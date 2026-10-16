@@ -25,6 +25,15 @@ pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
 }
 
 pub(crate) fn functions(precision: ProviderPrecision) -> String {
+    let mut source = String::new();
+    write_functions(precision, &mut source).expect("String writer is infallible");
+    source
+}
+
+pub(crate) fn write_functions(
+    precision: ProviderPrecision,
+    writer: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
     let format = format::Format::new(precision);
     let ty = format.ty;
     let fraction_bits = format.fraction_bits;
@@ -38,7 +47,8 @@ pub(crate) fn functions(precision: ProviderPrecision) -> String {
         ProviderPrecision::F64 => "",
     };
     let name = entrypoint(precision);
-    format!(
+    write!(
+        writer,
         r#"
 struct RmRemainderParts_{ty} {{
     significand: {ty},

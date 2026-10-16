@@ -14,9 +14,8 @@ use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericStorage, Ten
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{
@@ -82,14 +81,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let lhs = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            let rhs = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("({lhs} * {rhs})"))
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            crate::builtins::common::spec::write_real_binary_expression(
+                runmat_types::OperatorKind::ElementwiseMultiply, ctx, writer,
+            )
+        }),
     }),
     reduction: None,
     emits_nan: false,

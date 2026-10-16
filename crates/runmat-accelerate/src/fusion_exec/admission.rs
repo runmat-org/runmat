@@ -34,18 +34,24 @@ pub(super) struct AdmittedBindings {
     operations: Vec<Operation>,
 }
 
+/// Exact requested payload for the captured operation vector. The caller
+/// checks the multiplication before any binding capture can allocate.
+pub(crate) fn binding_storage_bytes(count: usize) -> Option<u64> {
+    count
+        .checked_mul(std::mem::size_of::<Operation>())
+        .and_then(|bytes| u64::try_from(bytes).ok())
+}
+
 impl AdmittedBindings {
     pub(super) fn host_facts(
         &self,
         request: &FusionExecutionRequest<'_>,
         precision: runmat_accelerate_api::ProviderPrecision,
     ) -> Option<crate::fusion::semantics::ResolvedProgram> {
-        let snapshots = self
-            .operations
-            .iter()
-            .map(|operation| operation.semantic)
-            .collect::<Vec<_>>();
-        let inputs = request.inputs.iter().collect::<Vec<_>>();
+        let mut snapshots = Vec::with_capacity(self.operations.len());
+        snapshots.extend(self.operations.iter().map(|operation| operation.semantic));
+        let mut inputs = Vec::with_capacity(request.inputs.len());
+        inputs.extend(request.inputs.iter());
         crate::fusion::semantics::ResolvedProgram::resolve_host_static_captured(
             request.plan,
             &inputs,
@@ -87,7 +93,7 @@ impl AdmittedBindings {
         &self,
         runtime: Option<&runmat_runtime::context::RuntimeContext>,
     ) -> Option<Vec<runmat_runtime::context::VmFusionHostOperation>> {
-        let mut operations = Vec::new();
+        let mut operations = Vec::with_capacity(self.operations.len());
         self.visit_host_operations(runtime, |operation| operations.push(operation))?;
         Some(operations)
     }
@@ -141,7 +147,7 @@ impl AdmittedBindings {
         &self,
         runtime: Option<&runmat_runtime::context::RuntimeContext>,
     ) -> Option<Vec<runmat_builtins::BuiltinBindingIdentity>> {
-        let mut bindings = Vec::new();
+        let mut bindings = Vec::with_capacity(self.operations.len());
         for operation in &self.operations {
             match &operation.identity {
                 Identity::Primitive(op) => {
@@ -173,11 +179,9 @@ impl AdmittedBindings {
         {
             return None;
         }
-        let operations = request
-            .plan
-            .operations
-            .iter()
-            .map(|operation| {
+        let mut operations = Vec::with_capacity(request.plan.operations.len());
+        for operation in &request.plan.operations {
+            let selected = (|| {
                 let (name, origin) = match operation {
                     FusionOp::Primitive { op, .. } => {
                         let semantic = SemanticBinding::capture(operation).ok()?;
@@ -233,8 +237,9 @@ impl AdmittedBindings {
                     reduction: selected.reduction,
                     semantic,
                 })
-            })
-            .collect::<Option<Vec<_>>>()?;
+            })()?;
+            operations.push(selected);
+        }
         Some(Self { operations })
     }
 

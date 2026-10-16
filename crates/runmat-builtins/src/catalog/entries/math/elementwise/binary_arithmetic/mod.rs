@@ -16,15 +16,27 @@ pub(in crate::catalog) fn infer_binary_arithmetic(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
-    let policy = match rule {
+    inference::infer(policy_for_rule(rule), request, entry)
+}
+
+pub(in crate::catalog) fn infer_binary_arithmetic_fusion_fact(
+    rule: BinaryArithmeticInferenceRule,
+    request: &CallRequest,
+) -> Result<runmat_types::ValueFact, Vec<runmat_types::InferenceDiagnostic>> {
+    inference::infer_fusion_fact(policy_for_rule(rule), request)
+}
+
+fn policy_for_rule(
+    rule: BinaryArithmeticInferenceRule,
+) -> inference::BinaryArithmeticInferencePolicy {
+    match rule {
         BinaryArithmeticInferenceRule::Add => plus::INFERENCE_POLICY,
         BinaryArithmeticInferenceRule::Subtract => minus::INFERENCE_POLICY,
         BinaryArithmeticInferenceRule::Multiply => times::INFERENCE_POLICY,
         BinaryArithmeticInferenceRule::RightDivide => rdivide::INFERENCE_POLICY,
         BinaryArithmeticInferenceRule::LeftDivide => ldivide::INFERENCE_POLICY,
         BinaryArithmeticInferenceRule::Power => power::INFERENCE_POLICY,
-    };
-    inference::infer(policy, request, entry)
+    }
 }
 
 pub use ldivide::*;

@@ -2,7 +2,7 @@
 //! Unsupported source operations stay unknown; no range is inferred from a
 //! graph's labels or from an ancestor of an unevaluated intermediate.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use anyhow::anyhow;
 use runmat_accelerate_api::{NumericalDomainEvidence, ProviderPrecision};
@@ -33,9 +33,13 @@ pub(super) struct RealRange {
 }
 
 pub(super) struct RealRangeResolver<'a> {
-    operations: HashMap<ValueId, usize>,
-    leaves: HashMap<ValueId, &'a Value>,
-    ranges: HashMap<ValueId, Option<RealRange>>,
+    operations: Vec<(ValueId, usize)>,
+    leaves: Vec<(ValueId, &'a Value)>,
+    ranges: Vec<(ValueId, Option<Option<RealRange>>)>,
+    ids: Vec<ValueId>,
+    visit_marks: Vec<(u32, u8)>,
+    visit_generation: u32,
+    visit_order: Vec<ValueId>,
     valid: bool,
     indexed_operations: usize,
     indexed_leaves: usize,
@@ -43,8 +47,8 @@ pub(super) struct RealRangeResolver<'a> {
 
 impl<'a> RealRangeResolver<'a> {
     pub(super) fn new(plan: &'a FusionGroupPlan, invocation: &FusionInvocationLeaves<'a>) -> Self {
-        let mut operations = HashMap::with_capacity(plan.operations.len());
-        let leaves = invocation.values().clone();
+        let mut operations = Vec::with_capacity(plan.operations.len());
+        let leaves = invocation.values().to_vec();
         let indexed_leaves = invocation.unique_leaf_count();
         let mut valid = true;
         for (index, operation) in plan.operations.iter().enumerate() {
@@ -52,14 +56,28 @@ impl<'a> RealRangeResolver<'a> {
                 FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => output,
             };
             if let Some(output) = output {
-                valid &= !leaves.contains_key(output);
-                valid &= operations.insert(*output, index).is_none();
+                valid &= lookup(&leaves, *output).is_none();
+                operations.push((*output, index));
             }
         }
+        operations.sort_unstable_by_key(|(id, _)| *id);
+        valid &= !operations.windows(2).any(|pair| pair[0].0 == pair[1].0);
+        let mut ids = Vec::with_capacity(leaves.len() + operations.len());
+        ids.extend(leaves.iter().map(|(id, _)| *id));
+        ids.extend(operations.iter().map(|(id, _)| *id));
+        ids.sort_unstable();
+        ids.dedup();
+        let ranges = ids.iter().map(|&id| (id, None)).collect();
+        let visit_marks = vec![(0, 0); ids.len()];
+        let visit_order = Vec::with_capacity(ids.len());
         Self {
             operations,
             leaves,
-            ranges: HashMap::new(),
+            ranges,
+            ids,
+            visit_marks,
+            visit_generation: 0,
+            visit_order,
             valid,
             indexed_operations: plan.operations.len(),
             indexed_leaves,
@@ -88,8 +106,55 @@ impl<'a> RealRangeResolver<'a> {
     }
 }
 
-fn floating_class(facts: &HashMap<ValueId, ValueFact>, id: ValueId) -> Option<NumericClass> {
-    let numeric = facts.get(&id)?.numeric()?;
+fn lookup<T>(entries: &[(ValueId, T)], id: ValueId) -> Option<&T> {
+    entries
+        .binary_search_by_key(&id, |(key, _)| *key)
+        .ok()
+        .map(|index| &entries[index].1)
+}
+
+fn range_at(
+    ranges: &[(ValueId, Option<Option<RealRange>>)],
+    id: ValueId,
+) -> Option<Option<RealRange>> {
+    lookup(ranges, id).copied().flatten()
+}
+
+trait RangeLookup {
+    fn known(&self, id: ValueId) -> Option<Option<RealRange>>;
+}
+
+impl RangeLookup for Vec<(ValueId, Option<Option<RealRange>>)> {
+    fn known(&self, id: ValueId) -> Option<Option<RealRange>> {
+        range_at(self, id)
+    }
+}
+
+#[cfg(test)]
+impl RangeLookup for HashMap<ValueId, Option<RealRange>> {
+    fn known(&self, id: ValueId) -> Option<Option<RealRange>> {
+        self.get(&id).copied()
+    }
+}
+
+pub(super) trait ValueFactLookup {
+    fn fact(&self, id: ValueId) -> Option<&ValueFact>;
+}
+
+impl ValueFactLookup for HashMap<ValueId, ValueFact> {
+    fn fact(&self, id: ValueId) -> Option<&ValueFact> {
+        self.get(&id)
+    }
+}
+
+impl ValueFactLookup for super::semantics::fact_index::FactIndex {
+    fn fact(&self, id: ValueId) -> Option<&ValueFact> {
+        self.get(&id)
+    }
+}
+
+fn floating_class(facts: &dyn ValueFactLookup, id: ValueId) -> Option<NumericClass> {
+    let numeric = facts.fact(id)?.numeric()?;
     (numeric.domain == NumericDomain::Real
         && matches!(numeric.class, NumericClass::Single | NumericClass::Double))
     .then_some(numeric.class)
@@ -148,55 +213,80 @@ fn append_stage(
     }
 }
 
-fn visit(
-    id: ValueId,
-    plan: &FusionGroupPlan,
-    operations: &HashMap<ValueId, usize>,
-    leaves: &HashMap<ValueId, &Value>,
-    known: &HashMap<ValueId, Option<RealRange>>,
-) -> (Option<Vec<ValueId>>, u64) {
-    let mut order = Vec::new();
-    let mut visiting = HashSet::new();
-    let mut finished = HashSet::new();
-    let mut stack = vec![(id, false)];
-    let mut examined = 0u64;
-    while let Some((current, expanded)) = stack.pop() {
-        examined = examined.saturating_add(1);
-        if known.contains_key(&current) || finished.contains(&current) {
-            continue;
+impl RealRangeResolver<'_> {
+    fn visit(&mut self, id: ValueId, plan: &FusionGroupPlan) -> (Option<()>, u64) {
+        let Self {
+            operations,
+            leaves,
+            ranges: known,
+            ids,
+            visit_marks: marks,
+            visit_generation: generation,
+            visit_order: order,
+            ..
+        } = self;
+        order.clear();
+        if *generation == u32::MAX {
+            marks.fill((0, 0));
+            *generation = 0;
         }
-        if expanded {
-            visiting.remove(&current);
-            finished.insert(current);
-            order.push(current);
-            continue;
-        }
-        if !visiting.insert(current) {
-            return (None, examined);
-        }
-        stack.push((current, true));
-        if leaves.contains_key(&current) {
-            continue;
-        }
-        let Some(operation) = operations
-            .get(&current)
-            .and_then(|index| plan.operations.get(*index))
-        else {
-            return (None, examined);
+        *generation += 1;
+        let current_generation = *generation;
+        let status = |marks: &[(u32, u8)], index: usize| {
+            if marks[index].0 == current_generation {
+                marks[index].1
+            } else {
+                0
+            }
         };
-        let inputs = match operation {
-            FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => inputs,
-        };
-        for input in inputs.iter().rev() {
-            if visiting.contains(input) {
+        let mut stack = vec![(id, false)];
+        let mut examined = 0u64;
+        while let Some((current, expanded)) = stack.pop() {
+            examined = examined.saturating_add(1);
+            if range_at(known, current).is_some() {
+                continue;
+            }
+            let Ok(index) = ids.binary_search(&current) else {
+                return (None, examined);
+            };
+            if status(marks, index) == 2 {
+                continue;
+            }
+            if expanded {
+                marks[index] = (current_generation, 2);
+                order.push(current);
+                continue;
+            }
+            if status(marks, index) == 1 {
                 return (None, examined);
             }
-            if !known.contains_key(input) && !finished.contains(input) {
-                stack.push((*input, false));
+            marks[index] = (current_generation, 1);
+            stack.push((current, true));
+            if lookup(leaves, current).is_some() {
+                continue;
+            }
+            let Some(operation) =
+                lookup(operations, current).and_then(|index| plan.operations.get(*index))
+            else {
+                return (None, examined);
+            };
+            let inputs = match operation {
+                FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => inputs,
+            };
+            for input in inputs.iter().rev() {
+                let Some(index) = ids.binary_search(input).ok() else {
+                    return (None, examined);
+                };
+                if status(marks, index) == 1 {
+                    return (None, examined);
+                }
+                if range_at(known, *input).is_none() && status(marks, index) != 2 {
+                    stack.push((*input, false));
+                }
             }
         }
+        (Some(()), examined)
     }
-    (Some(order), examined)
 }
 
 async fn leaf_range(
@@ -320,8 +410,8 @@ async fn leaf_range(
 fn operation_range(
     operation: &FusionOp,
     selected: Option<super::semantic_bindings::SemanticBinding>,
-    facts: &HashMap<ValueId, ValueFact>,
-    ranges: &HashMap<ValueId, Option<RealRange>>,
+    facts: &dyn ValueFactLookup,
+    ranges: &dyn RangeLookup,
     output: ValueId,
 ) -> Option<RealRange> {
     let class = floating_class(facts, output)?;
@@ -346,13 +436,13 @@ fn operation_range(
             };
             let left_class = floating_class(facts, *left_id)?;
             let right_class = floating_class(facts, *right_id)?;
-            let left = ranges.get(left_id).copied().flatten()?;
-            let right = ranges.get(right_id).copied().flatten()?;
+            let left = ranges.known(*left_id)??;
+            let right = ranges.known(*right_id)??;
             if left.class != left_class || right.class != right_class {
                 return None;
             }
             let mode =
-                represented_add_mode(facts.get(left_id)?, facts.get(right_id)?, left, right)?;
+                represented_add_mode(facts.fact(*left_id)?, facts.fact(*right_id)?, left, right)?;
             if mode.result_class() != class {
                 return None;
             }
@@ -372,7 +462,7 @@ fn operation_range(
             let [input] = inputs.as_slice() else {
                 return None;
             };
-            let source = ranges.get(input).copied().flatten()?;
+            let source = ranges.known(*input)??;
             let minimum = represented(source.minimum, class);
             let maximum = represented(source.maximum, class);
             (!minimum.is_nan() && !maximum.is_nan() && minimum <= maximum).then_some(RealRange {
@@ -403,7 +493,7 @@ fn classification(range: RealRange, predicate: RealUnaryPredicate) -> RealUnaryC
 pub(super) struct RealDomainProofContext<'a> {
     pub plan: &'a FusionGroupPlan,
     pub snapshots: &'a [Option<super::semantic_bindings::SemanticBinding>],
-    pub facts: &'a HashMap<ValueId, ValueFact>,
+    pub facts: &'a dyn ValueFactLookup,
     pub binding: BuiltinBindingIdentity,
     pub internal_error: &'static runmat_builtins::BuiltinErrorDescriptor,
     pub provider_precision: ProviderPrecision,
@@ -424,27 +514,21 @@ pub(super) async fn prove(
         internal_error,
         provider_precision,
     } = context;
-    let (order, examined) = visit(
-        operand_id,
-        plan,
-        &resolver.operations,
-        &resolver.leaves,
-        &resolver.ranges,
-    );
+    let (order, examined) = resolver.visit(operand_id, plan);
     append_stage(
         work,
         binding,
         provider_precision,
         FusionProofStage::GraphWalk { examined },
     );
-    let Some(order) = order else {
+    let Some(()) = order else {
         return Ok(None);
     };
-    for id in order {
-        if resolver.ranges.contains_key(&id) {
+    for &id in &resolver.visit_order {
+        if range_at(&resolver.ranges, id).is_some() {
             continue;
         }
-        let range = if let Some(value) = resolver.leaves.get(&id) {
+        let range = if let Some(value) = lookup(&resolver.leaves, id) {
             match floating_class(facts, id) {
                 Some(class) => {
                     leaf_range(
@@ -460,7 +544,7 @@ pub(super) async fn prove(
                 None => None,
             }
         } else {
-            let Some((index, operation)) = resolver.operations.get(&id).and_then(|index| {
+            let Some((index, operation)) = lookup(&resolver.operations, id).and_then(|index| {
                 plan.operations
                     .get(*index)
                     .map(|operation| (*index, operation))
@@ -488,9 +572,13 @@ pub(super) async fn prove(
                 id,
             )
         };
-        resolver.ranges.insert(id, range);
+        let index = resolver
+            .ranges
+            .binary_search_by_key(&id, |(key, _)| *key)
+            .map_err(|_| anyhow!("fusion range output has no source value ID"))?;
+        resolver.ranges[index].1 = Some(range);
     }
-    let Some(range) = resolver.ranges.get(&operand_id).copied().flatten() else {
+    let Some(range) = range_at(&resolver.ranges, operand_id).flatten() else {
         return Ok(None);
     };
     Ok(Some(FusionOperandDomainEvidence {

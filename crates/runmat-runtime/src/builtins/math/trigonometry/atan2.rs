@@ -13,8 +13,8 @@ use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{
     binary as common_binary, broadcast::BroadcastPlan, gpu_helpers, tensor,
@@ -80,20 +80,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             let y = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let x = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            let negative_zero = match ctx.scalar_ty {
-                ScalarType::F32 => format!("bitcast<u32>({x}) == 0x80000000u"),
-                ScalarType::F64 => {
-                    format!("bitcast<u64>({x}) == 0x8000000000000000u")
-                }
-                other => return Err(FusionError::UnsupportedPrecision(other)),
-            };
-            Ok(format!(
-                "select(atan2({y}, {x}), select({y}, 0.0, {negative_zero}), ({y} == 0.0) && ({x} == 0.0))"
-            ))
-        },
+            match ctx.scalar_ty {
+                ScalarType::F32 => writer.write_formatted(format_args!("select(atan2({y}, {x}), select({y}, 0.0, bitcast<u32>({x}) == 0x80000000u), ({y} == 0.0) && ({x} == 0.0))")),
+                ScalarType::F64 => writer.write_formatted(format_args!("select(atan2({y}, {x}), select({y}, 0.0, bitcast<u64>({x}) == 0x8000000000000000u), ({y} == 0.0) && ({x} == 0.0))")),
+                other => Err(FusionError::UnsupportedPrecision(other)),
+            }
+        }),
     }),
     reduction: None,
     emits_nan: false,

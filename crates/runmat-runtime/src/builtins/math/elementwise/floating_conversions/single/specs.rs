@@ -1,7 +1,6 @@
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 
 #[runmat_macros::register_gpu_spec(
@@ -51,19 +50,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            if ctx.inputs.len() != 1 {
-                return Err(FusionError::Message(
-                    "unary fusion requires exactly one data operand",
-                ));
-            }
-            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            match ctx.scalar_ty {
-                ScalarType::F32 => Ok(input.to_string()),
-                ScalarType::F64 => Ok(format!("f64(f32({input}))")),
-                _ => Err(FusionError::UnsupportedPrecision(ctx.scalar_ty)),
-            }
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            crate::builtins::common::spec::write_real_cast_expression(
+                runmat_types::NumericClass::Single,
+                ctx,
+                writer,
+            )
+        }),
     }),
     reduction: None,
     emits_nan: false,

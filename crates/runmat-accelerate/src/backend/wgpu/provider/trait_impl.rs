@@ -864,7 +864,16 @@ impl AccelProvider for WgpuProvider {
     }
 
     fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
-        crate::placement::wgpu_capability_snapshot(self, self.adapter_limits.max_buffer_size)
+        self.capability_snapshot
+            .get()
+            .expect("provider capability snapshot initialized at construction")
+            .clone()
+    }
+
+    fn capability_snapshot_ref(
+        &self,
+    ) -> Option<&runmat_accelerate_api::ProviderCapabilitySnapshot> {
+        self.capability_snapshot.get()
     }
 
     fn execution_accelerator_device(

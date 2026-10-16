@@ -13,9 +13,18 @@ pub(super) fn infer(
     request: &CallRequest,
     entry: &BuiltinCatalogEntry,
 ) -> CallInference {
+    let (output, diagnostics) = infer_fact(policy, admitted, request);
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+pub(super) fn infer_fact(
+    policy: BinaryArithmeticInferencePolicy,
+    admitted: AdmittedCall<'_>,
+    request: &CallRequest,
+) -> (ValueFact, Vec<runmat_types::InferenceDiagnostic>) {
     let mut diagnostics = admitted.diagnostics;
     let (Some(left), Some(right)) = (admitted.left, admitted.right) else {
-        return finish_fixed(entry, request, dynamic(), diagnostics);
+        return (dynamic(), diagnostics);
     };
 
     let mut output = dynamic();
@@ -104,7 +113,7 @@ pub(super) fn infer(
         output.layout = LayoutFact::Unknown;
         output.contiguity = ContiguityFact::Unknown;
     }
-    finish_fixed(entry, request, output, diagnostics)
+    (output, diagnostics)
 }
 
 /// Publication carrier is independent of automatic placement and real-result

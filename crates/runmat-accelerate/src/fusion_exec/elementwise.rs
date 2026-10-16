@@ -22,6 +22,150 @@ struct ElementwiseHostContinuation {
     readback: Option<super::host_readback::CpuReadbackPlan>,
 }
 
+struct TypedProducerPreparation {
+    receipt: Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
+    primary: abi::ShaderBodyPreparation,
+    fallback: abi::ShaderBodyPreparation,
+}
+
+/// The semantic receipt stays live while this additive producer reservation
+/// is admitted. A retained multi-output shader can overlap one single-output
+/// producer if the provider rejects multi-output dispatch after preparation.
+fn admit_typed_producer_preparation(
+    request: &FusionExecutionRequest<'_>,
+    outputs: &[ValueId],
+    program: &crate::fusion::semantics::ResolvedProgram,
+    provider: &dyn AccelProvider,
+    finite: bool,
+) -> std::result::Result<TypedProducerPreparation, crate::fusion::semantics::FusionResolveFailure> {
+    use crate::fusion::semantics::FusionResolveFailure;
+    use runmat_runtime::builtins::common::spec::ScalarType;
+    if !finite {
+        return Ok(TypedProducerPreparation {
+            receipt: None,
+            primary: abi::ShaderBodyPreparation::Unbounded,
+            fallback: abi::ShaderBodyPreparation::Unbounded,
+        });
+    }
+    let default_precision = provider.precision();
+    let default_scalar = match default_precision {
+        ProviderPrecision::F32 => ScalarType::F32,
+        ProviderPrecision::F64 => ScalarType::F64,
+    };
+    let default_indices = abi::physical_indices(request.plan, outputs, program, default_precision)
+        .map_err(FusionResolveFailure::Admission)?;
+    let mut peak = 0_u64;
+    let mut f32_body_capacity = None;
+    let mut f32_route = None;
+    if default_precision == ProviderPrecision::F64 {
+        let single_indices =
+            abi::physical_indices(request.plan, outputs, program, ProviderPrecision::F32)
+                .map_err(FusionResolveFailure::Admission)?;
+        if abi::may_try_single(
+            request.plan,
+            outputs,
+            program,
+            provider,
+            &request.inputs,
+            &single_indices,
+        )
+        .map_err(FusionResolveFailure::Admission)?
+        {
+            let single = request
+                .plan
+                .measured_typed_shader_preparation_bytes(
+                    outputs,
+                    program,
+                    ScalarType::F32,
+                    single_indices.len(),
+                )
+                .map_err(FusionResolveFailure::Admission)?;
+            f32_body_capacity = Some(single.body_bytes);
+            peak = peak.max(single.requested_bytes);
+            f32_route = Some((single_indices, single));
+        }
+    }
+    let default_bound = request.plan.measured_typed_shader_preparation_bytes(
+        outputs,
+        program,
+        default_scalar,
+        default_indices.len(),
+    );
+    let default_bound = match default_bound {
+        Ok(bound) => {
+            peak = peak.max(bound.requested_bytes);
+            Some(bound)
+        }
+        Err(error)
+            if f32_route.is_some()
+                && error
+                    .downcast_ref::<crate::fusion::typed_producer::CountedRecipeUnavailable>()
+                    .is_some() =>
+        {
+            log::debug!("finite fusion default ABI has no counted recipe: {error}");
+            None
+        }
+        Err(error) => return Err(FusionResolveFailure::Admission(error)),
+    };
+    let mut default_fallback_body_capacity = None;
+    let mut f32_fallback_body_capacity = None;
+    if outputs.len() > 1 {
+        let mut fallback = |scalar, indices: &[usize], retained: u64| {
+            let mut body = 0usize;
+            for output in outputs {
+                let single = request
+                    .plan
+                    .measured_typed_shader_preparation_bytes(
+                        std::slice::from_ref(output),
+                        program,
+                        scalar,
+                        indices.len(),
+                    )
+                    .map_err(FusionResolveFailure::Admission)?;
+                body = body.max(single.body_bytes);
+                let overlap = retained
+                    .checked_add(single.requested_bytes)
+                    .ok_or_else(|| {
+                        FusionResolveFailure::Admission(anyhow!(
+                            "finite fusion multi-output fallback peak overflows"
+                        ))
+                    })?;
+                peak = peak.max(overlap);
+            }
+            Ok::<usize, FusionResolveFailure>(body)
+        };
+        if let Some(bound) = default_bound {
+            default_fallback_body_capacity = Some(fallback(
+                default_scalar,
+                &default_indices,
+                bound.retained_bytes,
+            )?);
+        }
+        if let Some((indices, bound)) = &f32_route {
+            f32_fallback_body_capacity =
+                Some(fallback(ScalarType::F32, indices, bound.retained_bytes)?);
+        }
+    }
+    let plan = runmat_runtime::context::host_allocation::HostAllocationPlan::new(peak, 0)
+        .map_err(|error| FusionResolveFailure::Admission(error.into()))?;
+    let receipt = runmat_runtime::context::host_allocation::HostAllocationReceipt::admit(
+        request.runtime.as_ref(),
+        plan,
+    )
+    .map_err(|error| FusionResolveFailure::Admission(error.into()))?;
+    Ok(TypedProducerPreparation {
+        receipt,
+        primary: abi::ShaderBodyPreparation::Counted {
+            single: f32_body_capacity,
+            provider_default: default_bound.map(|bound| bound.body_bytes),
+        },
+        fallback: abi::ShaderBodyPreparation::Counted {
+            single: f32_fallback_body_capacity,
+            provider_default: default_fallback_body_capacity,
+        },
+    })
+}
+
 async fn execute_elementwise_outputs(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
@@ -29,6 +173,38 @@ async fn execute_elementwise_outputs(
     input_uses: Option<&super::VmHostInputUses>,
     host_continuation: &mut Option<ElementwiseHostContinuation>,
 ) -> ExecutionResult<FusionExecutionOutcome<(HashMap<ValueId, Value>, FusionPlacementSelection)>> {
+    let finite_host_preparation = request
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.service_ports().parallel())
+        .is_some_and(|parallel| {
+            parallel
+                .placement_resources()
+                .memory_available_bytes
+                .is_some()
+        });
+    let preparation_receipt = if finite_host_preparation {
+        let geometry = crate::fusion::semantics::preparation_resources::PureSourceGeometry::admit(
+            request.plan,
+            &request.inputs,
+        )
+        .map_err(ProviderExecutionError::from_source)?;
+        let host_uses = vm_right
+            .zip(input_uses)
+            .map(|(_, uses)| (uses.entry.len(), uses.loads.len()));
+        let bytes = geometry
+            .overlapping_preparation_bytes(host_uses)
+            .map_err(ProviderExecutionError::from_source)?;
+        let plan = runmat_runtime::context::host_allocation::HostAllocationPlan::new(bytes, 0)
+            .map_err(ProviderExecutionError::from_source)?;
+        runmat_runtime::context::host_allocation::HostAllocationReceipt::admit(
+            request.runtime.as_ref(),
+            plan,
+        )
+        .map_err(ProviderExecutionError::from_source)?
+    } else {
+        None
+    };
     let Some(bindings) = AdmittedBindings::new(request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -98,29 +274,53 @@ async fn execute_elementwise_outputs(
             request.placement,
         )
         .await?;
-        let classes = output_ids
-            .iter()
-            .map(|id| program.floating_class(*id))
-            .collect::<Result<Vec<_>>>()?;
+        let producer_preparation = admit_typed_producer_preparation(
+            request,
+            output_ids,
+            &program,
+            provider,
+            finite_host_preparation,
+        )?;
+        let mut classes = Vec::new();
+        classes
+            .try_reserve_exact(output_ids.len())
+            .map_err(|error| {
+                crate::fusion::semantics::FusionResolveFailure::Admission(error.into())
+            })?;
+        for id in output_ids {
+            classes.push(program.floating_class(*id)?);
+        }
         let started = Instant::now();
         let (generated_shader, typed_abi) = abi::select_shader(
             request.plan,
             output_ids,
             &program,
-            &classes,
             provider,
             &request.inputs,
-        )?;
+            producer_preparation.primary,
+        )
+        .map_err(|error| {
+            if finite_host_preparation
+                && error
+                    .downcast_ref::<crate::fusion::typed_producer::CountedRecipeUnavailable>()
+                    .is_none()
+            {
+                crate::fusion::semantics::FusionResolveFailure::Admission(error)
+            } else {
+                crate::fusion::semantics::FusionResolveFailure::Structural(error)
+            }
+        })?;
         FusionPlacementObserver::new(request.placement).shader_source_generation(started);
         Ok::<_, crate::fusion::semantics::FusionResolveFailure>((
             program,
             classes,
             generated_shader,
             typed_abi,
+            producer_preparation,
         ))
     }
     .await;
-    let (program, output_classes, generated_shader, typed_abi) = match typed {
+    let (program, output_classes, generated_shader, typed_abi, producer_preparation) = match typed {
         Ok(typed) => typed,
         Err(error) => {
             let error = match error.into_execution_or_structural() {
@@ -133,6 +333,12 @@ async fn execute_elementwise_outputs(
                 "typed_representation_unsupported",
                 None,
             );
+            if let (Some(receipt), Some(runtime)) = (&preparation_receipt, request.runtime.as_ref())
+            {
+                receipt
+                    .checkpoint(runtime)
+                    .map_err(ProviderExecutionError::from_source)?;
+            }
             return host_candidate::without_shader(
                 request,
                 output_ids,
@@ -144,6 +350,18 @@ async fn execute_elementwise_outputs(
             );
         }
     };
+    if let (Some(receipt), Some(runtime)) = (&preparation_receipt, request.runtime.as_ref()) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(ProviderExecutionError::from_source)?;
+    }
+    if let (Some(receipt), Some(runtime)) =
+        (&producer_preparation.receipt, request.runtime.as_ref())
+    {
+        receipt
+            .checkpoint(runtime)
+            .map_err(ProviderExecutionError::from_source)?;
+    }
     let physical_precision = generated_shader.abi().precision();
     let exact_product_words = generated_shader.uses_exact_product_words();
     let emitted_implementations = generated_shader.implementations().to_vec();
@@ -245,21 +463,19 @@ async fn execute_elementwise_outputs(
         .or(original_host_program.as_ref());
     let host_scalar_work_units =
         original_host_program.and_then(|program| program.host_scalar_work_units(request.plan).ok());
-    let semantic_identity = runmat_execution::Digest::sha256(
-        serde_json::to_vec(&(
-            "elementwise-independent-host-provider-work-v1",
-            program.cache_identity()?,
-            original_host_program
-                .map(|program| program.cache_identity())
-                .transpose()?,
-            host_scalar_work_units,
-            &shader,
-            exact_product_words,
-            &emitted_implementations,
-            scalar_work_units,
-        ))
-        .map_err(anyhow::Error::from)?,
-    );
+    let semantic_identity = runmat_execution::Digest::sha256_serialized(&(
+        "elementwise-independent-host-provider-work-v1",
+        program.cache_identity()?,
+        original_host_program
+            .map(|program| program.cache_identity())
+            .transpose()?,
+        host_scalar_work_units,
+        &shader,
+        exact_product_words,
+        &emitted_implementations,
+        scalar_work_units,
+    ))
+    .map_err(anyhow::Error::from)?;
     let host = if has_resident && vm_right.is_some() {
         admission.as_ref().map_or(
             super::host_readback::CpuHostPlacement::Unavailable,
@@ -268,6 +484,18 @@ async fn execute_elementwise_outputs(
     } else {
         super::host_readback::CpuHostPlacement::Legacy
     };
+    if let (Some(receipt), Some(runtime)) = (&preparation_receipt, request.runtime.as_ref()) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(ProviderExecutionError::from_source)?;
+    }
+    if let (Some(receipt), Some(runtime)) =
+        (&producer_preparation.receipt, request.runtime.as_ref())
+    {
+        receipt
+            .checkpoint(runtime)
+            .map_err(ProviderExecutionError::from_source)?;
+    }
     let selection = select_fusion_provider_with_contract_vm_cpu(
         request,
         &bindings,
@@ -288,6 +516,18 @@ async fn execute_elementwise_outputs(
         vm_right,
         host,
     )?;
+    if let (Some(receipt), Some(runtime)) = (&preparation_receipt, request.runtime.as_ref()) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(ProviderExecutionError::from_source)?;
+    }
+    if let (Some(receipt), Some(runtime)) =
+        (&producer_preparation.receipt, request.runtime.as_ref())
+    {
+        receipt
+            .checkpoint(runtime)
+            .map_err(ProviderExecutionError::from_source)?;
+    }
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
@@ -512,11 +752,16 @@ async fn execute_elementwise_outputs(
                     // Provider does not support multi-output dispatch; fall back to N single dispatches.
                     for output_id in output_ids.iter().copied() {
                         let started = Instant::now();
-                        let single_shader = request.plan.prepare_typed_shader_with_inputs(
+                        let single_shader = request.plan.prepare_typed_shader_with_inputs_bounded(
                             &[output_id],
                             &program,
                             scalar_type,
                             &input_indices,
+                            if typed_abi.is_some() {
+                                producer_preparation.fallback.single_capacity()
+                            } else {
+                                producer_preparation.fallback.default_capacity()
+                            },
                         )?;
                         observer.shader_source_generation(started);
                         if !provider.supports_shader_requirements(single_shader.requirements()) {

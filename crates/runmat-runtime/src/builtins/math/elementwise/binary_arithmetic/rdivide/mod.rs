@@ -8,9 +8,8 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::math::elementwise::integer_arithmetic::reject_integer_logical_operands;
 use crate::context::RuntimeContext;
@@ -70,14 +69,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let lhs = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            let rhs = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("({lhs} / {rhs})"))
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            crate::builtins::common::spec::write_real_binary_expression(
+                runmat_types::OperatorKind::ElementwiseDivide, ctx, writer,
+            )
+        }),
     }),
     reduction: None,
     emits_nan: false,

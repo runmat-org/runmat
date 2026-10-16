@@ -1801,6 +1801,7 @@ pub struct InProcessProvider {
     next_id: AtomicU64,
     id_limit: u64,
     telemetry: AccelTelemetry,
+    capability_snapshot: OnceCell<runmat_accelerate_api::ProviderCapabilitySnapshot>,
 }
 
 impl InProcessProvider {
@@ -1811,14 +1812,19 @@ impl InProcessProvider {
                 current.checked_add(PROVIDER_ID_BLOCK_SIZE)
             })
             .expect("in-process provider id range exhausted");
-        Self {
+        let provider = Self {
             device_id,
             next_id: AtomicU64::new(id_base),
             id_limit: id_base
                 .checked_add(PROVIDER_ID_BLOCK_SIZE)
                 .expect("in-process provider id range exhausted"),
             telemetry: AccelTelemetry::new(),
-        }
+            capability_snapshot: OnceCell::new(),
+        };
+        let snapshot = crate::placement::in_process_capability_snapshot(&provider);
+        // Construction has exclusive access; this cannot race a later revision.
+        let _ = provider.capability_snapshot.set(snapshot);
+        provider
     }
 
     fn next_allocation_identity(
@@ -3874,7 +3880,16 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
-        crate::placement::in_process_capability_snapshot(self)
+        self.capability_snapshot
+            .get()
+            .expect("provider capability snapshot initialized at construction")
+            .clone()
+    }
+
+    fn capability_snapshot_ref(
+        &self,
+    ) -> Option<&runmat_accelerate_api::ProviderCapabilitySnapshot> {
+        self.capability_snapshot.get()
     }
 
     fn query_feasibility(

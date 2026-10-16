@@ -14,8 +14,8 @@ use runmat_value::{
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::signal::common::output_precision::SignalPrecision;
@@ -50,13 +50,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            let scaled = format!("(3.141592653589793 * {input})");
-            Ok(format!(
-                "select(select(sin({scaled}) / {scaled}, 0.0, isFinite({input}) && floor(abs({input})) == abs({input})), 1.0, {input} == 0.0)"
-            ))
-        },
+            writer.write_formatted(format_args!("select(select(sin((3.141592653589793 * {input})) / (3.141592653589793 * {input}), 0.0, isFinite({input}) && floor(abs({input})) == abs({input})), 1.0, {input} == 0.0)"))
+        }),
     }),
     reduction: None,
     emits_nan: true,
@@ -416,6 +413,7 @@ fn sinc_complex_value(re: f64, im: f64) -> (f64, f64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::spec::FusionExprContext;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::{
@@ -582,13 +580,13 @@ mod tests {
     #[test]
     fn sinc_fusion_integer_guard_matches_host() {
         let template = FUSION_SPEC.elementwise.expect("fusion template");
-        let inputs = ["x"];
+        let inputs = [crate::builtins::common::spec::FusionExprInput::text("x")];
         let ctx = FusionExprContext {
             scalar_ty: ScalarType::F64,
             inputs: &inputs,
             constants: &[],
         };
-        let expr = (template.wgsl_body)(&ctx).expect("fusion expression");
+        let expr = template.wgsl_body.render(&ctx).expect("fusion expression");
         assert!(expr.contains("isFinite(x) && floor(abs(x)) == abs(x)"));
         assert!(
             !expr.contains("9.007199254740992e15"),

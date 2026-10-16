@@ -15,6 +15,26 @@ pub(super) fn infer_trigonometric(
     entry: &BuiltinCatalogEntry,
     function: TrigonometricFunction,
 ) -> CallInference {
+    let (output, diagnostics) = trigonometric_fact(request, function);
+    finish_fixed(entry, request, output, diagnostics)
+}
+
+pub(in crate::catalog::inference) fn infer_fusion_numeric_fact(
+    request: &CallRequest,
+    function: TrigonometricFunction,
+) -> Result<ValueFact, Vec<runmat_types::InferenceDiagnostic>> {
+    let (fact, diagnostics) = trigonometric_fact(request, function);
+    if diagnostics.is_empty() {
+        Ok(fact)
+    } else {
+        Err(diagnostics)
+    }
+}
+
+fn trigonometric_fact(
+    request: &CallRequest,
+    function: TrigonometricFunction,
+) -> (ValueFact, Vec<runmat_types::InferenceDiagnostic>) {
     let name = match function {
         TrigonometricFunction::Sin => "sin",
         TrigonometricFunction::Cos => "cos",
@@ -27,12 +47,7 @@ pub(super) fn infer_trigonometric(
             format!("{name} requires an input value"),
             0,
         ));
-        return finish_fixed(
-            entry,
-            request,
-            ValueFact::unknown(DynamicReason::RuntimeValue),
-            diagnostics,
-        );
+        return (ValueFact::unknown(DynamicReason::RuntimeValue), diagnostics);
     };
 
     let mut output = input.clone();
@@ -137,7 +152,7 @@ pub(super) fn infer_trigonometric(
         }
     }
 
-    finish_fixed(entry, request, output, diagnostics)
+    (output, diagnostics)
 }
 
 pub(super) fn infer_pi_scaled_trigonometric(

@@ -1,7 +1,7 @@
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 
 use super::BUILTIN_NAME;
@@ -35,12 +35,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |context: &FusionExprContext| {
-            let input = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            Ok(format!(
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            writer.write_formatted(format_args!(
                 "select(ceil(log2(abs({input}))), 0.0, abs({input}) == 0.0)"
             ))
-        },
+        }),
     }),
     reduction: None,
     emits_nan: true,

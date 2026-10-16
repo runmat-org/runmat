@@ -1,7 +1,7 @@
 //! Request-local type resolution. Cached structural plans never own runtime
 //! facts or evidence about the contents of a different invocation's operands.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::precision::PrecisionPolicy;
 use anyhow::{anyhow, Result};
@@ -18,7 +18,10 @@ use runmat_types::{
     infer_binary, infer_unary, CallRequest, NumericClass, NumericDomain, OutputSelection, ValueFact,
 };
 use runmat_value::Value;
-use serde::Serialize;
+use serde::{
+    ser::{SerializeMap, SerializeSeq},
+    Serialize, Serializer,
+};
 
 use super::semantic_bindings::{self, SemanticBinding};
 use super::{FusionGroupPlan, FusionOp};
@@ -46,12 +49,20 @@ pub(crate) use constant_identity::exact_constant_digest;
 #[path = "semantics/invocation_leaves.rs"]
 pub(super) mod invocation_leaves;
 use invocation_leaves::FusionInvocationLeaves;
+#[path = "semantics/fact_index.rs"]
+pub(super) mod fact_index;
+use fact_index::FactIndex;
+#[path = "semantics/slot_map.rs"]
+mod slot_map;
+use slot_map::SlotMap;
 
 #[path = "semantics/exact_product.rs"]
 mod exact_product;
 pub(crate) use exact_product::ExactProductReceipt;
 #[path = "semantics/assembly.rs"]
 mod assembly;
+#[path = "semantics/preparation_resources.rs"]
+pub(crate) mod preparation_resources;
 #[path = "semantics/request_literals.rs"]
 mod request_literals;
 #[path = "semantics/computed_scalars.rs"]
@@ -108,25 +119,19 @@ fn validate_arithmetic(
 }
 
 fn source_constants(plan: &FusionGroupPlan) -> Result<Vec<(ValueId, Digest)>> {
-    let mut constants = plan
-        .const_values
-        .iter()
-        .map(|(&id, value)| {
-            constant_identity::exact_constant_digest(value).map(|digest| (id, digest))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut constants = Vec::with_capacity(plan.const_values.len());
+    for (&id, value) in &plan.const_values {
+        constants.push((id, constant_identity::exact_constant_digest(value)?));
+    }
     constants.sort_unstable_by_key(|(id, _)| *id);
     Ok(constants)
 }
 
 fn source_slot_constants(plan: &FusionGroupPlan) -> Result<Vec<(usize, Digest)>> {
-    let mut constants = plan
-        .constants
-        .iter()
-        .map(|(&slot, value)| {
-            constant_identity::exact_constant_digest(value).map(|digest| (slot, digest))
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut constants = Vec::with_capacity(plan.constants.len());
+    for (&slot, value) in &plan.constants {
+        constants.push((slot, constant_identity::exact_constant_digest(value)?));
+    }
     constants.sort_unstable_by_key(|(slot, _)| *slot);
     Ok(constants)
 }
@@ -157,22 +162,21 @@ fn source_operations(
     plan: &FusionGroupPlan,
     snapshots: &[Option<SemanticBinding>],
 ) -> Result<Vec<SourceOperationIdentity>> {
-    plan.operations
-        .iter()
-        .zip(snapshots)
-        .map(|(operation, snapshot)| match operation {
-            FusionOp::Primitive { op, inputs, output } => Ok(SourceOperationIdentity::Primitive {
+    let mut source = Vec::with_capacity(plan.operations.len());
+    for (operation, snapshot) in plan.operations.iter().zip(snapshots) {
+        source.push(match operation {
+            FusionOp::Primitive { op, inputs, output } => SourceOperationIdentity::Primitive {
                 operation: *op,
                 binding: snapshot.map(|binding| binding.declaration.binding),
                 inputs: inputs.clone(),
                 output: *output,
-            }),
+            },
             FusionOp::Builtin {
                 origin,
                 inputs,
                 output,
                 ..
-            } => Ok(SourceOperationIdentity::Builtin {
+            } => SourceOperationIdentity::Builtin {
                 binding: snapshot
                     .ok_or_else(|| anyhow!("fusion builtin has no captured binding"))?
                     .declaration
@@ -180,32 +184,33 @@ fn source_operations(
                 origin: *origin,
                 inputs: inputs.clone(),
                 output: *output,
-            }),
-        })
-        .collect()
+            },
+        });
+    }
+    Ok(source)
 }
 
 #[derive(Debug)]
 pub(crate) struct ResolvedProgram {
     source_operations: Vec<SourceOperationIdentity>,
     source_input_ids: Vec<ValueId>,
-    source_input_set: HashSet<ValueId>,
+    source_input_set: Vec<ValueId>,
     source_constants: Vec<(ValueId, Digest)>,
     source_slot_constants: Vec<(usize, Digest)>,
     source_root: Option<ValueId>,
-    facts: HashMap<ValueId, ValueFact>,
+    facts: FactIndex,
     source_inputs: Vec<ValueFact>,
     precision_policy: PrecisionPolicy,
     provider_precision: ProviderPrecision,
     /// Selected bindings are part of request identity, not inferred from output
     /// class or a spelling-based expression dispatch table.
     binding_contracts: Vec<SemanticBinding>,
-    declarations: HashMap<ValueId, SemanticBinding>,
-    evidence: BTreeMap<ValueId, runmat_accelerate_api::NumericalDomainEvidence>,
-    sign: BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionSignEvidence>,
-    arithmetic: BTreeMap<ValueId, FusionArithmeticEvidence>,
-    exact_products: BTreeMap<ValueId, ExactProductReceipt>,
-    admission_work: BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
+    declarations: SlotMap<SemanticBinding>,
+    evidence: SlotMap<runmat_accelerate_api::NumericalDomainEvidence>,
+    sign: SlotMap<runmat_runtime::builtins::common::spec::FusionSignEvidence>,
+    arithmetic: SlotMap<FusionArithmeticEvidence>,
+    exact_products: SlotMap<ExactProductReceipt>,
+    admission_work: SlotMap<runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
 }
 
 #[derive(Debug)]
@@ -268,8 +273,9 @@ impl ResolvedProgram {
         provider_precision: ProviderPrecision,
         correlation: Option<crate::placement::PlacementCorrelationId>,
     ) -> std::result::Result<Self, FusionResolveFailure> {
-        let inputs: Vec<_> = inputs.iter().collect();
-        Self::resolve_borrowed(plan, &inputs, provider_precision, correlation).await
+        let mut selected = Vec::with_capacity(inputs.len());
+        selected.extend(inputs.iter());
+        Self::resolve_borrowed(plan, &selected, provider_precision, correlation).await
     }
 
     pub async fn resolve_borrowed(
@@ -517,7 +523,7 @@ impl ResolvedProgram {
     }
 
     pub(crate) fn is_invocation_input(&self, id: ValueId) -> bool {
-        self.source_input_set.contains(&id)
+        self.source_input_set.binary_search(&id).is_ok()
     }
 
     /// Literal representation follows the same explicit source precision
@@ -586,6 +592,7 @@ impl ResolvedProgram {
     /// Controls are omitted only if every use is an authenticated exact scalar
     /// implementation (POWER exponent or binary32-equivalent product).
     /// They remain source inputs and original-bit semantic identity facts.
+    #[cfg(test)]
     pub fn embedded_scalar_controls(
         &self,
         plan: &FusionGroupPlan,
@@ -600,28 +607,64 @@ impl ResolvedProgram {
         outputs: &[ValueId],
         precision: ProviderPrecision,
     ) -> HashSet<ValueId> {
-        let mut controls = plan
-            .operations
-            .iter()
-            .filter_map(|operation| {
-                let output = match operation {
-                    FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => {
-                        *output
-                    }
-                }?;
-                self.exact_single_base_power(output)?;
-                Some(self.power_arithmetic(output)?.exponent_id)
-            })
-            .filter(|id| {
-                (plan.inputs.contains(id) || plan.const_values.contains_key(id))
-                    && !outputs.contains(id)
-            })
-            .collect::<HashSet<_>>();
+        self.embedded_controls_sorted_for_precision(plan, outputs, precision)
+            .expect("fusion control geometry is representable")
+            .into_iter()
+            .collect()
+    }
+
+    /// Exact request-sized control IDs for finite elementwise preparation.
+    /// Reduction and legacy callers retain the Set adapter above; the typed
+    /// producer performs membership checks by binary search.
+    pub(crate) fn embedded_controls_sorted_for_precision(
+        &self,
+        plan: &FusionGroupPlan,
+        outputs: &[ValueId],
+        precision: ProviderPrecision,
+    ) -> Result<Vec<ValueId>> {
+        let mut controls = Vec::new();
+        controls.try_reserve_exact(
+            plan.operations
+                .len()
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("fusion control count overflows"))?,
+        )?;
+        controls.extend(
+            plan.operations
+                .iter()
+                .filter_map(|operation| {
+                    let output = match operation {
+                        FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => {
+                            *output
+                        }
+                    }?;
+                    self.exact_single_base_power(output)?;
+                    Some(self.power_arithmetic(output)?.exponent_id)
+                })
+                .filter(|id| {
+                    (plan.inputs.contains(id) || plan.const_values.contains_key(id))
+                        && !outputs.contains(id)
+                }),
+        );
         if precision == ProviderPrecision::F32 {
             controls.extend(self.exact_products.values().filter_map(|receipt| {
                 (!outputs.contains(&receipt.control)).then_some(receipt.control)
             }));
         }
+        controls.sort_unstable();
+        controls.dedup();
+        let exclusion_capacity = plan
+            .operations
+            .iter()
+            .try_fold(0usize, |count, operation| {
+                let inputs = match operation {
+                    FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => inputs,
+                };
+                count.checked_add(inputs.len())
+            })
+            .ok_or_else(|| anyhow!("fusion control exclusion count overflows"))?;
+        let mut exclusions = Vec::new();
+        exclusions.try_reserve_exact(exclusion_capacity)?;
         for operation in &plan.operations {
             let (inputs, output) = match operation {
                 FusionOp::Primitive { inputs, output, .. }
@@ -634,11 +677,14 @@ impl ResolvedProgram {
                         .and_then(|id| self.exact_products.get(&id))
                         .is_some_and(|receipt| receipt.control == *input);
                 if (position != 1 || exact.is_none()) && !product {
-                    controls.remove(input);
+                    exclusions.push(*input);
                 }
             }
         }
-        controls
+        exclusions.sort_unstable();
+        exclusions.dedup();
+        controls.retain(|id| exclusions.binary_search(id).is_err());
+        Ok(controls)
     }
 
     pub(crate) fn exact_product(&self, output: ValueId) -> Option<ExactProductReceipt> {
@@ -768,51 +814,60 @@ impl ResolvedProgram {
     /// shader text is additionally hashed by the placement caller, capturing
     /// the selected binding's actual expression lowering, not a function address.
     pub fn cache_identity(&self) -> Result<Digest> {
-        let facts: BTreeMap<_, _> = self.facts.iter().collect();
-        let declarations = self
-            .binding_contracts
-            .iter()
-            .map(|snapshot| {
-                (
-                    snapshot.declaration.binding,
-                    snapshot.entry.contract,
-                    snapshot.entry.placement,
-                )
-            })
-            .collect::<Vec<_>>();
-        let revisions: BTreeMap<_, _> = self
-            .declarations
-            .iter()
-            .map(|(id, declaration)| {
-                (
-                    *id,
-                    (
-                        declaration.declaration.semantics.map(|semantics| {
-                            (
-                                semantics.revision,
-                                semantics.helpers,
-                                semantics.required_arithmetic,
-                            )
-                        }),
-                        declaration
-                            .declaration
-                            .reduction
-                            .map(|reduction| reduction.revision),
-                    ),
-                )
-            })
-            .collect();
+        struct DeclarationContracts<'a>(&'a [SemanticBinding]);
+        impl Serialize for DeclarationContracts<'_> {
+            fn serialize<S: Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+                for snapshot in self.0 {
+                    sequence.serialize_element(&(
+                        snapshot.declaration.binding,
+                        snapshot.entry.contract,
+                        snapshot.entry.placement,
+                    ))?;
+                }
+                sequence.end()
+            }
+        }
+        struct Revisions<'a>(&'a SlotMap<SemanticBinding>);
+        impl Serialize for Revisions<'_> {
+            fn serialize<S: Serializer>(
+                &self,
+                serializer: S,
+            ) -> std::result::Result<S::Ok, S::Error> {
+                let mut map = serializer.serialize_map(None)?;
+                for (id, declaration) in self.0.iter() {
+                    map.serialize_entry(
+                        id,
+                        &(
+                            declaration.declaration.semantics.map(|semantics| {
+                                (
+                                    semantics.revision,
+                                    semantics.helpers,
+                                    semantics.required_arithmetic,
+                                )
+                            }),
+                            declaration
+                                .declaration
+                                .reduction
+                                .map(|reduction| reduction.revision),
+                        ),
+                    )?;
+                }
+                map.end()
+            }
+        }
         #[derive(serde::Serialize)]
         struct AdmissionIdentity<'a> {
-            domains: &'a BTreeMap<ValueId, runmat_accelerate_api::NumericalDomainEvidence>,
-            signs:
-                &'a BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionSignEvidence>,
-            arithmetic: &'a BTreeMap<ValueId, FusionArithmeticEvidence>,
-            exact_products: &'a BTreeMap<ValueId, ExactProductReceipt>,
-            work:
-                &'a BTreeMap<ValueId, runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
+            domains: &'a SlotMap<runmat_accelerate_api::NumericalDomainEvidence>,
+            signs: &'a SlotMap<runmat_runtime::builtins::common::spec::FusionSignEvidence>,
+            arithmetic: &'a SlotMap<FusionArithmeticEvidence>,
+            exact_products: &'a SlotMap<ExactProductReceipt>,
+            work: &'a SlotMap<runmat_runtime::builtins::common::spec::FusionAdmissionWork>,
         }
-        Ok(Digest::sha256(serde_json::to_vec(&(
+        Ok(Digest::sha256_serialized(&(
             "typed-fusion-v7",
             runmat_builtins::BUILTIN_CATALOG_SCHEMA_VERSION,
             &self.source_operations,
@@ -820,12 +875,12 @@ impl ResolvedProgram {
             &self.source_constants,
             &self.source_slot_constants,
             self.source_root,
-            declarations,
-            facts,
+            DeclarationContracts(&self.binding_contracts),
+            &self.facts,
             &self.source_inputs,
             self.precision_policy,
             self.provider_precision,
-            revisions,
+            Revisions(&self.declarations),
             AdmissionIdentity {
                 domains: &self.evidence,
                 signs: &self.sign,
@@ -833,7 +888,7 @@ impl ResolvedProgram {
                 exact_products: &self.exact_products,
                 work: &self.admission_work,
             },
-        ))?))
+        ))?)
     }
 
     pub fn require_source_plan(&self, plan: &FusionGroupPlan) -> Result<()> {

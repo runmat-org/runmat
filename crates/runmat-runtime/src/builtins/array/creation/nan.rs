@@ -18,9 +18,8 @@ use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_constructor_dimensions, normalize_constructor_shape,
 };
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
-    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
-    ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 
@@ -73,18 +72,18 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             let literal = match ctx.scalar_ty {
-                ScalarType::F32 => "bitcast<f32>(0x7fc00000u)".to_string(),
-                ScalarType::F64 => "bitcast<f64>(0x7ff8000000000000u)".to_string(),
+                ScalarType::F32 => "bitcast<f32>(0x7fc00000u)",
+                ScalarType::F64 => "bitcast<f64>(0x7ff8000000000000u)",
                 ScalarType::I32 | ScalarType::Bool => {
                     return Err(crate::builtins::common::spec::FusionError::Message(
                         "nan: integer and logical fusion output is unsupported",
-                    ));
+                    ))
                 }
             };
-            Ok(literal)
-        },
+            writer.push(literal)
+        }),
     }),
     reduction: None,
     emits_nan: true,

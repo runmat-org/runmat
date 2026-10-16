@@ -2,7 +2,10 @@ use std::fmt;
 
 mod admission;
 mod unary_math;
-pub use unary_math::unary_math_expression;
+pub use unary_math::{
+    unary_math_expression, write_unary_math_expression, write_unary_math_first_expression,
+    write_unary_math_scalar_expression,
+};
 mod canonical;
 mod host_resources;
 pub use host_resources::{
@@ -198,12 +201,251 @@ pub enum ShapeRequirements {
 /// Context provided to fusion expression builders.
 pub struct FusionExprContext<'a> {
     pub scalar_ty: ScalarType,
-    pub inputs: &'a [&'a str],
+    pub inputs: &'a [FusionExprInput<'a>],
     pub constants: &'a [&'a str],
 }
 
-/// Builder used to generate WGSL expressions.
-pub type FusionExprBuilder = fn(&FusionExprContext) -> Result<String, FusionError>;
+/// One operand supplied to the canonical declaration writer. A measured
+/// operand carries only its exact future source length; it cannot be emitted.
+#[derive(Clone, Copy)]
+pub struct FusionExprInput<'a> {
+    text: Option<&'a str>,
+    bytes: usize,
+}
+
+impl<'a> FusionExprInput<'a> {
+    pub fn text(text: &'a str) -> Self {
+        Self {
+            text: Some(text),
+            bytes: text.len(),
+        }
+    }
+
+    pub fn measured_bytes(bytes: usize) -> Self {
+        Self { text: None, bytes }
+    }
+
+    pub fn byte_len(self) -> usize {
+        self.bytes
+    }
+
+    fn is_measured(self) -> bool {
+        self.text.is_none()
+    }
+}
+
+impl std::fmt::Display for FusionExprInput<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.text {
+            Some(text) => formatter.write_str(text),
+            None => {
+                let mut bytes = self.bytes;
+                // Format-based declarations use the same writer in both
+                // passes. The count sink discards these stack-backed bytes;
+                // no operand source String is constructed for admission.
+                const FILL: &str =
+                    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+                while bytes >= FILL.len() {
+                    formatter.write_str(FILL)?;
+                    bytes -= FILL.len();
+                }
+                formatter.write_str(&FILL[..bytes])
+            }
+        }
+    }
+}
+
+/// One expression implementation owns both its checked byte count and its
+/// emitted bytes for every registered fusion template.
+#[derive(Clone, Copy)]
+pub struct FusionExprBuilder {
+    write: fn(&FusionExprContext, &mut FusionExprWriter<'_>) -> Result<(), FusionError>,
+}
+
+/// Infallible String output, preceded by checked source-byte accounting.
+/// The counting pass never constructs an intermediate expression String.
+pub struct FusionExprWriter<'a> {
+    target: Option<&'a mut String>,
+    bytes: usize,
+}
+
+impl FusionExprWriter<'_> {
+    pub fn counting() -> Self {
+        Self {
+            target: None,
+            bytes: 0,
+        }
+    }
+
+    pub fn emitting(target: &mut String) -> FusionExprWriter<'_> {
+        FusionExprWriter {
+            target: Some(target),
+            bytes: 0,
+        }
+    }
+
+    pub fn push(&mut self, fragment: impl fmt::Display) -> Result<(), FusionError> {
+        self.write_formatted(format_args!("{fragment}"))
+    }
+
+    fn push_str_fragment(&mut self, fragment: &str) -> Result<(), FusionError> {
+        self.bytes = self
+            .bytes
+            .checked_add(fragment.len())
+            .ok_or(FusionError::ExpressionTooLarge)?;
+        if let Some(target) = self.target.as_mut() {
+            target.push_str(fragment);
+        }
+        Ok(())
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.bytes
+    }
+
+    pub fn write_formatted(&mut self, arguments: fmt::Arguments<'_>) -> Result<(), FusionError> {
+        fmt::write(self, arguments).map_err(|_| FusionError::ExpressionTooLarge)
+    }
+}
+
+impl fmt::Write for FusionExprWriter<'_> {
+    fn write_str(&mut self, fragment: &str) -> fmt::Result {
+        self.push_str_fragment(fragment).map_err(|_| fmt::Error)
+    }
+}
+
+/// A pure real scalar operator's source is composed once for both admission
+/// and emission. Domain-sensitive power remains on its separate typed route.
+pub fn write_real_binary_expression(
+    operation: runmat_types::OperatorKind,
+    context: &FusionExprContext<'_>,
+    writer: &mut FusionExprWriter<'_>,
+) -> Result<(), FusionError> {
+    let lhs = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
+    let rhs = context.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
+    let infix = match operation {
+        runmat_types::OperatorKind::Add => " + ",
+        runmat_types::OperatorKind::Subtract => " - ",
+        runmat_types::OperatorKind::ElementwiseMultiply => " * ",
+        runmat_types::OperatorKind::ElementwiseDivide => " / ",
+        runmat_types::OperatorKind::ElementwiseLeftDivide => " / ",
+        _ => {
+            return Err(FusionError::Message(
+                "operator has no counted binary expression",
+            ))
+        }
+    };
+    writer.push("(")?;
+    if operation == runmat_types::OperatorKind::ElementwiseLeftDivide {
+        writer.push(rhs)?;
+        writer.push(infix)?;
+        writer.push(lhs)?;
+    } else {
+        writer.push(lhs)?;
+        writer.push(infix)?;
+        writer.push(rhs)?;
+    }
+    writer.push(")")
+}
+
+pub fn write_real_cast_expression(
+    class: runmat_types::NumericClass,
+    context: &FusionExprContext<'_>,
+    writer: &mut FusionExprWriter<'_>,
+) -> Result<(), FusionError> {
+    if context.inputs.len() != 1 {
+        return Err(FusionError::Message(
+            "unary fusion requires exactly one data operand",
+        ));
+    }
+    let input = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
+    match (class, context.scalar_ty) {
+        (runmat_types::NumericClass::Single, ScalarType::F32) => writer.push(input),
+        (runmat_types::NumericClass::Single, ScalarType::F64) => {
+            writer.push("f64(f32(")?;
+            writer.push(input)?;
+            writer.push("))")
+        }
+        (runmat_types::NumericClass::Double, ScalarType::F64) => {
+            writer.push("(")?;
+            writer.push(input)?;
+            writer.push(")")
+        }
+        _ => Err(FusionError::UnsupportedPrecision(context.scalar_ty)),
+    }
+}
+
+pub fn write_real_power_expression(
+    context: &FusionExprContext<'_>,
+    writer: &mut FusionExprWriter<'_>,
+) -> Result<(), FusionError> {
+    let base = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
+    let exponent = context.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
+    let helper = FusionMathHelper::RealPower.entrypoint(context.scalar_ty)?;
+    writer.push(helper)?;
+    writer.push("(")?;
+    writer.push(base)?;
+    writer.push(", ")?;
+    writer.push(exponent)?;
+    writer.push(")")
+}
+
+impl FusionExprBuilder {
+    pub const fn new(
+        write: fn(&FusionExprContext, &mut FusionExprWriter<'_>) -> Result<(), FusionError>,
+    ) -> Self {
+        Self { write }
+    }
+
+    pub fn measured_bytes(self, context: &FusionExprContext<'_>) -> Result<usize, FusionError> {
+        let mut sink = FusionExprWriter::counting();
+        (self.write)(context, &mut sink)?;
+        Ok(sink.bytes())
+    }
+
+    /// Count before producer allocation from indexed operand lengths. Current
+    /// scalar declarations admit at most two operands; a wider declaration
+    /// has no finite source certificate from this API.
+    pub fn measured_bytes_from_lengths(
+        self,
+        scalar_ty: ScalarType,
+        lengths: &[usize],
+    ) -> Result<usize, FusionError> {
+        if lengths.len() > 2 {
+            return Err(FusionError::Message(
+                "fusion expression has no finite operand-length geometry",
+            ));
+        }
+        let mut inputs = [FusionExprInput::measured_bytes(0); 2];
+        for (input, length) in inputs.iter_mut().zip(lengths.iter().copied()) {
+            *input = FusionExprInput::measured_bytes(length);
+        }
+        self.measured_bytes(&FusionExprContext {
+            scalar_ty,
+            inputs: &inputs[..lengths.len()],
+            constants: &[],
+        })
+    }
+
+    pub fn render(self, context: &FusionExprContext<'_>) -> Result<String, FusionError> {
+        if context.inputs.iter().any(|input| input.is_measured()) {
+            return Err(FusionError::Message(
+                "measured fusion operand cannot be published as source",
+            ));
+        }
+        let expected = self.measured_bytes(context)?;
+        let mut output = String::new();
+        output
+            .try_reserve_exact(expected)
+            .map_err(|_| FusionError::ExpressionTooLarge)?;
+        let mut sink = FusionExprWriter::emitting(&mut output);
+        (self.write)(context, &mut sink)?;
+        if sink.bytes() != expected {
+            return Err(FusionError::ExpressionTooLarge);
+        }
+        Ok(output)
+    }
+}
 
 /// Description of a fusion kernel template.
 #[derive(Clone)]
@@ -218,6 +460,7 @@ pub enum FusionError {
     MissingInput(usize),
     UnsupportedPrecision(ScalarType),
     Message(&'static str),
+    ExpressionTooLarge,
 }
 
 /// GPU metadata registered alongside builtin functions.
@@ -246,6 +489,9 @@ impl fmt::Display for FusionError {
             FusionError::MissingInput(idx) => write!(f, "missing input {}", idx),
             FusionError::UnsupportedPrecision(ty) => write!(f, "unsupported precision {:?}", ty),
             FusionError::Message(msg) => write!(f, "{msg}"),
+            FusionError::ExpressionTooLarge => {
+                f.write_str("fusion expression byte count overflows")
+            }
         }
     }
 }

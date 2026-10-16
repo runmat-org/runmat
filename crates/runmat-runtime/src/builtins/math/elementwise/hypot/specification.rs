@@ -1,7 +1,7 @@
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::elementwise::hypot")]
@@ -30,11 +30,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |context: &FusionExprContext| {
-            let left = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            let right = context.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
-            Ok(format!("hypot({left}, {right})"))
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            let left = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            let right = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
+            writer.write_formatted(format_args!("hypot({left}, {right})"))
+        }),
     }),
     reduction: None,
     emits_nan: false,

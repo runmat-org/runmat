@@ -35,16 +35,19 @@ fn any_descriptor_signatures_and_errors() {
 
 #[test]
 fn any_fusion_uses_the_default_omit_nan_truth_rule() {
-    let source = (super::FUSION_SPEC
+    let source = super::FUSION_SPEC
         .reduction
         .as_ref()
         .expect("any has a reduction fusion template")
-        .wgsl_body)(&crate::builtins::common::spec::FusionExprContext {
-        scalar_ty: crate::builtins::common::spec::ScalarType::F64,
-        inputs: &["value"],
-        constants: &[],
-    })
-    .expect("fusion expression");
+        .wgsl_body
+        .render(&crate::builtins::common::spec::FusionExprContext {
+            scalar_ty: crate::builtins::common::spec::ScalarType::F64,
+            inputs: &[crate::builtins::common::spec::FusionExprInput::text(
+                "value",
+            )],
+            constants: &[],
+        })
+        .expect("fusion expression");
     assert!(source.contains("(value != 0.0) && (value == value)"));
 }
 

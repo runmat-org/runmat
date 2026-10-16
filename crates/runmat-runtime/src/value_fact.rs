@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 
 use runmat_types::{
     AliasFact, CallableFact, CallableIdentity, CellFact, CertaintyFact, ContiguityFact,
@@ -120,7 +121,7 @@ pub fn value_fact(value: &Value) -> ValueFact {
                 contiguity: ContiguityFact::Unknown,
                 view: ViewFact::Unknown,
                 residency: ResidencyFact::Device {
-                    provider: Some(format!("device:{}", value.device_id())),
+                    provider: Some(device_provider_name(value.device_id())),
                 },
                 alias: AliasFact::Identity,
                 mutation: MutationFact::HandleSemantics,
@@ -289,6 +290,15 @@ pub fn value_fact(value: &Value) -> ValueFact {
             fact
         }
     }
+}
+
+fn device_provider_name(device_id: u32) -> String {
+    // `device:` plus the maximum ten decimal digits of u32. A checked
+    // request-local resource preflight can reserve this exact requested
+    // capacity before a resident ValueFact is constructed.
+    let mut name = String::with_capacity(17);
+    write!(&mut name, "device:{device_id}").expect("writing to String cannot fail");
+    name
 }
 
 fn numeric_scalar(class: NumericClass, domain: NumericDomain) -> ValueFact {

@@ -7,7 +7,7 @@ use runmat_accelerate_api::{
 use runmat_execution::{CandidateOutputPresentation, CandidateResourceDemand, ResourceByteBound};
 use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::Value;
-use std::collections::HashSet;
+use std::borrow::Cow;
 
 pub enum CpuReadbackFailure {
     BeforeEffect(RuntimeError),
@@ -49,7 +49,7 @@ pub(crate) struct Source {
     pub(crate) owner: &'static dyn AccelProvider,
     pub(crate) offsets: Vec<usize>,
     pub(crate) loads: Vec<super::VmHostLoadUse>,
-    pub(crate) capabilities: ProviderCapabilitySnapshot,
+    pub(crate) capabilities: Cow<'static, ProviderCapabilitySnapshot>,
     pub(crate) payload_bytes: u64,
     pub(crate) host_workspace: u64,
     pub(crate) provider_scratch: ResourceByteBound,
@@ -59,7 +59,76 @@ pub(crate) struct Source {
 pub(crate) struct CpuReadbackPlan {
     pub(crate) sources: Vec<Source>,
     pub(crate) stack_len: usize,
-    pub(crate) resident_offsets: HashSet<usize>,
+    pub(crate) resident_offsets: Vec<usize>,
+}
+
+/// Checked upper bound for the request-local metadata built while deciding a
+/// host candidate. Download payload and execution scratch have separate
+/// physical owners; this counts only the preparation vectors that coexist
+/// with the retained semantic programs. Production resident sources borrow
+/// their immutable provider capability snapshots.
+pub(crate) fn candidate_preparation_bytes(
+    resident_inputs: usize,
+    entry_uses: usize,
+    load_uses: usize,
+    operations: usize,
+    operand_occurrences: usize,
+    max_rank: usize,
+) -> Option<u64> {
+    fn vector<T>(count: usize) -> Option<u64> {
+        count
+            .checked_mul(std::mem::size_of::<T>())
+            .and_then(|bytes| u64::try_from(bytes).ok())
+    }
+    let mut bytes = 0_u64;
+    let mut add = |more: u64| {
+        bytes = bytes.checked_add(more)?;
+        Some(())
+    };
+    // The two duplicate guards, final resident offset table and one source
+    // vector all exist before selection. Each source starts with full transcript
+    // capacity so later same-handle extension needs no larger allocation.
+    add(vector::<usize>(entry_uses.checked_mul(2)?)?)?;
+    add(vector::<usize>(load_uses)?)?;
+    add(vector::<Source>(resident_inputs)?)?;
+    add(vector::<usize>(entry_uses.checked_mul(resident_inputs)?)?)?;
+    add(vector::<super::VmHostLoadUse>(
+        load_uses.checked_mul(resident_inputs)?,
+    )?)?;
+    add(vector::<runmat_execution::ProviderReadbackDemand>(
+        resident_inputs,
+    )?)?;
+    add(u64::try_from(std::mem::size_of::<runmat_execution::ProviderReadbackDemands>()).ok()?)?;
+    add(vector::<runmat_runtime::context::VmFusionHostOperation>(
+        operations,
+    )?)?;
+    add(vector::<runmat_builtins::BuiltinBindingIdentity>(
+        operations,
+    )?)?;
+    // Every occurrence may retain a shape during resource calculation. The
+    // current operation also owns its Vec-of-shapes, argument vector and a
+    // temporary known-dims projection while constructing the next shape.
+    add(vector::<usize>(
+        operand_occurrences
+            .checked_add(operations)?
+            .checked_mul(max_rank)?,
+    )?)?;
+    add(vector::<Option<usize>>(max_rank)?)?;
+    add(vector::<Vec<usize>>(2)?)?;
+    add(vector::<
+        runmat_runtime::builtins::common::spec::FusionHostResourceInput<'static>,
+    >(2)?)?;
+    // The canonical host binary calculator constructs a BroadcastPlan while
+    // pricing its body. Its ten-vector geometry comes from that owner.
+    add(vector::<usize>(
+        max_rank.checked_mul(
+            usize::try_from(
+                runmat_runtime::builtins::math::host_resources::BROADCAST_METADATA_VECTORS_UPPER,
+            )
+            .ok()?,
+        )?,
+    )?)?;
+    Some(bytes)
 }
 
 fn unavailable(message: &'static str) -> RuntimeError {
@@ -113,7 +182,10 @@ impl Source {
             owner,
             offsets,
             loads,
-            capabilities: owner.capability_snapshot(),
+            capabilities: owner
+                .capability_snapshot_ref()
+                .map(Cow::Borrowed)
+                .unwrap_or_else(|| Cow::Owned(owner.capability_snapshot())),
             payload_bytes: checked_numeric_download_host_payload_bytes(handle)?,
             host_workspace,
             provider_scratch,
@@ -138,7 +210,14 @@ impl Source {
                         .query_numeric_download_feasibility(&self.handle, &query)
                         .is_supported()
                 })
-            && self.owner.capability_snapshot() == self.capabilities
+            && self.owner.capability_snapshot_ref().map_or_else(
+                || {
+                    self.owner
+                        .capability_snapshot()
+                        .eq(self.capabilities.as_ref())
+                },
+                |current| current == self.capabilities.as_ref(),
+            )
             && checked_numeric_download_host_payload_bytes(&self.handle) == Some(self.payload_bytes)
             && self
                 .owner
@@ -213,7 +292,7 @@ impl CpuReadbackPlan {
         self.resident_offsets.len() == occurrence_count
             && stack.iter().enumerate().all(|(offset, value)| {
                 !runmat_runtime::dispatcher::value_contains_gpu(value)
-                    || self.resident_offsets.contains(&offset)
+                    || self.resident_offsets.binary_search(&offset).is_ok()
             })
     }
 

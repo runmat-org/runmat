@@ -2224,6 +2224,13 @@ pub trait AccelProvider: AcceleratorThreadBound {
         ProviderCapabilitySnapshot::conservative(self)
     }
 
+    /// Borrows the same capability authority when its immutable snapshot is
+    /// retained by the provider. Dynamic providers may return `None`; callers
+    /// then use the owned snapshot and must account for that request-local copy.
+    fn capability_snapshot_ref(&self) -> Option<&ProviderCapabilitySnapshot> {
+        None
+    }
+
     /// Returns a validated cluster-facing device description when this
     /// provider can execute remotely scheduled accelerator work. Providers
     /// opt in explicitly, so host-only compatibility providers are never

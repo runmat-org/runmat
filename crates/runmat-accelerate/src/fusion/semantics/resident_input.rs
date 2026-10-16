@@ -7,7 +7,9 @@ use runmat_accelerate_api::{
     ProviderResidency, ProviderStorage,
 };
 use runmat_runtime::builtins::common::gpu_helpers::exact_provider_for_handle;
-use runmat_types::{NumericClass, NumericDomain, StorageFact, ValueFact, ValueKindFact};
+use runmat_types::{
+    DimensionFact, NumericClass, NumericDomain, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+};
 use runmat_value::Value;
 
 use crate::graph::ValueId;
@@ -70,8 +72,7 @@ impl<'a> FusionResidentInput<'a> {
             || representation.checked_byte_len().is_none()
             || !matches!(&actual_fact.kind, ValueKindFact::Numeric(numeric)
                 if numeric.class == class && numeric.domain == NumericDomain::Real)
-            || actual_fact.shape.known_dims()?
-                != handle.shape().iter().copied().map(Some).collect::<Vec<_>>()
+            || !exact_shape(&actual_fact.shape, handle.shape())
         {
             return None;
         }
@@ -107,5 +108,18 @@ impl<'a> FusionResidentInput<'a> {
         // No uniqueness, view, layout, sign, payload or initialization proof.
         // The physical/view certificate stays separate from opted-class facts.
         fact.storage = StorageFact::Dense;
+    }
+}
+
+fn exact_shape(fact: &ShapeFact, dimensions: &[usize]) -> bool {
+    match fact {
+        ShapeFact::Scalar => dimensions == [1, 1],
+        ShapeFact::Shaped { dims } => {
+            dims.len() == dimensions.len()
+                && dims.iter().zip(dimensions).all(|(fact, actual)| {
+                    matches!(fact, DimensionFact::Known(expected) if expected == actual)
+                })
+        }
+        ShapeFact::Unknown | ShapeFact::Ranked { .. } => false,
     }
 }

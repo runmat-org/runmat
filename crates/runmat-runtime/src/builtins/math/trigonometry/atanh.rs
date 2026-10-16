@@ -17,9 +17,8 @@ use runmat_value::{CharArray, ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy,
-    FusionAdmissionContext, FusionAdmissionFuture, FusionError, FusionExprContext,
-    FusionKernelTemplate, FusionSemanticDeclaration, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionAdmissionContext, FusionAdmissionFuture, FusionKernelTemplate, FusionSemanticDeclaration,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::context::RuntimeContext;
@@ -101,12 +100,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let [input] = ctx.inputs else {
-                return Err(FusionError::MissingInput(0));
-            };
-            crate::builtins::common::spec::unary_math_expression(runmat_types::ScalarUnaryMath::Atanh, ctx.scalar_ty, input)
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            crate::builtins::common::spec::write_unary_math_expression(runmat_types::ScalarUnaryMath::Atanh, ctx, writer)
+        }),
     }),
     reduction: None,
     emits_nan: true,

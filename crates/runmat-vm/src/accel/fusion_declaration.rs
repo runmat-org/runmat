@@ -9,7 +9,7 @@ use runmat_builtins::{
     BuiltinAsyncBehavior, BuiltinCatalogEntry, BuiltinFusionPolicy, BuiltinPurity,
 };
 use runmat_runtime::builtins::common::spec::{
-    canonical_fusion_declaration, FusionExprContext, FusionKernelTemplate,
+    canonical_fusion_declaration, FusionExprContext, FusionExprInput, FusionKernelTemplate,
     FusionStructuralOperation,
 };
 use runmat_types::EffectKind;
@@ -72,14 +72,16 @@ fn accepts_arity(template: &FusionKernelTemplate, argument_count: Option<usize>)
     };
     // Ask the operation's existing expression builder, rather than reconstruct
     // optional-control signatures or maintain a second per-identity arity table.
-    let inputs = vec!["operand"; count];
+    let inputs = vec![FusionExprInput::text("operand"); count];
     template.scalar_precisions.iter().any(|&scalar_ty| {
-        (template.wgsl_body)(&FusionExprContext {
-            scalar_ty,
-            inputs: &inputs,
-            constants: &[],
-        })
-        .is_ok()
+        template
+            .wgsl_body
+            .render(&FusionExprContext {
+                scalar_ty,
+                inputs: &inputs,
+                constants: &[],
+            })
+            .is_ok()
     })
 }
 

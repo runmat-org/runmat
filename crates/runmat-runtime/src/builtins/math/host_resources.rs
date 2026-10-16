@@ -10,6 +10,10 @@ use runmat_types::{NumericClass, NumericDomain, OperatorKind};
 mod envelope;
 pub use envelope::{promoting_output, PromotingOutput};
 
+/// BroadcastPlan's existing typed shape/stride preparation bound. Reused by
+/// fusion's pre-selection receipt so the same temporary is not guessed twice.
+pub const BROADCAST_METADATA_VECTORS_UPPER: u64 = 10;
+
 fn width(class: NumericClass) -> Option<u64> {
     match class {
         NumericClass::Single => Some(4),
@@ -100,7 +104,7 @@ fn binary_bound(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourc
     let vectors = u64::try_from(rank)
         .ok()?
         .checked_mul(std::mem::size_of::<usize>() as u64)?
-        .checked_mul(10)?;
+        .checked_mul(BROADCAST_METADATA_VECTORS_UPPER)?;
     Some(FusionHostResourceBound {
         retained_bytes: payload(query.output)?.checked_add(metadata(query.output.shape)?)?,
         scratch_bytes: payload(*left)?

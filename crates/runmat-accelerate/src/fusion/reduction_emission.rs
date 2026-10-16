@@ -25,18 +25,23 @@ pub(crate) fn structural_support(source: &FusionGroupPlan) -> bool {
     if source.inputs.is_empty() || source.legacy_reduction_axis().is_none() {
         return false;
     }
-    let leaves = source
+    let mut leaves = source
         .inputs
         .iter()
         .chain(source.const_values.keys())
-        .map(|&id| (id, String::new()))
-        .collect::<HashMap<_, _>>();
+        .copied()
+        .collect::<Vec<_>>();
+    leaves.sort_unstable();
+    leaves.dedup();
     let Ok(selected) = producer_indices(source, &leaves, &[root]) else {
         return false;
     };
-    selected.into_iter().all(|index| {
-        super::expression::structural_operation_support(source, &source.operations[index])
-    })
+    for index in selected.iter() {
+        if !super::expression::structural_operation_support(source, &source.operations[index]) {
+            return false;
+        }
+    }
+    true
 }
 
 pub(crate) struct ReductionProducerEmission {

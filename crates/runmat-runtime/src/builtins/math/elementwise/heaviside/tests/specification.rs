@@ -1,4 +1,4 @@
-use crate::builtins::common::spec::{FusionExprContext, ScalarType};
+use crate::builtins::common::spec::{FusionExprContext, FusionExprInput, ScalarType};
 use runmat_builtins::MathInferenceRule;
 
 #[test]
@@ -20,13 +20,15 @@ fn fusion_expression_preserves_nan_and_zero() {
     let template = super::super::specification::FUSION_SPEC
         .elementwise
         .expect("fusion template");
-    let inputs = ["x"];
-    let expression = (template.wgsl_body)(&FusionExprContext {
-        scalar_ty: ScalarType::F64,
-        inputs: &inputs,
-        constants: &[],
-    })
-    .expect("fusion expression");
+    let inputs = [FusionExprInput::text("x")];
+    let expression = template
+        .wgsl_body
+        .render(&FusionExprContext {
+            scalar_ty: ScalarType::F64,
+            inputs: &inputs,
+            constants: &[],
+        })
+        .expect("fusion expression");
     assert!(expression.contains("isNan(x)"));
     assert!(expression.contains("f64(0.5)"));
 }

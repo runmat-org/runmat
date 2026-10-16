@@ -5,7 +5,6 @@ use crate::fusion::FusionOp;
 use crate::fusion_exec::host_readback::{CpuHostResources, CpuReadbackPlan, Source};
 use crate::fusion_exec::VmHostInputUses;
 use runmat_runtime::builtins::common::spec::{FusionHostResourceInput, FusionHostResourceQuery};
-use std::collections::HashSet;
 
 pub(super) struct Admission {
     pub plan: CpuReadbackPlan,
@@ -14,13 +13,12 @@ pub(super) struct Admission {
 }
 
 fn shape(program: &crate::fusion::semantics::ResolvedProgram, id: ValueId) -> Option<Vec<usize>> {
-    program
-        .fact(id)
-        .ok()?
-        .shape
-        .known_dims()?
-        .into_iter()
-        .collect()
+    let known = program.fact(id).ok()?.shape.known_dims()?;
+    let mut shape = Vec::with_capacity(known.len());
+    for dimension in known {
+        shape.push(dimension?);
+    }
+    Some(shape)
 }
 
 pub(super) fn admit(
@@ -66,18 +64,39 @@ fn admit_inputs(
     }) {
         return None;
     }
-    let mut used_offsets = HashSet::new();
-    let mut used_loads = HashSet::new();
-    if uses.entry.iter().any(|&(_, offset)| {
-        offset >= layout.required_stack_operands || !used_offsets.insert(offset)
-    }) || uses.loads.iter().any(|load| {
-        load.pc < request.plan.group.span.start
-            || load.pc > request.plan.group.span.end
-            || !used_loads.insert(load.pc)
-    }) {
+    let mut used_offsets = uses
+        .entry
+        .iter()
+        .map(|&(_, offset)| offset)
+        .collect::<Vec<_>>();
+    if used_offsets
+        .iter()
+        .any(|&offset| offset >= layout.required_stack_operands)
+    {
         return None;
     }
-    let mut sources: Vec<Source> = Vec::new();
+    used_offsets.sort_unstable();
+    if used_offsets.windows(2).any(|pair| pair[0] == pair[1]) {
+        return None;
+    }
+    let mut used_loads = uses.loads.iter().map(|load| load.pc).collect::<Vec<_>>();
+    if used_loads
+        .iter()
+        .any(|&pc| pc < request.plan.group.span.start || pc > request.plan.group.span.end)
+    {
+        return None;
+    }
+    used_loads.sort_unstable();
+    if used_loads.windows(2).any(|pair| pair[0] == pair[1]) {
+        return None;
+    }
+    let mut sources: Vec<Source> = Vec::with_capacity(
+        request
+            .inputs
+            .iter()
+            .filter(|value| matches!(value, Value::GpuTensor(_)))
+            .count(),
+    );
     for (&id, value) in request.plan.inputs.iter().zip(&request.inputs) {
         let Value::GpuTensor(handle) = value else {
             if runmat_runtime::dispatcher::value_contains_gpu(value) {
@@ -93,17 +112,19 @@ fn admit_inputs(
         if program.floating_class(id).ok()? != class || shape(program, id)? != handle.shape() {
             return None;
         }
-        let offsets = uses
-            .entry
-            .iter()
-            .filter_map(|&(value, offset)| (value == id).then_some(offset))
-            .collect::<Vec<_>>();
-        let loads = uses
-            .loads
-            .iter()
-            .filter(|load| load.value_id == id)
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut offsets = Vec::with_capacity(uses.entry.len());
+        offsets.extend(
+            uses.entry
+                .iter()
+                .filter_map(|&(value, offset)| (value == id).then_some(offset)),
+        );
+        let mut loads = Vec::with_capacity(uses.loads.len());
+        loads.extend(
+            uses.loads
+                .iter()
+                .filter(|load| load.value_id == id)
+                .cloned(),
+        );
         let occurrences = request
             .plan
             .operations
@@ -143,10 +164,10 @@ fn admit_inputs(
             FusionOp::Primitive { inputs, output, .. }
             | FusionOp::Builtin { inputs, output, .. } => (inputs, (*output)?),
         };
-        let shapes = inputs
-            .iter()
-            .map(|&id| shape(program, id))
-            .collect::<Option<Vec<_>>>()?;
+        let mut shapes = Vec::with_capacity(inputs.len());
+        for &id in inputs {
+            shapes.push(shape(program, id)?);
+        }
         // Private producer fanout and retained stack operands can keep shape
         // clones alive while another operation executes. Charge every input
         // occurrence, not merely one clone per graph value or active operator.
@@ -157,16 +178,13 @@ fn admit_inputs(
                     .checked_mul(std::mem::size_of::<usize>() as u64)?,
             )?;
         }
-        let args = inputs
-            .iter()
-            .zip(&shapes)
-            .map(|(&id, shape)| {
-                Some(FusionHostResourceInput {
-                    shape,
-                    class: program.floating_class(id).ok()?,
-                })
-            })
-            .collect::<Option<Vec<_>>>()?;
+        let mut args = Vec::with_capacity(inputs.len());
+        for (&id, shape) in inputs.iter().zip(&shapes) {
+            args.push(FusionHostResourceInput {
+                shape,
+                class: program.floating_class(id).ok()?,
+            });
+        }
         let output_shape = shape(program, output)?;
         let bound = bindings.host_resource_bound(
             index,
@@ -192,10 +210,14 @@ fn admit_inputs(
         active_scratch,
         operand_metadata,
     )?;
-    let resident_offsets = sources
-        .iter()
-        .flat_map(|source| source.offsets.iter().copied())
-        .collect();
+    let mut resident_offsets = Vec::with_capacity(uses.entry.len());
+    resident_offsets.extend(
+        sources
+            .iter()
+            .flat_map(|source| source.offsets.iter().copied()),
+    );
+    resident_offsets.sort_unstable();
+    resident_offsets.dedup();
     Some(Admission {
         program: host_program,
         plan: CpuReadbackPlan {

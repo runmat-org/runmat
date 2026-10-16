@@ -36,11 +36,12 @@ pub(super) fn source_assembly<'a>(
     // A selected POWER scalar is source-typed control, not a staging buffer.
     // Keep its original Double fact even under an opted physical downcast
     // policy. Arithmetic admission still owns whether any specialization exists.
-    let power_controls = plan
-        .operations
-        .iter()
-        .zip(snapshots)
-        .filter_map(|(operation, snapshot)| {
+    // Most ordinary unary/binary declarations have no POWER control. Leave
+    // this vector unallocated for them; the exact control identity remains
+    // selected and sorted on the POWER route below.
+    let mut power_controls = Vec::new();
+    for (operation, snapshot) in plan.operations.iter().zip(snapshots) {
+        let control = (|| {
             let snapshot = snapshot.as_ref()?;
             if snapshot.entry.identity != runmat_builtins::POWER_CATALOG_ENTRY.identity {
                 return None;
@@ -52,16 +53,21 @@ pub(super) fn source_assembly<'a>(
                 return None;
             };
             matches!(
-                exact_scalar_control(leaves.values().get(exponent).copied()),
+                exact_scalar_control(leaves.value(*exponent)),
                 Some(runmat_accelerate_api::PowerScalarControl::DoubleBits(_))
             )
             .then_some(*exponent)
-        })
-        .collect::<HashSet<_>>();
+        })();
+        if let Some(control) = control {
+            power_controls.push(control);
+        }
+    }
+    power_controls.sort_unstable();
+    power_controls.dedup();
     let effective_input = |id: ValueId, mut fact: ValueFact| {
         if precision_policy.permits_double_to_single()
             && provider_precision == ProviderPrecision::F32
-            && !power_controls.contains(&id)
+            && power_controls.binary_search(&id).is_err()
         {
             if let runmat_types::ValueKindFact::Numeric(ref mut numeric) = fact.kind {
                 if numeric.class == NumericClass::Double {
@@ -71,22 +77,25 @@ pub(super) fn source_assembly<'a>(
         }
         fact
     };
-    let facts = leaves
-        .values()
-        .iter()
-        .map(|(&id, &value)| {
-            let mut fact = value_fact(value);
-            // Authenticate the actual physical class first. An opted class is
-            // semantic precision policy, never physical representation proof.
-            leaves.refine_input_storage(id, value, &mut fact);
-            (id, effective_input(id, fact))
-        })
-        .collect();
+    let mut facts = FactIndex::new(plan, &leaves);
+    for &(id, value) in leaves.values() {
+        let mut fact = value_fact(value);
+        // Authenticate the actual physical class first. An opted class is
+        // semantic precision policy, never physical representation proof.
+        leaves.refine_input_storage(id, value, &mut fact);
+        facts.insert(id, effective_input(id, fact))?;
+    }
+    let declarations = SlotMap::new(&facts);
+    let evidence = SlotMap::new(&facts);
+    let sign = SlotMap::new(&facts);
+    let arithmetic = SlotMap::new(&facts);
+    let exact_products = SlotMap::new(&facts);
+    let admission_work = SlotMap::new(&facts);
     Ok((
         ResolvedProgram {
             source_operations: source_operations(plan, snapshots)?,
             source_input_ids: plan.inputs.clone(),
-            source_input_set: leaves.input_ids().clone(),
+            source_input_set: leaves.input_ids().to_vec(),
             source_constants: source_constants(plan)?,
             source_slot_constants: source_slot_constants(plan)?,
             source_root: plan.output,
@@ -94,13 +103,13 @@ pub(super) fn source_assembly<'a>(
             source_inputs,
             precision_policy,
             provider_precision,
-            binding_contracts: Vec::new(),
-            declarations: HashMap::new(),
-            evidence: BTreeMap::new(),
-            sign: BTreeMap::new(),
-            arithmetic: BTreeMap::new(),
-            exact_products: BTreeMap::new(),
-            admission_work: BTreeMap::new(),
+            binding_contracts: Vec::with_capacity(plan.operations.len()),
+            declarations,
+            evidence,
+            sign,
+            arithmetic,
+            exact_products,
+            admission_work,
         },
         leaves,
     ))
@@ -117,34 +126,53 @@ pub(super) fn inferred_operation<'a>(
             (inputs.as_slice(), *output)
         }
     };
-    let arguments = input_ids
-        .iter()
-        .map(|id| {
+    let mut arguments = Vec::with_capacity(input_ids.len());
+    for id in input_ids {
+        arguments.push(
             program
                 .facts
                 .get(id)
                 .cloned()
-                .ok_or_else(|| anyhow!("missing fusion operand fact {id}"))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let fact = if let Some(snapshot) = snapshot {
-        let inference = infer_catalog_call(
-            snapshot.entry,
-            &CallRequest {
-                arguments: arguments.clone(),
-                literals: request_literals::for_operands(input_ids, leaves.values()),
-                outputs: OutputSelection::default(),
-            },
+                .ok_or_else(|| anyhow!("missing fusion operand fact {id}"))?,
         );
-        if !inference.diagnostics.is_empty() || inference.outputs.len() != 1 {
-            return Err(anyhow!("fusion call has no admitted output"));
-        }
-        inference.outputs.into_iter().next().unwrap()
+    }
+    let (fact, arguments) = if let Some(snapshot) = snapshot {
+        // The selected pure one/two-input real declaration has no literal
+        // control operand: binary arithmetic only consults literals for its
+        // four-input `like` form, and trigonometric inference only for its
+        // three-input form. Keep those other forms on the exact source-literal
+        // route rather than projecting a whole tensor control vector here.
+        let pure_numeric = snapshot
+            .declaration
+            .semantics
+            .and_then(|semantics| semantics.finite_preparation_class())
+            .is_some_and(|class| class.arity() == input_ids.len());
+        let request = CallRequest {
+            arguments,
+            literals: if pure_numeric {
+                Default::default()
+            } else {
+                request_literals::for_operands(input_ids, |id| leaves.value(id))
+            },
+            outputs: OutputSelection::default(),
+        };
+        let fact = if let Some(fact) =
+            runmat_builtins::infer_fusion_numeric_fact(snapshot.entry, &request)
+        {
+            fact.map_err(|_| anyhow!("fusion call has no admitted output"))?
+        } else {
+            let inference = infer_catalog_call(snapshot.entry, &request);
+            if !inference.diagnostics.is_empty() || inference.outputs.len() != 1 {
+                return Err(anyhow!("fusion call has no admitted output"));
+            }
+            inference.outputs.into_iter().next().unwrap()
+        };
+        (fact, request.arguments)
     } else {
         let FusionOp::Primitive { op, .. } = operation else {
             return Err(anyhow!("fusion builtin has no selected binding"));
         };
-        primitive_fact(*op, &arguments)?
+        (primitive_fact(*op, &arguments)?, arguments)
     };
     Ok(InferredOperation {
         operation,
@@ -160,16 +188,13 @@ pub(super) fn selected_values<'a>(
     computed: &'a ComputedScalars,
     input_ids: &[ValueId],
 ) -> Vec<Option<&'a Value>> {
-    input_ids
-        .iter()
-        .map(|id| {
-            leaves
-                .values()
-                .get(id)
-                .copied()
-                .or_else(|| computed.get(*id))
-        })
-        .collect()
+    let mut selected = Vec::with_capacity(input_ids.len());
+    selected.extend(
+        input_ids
+            .iter()
+            .map(|id| leaves.value(*id).or_else(|| computed.get(*id))),
+    );
+    selected
 }
 
 pub(super) fn record_operation(
@@ -224,7 +249,7 @@ pub(super) fn record_operation(
             if numeric.domain != NumericDomain::Real || numeric.class != sign.class() {
                 return Err(anyhow!("sign receipt differs from admitted output class"));
             }
-            program.sign.insert(output, sign);
+            program.sign.insert(output, sign)?;
         }
         if let Some(receipt) = validate_arithmetic(
             snapshot.declaration,
@@ -234,10 +259,10 @@ pub(super) fn record_operation(
             values,
             admitted.arithmetic,
         )? {
-            program.arithmetic.insert(output, receipt);
+            program.arithmetic.insert(output, receipt)?;
         }
-        program.evidence.insert(output, admitted.numerical_domain);
-        program.admission_work.insert(output, work);
+        program.evidence.insert(output, admitted.numerical_domain)?;
+        program.admission_work.insert(output, work)?;
     }
     if let Some(snapshot) = snapshot {
         if matches!(
@@ -259,7 +284,7 @@ pub(super) fn record_operation(
             program.evidence.insert(
                 output,
                 runmat_accelerate_api::NumericalDomainEvidence::NonnegativeOrNaN,
-            );
+            )?;
         }
         if matches!(
             snapshot
@@ -284,13 +309,13 @@ pub(super) fn record_operation(
                         runmat_runtime::builtins::common::spec::FusionSignEvidence::NonnegativeOrNaN {
                             class: output_numeric.class,
                         },
-                    );
+                    )?;
                 }
             }
         }
-        program.declarations.insert(output, snapshot);
+        program.declarations.insert(output, snapshot)?;
     }
-    program.facts.insert(output, inferred.fact);
+    program.facts.insert(output, inferred.fact)?;
     exact_product::record(
         program,
         inferred.operation,
@@ -326,7 +351,7 @@ pub(super) fn record_sign_refinement(
     if let Some(storage) = storage {
         fact.storage = storage;
     }
-    program.sign.insert(output, sign);
-    program.admission_work.insert(output, work);
+    program.sign.insert(output, sign)?;
+    program.admission_work.insert(output, work)?;
     Ok(())
 }

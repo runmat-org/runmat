@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use runmat_execution::Digest;
-use serde::Serialize;
+use serde::{ser::SerializeSeq, Serialize, Serializer};
 
 use super::{semantic_bindings, source_constants, source_operations, source_slot_constants};
 use crate::fusion::{
@@ -114,6 +114,18 @@ enum AxesIdentity<'a> {
     Explicit(&'a [usize]),
 }
 
+struct StoreIdentities<'a>(&'a [crate::fusion::FusionStoreMaterialization]);
+
+impl Serialize for StoreIdentities<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for store in self.0 {
+            sequence.serialize_element(&(store.value_id, &store.binding))?;
+        }
+        sequence.end()
+    }
+}
+
 /// Exact source-plan identity used only after the VM has reconciled its
 /// executable group. Unsupported constants make the region ineligible rather
 /// than falling back to a display or pointer hash.
@@ -153,10 +165,6 @@ pub fn exact_source_plan_identity(plan: &FusionGroupPlan) -> Result<Digest> {
     let operations = source_operations(plan, &snapshots)?;
     let constants = source_constants(plan)?;
     let slot_constants = source_slot_constants(plan)?;
-    let stores = materialized_stores
-        .iter()
-        .map(|store| (store.value_id, &store.binding))
-        .collect::<Vec<_>>();
     let flavor = reduction_flavor.map(|flavor| match flavor {
         runmat_accelerate_api::ReductionFlavor::Sum => FlavorIdentity::Sum,
         runmat_accelerate_api::ReductionFlavor::Mean => FlavorIdentity::Mean,
@@ -169,7 +177,7 @@ pub fn exact_source_plan_identity(plan: &FusionGroupPlan) -> Result<Digest> {
         crate::reduction_meta::ReductionAxes::All => AxesIdentity::All,
         crate::reduction_meta::ReductionAxes::Explicit(values) => AxesIdentity::Explicit(values),
     });
-    Ok(Digest::sha256(serde_json::to_vec(&(
+    Ok(Digest::sha256_serialized(&(
         "runmat.vm-fusion-source-plan.v1",
         (
             id,
@@ -185,7 +193,7 @@ pub fn exact_source_plan_identity(plan: &FusionGroupPlan) -> Result<Digest> {
         stack_pattern,
         constants,
         slot_constants,
-        stores,
+        StoreIdentities(materialized_stores),
         output,
         (kernel_kind, kernel_supported),
         reduction_data,
@@ -193,5 +201,30 @@ pub fn exact_source_plan_identity(plan: &FusionGroupPlan) -> Result<Digest> {
         flavor,
         axes,
         pattern_identity(pattern.as_ref()),
-    ))?))
+    ))?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{VarBinding, VarKind};
+
+    #[test]
+    fn streamed_store_projection_preserves_legacy_json_bytes() {
+        let stores = vec![crate::fusion::FusionStoreMaterialization {
+            value_id: 12,
+            binding: VarBinding {
+                kind: VarKind::Global,
+                index: 3,
+            },
+        }];
+        let legacy = stores
+            .iter()
+            .map(|store| (store.value_id, &store.binding))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            serde_json::to_vec(&StoreIdentities(&stores)).unwrap(),
+            serde_json::to_vec(&legacy).unwrap()
+        );
+    }
 }

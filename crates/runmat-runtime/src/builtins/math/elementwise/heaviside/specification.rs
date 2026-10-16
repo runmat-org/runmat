@@ -1,7 +1,7 @@
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionExprContext, FusionExprWriter, FusionKernelTemplate, GpuOpKind, ProviderHook,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 
 use super::BUILTIN_NAME;
@@ -33,14 +33,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: expression,
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(expression),
     }),
     reduction: None,
     emits_nan: true,
     notes: "Fusion emits the same H(0) = 0.5 and NaN-preserving mapping as host execution.",
 };
 
-fn expression(context: &FusionExprContext) -> Result<String, FusionError> {
+fn expression(
+    context: &FusionExprContext<'_>,
+    writer: &mut FusionExprWriter<'_>,
+) -> Result<(), FusionError> {
     let input = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
     let (zero, half, one) = match context.scalar_ty {
         ScalarType::F32 => ("0.0", "0.5", "1.0"),
@@ -49,7 +52,7 @@ fn expression(context: &FusionExprContext) -> Result<String, FusionError> {
             return Err(FusionError::UnsupportedPrecision(context.scalar_ty));
         }
     };
-    Ok(format!(
+    writer.write_formatted(format_args!(
         "select(select(select({zero}, {one}, ({input} > {zero})), {half}, ({input} == {zero})), {input}, isNan({input}))"
     ))
 }

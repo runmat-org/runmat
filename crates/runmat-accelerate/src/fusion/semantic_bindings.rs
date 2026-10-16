@@ -96,8 +96,9 @@ pub(crate) fn matches(operation: &FusionOp, snapshot: Option<SemanticBinding>) -
 }
 
 pub(crate) fn capture(plan: &FusionGroupPlan) -> Result<Vec<Option<SemanticBinding>>> {
-    plan.operations
-        .iter()
-        .map(SemanticBinding::capture)
-        .collect()
+    let mut snapshots = Vec::with_capacity(plan.operations.len());
+    for operation in &plan.operations {
+        snapshots.push(SemanticBinding::capture(operation)?);
+    }
+    Ok(snapshots)
 }

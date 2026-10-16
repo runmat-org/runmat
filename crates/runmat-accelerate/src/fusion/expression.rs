@@ -1,10 +1,13 @@
+#[cfg(test)]
 use std::collections::HashMap;
 
 use runmat_builtins::BuiltinCatalogEntry;
 use runmat_runtime::builtins::common::spec::{
-    canonical_fusion_declaration, CanonicalFusionDeclaration, FusionExprContext, ScalarType,
+    canonical_fusion_declaration, CanonicalFusionDeclaration, FusionError, FusionExprContext,
+    FusionExprInput, ScalarType,
 };
 
+use super::ExpressionLookup;
 use crate::graph::ValueId;
 
 /// Canonical expression declarations are authoritative. A missing or ambiguous
@@ -12,7 +15,7 @@ use crate::graph::ValueId;
 pub(super) fn canonical_expression(
     entry: &BuiltinCatalogEntry,
     inputs: &[ValueId],
-    expressions: &HashMap<ValueId, String>,
+    expressions: &impl ExpressionLookup,
     scalar_ty: ScalarType,
 ) -> Option<String> {
     let [binding] = entry.bindings else {
@@ -33,23 +36,64 @@ pub(super) fn canonical_expression(
 pub(super) fn admitted_expression(
     declaration: CanonicalFusionDeclaration,
     inputs: &[ValueId],
-    expressions: &HashMap<ValueId, String>,
+    expressions: &impl ExpressionLookup,
     scalar_ty: ScalarType,
 ) -> Option<String> {
-    let template = declaration.spec.elementwise.as_ref()?;
+    admitted_expression_checked(declaration, inputs, expressions, scalar_ty)
+        .ok()
+        .flatten()
+}
+
+/// Selected typed producers retain allocation/overflow errors so finite
+/// admission cannot mistake resource failure for an unsupported declaration.
+pub(super) fn admitted_expression_checked(
+    declaration: CanonicalFusionDeclaration,
+    inputs: &[ValueId],
+    expressions: &impl ExpressionLookup,
+    scalar_ty: ScalarType,
+) -> Result<Option<String>, FusionError> {
+    let Some(template) = declaration.spec.elementwise.as_ref() else {
+        return Ok(None);
+    };
     if !template.scalar_precisions.contains(&scalar_ty) {
-        return None;
+        return Ok(None);
     }
-    let inputs = inputs
+    // The finite producer admits at most two scalar operands. Its canonical
+    // declaration writer receives borrowed stack views, not an extra Vec.
+    if inputs.len() <= 2 {
+        let mut projected = [FusionExprInput::text(""); 2];
+        for (slot, id) in projected.iter_mut().zip(inputs) {
+            let Some(expression) = expressions.get(id) else {
+                return Ok(None);
+            };
+            *slot = FusionExprInput::text(expression);
+        }
+        return template
+            .wgsl_body
+            .render(&FusionExprContext {
+                scalar_ty,
+                inputs: &projected[..inputs.len()],
+                constants: &[],
+            })
+            .map(Some);
+    }
+    // Wider legacy declarations retain their established admission policy;
+    // the finite producer has no positive byte certificate for this branch.
+    let Some(inputs) = inputs
         .iter()
-        .map(|id| expressions.get(id).map(String::as_str))
-        .collect::<Option<Vec<_>>>()?;
-    (template.wgsl_body)(&FusionExprContext {
-        scalar_ty,
-        inputs: &inputs,
-        constants: &[],
-    })
-    .ok()
+        .map(|id| expressions.get(id).map(|text| FusionExprInput::text(text)))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Ok(None);
+    };
+    template
+        .wgsl_body
+        .render(&FusionExprContext {
+            scalar_ty,
+            inputs: &inputs,
+            constants: &[],
+        })
+        .map(Some)
 }
 
 pub(super) fn structural_support(plan: &super::FusionGroupPlan) -> bool {

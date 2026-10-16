@@ -8,28 +8,89 @@ use runmat_accelerate_api::{
 use runmat_runtime::builtins::common::spec::ScalarType;
 use runmat_types::NumericClass;
 
-pub(super) fn select_shader(
+#[derive(Clone, Copy)]
+pub(super) enum ShaderBodyPreparation {
+    Unbounded,
+    Counted {
+        single: Option<usize>,
+        provider_default: Option<usize>,
+    },
+}
+
+impl ShaderBodyPreparation {
+    pub(super) fn single_capacity(self) -> Option<usize> {
+        match self {
+            Self::Unbounded => None,
+            Self::Counted { single, .. } => single,
+        }
+    }
+
+    pub(super) fn default_capacity(self) -> Option<usize> {
+        match self {
+            Self::Unbounded => None,
+            Self::Counted {
+                provider_default, ..
+            } => provider_default,
+        }
+    }
+}
+
+/// Only a typed missing Single recipe can use the already-admitted default
+/// recipe. In finite mode every other failure invalidates that preparation.
+fn single_shader_may_use_default(
+    error: &anyhow::Error,
+    preparation: ShaderBodyPreparation,
+) -> bool {
+    if error
+        .downcast_ref::<crate::fusion::typed_shader::CountedGeometryViolation>()
+        .is_some()
+        || error.downcast_ref::<std::fmt::Error>().is_some()
+        || error
+            .downcast_ref::<std::collections::TryReserveError>()
+            .is_some()
+        || matches!(
+            error.downcast_ref::<runmat_runtime::builtins::common::spec::FusionError>(),
+            Some(runmat_runtime::builtins::common::spec::FusionError::ExpressionTooLarge)
+        )
+    {
+        return false;
+    }
+    match preparation {
+        ShaderBodyPreparation::Counted { .. } => error
+            .downcast_ref::<crate::fusion::typed_producer::CountedRecipeUnavailable>()
+            .is_some(),
+        ShaderBodyPreparation::Unbounded => true,
+    }
+}
+
+pub(super) fn may_try_single(
     plan: &FusionGroupPlan,
     outputs: &[ValueId],
     program: &ResolvedProgram,
-    classes: &[NumericClass],
     provider: &dyn AccelProvider,
     inputs: &[Value],
-) -> Result<(
-    GeneratedElementwiseShader,
-    Option<runmat_accelerate_api::ProviderFusedElementwiseWorkload>,
-)> {
+    indices: &[usize],
+) -> Result<bool> {
     let abi = Abi::BroadcastReal {
         precision: ProviderPrecision::F32,
     };
-    let controls = program.embedded_scalar_controls(plan, outputs);
-    let indices = plan
-        .inputs
-        .iter()
-        .enumerate()
-        .filter_map(|(index, id)| (!controls.contains(id)).then_some(index))
-        .collect::<Vec<_>>();
-    let authentic_single = indices.iter().all(|&index| match inputs.get(index) {
+    if provider.precision() != ProviderPrecision::F64
+        || !provider.supports_fused_elementwise_abi(abi)
+        || !outputs
+            .iter()
+            .all(|id| program.floating_class(*id).ok() == Some(NumericClass::Single))
+        || !plan.operations.iter().all(|operation| {
+            let output = match operation {
+                crate::fusion::FusionOp::Primitive { output, .. }
+                | crate::fusion::FusionOp::Builtin { output, .. } => *output,
+            };
+            output.is_some_and(|id| program.floating_class(id).ok() == Some(NumericClass::Single))
+        })
+        || !program.physical_inputs_are_single(indices)
+    {
+        return Ok(false);
+    }
+    Ok(indices.iter().all(|&index| match inputs.get(index) {
         Some(Value::Tensor(tensor)) => tensor.numeric_dtype() == NumericDType::F32,
         Some(Value::GpuTensor(handle)) => {
             handle.physical().element_type() == runmat_accelerate_api::NumericElementType::F32
@@ -37,25 +98,85 @@ pub(super) fn select_shader(
                 && !runmat_accelerate_api::handle_is_logical(handle)
         }
         _ => false,
-    });
-    if provider.precision() == ProviderPrecision::F64
-        && provider.supports_fused_elementwise_abi(abi)
-        && classes.iter().all(|class| *class == NumericClass::Single)
-        && program.physical_inputs_are_single(&indices)
-        && authentic_single
-    {
-        if let Ok(shader) =
-            plan.prepare_typed_shader_with_inputs(outputs, program, ScalarType::F32, &indices)
-        {
-            let work = describe_inputs(abi, &indices, inputs)?;
-            return Ok((shader, Some(work)));
+    }))
+}
+
+pub(super) fn physical_indices(
+    plan: &FusionGroupPlan,
+    outputs: &[ValueId],
+    program: &ResolvedProgram,
+    precision: ProviderPrecision,
+) -> Result<Vec<usize>> {
+    let controls = program.embedded_controls_sorted_for_precision(plan, outputs, precision)?;
+    let mut indices = Vec::new();
+    indices.try_reserve_exact(plan.inputs.len())?;
+    indices.extend(
+        plan.inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, id)| (controls.binary_search(id).is_err()).then_some(index)),
+    );
+    Ok(indices)
+}
+
+pub(super) fn select_shader(
+    plan: &FusionGroupPlan,
+    outputs: &[ValueId],
+    program: &ResolvedProgram,
+    provider: &dyn AccelProvider,
+    inputs: &[Value],
+    preparation: ShaderBodyPreparation,
+) -> Result<(
+    GeneratedElementwiseShader,
+    Option<runmat_accelerate_api::ProviderFusedElementwiseWorkload>,
+)> {
+    let abi = Abi::BroadcastReal {
+        precision: ProviderPrecision::F32,
+    };
+    let indices = physical_indices(plan, outputs, program, ProviderPrecision::F32)?;
+    if may_try_single(plan, outputs, program, provider, inputs, &indices)? {
+        match plan.prepare_typed_shader_with_inputs_bounded(
+            outputs,
+            program,
+            ScalarType::F32,
+            &indices,
+            preparation.single_capacity(),
+        ) {
+            Ok(shader) => {
+                let work = describe_inputs(abi, &indices, inputs)?;
+                return Ok((shader, Some(work)));
+            }
+            Err(error) if single_shader_may_use_default(&error, preparation) => {}
+            Err(error) => return Err(error),
         }
     }
     let scalar = match provider.precision() {
         ProviderPrecision::F32 => ScalarType::F32,
         ProviderPrecision::F64 => ScalarType::F64,
     };
-    Ok((plan.prepare_typed_shader(outputs, program, scalar)?, None))
+    if matches!(
+        preparation,
+        ShaderBodyPreparation::Counted {
+            provider_default: None,
+            ..
+        }
+    ) {
+        return Err(crate::fusion::typed_producer::CountedRecipeUnavailable(
+            "default fusion ABI has no counted scalar recipe",
+        )
+        .into());
+    }
+    let indices = physical_indices(plan, outputs, program, provider.precision())?;
+    Ok((
+        plan.prepare_typed_shader_with_inputs_bounded(
+            outputs,
+            program,
+            scalar,
+            &indices,
+            preparation.default_capacity(),
+        )?,
+        None,
+    ))
 }
 
 pub(super) fn describe_inputs(
@@ -179,5 +300,45 @@ pub(super) async fn dispatch_multi(
                 request.output_classes,
             )
             .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{single_shader_may_use_default, ShaderBodyPreparation};
+
+    #[test]
+    fn counted_single_route_only_falls_back_for_missing_recipe() {
+        let counted = ShaderBodyPreparation::Counted {
+            single: Some(32),
+            provider_default: Some(64),
+        };
+        let unavailable =
+            crate::fusion::typed_producer::CountedRecipeUnavailable("single recipe unavailable");
+        assert!(single_shader_may_use_default(&unavailable.into(), counted));
+        for error in [
+            crate::fusion::typed_shader::CountedGeometryViolation::BodyCapacity {
+                admitted: 4,
+                actual: 5,
+            },
+            crate::fusion::typed_shader::CountedGeometryViolation::ShellCapacity {
+                admitted: 8,
+                actual: 9,
+            },
+            crate::fusion::typed_shader::CountedGeometryViolation::SourceLength {
+                expected: 12,
+                actual: 11,
+            },
+        ] {
+            assert!(!single_shader_may_use_default(&error.into(), counted));
+        }
+        assert!(!single_shader_may_use_default(
+            &anyhow::anyhow!("unclassified finite preparation failure"),
+            counted,
+        ));
+        assert!(single_shader_may_use_default(
+            &anyhow::anyhow!("legacy structural single route"),
+            ShaderBodyPreparation::Unbounded,
+        ));
     }
 }

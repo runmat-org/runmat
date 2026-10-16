@@ -55,52 +55,26 @@ fn indexed_walk_handles_deep_chains_shared_dags_and_cycles() {
     let deep = plan(operations, 4097);
     let values = [Value::Num(1.0), Value::Num(0.0)];
     let inputs: Vec<_> = values.iter().collect();
-    let resolver = new_resolver(&deep, &inputs);
+    let mut resolver = new_resolver(&deep, &inputs);
     assert!(resolver.is_valid());
-    let (order, examined) = visit(
-        4097,
-        &deep,
-        &resolver.operations,
-        &resolver.leaves,
-        &resolver.ranges,
-    );
-    let order = order.unwrap();
+    let (order, examined) = resolver.visit(4097, &deep);
+    order.unwrap();
+    let order = &resolver.visit_order;
     assert_eq!(order.len(), 4098);
     assert!(examined >= order.len() as u64);
     assert_eq!(order.last(), Some(&4097));
 
     let shared = plan(vec![add_op(0, 1, 2), add_op(2, 2, 3)], 3);
-    let resolver = new_resolver(&shared, &inputs);
-    let (order, _) = visit(
-        3,
-        &shared,
-        &resolver.operations,
-        &resolver.leaves,
-        &resolver.ranges,
-    );
-    let order = order.unwrap();
+    let mut resolver = new_resolver(&shared, &inputs);
+    let (order, _) = resolver.visit(3, &shared);
+    order.unwrap();
+    let order = &resolver.visit_order;
     assert_eq!(order.len(), 4, "shared producer is traversed only once");
 
     let cyclic = plan(vec![add_op(3, 0, 2), add_op(2, 0, 3)], 3);
-    let resolver = new_resolver(&cyclic, &inputs);
-    assert!(visit(
-        3,
-        &cyclic,
-        &resolver.operations,
-        &resolver.leaves,
-        &resolver.ranges
-    )
-    .0
-    .is_none());
-    assert!(visit(
-        99,
-        &cyclic,
-        &resolver.operations,
-        &resolver.leaves,
-        &resolver.ranges
-    )
-    .0
-    .is_none());
+    let mut resolver = new_resolver(&cyclic, &inputs);
+    assert!(resolver.visit(3, &cyclic).0.is_none());
+    assert!(resolver.visit(99, &cyclic).0.is_none());
     let duplicate = plan(vec![add_op(0, 1, 2), add_op(0, 1, 2)], 2);
     assert!(FusionInvocationLeaves::new(&duplicate, &inputs).is_err());
     let leaf_collision = plan(vec![add_op(0, 1, 0)], 0);

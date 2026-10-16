@@ -20,8 +20,8 @@ use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{
     shape::{is_scalar_shape, normalize_scalar_shape},
@@ -97,15 +97,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     elementwise: None,
     reduction: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let input = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
-            Ok(format!(
-                "accumulator = min(accumulator, {input});"
-            ))
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
+            writer.write_formatted(format_args!("accumulator = min(accumulator, {input});"))
+        }),
     }),
     emits_nan: true,
     notes: "Fusion planner emits canonical reduction kernels; providers may substitute custom WGSL via reduce_min_dim hooks.",

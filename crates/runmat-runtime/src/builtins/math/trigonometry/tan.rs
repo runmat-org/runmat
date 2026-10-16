@@ -14,9 +14,8 @@ use runmat_value::{CharArray, ComplexStorage, ComplexTensor, NumericDType, Tenso
 
 use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of};
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, map_control_flow_with_builtin, tensor};
 use crate::builtins::math::symbolic::symbolic_function;
@@ -82,19 +81,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            if ctx.inputs.len() != 1 {
-                return Err(FusionError::Message(
-                    "unary fusion requires exactly one data operand",
-                ));
-            }
-            let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
-            crate::builtins::common::spec::unary_math_expression(
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            crate::builtins::common::spec::write_unary_math_expression(
                 runmat_types::ScalarUnaryMath::Tan,
-                ctx.scalar_ty,
-                input,
+                ctx,
+                writer,
             )
-        },
+        }),
     }),
     reduction: None,
     emits_nan: false,

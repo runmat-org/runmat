@@ -25,7 +25,7 @@ use runmat_execution::{
 use runmat_runtime::gather_if_needed;
 use runmat_time::Instant;
 use runmat_value::{NumericDType, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 mod observation;
@@ -37,6 +37,7 @@ pub use host_readback::PreparedVmHostInputs;
 mod provider_observation;
 use provider_observation::FusionPlacementSelection;
 mod admission;
+pub(crate) use admission::binding_storage_bytes;
 use admission::AdmittedBindings;
 mod reduction;
 mod reduction_arithmetic;
@@ -130,10 +131,9 @@ fn admit_provider_availability<'p>(
 /// binding is represented by the supplied value; only unbound constants are
 /// independent residency and numeric-classification leaves.
 fn unbound_constant_values(plan: &FusionGroupPlan) -> impl Iterator<Item = &Value> {
-    let input_ids: HashSet<_> = plan.inputs.iter().copied().collect();
     plan.const_values
         .iter()
-        .filter(move |(id, _)| !input_ids.contains(id))
+        .filter(move |(id, _)| !plan.inputs.contains(id))
         .map(|(_, value)| value)
         .chain(
             plan.constants

@@ -11,8 +11,8 @@ use runmat_value::{NumericDType, Tensor, Value};
 use crate::builtins::common::broadcast::BroadcastPlan;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{binary as common_binary, gpu_helpers, tensor};
 use crate::builtins::math::elementwise::integer_arithmetic::{
@@ -64,16 +64,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             if ctx.inputs.len() != 2 { return Err(FusionError::Message("remainder requires two operands")); }
-            let a = ctx
-                .inputs
-                .first()
-                .ok_or(FusionError::MissingInput(0))?;
+            let a = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let b = ctx.inputs.get(1).ok_or(FusionError::MissingInput(1))?;
             let helper = crate::builtins::common::spec::FusionMathHelper::FloatingRemainder.entrypoint(ctx.scalar_ty)?;
-            Ok(format!("{helper}({a}, {b}, true)"))
-        },
+            writer.write_formatted(format_args!("{helper}({a}, {b}, true)"))
+        }),
     }),
     reduction: None,
     emits_nan: true,

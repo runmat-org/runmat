@@ -497,7 +497,8 @@ impl WgpuProvider {
         .map_err(|error| log::warn!("provider observation progress unavailable: {error}"))
         .ok();
 
-        Ok(Self {
+        let provider = Self {
+            capability_snapshot: std::sync::OnceLock::new(),
             instance,
             access,
             emission_authority,
@@ -549,7 +550,14 @@ impl WgpuProvider {
             autotune_device_tag,
             reduction_reuse,
             fft_twiddle_cache: Mutex::new(HashMap::new()),
-        })
+        };
+        let snapshot = crate::placement::wgpu_capability_snapshot(
+            &provider,
+            provider.adapter_limits.max_buffer_size,
+        );
+        // Construction owns the provider until its immutable contract is set.
+        let _ = provider.capability_snapshot.set(snapshot);
+        Ok(provider)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

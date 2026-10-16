@@ -8,8 +8,8 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use crate::builtins::common::spec::{
-    BuiltinFusionSpec, ConstantStrategy, FusionError, FusionExprContext, FusionKernelTemplate,
-    ScalarType, ShapeRequirements,
+    BuiltinFusionSpec, ConstantStrategy, FusionError, FusionKernelTemplate, ScalarType,
+    ShapeRequirements,
 };
 use crate::BuiltinResult;
 
@@ -36,14 +36,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             match ctx.scalar_ty {
-                ScalarType::F64 => Ok(format!("({input} * f64({RAD_TO_DEG}))")),
-                ScalarType::F32 => Ok(format!("({input} * {:.10})", 180.0 / std::f32::consts::PI)),
+                ScalarType::F64 => {
+                    writer.write_formatted(format_args!("({input} * f64({RAD_TO_DEG}))"))
+                }
+                ScalarType::F32 => writer.write_formatted(format_args!(
+                    "({input} * {:.10})",
+                    180.0 / std::f32::consts::PI
+                )),
                 other => Err(FusionError::UnsupportedPrecision(other)),
             }
-        },
+        }),
     }),
     reduction: None,
     emits_nan: false,

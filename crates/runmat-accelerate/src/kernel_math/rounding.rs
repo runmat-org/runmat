@@ -20,12 +20,22 @@ pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
 }
 
 pub(crate) fn functions(precision: ProviderPrecision) -> String {
+    let mut source = String::new();
+    write_functions(precision, &mut source).expect("String writer is infallible");
+    source
+}
+
+pub(crate) fn write_functions(
+    precision: ProviderPrecision,
+    writer: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
     let (ty, classification) = match precision {
         ProviderPrecision::F32 => ("f32", "let bits = bitcast<u32>(a);\nlet special = (bits & 0x7f800000u) == 0x7f800000u;\nlet zero = (bits & 0x7fffffffu) == 0u;\nlet negative = (bits & 0x80000000u) != 0u;"),
         ProviderPrecision::F64 => ("f64", "let low = runmat_f64_low(a);\nlet high = runmat_f64_high(a);\nlet special = (high & 0x7ff00000u) == 0x7ff00000u;\nlet zero = (high & 0x7fffffffu) == 0u && low == 0u;\nlet negative = (high & 0x80000000u) != 0u;"),
     };
     let name = entrypoint(precision);
-    format!(
+    write!(
+        writer,
         r#"
 fn {name}(a: {ty}) -> {ty} {{
     {classification}

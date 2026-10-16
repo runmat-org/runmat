@@ -131,7 +131,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             owner,
             offsets: vec![offset],
             loads: Vec::new(),
-            capabilities: owner.capability_snapshot(),
+            capabilities: std::borrow::Cow::Owned(owner.capability_snapshot()),
             payload_bytes: 4,
             host_workspace: 4,
             provider_scratch: ResourceByteBound::Known(0),
@@ -140,7 +140,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
         let plan = CpuReadbackPlan {
             sources: vec![source(first.clone(), 0), source(second.clone(), 1)],
             stack_len: 2,
-            resident_offsets: HashSet::from([0, 1]),
+            resident_offsets: vec![0, 1],
         };
         let stack = [
             Value::GpuTensor(first.clone()),
@@ -186,7 +186,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             let readback = CpuReadbackPlan {
                 sources: vec![Source::admit(&handle, owner, vec![0], Vec::new()).unwrap()],
                 stack_len: 1,
-                resident_offsets: HashSet::from([0]),
+                resident_offsets: vec![0],
             };
             let entry = &runmat_builtins::PLUS_CATALOG_ENTRY;
             let binding = entry.binding_identity(&entry.bindings[0]);
@@ -238,7 +238,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             CpuReadbackPlan {
                 sources: vec![repeated],
                 stack_len: 1,
-                resident_offsets: HashSet::from([0]),
+                resident_offsets: vec![0],
             }
             .prepare_inputs(&stack[..1]),
         )
@@ -289,7 +289,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             CpuReadbackPlan {
                 sources: vec![source(retiring.clone(), 0)],
                 stack_len: 1,
-                resident_offsets: HashSet::from([0]),
+                resident_offsets: vec![0],
             }
             .prepare_inputs(&retiring_stack),
         )
@@ -315,7 +315,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
         let incomplete = CpuReadbackPlan {
             sources: vec![source(first.clone(), 0), source(second.clone(), 1)],
             stack_len: 3,
-            resident_offsets: HashSet::from([0, 1]),
+            resident_offsets: vec![0, 1],
         };
         assert!(!incomplete.covers_resident_slice(&uncovered));
         assert!(matches!(

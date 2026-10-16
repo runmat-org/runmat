@@ -255,7 +255,10 @@ pub(crate) fn admit(
             owner,
             offsets,
             loads: Vec::new(),
-            capabilities: owner.capability_snapshot(),
+            capabilities: owner
+                .capability_snapshot_ref()
+                .map(std::borrow::Cow::Borrowed)
+                .unwrap_or_else(|| std::borrow::Cow::Owned(owner.capability_snapshot())),
             payload_bytes,
             host_workspace: workspace,
             provider_scratch,
@@ -290,10 +293,12 @@ pub(crate) fn admit(
         provider_input_stages: None,
         peak_live: None,
     };
-    let resident_offsets = sources
+    let mut resident_offsets = sources
         .iter()
         .flat_map(|source| source.offsets.iter().copied())
-        .collect::<HashSet<_>>();
+        .collect::<Vec<_>>();
+    resident_offsets.sort_unstable();
+    resident_offsets.dedup();
     let plan = CpuReadbackPlan {
         sources,
         stack_len: layout.required_stack_operands,

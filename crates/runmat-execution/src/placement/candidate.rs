@@ -23,15 +23,31 @@ pub struct ProviderReadbackDemands {
 
 impl ProviderReadbackDemands {
     pub fn sequential(readbacks: impl IntoIterator<Item = ProviderReadbackDemand>) -> Option<Self> {
-        let mut by_device = std::collections::BTreeMap::new();
+        let mut set = Self::default();
+        let mut count = 0usize;
         for readback in readbacks {
             if readback.queue_slots == 0
                 && readback.provider_scratch_bytes != ResourceByteBound::Known(0)
             {
                 return None;
             }
-            let current: &mut ProviderReadbackDemand =
-                by_device.entry(readback.device_id).or_insert(readback);
+            let slot = if let Some(index) = set.entries[..count]
+                .iter()
+                .position(|entry| entry.is_some_and(|entry| entry.device_id == readback.device_id))
+            {
+                index
+            } else {
+                if count == set.entries.len() {
+                    return None;
+                }
+                let index = count;
+                count += 1;
+                set.entries[index] = Some(readback);
+                index
+            };
+            let current = set.entries[slot]
+                .as_mut()
+                .expect("initialized inline readback");
             current.queue_slots = current.queue_slots.max(readback.queue_slots);
             current.provider_scratch_bytes = match (
                 current.provider_scratch_bytes,
@@ -46,13 +62,8 @@ impl ProviderReadbackDemands {
                 }
             };
         }
-        if by_device.len() > 16 {
-            return None;
-        }
-        let mut set = Self::default();
-        for (slot, demand) in set.entries.iter_mut().zip(by_device.into_values()) {
-            *slot = Some(demand);
-        }
+        set.entries[..count]
+            .sort_unstable_by_key(|entry| entry.expect("initialized inline readback").device_id);
         Some(set)
     }
 

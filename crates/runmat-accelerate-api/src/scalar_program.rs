@@ -3,7 +3,7 @@
 //! This is a semantic receipt, not a provider submission or a claim that a
 //! device can execute the listed operations. Physical layout and effects are
 //! admitted by the existing fusion and provider owners before execution.
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use anyhow::{anyhow, ensure, Result};
 use runmat_execution::Digest;
@@ -104,17 +104,25 @@ impl ScalarProgram {
             "unsupported scalar semantic revision"
         );
         ensure!(!wire.nodes.is_empty(), "empty scalar program");
-        let mut previous = HashMap::new();
+        let mut definitions = Vec::new();
+        definitions.try_reserve_exact(wire.nodes.len())?;
+        definitions.extend(
+            wire.nodes
+                .iter()
+                .enumerate()
+                .map(|(index, node)| (node.id(), index)),
+        );
+        definitions.sort_unstable_by_key(|(id, _)| *id);
+        ensure!(
+            !definitions.windows(2).any(|pair| pair[0].0 == pair[1].0),
+            "duplicate scalar value definition"
+        );
         let mut last_source_index = None;
-        for node in &wire.nodes {
+        for (node_index, node) in wire.nodes.iter().enumerate() {
             let class = node.class();
             ensure!(
                 matches!(class, NumericClass::Single | NumericClass::Double),
                 "nonfloating scalar class"
-            );
-            ensure!(
-                !previous.contains_key(&node.id()),
-                "duplicate scalar value definition"
             );
             if let ScalarNode::Apply {
                 source_index,
@@ -132,15 +140,20 @@ impl ScalarProgram {
                     .arity()
                     .ok_or_else(|| anyhow!("operation has no pure scalar lowering"))?;
                 ensure!(operands.len() == arity, "scalar operation arity mismatch");
-                let mut input_classes = Vec::with_capacity(operands.len());
+                let mut input_classes = Vec::new();
+                input_classes.try_reserve_exact(operands.len())?;
                 for operand in operands {
-                    let input_class = previous
-                        .get(operand)
+                    let position = definitions
+                        .binary_search_by_key(operand, |(id, _)| *id)
+                        .ok()
+                        .map(|index| definitions[index].1)
+                        .filter(|&index| index < node_index)
                         .ok_or_else(|| anyhow!("forward or missing scalar operand"))?;
-                    input_classes.push(*input_class);
+                    let input_class = wire.nodes[position].class();
+                    input_classes.push(input_class);
                     if matches!(operation, ScalarOperation::Operator(operator) if *operator != runmat_types::OperatorKind::ElementwisePower)
                     {
-                        ensure!(*input_class == class, "scalar operation class mismatch");
+                        ensure!(input_class == class, "scalar operation class mismatch");
                     }
                 }
                 if *operation
@@ -178,25 +191,39 @@ impl ScalarProgram {
                     ensure!(*target == class, "scalar cast result class mismatch");
                 }
             }
-            previous.insert(node.id(), class);
         }
         ensure!(
-            previous.contains_key(&wire.root),
+            definitions
+                .binary_search_by_key(&wire.root, |(id, _)| *id)
+                .is_ok(),
             "missing scalar program root"
         );
-        let mut required = HashSet::from([wire.root]);
-        for node in wire.nodes.iter().rev() {
-            if required.contains(&node.id()) {
+        let mut required = Vec::new();
+        required.try_reserve_exact(wire.nodes.len())?;
+        required.resize(wire.nodes.len(), false);
+        let root_position = definitions
+            .binary_search_by_key(&wire.root, |(id, _)| *id)
+            .map(|index| definitions[index].1)
+            .map_err(|_| anyhow!("missing scalar program root"))?;
+        required[root_position] = true;
+        for (index, node) in wire.nodes.iter().enumerate().rev() {
+            if required[index] {
                 if let ScalarNode::Apply { operands, .. } = node {
-                    required.extend(operands.iter().copied());
+                    for operand in operands {
+                        let position = definitions
+                            .binary_search_by_key(operand, |(id, _)| *id)
+                            .map(|position| definitions[position].1)
+                            .map_err(|_| anyhow!("missing scalar program operand"))?;
+                        required[position] = true;
+                    }
                 }
             }
         }
         ensure!(
-            required.len() == wire.nodes.len(),
+            required.iter().all(|&needed| needed),
             "unreachable scalar program node"
         );
-        let identity = Digest::sha256(serde_json::to_vec(&("scalar-program-v6", &wire))?);
+        let identity = Digest::sha256_serialized(&("scalar-program-v6", &wire))?;
         Ok(Self { wire, identity })
     }
 
@@ -252,27 +279,57 @@ impl ScalarProgram {
     /// Literal controls whose every use is a checked exact implementation. This
     /// describes source metadata; it does not authenticate live allocations.
     pub fn metadata_control_ids(&self) -> HashSet<u32> {
-        let mut controls = self
-            .wire
-            .nodes
-            .iter()
-            .filter_map(|node| match node {
-                ScalarNode::Apply {
-                    operation:
-                        ScalarOperation::Operator(runmat_types::OperatorKind::ElementwisePower),
-                    operands,
-                    ..
-                } => operands.get(1).copied(),
-                _ => None,
-            })
-            .collect::<HashSet<_>>();
+        self.metadata_control_ids_sorted()
+            .expect("scalar control geometry is representable")
+            .into_iter()
+            .collect()
+    }
+
+    /// The indexed producer uses a request-sized vector rather than creating
+    /// an unbounded hash table while preparing a finite host request.
+    pub fn metadata_control_ids_sorted(&self) -> Result<Vec<u32>> {
+        let mut controls = Vec::new();
+        controls.try_reserve_exact(
+            self.wire
+                .nodes
+                .len()
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("scalar control count overflows"))?,
+        )?;
+        controls.extend(self.wire.nodes.iter().filter_map(|node| match node {
+            ScalarNode::Apply {
+                operation: ScalarOperation::Operator(runmat_types::OperatorKind::ElementwisePower),
+                operands,
+                ..
+            } => operands.get(1).copied(),
+            _ => None,
+        }));
         controls.extend(
             self.wire
                 .nodes
                 .iter()
                 .filter_map(|node| self.exact_product(node.id()).map(|(_, control, _)| control)),
         );
-        controls.remove(&self.wire.root);
+        controls.sort_unstable();
+        controls.dedup();
+        let excluded_capacity = self
+            .wire
+            .nodes
+            .iter()
+            .try_fold(0usize, |count, node| {
+                count.checked_add(match node {
+                    ScalarNode::Apply { operands, .. } => operands.len(),
+                    _ => 0,
+                })
+            })
+            .ok_or_else(|| anyhow!("scalar control operand count overflows"))?;
+        let mut excluded = Vec::new();
+        excluded.try_reserve_exact(
+            excluded_capacity
+                .checked_add(1)
+                .ok_or_else(|| anyhow!("scalar control exclusion count overflows"))?,
+        )?;
+        excluded.push(self.wire.root);
         for node in &self.wire.nodes {
             if let ScalarNode::Apply {
                 operation,
@@ -290,12 +347,15 @@ impl ScalarProgram {
                         .exact_product(node.id())
                         .is_some_and(|(_, control, _)| control == *operand);
                     if !power && !product {
-                        controls.remove(operand);
+                        excluded.push(*operand);
                     }
                 }
             }
         }
-        controls
+        excluded.sort_unstable();
+        excluded.dedup();
+        controls.retain(|id| excluded.binary_search(id).is_err());
+        Ok(controls)
     }
 
     /// A decoded wire is only structurally valid. A future submission owner

@@ -125,9 +125,22 @@ fn captured_scalar_leaves_seed_exact_words_for_single_and_multi_output_fallbacks
             );
             let program = resolve(&source, std::slice::from_ref(&input), precision);
             for outputs in [&[3][..], &[2, 3][..], &[1, 3][..]] {
-                let shader = source
-                    .prepare_typed_shader(outputs, &program, scalar)
+                let bound = source
+                    .measured_typed_shader_preparation_bytes(outputs, &program, scalar, 1)
                     .unwrap();
+                let shader = source
+                    .prepare_typed_shader_with_inputs_bounded(
+                        outputs,
+                        &program,
+                        scalar,
+                        &[0],
+                        Some(bound.body_bytes),
+                    )
+                    .unwrap();
+                assert!(
+                    bound.retained_bytes >= shader.source().len() as u64,
+                    "retained source exceeded pre-admitted geometry"
+                );
                 assert!(shader.source().contains(&expected), "{}", shader.source());
                 assert_eq!(shader.source().matches("let control1 =").count(), 1);
                 assert!(!shader.source().contains("control99"));
@@ -217,9 +230,9 @@ fn root_slice_keeps_shared_dependencies_once_and_original_temporary_indices() {
 #[test]
 fn full_elementwise_source_and_rounding_are_unchanged() {
     let plan = plan(vec![add(0, 1, 2), add(2, 1, 3)], 3);
-    assert_eq!(plan.complete_single_output_root(&[3]), Some(3));
-    assert_eq!(plan.complete_single_output_root(&[2]), None);
-    assert_eq!(plan.complete_single_output_root(&[2, 3]), None);
+    assert_eq!(plan.complete_single_output_root(&[3]).unwrap(), Some(3));
+    assert_eq!(plan.complete_single_output_root(&[2]).unwrap(), None);
+    assert_eq!(plan.complete_single_output_root(&[2, 3]).unwrap(), None);
     let program = resolve(
         &plan,
         &[Value::Num(1.0), Value::Num(2.0)],
@@ -365,8 +378,42 @@ fn malformed_advertised_cast_cannot_fall_back_to_legacy_expression() {
 }
 
 #[test]
+fn later_closed_binding_is_validated_after_uncounted_legacy_operation() {
+    let source = plan(
+        vec![
+            FusionOp::Builtin {
+                origin: Default::default(),
+                name: "round".into(),
+                inputs: vec![0],
+                output: Some(2),
+            },
+            FusionOp::Builtin {
+                origin: Default::default(),
+                name: "single".into(),
+                inputs: vec![2],
+                output: Some(3),
+            },
+        ],
+        3,
+    );
+    let facts = resolve(
+        &source,
+        &[Value::Num(2.5), Value::Num(1.0)],
+        ProviderPrecision::F64,
+    );
+    let mut malformed = source;
+    let FusionOp::Builtin { inputs, .. } = &mut malformed.operations[1] else {
+        unreachable!()
+    };
+    inputs.push(1);
+    let selected = producer_indices(&malformed, &[0, 1], &[3]).unwrap();
+    let error = program::selected_resolution_receipt(&malformed, &facts, &selected).unwrap_err();
+    assert!(error.to_string().contains("arity"), "{error:#}");
+}
+
+#[test]
 fn unsupported_scalar_contract_does_not_change_existing_wgsl_route() {
-    let plan = plan(
+    let source = plan(
         vec![FusionOp::Builtin {
             origin: Default::default(),
             name: "round".into(),
@@ -376,21 +423,59 @@ fn unsupported_scalar_contract_does_not_change_existing_wgsl_route() {
         2,
     );
     let facts = resolve(
-        &plan,
+        &source,
         &[Value::Num(2.5), Value::Num(0.0)],
         ProviderPrecision::F64,
     );
     assert!(
-        TypedProducer::emit_checked_program(&plan, &facts, ScalarType::F64, 2)
+        TypedProducer::emit_checked_program(&source, &facts, ScalarType::F64, 2)
             .unwrap()
             .is_none()
     );
     assert!(
-        TypedProducer::emit(&plan, &facts, ScalarType::F64, leaves(), Some(&[2]))
+        TypedProducer::emit(&source, &facts, ScalarType::F64, leaves(), Some(&[2]))
             .unwrap()
             .body
             .contains("rm_round_f64")
     );
+
+    // Round's inferred output carrier is not itself a physical output buffer.
+    // Finite geometry must use the same represented Dense fact as the emitter
+    // when the next selected arithmetic operation consumes that value.
+    let chain = plan(
+        vec![
+            FusionOp::Builtin {
+                origin: Default::default(),
+                name: "round".into(),
+                inputs: vec![0],
+                output: Some(2),
+            },
+            add(2, 1, 3),
+        ],
+        3,
+    );
+    let first = Value::Tensor(runmat_value::Tensor::from_f32(vec![2.5, 3.5], vec![1, 2]).unwrap());
+    let second = Value::Tensor(runmat_value::Tensor::from_f32(vec![1.0, 1.0], vec![1, 2]).unwrap());
+    let program = resolve(&chain, &[first, second], ProviderPrecision::F32);
+    assert!(matches!(
+        program.fact(2).unwrap().storage,
+        runmat_types::StorageFact::Unknown | runmat_types::StorageFact::Opaque
+    ));
+    for outputs in [&[3][..], &[2, 3][..]] {
+        let bound = chain
+            .measured_typed_shader_preparation_bytes(outputs, &program, ScalarType::F32, 2)
+            .expect("the selected represented chain has finite geometry");
+        let shader = chain
+            .prepare_typed_shader_with_inputs_bounded(
+                outputs,
+                &program,
+                ScalarType::F32,
+                &[0, 1],
+                Some(bound.body_bytes),
+            )
+            .expect("the measured represented chain emits");
+        assert!(bound.retained_bytes >= shader.source().len() as u64);
+    }
 }
 
 #[test]
@@ -447,7 +532,10 @@ fn canonical_helper_is_shared_by_full_and_sliced_emission() {
 
 #[test]
 fn malformed_slice_dependencies_fail_closed() {
-    let inputs = leaves();
+    let inputs = [0, 1];
+    let ordered =
+        producer_indices(&plan(vec![add(0, 1, 2), add(2, 1, 3)], 3), &inputs, &[3]).unwrap();
+    assert_eq!(ordered.iter().collect::<Vec<_>>(), vec![0, 1]);
     assert!(producer_indices(&plan(vec![add(0, 1, 2)], 2), &inputs, &[99]).is_err());
     assert!(producer_indices(&plan(vec![add(0, 99, 2)], 2), &inputs, &[2]).is_err());
     assert!(producer_indices(&plan(vec![add(0, 1, 2), add(1, 0, 2)], 2), &inputs, &[2]).is_err());

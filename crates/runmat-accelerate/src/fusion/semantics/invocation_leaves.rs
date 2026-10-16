@@ -2,8 +2,6 @@
 //! Structural constants remain in the plan fingerprint, but a ValueId bound
 //! to a supplied input denotes the value actually consumed this invocation.
 
-use std::collections::{HashMap, HashSet};
-
 use anyhow::{anyhow, Result};
 use runmat_time::Instant;
 use runmat_value::Value;
@@ -17,10 +15,19 @@ use super::{FusionGroupPlan, FusionOp};
 mod resident_input;
 use resident_input::FusionResidentInput;
 
+pub(super) fn resident_slot_bytes(
+    count: usize,
+) -> std::result::Result<u64, super::preparation_resources::PreparationBoundError> {
+    count
+        .checked_mul(std::mem::size_of::<(ValueId, FusionResidentInput<'static>)>())
+        .and_then(|bytes| u64::try_from(bytes).ok())
+        .ok_or(super::preparation_resources::PreparationBoundError::Overflow)
+}
+
 pub(crate) struct FusionInvocationLeaves<'a> {
-    values: HashMap<ValueId, &'a Value>,
-    input_ids: HashSet<ValueId>,
-    resident_inputs: HashMap<ValueId, FusionResidentInput<'a>>,
+    values: Vec<(ValueId, &'a Value)>,
+    input_ids: Vec<ValueId>,
+    resident_inputs: Vec<(ValueId, FusionResidentInput<'a>)>,
 }
 
 struct LeafIndexObservation {
@@ -63,25 +70,29 @@ impl<'a> FusionInvocationLeaves<'a> {
         if inputs.len() != plan.inputs.len() {
             return Err(anyhow!("fusion operand count does not match the plan"));
         }
-        let mut input_ids = HashSet::with_capacity(plan.inputs.len());
-        for &id in &plan.inputs {
-            observation.work.input_ids_indexed =
-                observation.work.input_ids_indexed.saturating_add(1);
-            if !input_ids.insert(id) {
-                return Err(anyhow!("fusion input value IDs are duplicated"));
-            }
+        let mut input_ids = plan.inputs.clone();
+        input_ids.sort_unstable();
+        if input_ids.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(anyhow!("fusion input value IDs are duplicated"));
         }
-        let mut values = HashMap::with_capacity(input_ids.len() + plan.const_values.len());
+        observation.work.input_ids_indexed = u64::try_from(plan.inputs.len()).unwrap_or(u64::MAX);
+        let mut values = Vec::with_capacity(input_ids.len() + plan.const_values.len());
         for (&id, value) in &plan.const_values {
             observation.work.source_constants_indexed =
                 observation.work.source_constants_indexed.saturating_add(1);
-            values.insert(id, value);
+            values.push((id, value));
         }
+        values.sort_unstable_by_key(|(id, _)| *id);
+        let constant_count = values.len();
         for (&id, &value) in plan.inputs.iter().zip(inputs) {
-            values.insert(id, value);
+            match values[..constant_count].binary_search_by_key(&id, |(key, _)| *key) {
+                Ok(index) => values[index] = (id, value),
+                Err(_) => values.push((id, value)),
+            }
         }
+        values.sort_unstable_by_key(|(id, _)| *id);
         observation.work.unique_leaves = u64::try_from(values.len()).unwrap_or(u64::MAX);
-        let mut produced = HashSet::new();
+        let mut produced = Vec::with_capacity(plan.operations.len());
         for operation in &plan.operations {
             let output = match operation {
                 FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => output,
@@ -89,23 +100,27 @@ impl<'a> FusionInvocationLeaves<'a> {
             if let Some(id) = output {
                 observation.work.producer_ids_checked =
                     observation.work.producer_ids_checked.saturating_add(1);
-                if values.contains_key(id) || !produced.insert(*id) {
+                if values.binary_search_by_key(id, |(key, _)| *key).is_ok() {
                     return Err(anyhow!("fusion value ID has conflicting producers"));
                 }
+                produced.push(*id);
             }
         }
-        let resident_inputs = plan
-            .inputs
-            .iter()
-            .zip(inputs)
-            .filter_map(|(&id, &value)| {
-                if matches!(value, Value::GpuTensor(_)) {
-                    observation.work.resident_inputs_checked =
-                        observation.work.resident_inputs_checked.saturating_add(1);
-                }
-                FusionResidentInput::authenticate(id, value).map(|proof| (id, proof))
-            })
-            .collect();
+        produced.sort_unstable();
+        if produced.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(anyhow!("fusion value ID has conflicting producers"));
+        }
+        let mut resident_inputs = Vec::with_capacity(inputs.len());
+        for (&id, &value) in plan.inputs.iter().zip(inputs) {
+            if matches!(value, Value::GpuTensor(_)) {
+                observation.work.resident_inputs_checked =
+                    observation.work.resident_inputs_checked.saturating_add(1);
+            }
+            if let Some(proof) = FusionResidentInput::authenticate(id, value) {
+                resident_inputs.push((id, proof));
+            }
+        }
+        resident_inputs.sort_unstable_by_key(|(id, _)| *id);
         observation.completed = true;
         Ok(Self {
             values,
@@ -114,15 +129,22 @@ impl<'a> FusionInvocationLeaves<'a> {
         })
     }
 
-    pub(crate) fn values(&self) -> &HashMap<ValueId, &'a Value> {
+    pub(crate) fn values(&self) -> &[(ValueId, &'a Value)] {
         &self.values
+    }
+
+    pub(crate) fn value(&self, id: ValueId) -> Option<&'a Value> {
+        self.values
+            .binary_search_by_key(&id, |(key, _)| *key)
+            .ok()
+            .map(|index| self.values[index].1)
     }
 
     pub(crate) fn unique_leaf_count(&self) -> usize {
         self.values.len()
     }
 
-    pub(crate) fn input_ids(&self) -> &HashSet<ValueId> {
+    pub(crate) fn input_ids(&self) -> &[ValueId] {
         &self.input_ids
     }
 
@@ -133,13 +155,18 @@ impl<'a> FusionInvocationLeaves<'a> {
         value: &Value,
         fact: &mut runmat_types::ValueFact,
     ) {
-        if let Some(proof) = self.resident_inputs.get(&id) {
+        if let Some(proof) = self
+            .resident_inputs
+            .binary_search_by_key(&id, |(key, _)| *key)
+            .ok()
+            .map(|index| &self.resident_inputs[index].1)
+        {
             proof.refine_storage(id, value, fact);
         }
     }
 
     pub(crate) fn require_live_resident_inputs(&self) -> Result<()> {
-        for proof in self.resident_inputs.values() {
+        for (_, proof) in &self.resident_inputs {
             proof.require_live()?;
         }
         Ok(())

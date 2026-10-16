@@ -3,20 +3,40 @@
 use super::*;
 use runmat_accelerate_api::scalar_program::ScalarLiteral;
 
+/// Source slice whose captured constants may be emitted by this producer.
+pub(super) struct ConstantSelection<'a> {
+    pub(super) indices: Option<&'a SelectedProducerIndices>,
+    pub(super) roots: Option<&'a [ValueId]>,
+}
+
 pub(super) fn seed(
     plan: &FusionGroupPlan,
     program: &ResolvedProgram,
     buffer_type: ScalarType,
-    expressions: &mut HashMap<ValueId, String>,
-    selected: Option<&HashSet<usize>>,
-    roots: Option<&[ValueId]>,
-    mut words: Option<&mut HashMap<ValueId, String>>,
+    expressions: &mut ExpressionSlots,
+    selection: ConstantSelection<'_>,
+    mut words: Option<&mut ExpressionSlots>,
+    body_capacity: Option<usize>,
 ) -> Result<String> {
-    let mut used = roots
+    let ConstantSelection {
+        indices: selected,
+        roots,
+    } = selection;
+    let base = roots
         .unwrap_or_default()
+        .len()
+        .checked_add(expressions.len())
+        .ok_or_else(|| anyhow!("fusion constant-use count overflows"))?;
+    let capacity = plan
+        .operations
         .iter()
-        .copied()
-        .collect::<HashSet<_>>();
+        .try_fold(base, |count, operation| {
+            count.checked_add(operands(operation).0.len())
+        })
+        .ok_or_else(|| anyhow!("fusion constant-use count overflows"))?;
+    let mut used = Vec::new();
+    used.try_reserve_exact(capacity)?;
+    used.extend(roots.unwrap_or_default().iter().copied());
     for (index, operation) in plan.operations.iter().enumerate() {
         if selected.is_none_or(|selected| selected.contains(&index)) {
             used.extend(operands(operation).0.iter().copied());
@@ -25,7 +45,9 @@ pub(super) fn seed(
     // Complete multi-output emission receives requested constant outputs as
     // placeholders from its indexing owner; they need no producer operation.
     used.extend(expressions.keys().copied());
-    let controls = program.embedded_controls_for_precision(
+    used.sort_unstable();
+    used.dedup();
+    let controls = program.embedded_controls_sorted_for_precision(
         plan,
         roots.unwrap_or_default(),
         if buffer_type == ScalarType::F32 {
@@ -33,23 +55,25 @@ pub(super) fn seed(
         } else {
             runmat_accelerate_api::ProviderPrecision::F64
         },
+    )?;
+    let mut ids = Vec::new();
+    ids.try_reserve_exact(plan.const_values.len())?;
+    ids.extend(
+        plan.const_values
+            .keys()
+            .copied()
+            .filter(|id| used.binary_search(id).is_ok() && !program.is_invocation_input(*id)),
     );
-    let mut ids = plan
-        .const_values
-        .keys()
-        .copied()
-        .filter(|id| used.contains(id) && !program.is_invocation_input(*id))
-        .collect::<Vec<_>>();
     ids.sort_unstable();
-    let mut body = String::new();
+    let mut body = super::super::wgsl_source::BoundedWgslBody::new(body_capacity)?;
     for id in ids {
         // Only an authenticated, exclusively metadata scalar can omit its
         // Double representation. Complete callers identify omitted controls
         // by an empty expression; sliced callers supply their exact roots.
-        if controls.contains(&id)
+        if controls.binary_search(&id).is_ok()
             && (roots.is_some() || expressions.get(&id).is_some_and(String::is_empty))
         {
-            expressions.insert(id, String::new());
+            expressions.insert(id, String::new())?;
             continue;
         }
         let literal = program::literal(&plan.const_values[&id])
@@ -66,9 +90,9 @@ pub(super) fn seed(
                 ScalarLiteral::F64Bits(bits) => (f64::from_bits(bits) as f32).to_bits(),
             };
             let name = format!("control{id}_bits");
-            body.push_str(&format!("    let {name}: u32 = 0x{bits:08x}u;\n    let control{id} = bitcast<f32>({name});\n"));
-            words.insert(id, name);
-            expressions.insert(id, format!("control{id}"));
+            write!(&mut body, "    let {name}: u32 = 0x{bits:08x}u;\n    let control{id} = bitcast<f32>({name});\n")?;
+            words.insert(id, name)?;
+            expressions.insert(id, format!("control{id}"))?;
             continue;
         }
         let expression = match (literal, class) {
@@ -94,8 +118,8 @@ pub(super) fn seed(
             }
             _ => return Err(anyhow!("unsupported represented constant class")),
         };
-        body.push_str(&format!("    let control{id} = {expression};\n"));
-        expressions.insert(id, format!("control{id}"));
+        writeln!(&mut body, "    let control{id} = {expression};")?;
+        expressions.insert(id, format!("control{id}"))?;
     }
-    Ok(body)
+    Ok(body.into_source())
 }

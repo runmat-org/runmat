@@ -10,8 +10,8 @@ use runmat_value::Value;
 use super::classification::ClassificationBoundary;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::BuiltinResult;
 
@@ -40,15 +40,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |context: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|context, writer| {
             let input = context.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let (zero, one) = match context.scalar_ty {
                 ScalarType::F32 => ("0.0", "1.0"),
                 ScalarType::F64 => ("f64(0.0)", "f64(1.0)"),
                 other => return Err(FusionError::UnsupportedPrecision(other)),
             };
-            Ok(format!("select({zero}, {one}, isFinite({input}))"))
-        },
+            writer.write_formatted(format_args!("select({zero}, {one}, isFinite({input}))"))
+        }),
     }),
     reduction: None,
     emits_nan: false,

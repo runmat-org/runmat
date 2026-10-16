@@ -2,19 +2,19 @@
 //! selection shares the typed producer index and keeps request leaf identity.
 
 use crate::fusion::{typed_producer::producer_indices, FusionGroupPlan};
-use crate::graph::ValueId;
-use std::collections::HashMap;
 
 pub(super) fn project(plan: &FusionGroupPlan) -> anyhow::Result<(FusionGroupPlan, Vec<usize>)> {
     let root = plan
         .reduction_data
         .ok_or_else(|| anyhow::anyhow!("reduction has no selected data producer"))?;
-    let leaves: HashMap<ValueId, String> = plan
+    let mut leaves = plan
         .inputs
         .iter()
         .chain(plan.const_values.keys())
-        .map(|&id| (id, String::new()))
-        .collect();
+        .copied()
+        .collect::<Vec<_>>();
+    leaves.sort_unstable();
+    leaves.dedup();
     let selected = producer_indices(plan, &leaves, &[root])?;
     let indices: Vec<_> = (0..plan.operations.len())
         .filter(|index| selected.contains(index))

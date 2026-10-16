@@ -28,3 +28,20 @@ pub(super) fn infer(
     let admitted = admission::inspect(request);
     output::infer(policy, admitted, request, entry)
 }
+
+/// The same canonical numeric fact before public CallInference wraps it in
+/// effect/capability BTreeSets. Fusion's selected one-output preparation does
+/// not consume those sets, and finite admission must not invent a bound for
+/// their allocator-private node layout.
+pub(super) fn infer_fusion_fact(
+    policy: BinaryArithmeticInferencePolicy,
+    request: &CallRequest,
+) -> Result<runmat_types::ValueFact, Vec<runmat_types::InferenceDiagnostic>> {
+    let admitted = admission::inspect(request);
+    let (fact, diagnostics) = output::infer_fact(policy, admitted, request);
+    if diagnostics.is_empty() {
+        Ok(fact)
+    } else {
+        Err(diagnostics)
+    }
+}

@@ -1,7 +1,7 @@
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 
 #[runmat_macros::register_gpu_spec(
@@ -31,14 +31,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |context: &FusionExprContext| {
-            let literal = match context.scalar_ty {
-                ScalarType::F32 => "0.0".to_string(),
-                ScalarType::F64 => "f64(0.0)".to_string(),
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            let literal = match ctx.scalar_ty {
+                ScalarType::F32 => "0.0",
+                ScalarType::F64 => "f64(0.0)",
                 other => return Err(FusionError::UnsupportedPrecision(other)),
             };
-            Ok(literal)
-        },
+            writer.push(literal)
+        }),
     }),
     reduction: None,
     emits_nan: false,

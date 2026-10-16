@@ -47,6 +47,8 @@ mod image_normalize_key_tests {
 
 // Core WGPU provider state (device, caches, pipelines)
 pub struct WgpuProvider {
+    pub(super) capability_snapshot:
+        std::sync::OnceLock<runmat_accelerate_api::ProviderCapabilitySnapshot>,
     pub(super) instance: Arc<wgpu::Instance>,
     /// The same authority is exported to renderers and retained by progress.
     /// Nested emitters borrow its permit; they must not reacquire the gate.

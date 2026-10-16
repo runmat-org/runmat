@@ -131,11 +131,12 @@ pub(crate) fn tensor_representation(
     value: &Value,
     provider_precision: ProviderPrecision,
 ) -> Option<ProviderRepresentation> {
+    let scalar_shape = [1, 1];
     let (element_type, storage, shape, residency) = match value {
         Value::Tensor(tensor) => (
             provider_element_type(tensor.numeric_dtype()),
             ProviderStorage::DenseReal,
-            tensor.shape().to_vec(),
+            tensor.shape(),
             ProviderResidency::Host,
         ),
         Value::GpuTensor(handle) => {
@@ -165,20 +166,20 @@ pub(crate) fn tensor_representation(
             (
                 element_type,
                 storage,
-                handle.shape().to_vec(),
+                handle.shape(),
                 ProviderResidency::Device,
             )
         }
         Value::Num(_) => (
             ProviderElementType::F64,
             ProviderStorage::DenseReal,
-            vec![1, 1],
+            scalar_shape.as_slice(),
             ProviderResidency::Host,
         ),
         Value::Int(integer) => (
             provider_element_type(integer.numeric_dtype()),
             ProviderStorage::DenseReal,
-            vec![1, 1],
+            scalar_shape.as_slice(),
             ProviderResidency::Host,
         ),
         _ => return None,
@@ -193,8 +194,8 @@ pub(crate) fn tensor_representation(
             ProviderLayout::ColumnMajorContiguous
         },
         shape: shape
-            .into_iter()
-            .map(|extent| u64::try_from(extent).unwrap_or(u64::MAX))
+            .iter()
+            .map(|&extent| u64::try_from(extent).unwrap_or(u64::MAX))
             .collect(),
         residency,
     })

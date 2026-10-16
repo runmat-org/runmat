@@ -218,7 +218,41 @@ pub struct FusionSemanticDeclaration {
     pub scalar_operation: Option<runmat_types::ScalarOperation>,
 }
 
+/// Source-owned shape of the first finite-preparation accounting cohort.
+/// This is a typed declaration property, not a dispatch by builtin spelling.
+/// Admissions that can scan, suspend, or retain control work require their
+/// own proven bound and must not inherit this pure scalar class.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FusionPreparationClass {
+    PureRealUnary,
+    PureRealBinary,
+}
+
+impl FusionPreparationClass {
+    pub const fn arity(self) -> usize {
+        match self {
+            Self::PureRealUnary => 1,
+            Self::PureRealBinary => 2,
+        }
+    }
+}
+
 impl FusionSemanticDeclaration {
+    pub fn finite_preparation_class(&self) -> Option<FusionPreparationClass> {
+        if self.admit.is_some()
+            || self.admit_static.is_some()
+            || self.required_real_unary.is_some()
+            || self.required_arithmetic.is_some()
+        {
+            return None;
+        }
+        match self.scalar_operation?.arity()? {
+            1 => Some(FusionPreparationClass::PureRealUnary),
+            2 => Some(FusionPreparationClass::PureRealBinary),
+            _ => None,
+        }
+    }
+
     /// Only total real-domain, class-preserving unary instructions use this
     /// convenience constructor. Promoting operations retain explicit domain
     /// admission declarations instead of inheriting this absence of checks.

@@ -63,7 +63,7 @@ pub(super) fn record(
                     control,
                     exact,
                 },
-            );
+            )?;
             break;
         }
     }

@@ -18,8 +18,8 @@ use super::digits::{
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionError,
-    FusionExprContext, FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN,
-    ResidencyPolicy, ScalarType, ShapeRequirements,
+    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
+    ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::context::RuntimeContext;
@@ -69,16 +69,12 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            if ctx.inputs.len() != 1 {
-                return Err(FusionError::Message(
-                    "round digit forms require their parsed runtime strategy",
-                ));
-            }
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            if ctx.inputs.len() != 1 { return Err(FusionError::Message("round digit forms require their parsed runtime strategy")); }
             let input = ctx.inputs.first().ok_or(FusionError::MissingInput(0))?;
             let helper = crate::builtins::common::spec::FusionMathHelper::Round.entrypoint(ctx.scalar_ty)?;
-            Ok(format!("{helper}({input})"))
-        },
+            writer.write_formatted(format_args!("{helper}({input})"))
+        }),
     }),
     reduction: None,
     emits_nan: false,
@@ -478,6 +474,7 @@ fn parse_mode(value: &Value) -> BuiltinResult<RoundMode> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::spec::FusionExprContext;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{
@@ -492,19 +489,26 @@ pub(crate) mod tests {
             (ScalarType::F32, "rm_round_f32"),
             (ScalarType::F64, "rm_round_f64"),
         ] {
-            let expression = (template.wgsl_body)(&FusionExprContext {
-                scalar_ty,
-                inputs: &["x"],
-                constants: &[],
-            })
-            .unwrap();
+            let expression = template
+                .wgsl_body
+                .render(&FusionExprContext {
+                    scalar_ty,
+                    inputs: &[crate::builtins::common::spec::FusionExprInput::text("x")],
+                    constants: &[],
+                })
+                .unwrap();
             assert_eq!(expression, format!("{helper}(x)"));
-            assert!((template.wgsl_body)(&FusionExprContext {
-                scalar_ty,
-                inputs: &["x", "2"],
-                constants: &[]
-            })
-            .is_err());
+            assert!(template
+                .wgsl_body
+                .render(&FusionExprContext {
+                    scalar_ty,
+                    inputs: &[
+                        crate::builtins::common::spec::FusionExprInput::text("x"),
+                        crate::builtins::common::spec::FusionExprInput::text("2"),
+                    ],
+                    constants: &[]
+                })
+                .is_err());
         }
     }
 

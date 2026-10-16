@@ -21,9 +21,8 @@ use crate::build_runtime_error;
 #[cfg(test)]
 use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
-    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
-    ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{
     random_args::{
@@ -90,15 +89,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::InlineLiteral,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
-            let zero = match ctx.scalar_ty {
-                ScalarType::F32 => "0.0".to_string(),
-                ScalarType::F64 => "f64(0.0)".to_string(),
-                ScalarType::I32 => "0".to_string(),
-                ScalarType::Bool => "false".to_string(),
-            };
-            Ok(zero)
-        },
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
+            let literal = match ctx.scalar_ty {
+                            ScalarType::F32 => "0.0", ScalarType::F64 => "f64(0.0)",
+                            ScalarType::I32 => "0", ScalarType::Bool => "false",
+                        };
+                        writer.push(literal)
+        }),
     }),
     reduction: None,
     emits_nan: false,

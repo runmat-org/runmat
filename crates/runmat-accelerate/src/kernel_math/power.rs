@@ -1,6 +1,11 @@
 //! One WGSL numerical policy shared by standalone power and fused expressions.
 use runmat_accelerate_api::ProviderPrecision;
 use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
+use std::fmt::Write as _;
+
+#[path = "power/stream_replace.rs"]
+mod stream_replace;
+use stream_replace::ReplaceWriter;
 
 pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
     let scalar = match precision {
@@ -13,6 +18,15 @@ pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
 }
 
 pub(crate) fn functions(precision: ProviderPrecision) -> String {
+    let mut source = String::new();
+    write_functions(precision, &mut source).expect("String writer is infallible");
+    source
+}
+
+pub(crate) fn write_functions(
+    precision: ProviderPrecision,
+    writer: &mut impl std::fmt::Write,
+) -> std::fmt::Result {
     let ty = match precision {
         ProviderPrecision::F32 => "f32",
         ProviderPrecision::F64 => "f64",
@@ -52,7 +66,16 @@ fn negative(v: f64) -> bool { return (runmat_f64_high(v) & 0x80000000u) != 0u; }
         ProviderPrecision::F32 => ("0x7f800000u", "0x7fc00000u"),
         ProviderPrecision::F64 => ("0x7ff00000u", "0x7ff80000u"),
     };
-    let source = format!(
+    let name = entrypoint(precision);
+    let mut real_power = ReplaceWriter::new(writer, "real_power(", [name, "("]);
+    let mut needs_complex =
+        ReplaceWriter::new(&mut real_power, "needs_complex(", [name, "_needs_complex("]);
+    let mut negative = ReplaceWriter::new(&mut needs_complex, "negative(", [name, "_negative("]);
+    let mut nan = ReplaceWriter::new(&mut negative, "nan(", [name, "_nan("]);
+    let mut finite = ReplaceWriter::new(&mut nan, "finite(", [name, "_finite("]);
+    let mut types = ReplaceWriter::new(&mut finite, "T", [ty, ""]);
+    write!(
+        &mut types,
         r#"{bits}
 fn needs_complex(a: T, b: T) -> bool {{
     return finite(a) && a < T(0.0) && finite(b) && trunc(b) != b;
@@ -79,15 +102,13 @@ fn real_power(a: T, b: T) -> T {{
     return result;
 }}
 "#
-    );
-    let name = entrypoint(precision);
-    source
-        .replace("T", ty)
-        .replace("finite(", &format!("{name}_finite("))
-        .replace("nan(", &format!("{name}_nan("))
-        .replace("negative(", &format!("{name}_negative("))
-        .replace("needs_complex(", &format!("{name}_needs_complex("))
-        .replace("real_power(", &format!("{name}("))
+    )?;
+    types.finish()?;
+    finite.finish()?;
+    nan.finish()?;
+    negative.finish()?;
+    needs_complex.finish()?;
+    real_power.finish()
 }
 
 #[cfg(test)]

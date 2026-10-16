@@ -20,6 +20,20 @@ pub(crate) fn inject(source: &str) -> String {
     format!("{source}\n{HELPERS}")
 }
 
+/// Append the same helper bytes to the owned shader without a second full
+/// source allocation. `generated_from` preserves the old injection decision
+/// when a caller has already prefixed a separate semantic preamble.
+pub(crate) fn append_if_missing(source: &mut String, generated_from: usize) {
+    if !source[generated_from..].contains("fn runmat_f64_from_words(") {
+        source.push('\n');
+        source.push_str(HELPERS);
+    }
+}
+
+pub(crate) const fn appended_bytes() -> usize {
+    1 + HELPERS.len()
+}
+
 /// Exact widening of a binary32 storage word, without a floating binary32
 /// intermediate (which could flush subnormals). Same enabled F64/INT64 gate
 /// as the word helpers above. NaN payloads are not a language promise.
@@ -61,6 +75,14 @@ mod tests {
     #[test]
     fn scalar_word_helper_is_idempotent_and_has_no_wide_unsuffixed_literal() {
         let once = inject("fn main() {}");
+        let mut owned = "fn main() {}".to_owned();
+        append_if_missing(&mut owned, 0);
+        assert_eq!(owned, once);
+        let mut prefixed = format!("{HELPERS}fn main() {{}}");
+        append_if_missing(&mut prefixed, HELPERS.len());
+        assert_eq!(prefixed, format!("{HELPERS}{once}"));
+        append_if_missing(&mut owned, 0);
+        assert_eq!(owned, once);
         assert_eq!(inject(&once), once);
         assert!(once.contains("bitcast<u64>(value)"));
         assert!(once.contains("u64(high) << 32u"));

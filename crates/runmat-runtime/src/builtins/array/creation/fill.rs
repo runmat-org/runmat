@@ -23,9 +23,8 @@ use crate::builtins::array::type_resolvers::{
 use crate::builtins::common::random_args::shape_from_value;
 use crate::builtins::common::random_args::{extract_dims, keyword_of};
 use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionExprContext,
-    FusionKernelTemplate, GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType,
-    ShapeRequirements,
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, FusionKernelTemplate,
+    GpuOpKind, ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 
@@ -55,13 +54,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     constant_strategy: ConstantStrategy::UniformBuffer,
     elementwise: Some(FusionKernelTemplate {
         scalar_precisions: &[ScalarType::F32, ScalarType::F64],
-        wgsl_body: |ctx: &FusionExprContext| {
+        wgsl_body: crate::builtins::common::spec::FusionExprBuilder::new(|ctx, writer| {
             let constant = ctx
                 .constants
                 .first()
                 .ok_or(crate::builtins::common::spec::FusionError::MissingInput(0))?;
-            Ok(constant.to_string())
-        },
+            writer.push(constant)
+        }),
     }),
     reduction: None,
     emits_nan: false,

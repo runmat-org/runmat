@@ -22,6 +22,7 @@ mod unary_logical_scalar;
 
 pub use distributed::infer_partition_local_call;
 pub use routing::infer as infer_catalog_call;
+pub use routing::infer_fusion_numeric_fact;
 pub(crate) use support::facts::materialize;
 pub use support::materialization::gathered_value_fact;
 pub(crate) use support::object_handle::known_invalid_scalar_object_handle;

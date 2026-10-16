@@ -75,9 +75,10 @@ pub(super) fn map<'a>(request: &'a FusionExecutionRequest<'_>) -> Option<Inputs<
             .then(|| (*value).clone())
         })
         .collect::<Option<Vec<_>>>()?;
-    let expressions = leaves.keys().map(|&id| (id, String::new())).collect();
-    let selected = producer_indices(plan, &expressions, &[root]).ok()?;
-    if selected.contains(&terminal) || selected.iter().any(|&index| index >= terminal) {
+    let mut leaf_ids = leaves.keys().copied().collect::<Vec<_>>();
+    leaf_ids.sort_unstable();
+    let selected = producer_indices(plan, &leaf_ids, &[root]).ok()?;
+    if selected.contains(&terminal) || selected.iter().any(|index| index >= terminal) {
         return None;
     }
     // This receipt cannot authorize dropping other evaluated statements or
@@ -90,7 +91,7 @@ pub(super) fn map<'a>(request: &'a FusionExecutionRequest<'_>) -> Option<Inputs<
     if leaves.contains_key(&root) {
         used.insert(root);
     }
-    for &index in &selected {
+    for index in selected.iter() {
         let (inputs, _) = operands(&plan.operations[index]);
         used.extend(inputs.iter().filter(|id| leaves.contains_key(*id)).copied());
     }

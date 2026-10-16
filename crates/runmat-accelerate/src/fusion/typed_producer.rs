@@ -1,7 +1,9 @@
 //! Typed scalar producer emission, independent of dispatch and physical indexing.
 //! Root slicing does not grant permission to prune execution effects or bypass
 //! selected-binding admission. Callers must establish both before execution.
-use super::{expression::admitted_expression, primitive_expr, semantics::ResolvedProgram};
+use super::{
+    expression::admitted_expression_checked, primitive_expr_checked, semantics::ResolvedProgram,
+};
 use super::{FusionGroupPlan, FusionOp};
 use crate::graph::ValueId;
 use anyhow::{anyhow, Result};
@@ -10,21 +12,59 @@ use runmat_accelerate_api::scalar_program::{
 };
 use runmat_runtime::builtins::common::spec::{FusionMathHelper, ScalarType};
 use runmat_types::NumericClass;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::fmt::Write as _;
+
+/// Exact operation-index storage for one selected producer slice. The count is
+/// separate because `Vec::len` describes the complete source program.
+pub(crate) struct SelectedProducerIndices {
+    bits: Vec<bool>,
+    selected: usize,
+}
+
+impl SelectedProducerIndices {
+    pub(crate) fn contains(&self, index: &usize) -> bool {
+        self.bits.get(*index).copied().unwrap_or(false)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.selected
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.selected == 0
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = usize> + '_ {
+        self.bits
+            .iter()
+            .enumerate()
+            .filter_map(|(index, selected)| selected.then_some(index))
+    }
+}
 
 #[path = "typed_producer/program.rs"]
 mod program;
 #[path = "typed_producer/constants.rs"]
 mod constants;
+#[path = "typed_producer/expression_slots.rs"]
+mod expression_slots;
+pub(crate) use expression_slots::ExpressionSlots;
+#[path = "typed_producer/geometry.rs"]
+mod geometry;
+pub(crate) use geometry::CountedRecipeUnavailable;
+pub(super) use geometry::{
+    body_upper_bytes, max_operand_bytes, preamble_upper_bytes, structural_upper_bytes,
+};
 
 pub(crate) struct TypedProducer {
     pub body: String,
-    expressions: HashMap<ValueId, String>,
+    expressions: ExpressionSlots,
     helpers: Vec<(FusionMathHelper, ScalarType)>,
     checked_program: Option<ScalarProgram>,
     exact_power: bool,
     exact_product: bool,
-    word_expressions: HashMap<ValueId, String>,
+    word_expressions: ExpressionSlots,
     implementations: Vec<EmittedScalarImplementation>,
 }
 impl TypedProducer {
@@ -37,12 +77,16 @@ impl TypedProducer {
     ) -> Result<bool> {
         program.require_source_plan(plan)?;
         let selected = if let Some(roots) = roots {
-            let leaves = plan
+            let capacity = plan
                 .inputs
-                .iter()
-                .chain(plan.const_values.keys())
-                .map(|&id| (id, String::new()))
-                .collect();
+                .len()
+                .checked_add(plan.const_values.len())
+                .ok_or_else(|| anyhow!("typed fusion leaf count overflows"))?;
+            let mut leaves = Vec::new();
+            leaves.try_reserve_exact(capacity)?;
+            leaves.extend(plan.inputs.iter().chain(plan.const_values.keys()).copied());
+            leaves.sort_unstable();
+            leaves.dedup();
             Some(producer_indices(plan, &leaves, roots)?)
         } else {
             None
@@ -88,24 +132,74 @@ impl TypedProducer {
         plan: &FusionGroupPlan,
         program: &ResolvedProgram,
         buffer_type: ScalarType,
-        mut expressions: HashMap<ValueId, String>,
+        expressions: HashMap<ValueId, String>,
         roots: Option<&[ValueId]>,
-        mut word_expressions: HashMap<ValueId, String>,
+        word_expressions: HashMap<ValueId, String>,
+    ) -> Result<Self> {
+        Self::emit_indexed_with_words(
+            plan,
+            program,
+            buffer_type,
+            ExpressionSlots::from_map(plan, expressions)?,
+            roots,
+            ExpressionSlots::from_map(plan, word_expressions)?,
+        )
+    }
+
+    pub(crate) fn emit_indexed_with_words(
+        plan: &FusionGroupPlan,
+        program: &ResolvedProgram,
+        buffer_type: ScalarType,
+        expressions: ExpressionSlots,
+        roots: Option<&[ValueId]>,
+        word_expressions: ExpressionSlots,
+    ) -> Result<Self> {
+        Self::emit_indexed_with_words_bounded(
+            plan,
+            program,
+            buffer_type,
+            expressions,
+            roots,
+            word_expressions,
+            None,
+        )
+    }
+
+    pub(crate) fn emit_indexed_with_words_bounded(
+        plan: &FusionGroupPlan,
+        program: &ResolvedProgram,
+        buffer_type: ScalarType,
+        mut expressions: ExpressionSlots,
+        roots: Option<&[ValueId]>,
+        mut word_expressions: ExpressionSlots,
+        body_capacity: Option<usize>,
     ) -> Result<Self> {
         program.require_source_plan(plan)?;
         // Captured constants are leaves even when the physical indexing owner
         // has no buffer expression for them. Invocation inputs still win over
         // same-ID captured constants, exactly as in source assembly.
-        let mut leaves = expressions.clone();
+        let leaf_capacity = expressions
+            .len()
+            .checked_add(plan.const_values.len())
+            .ok_or_else(|| anyhow!("typed fusion leaf count overflows"))?;
+        let mut leaves = Vec::new();
+        leaves.try_reserve_exact(leaf_capacity)?;
+        leaves.extend(expressions.keys().copied());
         for &id in plan.const_values.keys() {
             if !program.is_invocation_input(id) {
-                leaves.entry(id).or_default();
+                leaves.push(id);
             }
         }
+        leaves.sort_unstable();
+        leaves.dedup();
         // Even complete emission must reject a constant which ambiguously
         // aliases a produced SSA value; None still emits every operation.
-        let indices = producer_indices(plan, &leaves, roots.unwrap_or_default())?;
-        let selected = roots.map(|_| indices);
+        let mut indices = producer_indices(plan, &leaves, roots.unwrap_or_default())?;
+        if roots.is_none() {
+            indices.bits.fill(true);
+            indices.selected = plan.operations.len();
+        }
+        let selected = roots.map(|_| &indices);
         let capture_words = buffer_type == ScalarType::F32
             && Self::requires_binary32_word_transport(plan, program, roots)?;
         let constant_body = constants::seed(
@@ -113,9 +207,12 @@ impl TypedProducer {
             program,
             buffer_type,
             &mut expressions,
-            selected.as_ref(),
-            roots,
+            constants::ConstantSelection {
+                indices: selected,
+                roots,
+            },
             capture_words.then_some(&mut word_expressions),
+            body_capacity,
         )?;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
@@ -134,55 +231,35 @@ impl TypedProducer {
                 program.require_ordinary_arithmetic(output, precision)?;
             }
         }
-        // Multi-output and complete legacy emission do not construct a scalar
-        // program. Advertised closed bindings still have to pass their typed
-        // class and arity contract before their legacy WGSL expression is used.
-        if !matches!(roots, Some([_])) {
-            for (index, operation) in plan.operations.iter().enumerate() {
-                if selected
-                    .as_ref()
-                    .is_some_and(|indices| !indices.contains(&index))
-                {
-                    continue;
-                }
-                let (_, output) = operands(operation);
-                if output.is_some_and(|id| {
-                    program
-                        .declaration(id)
-                        .and_then(|declaration| declaration.semantics)
-                        .and_then(|semantics| semantics.scalar_operation)
-                        .is_some()
-                }) {
-                    program::resolved_operation(program, operation)?;
-                }
-            }
-        }
         // The checked closed operation stream is the arithmetic authority for
         // its admitted subset. WGSL-only declarations keep their established
         // path until their exact numerical policy is represented there too.
         if let Some(&[root]) = roots {
             if let Some(checked) = Self::emit_checked_program(plan, program, buffer_type, root)? {
-                if let Some(lowered) = Self::lower_checked_with_words(
-                    &checked,
+                if let Some(lowered) = Self::lower_checked_indexed_with_words_owned(
+                    checked,
                     buffer_type,
                     expressions.clone(),
                     word_expressions.clone(),
+                    body_capacity,
                 )? {
                     return Ok(lowered);
                 }
             }
         }
-        let mut body = constant_body;
+        // Resolve the selected stream in source order before any legacy
+        // expression can decline or an exact recipe can skip the ordinary
+        // branch. The temporary represented facts die at this boundary; the
+        // indexed identities are reused below without a second inference.
+        let resolved = program::selected_resolution_receipt(plan, program, &indices)?;
+        let mut body =
+            super::wgsl_source::BoundedWgslBody::from_source(constant_body, body_capacity)?;
         let mut helpers = Vec::new();
+        helpers.try_reserve_exact(6)?;
         let mut exact_power = false;
         let mut exact_product = false;
         let mut implementations = Vec::new();
-        let mut represented = Vec::new();
-        represented.try_reserve_exact(
-            selected
-                .as_ref()
-                .map_or(plan.operations.len(), HashSet::len),
-        )?;
+        implementations.try_reserve_exact(plan.operations.len())?;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
                 .as_ref()
@@ -205,12 +282,13 @@ impl TypedProducer {
                         anyhow!("exact product requires word-preserving Single data")
                     })?;
                     let temporary = format!("typed{index}_bits");
-                    body.push_str(&format!(
-                        "    let {temporary}: u32 = rm_exact_product_bits({bits}, 0x{:08x}u);\n",
+                    writeln!(
+                        &mut body,
+                        "    let {temporary}: u32 = rm_exact_product_bits({bits}, 0x{:08x}u);",
                         receipt.exact.binary32_bits()
-                    ));
-                    expressions.insert(output, format!("bitcast<f32>({temporary})"));
-                    word_expressions.insert(output, temporary);
+                    )?;
+                    expressions.insert(output, format!("bitcast<f32>({temporary})"))?;
+                    word_expressions.insert(output, temporary)?;
                     exact_product = true;
                     implementations.push(product_implementation(output));
                     continue;
@@ -239,11 +317,9 @@ impl TypedProducer {
                     .ok_or_else(|| anyhow!("missing certified POWER base"))?;
                 let name = crate::kernel_math::power_exact::entrypoint(operation);
                 let temporary = format!("typed{index}_bits");
-                body.push_str(&format!(
-                    "    let {temporary}: u32 = {name}({base_bits});\n"
-                ));
-                expressions.insert(output, format!("bitcast<f32>({temporary})"));
-                word_expressions.insert(output, temporary);
+                writeln!(&mut body, "    let {temporary}: u32 = {name}({base_bits});")?;
+                expressions.insert(output, format!("bitcast<f32>({temporary})"))?;
+                word_expressions.insert(output, temporary)?;
                 exact_power = true;
                 implementations.push(crate::kernel_math::power_exact::implementation(
                     operation, output,
@@ -263,17 +339,16 @@ impl TypedProducer {
                 ));
             }
             let operation_name = scalar_name(operation_type)?;
-            let operands = inputs
-                .iter()
-                .map(|id| {
-                    let expression = expressions
-                        .get(id)
-                        .ok_or_else(|| anyhow!("missing typed fusion operand"))?;
-                    Ok((*id, format!("{operation_name}({expression})")))
-                })
-                .collect::<Result<HashMap<_, _>>>()?;
-            let resolved =
-                program::resolved_operation_with_represented(program, operation, &represented)?;
+            let mut operands = Vec::new();
+            operands.try_reserve_exact(inputs.len())?;
+            for id in inputs {
+                let expression = expressions
+                    .get(id)
+                    .ok_or_else(|| anyhow!("missing typed fusion operand"))?;
+                operands.push((*id, format!("{operation_name}({expression})")));
+            }
+            operands.sort_unstable_by_key(|(id, _)| *id);
+            let resolved = resolved[index];
             let expression =
                 if let Some(runmat_types::ScalarOperation::RealArithmetic(recipe)) = resolved {
                     let [left, right] = inputs.as_slice() else {
@@ -315,10 +390,12 @@ impl TypedProducer {
                             helpers.push((*helper, operation_type));
                         }
                     }
-                    admitted_expression(declaration, inputs, &operands, operation_type)
+                    admitted_expression_checked(declaration, inputs, &operands, operation_type)?
                 } else {
                     match operation {
-                        FusionOp::Primitive { op, .. } => primitive_expr(*op, inputs, &operands),
+                        FusionOp::Primitive { op, .. } => {
+                            primitive_expr_checked(*op, inputs, &operands)?
+                        }
                         FusionOp::Builtin { .. } => {
                             return Err(anyhow!("fusion builtin was not admitted"))
                         }
@@ -326,31 +403,21 @@ impl TypedProducer {
                 }
                 .ok_or_else(|| anyhow!("no typed fusion expression for the selected operation"))?;
             let temporary = format!("typed{index}");
-            body.push_str(&format!(
-                "    let {temporary}: {operation_name} = {expression};\n"
-            ));
+            writeln!(
+                &mut body,
+                "    let {temporary}: {operation_name} = {expression};"
+            )?;
             if capture_words && operation_type == ScalarType::F32 {
                 // Capture the already-admitted native Single result. This is
                 // not a stronger accuracy/FTZ promise for that native operation.
                 let bits = format!("{temporary}_bits");
-                body.push_str(&format!(
-                    "    let {bits}: u32 = bitcast<u32>({temporary});\n"
-                ));
-                word_expressions.insert(output, bits);
+                writeln!(
+                    &mut body,
+                    "    let {bits}: u32 = bitcast<u32>({temporary});"
+                )?;
+                word_expressions.insert(output, bits)?;
             }
-            expressions.insert(output, temporary);
-            if let Some(fact) = program::represented_output_fact(program, operation, resolved)? {
-                let position = represented
-                    .binary_search_by_key(&output, |(id, _)| *id)
-                    .unwrap_or_else(|position| position);
-                if represented
-                    .get(position)
-                    .is_some_and(|(id, _)| *id == output)
-                {
-                    return Err(anyhow!("scalar producer has duplicate output identity"));
-                }
-                represented.insert(position, (output, fact));
-            }
+            expressions.insert(output, temporary)?;
         }
 
         if let Some(roots) = roots {
@@ -368,7 +435,7 @@ impl TypedProducer {
             }
         }
         Ok(Self {
-            body,
+            body: body.into_source(),
             expressions,
             helpers,
             checked_program: None,
@@ -394,16 +461,32 @@ impl TypedProducer {
             .ok_or_else(|| anyhow!("missing typed fusion output"))
     }
     pub fn preamble(&self, program: &ResolvedProgram) -> Result<String> {
+        let mut measured = super::wgsl_source::CountedWgslSource::with_preamble_bytes(0);
+        self.write_preamble(program, &mut measured)?;
+        let mut preamble = String::new();
+        preamble.try_reserve_exact(measured.bytes())?;
+        self.write_preamble(program, &mut preamble)?;
+        if preamble.len() != measured.bytes() {
+            return Err(anyhow!("fusion preamble changed length during emission"));
+        }
+        Ok(preamble)
+    }
+
+    pub(crate) fn write_preamble(
+        &self,
+        program: &ResolvedProgram,
+        writer: &mut impl std::fmt::Write,
+    ) -> Result<()> {
         // Shader text is itself the backend cache key. Include resolved facts
         // even when two otherwise identical programs happen to emit the same
         // arithmetic, so representation contracts do not share a stale key.
         let identity = program.cache_identity()?;
-        let mut math = String::new();
+        writeln!(writer, "// {identity}")?;
         if self.exact_power || self.exact_product {
-            math.push_str(crate::kernel_math::power_exact::functions());
+            writer.write_str(crate::kernel_math::power_exact::functions())?;
         }
         if self.exact_product {
-            math.push_str(crate::kernel_math::product_exact::functions());
+            writer.write_str(crate::kernel_math::product_exact::functions())?;
         }
         for &(helper, precision) in &self.helpers {
             let precision = match precision {
@@ -413,32 +496,47 @@ impl TypedProducer {
             };
             match helper {
                 FusionMathHelper::RealPower => {
-                    math.push_str(&crate::kernel_math::power::functions(precision))
+                    crate::kernel_math::power::write_functions(precision, writer)?
                 }
                 FusionMathHelper::Round => {
-                    math.push_str(&crate::kernel_math::rounding::functions(precision))
+                    crate::kernel_math::rounding::write_functions(precision, writer)?
                 }
-                FusionMathHelper::FloatingRemainder => math.push_str(
-                    &crate::kernel_math::floating_remainder::functions(precision),
-                ),
+                FusionMathHelper::FloatingRemainder => {
+                    crate::kernel_math::floating_remainder::write_functions(precision, writer)?
+                }
             }
         }
-
-        Ok(format!("// {identity}\n{math}\n"))
+        writer.write_char('\n')?;
+        Ok(())
     }
     pub(crate) fn checked_preamble(&self) -> Result<String> {
+        let mut measured = super::wgsl_source::CountedWgslSource::with_preamble_bytes(0);
+        self.write_checked_preamble(&mut measured)?;
+        let mut preamble = String::new();
+        preamble.try_reserve_exact(measured.bytes())?;
+        self.write_checked_preamble(&mut preamble)?;
+        if preamble.len() != measured.bytes() {
+            return Err(anyhow!(
+                "checked fusion preamble changed length during emission"
+            ));
+        }
+        Ok(preamble)
+    }
+
+    pub(crate) fn write_checked_preamble(&self, writer: &mut impl std::fmt::Write) -> Result<()> {
         let checked = self
             .checked_program
             .as_ref()
             .ok_or_else(|| anyhow!("producer has no checked scalar program"))?;
-        let mut math = String::new();
+        writeln!(writer, "// {}", checked.wire().source_identity)?;
         if self.exact_power || self.exact_product {
-            math.push_str(crate::kernel_math::power_exact::functions());
+            writer.write_str(crate::kernel_math::power_exact::functions())?;
         }
         if self.exact_product {
-            math.push_str(crate::kernel_math::product_exact::functions());
+            writer.write_str(crate::kernel_math::product_exact::functions())?;
         }
-        Ok(format!("// {}\n{math}\n", checked.wire().source_identity))
+        writer.write_char('\n')?;
+        Ok(())
     }
 }
 fn product_implementation(output: ValueId) -> EmittedScalarImplementation {
@@ -452,33 +550,52 @@ fn product_implementation(output: ValueId) -> EmittedScalarImplementation {
 }
 pub(crate) fn producer_indices(
     plan: &FusionGroupPlan,
-    leaves: &HashMap<ValueId, String>,
+    leaves: &[ValueId],
     roots: &[ValueId],
-) -> Result<HashSet<usize>> {
-    let mut producers = HashMap::new();
+) -> Result<SelectedProducerIndices> {
+    let mut producers = Vec::new();
+    producers.try_reserve_exact(plan.operations.len())?;
     for (index, operation) in plan.operations.iter().enumerate() {
         let (_, output) = operands(operation);
         let output = output.ok_or_else(|| anyhow!("fusion operation has no output"))?;
-        if leaves.contains_key(&output) || producers.insert(output, index).is_some() {
+        if leaves.binary_search(&output).is_ok() {
             return Err(anyhow!("ambiguous typed fusion producer"));
         }
+        producers.push((output, index));
     }
-    let mut selected = HashSet::new();
-    let mut pending: Vec<_> = roots
+    producers.sort_unstable_by_key(|(id, _)| *id);
+    if producers.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err(anyhow!("ambiguous typed fusion producer"));
+    }
+    let mut bits = Vec::new();
+    bits.try_reserve_exact(plan.operations.len())?;
+    bits.resize(plan.operations.len(), false);
+    let mut selected = SelectedProducerIndices { bits, selected: 0 };
+    let pending_capacity = plan
+        .operations
         .iter()
-        .map(|&id| (id, plan.operations.len()))
-        .collect();
+        .try_fold(roots.len(), |count, operation| {
+            count.checked_add(operands(operation).0.len())
+        })
+        .ok_or_else(|| anyhow!("typed fusion producer traversal overflows"))?;
+    let mut pending = Vec::new();
+    pending.try_reserve_exact(pending_capacity)?;
+    pending.extend(roots.iter().map(|&id| (id, plan.operations.len())));
     while let Some((id, consumer)) = pending.pop() {
-        if leaves.contains_key(&id) {
+        if leaves.binary_search(&id).is_ok() {
             continue;
         }
-        let index = *producers
-            .get(&id)
+        let index = producers
+            .binary_search_by_key(&id, |(output, _)| *output)
+            .ok()
+            .map(|position| producers[position].1)
             .ok_or_else(|| anyhow!("missing typed fusion producer"))?;
         if index >= consumer {
             return Err(anyhow!("cyclic or unordered typed fusion producer"));
         }
-        if selected.insert(index) {
+        if !selected.bits[index] {
+            selected.bits[index] = true;
+            selected.selected += 1;
             let (inputs, _) = operands(&plan.operations[index]);
             pending.extend(inputs.iter().map(|&input| (input, index)));
         }

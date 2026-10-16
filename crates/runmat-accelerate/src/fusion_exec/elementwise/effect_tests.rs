@@ -7,6 +7,7 @@ use runmat_accelerate_api::{
     ProviderFeasibilityQuery, ThreadProviderGuard,
 };
 use std::future::Future;
+use std::rc::Rc;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Mutex,
@@ -265,6 +266,95 @@ fn invoke(provider: &'static FailingProvider) -> ProviderExecutionError {
             Ok(_) => panic!("injected provider hook must fail, not select a continuation"),
         }
     })
+}
+
+struct FinitePreparationOwner(runmat_runtime::context::host_effect::ManagedHostEffectLedger);
+
+impl runmat_runtime::context::RuntimeParallelService for FinitePreparationOwner {
+    fn supports(&self, _: runmat_runtime::context::ParallelCapability) -> bool {
+        false
+    }
+
+    fn placement_resources(&self) -> runmat_runtime::context::RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        runmat_runtime::context::RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..Default::default()
+        }
+    }
+
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<runmat_runtime::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn finite_scalar_preparation_denies_before_provider_work() {
+    runmat_gc::gc_test_context(|| {
+        let source = plan();
+        let tensor = || Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![2]).unwrap());
+        let inputs = vec![tensor(), tensor()];
+        let semantic_bytes =
+            crate::fusion::semantics::preparation_resources::PureSourceGeometry::admit(
+                &source, &inputs,
+            )
+            .unwrap()
+            .overlapping_preparation_bytes(None)
+            .unwrap();
+        for budget in [1, semantic_bytes + 1] {
+            let provider = FailingProvider::new(usize::MAX);
+            let _selected = ThreadProviderGuard::set(Some(provider));
+            let ledger =
+                runmat_runtime::context::host_effect::ManagedHostEffectLedger::new_with_epoch(
+                    budget, 29,
+                );
+            let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ))
+            .with_service_ports(
+                runmat_runtime::context::RuntimeServicePorts::default()
+                    .with_parallel(Rc::new(FinitePreparationOwner(ledger.clone()))),
+            );
+            let request = FusionExecutionRequest {
+                plan: &source,
+                inputs: inputs.clone(),
+                placement: None,
+                runtime: Some(runtime),
+            };
+            let error = match futures::executor::block_on(execute_elementwise_placed(request)) {
+                Err(error) => error,
+                Ok(_) => {
+                    panic!("finite host authority must reject insufficient preparation capacity")
+                }
+            };
+            assert!(
+                !error.is_unsupported(),
+                "quota denial cannot authorize host replay"
+            );
+            let mut cause: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+            let mut denied_by_ledger = false;
+            while let Some(current) = cause {
+                denied_by_ledger |= matches!(
+                    current.downcast_ref::<
+                        runmat_runtime::context::host_allocation::HostAllocationError,
+                    >(),
+                    Some(runmat_runtime::context::host_allocation::HostAllocationError::Resource(_))
+                );
+                cause = current.source();
+            }
+            assert!(
+                denied_by_ledger,
+                "the managed finite owner must deny this reservation"
+            );
+            assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+            assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+            assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        }
+    });
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

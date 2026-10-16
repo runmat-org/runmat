@@ -4,8 +4,6 @@
 //! turn an unevaluated intermediate into a source literal. Input IDs override
 //! captured plan constants in that shared owner before projection.
 
-use std::collections::HashMap;
-
 use runmat_types::{LiteralContext, LiteralValue, NumericClass};
 use runmat_value::{IntValue, NumericScalar, Value};
 
@@ -69,14 +67,13 @@ fn exact(value: &Value) -> LiteralValue {
     }
 }
 
-pub(super) fn for_operands(ids: &[ValueId], leaves: &HashMap<ValueId, &Value>) -> LiteralContext {
+pub(super) fn for_operands<'a>(
+    ids: &[ValueId],
+    source_value: impl Fn(ValueId) -> Option<&'a Value>,
+) -> LiteralContext {
     LiteralContext::new(
         ids.iter()
-            .map(|id| {
-                leaves
-                    .get(id)
-                    .map_or(LiteralValue::Unknown, |value| exact(value))
-            })
+            .map(|id| source_value(*id).map_or(LiteralValue::Unknown, exact))
             .collect(),
     )
 }
@@ -85,13 +82,14 @@ pub(super) fn for_operands(ids: &[ValueId], leaves: &HashMap<ValueId, &Value>) -
 mod tests {
     use super::*;
     use runmat_value::Tensor;
+    use std::collections::HashMap;
 
     #[test]
     fn exact_controls_project_without_inventing_computed_literals() {
         let axes = Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![1, 2]).unwrap());
         let output = Value::String("native".into());
         let leaves = HashMap::from([(7, &axes), (8, &output)]);
-        let projected = for_operands(&[6, 7, 8], &leaves);
+        let projected = for_operands(&[6, 7, 8], |id| leaves.get(&id).copied());
         assert_eq!(projected.literal_args[0], LiteralValue::Unknown);
         assert_eq!(
             projected.literal_args[1],
@@ -114,7 +112,7 @@ mod tests {
         );
         let leaves = HashMap::from([(3, &integer)]);
         assert_eq!(
-            for_operands(&[3], &leaves).literal_args,
+            for_operands(&[3], |id| leaves.get(&id).copied()).literal_args,
             [LiteralValue::Integer {
                 text: u64::MAX.to_string(),
                 class: NumericClass::UInt64,

@@ -2,6 +2,7 @@ use super::*;
 use crate::fusion::{FusionGroup, FusionKernelSpec, FusionKind};
 use crate::graph::{InstrSpan, ShapeInfo};
 use runmat_runtime::builtins::common::spec::ScalarType;
+use std::collections::HashMap;
 
 #[path = "semantics_tests/exact_product.rs"]
 mod exact_product_tests;

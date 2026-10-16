@@ -24,6 +24,8 @@ use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, Reduction
 use runmat_accelerate_api::CovNormalization;
 
 mod expression;
+mod wgsl_source;
+use wgsl_source::WgslShaderFragments;
 mod scope;
 pub use scope::{scope_fusion_plan, FusionPlanFuture};
 mod reduction_group_nodes;
@@ -1633,26 +1635,139 @@ impl FusionGroupPlan {
         final_writes: &str,
         include_ieee_helpers: bool,
     ) -> String {
-        let (input_count, scalar_ty, storage_ty) = input_abi;
         let mut shader = String::new();
+        self.append_wgsl_shader_with_inputs(
+            &mut shader,
+            input_abi,
+            WgslShaderFragments {
+                bindings: output_bindings,
+                body,
+                final_writes,
+            },
+            params_binding_idx,
+            include_ieee_helpers,
+        );
+        shader
+    }
+
+    fn append_wgsl_shader_with_inputs(
+        &self,
+        shader: &mut String,
+        input_abi: (usize, &str, &str),
+        fragments: WgslShaderFragments<&str, &str, &str>,
+        params_binding_idx: usize,
+        include_ieee_helpers: bool,
+    ) {
+        let generated_from = shader.len();
+        self.write_wgsl_shader_with_inputs(
+            shader,
+            input_abi,
+            fragments,
+            params_binding_idx,
+            include_ieee_helpers,
+        )
+        .expect("String WGSL emission is infallible");
+        if input_abi.1 == "f64" && include_ieee_helpers {
+            crate::wgsl::ieee_words::append_if_missing(shader, generated_from);
+        }
+    }
+
+    fn measured_wgsl_shader_bytes_with_inputs(
+        &self,
+        preamble_bytes: usize,
+        input_abi: (usize, &str, &str),
+        fragments: WgslShaderFragments<&str, &str, &str>,
+        params_binding_idx: usize,
+        include_ieee_helpers: bool,
+    ) -> Option<usize> {
+        let mut counter = wgsl_source::CountedWgslSource::with_preamble_bytes(preamble_bytes);
+        self.write_wgsl_shader_with_inputs(
+            &mut counter,
+            input_abi,
+            fragments,
+            params_binding_idx,
+            include_ieee_helpers,
+        )
+        .ok()?;
+        if input_abi.1 == "f64" && include_ieee_helpers && !counter.has_word_helper() {
+            counter
+                .bytes()
+                .checked_add(crate::wgsl::ieee_words::appended_bytes())
+        } else {
+            Some(counter.bytes())
+        }
+    }
+
+    /// The same shell writer counts the exact fixed WGSL and indexed input
+    /// geometry before producer fragments exist. Each fragment has its own
+    /// checked byte authority; reserving the optional IEEE helper is
+    /// conservative when a generated fragment already includes its marker.
+    fn measured_wgsl_shell_bytes_with_inputs(
+        &self,
+        input_abi: (usize, &str, &str),
+        output_binding_bytes: usize,
+        params_binding_idx: usize,
+        body_bytes: usize,
+        final_write_bytes: usize,
+        include_ieee_helpers: bool,
+    ) -> Option<usize> {
+        use wgsl_source::MeasuredFragment;
+        let mut counter = wgsl_source::CountedWgslSource::with_preamble_bytes(0);
+        self.write_wgsl_shader_with_inputs(
+            &mut counter,
+            input_abi,
+            WgslShaderFragments {
+                bindings: MeasuredFragment(output_binding_bytes),
+                body: MeasuredFragment(body_bytes),
+                final_writes: MeasuredFragment(final_write_bytes),
+            },
+            params_binding_idx,
+            include_ieee_helpers,
+        )
+        .ok()?;
+        if input_abi.1 == "f64" && include_ieee_helpers {
+            counter
+                .bytes()
+                .checked_add(crate::wgsl::ieee_words::appended_bytes())
+        } else {
+            Some(counter.bytes())
+        }
+    }
+
+    fn write_wgsl_shader_with_inputs<W: std::fmt::Write>(
+        &self,
+        shader: &mut W,
+        input_abi: (usize, &str, &str),
+        fragments: WgslShaderFragments<
+            impl std::fmt::Display,
+            impl std::fmt::Display,
+            impl std::fmt::Display,
+        >,
+        params_binding_idx: usize,
+        include_ieee_helpers: bool,
+    ) -> std::fmt::Result {
+        let (input_count, scalar_ty, storage_ty) = input_abi;
+        let WgslShaderFragments {
+            bindings: output_bindings,
+            body,
+            final_writes,
+        } = fragments;
 
         // ── type definitions ──────────────────────────────────────────────────
-        shader.push_str("const MAX_RANK: u32 = 128u;\n");
-        shader.push_str("struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };\n");
-        shader.push_str("alias PackedArray = array<PackedValue, MAX_RANK>;\n\n");
-        shader.push_str(&format!(
-            "struct Tensor {{ data: array<{storage_ty}>, }};\n"
-        ));
+        shader.write_str("const MAX_RANK: u32 = 128u;\n")?;
+        shader.write_str(
+            "struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };\n",
+        )?;
+        shader.write_str("alias PackedArray = array<PackedValue, MAX_RANK>;\n\n")?;
+        writeln!(shader, "struct Tensor {{ data: array<{storage_ty}>, }};")?;
 
         // Broadcast-aware Params: len, offset, rank, pad, out_shape and per-input shape/stride
-        shader.push_str(
-            "struct Params {\n    len: u32,\n    offset: u32,\n    rank: u32,\n    _pad: u32,\n    out_shape: PackedArray,\n",
-        );
+        shader.write_str("struct Params {\n    len: u32,\n    offset: u32,\n    rank: u32,\n    _pad: u32,\n    out_shape: PackedArray,\n",)?;
         for idx in 0..input_count {
-            shader.push_str(&format!("    in{}_shape: PackedArray,\n", idx));
-            shader.push_str(&format!("    in{}_stride: PackedArray,\n", idx));
+            writeln!(shader, "    in{}_shape: PackedArray,", idx)?;
+            writeln!(shader, "    in{}_stride: PackedArray,", idx)?;
         }
-        shader.push_str("}\n\n");
+        shader.write_str("}\n\n")?;
 
         // ── portable helper stubs ─────────────────────────────────────────────
         // Avoid relying on backend builtins that may be missing.
@@ -1662,10 +1777,10 @@ impl FusionGroupPlan {
         // Match MATLAB's NaN precedence before guarding against Inf/Inf in the
         // scaled formula.
         if scalar_ty == "f32" {
-            shader.push_str("fn isNan(x: f32) -> bool { let bits = bitcast<u32>(x); return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u; }\n");
-            shader.push_str("fn isFinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }\n");
-            shader.push_str("fn isInf(x: f32) -> bool { return (bitcast<u32>(x) & 0x7fffffffu) == 0x7f800000u; }\n");
-            shader.push_str(concat!(
+            shader.write_str("fn isNan(x: f32) -> bool { let bits = bitcast<u32>(x); return (bits & 0x7f800000u) == 0x7f800000u && (bits & 0x007fffffu) != 0u; }\n")?;
+            shader.write_str("fn isFinite(x: f32) -> bool { return (bitcast<u32>(x) & 0x7f800000u) != 0x7f800000u; }\n")?;
+            shader.write_str("fn isInf(x: f32) -> bool { return (bitcast<u32>(x) & 0x7fffffffu) == 0x7f800000u; }\n")?;
+            shader.write_str(concat!(
                 "fn hypot(a: f32, b: f32) -> f32 {\n",
                 "    if isNan(a) || isNan(b) { return a + b; }\n",
                 "    let lo = min(abs(a), abs(b));\n",
@@ -1675,12 +1790,12 @@ impl FusionGroupPlan {
                 "    let r = lo / hi;\n",
                 "    return hi * sqrt(1.0 + r * r);\n",
                 "}\n\n",
-            ));
+            ))?;
         } else if include_ieee_helpers {
-            shader.push_str("fn isNan(x: f64) -> bool { let low = runmat_f64_low(x); let high = runmat_f64_high(x); return (high & 0x7ff00000u) == 0x7ff00000u && ((high & 0x000fffffu) != 0u || low != 0u); }\n");
-            shader.push_str("fn isFinite(x: f64) -> bool { return (runmat_f64_high(x) & 0x7ff00000u) != 0x7ff00000u; }\n");
-            shader.push_str("fn isInf(x: f64) -> bool { return (runmat_f64_high(x) & 0x7fffffffu) == 0x7ff00000u && runmat_f64_low(x) == 0u; }\n");
-            shader.push_str(concat!(
+            shader.write_str("fn isNan(x: f64) -> bool { let low = runmat_f64_low(x); let high = runmat_f64_high(x); return (high & 0x7ff00000u) == 0x7ff00000u && ((high & 0x000fffffu) != 0u || low != 0u); }\n")?;
+            shader.write_str("fn isFinite(x: f64) -> bool { return (runmat_f64_high(x) & 0x7ff00000u) != 0x7ff00000u; }\n")?;
+            shader.write_str("fn isInf(x: f64) -> bool { return (runmat_f64_high(x) & 0x7fffffffu) == 0x7ff00000u && runmat_f64_low(x) == 0u; }\n")?;
+            shader.write_str(concat!(
                 "fn hypot(a: f64, b: f64) -> f64 {\n",
                 "    if isNan(a) || isNan(b) { return a + b; }\n",
                 "    let lo = min(abs(a), abs(b));\n",
@@ -1690,47 +1805,41 @@ impl FusionGroupPlan {
                 "    let r = lo / hi;\n",
                 "    return hi * sqrt(f64(1.0) + r * r);\n",
                 "}\n\n",
-            ));
+            ))?;
         }
 
         // ── resource bindings ─────────────────────────────────────────────────
         for idx in 0..input_count {
-            shader.push_str(&format!(
-                "@group(0) @binding({idx}) var<storage, read> input{idx}: Tensor;\n",
-            ));
+            writeln!(
+                shader,
+                "@group(0) @binding({idx}) var<storage, read> input{idx}: Tensor;",
+            )?;
         }
-        shader.push_str(output_bindings);
-        shader.push_str(&format!(
+        write!(shader, "{output_bindings}")?;
+        write!(
+            shader,
             "@group(0) @binding({params_binding_idx}) var<uniform> params: Params;\n\n",
-        ));
+        )?;
 
         // ── compute entry point ───────────────────────────────────────────────
-        shader.push_str(
-            "@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n",
-        );
-        shader.push_str("    let idx = gid.x;\n    if (idx >= params.len) { return; }\n");
-        shader.push_str("    let g = idx + params.offset;\n");
+        shader.write_str("@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n",)?;
+        shader.write_str("    let idx = gid.x;\n    if (idx >= params.len) { return; }\n")?;
+        shader.write_str("    let g = idx + params.offset;\n")?;
 
         // Compute N-D coordinates from global index (with chunk offset)
-        shader.push_str(
-            "    var coord: array<u32, MAX_RANK>;\n    var tmp: u32 = g;\n    var d: u32 = 0u;\n    loop { if d >= params.rank { break; } let dim = params.out_shape[d].value; if dim == 0u { coord[d] = 0u; } else { coord[d] = tmp % dim; tmp = tmp / dim; } d = d + 1u; }\n",
-        );
+        shader.write_str("    var coord: array<u32, MAX_RANK>;\n    var tmp: u32 = g;\n    var d: u32 = 0u;\n    loop { if d >= params.rank { break; } let dim = params.out_shape[d].value; if dim == 0u { coord[d] = 0u; } else { coord[d] = tmp % dim; tmp = tmp / dim; } d = d + 1u; }\n",)?;
 
         // Compute broadcasted flat indices per input
         for idx in 0..input_count {
-            shader.push_str(&format!(
-                "    var i{idx}: u32 = 0u; d = 0u; loop {{ if d >= params.rank {{ break; }} let sd = params.in{idx}_shape[d].value; let st = params.in{idx}_stride[d].value; let c = select(coord[d], 0u, sd == 1u); i{idx} = i{idx} + c * st; d = d + 1u; }}\n",
-            ));
+            writeln!(shader,
+                "    var i{idx}: u32 = 0u; d = 0u; loop {{ if d >= params.rank {{ break; }} let sd = params.in{idx}_shape[d].value; let st = params.in{idx}_stride[d].value; let c = select(coord[d], 0u, sd == 1u); i{idx} = i{idx} + c * st; d = d + 1u; }}",
+            )?;
         }
 
-        shader.push_str(body);
-        shader.push_str(final_writes);
-        shader.push_str("}\n");
-        if scalar_ty == "f64" && include_ieee_helpers {
-            crate::wgsl::ieee_words::inject(&shader)
-        } else {
-            shader
-        }
+        write!(shader, "{body}")?;
+        write!(shader, "{final_writes}")?;
+        shader.write_str("}\n")?;
+        Ok(())
     }
 
     /// Generate a single WGSL shader that writes all `output_ids` in one compute pass,
@@ -3078,54 +3187,122 @@ fn source_literal_constant(graph: &AccelGraph, vid: ValueId) -> Option<&Value> {
     graph.source_literal_constant(vid)
 }
 
+pub(crate) trait ExpressionLookup {
+    fn get(&self, id: &ValueId) -> Option<&String>;
+}
+
+impl ExpressionLookup for HashMap<ValueId, String> {
+    fn get(&self, id: &ValueId) -> Option<&String> {
+        HashMap::get(self, id)
+    }
+}
+
+impl ExpressionLookup for Vec<(ValueId, String)> {
+    fn get(&self, id: &ValueId) -> Option<&String> {
+        self.binary_search_by_key(id, |(key, _)| *key)
+            .ok()
+            .map(|index| &self[index].1)
+    }
+}
+
 fn primitive_expr(
     op: PrimitiveOp,
     inputs: &[ValueId],
-    exprs: &HashMap<ValueId, String>,
+    exprs: &impl ExpressionLookup,
 ) -> Option<String> {
-    let arguments = inputs
-        .iter()
-        .map(|input| exprs.get(input).cloned())
-        .collect::<Option<Vec<_>>>()?;
+    primitive_expr_checked(op, inputs, exprs).ok().flatten()
+}
+
+fn primitive_expr_checked(
+    op: PrimitiveOp,
+    inputs: &[ValueId],
+    exprs: &impl ExpressionLookup,
+) -> anyhow::Result<Option<String>> {
+    // Every admitted scalar primitive is unary or binary. Borrow the source
+    // expressions while rendering; cloning both operands would create a
+    // second request-local payload outside the counted producer geometry.
+    if inputs.len() > 2 {
+        return Ok(None);
+    }
+    let mut arguments = [""; 2];
+    for (slot, input) in arguments.iter_mut().zip(inputs) {
+        let Some(expression) = exprs.get(input) else {
+            return Ok(None);
+        };
+        *slot = expression.as_str();
+    }
+    let arguments = &arguments[..inputs.len()];
     match op {
-        PrimitiveOp::Add => scalar_operator_expr(OperatorKind::Add, &arguments),
-        PrimitiveOp::Sub => scalar_operator_expr(OperatorKind::Subtract, &arguments),
+        PrimitiveOp::Add => scalar_operator_expr(OperatorKind::Add, arguments),
+        PrimitiveOp::Sub => scalar_operator_expr(OperatorKind::Subtract, arguments),
         PrimitiveOp::Mul | PrimitiveOp::ElemMul => {
-            scalar_operator_expr(OperatorKind::ElementwiseMultiply, &arguments)
+            scalar_operator_expr(OperatorKind::ElementwiseMultiply, arguments)
         }
-        PrimitiveOp::ElemDiv => scalar_operator_expr(OperatorKind::ElementwiseDivide, &arguments),
+        PrimitiveOp::ElemDiv => scalar_operator_expr(OperatorKind::ElementwiseDivide, arguments),
         PrimitiveOp::ElemLeftDiv => {
-            scalar_operator_expr(OperatorKind::ElementwiseLeftDivide, &arguments)
+            scalar_operator_expr(OperatorKind::ElementwiseLeftDivide, arguments)
         }
         PrimitiveOp::Pow | PrimitiveOp::ElemPow => {
-            let [lhs, rhs] = arguments.as_slice() else {
-                return None;
+            let [lhs, rhs] = arguments else {
+                return Ok(None);
             };
-            if expr_is_literal(rhs.as_str(), 2.0) {
-                return Some(format!("({lhs} * {lhs})"));
+            if expr_is_literal(rhs, 2.0) {
+                return Ok(Some(format!("({lhs} * {lhs})")));
             }
-            Some(format!("pow({lhs}, {rhs})"))
+            Ok(Some(format!("pow({lhs}, {rhs})")))
         }
-        PrimitiveOp::Neg => scalar_operator_expr(OperatorKind::UnaryMinus, &arguments),
-        PrimitiveOp::UPlus => scalar_operator_expr(OperatorKind::UnaryPlus, &arguments),
-        _ => None,
+        PrimitiveOp::Neg => scalar_operator_expr(OperatorKind::UnaryMinus, arguments),
+        PrimitiveOp::UPlus => scalar_operator_expr(OperatorKind::UnaryPlus, arguments),
+        _ => Ok(None),
     }
 }
 
 /// One WGSL spelling for both the legacy primitive route and checked scalar
 /// programs. Domain admission decides which operations may reach this lowerer.
-fn scalar_operator_expr(operation: OperatorKind, arguments: &[String]) -> Option<String> {
+fn scalar_operator_expr(
+    operation: OperatorKind,
+    arguments: &[impl std::fmt::Display],
+) -> anyhow::Result<Option<String>> {
+    let arity = match operation {
+        OperatorKind::Add
+        | OperatorKind::Subtract
+        | OperatorKind::ElementwiseMultiply
+        | OperatorKind::ElementwiseDivide
+        | OperatorKind::ElementwiseLeftDivide => 2,
+        OperatorKind::UnaryMinus | OperatorKind::UnaryPlus => 1,
+        _ => return Ok(None),
+    };
+    if arguments.len() != arity {
+        return Ok(None);
+    }
+    let mut measured = wgsl_source::CountedWgslSource::with_preamble_bytes(0);
+    write_scalar_operator_expr(&mut measured, operation, arguments)?;
+    let mut expression = String::new();
+    expression.try_reserve_exact(measured.bytes())?;
+    write_scalar_operator_expr(&mut expression, operation, arguments)?;
+    if expression.len() != measured.bytes() {
+        return Err(std::fmt::Error.into());
+    }
+    Ok(Some(expression))
+}
+
+/// The operation spelling is shared by legacy emission, checked scalar
+/// lowering, and allocation-free geometry measurement.
+pub(super) fn write_scalar_operator_expr(
+    writer: &mut impl std::fmt::Write,
+    operation: OperatorKind,
+    arguments: &[impl std::fmt::Display],
+) -> std::fmt::Result {
     match (operation, arguments) {
-        (OperatorKind::Add, [a, b]) => Some(format!("({a} + {b})")),
-        (OperatorKind::Subtract, [a, b]) => Some(format!("({a} - {b})")),
-        (OperatorKind::ElementwiseMultiply, [a, b]) => Some(format!("({a} * {b})")),
-        (OperatorKind::ElementwiseDivide, [a, b]) => Some(format!("({a} / {b})")),
-        (OperatorKind::ElementwiseLeftDivide, [a, b]) => Some(format!("({b} / {a})")),
-        (OperatorKind::UnaryMinus, [a]) => Some(format!("(-{a})")),
-        // WGSL has no unary `+`; numeric admission already establishes the
-        // operand's class, so unary plus preserves the expression unchanged.
-        (OperatorKind::UnaryPlus, [a]) => Some(a.clone()),
-        _ => None,
+        (OperatorKind::Add, [a, b]) => write!(writer, "({a} + {b})"),
+        (OperatorKind::Subtract, [a, b]) => write!(writer, "({a} - {b})"),
+        (OperatorKind::ElementwiseMultiply, [a, b]) => write!(writer, "({a} * {b})"),
+        (OperatorKind::ElementwiseDivide, [a, b]) => write!(writer, "({a} / {b})"),
+        (OperatorKind::ElementwiseLeftDivide, [a, b]) => write!(writer, "({b} / {a})"),
+        (OperatorKind::UnaryMinus, [a]) => write!(writer, "(-{a})"),
+        // WGSL has no unary `+`; admission already establishes the class.
+        (OperatorKind::UnaryPlus, [a]) => write!(writer, "{a}"),
+        _ => Err(std::fmt::Error),
     }
 }
 
@@ -3144,7 +3321,7 @@ fn expr_is_literal(expr: &str, expected: f64) -> bool {
 fn builtin_expr(
     name: &str,
     inputs: &[ValueId],
-    exprs: &HashMap<ValueId, String>,
+    exprs: &impl ExpressionLookup,
     scalar_ty: &str,
 ) -> Option<String> {
     if let Some(entry) = runmat_builtins::builtin_catalog_entry_by_name(name) {
@@ -3246,11 +3423,7 @@ fn builtin_expr(
     Some(format!("{func}({arg})"))
 }
 
-fn builtin_binary(
-    func: &str,
-    inputs: &[ValueId],
-    exprs: &HashMap<ValueId, String>,
-) -> Option<String> {
+fn builtin_binary(func: &str, inputs: &[ValueId], exprs: &impl ExpressionLookup) -> Option<String> {
     let lhs = exprs.get(inputs.first()?).cloned()?;
     let rhs = exprs.get(inputs.get(1)?).cloned()?;
     Some(format!("{func}({lhs}, {rhs})"))
@@ -3259,13 +3432,13 @@ fn builtin_binary(
 fn builtin_unary_call(
     func: &str,
     inputs: &[ValueId],
-    exprs: &HashMap<ValueId, String>,
+    exprs: &impl ExpressionLookup,
 ) -> Option<String> {
     let arg = exprs.get(inputs.first()?).cloned()?;
     Some(format!("{func}({arg})"))
 }
 
-fn builtin_identity(inputs: &[ValueId], exprs: &HashMap<ValueId, String>) -> Option<String> {
+fn builtin_identity(inputs: &[ValueId], exprs: &impl ExpressionLookup) -> Option<String> {
     exprs.get(inputs.first()?).cloned()
 }
 
@@ -4062,6 +4235,65 @@ mod tests {
         let wgsl = group_plan.generate_wgsl("f32").expect("wgsl");
         assert!(wgsl.contains("@compute"));
         assert!(group_plan.group.element_count().is_some());
+    }
+
+    #[test]
+    fn counted_wgsl_source_matches_emission_with_f64_helper() {
+        let graph = simple_elementwise_graph();
+        let groups = detect_fusion_groups(&graph);
+        let plan = FusionPlan::from_graph(&graph, &groups);
+        let group = &plan.groups[0];
+        let bindings = "@group(0) @binding(1) var<storage, read_write> output0: Tensor;\n";
+        let body = "    let typed0: f64 = input0.data[i0];\n";
+        let writes = "    output0.data[g] = typed0;\n";
+        let mut source = "// retained preamble\n".to_owned();
+        let fragments = WgslShaderFragments {
+            bindings,
+            body,
+            final_writes: writes,
+        };
+        let measured = group
+            .measured_wgsl_shader_bytes_with_inputs(
+                source.len(),
+                (1, "f64", "f64"),
+                fragments,
+                2,
+                true,
+            )
+            .unwrap();
+        group.append_wgsl_shader_with_inputs(&mut source, (1, "f64", "f64"), fragments, 2, true);
+        assert_eq!(measured, source.len());
+        assert!(source.contains("fn runmat_f64_from_words("));
+    }
+
+    #[test]
+    fn counted_math_helpers_match_emitted_source_bytes() {
+        for precision in [
+            runmat_accelerate_api::ProviderPrecision::F32,
+            runmat_accelerate_api::ProviderPrecision::F64,
+        ] {
+            let mut power = super::wgsl_source::CountedWgslSource::with_preamble_bytes(0);
+            crate::kernel_math::power::write_functions(precision, &mut power).unwrap();
+            assert_eq!(
+                power.bytes(),
+                crate::kernel_math::power::functions(precision).len()
+            );
+
+            let mut round = super::wgsl_source::CountedWgslSource::with_preamble_bytes(0);
+            crate::kernel_math::rounding::write_functions(precision, &mut round).unwrap();
+            assert_eq!(
+                round.bytes(),
+                crate::kernel_math::rounding::functions(precision).len()
+            );
+
+            let mut remainder = super::wgsl_source::CountedWgslSource::with_preamble_bytes(0);
+            crate::kernel_math::floating_remainder::write_functions(precision, &mut remainder)
+                .unwrap();
+            assert_eq!(
+                remainder.bytes(),
+                crate::kernel_math::floating_remainder::functions(precision).len()
+            );
+        }
     }
 
     #[test]
