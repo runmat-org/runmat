@@ -413,6 +413,23 @@ fn regress_surface_executes_from_scripts() {
 }
 
 #[test]
+fn nlparci_jacobian_and_covariance_forms_execute_from_scripts() {
+    let vars = execute_source(
+        "beta = [1; 2]; r = [1; -1; 1; -1]; J = [1 -1; 1 -1; 1 1; 1 1]; CovB = [0.5 0; 0 0.5]; ciJ = nlparci(beta,r,'Jacobian',J); ciC = nlparci(beta,r,'Covar',CovB,'Alpha',0.05); difference = max(abs(ciJ(:)-ciC(:)));",
+    )
+    .expect("nlparci source forms");
+    let half_width = 4.302_652_729_749_462 * 0.5_f64.sqrt();
+    let expected = [
+        1.0 - half_width,
+        2.0 - half_width,
+        1.0 + half_width,
+        2.0 + half_width,
+    ];
+    assert!(has_tensor_data(&vars, &[2, 2], &expected));
+    assert!(has_num(&vars, 0.0));
+}
+
+#[test]
 fn lscov_surface_executes_from_scripts() {
     let vars = execute_source(
         "A = [1 0; 1 1; 1 2]; B = [1; 2; 10]; V = [1; 1; 100]; [x,stdx,mse,S] = lscov(A, B, V, 'orth'); intercept = x(1); slope = x(2);",

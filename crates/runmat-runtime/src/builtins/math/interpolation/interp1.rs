@@ -22,9 +22,9 @@ use crate::builtins::common::spec::{
 
 use super::pp::{
     build_makima_pp, build_pchip_pp, build_spline_pp, evaluate_linear_or_nearest, evaluate_pp,
-    implicit_series_from_values, interp1_series_from_plan, is_vector_shape, parse_extrapolation,
-    parse_method, prepare_interp1_samples, query_points, Extrapolation, Interp1SamplePlan,
-    InterpMethod, PpOutputLayout,
+    implicit_series_from_values, interp1_series_from_plan, is_spline_execution_failure,
+    is_vector_shape, parse_extrapolation, parse_method, prepare_interp1_samples, query_points,
+    Extrapolation, Interp1SamplePlan, InterpMethod, PpOutputLayout,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
@@ -93,9 +93,13 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "interp1",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::interpolation::interp1"
+    builtin_path = "crate::builtins::math::interpolation::interp1",
+    context = true
 )]
-async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn interp1_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     let explicit = args.len() >= 3 && !third_arg_is_option(&args);
     let sample_plan = if explicit {
         preflight_interp1_explicit_x(&args[0]).await?;
@@ -124,8 +128,18 @@ async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         )
         .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL)),
         InterpMethod::Spline => {
-            let pp = build_spline_pp(&parsed.series, NAME)
-                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))?;
+            let mut work = runtime
+                .as_ref()
+                .map(crate::context::RuntimeContext::cpu_cooperation);
+            let pp = build_spline_pp(&parsed.series, NAME, &mut work)
+                .await
+                .map_err(|err| {
+                    if is_spline_execution_failure(&err) {
+                        crate::builtins::common::map_control_flow_with_builtin(err, NAME)
+                    } else {
+                        interp1_map_error(err, &INTERP1_ERROR_INTERNAL)
+                    }
+                })?;
             evaluate_pp(
                 &pp,
                 &parsed.query,
@@ -160,6 +174,11 @@ async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
         }
     }
+}
+
+#[cfg(test)]
+async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    interp1_builtin_registered(None, args).await
 }
 
 async fn preflight_interp1_explicit_x(value: &Value) -> crate::BuiltinResult<()> {

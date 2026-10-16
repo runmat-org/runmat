@@ -1,13 +1,14 @@
 //! MATLAB-compatible `issymmetric` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderSymmetryKind};
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::ISSYMMETRIC_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
+    ISSYMMETRIC_ERROR_INTERNAL, ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
+    ISSYMMETRIC_ERROR_INVALID_INPUT, ISSYMMETRIC_FLAG_ALIAS_EXTENSION,
+    ISSYMMETRIC_INTEGER_INPUT_EXTENSION, ISSYMMETRIC_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value};
@@ -19,155 +20,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::structure::integer_symmetry;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "issymmetric";
-
-const ISSYMMETRIC_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when the matrix satisfies the selected symmetry predicate.",
-}];
-
-const ISSYMMETRIC_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const ISSYMMETRIC_INPUTS_OPTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Symmetry flag or tolerance scalar.",
-    },
-];
-
-const ISSYMMETRIC_INPUTS_FLAG_TOL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "flag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Symmetry flag (for example \"skew\" or \"symmetric\").",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Tolerance for element-wise symmetry checks.",
-    },
-];
-
-const ISSYMMETRIC_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A)",
-        inputs: &ISSYMMETRIC_INPUTS,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A, option)",
-        inputs: &ISSYMMETRIC_INPUTS_OPTION,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A, flag, tol)",
-        inputs: &ISSYMMETRIC_INPUTS_FLAG_TOL,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = issymmetric(A, tol, flag)",
-        inputs: &ISSYMMETRIC_INPUTS_FLAG_TOL,
-        outputs: &ISSYMMETRIC_OUTPUT,
-    },
-];
-
-const ISSYMMETRIC_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSYMMETRIC.INVALID_ARGUMENT",
-    identifier: Some("RunMat:issymmetric:InvalidArgument"),
-    when: "Flag/tolerance arguments are malformed, duplicated, or unsupported.",
-    message: "issymmetric: invalid argument",
-};
-
-const ISSYMMETRIC_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSYMMETRIC.INVALID_INPUT",
-    identifier: Some("RunMat:issymmetric:InvalidInput"),
-    when: "Input shape/type cannot be interpreted as a numeric or logical 2-D matrix.",
-    message: "issymmetric: invalid input",
-};
-
-const ISSYMMETRIC_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISSYMMETRIC.INTERNAL",
-    identifier: Some("RunMat:issymmetric:Internal"),
-    when: "Runtime fails while creating internal tensors or coercing values.",
-    message: "issymmetric: internal runtime failure",
-};
-
-const ISSYMMETRIC_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ISSYMMETRIC_ERROR_INVALID_ARGUMENT,
-    ISSYMMETRIC_ERROR_INVALID_INPUT,
-    ISSYMMETRIC_ERROR_INTERNAL,
-];
-
-pub const ISSYMMETRIC_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISSYMMETRIC_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISSYMMETRIC_ERRORS,
-};
-
-const ISSYMMETRIC_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "issymmetric-integer-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "issymmetric with typed-integer input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IssymmetricIntegerInputExtension"),
-    };
-const ISSYMMETRIC_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "issymmetric-tolerance-form",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "issymmetric tolerance arguments are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IssymmetricToleranceExtension"),
-};
-const ISSYMMETRIC_FLAG_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "issymmetric-flag-aliases",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "issymmetric flag aliases beyond 'nonskew' and 'skew' are RunMat extensions",
-    error_identifier: Some("RunMat:compatibility:IssymmetricFlagAliasExtension"),
-};
-const ISSYMMETRIC_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    ISSYMMETRIC_INTEGER_INPUT_EXTENSION,
-    ISSYMMETRIC_TOLERANCE_EXTENSION,
-    ISSYMMETRIC_FLAG_ALIAS_EXTENSION,
-];
-pub const ISSYMMETRIC_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "MATLAB documents single, double, and logical matrix inputs; RunMat integer matrices and tolerance arguments are separately declared and gated extensions.",
-    };
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
@@ -220,16 +77,7 @@ fn issymmetric_error_with_detail(
 
 #[runtime_builtin(
     name = "issymmetric",
-    category = "math/linalg/structure",
-    summary = "Test whether a matrix is symmetric or skew-symmetric.",
-    keywords = "issymmetric,symmetric,skew-symmetric,matrix structure,gpu",
-    accel = "metadata",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::issymmetric::ISSYMMETRIC_DESCRIPTOR),
-    extensions(ISSYMMETRIC_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::issymmetric::ISSYMMETRIC_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::issymmetric"
 )]
 async fn issymmetric_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -2,7 +2,9 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderCondNorm};
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::{GpuTensorHandle, ProviderCondNorm, ProviderPrecision};
 #[cfg(test)]
 use runmat_builtins::COND_DESCRIPTOR;
 use runmat_builtins::{
@@ -172,7 +174,7 @@ fn ensure_cond_input_policy(value: &Value) -> BuiltinResult<()> {
 }
 
 async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Value> {
-    let maybe_provider = runmat_accelerate_api::provider_for_handle(&handle);
+    let maybe_provider = gpu_helpers::exact_provider_for_handle(&handle);
 
     if runmat_accelerate_api::handle_integer_type(&handle).is_some() {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
@@ -181,15 +183,23 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
         let tensor = tensor::value_into_tensor_for(NAME, gathered).map_err(builtin_error)?;
         let cond_value = cond_real_tensor_builtin(&tensor, norm)?;
         if let Some(provider) = maybe_provider {
-            let uploaded = upload_scalar(provider, cond_value)?;
-            return gpu_helpers::resident_gpu_value(uploaded);
+            return gpu_helpers::restore_real_scalar_after_host(
+                &handle,
+                provider,
+                cond_value,
+                cond_output_precision(&handle)?,
+                NAME,
+                internal_error,
+            );
         }
         return Ok(Value::Num(cond_value));
     }
 
-    if let Some(provider) = maybe_provider {
-        if let Some(value) = cond_gpu_via_provider(provider, &handle, norm).await? {
-            return Ok(value);
+    if !runmat_accelerate_api::handle_is_logical(&handle) {
+        if let Some(provider) = maybe_provider {
+            if let Some(value) = cond_gpu_via_provider(provider, &handle, norm).await? {
+                return Ok(value);
+            }
         }
     }
 
@@ -221,8 +231,14 @@ async fn cond_gpu(handle: GpuTensorHandle, norm: CondNorm) -> BuiltinResult<Valu
     };
 
     if let Some(provider) = maybe_provider {
-        let uploaded = upload_scalar(provider, cond_value)?;
-        return gpu_helpers::resident_gpu_value(uploaded);
+        return gpu_helpers::restore_real_scalar_after_host(
+            &handle,
+            provider,
+            cond_value,
+            cond_output_precision(&handle)?,
+            NAME,
+            internal_error,
+        );
     }
 
     Ok(Value::Num(cond_value))
@@ -235,8 +251,39 @@ async fn cond_gpu_via_provider(
 ) -> BuiltinResult<Option<Value>> {
     let provider_norm = ProviderCondNorm::from(norm);
     match provider.cond(handle, provider_norm).await {
-        Ok(result) => Ok(Some(Value::GpuTensor(result))),
-        Err(_err) => Ok(None),
+        Ok(mut result)
+            if gpu_helpers::unary_gpu_output_matches_shape(
+                &result,
+                handle,
+                provider,
+                &[1, 1],
+                gpu_helpers::UnaryGpuOutputContract {
+                    storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    precision: runmat_accelerate_api::handle_precision(handle),
+                    integer: None,
+                    logical: false,
+                    alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                },
+            ) =>
+        {
+            if let Err(error) = gpu_helpers::propagate_output_provenance(&mut result, [handle]) {
+                return Err(gpu_helpers::reject_gpu_output(result, error));
+            }
+            gpu_helpers::resident_gpu_value(result).map(Some)
+        }
+        Ok(result) => {
+            let failure =
+                internal_error("cond: provider returned a malformed, aliased, or foreign scalar");
+            Err(gpu_helpers::reject_gpu_output(result, failure))
+        }
+        Err(error) if error.is_unsupported() => Ok(None),
+        Err(error) => {
+            let mut failure = internal_error(format!("cond: provider execution failed: {error}"));
+            failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+            Err(crate::runtime_error::with_provider_execution_source(
+                failure, error,
+            ))
+        }
     }
 }
 
@@ -561,19 +608,17 @@ fn parse_norm_string(text: &str) -> BuiltinResult<CondNorm> {
     }
 }
 
-fn upload_scalar(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    value: f64,
-) -> BuiltinResult<GpuTensorHandle> {
-    let data = [value];
-    let shape = [1usize, 1usize];
-    let view = HostTensorView {
-        data: &data,
-        shape: &shape,
-    };
-    provider
-        .upload(&view)
-        .map_err(|e| internal_error(format!("{NAME}: {e}")))
+fn cond_output_precision(handle: &GpuTensorHandle) -> BuiltinResult<ProviderPrecision> {
+    if runmat_accelerate_api::handle_integer_type(handle).is_some()
+        || runmat_accelerate_api::handle_is_logical(handle)
+    {
+        return Ok(ProviderPrecision::F64);
+    }
+    runmat_accelerate_api::handle_precision(handle).ok_or_else(|| {
+        let mut failure = internal_error("cond: input has no floating physical precision");
+        failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        failure
+    })
 }
 
 /// Helper for provider backends that reuse the host implementation.

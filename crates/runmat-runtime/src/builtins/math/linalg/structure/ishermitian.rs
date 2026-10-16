@@ -1,13 +1,14 @@
 //! MATLAB-compatible `ishermitian` builtin with GPU-aware semantics for RunMat.
 
 use runmat_accelerate_api::{GpuTensorHandle, ProviderHermitianKind};
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::ISHERMITIAN_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
+    ISHERMITIAN_ERROR_INTERNAL, ISHERMITIAN_ERROR_INVALID_ARGUMENT,
+    ISHERMITIAN_ERROR_INVALID_INPUT, ISHERMITIAN_FLAG_ALIAS_EXTENSION,
+    ISHERMITIAN_INTEGER_INPUT_EXTENSION, ISHERMITIAN_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, NumericScalar, Tensor, Value};
@@ -19,155 +20,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::linalg::structure::integer_symmetry;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "ishermitian";
-
-const ISHERMITIAN_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when the matrix satisfies the selected Hermitian predicate.",
-}];
-
-const ISHERMITIAN_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const ISHERMITIAN_INPUTS_OPTION: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "option",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Hermitian mode flag or tolerance scalar.",
-    },
-];
-
-const ISHERMITIAN_INPUTS_FLAG_TOL: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "flag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Mode flag (for example \"hermitian\" or \"skew\").",
-    },
-    BuiltinParamDescriptor {
-        name: "tol",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Tolerance for Hermitian comparison checks.",
-    },
-];
-
-const ISHERMITIAN_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "tf = ishermitian(A)",
-        inputs: &ISHERMITIAN_INPUTS,
-        outputs: &ISHERMITIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = ishermitian(A, option)",
-        inputs: &ISHERMITIAN_INPUTS_OPTION,
-        outputs: &ISHERMITIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = ishermitian(A, flag, tol)",
-        inputs: &ISHERMITIAN_INPUTS_FLAG_TOL,
-        outputs: &ISHERMITIAN_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "tf = ishermitian(A, tol, flag)",
-        inputs: &ISHERMITIAN_INPUTS_FLAG_TOL,
-        outputs: &ISHERMITIAN_OUTPUT,
-    },
-];
-
-const ISHERMITIAN_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISHERMITIAN.INVALID_ARGUMENT",
-    identifier: Some("RunMat:ishermitian:InvalidArgument"),
-    when: "Flag/tolerance arguments are malformed, duplicated, or unsupported.",
-    message: "ishermitian: invalid argument",
-};
-
-const ISHERMITIAN_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISHERMITIAN.INVALID_INPUT",
-    identifier: Some("RunMat:ishermitian:InvalidInput"),
-    when: "Input shape/type cannot be interpreted as a numeric or logical 2-D matrix.",
-    message: "ishermitian: invalid input",
-};
-
-const ISHERMITIAN_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISHERMITIAN.INTERNAL",
-    identifier: Some("RunMat:ishermitian:Internal"),
-    when: "Runtime fails while creating internal tensors or coercing values.",
-    message: "ishermitian: internal runtime failure",
-};
-
-const ISHERMITIAN_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    ISHERMITIAN_ERROR_INVALID_ARGUMENT,
-    ISHERMITIAN_ERROR_INVALID_INPUT,
-    ISHERMITIAN_ERROR_INTERNAL,
-];
-
-pub const ISHERMITIAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISHERMITIAN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISHERMITIAN_ERRORS,
-};
-
-const ISHERMITIAN_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "ishermitian-integer-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "ishermitian with typed-integer input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:IshermitianIntegerInputExtension"),
-    };
-const ISHERMITIAN_TOLERANCE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ishermitian-tolerance-form",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ishermitian tolerance arguments are a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IshermitianToleranceExtension"),
-};
-const ISHERMITIAN_FLAG_ALIAS_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "ishermitian-flag-aliases",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "ishermitian flag aliases beyond 'nonskew' and 'skew' are RunMat extensions",
-    error_identifier: Some("RunMat:compatibility:IshermitianFlagAliasExtension"),
-};
-const ISHERMITIAN_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    ISHERMITIAN_INTEGER_INPUT_EXTENSION,
-    ISHERMITIAN_TOLERANCE_EXTENSION,
-    ISHERMITIAN_FLAG_ALIAS_EXTENSION,
-];
-pub const ISHERMITIAN_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "MATLAB documents single, double, and logical matrix inputs; RunMat integer matrices and tolerance arguments are separately declared and gated extensions.",
-    };
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
@@ -220,16 +77,7 @@ fn ishermitian_error_with_detail(
 
 #[runtime_builtin(
     name = "ishermitian",
-    category = "math/linalg/structure",
-    summary = "Determine whether a matrix is Hermitian or skew-Hermitian.",
-    keywords = "ishermitian,hermitian,skew-hermitian,matrix structure,gpu",
-    accel = "metadata",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::ishermitian::ISHERMITIAN_DESCRIPTOR),
-    extensions(ISHERMITIAN_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::ishermitian::ISHERMITIAN_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::ishermitian"
 )]
 async fn ishermitian_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {

@@ -178,14 +178,13 @@ async fn rcond_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                     error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                     return Err(gpu_helpers::reject_gpu_output(result, error));
                 }
-                Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+                Err(error) if error.is_unsupported() => {}
                 Err(error) => {
                     let mut failure =
                         builtin_error(format!("rcond: provider execution failed: {error}"));
                     failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
                     return Err(crate::runtime_error::with_provider_execution_source(
-                        failure,
-                        error.into(),
+                        failure, error,
                     ));
                 }
             }
@@ -247,24 +246,19 @@ fn valid_provider_rcond_result(
     source: &GpuTensorHandle,
     result: &GpuTensorHandle,
 ) -> bool {
-    result.allocation_lease().validate_live().is_ok()
-        && !source.shares_allocation_with(result)
-        && result.shape() == [1, 1]
-        && result.device_id() == provider.device_id()
-        && gpu_helpers::exact_provider_for_handle(result)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && runmat_accelerate_api::handle_storage(result)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(result)
-            == runmat_accelerate_api::handle_precision(source)
-        && runmat_accelerate_api::handle_integer_type(result).is_none()
-        && !runmat_accelerate_api::handle_is_logical(result)
-        && gpu_helpers::gpu_class_metadata_matches(
-            result,
-            runmat_accelerate_api::handle_precision(source),
-            None,
-            false,
-        )
+    gpu_helpers::unary_gpu_output_matches_shape(
+        result,
+        source,
+        provider,
+        &[1, 1],
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(source),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        },
+    )
 }
 
 fn rcond_real_tensor(matrix: &Tensor) -> BuiltinResult<f64> {

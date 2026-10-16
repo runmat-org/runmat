@@ -188,7 +188,7 @@ async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(result, error));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => {
                 let mut failure = pinv_error_with_message(
                     format!("pinv: provider execution failed: {error}"),
@@ -196,8 +196,7 @@ async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
                 );
                 failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(crate::runtime_error::with_provider_execution_source(
-                    failure,
-                    error.into(),
+                    failure, error,
                 ));
             }
         }
@@ -227,22 +226,19 @@ fn valid_pinv_gpu_output(
 ) -> bool {
     let rows = input.shape().first().copied().unwrap_or(1);
     let cols = input.shape().get(1).copied().unwrap_or(1);
-    output.shape() == [cols, rows]
-        && output.device_id() == input.device_id()
-        && !input.shares_allocation_with(output)
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && runmat_accelerate_api::handle_storage(output)
-            == runmat_accelerate_api::handle_storage(input)
-        && runmat_accelerate_api::handle_precision(output) == pinv_output_precision(input)
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && gpu_helpers::gpu_class_metadata_matches(
-            output,
-            pinv_output_precision(input),
-            None,
-            false,
-        )
+    gpu_helpers::unary_gpu_output_matches_shape(
+        output,
+        input,
+        provider,
+        &[cols, rows],
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: runmat_accelerate_api::handle_storage(input),
+            precision: pinv_output_precision(input),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        },
+    )
 }
 
 fn pinv_output_precision(

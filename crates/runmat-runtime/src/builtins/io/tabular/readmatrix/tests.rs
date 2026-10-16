@@ -131,6 +131,57 @@ fn values(tensor: &Tensor) -> Vec<f64> {
 }
 
 #[test]
+fn readmatrix_applies_typed_per_column_missing_and_numeric_rules() {
+    let _fs_lock = runmat_filesystem::provider_override_lock();
+    let path = unique_path("readmatrix_variable_options");
+    fs::write(&path, "N/A,1.234\n2,2.500\n").expect("write numeric fixture");
+    let mut base = runmat_value::StructValue::new();
+    base.insert("FileType", Value::from("text"));
+    base.insert("NumVariables", Value::Num(2.0));
+    base.insert("Delimiter", Value::from(","));
+    base.insert(
+        "VariableNames",
+        Value::StringArray(StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap()),
+    );
+    base.insert(
+        "VariableTypes",
+        Value::StringArray(
+            StringArray::new(vec!["double".into(), "double".into()], vec![1, 2]).unwrap(),
+        ),
+    );
+    let mut options = ImportOptions::from_legacy(base).expect("typed import options");
+    options
+        .set_options(
+            Some(&Value::from("A")),
+            &[
+                ("TreatAsMissing".into(), Value::from("N/A")),
+                ("FillValue".into(), Value::Num(0.0)),
+            ],
+        )
+        .expect("first column controls");
+    options
+        .set_options(
+            Some(&Value::from("B")),
+            &[
+                ("DecimalSeparator".into(), Value::from(",")),
+                ("ThousandsSeparator".into(), Value::from(".")),
+            ],
+        )
+        .expect("second column controls");
+    let output = block_on(readmatrix_builtin(
+        None,
+        Value::from(path.to_string_lossy().to_string()),
+        vec![options.to_value().expect("encode import options")],
+    ))
+    .expect("readmatrix with per-variable options");
+    let Value::Tensor(output) = output else {
+        panic!("expected numeric matrix")
+    };
+    assert_eq!(output.materialize_f64(), vec![0.0, 2.0, 1234.0, 2500.0]);
+    let _ = fs::remove_file(path);
+}
+
+#[test]
 fn readmatrix_like_preserves_every_exact_integer_class() {
     let prototypes = [
         IntegerStorage::I8(vec![0]),
@@ -376,12 +427,26 @@ fn empty_value_reads_typed_integer_tensor_storage_exactly() {
         ..ReadMatrixOptions::default()
     };
     assert_eq!(
-        parse_integer_numeric_token("", &options, NumericDType::U64, 1, 1).unwrap(),
+        parse_integer_numeric_token(
+            "",
+            &options,
+            NumericDType::U64,
+            1,
+            options.column_from_source(0)
+        )
+        .unwrap(),
         NumericScalar::U64(wide)
     );
     options.add_missing_token("NA");
     assert_eq!(
-        parse_integer_numeric_token("NA", &options, NumericDType::U64, 1, 1).unwrap(),
+        parse_integer_numeric_token(
+            "NA",
+            &options,
+            NumericDType::U64,
+            1,
+            options.column_from_source(0)
+        )
+        .unwrap(),
         NumericScalar::U64(0)
     );
     assert_eq!(
@@ -390,7 +455,7 @@ fn empty_value_reads_typed_integer_tensor_storage_exactly() {
             &options,
             NumericDType::U64,
             1,
-            1,
+            options.column_from_source(0),
         )
         .unwrap(),
         NumericScalar::U64(u64::MAX)
@@ -401,7 +466,7 @@ fn empty_value_reads_typed_integer_tensor_storage_exactly() {
             &options,
             NumericDType::I64,
             1,
-            1,
+            options.column_from_source(0),
         )
         .unwrap(),
         NumericScalar::I64(i64::MIN)

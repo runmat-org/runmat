@@ -14,8 +14,8 @@ use crate::builtins::common::spec::{
 };
 
 use super::pp::{
-    build_spline_pp_with_slopes, evaluate_pp, pp_to_value, query_points,
-    spline_samples_from_values, Extrapolation, PpOutputLayout, SampleAxis,
+    build_spline_pp_with_slopes, evaluate_pp, is_spline_execution_failure, pp_to_value,
+    query_points, spline_samples_from_values, Extrapolation, PpOutputLayout, SampleAxis,
 };
 use crate::{build_runtime_error, RuntimeError};
 
@@ -75,9 +75,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "spline",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::interpolation::spline"
+    builtin_path = "crate::builtins::math::interpolation::spline",
+    context = true
 )]
-async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn spline_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    x: Value,
+    y: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     crate::builtins::common::validation::ensure_runmat_integer_f64_boundary(
         &x,
         &SPLINE_INTEGER_X_EXTENSION,
@@ -110,10 +116,23 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
         SampleAxis::First => PpOutputLayout::QueryLeading,
         SampleAxis::Last => PpOutputLayout::ComponentLeading,
     };
-    let pp = build_spline_pp_with_slopes(&samples.series, samples.endpoint_slopes.as_deref(), NAME)
-        .map_err(|err| {
+    let mut work = runtime
+        .as_ref()
+        .map(crate::context::RuntimeContext::cpu_cooperation);
+    let pp = build_spline_pp_with_slopes(
+        &samples.series,
+        samples.endpoint_slopes.as_deref(),
+        NAME,
+        &mut work,
+    )
+    .await
+    .map_err(|err| {
+        if is_spline_execution_failure(&err) {
+            crate::builtins::common::map_control_flow_with_builtin(err, NAME)
+        } else {
             spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
-        })?;
+        }
+    })?;
     match rest.len() {
         0 => pp_to_value(pp, NAME).map_err(|err| {
             spline_error_with_message(err.message().to_string(), &SPLINE_ERROR_INTERNAL)
@@ -140,6 +159,11 @@ async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinR
         }
         _ => Err(spline_invalid_argument("too many input arguments")),
     }
+}
+
+#[cfg(test)]
+async fn spline_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    spline_builtin_registered(None, x, y, rest).await
 }
 
 #[cfg(test)]

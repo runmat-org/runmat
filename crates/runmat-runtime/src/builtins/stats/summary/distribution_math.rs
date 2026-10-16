@@ -134,7 +134,9 @@ pub(crate) fn student_t_inv(p: f64, nu: f64) -> f64 {
     student_t_inv_upper_tail(1.0 - p, nu)
 }
 
-fn student_t_inv_upper_tail(q: f64, nu: f64) -> f64 {
+/// Positive Student-t quantile from an upper-tail probability. Keeping the
+/// tail probability avoids rounding `1 - alpha/2` to one for small alpha.
+pub(crate) fn student_t_inv_upper_tail(q: f64, nu: f64) -> f64 {
     if q == 0.0 {
         return f64::INFINITY;
     }

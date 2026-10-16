@@ -1,9 +1,13 @@
 use runmat_accelerate_api::{
-    test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
-    GpuTensorHandle, GpuTensorStorage, HostTensorView, NumericElementType, ProviderInvOptions,
-    ProviderNormOrder, ThreadProviderGuard,
+    test_support::TestAllocationOwner, AccelDownloadFuture, AccelProvider, GpuTensorHandle,
+    GpuTensorStorage, HostTensorView, NumericElementType, ProviderInvOptions, ProviderNormOrder,
+    ThreadProviderGuard,
 };
 use runmat_value::Value;
+
+#[cfg(all(feature = "wgpu", not(target_arch = "wasm32")))]
+#[path = "owning_tests/complex_residency.rs"]
+mod complex_residency;
 
 struct Provider {
     owner: TestAllocationOwner,
@@ -14,7 +18,7 @@ impl Provider {
         &'a self,
         input: &'a GpuTensorHandle,
         scalar: bool,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             if self.alias {
                 let view = if scalar {
@@ -22,11 +26,17 @@ impl Provider {
                 } else {
                     input.view().clone()
                 };
-                Ok(input.with_view(view)?)
+                input.with_view(view).map_err(|error| {
+                    runmat_accelerate_api::ProviderExecutionError::from(error)
+                        .with_unproven_effects()
+                })
             } else {
                 Err(
-                    std::io::Error::new(std::io::ErrorKind::BrokenPipe, "native linalg failed")
-                        .into(),
+                    runmat_accelerate_api::ProviderExecutionError::from(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "native linalg failed",
+                    ))
+                    .with_unproven_effects(),
                 )
             }
         })
@@ -49,14 +59,14 @@ impl AccelProvider for Provider {
         &'a self,
         input: &'a GpuTensorHandle,
         _: ProviderInvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.result(input, false)
     }
     fn norm<'a>(
         &'a self,
         input: &'a GpuTensorHandle,
         _: ProviderNormOrder,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         self.result(input, true)
     }
 }

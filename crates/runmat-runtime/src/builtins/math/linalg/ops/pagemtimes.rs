@@ -1,15 +1,14 @@
 //! MATLAB-compatible `pagemtimes` builtin.
 
 use runmat_accelerate_api::AccelProvider;
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::PAGEMTIMES_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    PAGEMTIMES_ERROR_INTERNAL, PAGEMTIMES_ERROR_INVALID_ARITY, PAGEMTIMES_ERROR_INVALID_INPUT,
+    PAGEMTIMES_ERROR_INVALID_TRANSPOSE, PAGEMTIMES_ERROR_MATRIX_DIM_MISMATCH,
+    PAGEMTIMES_ERROR_PAGE_DIM_MISMATCH, PAGEMTIMES_INTEGER_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
@@ -24,185 +23,6 @@ use crate::builtins::common::tensor;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const NAME: &str = "pagemtimes";
-
-pub const PAGEMTIMES_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "pagemtimes-integer-input",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "pagemtimes with typed-integer input is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:PagemtimesIntegerInputExtension"),
-    };
-
-pub const PAGEMTIMES_EXTENSIONS: [BuiltinExtensionDescriptor; 1] =
-    [PAGEMTIMES_INTEGER_INPUT_EXTENSION];
-
-const PAGEMTIMES_INTEGER_X_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public X is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check.",
-    }];
-
-const PAGEMTIMES_INTEGER_Y_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "Y",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public Y is single or double; RunMat mode admits real integer pages only after an exact binary64-boundary check.",
-    }];
-
-pub const PAGEMTIMES_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Z = pagemtimes(integer_X, Y, transpose_options...)",
-        inputs: &PAGEMTIMES_INTEGER_X_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed-integer left pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "Z = pagemtimes(X, integer_Y, transpose_options...)",
-        inputs: &PAGEMTIMES_INTEGER_Y_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed-integer right pages are a gated RunMat extension. Authoritative values cross once into binary64 after exactness checks; a resident result is restored to the owning provider when possible.",
-    },
-];
-
-const PAGEMTIMES_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Z",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Page-wise matrix product.",
-}];
-
-const PAGEMTIMES_INPUTS_BASIC: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left dense single, double, or complex array.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right dense single, double, or complex array.",
-    },
-];
-
-const PAGEMTIMES_INPUTS_TRANSPOSE: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left dense single, double, or complex array.",
-    },
-    BuiltinParamDescriptor {
-        name: "transpX",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "`none`, `transpose`, or `ctranspose` for X.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right dense single, double, or complex array.",
-    },
-    BuiltinParamDescriptor {
-        name: "transpY",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "`none`, `transpose`, or `ctranspose` for Y.",
-    },
-];
-
-const PAGEMTIMES_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "Z = pagemtimes(X, Y)",
-        inputs: &PAGEMTIMES_INPUTS_BASIC,
-        outputs: &PAGEMTIMES_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "Z = pagemtimes(X, transpX, Y, transpY)",
-        inputs: &PAGEMTIMES_INPUTS_TRANSPOSE,
-        outputs: &PAGEMTIMES_OUTPUT,
-    },
-];
-
-const PAGEMTIMES_ERROR_INVALID_ARITY: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGEMTIMES.INVALID_ARITY",
-    identifier: Some("RunMat:pagemtimes:InvalidArity"),
-    when: "The call does not use the two-argument or four-argument form.",
-    message: "pagemtimes: expected X,Y or X,transpX,Y,transpY",
-};
-
-const PAGEMTIMES_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGEMTIMES.INVALID_INPUT",
-    identifier: Some("RunMat:pagemtimes:InvalidInput"),
-    when: "Inputs are not dense single, double, or complex arrays.",
-    message: "pagemtimes: inputs must be dense single, double, or complex arrays",
-};
-
-const PAGEMTIMES_ERROR_INVALID_TRANSPOSE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGEMTIMES.INVALID_TRANSPOSE",
-    identifier: Some("RunMat:pagemtimes:InvalidTranspose"),
-    when: "Transpose flags are not one of none, transpose, or ctranspose.",
-    message: "pagemtimes: transpose options must be 'none', 'transpose', or 'ctranspose'",
-};
-
-const PAGEMTIMES_ERROR_PAGE_DIM_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGEMTIMES.PAGE_DIM_MISMATCH",
-    identifier: Some("RunMat:pagemtimes:PageDimensionMismatch"),
-    when: "Trailing page dimensions cannot be implicitly expanded.",
-    message: "pagemtimes: page dimensions are not compatible",
-};
-
-const PAGEMTIMES_ERROR_MATRIX_DIM_MISMATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGEMTIMES.MATRIX_DIM_MISMATCH",
-    identifier: Some("RunMat:pagemtimes:MatrixDimensionMismatch"),
-    when: "Matrix dimensions are not valid for page-wise multiplication.",
-    message: "pagemtimes: inner matrix dimensions must agree",
-};
-
-const PAGEMTIMES_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGEMTIMES.INTERNAL",
-    identifier: Some("RunMat:pagemtimes:InternalError"),
-    when: "Runtime cannot materialize the page-wise result.",
-    message: "pagemtimes: internal runtime failure",
-};
-
-const PAGEMTIMES_ERRORS: [BuiltinErrorDescriptor; 6] = [
-    PAGEMTIMES_ERROR_INVALID_ARITY,
-    PAGEMTIMES_ERROR_INVALID_INPUT,
-    PAGEMTIMES_ERROR_INVALID_TRANSPOSE,
-    PAGEMTIMES_ERROR_PAGE_DIM_MISMATCH,
-    PAGEMTIMES_ERROR_MATRIX_DIM_MISMATCH,
-    PAGEMTIMES_ERROR_INTERNAL,
-];
-
-pub const PAGEMTIMES_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PAGEMTIMES_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PAGEMTIMES_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::pagemtimes")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -274,23 +94,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
     builder.with_source(err).build()
 }
 
-fn pagemtimes_type(args: &[Type], _ctx: &runmat_builtins::ResolveContext) -> Type {
-    let _ = args;
-    Type::Tensor { shape: None }
-}
-
 #[runtime_builtin(
     name = "pagemtimes",
-    category = "math/linalg/ops",
-    summary = "Multiply corresponding matrix pages in dense arrays.",
-    keywords = "pagemtimes,page-wise matrix multiplication,batched matrix multiply,linear algebra,gpu",
-    accel = "custom",
-    type_resolver(pagemtimes_type),
-    descriptor(crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::linalg::ops::pagemtimes::PAGEMTIMES_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::pagemtimes"
 )]
 async fn pagemtimes_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
@@ -473,7 +279,9 @@ impl PageInput {
     fn from_complex_tensor(tensor: ComplexTensor) -> BuiltinResult<Self> {
         let shape = canonical_matrix_shape(tensor.shape());
         let expected = checked_product(&shape)?;
-        if tensor.materialize_f64().len() != expected {
+        let dtype = tensor.numeric_dtype();
+        let data = tensor.materialize_f64();
+        if data.len() != expected {
             return Err(pagemtimes_internal(
                 "pagemtimes: complex tensor data length does not match shape",
             ));
@@ -482,8 +290,8 @@ impl PageInput {
             rows: shape[0],
             cols: shape[1],
             page_dims: shape.get(2..).unwrap_or(&[]).to_vec(),
-            dtype: NumericDType::F64,
-            data: PageData::Complex(tensor.materialize_f64()),
+            dtype,
+            data: PageData::Complex(data),
         })
     }
 
@@ -658,11 +466,17 @@ fn pagemtimes_host(
                 &mut data,
             )?;
         }
-        let tensor = ComplexTensor::new(data, shape).map_err(|err| {
-            pagemtimes_internal(format!(
-                "pagemtimes: failed to build complex result ({err})"
-            ))
-        })?;
+        let dtype = if lhs.dtype == NumericDType::F32 && rhs.dtype == NumericDType::F32 {
+            NumericDType::F32
+        } else {
+            NumericDType::F64
+        };
+        let tensor =
+            ComplexTensor::from_f64_values_with_dtype(data, shape, dtype).map_err(|err| {
+                pagemtimes_internal(format!(
+                    "pagemtimes: failed to build complex result ({err})"
+                ))
+            })?;
         Ok(PageOutput::Complex(tensor))
     } else {
         let mut data = Vec::with_capacity(element_count);
@@ -1143,6 +957,42 @@ mod tests {
             }
             other => panic!("expected complex scalar, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn complex_single_page_products_retain_class_until_a_double_operand_enters() {
+        let identity_single = ComplexTensor::from_f32(
+            vec![(1.0, 0.0), (0.0, 0.0), (0.0, 0.0), (1.0, 0.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let rhs_single = ComplexTensor::from_f32(
+            vec![(1.5, -2.0), (3.0, 0.5), (4.0, 1.0), (-1.0, 2.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let expected = rhs_single.materialize_f64();
+        for lhs in [
+            Value::ComplexTensor(identity_single),
+            Value::Tensor(Tensor::from_f32(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap()),
+        ] {
+            let Value::ComplexTensor(out) =
+                call(lhs, vec![Value::ComplexTensor(rhs_single.clone())]).unwrap()
+            else {
+                panic!("single page product must retain a complex tensor")
+            };
+            assert_eq!(out.numeric_dtype(), NumericDType::F32);
+            assert_eq!(out.materialize_f64(), expected);
+        }
+        let Value::ComplexTensor(mixed) = call(
+            tensor(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]),
+            vec![Value::ComplexTensor(rhs_single)],
+        )
+        .unwrap() else {
+            panic!("mixed page product must remain complex")
+        };
+        assert_eq!(mixed.numeric_dtype(), NumericDType::F64);
+        assert_eq!(mixed.materialize_f64(), expected);
     }
 
     #[test]

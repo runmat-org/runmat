@@ -131,6 +131,68 @@ fn canonical_requested_bytes_equal_the_retained_charge_for_every_numeric_class()
 }
 
 #[test]
+fn exact_nd_real_and_complex_outputs_retain_their_physical_claims() {
+    let shape = [2, 1, 2];
+    for dtype in [NumericDType::F32, NumericDType::F64] {
+        let real_bytes = ExactHostTensorAllocation::requested_bytes(dtype, &shape).unwrap();
+        assert_eq!(
+            real_bytes,
+            ExactHostTensorAllocation::requested_bytes_for_dimensions(dtype, 4, shape.len())
+                .unwrap()
+        );
+        let real_quota = permit(real_bytes);
+        let mut real = ExactHostTensorAllocation::new(dtype, &shape, &real_quota).unwrap();
+        if let Some(values) = real.as_f32_slice_mut() {
+            values.copy_from_slice(&[1.0, 2.0, 3.0, 4.0]);
+        } else {
+            real.as_f64_slice_mut()
+                .unwrap()
+                .copy_from_slice(&[1.0, 2.0, 3.0, 4.0]);
+        }
+        let real = real.into_tensor().unwrap();
+        assert_eq!(real.shape(), shape);
+        assert_eq!(real.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(real_quota.retained.load(Ordering::SeqCst), real_bytes);
+        drop(real);
+        assert_eq!(real_quota.retained.load(Ordering::SeqCst), 0);
+
+        let complex_bytes =
+            ExactHostComplexTensorAllocation::requested_bytes(dtype, &shape).unwrap();
+        assert_eq!(
+            complex_bytes,
+            ExactHostComplexTensorAllocation::requested_bytes_for_dimensions(dtype, 4, shape.len())
+                .unwrap()
+        );
+        let complex_quota = permit(complex_bytes);
+        let mut complex =
+            ExactHostComplexTensorAllocation::new(dtype, &shape, &complex_quota).unwrap();
+        for index in 0..4 {
+            complex.set(index, index as f64, -(index as f64)).unwrap();
+        }
+        let complex = complex.into_tensor().unwrap();
+        assert_eq!(complex.shape(), shape);
+        match dtype {
+            NumericDType::F32 => assert_eq!(
+                complex.as_f32_slice().unwrap()[3],
+                crate::ComplexElement(3.0, -3.0)
+            ),
+            NumericDType::F64 => assert_eq!(
+                complex.as_f64_slice().unwrap()[3],
+                crate::ComplexElement(3.0, -3.0)
+            ),
+            _ => unreachable!(),
+        }
+        assert_eq!(complex_quota.retained.load(Ordering::SeqCst), complex_bytes);
+        drop(complex);
+        assert_eq!(complex_quota.retained.load(Ordering::SeqCst), 0);
+    }
+    assert_eq!(
+        ExactHostComplexTensorAllocation::requested_bytes(NumericDType::F64, &[usize::MAX, 2]),
+        Err(ExactHostNumericAllocationError::LayoutOverflow)
+    );
+}
+
+#[test]
 fn retained_exact_claim_follows_last_original_owner_not_later_cow_copy() {
     let requested = ExactHostTensor2dAllocation::requested_bytes(NumericDType::U64, 1, 2).unwrap();
     let quota = permit(requested);

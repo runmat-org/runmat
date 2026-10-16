@@ -22,6 +22,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntegerStorage, LogicalArray, NumericDType, NumericStorage, Tensor, Value};
 
 use super::cooperation::{await_io, TabularCooperation};
+use super::import_options::{ImportOptions, VariableImportOptions};
 use super::path::{BorrowedTabularReadPath, TabularFsOwner, TabularReadPath, TabularReadSource};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::io::filetext::helpers::decode_bytes;
@@ -193,21 +194,33 @@ fn value_contains_typed_integer(value: &Value) -> bool {
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
         || matches!(value, Value::Struct(structure) if structure.fields.values().any(value_contains_typed_integer))
+        || matches!(value, Value::Object(object) if object.properties.values().any(value_contains_typed_integer))
         || matches!(value, Value::Cell(cell) if cell.data.iter().any(value_contains_typed_integer))
 }
 
 fn raw_args_contain_option(args: &[Value], sought: ReadMatrixControl) -> bool {
-    let first_pair = if let Some(Value::Struct(structure)) = args.first() {
-        if structure
-            .fields
-            .keys()
-            .any(|name| ReadMatrixControl::parse(name) == sought)
-        {
-            return true;
+    let first_pair = match args.first() {
+        Some(Value::Struct(structure)) => {
+            if structure
+                .fields
+                .keys()
+                .any(|name| ReadMatrixControl::parse(name) == sought)
+            {
+                return true;
+            }
+            1
         }
-        1
-    } else {
-        0
+        Some(Value::Object(object)) => {
+            if object
+                .properties
+                .keys()
+                .any(|name| ReadMatrixControl::parse(name) == sought)
+            {
+                return true;
+            }
+            1
+        }
+        _ => 0,
     };
     (first_pair..args.len()).step_by(2).any(|index| {
         raw_scalar_text(&args[index]).is_some_and(|name| ReadMatrixControl::parse(&name) == sought)
@@ -221,8 +234,22 @@ fn raw_scalar_text(value: &Value) -> Option<String> {
 async fn parse_options(args: &[Value]) -> BuiltinResult<ReadMatrixOptions> {
     let mut options = ReadMatrixOptions::default();
     let mut index = 0usize;
-    if let Some(Value::Struct(struct_value)) = args.get(index) {
-        parse_struct_options(struct_value, &mut options).await?;
+    if let Some(source) = args
+        .get(index)
+        .filter(|value| matches!(value, Value::Struct(_) | Value::Object(_)))
+    {
+        match source {
+            Value::Struct(structure) => parse_struct_options(structure, &mut options).await?,
+            _ => {
+                let import = ImportOptions::decode(source)?.ok_or_else(|| {
+                    readmatrix_error_with(
+                        &READMATRIX_ERROR_ARG_CONFIG,
+                        "readmatrix: expected tabular import options",
+                    )
+                })?;
+                options.apply_import_options(&import).await?;
+            }
+        }
         index += 1;
     }
     while index < args.len() {
@@ -312,9 +339,25 @@ fn apply_decoded_control(
 fn preflight_host_options(args: &[Value]) -> BuiltinResult<()> {
     let mut options = ReadMatrixOptions::default();
     let mut index = 0;
-    if let Some(Value::Struct(structure)) = args.first() {
-        for (name, value) in &structure.fields {
-            preflight_host_option(&mut options, ReadMatrixControl::parse(name), value)?;
+    if let Some(source) = args
+        .first()
+        .filter(|value| matches!(value, Value::Struct(_) | Value::Object(_)))
+    {
+        match source {
+            Value::Struct(structure) => {
+                for (name, value) in &structure.fields {
+                    preflight_host_option(&mut options, ReadMatrixControl::parse(name), value)?;
+                }
+            }
+            _ => {
+                let import = ImportOptions::decode(source)?.ok_or_else(|| {
+                    readmatrix_error_with(
+                        &READMATRIX_ERROR_ARG_CONFIG,
+                        "readmatrix: expected tabular import options",
+                    )
+                })?;
+                options.preflight_import_options(&import)?;
+            }
         }
         index = 1;
     }
@@ -569,6 +612,8 @@ fn format_numeric_token(value: f64) -> String {
 
 #[derive(Clone)]
 struct ReadMatrixOptions {
+    variable_options: Vec<VariableImportOptions>,
+    variable_source_origin: Option<usize>,
     delimiter: Option<Delimiter>,
     num_header_lines: usize,
     decimal_separator: char,
@@ -584,6 +629,8 @@ struct ReadMatrixOptions {
 impl Default for ReadMatrixOptions {
     fn default() -> Self {
         Self {
+            variable_options: Vec::new(),
+            variable_source_origin: None,
             delimiter: None,
             num_header_lines: 0,
             decimal_separator: '.',
@@ -599,6 +646,67 @@ impl Default for ReadMatrixOptions {
 }
 
 impl ReadMatrixOptions {
+    fn preflight_import_options(&mut self, import: &ImportOptions) -> BuiltinResult<()> {
+        if import.source() != super::import_options::ImportSource::DelimitedText {
+            return Err(readmatrix_error_with(
+                &READMATRIX_ERROR_ARG_CONFIG,
+                "readmatrix: spreadsheet import options require a spreadsheet reader",
+            ));
+        }
+        for variable in import.variables() {
+            if !variable.type_name.eq_ignore_ascii_case("auto")
+                && ReadMatrixOutputClass::parse(&variable.type_name).is_none()
+            {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OUTPUT_TYPE,
+                    format!("readmatrix: variable '{}' is not numeric", variable.name),
+                ));
+            }
+            if variable.input_format.is_some() {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    "readmatrix: InputFormat requires a datetime table variable",
+                ));
+            }
+            variable.numeric_fill()?;
+        }
+        self.variable_options = import.variables().to_vec();
+        self.variable_source_origin = import.source_origin();
+        for (name, value) in &import.base().fields {
+            let control = ReadMatrixControl::parse(name);
+            if control != ReadMatrixControl::Unknown {
+                preflight_host_option(self, control, value)?;
+            }
+        }
+        self.validate()
+    }
+
+    async fn apply_import_options(&mut self, import: &ImportOptions) -> BuiltinResult<()> {
+        self.preflight_import_options(import)?;
+        for (name, value) in &import.base().fields {
+            let control = ReadMatrixControl::parse(name);
+            if control != ReadMatrixControl::Unknown {
+                apply_option(self, name, value).await?;
+            }
+        }
+        Ok(())
+    }
+
+    fn variable(&self, column: MatrixFieldColumn) -> Option<&VariableImportOptions> {
+        column.selected_index()?;
+        let selected_width = self
+            .range
+            .as_ref()
+            .and_then(|range| range.end_col?.checked_sub(range.start_col)?.checked_add(1));
+        let projection = super::import_options::ImportColumnProjection::new(
+            self.variable_source_origin,
+            self.range.as_ref().map_or(0, |range| range.start_col),
+        )
+        .with_selected_width(self.variable_options.len(), selected_width);
+        self.variable_options
+            .get(projection.metadata_index_for_source(column.source_index())?)
+    }
+
     fn add_missing_token(&mut self, token: &str) {
         let normalized = normalize_missing_token(token);
         self.treat_as_missing.insert(normalized);
@@ -612,12 +720,45 @@ impl ReadMatrixOptions {
         self.treat_as_missing.contains(&norm)
     }
 
+    fn is_missing_token_for(&self, token: &str, column: MatrixFieldColumn) -> bool {
+        self.is_missing_token(token)
+            || self
+                .variable(column)
+                .is_some_and(|variable| variable.is_missing(token))
+    }
+
     fn empty_value(&self) -> NumericScalar {
         self.empty_value.unwrap_or(NumericScalar::F64(f64::NAN))
     }
 
     fn empty_value_f64(&self) -> f64 {
         self.empty_value().materialize_f64()
+    }
+
+    fn empty_value_for(&self, column: MatrixFieldColumn) -> BuiltinResult<NumericScalar> {
+        match self.variable(column) {
+            Some(variable) => {
+                if variable.empty_field_rule == super::import_options::EmptyFieldRule::Error {
+                    return Err(readmatrix_error_with(
+                        &READMATRIX_ERROR_OPTION_VALUE,
+                        format!("readmatrix: empty field in variable '{}'", variable.name),
+                    ));
+                }
+                Ok(variable
+                    .numeric_fill()?
+                    .unwrap_or_else(|| self.empty_value()))
+            }
+            None => Ok(self.empty_value()),
+        }
+    }
+
+    fn missing_value_for(&self, column: MatrixFieldColumn) -> BuiltinResult<NumericScalar> {
+        match self.variable(column) {
+            Some(variable) => Ok(variable
+                .numeric_fill()?
+                .unwrap_or(NumericScalar::F64(f64::NAN))),
+            None => Ok(NumericScalar::F64(f64::NAN)),
+        }
     }
 
     fn validate(&self) -> BuiltinResult<()> {
@@ -629,6 +770,21 @@ impl ReadMatrixOptions {
                 return Err(readmatrix_error_with(
                     &READMATRIX_ERROR_OPTION_VALUE,
                     "readmatrix: DecimalSeparator and ThousandsSeparator must differ",
+                ));
+            }
+        }
+        for variable in &self.variable_options {
+            let decimal = variable.decimal_separator.unwrap_or(self.decimal_separator);
+            let thousands = variable
+                .thousands_separator
+                .unwrap_or(self.thousands_separator);
+            if thousands == Some(decimal) {
+                return Err(readmatrix_error_with(
+                    &READMATRIX_ERROR_OPTION_VALUE,
+                    format!(
+                        "readmatrix: numeric separators coincide for variable '{}'",
+                        variable.name
+                    ),
                 ));
             }
         }
@@ -706,6 +862,8 @@ enum OutputTemplate {
 
 mod range;
 mod admission;
+mod column;
+use column::MatrixFieldColumn;
 #[cfg(test)]
 use range::parse_range_numeric;
 use range::{apply_range, parse_range, RangeSpec};

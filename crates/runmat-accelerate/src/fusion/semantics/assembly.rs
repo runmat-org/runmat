@@ -156,12 +156,19 @@ pub(super) fn inferred_operation<'a>(
 }
 
 pub(super) fn selected_values<'a>(
-    leaves: &FusionInvocationLeaves<'a>,
+    leaves: &'a FusionInvocationLeaves<'_>,
+    computed: &'a ComputedScalars,
     input_ids: &[ValueId],
 ) -> Vec<Option<&'a Value>> {
     input_ids
         .iter()
-        .map(|id| leaves.values().get(id).copied())
+        .map(|id| {
+            leaves
+                .values()
+                .get(id)
+                .copied()
+                .or_else(|| computed.get(*id))
+        })
         .collect()
 }
 

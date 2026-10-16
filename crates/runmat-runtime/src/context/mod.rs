@@ -35,6 +35,7 @@ mod host_dialog;
 mod managed_observations;
 pub(crate) mod output_projection;
 pub mod host_effect;
+pub mod host_allocation;
 pub(crate) mod host_presentation;
 pub(crate) mod provider_operation;
 #[cfg(test)]

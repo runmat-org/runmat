@@ -36,22 +36,27 @@ pub(super) fn admit(
     ];
     let matrix_shape = [cols, cols];
     let vector_shape = [cols, 1];
+    let factor_precision = runmat_accelerate_api::handle_precision(input);
+    let permutation_precision = Some(runmat_accelerate_api::ProviderPrecision::F64);
     let slots = match (&result, request) {
         (ProviderQrResult::R { r }, QrOutputRequest::R) => {
-            Some([Some((r, r_shape)), None, None, None])
+            Some([Some((r, r_shape, factor_precision)), None, None, None])
         }
-        (ProviderQrResult::Qr { q, r }, QrOutputRequest::Qr) => {
-            Some([Some((q, q_shape)), Some((r, r_shape)), None, None])
-        }
+        (ProviderQrResult::Qr { q, r }, QrOutputRequest::Qr) => Some([
+            Some((q, q_shape, factor_precision)),
+            Some((r, r_shape, factor_precision)),
+            None,
+            None,
+        ]),
         (ProviderQrResult::Qrp { q, r, permutation }, QrOutputRequest::Qrp) => {
             let perm_shape = match options.format.pivot_mode() {
                 super::PivotMode::Matrix => matrix_shape,
                 super::PivotMode::Vector => vector_shape,
             };
             Some([
-                Some((q, q_shape)),
-                Some((r, r_shape)),
-                Some((permutation, perm_shape)),
+                Some((q, q_shape, factor_precision)),
+                Some((r, r_shape, factor_precision)),
+                Some((permutation, perm_shape, permutation_precision)),
                 None,
             ])
         }
@@ -64,39 +69,43 @@ pub(super) fn admit(
             },
             QrOutputRequest::FullEnvelope | QrOutputRequest::FullEnvelopeUnpivoted,
         ) => Some([
-            Some((q, q_shape)),
-            Some((r, r_shape)),
-            Some((perm_matrix, matrix_shape)),
-            Some((perm_vector, vector_shape)),
+            Some((q, q_shape, factor_precision)),
+            Some((r, r_shape, factor_precision)),
+            Some((perm_matrix, matrix_shape, permutation_precision)),
+            Some((perm_vector, vector_shape, permutation_precision)),
         ]),
         _ => None,
     };
-    let valid = slots.is_some_and(|slots| {
-        slots.into_iter().flatten().all(|(output, expected_shape)| {
-            output.shape() == expected_shape
-                && output.device_id() == input.device_id()
-                && !output.shares_allocation_with(input)
-                && output.allocation_lease().validate_live().is_ok()
-                && !runmat_accelerate_api::handle_is_transposed(output)
-                && !runmat_accelerate_api::handle_is_logical(output)
-                && runmat_accelerate_api::handle_integer_type(output).is_none()
-                && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
-                && runmat_accelerate_api::handle_precision(output)
-                    == runmat_accelerate_api::handle_precision(input)
-                && gpu_helpers::exact_provider_for_handle(output)
-                    .is_some_and(|candidate| same_provider_instance(candidate, owner))
-        }) && slots
-            .into_iter()
-            .flatten()
-            .enumerate()
-            .all(|(index, (output, _))| {
-                slots
+    let valid = factor_precision.is_some()
+        && slots.is_some_and(|slots| {
+            slots
+                .into_iter()
+                .flatten()
+                .all(|(output, expected_shape, expected_precision)| {
+                    output.shape() == expected_shape
+                        && output.device_id() == input.device_id()
+                        && !output.shares_allocation_with(input)
+                        && output.allocation_lease().validate_live().is_ok()
+                        && !runmat_accelerate_api::handle_is_transposed(output)
+                        && !runmat_accelerate_api::handle_is_logical(output)
+                        && runmat_accelerate_api::handle_integer_type(output).is_none()
+                        && runmat_accelerate_api::handle_storage(output) == GpuTensorStorage::Real
+                        && runmat_accelerate_api::handle_precision(output) == expected_precision
+                        && gpu_helpers::exact_provider_for_handle(output)
+                            .is_some_and(|candidate| same_provider_instance(candidate, owner))
+                })
+                && slots
                     .into_iter()
                     .flatten()
-                    .skip(index + 1)
-                    .all(|(other, _)| !output.shares_allocation_with(other))
-            })
-    });
+                    .enumerate()
+                    .all(|(index, (output, _, _))| {
+                        slots
+                            .into_iter()
+                            .flatten()
+                            .skip(index + 1)
+                            .all(|(other, _, _)| !output.shares_allocation_with(other))
+                    })
+        });
     if !valid {
         return Err(reject(
             result,

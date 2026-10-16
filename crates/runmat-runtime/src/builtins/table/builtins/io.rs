@@ -351,7 +351,7 @@ pub(crate) async fn parquetinfo_builtin(path: Value) -> BuiltinResult<Value> {
     summary = "Create spreadsheet import options for readtable.",
     keywords = "spreadsheetImportOptions,readtable,spreadsheet,xlsx,xls,DataRange,VariableTypes,VariableNames,NumVariables",
     accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
+    type_resolver(crate::builtins::io::type_resolvers::spreadsheet_import_options_type),
     descriptor(crate::builtins::table::SPREADSHEET_IMPORT_OPTIONS_DESCRIPTOR),
     extensions(crate::builtins::table::builtins::io::SPREADSHEET_IMPORT_OPTIONS_EXTENSIONS),
     integer_capabilities(
@@ -367,7 +367,10 @@ pub(crate) async fn spreadsheet_import_options_builtin(args: Vec<Value>) -> Buil
         &["NumVariables"],
     )?;
     let gathered = gather_values(&args).await?;
-    spreadsheet_import_options(gathered)
+    let Value::Struct(options) = spreadsheet_import_options(gathered)? else {
+        unreachable!("spreadsheet import constructor returns options fields")
+    };
+    crate::builtins::io::tabular::import_options::ImportOptions::from_legacy(options)?.to_value()
 }
 
 #[runtime_builtin(
@@ -376,7 +379,7 @@ pub(crate) async fn spreadsheet_import_options_builtin(args: Vec<Value>) -> Buil
     summary = "Inspect a text or spreadsheet file and create import options.",
     keywords = "detectImportOptions,readtable,readmatrix,csv,tsv,xlsx,Delimiter,VariableTypes,VariableNames",
     accel = "cpu",
-    type_resolver(crate::builtins::io::type_resolvers::struct_type),
+    type_resolver(crate::builtins::io::type_resolvers::detected_import_options_type),
     descriptor(crate::builtins::table::DETECT_IMPORT_OPTIONS_DESCRIPTOR),
     extensions(crate::builtins::table::builtins::io::DETECT_IMPORT_OPTIONS_EXTENSIONS),
     integer_capabilities(
@@ -405,7 +408,149 @@ pub(crate) async fn detect_import_options_builtin(
     let args = gather_values(&rest).await?;
     let options = ReadTableOptions::parse(&args)?;
     let resolved = resolve_path(&path_value)?;
-    detect_import_options_from_file(&resolved, &options).await
+    let Value::Struct(detected) = detect_import_options_from_file(&resolved, &options).await?
+    else {
+        unreachable!("detected import constructor returns options fields")
+    };
+    let origin = options.detected_variable_source_origin();
+    crate::builtins::io::tabular::import_options::ImportOptions::from_detected(detected, origin)?
+        .to_value()
+}
+
+#[runtime_builtin(
+    name = "setvaropts",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn setvaropts_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    use crate::builtins::io::tabular::import_options::ImportOptions;
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SETVAROPTS_DESCRIPTOR,
+        &TABLE_ERROR_INVALID_ARGUMENT,
+        "setvaropts",
+    )?;
+    if args.iter().any(crate::value_contains_gpu) {
+        return Err(invalid_argument(
+            "setvaropts: resident arguments are not supported",
+        ));
+    }
+    if args.len() < 3 {
+        return Err(invalid_argument(
+            "setvaropts: expected options and name-value pairs",
+        ));
+    }
+    let mut args = args.into_iter();
+    let source = args.next().expect("checked arity");
+    if !matches!(&source, Value::Object(_)) {
+        return Err(invalid_argument(
+            "setvaropts: expected a typed import-options object",
+        ));
+    }
+    let mut options = ImportOptions::decode(&source)?
+        .ok_or_else(|| invalid_argument("setvaropts: expected an import-options object"))?;
+    let remaining = args.collect::<Vec<_>>();
+    let (selection, pairs) = if remaining.len().is_multiple_of(2) {
+        (None, remaining.as_slice())
+    } else {
+        (Some(&remaining[0]), &remaining[1..])
+    };
+    if pairs.is_empty() || !pairs.len().is_multiple_of(2) {
+        return Err(invalid_argument(
+            "setvaropts: name-value options must be paired",
+        ));
+    }
+    let pairs = pairs
+        .chunks_exact(2)
+        .map(|pair| Ok((scalar_text(&pair[0], "setvaropts option")?, pair[1].clone())))
+        .collect::<BuiltinResult<Vec<_>>>()?;
+    options.set_options(selection, &pairs)?;
+    options.to_value()
+}
+
+#[runtime_builtin(
+    name = "setvartype",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn setvartype_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    use crate::builtins::io::tabular::import_options::ImportOptions;
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::SETVARTYPE_DESCRIPTOR,
+        &TABLE_ERROR_INVALID_ARGUMENT,
+        "setvartype",
+    )?;
+    if args.iter().any(crate::value_contains_gpu) {
+        return Err(invalid_argument(
+            "setvartype: resident arguments are not supported",
+        ));
+    }
+    let [source, selection, types] = args.as_slice() else {
+        return Err(invalid_argument(
+            "setvartype: expected options, selection, and type",
+        ));
+    };
+    if !matches!(source, Value::Object(_)) {
+        return Err(invalid_argument(
+            "setvartype: expected a typed import-options object",
+        ));
+    }
+    let mut options = ImportOptions::decode(source)?
+        .ok_or_else(|| invalid_argument("setvartype: expected an import-options object"))?;
+    options.set_types(selection, types)?;
+    for variable in options.variables() {
+        ImportVariableType::parse(&variable.type_name)?;
+    }
+    options.to_value()
+}
+
+#[runtime_builtin(
+    name = "getvaropts",
+    binding_variant = "default",
+    builtin_path = "crate::builtins::table::builtins"
+)]
+pub(crate) async fn getvaropts_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    use crate::builtins::io::tabular::import_options::ImportOptions;
+    crate::output_count::validate_fixed_outputs(
+        &runmat_builtins::GETVAROPTS_DESCRIPTOR,
+        &TABLE_ERROR_INVALID_ARGUMENT,
+        "getvaropts",
+    )?;
+    if args.iter().any(crate::value_contains_gpu) {
+        return Err(invalid_argument(
+            "getvaropts: resident arguments are not supported",
+        ));
+    }
+    let [source, selection] = args.as_slice() else {
+        return Err(invalid_argument(
+            "getvaropts: expected options and selection",
+        ));
+    };
+    if !matches!(source, Value::Object(_)) {
+        return Err(invalid_argument(
+            "getvaropts: expected a typed import-options object",
+        ));
+    }
+    let options = ImportOptions::decode(source)?
+        .ok_or_else(|| invalid_argument("getvaropts: expected an import-options object"))?;
+    let selected = options.selected(selection)?;
+    if selected.len() == 1 {
+        return ImportOptions::variable_value(selected[0]);
+    }
+    let count = selected.len();
+    let mut cells = Vec::new();
+    cells
+        .try_reserve_exact(count)
+        .map_err(|_| invalid_argument("getvaropts: selection exceeds available memory"))?;
+    for variable in selected {
+        cells.push(ImportOptions::variable_value(variable)?);
+    }
+    Ok(Value::ObjectArray(
+        runmat_value::ObjectArray::row(
+            crate::builtins::io::tabular::import_options::VARIABLE_IMPORT_CLASS,
+            cells,
+        )
+        .map_err(|error| invalid_argument(format!("getvaropts: {error}")))?,
+    ))
 }
 
 fn detect_option_has_typed_integer(args: &[Value], sought: &str) -> bool {
@@ -544,6 +689,11 @@ pub(crate) async fn readcell_builtin(path: Value, rest: Vec<Value>) -> BuiltinRe
     let rest = gather_values(&rest).await?;
     let path = resolve_path(&path)?;
     let options = ReadTableOptions::parse(&rest)?;
+    if options.has_variable_value_controls() {
+        return Err(invalid_argument(
+            "readcell: per-variable import options are not supported by the current cell reader",
+        ));
+    }
     read_cell_from_file(&path, &options).await
 }
 

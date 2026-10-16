@@ -6,9 +6,8 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         compute_left: bool,
     ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderEigResult> {
-        let host = self.download_exec(handle).await?;
-        let tensor =
-            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("eig: {e}"))?;
+        let source_precision = self.real_floating_input_precision_exec(handle)?;
+        let tensor = self.download_real_floating_tensor_exec(handle).await?;
         let eval = runmat_runtime::builtins::math::linalg::factor::eig::evaluate(
             Value::Tensor(tensor),
             &[],
@@ -17,51 +16,28 @@ impl WgpuProvider {
         .await
         .map_err(runtime_flow_to_provider_error)?;
 
-        let eigenvalues_tensor = host_tensor_from_value("eig", eval.eigenvalues())?;
-        let diagonal_tensor = host_tensor_from_value("eig", eval.diagonal_matrix())?;
-        let right_tensor = host_tensor_from_value("eig", eval.right())?;
-
+        let eigenvalues_value = eval.eigenvalues();
+        let diagonal_value = eval.diagonal_matrix();
+        let right_value = eval.right();
         let left_value = if compute_left {
             Some(eval.left().map_err(runtime_flow_to_provider_error)?)
         } else {
             None
         };
-
-        let left_tensor = match left_value {
-            Some(value) => Some(host_tensor_from_value("eig", value)?),
-            None => None,
-        };
-
-        let eigenvalues_data = eigenvalues_tensor.materialize_f64();
-        let diagonal_data = diagonal_tensor.materialize_f64();
-        let right_data = right_tensor.materialize_f64();
-        let left_data = left_tensor.as_ref().map(Tensor::materialize_f64);
-        let eigenvalues = self.upload_exec(&HostTensorView {
-            data: &eigenvalues_data,
-            shape: eigenvalues_tensor.shape(),
-        })?;
-        let diagonal = self.upload_exec(&HostTensorView {
-            data: &diagonal_data,
-            shape: diagonal_tensor.shape(),
-        })?;
-        let right = self.upload_exec(&HostTensorView {
-            data: &right_data,
-            shape: right_tensor.shape(),
-        })?;
-        let left = match (left_tensor, left_data) {
-            (Some(tensor), Some(data)) => Some(self.upload_exec(&HostTensorView {
-                data: &data,
-                shape: tensor.shape(),
-            })?),
-            _ => None,
-        };
-
-        if compute_left && left.is_none() {
-            return Err((anyhow!(
-                "eig: left eigenvectors are not available for the requested matrix"
-            ))
-            .into());
+        for value in [&eigenvalues_value, &diagonal_value, &right_value]
+            .into_iter()
+            .chain(left_value.iter())
+        {
+            eig_transfer::admit_eig_output_class(value, source_precision)?;
         }
+        let eigenvalues = self.upload_eig_output_exec(eigenvalues_value, &[handle])?;
+        let diagonal = self.upload_eig_output_exec(diagonal_value, &[handle, &eigenvalues])?;
+        let right = self.upload_eig_output_exec(right_value, &[handle, &eigenvalues, &diagonal])?;
+        let left = left_value
+            .map(|value| {
+                self.upload_eig_output_exec(value, &[handle, &eigenvalues, &diagonal, &right])
+            })
+            .transpose()?;
 
         Ok(ProviderEigResult {
             eigenvalues,

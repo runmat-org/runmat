@@ -1,8 +1,17 @@
 use super::*;
+use crate::context::host_allocation::{HostAllocationError, HostAllocationReceipt};
+use runmat_value::ExactHostTensorAllocation;
 
-pub(super) fn evaluate_interpolant(
+#[path = "query/allocation.rs"]
+mod allocation;
+use allocation::admit_spline2_before_query;
+pub(super) use allocation::admit_spline2_from_object;
+
+pub(super) async fn evaluate_interpolant(
     spec: &InterpolantSpec,
     args: Vec<Value>,
+    runtime: Option<&crate::context::RuntimeContext>,
+    preceding_receipt: Option<&HostAllocationReceipt>,
 ) -> BuiltinResult<Value> {
     if spec.grid_vectors.is_empty() {
         return Err(invalid("cannot evaluate an empty griddedInterpolant"));
@@ -14,7 +23,6 @@ pub(super) fn evaluate_interpolant(
         spec.extrapolation,
     )?;
     ensure_query_integer_extensions(&args)?;
-    let plan = parse_query_plan(&spec.grid_vectors, args)?;
     let grid_rank = spec.grid_vectors.len();
     let grid_size = spec
         .grid_vectors
@@ -35,12 +43,36 @@ pub(super) fn evaluate_interpolant(
         .copied()
         .try_fold(1usize, |acc, len| acc.checked_mul(len))
         .ok_or_else(|| invalid("value size exceeds platform limits"))?;
+    let allocation = if preceding_receipt.is_none() {
+        admit_spline2_before_query(
+            spec,
+            &args,
+            grid_size,
+            extra_count,
+            extra_shape.len(),
+            runtime,
+        )?
+    } else {
+        None
+    };
+    let receipt = preceding_receipt.or(allocation.as_ref());
+    if let (Some(receipt), Some(runtime)) = (receipt, runtime) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(|error| super::super::pp::host_allocation_error(BUILTIN_NAME, error))?;
+    }
+    let plan = parse_query_plan(&spec.grid_vectors, args)?;
     let mut out_shape = plan.shape.clone();
     out_shape.extend(extra_shape);
     if out_shape.is_empty() {
         out_shape.push(1);
     }
     let values = tensor_utils::tensor_values_f64_cow(&spec.values);
+    if let (Some(receipt), Some(runtime)) = (receipt, runtime) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(|error| super::super::pp::host_allocation_error(BUILTIN_NAME, error))?;
+    }
     if is_piecewise_method(spec.method) {
         return evaluate_piecewise_interpolant(
             spec,
@@ -49,7 +81,10 @@ pub(super) fn evaluate_interpolant(
             grid_size,
             extra_count,
             out_shape,
-        );
+            runtime,
+            receipt,
+        )
+        .await;
     }
     let output_count = plan
         .len()
@@ -72,14 +107,29 @@ pub(super) fn evaluate_interpolant(
     finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
 }
 
-pub(super) fn evaluate_piecewise_interpolant(
+pub(super) async fn evaluate_piecewise_interpolant(
     spec: &InterpolantSpec,
     values: &[f64],
     plan: &QueryPlan,
     grid_size: usize,
     extra_count: usize,
     out_shape: Vec<usize>,
+    runtime: Option<&crate::context::RuntimeContext>,
+    receipt: Option<&HostAllocationReceipt>,
 ) -> BuiltinResult<Value> {
+    if spec.grid_vectors.len() == 2 {
+        return evaluate_spline2_interpolant(
+            spec,
+            values,
+            plan,
+            grid_size,
+            extra_count,
+            out_shape,
+            runtime,
+            receipt,
+        )
+        .await;
+    }
     let x = &spec.grid_vectors[0];
     let output_count = plan
         .len()
@@ -88,6 +138,7 @@ pub(super) fn evaluate_piecewise_interpolant(
     let mut out = Vec::new();
     out.try_reserve_exact(output_count)
         .map_err(|_| invalid("interpolant output exceeds available memory"))?;
+    let mut work = runtime.map(crate::context::RuntimeContext::cpu_cooperation);
     for series in 0..extra_count {
         let series_offset = series * grid_size;
         let y = values[series_offset..series_offset + grid_size].to_vec();
@@ -102,8 +153,15 @@ pub(super) fn evaluate_piecewise_interpolant(
             InterpMethod::Pchip => {
                 build_pchip_pp(&series_data, BUILTIN_NAME).map_err(|err| internal(err.message()))?
             }
-            InterpMethod::Spline => build_spline_pp(&series_data, BUILTIN_NAME)
-                .map_err(|err| internal(err.message()))?,
+            InterpMethod::Spline => build_spline_pp(&series_data, BUILTIN_NAME, &mut work)
+                .await
+                .map_err(|err| {
+                    if is_spline_execution_failure(&err) {
+                        crate::builtins::common::map_control_flow_with_builtin(err, BUILTIN_NAME)
+                    } else {
+                        internal(err.message())
+                    }
+                })?,
             InterpMethod::Makima => build_makima_pp(&series_data, BUILTIN_NAME)
                 .map_err(|err| internal(err.message()))?,
             _ => unreachable!("piecewise evaluator only handles higher-order methods"),
@@ -119,6 +177,122 @@ pub(super) fn evaluate_piecewise_interpolant(
         })?;
     }
     finish_interpolant_output(out, out_shape, spec.values.numeric_dtype())
+}
+
+async fn evaluate_spline2_interpolant(
+    spec: &InterpolantSpec,
+    values: &[f64],
+    plan: &QueryPlan,
+    grid_size: usize,
+    extra_count: usize,
+    out_shape: Vec<usize>,
+    runtime: Option<&crate::context::RuntimeContext>,
+    receipt: Option<&HostAllocationReceipt>,
+) -> BuiltinResult<Value> {
+    let y = &spec.grid_vectors[0];
+    let x = &spec.grid_vectors[1];
+    let output_count = plan
+        .len()
+        .checked_mul(extra_count)
+        .ok_or_else(|| invalid("interpolant output size exceeds platform limits"))?;
+    let mut output = if let (Some(receipt), Some(runtime)) = (receipt, runtime) {
+        if output_count == 1 && spec.values.numeric_dtype() == NumericDType::F64 {
+            Spline2Output::Scalar(None)
+        } else {
+            let exact = receipt
+                .with_output_allocation(runtime, |permit| {
+                    ExactHostTensorAllocation::new(spec.values.numeric_dtype(), &out_shape, permit)
+                })
+                .map_err(|error| super::super::pp::host_allocation_error(BUILTIN_NAME, error))?;
+            Spline2Output::Exact(exact)
+        }
+    } else {
+        let mut out = Vec::new();
+        out.try_reserve_exact(output_count)
+            .map_err(|_| invalid("interpolant output exceeds available memory"))?;
+        Spline2Output::Ordinary(out)
+    };
+    let mut budget = AdmittedSplineWork::new(runtime, receipt, BUILTIN_NAME);
+    let exact_allocation = receipt.zip(runtime);
+    let mut query_scratch = vec![0.0; 2];
+    for series in 0..extra_count {
+        let series_offset = series * grid_size;
+        let samples = &values[series_offset..series_offset + grid_size];
+        let spline = TensorProductSpline2D::prepare(
+            x,
+            y,
+            |index| samples[index],
+            &mut budget,
+            BUILTIN_NAME,
+            exact_allocation,
+        )
+        .await?;
+        let mut pending = 0u64;
+        for query in 0..plan.len() {
+            let point = plan.point_at(query, &mut query_scratch);
+            let outside = point_outside_grid(spec, point);
+            let value = if outside && spec.extrapolation == ExtrapolationMethod::None {
+                f64::NAN
+            } else if outside && spec.extrapolation == ExtrapolationMethod::Nearest {
+                interpolate_nearest(spec, values, point, series_offset)
+            } else if outside && spec.extrapolation == ExtrapolationMethod::Linear {
+                interpolate_linear(spec, values, point, series_offset)
+            } else {
+                spline.evaluate(x, y, point[1], point[0], |index| samples[index])
+            };
+            output.set(series * plan.len() + query, value);
+            pending += 1;
+            if pending == 4096 {
+                budget.checkpoint(pending).await.map_err(|err| {
+                    crate::builtins::common::map_control_flow_with_builtin(err, BUILTIN_NAME)
+                })?;
+                pending = 0;
+            }
+        }
+        budget.checkpoint(pending).await.map_err(|err| {
+            crate::builtins::common::map_control_flow_with_builtin(err, BUILTIN_NAME)
+        })?;
+    }
+    let result = output.finish(out_shape, spec.values.numeric_dtype())?;
+    if let (Some(receipt), Some(runtime)) = (receipt, runtime) {
+        receipt
+            .checkpoint(runtime)
+            .map_err(|error| super::super::pp::host_allocation_error(BUILTIN_NAME, error))?;
+    }
+    Ok(result)
+}
+
+enum Spline2Output {
+    Scalar(Option<f64>),
+    Ordinary(Vec<f64>),
+    Exact(ExactHostTensorAllocation),
+}
+
+impl Spline2Output {
+    fn set(&mut self, index: usize, value: f64) {
+        match self {
+            Self::Scalar(slot) => *slot = Some(value),
+            Self::Ordinary(values) => values.push(value),
+            Self::Exact(values) => match values.as_f64_slice_mut() {
+                Some(slice) => slice[index] = value,
+                None => {
+                    values.as_f32_slice_mut().expect("single spline output")[index] = value as f32;
+                }
+            },
+        }
+    }
+
+    fn finish(self, shape: Vec<usize>, dtype: NumericDType) -> BuiltinResult<Value> {
+        match self {
+            Self::Scalar(Some(value)) => Ok(Value::Num(value)),
+            Self::Scalar(None) => Err(internal("scalar spline output was not filled")),
+            Self::Ordinary(values) => finish_interpolant_output(values, shape, dtype),
+            Self::Exact(values) => values
+                .into_tensor()
+                .map(Value::Tensor)
+                .map_err(|error| internal(format!("exact interpolant output: {error}"))),
+        }
+    }
 }
 
 pub(super) fn finish_interpolant_output(

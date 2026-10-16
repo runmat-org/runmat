@@ -9,99 +9,22 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
+use crate::builtins::math::linalg::ops::transpose_sparse_tensor;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::page_transpose_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::PAGETRANSPOSE_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
+    PAGETRANSPOSE_ERROR_INTERNAL, PAGETRANSPOSE_ERROR_INVALID_ARGUMENT,
+    PAGETRANSPOSE_ERROR_INVALID_INPUT,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, Value};
 
 const NAME: &str = "pagetranspose";
-
-const PAGETRANSPOSE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "X",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The public input-class table lists all eight integer classes; real and paired complex-integer storage is transposed without arithmetic.",
-    }];
-
-pub const PAGETRANSPOSE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "Y = pagetranspose(integer_X)",
-        inputs: &PAGETRANSPOSE_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The first two dimensions are permuted while exact native real or paired-complex integer payloads remain in their original class; providers may keep supported layouts resident and otherwise use transparent gather/restore.",
-    }];
-
-const PAGETRANSPOSE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Y",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input value with the first two dimensions swapped on every page.",
-}];
-
-const PAGETRANSPOSE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "X",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input scalar or array value.",
-}];
-
-const PAGETRANSPOSE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "Y = pagetranspose(X)",
-    inputs: &PAGETRANSPOSE_INPUTS,
-    outputs: &PAGETRANSPOSE_OUTPUT,
-}];
-
-const PAGETRANSPOSE_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGETRANSPOSE.INVALID_ARGUMENT",
-    identifier: Some("RunMat:pagetranspose:InvalidArgument"),
-    when: "Call does not provide exactly one input argument.",
-    message: "pagetranspose: expected exactly one input argument",
-};
-
-const PAGETRANSPOSE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGETRANSPOSE.INVALID_INPUT",
-    identifier: Some("RunMat:pagetranspose:InvalidInput"),
-    when: "Input type is unsupported for page-wise transpose.",
-    message: "pagetranspose: unsupported input type",
-};
-
-const PAGETRANSPOSE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PAGETRANSPOSE.INTERNAL",
-    identifier: Some("RunMat:pagetranspose:Internal"),
-    when: "Runtime cannot materialize the page-wise transpose output.",
-    message: "pagetranspose: internal runtime failure",
-};
-
-const PAGETRANSPOSE_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    PAGETRANSPOSE_ERROR_INVALID_ARGUMENT,
-    PAGETRANSPOSE_ERROR_INVALID_INPUT,
-    PAGETRANSPOSE_ERROR_INTERNAL,
-];
-
-pub const PAGETRANSPOSE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PAGETRANSPOSE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PAGETRANSPOSE_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::ops::pagetranspose"
@@ -169,18 +92,10 @@ fn internal_error(message: impl Into<String>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "pagetranspose",
-    category = "math/linalg/ops",
-    summary = "Apply the nonconjugate transpose to each matrix page of an array.",
-    keywords = "pagetranspose,page-wise transpose,non-conjugate,permute,gpu",
-    accel = "custom",
-    type_resolver(page_transpose_type),
-    descriptor(crate::builtins::math::linalg::ops::pagetranspose::PAGETRANSPOSE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::math::linalg::ops::pagetranspose::PAGETRANSPOSE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::pagetranspose"
 )]
-async fn pagetranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn pagetranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<Value> {
     let value = match args.len() {
         0 => return Err(builtin_error(&PAGETRANSPOSE_ERROR_INVALID_ARGUMENT)),
         1 => args.remove(0),
@@ -200,7 +115,8 @@ async fn pagetranspose_value(value: Value) -> BuiltinResult<Value> {
             Ok(tensor::tensor_into_value(permute_tensor(NAME, t, &order)?))
         }
         Value::SparseTensor(s) => Ok(Value::SparseTensor(
-            transpose_real_sparse_tensor(s).map_err(|e| internal_error(format!("{NAME}: {e}")))?,
+            transpose_sparse_tensor(s, false)
+                .map_err(|e| internal_error(format!("{NAME}: {e}")))?,
         )),
         Value::ComplexTensor(ct) => {
             let order = page_transpose_order_for_shape_len(ct.shape().len());

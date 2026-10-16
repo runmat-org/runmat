@@ -105,7 +105,7 @@ answer: "Add the option `'vector'`, e.g., `[Q,R,p] = qr(A,'vector')`. When you a
     BuiltinDocumentationFaq { question: "Are complex matrices supported?",
 answer: "Yes. Complex single and double inputs use complex Householder reflectors, and Q and R retain the input floating class." },
     BuiltinDocumentationFaq { question: "What precision do the returned factors use?",
-answer: "For dense single input, Q and R retain single precision; double, logical, and gated exact-integer inputs produce double factors. Host permutation vectors use one-based double indices; resident outputs follow the exact provider's physical precision." },
+answer: "For dense single input, Q and R retain single precision; double, logical, and gated exact-integer inputs produce double factors. Matrix and one-based vector permutation outputs are double. Resident factors retain the source's physical floating class, while the permutation output remains double when the exact owner supports that transfer." },
     BuiltinDocumentationFaq { question: "Can I call `qr` on logical arrays?",
 answer: "Yes. Logical inputs are converted to double precision before factorisation." },
     BuiltinDocumentationFaq { question: "What happens if I pass more than two option arguments?",

@@ -1,6 +1,7 @@
 use super::*;
 
 mod decomposition;
+mod eig_transfer;
 mod host_boundary;
 mod matmul;
 pub(in crate::backend::wgpu::provider) use matmul::{

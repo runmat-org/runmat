@@ -14,8 +14,9 @@ pub use arithmetic::{
     FusionScalarControl,
 };
 
-/// Exact values are available only for graph inputs/constants. An unevaluated
-/// intermediate never borrows the value of an ancestor as a semantic witness.
+/// Exact values originate from graph inputs/constants or a request-local,
+/// selected pure scalar producer. An unevaluated intermediate never borrows
+/// the value of an ancestor as a semantic witness.
 pub struct FusionAdmissionContext<'a> {
     pub operands: &'a [Option<&'a Value>],
     pub facts: &'a [ValueFact],

@@ -837,6 +837,7 @@ pub fn real_sequence_upload_feasible(
 }
 
 mod restore;
+pub(crate) use restore::restore_real_scalar_after_host;
 pub use restore::{
     restore_class_preserving_value, restore_class_preserving_value_protecting,
     restore_class_preserving_value_with_operands, RestoreOperandContext,

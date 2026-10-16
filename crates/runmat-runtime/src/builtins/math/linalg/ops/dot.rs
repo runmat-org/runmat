@@ -7,13 +7,12 @@
 
 #[cfg(test)]
 use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::DOT_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    DOT_ERROR_INTERNAL, DOT_ERROR_INVALID_ARGUMENT, DOT_ERROR_INVALID_INPUT,
+    DOT_INTEGER_DATA_EXTENSION, DOT_LOGICAL_DATA_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, NumericScalar, Tensor, Value};
@@ -24,164 +23,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::dot_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 const DOT_NAME: &str = "dot";
-
-const DOT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "C",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Dot product result.",
-}];
-
-const DOT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-];
-
-const DOT_INPUTS_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Left operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "B",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Right operand.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reduction dimension.",
-    },
-];
-
-const DOT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "C = dot(A, B)",
-        inputs: &DOT_INPUTS,
-        outputs: &DOT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "C = dot(A, B, dim)",
-        inputs: &DOT_INPUTS_DIM,
-        outputs: &DOT_OUTPUT,
-    },
-];
-
-const DOT_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOT.INVALID_ARGUMENT",
-    identifier: Some("RunMat:dot:InvalidArgument"),
-    when: "Argument count or dimension argument is invalid.",
-    message: "dot: invalid argument",
-};
-
-const DOT_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOT.INVALID_INPUT",
-    identifier: Some("RunMat:dot:InvalidInput"),
-    when: "Inputs are unsupported or incompatible.",
-    message: "dot: A and B must be the same size.",
-};
-
-const DOT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.DOT.INTERNAL",
-    identifier: Some("RunMat:dot:Internal"),
-    when: "Runtime cannot materialize dot outputs.",
-    message: "dot: internal runtime failure",
-};
-
-const DOT_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    DOT_ERROR_INVALID_ARGUMENT,
-    DOT_ERROR_INVALID_INPUT,
-    DOT_ERROR_INTERNAL,
-];
-
-const DOT_INTEGER_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "dot-integer-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "dot with typed-integer data operands is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DotIntegerDataExtension"),
-};
-
-const DOT_LOGICAL_DATA_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "dot-logical-data",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "dot with logical data operands is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:DotLogicalDataExtension"),
-};
-
-const DOT_EXTENSIONS: [BuiltinExtensionDescriptor; 2] =
-    [DOT_INTEGER_DATA_EXTENSION, DOT_LOGICAL_DATA_EXTENSION];
-
-const DOT_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A_or_B",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The compatibility target documents single/double data only. RunMat mode additionally accepts all eight real typed-integer classes.",
-    }];
-
-const DOT_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The documented positive-integer scalar dimension is read exactly from typed scalar storage before platform-bound validation.",
-    }];
-
-pub const DOT_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = dot(integer_A_or_B, B, dim?)",
-        inputs: &DOT_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Mode-gated integer operands are read from authoritative storage and multiplied exactly when both host operands are integral; each exact product then crosses to the floating reduction/output domain.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "C = dot(A, B, integer_dim)",
-        inputs: &DOT_INTEGER_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "All eight scalar integer classes select the reduction dimension through exact structural decoding.",
-    },
-];
-
-pub const DOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &DOT_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::dot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -283,14 +129,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "dot",
-    category = "math/linalg/ops",
-    summary = "Compute dot products.",
-    keywords = "dot,inner product,gpu,linear algebra",
-    accel = "reduction",
-    type_resolver(dot_type),
-    descriptor(crate::builtins::math::linalg::ops::dot::DOT_DESCRIPTOR),
-    extensions(DOT_EXTENSIONS),
-    integer_capabilities(DOT_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::dot"
 )]
 async fn dot_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

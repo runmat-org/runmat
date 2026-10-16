@@ -107,14 +107,7 @@ fn parse_datetime_text_with_input_format_trimmed(
     let Some(input_format) = input_format else {
         return parse_datetime_text_trimmed(trimmed);
     };
-    let chrono_format = format_token_to_strftime(input_format);
-    if let Ok(value) = NaiveDateTime::parse_from_str(trimmed, &chrono_format) {
-        return Some((value, true));
-    }
-    if let Ok(value) = NaiveDate::parse_from_str(trimmed, &chrono_format) {
-        return Some((value.and_hms_opt(0, 0, 0).unwrap(), false));
-    }
-    None
+    crate::builtins::common::validation::parse_datetime_with_input_format(trimmed, input_format)
 }
 
 pub(super) fn parse_text_input(

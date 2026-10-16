@@ -5,15 +5,18 @@ mod matrix_arithmetic;
 mod factor;
 mod ops;
 mod solve;
+mod structure;
 
 pub use self::factor::*;
 pub use self::matrix_arithmetic::*;
 pub use self::ops::*;
 pub use self::solve::*;
+pub use self::structure::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     factor::extend_entries(values);
     values.extend(matrix_arithmetic::ENTRIES.iter().copied());
     ops::extend_entries(values);
     solve::extend_entries(values);
+    structure::extend_entries(values);
 }

@@ -19,7 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "`griddedInterpolant(V)` uses default grid vectors `1:size(V,dim)`. `griddedInterpolant(x,v)` and `griddedInterpolant({x1,...,xn},V)` use explicit compact grid vectors. Full-grid `griddedInterpolant(X1,...,Xn,V)` extracts vectors from rectilinear monotone grids.",
                 "Grid vectors are finite, strictly increasing real vectors with at least two points. Values are real dense arrays whose leading dimensions match the grid. Single-precision Values remain single in the object and in tensor evaluation; scalar double results use numeric scalars.",
-                "Method may be linear, nearest, next, previous, pchip, spline, or makima; pchip, spline, and makima are 1-D only. ExtrapolationMethod also accepts none. Cubic and unsupported N-D higher-order forms return explicit errors rather than a substitute interpolation. Makima extrapolation currently requires makima interpolation.",
+                "Method may be linear, nearest, next, previous, pchip, spline, or makima. Pchip and makima are 1-D; spline uses shared not-a-knot coefficients for 1-D and a tensor product for 2-D. ExtrapolationMethod also accepts none. Cubic convolution, multidimensional makima, and spline above 2-D return explicit errors rather than a substitute interpolation. Makima extrapolation currently requires makima interpolation.",
             ],
         },
         BuiltinDocumentationSection {

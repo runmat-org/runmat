@@ -182,6 +182,126 @@ impl AccelProvider for Provider {
     ) -> anyhow::Result<GpuTensorHandle> {
         self.fail("cross")
     }
+    fn cond<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: ProviderCondNorm,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if self.failure == "cond_after_unsupported" {
+                self.trace.lock().unwrap().push("cond");
+                return Err(ProviderExecutionError::from(unsupported_provider_operation(
+                    "cond became unavailable after staging",
+                ))
+                .after_effect());
+            }
+            if self.failure == "cond_malformed" || self.failure == "cond_valid" {
+                self.trace.lock().unwrap().push("cond");
+                let shape = if self.failure == "cond_valid" {
+                    vec![1, 1]
+                } else {
+                    vec![1, 2]
+                };
+                return self
+                    .allocate(shape, GpuTensorStorage::Real)
+                    .map_err(|source| ProviderExecutionError::from(source).after_effect());
+            }
+            self.fail("cond")
+                .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+        })
+    }
+    fn inv<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: ProviderInvOptions,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if self.failure == "inv_after_unsupported" {
+                self.trace.lock().unwrap().push("inv");
+                return Err(ProviderExecutionError::from(unsupported_provider_operation(
+                    "inv became unavailable after staging",
+                ))
+                .after_effect());
+            }
+            self.fail("inv")
+                .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+        })
+    }
+    fn pinv<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: ProviderPinvOptions,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if self.failure == "pinv_after_unsupported" {
+                self.trace.lock().unwrap().push("pinv");
+                return Err(ProviderExecutionError::from(unsupported_provider_operation(
+                    "pinv became unavailable after staging",
+                ))
+                .after_effect());
+            }
+            self.fail("pinv")
+                .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+        })
+    }
+    fn norm<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: ProviderNormOrder,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if self.failure == "norm_after_unsupported" {
+                self.trace.lock().unwrap().push("norm");
+                return Err(ProviderExecutionError::from(unsupported_provider_operation(
+                    "norm became unavailable after staging",
+                ))
+                .after_effect());
+            }
+            self.fail("norm")
+                .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+        })
+    }
+    fn rcond<'a>(&'a self, _: &'a GpuTensorHandle) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if self.failure == "rcond_after_unsupported" {
+                self.trace.lock().unwrap().push("rcond");
+                return Err(ProviderExecutionError::from(unsupported_provider_operation(
+                    "rcond became unavailable after staging",
+                ))
+                .after_effect());
+            }
+            self.fail("rcond")
+                .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+        })
+    }
+    fn rank<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: Option<f64>,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if self.failure == "rank_after_unsupported" {
+                self.trace.lock().unwrap().push("rank");
+                return Err(ProviderExecutionError::from(unsupported_provider_operation(
+                    "rank became unavailable after staging",
+                ))
+                .after_effect());
+            }
+            if self.failure == "rank_malformed" || self.failure == "rank_valid" {
+                self.trace.lock().unwrap().push("rank");
+                let shape = if self.failure == "rank_valid" {
+                    vec![1, 1]
+                } else {
+                    vec![1, 2]
+                };
+                return self
+                    .allocate(shape, GpuTensorStorage::Real)
+                    .map_err(|source| ProviderExecutionError::from(source).after_effect());
+            }
+            self.fail("rank")
+                .map_err(|source| ProviderExecutionError::from(source).with_unproven_effects())
+        })
+    }
     fn complex_from_real_imag<'a>(
         &'a self,
         _: &'a GpuTensorHandle,

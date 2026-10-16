@@ -4,6 +4,96 @@ use super::*;
 #[path = "restore_owned_tests.rs"]
 mod owned_tests;
 
+/// Restore a host-computed real scalar after an input has already crossed a
+/// provider boundary. A fresh result is required even for automatic inputs:
+/// these callers have no host-result fallback once an owning provider exists.
+pub(crate) fn restore_real_scalar_after_host(
+    source: &GpuTensorHandle,
+    provider: &'static dyn AccelProvider,
+    value: f64,
+    precision: ProviderPrecision,
+    builtin: &str,
+    internal_error: impl Fn(String) -> crate::RuntimeError,
+) -> crate::BuiltinResult<Value> {
+    let terminal = |detail: String| {
+        let mut failure = internal_error(format!("{builtin}: {detail}"));
+        failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        failure
+    };
+    source.allocation_lease().validate_live().map_err(|cause| {
+        crate::runtime_error::with_provider_execution_source(
+            terminal(format!("input allocation is not live: {cause}")),
+            runmat_accelerate_api::ProviderExecutionError::from_source(cause)
+                .with_unproven_effects(),
+        )
+    })?;
+    if source.device_id() != provider.device_id()
+        || !exact_provider_for_handle(source)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+    {
+        return Err(terminal("input has no exact owning provider".to_owned()));
+    }
+
+    let single = [value as f32];
+    let double = [value];
+    let data = match precision {
+        ProviderPrecision::F32 => HostNumericDataView::F32(&single),
+        ProviderPrecision::F64 => HostNumericDataView::F64(&double),
+    };
+    let mut output = runmat_accelerate_api::upload_numeric_protecting(
+        provider,
+        &HostNumericTensorView {
+            data,
+            shape: &[1, 1],
+            storage: GpuTensorStorage::Real,
+        },
+        &[source],
+    )
+    .map_err(|cause| {
+        let failure = terminal(format!("scalar upload failed: {cause}"));
+        crate::runtime_error::with_provider_execution_source(
+            failure,
+            cause.into_execution_error().with_unproven_effects(),
+        )
+    })?;
+
+    if !unary_gpu_output_matches_shape(
+        &output,
+        source,
+        provider,
+        &[1, 1],
+        UnaryGpuOutputContract {
+            storage: GpuTensorStorage::Real,
+            precision: Some(precision),
+            integer: None,
+            logical: false,
+            alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
+        },
+    ) {
+        return Err(reject_gpu_output(
+            output,
+            terminal("provider returned a malformed, aliased, or foreign scalar".to_owned()),
+        ));
+    }
+    if let Err(cause) = source.allocation_lease().validate_live() {
+        let failure = crate::runtime_error::with_provider_execution_source(
+            terminal(format!(
+                "input allocation retired during scalar upload: {cause}"
+            )),
+            runmat_accelerate_api::ProviderExecutionError::from_source(cause)
+                .with_unproven_effects(),
+        );
+        return Err(reject_gpu_output(output, failure));
+    }
+    if let Err(cause) = propagate_output_provenance(&mut output, [source]) {
+        return Err(reject_gpu_output(output, cause));
+    }
+    resident_gpu_value(output).map_err(|mut cause| {
+        cause.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        cause
+    })
+}
+
 /// Restore a class-preserving host value to the provider that owns `source`.
 ///
 /// If the owner cannot physically represent the floating class, the host value

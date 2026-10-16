@@ -27,3 +27,4 @@ pub mod regress;
 mod regularized;
 pub mod ridge;
 pub mod tsne;
+pub mod nlparci;

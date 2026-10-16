@@ -2,13 +2,12 @@
 
 #[cfg(test)]
 use runmat_accelerate_api::HostTensorView;
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::TRACE_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    TRACE_CHAR_INPUT_EXTENSION, TRACE_ERROR_INTERNAL, TRACE_ERROR_INVALID_INPUT,
+    TRACE_INTEGER_INPUT_EXTENSION, TRACE_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CharArray, ComplexTensor, IntValue, Tensor, Value};
@@ -20,6 +19,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::numeric_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -30,95 +30,6 @@ use resident::trace_gpu;
 mod resident_tests;
 
 const NAME: &str = "trace";
-
-const INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trace-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trace accepts native integer matrices",
-    error_identifier: Some("RunMat:compatibility:TraceIntegerInputExtension"),
-};
-const LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trace-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trace accepts logical matrices",
-    error_identifier: Some("RunMat:compatibility:TraceLogicalInputExtension"),
-};
-const CHAR_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "trace-character-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "trace accepts character matrices",
-    error_identifier: Some("RunMat:compatibility:TraceCharacterInputExtension"),
-};
-pub const TRACE_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    INTEGER_INPUT_EXTENSION,
-    LOGICAL_INPUT_EXTENSION,
-    CHAR_INPUT_EXTENSION,
-];
-
-const TRACE_INTEGER_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Public trace input is single or double. Native integer matrices are independently gated and summed exactly before a checked double result boundary.",
-    }];
-pub const TRACE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "t = trace(integer_A)",
-        inputs: &TRACE_INTEGER_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Diagonal values are accumulated in an exact wide integer domain; the call rejects a result outside binary64's exact integer range instead of rounding it.",
-    }];
-
-const TRACE_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "t",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Diagonal-sum trace result.",
-}];
-
-const TRACE_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix-like value.",
-}];
-
-const TRACE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "t = trace(A)",
-    inputs: &TRACE_INPUTS,
-    outputs: &TRACE_OUTPUT,
-}];
-
-const TRACE_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRACE.INVALID_INPUT",
-    identifier: Some("RunMat:trace:InvalidInput"),
-    when: "Input is unsupported or not matrix-shaped.",
-    message: "trace: input must be 2-D",
-};
-
-const TRACE_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TRACE.INTERNAL",
-    identifier: Some("RunMat:trace:Internal"),
-    when: "Runtime cannot materialize or transport trace results.",
-    message: "trace: internal runtime failure",
-};
-
-const TRACE_ERRORS: [BuiltinErrorDescriptor; 2] = [TRACE_ERROR_INVALID_INPUT, TRACE_ERROR_INTERNAL];
-
-pub const TRACE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRACE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TRACE_ERRORS,
-};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::ops::trace")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -196,14 +107,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 #[runtime_builtin(
     name = "trace",
-    category = "math/linalg/ops",
-    summary = "Sum main-diagonal elements of matrix and matrix-like inputs.",
-    keywords = "trace,matrix trace,diagonal sum,gpu",
-    accel = "reduction",
-    type_resolver(numeric_scalar_type),
-    descriptor(crate::builtins::math::linalg::ops::trace::TRACE_DESCRIPTOR),
-    extensions(crate::builtins::math::linalg::ops::trace::TRACE_EXTENSIONS),
-    integer_capabilities(crate::builtins::math::linalg::ops::trace::TRACE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::trace"
 )]
 async fn trace_builtin(value: Value) -> BuiltinResult<Value> {
@@ -254,6 +158,12 @@ fn trace_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
             let value = sparse.complex_at(index, index).unwrap_or((0.0, 0.0));
             (sum.0 + value.0, sum.1 + value.1)
         });
+        if sparse.numeric_dtype() == Some(NumericDType::F32) {
+            return Ok(Value::ComplexTensor(
+                ComplexTensor::from_f32(vec![(real as f32, imaginary as f32)], vec![1, 1])
+                    .map_err(trace_invalid_input)?,
+            ));
+        }
         return Ok(Value::Complex(real, imaginary));
     }
     let sum = (0..sparse.rows)
@@ -379,16 +289,22 @@ fn ensure_trace_extensions(value: &Value) -> BuiltinResult<()> {
         || matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some())
     {
-        crate::compatibility::ensure_builtin_extension_enabled(&INTEGER_INPUT_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRACE_INTEGER_INPUT_EXTENSION,
+            NAME,
+        )?;
     }
     if matches!(value, Value::Bool(_) | Value::LogicalArray(_))
         || matches!(value, Value::SparseTensor(sparse) if sparse.is_logical())
         || matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle))
     {
-        crate::compatibility::ensure_builtin_extension_enabled(&LOGICAL_INPUT_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &TRACE_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
     }
     if matches!(value, Value::CharArray(_)) {
-        crate::compatibility::ensure_builtin_extension_enabled(&CHAR_INPUT_EXTENSION, NAME)?;
+        crate::compatibility::ensure_builtin_extension_enabled(&TRACE_CHAR_INPUT_EXTENSION, NAME)?;
     }
     Ok(())
 }
@@ -838,7 +754,10 @@ pub(crate) mod tests {
     fn trace_integer_extension_is_rejected_in_matlab_mode() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(super::trace_builtin(Value::Int(IntValue::I32(5)))).unwrap_err();
-        assert_eq!(error.identifier(), INTEGER_INPUT_EXTENSION.error_identifier);
+        assert_eq!(
+            error.identifier(),
+            TRACE_INTEGER_INPUT_EXTENSION.error_identifier
+        );
     }
 
     #[test]
@@ -886,5 +805,21 @@ pub(crate) mod tests {
             trace_builtin(Value::SparseTensor(sparse)).expect("trace"),
             Value::Complex(6.0, 3.0)
         );
+
+        let sparse_single = SparseTensor::new_complex_f32(
+            2,
+            2,
+            vec![0, 1, 2],
+            vec![0, 1],
+            vec![(2.5, -1.0), (3.5, 4.0)],
+        )
+        .expect("complex single sparse");
+        let Value::ComplexTensor(single) =
+            trace_builtin(Value::SparseTensor(sparse_single)).expect("single trace")
+        else {
+            panic!("single complex sparse trace must retain its typed carrier")
+        };
+        assert_eq!(single.numeric_dtype(), NumericDType::F32);
+        assert_eq!(single.materialize_f64(), vec![(6.0, 3.0)]);
     }
 }

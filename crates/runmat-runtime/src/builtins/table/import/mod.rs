@@ -2,6 +2,7 @@ use super::*;
 
 mod cells;
 mod conversion;
+mod variable_conversion;
 mod options;
 mod parquet;
 mod reader;
@@ -14,4 +15,5 @@ pub(super) use options::*;
 pub(super) use parquet::*;
 pub(super) use reader::*;
 pub(super) use text::*;
+use variable_conversion::prepare_variable_cells;
 pub(super) use writer::*;

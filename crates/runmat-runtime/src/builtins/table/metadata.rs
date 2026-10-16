@@ -52,7 +52,7 @@ const SPREADSHEET_IMPORT_OPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinP
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Spreadsheet import options struct.",
+    description: "Typed spreadsheet import-options object.",
 }];
 const SPREADSHEET_IMPORT_OPTIONS_INPUTS_NAME_VALUE: [BuiltinParamDescriptor; 1] =
     [BuiltinParamDescriptor {
@@ -67,7 +67,7 @@ const DETECT_IMPORT_OPTIONS_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamD
     ty: BuiltinParamType::Any,
     arity: BuiltinParamArity::Required,
     default: None,
-    description: "Detected import options struct accepted by readtable/readmatrix.",
+    description: "Typed text or spreadsheet import-options object for tabular readers.",
 }];
 const DETECT_IMPORT_OPTIONS_INPUTS_FILENAME: [BuiltinParamDescriptor; 1] =
     [BuiltinParamDescriptor {

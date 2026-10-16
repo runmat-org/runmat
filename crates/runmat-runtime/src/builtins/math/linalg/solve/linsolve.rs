@@ -29,6 +29,8 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 const NAME: &str = "linsolve";
 
 mod general;
+mod condition;
+pub use condition::{square_factor_rcond_for_provider, ProviderSquareFactor};
 #[cfg(test)]
 use general::binary_scale_preserves_component;
 use general::{solve_general_complex, solve_general_real};

@@ -3685,29 +3685,29 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _options: ProviderInvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("inv not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("inv not supported by provider")
     }
     fn pinv<'a>(
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _options: ProviderPinvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("pinv not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("pinv not supported by provider")
     }
     fn cond<'a>(
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _norm: ProviderCondNorm,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("cond not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("cond not supported by provider")
     }
     fn norm<'a>(
         &'a self,
         _tensor: &'a GpuTensorHandle,
         _order: ProviderNormOrder,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("norm not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("norm not supported by provider")
     }
     fn interp1<'a>(
         &'a self,
@@ -3719,14 +3719,14 @@ pub trait AccelProvider: AcceleratorThreadBound {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _tolerance: Option<f64>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { Err(anyhow::anyhow!("rank not supported by provider")) })
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("rank not supported by provider")
     }
     fn rcond<'a>(
         &'a self,
         _matrix: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        unsupported_future("rcond not supported by provider")
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("rcond not supported by provider")
     }
     fn mldivide<'a>(
         &'a self,
@@ -4058,7 +4058,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
         _rhs: &GpuTensorHandle,
         _dim: Option<usize>,
     ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!("cross not supported by provider"))
+        Err(unsupported_provider_operation(
+            "cross not supported by provider",
+        ))
     }
     /// Certify a known-unavailable double sum before a caller stages other
     /// provider work. The default cannot infer capability from the provider's

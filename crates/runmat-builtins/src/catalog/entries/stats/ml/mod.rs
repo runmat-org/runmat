@@ -25,6 +25,7 @@ mod regress;
 mod ridge;
 mod squareform;
 mod tsne;
+mod nlparci;
 
 pub use self::bayesopt::*;
 pub use self::classify::*;
@@ -42,6 +43,7 @@ pub use self::lassoglm::*;
 pub use self::linkage::*;
 pub use self::lscov::*;
 pub use self::mnrfit::*;
+pub use self::nlparci::*;
 pub use self::optimizable_variable::*;
 pub use self::pairwise_distance::*;
 pub use self::perfcurve::*;
@@ -74,4 +76,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(classify::ENTRIES.iter().copied());
     values.extend(perfcurve::ENTRIES.iter().copied());
     values.extend(mnrfit::ENTRIES.iter().copied());
+    values.extend(nlparci::ENTRIES.iter().copied());
 }

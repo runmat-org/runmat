@@ -2,13 +2,13 @@
 
 use nalgebra::{linalg::SVD, DMatrix};
 use num_complex::Complex64;
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 #[cfg(test)]
 use runmat_builtins::RANK_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, RANK_ERROR_INVALID_ARGUMENT, RANK_ERROR_INVALID_INPUT,
-    RANK_INTEGER_INPUT_EXTENSION, RANK_INTEGER_TOLERANCE_EXTENSION, RANK_LOGICAL_INPUT_EXTENSION,
-    RANK_LOGICAL_TOLERANCE_EXTENSION,
+    BuiltinErrorDescriptor, RANK_ERROR_INTERNAL, RANK_ERROR_INVALID_ARGUMENT,
+    RANK_ERROR_INVALID_INPUT, RANK_INTEGER_INPUT_EXTENSION, RANK_INTEGER_TOLERANCE_EXTENSION,
+    RANK_LOGICAL_INPUT_EXTENSION, RANK_LOGICAL_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Tensor, Value};
@@ -59,6 +59,10 @@ fn builtin_error(message: impl Into<String>) -> RuntimeError {
 
 fn argument_error(message: impl Into<String>) -> RuntimeError {
     rank_error_with_message(message, &RANK_ERROR_INVALID_ARGUMENT)
+}
+
+fn internal_error(message: impl Into<String>) -> RuntimeError {
+    rank_error_with_message(message, &RANK_ERROR_INTERNAL)
 }
 
 fn map_control_flow(err: RuntimeError) -> RuntimeError {
@@ -161,12 +165,47 @@ async fn rank_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
     let owner = gpu_helpers::exact_provider_for_handle(&handle);
-    if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+    {
         if let Some(provider) = owner {
             match provider.rank(&handle, tol).await {
-                Ok(device_scalar) => return Ok(Value::GpuTensor(device_scalar)),
-                Err(_) => {
-                    // Fall through to host-based fallback.
+                Ok(mut device_scalar)
+                    if gpu_helpers::unary_gpu_output_matches_shape(
+                        &device_scalar,
+                        &handle,
+                        provider,
+                        &[1, 1],
+                        gpu_helpers::UnaryGpuOutputContract {
+                            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                            precision: Some(runmat_accelerate_api::ProviderPrecision::F64),
+                            integer: None,
+                            logical: false,
+                            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+                        },
+                    ) =>
+                {
+                    if let Err(error) =
+                        gpu_helpers::propagate_output_provenance(&mut device_scalar, [&handle])
+                    {
+                        return Err(gpu_helpers::reject_gpu_output(device_scalar, error));
+                    }
+                    return gpu_helpers::resident_gpu_value(device_scalar);
+                }
+                Ok(device_scalar) => {
+                    let failure = internal_error(
+                        "rank: provider returned a malformed, aliased, or foreign scalar",
+                    );
+                    return Err(gpu_helpers::reject_gpu_output(device_scalar, failure));
+                }
+                Err(error) if error.is_unsupported() => {}
+                Err(error) => {
+                    let mut failure =
+                        internal_error(format!("rank: provider execution failed: {error}"));
+                    failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                    return Err(crate::runtime_error::with_provider_execution_source(
+                        failure, error,
+                    ));
                 }
             }
         }
@@ -178,34 +217,17 @@ async fn rank_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Va
     let rank = rank_scalar_from_value(gathered, tol)?;
 
     if let Some(provider) = owner {
-        match upload_rank_scalar(provider, rank) {
-            Ok(uploaded) => return Ok(Value::GpuTensor(uploaded)),
-            Err(err) => {
-                if err.message() == "interaction pending..." {
-                    return Err(build_runtime_error("interaction pending...")
-                        .with_builtin(NAME)
-                        .build());
-                }
-            }
-        }
+        return gpu_helpers::restore_real_scalar_after_host(
+            &handle,
+            provider,
+            rank,
+            ProviderPrecision::F64,
+            NAME,
+            internal_error,
+        );
     }
 
     Ok(Value::Num(rank))
-}
-
-fn upload_rank_scalar(
-    provider: &'static dyn runmat_accelerate_api::AccelProvider,
-    rank: f64,
-) -> BuiltinResult<GpuTensorHandle> {
-    let data = [rank];
-    let shape = [1usize, 1usize];
-    let view = HostTensorView {
-        data: &data,
-        shape: &shape,
-    };
-    provider
-        .upload(&view)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn rank_real_tensor_value(tensor: Tensor, tol: Option<f64>) -> BuiltinResult<Value> {

@@ -2,13 +2,14 @@
 
 use log::debug;
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderBandwidth};
+use runmat_builtins::BuiltinErrorDescriptor;
+
+#[cfg(test)]
+use runmat_builtins::{ISDIAG_DESCRIPTOR, ISTRIL_DESCRIPTOR, ISTRIU_DESCRIPTOR};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
-use runmat_builtins::{
-    BuiltinExtensionDescriptor, BuiltinExtensionMode, BuiltinIntegerAuditDescriptor,
-    BuiltinIntegerAuditKind,
+    ISDIAG_ERROR_INTERNAL, ISDIAG_ERROR_INVALID_INPUT, ISDIAG_INTEGER_INPUT_EXTENSION,
+    ISTRIL_ERROR_INTERNAL, ISTRIL_ERROR_INVALID_INPUT, ISTRIL_INTEGER_INPUT_EXTENSION,
+    ISTRIU_ERROR_INTERNAL, ISTRIU_ERROR_INVALID_INPUT, ISTRIU_INTEGER_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{
@@ -21,151 +22,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor as tensor_utils;
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::logical_scalar_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-
-const OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tf",
-    ty: BuiltinParamType::LogicalArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "True when the input matrix satisfies the requested structure predicate.",
-}];
-
-const INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input numeric, logical, complex, sparse, or gpuArray matrix.",
-}];
-
-const ISDIAG_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = isdiag(A)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ISTRIL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = istril(A)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ISTRIU_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "tf = istriu(A)",
-    inputs: &INPUTS,
-    outputs: &OUTPUT,
-}];
-
-const ISDIAG_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISDIAG.INVALID_INPUT",
-    identifier: Some("RunMat:isdiag:InvalidInput"),
-    when: "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
-    message: "isdiag: invalid input",
-};
-
-const ISDIAG_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISDIAG.INTERNAL",
-    identifier: Some("RunMat:isdiag:Internal"),
-    when: "Runtime fails while gathering GPU input or constructing an internal matrix view.",
-    message: "isdiag: internal runtime failure",
-};
-
-const ISTRIL_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIL.INVALID_INPUT",
-    identifier: Some("RunMat:istril:InvalidInput"),
-    when: "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
-    message: "istril: invalid input",
-};
-
-const ISTRIL_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIL.INTERNAL",
-    identifier: Some("RunMat:istril:Internal"),
-    when: "Runtime fails while gathering GPU input or constructing an internal matrix view.",
-    message: "istril: internal runtime failure",
-};
-
-const ISTRIU_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIU.INVALID_INPUT",
-    identifier: Some("RunMat:istriu:InvalidInput"),
-    when: "Input cannot be interpreted as a supported numeric, logical, sparse, complex, or gpuArray matrix.",
-    message: "istriu: invalid input",
-};
-
-const ISTRIU_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ISTRIU.INTERNAL",
-    identifier: Some("RunMat:istriu:Internal"),
-    when: "Runtime fails while gathering GPU input or constructing an internal matrix view.",
-    message: "istriu: internal runtime failure",
-};
-
-const ISDIAG_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ISDIAG_ERROR_INVALID_INPUT, ISDIAG_ERROR_INTERNAL];
-const ISTRIL_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ISTRIL_ERROR_INVALID_INPUT, ISTRIL_ERROR_INTERNAL];
-const ISTRIU_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [ISTRIU_ERROR_INVALID_INPUT, ISTRIU_ERROR_INTERNAL];
-
-pub const ISDIAG_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISDIAG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISDIAG_ERRORS,
-};
-
-const ISDIAG_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "isdiag-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "isdiag with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IsdiagIntegerInputExtension"),
-};
-const ISDIAG_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISDIAG_INTEGER_INPUT_EXTENSION];
-pub const ISDIAG_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
-};
-
-pub const ISTRIL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISTRIL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISTRIL_ERRORS,
-};
-
-const ISTRIL_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "istril-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "istril with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IstrilIntegerInputExtension"),
-};
-const ISTRIL_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIL_INTEGER_INPUT_EXTENSION];
-pub const ISTRIL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
-};
-
-pub const ISTRIU_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ISTRIU_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ISTRIU_ERRORS,
-};
-
-const ISTRIU_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "istriu-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "istriu with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:IstriuIntegerInputExtension"),
-};
-const ISTRIU_EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [ISTRIU_INTEGER_INPUT_EXTENSION];
-pub const ISTRIU_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "MATLAB documents single, double, and logical input; exact integer host or resident input is a separately declared and gated RunMat extension.",
-};
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
@@ -278,16 +137,7 @@ struct BuiltinContext {
 
 #[runtime_builtin(
     name = "isdiag",
-    category = "math/linalg/structure",
-    summary = "Determine whether a matrix is diagonal.",
-    keywords = "isdiag,diagonal,matrix structure,sparse,gpu",
-    accel = "structure",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_DESCRIPTOR),
-    extensions(ISDIAG_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::diagonal_triangular::ISDIAG_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn isdiag_builtin(value: Value) -> BuiltinResult<Value> {
@@ -319,16 +169,7 @@ fn value_has_integer_storage(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "istril",
-    category = "math/linalg/structure",
-    summary = "Determine whether a matrix is lower triangular.",
-    keywords = "istril,lower triangular,matrix structure,sparse,gpu",
-    accel = "structure",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_DESCRIPTOR),
-    extensions(ISTRIL_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIL_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
@@ -352,16 +193,7 @@ async fn istril_builtin(value: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "istriu",
-    category = "math/linalg/structure",
-    summary = "Determine whether a matrix is upper triangular.",
-    keywords = "istriu,upper triangular,matrix structure,sparse,gpu",
-    accel = "structure",
-    type_resolver(logical_scalar_type),
-    descriptor(crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_DESCRIPTOR),
-    extensions(ISTRIU_EXTENSIONS),
-    integer_audit(
-        crate::builtins::math::linalg::structure::diagonal_triangular::ISTRIU_INTEGER_AUDIT
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::diagonal_triangular"
 )]
 async fn istriu_builtin(value: Value) -> BuiltinResult<Value> {

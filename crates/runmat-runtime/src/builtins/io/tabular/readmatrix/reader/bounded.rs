@@ -210,7 +210,7 @@ async fn validate_row(
                     options,
                     dtype,
                     line_number,
-                    index + 1,
+                    options.column_from_source(index),
                     diagnostic_reservation,
                 )?;
             } else {
@@ -218,7 +218,7 @@ async fn validate_row(
                     field.as_str(),
                     options,
                     line_number,
-                    index + 1,
+                    options.column_from_source(index),
                     diagnostic_reservation,
                 )?;
             }

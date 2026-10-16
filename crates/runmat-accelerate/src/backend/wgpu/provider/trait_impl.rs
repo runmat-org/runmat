@@ -2757,7 +2757,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         _options: ProviderInvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.inv_exec(matrix).await })
     }
 
@@ -2765,7 +2765,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         options: ProviderPinvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.pinv_exec(matrix, options).await })
     }
 
@@ -2773,7 +2773,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         norm: ProviderCondNorm,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.cond_exec(matrix, norm).await })
     }
 
@@ -2781,7 +2781,7 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         tensor: &'a GpuTensorHandle,
         order: ProviderNormOrder,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.norm_exec(tensor, order).await })
     }
 
@@ -2796,14 +2796,14 @@ impl AccelProvider for WgpuProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         tolerance: Option<f64>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.rank_exec(matrix, tolerance).await })
     }
 
     fn rcond<'a>(
         &'a self,
         matrix: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.rcond_exec(matrix).await })
     }
 
@@ -3583,7 +3583,17 @@ impl AccelProvider for WgpuProvider {
                 Ok(())
             })
             .map_err(|error| numeric_upload_failure(error, buffer_created.get()))?;
-        complete_observed_upload(self).map_err(|error| numeric_upload_failure(error, true))?;
+        if let Err(error) = complete_observed_upload(self) {
+            let primary = numeric_upload_failure(error, true);
+            let cleanup = output.release().err().into_iter().collect();
+            return Err(runmat_accelerate_api::ProviderExecutionError::from_source(
+                runmat_accelerate_api::ProviderExecutionCompletionError::new(
+                    Some(primary),
+                    cleanup,
+                ),
+            )
+            .after_effect());
+        }
         Ok(output)
     }
     fn upload_logical_raw(

@@ -46,6 +46,12 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     };
     for index in [grid, xq, yq].into_iter().flatten() {
         if let Some(value) = request.arguments.get(index) {
+            if Some(index) == grid
+                && effective_method(request, index) != EffectiveMethod::LinearOrNearest
+                && matches!(value.kind, ValueKindFact::Numeric(_))
+            {
+                continue;
+            }
             if !matches!(
                 value.kind,
                 ValueKindFact::Numeric(NumericFact {
@@ -62,10 +68,8 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
             }
         }
     }
-    let output = match (xq, yq) {
-        (Some(left), Some(right)) => {
-            output_fact(request.arguments.get(left), request.arguments.get(right))
-        }
+    let output = match (grid, xq, yq) {
+        (Some(grid), Some(left), Some(right)) => output_fact(request, grid, left, right),
         _ => ValueFact::unknown(DynamicReason::RuntimeValue),
     };
     let mut contract = CallContract::fixed(vec![output]);
@@ -76,8 +80,58 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     inferred
 }
 
-fn output_fact(xq: Option<&ValueFact>, yq: Option<&ValueFact>) -> ValueFact {
-    let (Some(xq), Some(yq)) = (xq, yq) else {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum EffectiveMethod {
+    LinearOrNearest,
+    Spline,
+    Unknown,
+}
+
+/// The runtime processes every option in order and the last method wins.
+/// Unknown string-like options can change it; known numeric extrapolation
+/// controls and the `extrap` keyword cannot.
+fn effective_method(request: &CallRequest, grid: usize) -> EffectiveMethod {
+    let first_option = if grid == 0 { 3 } else { 5 };
+    let mut method = EffectiveMethod::LinearOrNearest;
+    for index in first_option..request.arguments.len() {
+        let literal = request.literals.literal_args.get(index);
+        let spelling = match literal {
+            Some(
+                LiteralValue::Character(value)
+                | LiteralValue::String(value)
+                | LiteralValue::Keyword(value),
+            ) => Some(value.as_str()),
+            Some(
+                LiteralValue::Number(_)
+                | LiteralValue::Real { .. }
+                | LiteralValue::Integer { .. }
+                | LiteralValue::Bool(_),
+            ) => continue,
+            _ if matches!(
+                request.arguments[index].kind,
+                ValueKindFact::Numeric(_) | ValueKindFact::Logical
+            ) =>
+            {
+                continue
+            }
+            _ => return EffectiveMethod::Unknown,
+        };
+        match spelling.map(str::to_ascii_lowercase).as_deref() {
+            Some("linear" | "nearest") => method = EffectiveMethod::LinearOrNearest,
+            Some("spline") => method = EffectiveMethod::Spline,
+            Some("extrap") => {}
+            _ => return EffectiveMethod::Unknown,
+        }
+    }
+    method
+}
+
+fn output_fact(request: &CallRequest, grid: usize, xq: usize, yq: usize) -> ValueFact {
+    let (Some(samples), Some(xq), Some(yq)) = (
+        request.arguments.get(grid),
+        request.arguments.get(xq),
+        request.arguments.get(yq),
+    ) else {
         return ValueFact::unknown(DynamicReason::RuntimeValue);
     };
     let shape = match (xq.shape.element_count(), yq.shape.element_count()) {
@@ -87,14 +141,29 @@ fn output_fact(xq: Option<&ValueFact>, yq: Option<&ValueFact>) -> ValueFact {
         (Some(_), Some(_)) if xq.shape.is_proven_equivalent(&yq.shape) => xq.shape.clone(),
         _ => ShapeFact::Unknown,
     };
-    let mut output = ValueFact::proven(
+    let kind = if effective_method(request, grid) == EffectiveMethod::Spline {
+        match &samples.kind {
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single | NumericClass::Double,
+                ..
+            }) => samples.kind.clone(),
+            _ => ValueKindFact::Unknown,
+        }
+    } else if effective_method(request, grid) == EffectiveMethod::LinearOrNearest {
         ValueKindFact::Numeric(NumericFact {
             class: NumericClass::Double,
             domain: NumericDomain::Real,
-        }),
-        shape,
-        StorageFact::Unknown,
-    );
+        })
+    } else {
+        ValueKindFact::Unknown
+    };
+    let mut output = if kind == ValueKindFact::Unknown {
+        let mut value = ValueFact::unknown(DynamicReason::RuntimeValue);
+        value.shape = shape;
+        value
+    } else {
+        ValueFact::proven(kind, shape, StorageFact::Unknown)
+    };
     if output.shape == ShapeFact::Unknown {
         output.certainty = CertaintyFact::Dynamic(DynamicReason::RuntimeValue);
     }

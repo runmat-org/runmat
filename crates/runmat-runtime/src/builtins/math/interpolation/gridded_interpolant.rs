@@ -46,8 +46,9 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_SUBSREF_METHOD};
 
 use super::pp::{
-    build_makima_pp, build_pchip_pp, build_spline_pp, eval_pp_scalar, Extrapolation, NumericSeries,
-    PiecewisePolynomial,
+    build_makima_pp, build_pchip_pp, build_spline_pp, eval_pp_scalar, is_spline_execution_failure,
+    tensor_spline_allocation_plan, AdmittedSplineWork, Extrapolation, NumericSeries,
+    PiecewisePolynomial, SplineCooperation, TensorProductSpline2D,
 };
 
 const BUILTIN_NAME: &str = "griddedInterpolant";
@@ -119,6 +120,21 @@ impl QueryPlan {
         match &self.coords {
             QueryCoords::Explicit(points) => points.len(),
             QueryCoords::FullGrid { total, .. } => *total,
+        }
+    }
+
+    fn point_at<'a>(&'a self, index: usize, scratch: &'a mut [f64]) -> &'a [f64] {
+        match &self.coords {
+            QueryCoords::Explicit(points) => &points[index],
+            QueryCoords::FullGrid { vectors, .. } => {
+                let mut remaining = index;
+                for (dim, vector) in vectors.iter().enumerate() {
+                    let sample = remaining % vector.len();
+                    remaining /= vector.len();
+                    scratch[dim] = vector[sample];
+                }
+                &scratch[..vectors.len()]
+            }
         }
     }
 
@@ -262,18 +278,35 @@ async fn gridded_interpolant_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "griddedInterpolant.subsref",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::interpolation::gridded_interpolant"
 )]
-async fn gridded_interpolant_subsref(
+async fn gridded_interpolant_subsref_registered(
+    runtime: Option<crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
 ) -> BuiltinResult<crate::execution::RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::execute_owned_subsref(obj, path, gridded_interpolant_read_step, None)
-        .await
+    crate::object::protocol::execute_owned_subsref_with_context(
+        runtime.as_ref(),
+        obj,
+        path,
+        |obj, step| gridded_interpolant_read_step(runtime.as_ref(), obj, step),
+        None,
+    )
+    .await
+}
+
+#[cfg(test)]
+async fn gridded_interpolant_subsref(
+    obj: Value,
+    subscript: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    gridded_interpolant_subsref_registered(None, obj, subscript).await
 }
 
 async fn gridded_interpolant_read_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
 ) -> BuiltinResult<crate::execution::RootedValue> {
@@ -281,11 +314,17 @@ async fn gridded_interpolant_read_step(
     let value = match step.kind() {
         crate::object::indexing::ObjectIndexKind::Member => gridded_member(obj, payload),
         crate::object::indexing::ObjectIndexKind::Paren => {
-            let spec = object_to_spec(&obj)?;
             let query_args = payload_to_args(payload)?;
+            let allocation = admit_spline2_from_object(&obj, &query_args, runtime)?;
+            let spec = object_to_spec(&obj)?;
             ensure_query_integer_extensions(&query_args)?;
             let query_args = gather_values(query_args).await?;
-            evaluate_interpolant(&spec, query_args)
+            if let (Some(receipt), Some(runtime)) = (allocation.as_ref(), runtime) {
+                receipt
+                    .checkpoint(runtime)
+                    .map_err(|error| super::pp::host_allocation_error(BUILTIN_NAME, error))?;
+            }
+            evaluate_interpolant(&spec, query_args, runtime, allocation.as_ref()).await
         }
         crate::object::indexing::ObjectIndexKind::Brace => {
             Err(invalid("brace indexing is not supported"))

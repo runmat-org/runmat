@@ -1506,6 +1506,32 @@ pub(crate) mod tests {
         tensor_close(&gpu_p, &host_p, tol);
         let host_vec = tensor_from_value(host_eval.permutation_vector());
         tensor_close(&gpu_vec, &host_vec, tol);
+
+        let single = [4.0_f32, 0.0, 0.0, 9.0];
+        let single_handle = provider
+            .upload_numeric(&runmat_accelerate_api::HostNumericTensorView {
+                data: runmat_accelerate_api::HostNumericDataView::F32(&single),
+                shape: &[2, 2],
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
+            .expect("single upload");
+        let single_eval = evaluate(Value::GpuTensor(single_handle), &[]).expect("single gpu QR");
+        let precision = |value: Value| match value {
+            Value::GpuTensor(handle) => runmat_accelerate_api::handle_precision(&handle),
+            other => panic!("QR output lost residency: {other:?}"),
+        };
+        assert_eq!(
+            precision(single_eval.q()),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
+        );
+        assert_eq!(
+            precision(single_eval.r()),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
+        );
+        assert_eq!(
+            precision(single_eval.permutation_matrix()),
+            Some(runmat_accelerate_api::ProviderPrecision::F64)
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

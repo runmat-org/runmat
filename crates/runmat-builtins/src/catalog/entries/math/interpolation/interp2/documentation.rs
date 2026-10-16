@@ -6,21 +6,21 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     slug: Some("interp2"),
     summary: "Interpolate values on a two-dimensional grid.",
     description: "`interp2(X,Y,Z,Xq,Yq)` estimates surface values at query points. X and Y may be vector axes or meshgrid-style coordinate matrices. `interp2(Z,Xq,Yq)` uses implicit column and row axes.",
-    keywords: &["interp2", "2-D interpolation", "bilinear", "nearest", "meshgrid"],
+    keywords: &["interp2", "2-D interpolation", "bilinear", "nearest", "spline", "meshgrid"],
     related: &["interp1", "meshgrid", "peaks"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Grid and query geometry",
             paragraphs: &[
-                "Z must be a real dense 2-D matrix with at least two rows and columns. X and Y may be strictly increasing vector axes of matching length or meshgrid-style matrices matching Z. The axes default to column indices for X and row indices for Y when omitted.",
-                "Xq and Yq may be scalars or equally shaped query arrays. A scalar broadcasts over the other query array. The result follows their common query shape, or is scalar when both queries are scalar.",
-                "The implemented methods are `linear` (bilinear interpolation) and `nearest`. Out-of-range queries return NaN by default. Supply `extrap` for extrapolation or a scalar fill value. Other methods are rejected rather than silently changed.",
+                "Z must be a dense 2-D matrix with at least two rows and columns. X and Y may be strictly increasing vector axes of matching length or full meshgrid-style matrices matching Z. The axes default to column indices for X and row indices for Y when omitted.",
+                "Xq and Yq may be scalars or equally shaped query arrays. A scalar broadcasts over the other query array; a row Xq and column Yq form a query grid. The result follows the query geometry.",
+                "The implemented methods are `linear` (bilinear interpolation), `nearest`, and tensor-product not-a-knot `spline`. Spline extrapolates by default; other methods return NaN out of range. Supply `extrap` or a scalar fill value to override. Cubic convolution and multidimensional makima are not aliases of spline and remain unsupported.",
             ],
         },
         BuiltinDocumentationSection {
             heading: "Classes and execution",
             paragraphs: &[
-                "The current implementation computes real double output on the CPU. Typed integer grid, query, and fill inputs are RunMat-mode extensions checked for exact binary64 conversion. Logical numeric inputs are also gated as RunMat extensions.",
+                "Linear and nearest retain their real double host result policy. Spline accepts real or complex single/double sample matrices, computes real and imaginary lanes independently, and returns the sample floating class. Typed integer grid, query, and fill inputs are RunMat-mode extensions checked for exact binary64 conversion. Logical numeric inputs are also gated as RunMat extensions.",
                 "Device-resident inputs are gathered to the host reference path; this release does not provide an interp2 device kernel or resident output. The call is a fusion boundary. The GPU specification records accepted input precision, not an implemented kernel.",
             ],
         },

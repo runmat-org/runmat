@@ -124,6 +124,69 @@ impl AccelProvider for Provider {
 }
 
 #[test]
+fn host_computed_real_scalar_restore_is_exact_and_never_replays() {
+    let _serial = crate::builtins::common::test_support::accel_test_lock();
+    for (precision, element) in [
+        (ProviderPrecision::F32, NumericElementType::F32),
+        (ProviderPrecision::F64, NumericElementType::F64),
+    ] {
+        let provider = Provider::new(NumericUpload::Success);
+        let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let source = provider
+            .owner
+            .allocate_zeroed(vec![2, 2], element, GpuTensorStorage::Real)
+            .unwrap();
+        let Value::GpuTensor(output) = restore_real_scalar_after_host(
+            &source.handle,
+            provider,
+            2.5,
+            precision,
+            "scalar-restore-test",
+            |message| build_runtime_error(message).build(),
+        )
+        .unwrap() else {
+            panic!("typed scalar restore must remain resident");
+        };
+        assert_eq!(output.shape(), [1, 1]);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&output),
+            Some(precision)
+        );
+        assert!(!output.shares_allocation_with(&source.handle));
+        source.handle.allocation_lease().validate_live().unwrap();
+    }
+
+    let provider = Provider::new(NumericUpload::Unsupported);
+    let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    let source = provider
+        .owner
+        .allocate_zeroed(vec![2, 2], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let failure = restore_real_scalar_after_host(
+        &source.handle,
+        provider,
+        2.5,
+        ProviderPrecision::F64,
+        "scalar-restore-test",
+        |message| build_runtime_error(message).build(),
+    )
+    .unwrap_err();
+    assert_eq!(failure.gpu_gather_retry, crate::GpuGatherRetry::Never);
+    let mut cause: &(dyn std::error::Error + 'static) = &failure;
+    let mut found_unproven = false;
+    while let Some(next) = cause.source() {
+        if let Some(execution) =
+            next.downcast_ref::<runmat_accelerate_api::ProviderExecutionError>()
+        {
+            found_unproven = !execution.is_unsupported() && !execution.is_after_effect();
+        }
+        cause = next;
+    }
+    assert!(found_unproven, "prior host work must forbid replay");
+    source.handle.allocation_lease().validate_live().unwrap();
+}
+
+#[test]
 fn numeric_restoration_preserves_rank_owner_class_and_allocation_independence() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = Provider::new(NumericUpload::Success);

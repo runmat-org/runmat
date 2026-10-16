@@ -114,6 +114,17 @@ pub fn warmup_from_disk<FHash, FCompile>(
                 // adapter. Scoped driver failures can be capability, limit,
                 // memory, or device failures; none proves disk corruption.
                 log::warn!("warmup: could not precompile retained pipeline {stem}: {error}");
+                if let Some(scoped) = error.chain().find_map(|cause| {
+                    cause.downcast_ref::<runmat_accelerate_api::WgpuScopeErrors>()
+                }) {
+                    scoped.with_errors(|errors| {
+                        for original in errors {
+                            log::warn!(
+                                "warmup: retained pipeline {stem} scoped driver cause: {original}"
+                            );
+                        }
+                    });
+                }
                 continue;
             }
         }
@@ -154,6 +165,52 @@ mod tests {
         fn drop(&mut self) {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn cache_abi_version_is_checked_before_compilation_and_stale_records_are_retained() {
+        let cache = OwnedCacheDirectory::new();
+        let source = "@compute @workgroup_size(1) fn main() {}";
+        let tag = "runmat-fill-layout";
+        let key = key::compute_pipeline_hash_bytes(source.as_bytes(), tag, Some(1));
+        persist::persist_pipeline_meta(
+            &cache.0,
+            key,
+            "warmup-version-test",
+            Some(tag),
+            Some(1),
+            NumericPrecision::F32,
+            Some(source.as_bytes()),
+        );
+        let meta_path = cache.0.join(format!("{key:016x}.json"));
+        let mut meta: PipelineMeta =
+            serde_json::from_slice(&std::fs::read(&meta_path).unwrap()).unwrap();
+        assert_eq!(meta.version, Some(PIPELINE_CACHE_VERSION));
+        let compiled = Cell::new(0);
+        let warm = || {
+            warmup_from_disk(
+                Some(&cache.0),
+                NumericPrecision::F32,
+                wgpu::Features::empty(),
+                key::compute_pipeline_hash_bytes,
+                |_, _, _, _, _| {
+                    compiled.set(compiled.get() + 1);
+                    Ok(true)
+                },
+            );
+        };
+        warm();
+        assert_eq!(compiled.get(), 1);
+        meta.version = Some(PIPELINE_CACHE_VERSION - 1);
+        let stale_metadata = serde_json::to_vec(&meta).unwrap();
+        std::fs::write(&meta_path, &stale_metadata).unwrap();
+        warm();
+        assert_eq!(compiled.get(), 1, "stale ABI must not reach compilation");
+        assert_eq!(std::fs::read(meta_path).unwrap(), stale_metadata);
+        assert_eq!(
+            std::fs::read(cache.0.join(format!("{key:016x}.wgsl"))).unwrap(),
+            source.as_bytes(),
+        );
     }
 
     #[test]

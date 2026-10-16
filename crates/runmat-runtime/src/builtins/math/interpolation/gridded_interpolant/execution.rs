@@ -68,13 +68,6 @@ pub(super) fn is_step_extrapolation(method: ExtrapolationMethod) -> bool {
     )
 }
 
-pub(super) fn is_piecewise_extrapolation(method: ExtrapolationMethod) -> bool {
-    matches!(
-        method,
-        ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline | ExtrapolationMethod::Makima
-    )
-}
-
 pub(super) fn evaluate_piecewise_scalar(
     spec: &InterpolantSpec,
     values: &[f64],

@@ -96,6 +96,7 @@ pub(in crate::builtins::table) fn import_rows_to_table(
             .as_ref()
             .and_then(|types| types.get(col))
             .copied();
+        let values = prepare_variable_cells(values, options, col, requested_type)?;
         columns.push(import_column(values, options, requested_type)?);
     }
     table_from_columns_with_properties(names, columns, row_names)

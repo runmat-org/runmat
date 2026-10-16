@@ -19,12 +19,13 @@ pub use aggregate::{
 pub use array::{
     host_copy_metrics, record_host_copy, AdoptedHostAllocation, CharArray, ComplexElement,
     ComplexStorage, ComplexTensor, ComplexTensorAdmission, ExactHostAllocationClaim,
-    ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocation,
-    ExactHostNumericAllocationError, ExactHostTensor2dAllocation, HostAllocationProvenance,
-    HostAllocationRelease, HostComplexBuffer, HostCopyMetrics, HostCopyReason, HostIndexBuffer,
-    HostLogicalBuffer, HostNumericBuffer, IntegerComplexStorage, LogicalArray,
-    NumericTensorAdmission, SparseCscValidation, SparseTensor, StringArray, SymbolicArray, Tensor,
-    ValidatedComplexTensorParts, ValidatedNumericTensorParts, ValidatedSparseCscParts,
+    ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostComplexTensorAllocation,
+    ExactHostNumericAllocation, ExactHostNumericAllocationError, ExactHostTensor2dAllocation,
+    ExactHostTensorAllocation, HostAllocationProvenance, HostAllocationRelease, HostComplexBuffer,
+    HostCopyMetrics, HostCopyReason, HostIndexBuffer, HostLogicalBuffer, HostNumericBuffer,
+    IntegerComplexStorage, LogicalArray, NumericTensorAdmission, SparseCscValidation, SparseTensor,
+    StringArray, SymbolicArray, Tensor, ValidatedComplexTensorParts, ValidatedNumericTensorParts,
+    ValidatedSparseCscParts,
 };
 pub use callable::{
     BoundFunctionAuthority, BoundFunctionBinding, BoundFunctionHandle, BoundFunctionHandleData,

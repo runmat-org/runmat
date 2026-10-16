@@ -301,10 +301,8 @@ impl AccelProvider for UnsupportedExtrema {
         _: &GpuTensorHandle,
         _: f64,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
-        let result: anyhow::Result<GpuTensorHandle> = self.reject();
-        result.map(Some).map_err(|source| {
-            runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
-        })
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(None)
     }
 }
 

@@ -16,6 +16,8 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 
 mod integer;
+mod complex;
+pub use complex::ExactHostComplexTensorAllocation;
 use integer::{allocate_integer, integer_layout, ExactIntegerStorage};
 
 macro_rules! integer_slice_mut {
@@ -148,6 +150,97 @@ pub struct ExactHostNumericAllocation {
 pub struct ExactHostTensor2dAllocation {
     numeric: ExactHostNumericAllocation,
     shape: [usize; 2],
+}
+
+/// Exact floating payload and exact initial shape for an arbitrary-rank
+/// retained tensor. The claim follows the adopted payload after publication.
+pub struct ExactHostTensorAllocation {
+    numeric: ExactHostNumericAllocation,
+    shape: Vec<usize>,
+}
+
+impl ExactHostTensorAllocation {
+    pub fn requested_bytes(
+        dtype: NumericDType,
+        shape: &[usize],
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        let count = shape
+            .iter()
+            .try_fold(1usize, |n, dim| n.checked_mul(*dim))
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        Self::requested_bytes_for_dimensions(dtype, count, shape.len())
+    }
+
+    pub fn requested_bytes_for_dimensions(
+        dtype: NumericDType,
+        count: usize,
+        rank: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        let shape_bytes = Layout::array::<usize>(rank)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
+            .size();
+        ExactHostNumericAllocation::requested_bytes_with_shape(dtype, count, shape_bytes)
+    }
+
+    pub fn new(
+        dtype: NumericDType,
+        shape: &[usize],
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let count = shape
+            .iter()
+            .try_fold(1usize, |n, dim| n.checked_mul(*dim))
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        let shape_bytes = Layout::array::<usize>(shape.len())
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
+            .size();
+        Ok(Self {
+            numeric: ExactHostNumericAllocation::new_with_reserved_shape(
+                dtype,
+                count,
+                shape_bytes,
+                permit,
+            )?,
+            shape: exact_shape(shape)?,
+        })
+    }
+
+    pub fn into_tensor(self) -> Result<Tensor, ExactHostNumericAllocationError> {
+        Tensor::from_host_buffer(self.numeric.try_into_host_buffer()?, self.shape)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
+    }
+}
+
+fn exact_shape(shape: &[usize]) -> Result<Vec<usize>, ExactHostNumericAllocationError> {
+    if shape.is_empty() {
+        return Ok(Vec::new());
+    }
+    let layout = Layout::array::<usize>(shape.len())
+        .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
+    let pointer = NonNull::new(unsafe { alloc(layout) })
+        .ok_or(ExactHostNumericAllocationError::AllocationFailed)?
+        .cast::<usize>();
+    unsafe {
+        std::ptr::copy_nonoverlapping(shape.as_ptr(), pointer.as_ptr(), shape.len());
+        Ok(Vec::from_raw_parts(
+            pointer.as_ptr(),
+            shape.len(),
+            shape.len(),
+        ))
+    }
+}
+
+impl Deref for ExactHostTensorAllocation {
+    type Target = ExactHostNumericAllocation;
+    fn deref(&self) -> &Self::Target {
+        &self.numeric
+    }
+}
+
+impl DerefMut for ExactHostTensorAllocation {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.numeric
+    }
 }
 
 impl ExactHostTensor2dAllocation {
@@ -411,6 +504,15 @@ impl ExactHostNumericAllocation {
             unsafe {
                 std::slice::from_raw_parts_mut(allocation.pointer().as_ptr().cast(), self.len)
             }
+        })
+    }
+
+    pub fn as_f64_slice(&self) -> Option<&[f64]> {
+        (self.dtype == NumericDType::F64).then(|| {
+            let ExactAllocation::Floating(allocation) = &self.allocation else {
+                unreachable!("floating dtype has floating allocation")
+            };
+            unsafe { std::slice::from_raw_parts(allocation.pointer().as_ptr().cast(), self.len) }
         })
     }
 

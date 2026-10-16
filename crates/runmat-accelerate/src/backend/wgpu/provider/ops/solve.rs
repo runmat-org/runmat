@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "solve/validated_triangular.rs"]
 mod validated_triangular;
+#[path = "solve/condition.rs"]
+mod condition;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 #[path = "solve/ownership_tests.rs"]
@@ -42,61 +44,161 @@ impl WgpuProvider {
         })
     }
 
-    pub(crate) async fn inv_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
-        let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        self.upload_real_floating_tensor_exec(&result)
+    pub(crate) async fn inv_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (tensor, _) = self.real_floating_host_for_linalg_hook(matrix).await?;
+        let result = inv_host_real_for_provider(&tensor).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from_source(source)
+                .with_unproven_effects()
+        })?;
+        self.upload_real_floating_tensor_raw(&result)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::with_unproven_effects)
     }
 
     pub(crate) async fn pinv_exec(
         &self,
         matrix: &GpuTensorHandle,
         options: ProviderPinvOptions,
-    ) -> Result<GpuTensorHandle> {
-        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
-        let result =
-            pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
-        self.upload_real_floating_tensor_exec(&result)
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (tensor, _) = self.real_floating_host_for_linalg_hook(matrix).await?;
+        let result = pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from_source(source)
+                .with_unproven_effects()
+        })?;
+        self.upload_real_floating_tensor_raw(&result)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::with_unproven_effects)
     }
 
     pub(crate) async fn cond_exec(
         &self,
         matrix: &GpuTensorHandle,
         norm: ProviderCondNorm,
-    ) -> Result<GpuTensorHandle> {
-        let precision = self.real_floating_input_precision_exec(matrix)?;
-        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
-        let cond_value = cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
-        self.upload_real_floating_scalar_exec(cond_value, precision)
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (tensor, precision) = self.real_floating_host_for_linalg_hook(matrix).await?;
+        let cond_value = cond_host_real_for_provider(&tensor, norm).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from_source(source)
+                .with_unproven_effects()
+        })?;
+        self.upload_real_floating_scalar_raw(cond_value, precision)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::with_unproven_effects)
     }
 
     pub(crate) async fn norm_exec(
         &self,
         tensor: &GpuTensorHandle,
         order: ProviderNormOrder,
-    ) -> Result<GpuTensorHandle> {
-        let precision = self.real_floating_input_precision_exec(tensor)?;
-        let host_tensor = self.download_real_floating_tensor_exec(tensor).await?;
-        let value = norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
-        self.upload_real_floating_scalar_exec(value, precision)
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (host_tensor, precision) = self.real_floating_host_for_linalg_hook(tensor).await?;
+        let value = norm_host_real_for_provider(&host_tensor, order).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from_source(source)
+                .with_unproven_effects()
+        })?;
+        self.upload_real_floating_scalar_raw(value, precision)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::with_unproven_effects)
     }
 
     pub(crate) async fn rank_exec(
         &self,
         matrix: &GpuTensorHandle,
         tolerance: Option<f64>,
-    ) -> Result<GpuTensorHandle> {
-        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
-        let rank =
-            rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
-        self.upload_real_floating_scalar_exec(rank, ProviderPrecision::F64)
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (tensor, _) = self.real_floating_host_for_linalg_hook(matrix).await?;
+        let rank = rank_host_real_for_provider(&tensor, tolerance).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from_source(source)
+                .with_unproven_effects()
+        })? as f64;
+        self.upload_real_floating_scalar_raw(rank, ProviderPrecision::F64)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::with_unproven_effects)
     }
 
-    pub(crate) async fn rcond_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let source_precision = self.real_floating_input_precision_exec(matrix)?;
-        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
-        let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        self.upload_real_floating_scalar_exec(estimate, source_precision)
+    fn upload_real_floating_scalar_raw(
+        &self,
+        value: f64,
+        precision: ProviderPrecision,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
+
+        let single = [value as f32];
+        let double = [value];
+        let data = match precision {
+            ProviderPrecision::F32 => HostNumericDataView::F32(&single),
+            ProviderPrecision::F64 => HostNumericDataView::F64(&double),
+        };
+        runmat_accelerate_api::AccelProvider::upload_numeric_raw(
+            self,
+            &HostNumericTensorView {
+                data,
+                shape: &[1, 1],
+                storage: GpuTensorStorage::Real,
+            },
+        )
+    }
+
+    pub(crate) async fn rcond_exec(
+        &self,
+        matrix: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        let (tensor, precision) = self.real_floating_host_for_linalg_hook(matrix).await?;
+        let estimate = rcond_host_real_for_provider(&tensor).map_err(|source| {
+            runmat_accelerate_api::ProviderExecutionError::from_source(source)
+                .with_unproven_effects()
+        })?;
+        self.upload_real_floating_scalar_raw(estimate, precision)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::with_unproven_effects)
+    }
+
+    async fn real_floating_host_for_linalg_hook(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<(Tensor, ProviderPrecision)> {
+        let precision = self
+            .real_floating_input_precision_exec(handle)
+            .map_err(|source| {
+                let error = runmat_accelerate_api::ProviderExecutionError::from(source);
+                if error.is_unsupported() {
+                    error
+                } else {
+                    error.with_unproven_effects()
+                }
+            })?;
+        // The shared readback has no phase receipt. A failure may precede or
+        // follow staging, so it cannot authorize replay.
+        let tensor = self
+            .download_real_floating_tensor_exec(handle)
+            .await
+            .map_err(|source| {
+                runmat_accelerate_api::ProviderExecutionError::from(source).with_unproven_effects()
+            })?;
+        Ok((tensor, precision))
+    }
+
+    fn upload_real_floating_tensor_raw(
+        &self,
+        tensor: &Tensor,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
+
+        let data = if let Some(values) = tensor.as_f32_slice() {
+            HostNumericDataView::F32(values)
+        } else if let Some(values) = tensor.as_f64_slice() {
+            HostNumericDataView::F64(values)
+        } else {
+            return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                runmat_accelerate_api::unsupported_provider_operation(
+                    "real floating output must have F32 or F64 storage",
+                ),
+            ));
+        };
+        runmat_accelerate_api::AccelProvider::upload_numeric_raw(
+            self,
+            &HostNumericTensorView {
+                data,
+                shape: tensor.shape(),
+                storage: GpuTensorStorage::Real,
+            },
+        )
     }
 
     pub(crate) async fn mldivide_exec(
@@ -556,19 +658,25 @@ impl WgpuProvider {
         let (r_handle, r_inv_handle) =
             self.chol_factor_spd_device(lhs, lhs_rows, "runmat-linsolve-posdef")?;
         let rcond = if Self::needs_rcond(options) {
-            let factor_rcond = match self.svd_rcond("linsolve_posdef_rcond", &r_handle).await {
+            let rcond = match self
+                .square_rcond_from_factors(
+                    lhs,
+                    condition::SquareDeviceFactor::Cholesky { r: &r_handle },
+                )
+                .await
+            {
                 Ok(value) => value,
                 Err(err) => {
                     drop(r_handle);
                     drop(r_inv_handle);
-                    return Err(err);
+                    return Err(err.with_unproven_effects());
                 }
             };
-            let rcond = factor_rcond * factor_rcond;
             if let Err(err) = self.enforce_device_rcond(options, rcond) {
                 drop(r_handle);
                 drop(r_inv_handle);
-                return Err(err.into());
+                return Err(runmat_accelerate_api::ProviderExecutionError::from(err)
+                    .with_unproven_effects());
             }
             rcond
         } else {
@@ -668,18 +776,30 @@ impl WgpuProvider {
                     false,
                 )?;
                 let rcond = if Self::needs_rcond(options) {
-                    let rcond = match self.svd_rcond("linsolve_tall_qr_rcond", &r_handle).await {
+                    let rcond = match if lhs_rows == lhs_cols {
+                        self.square_rcond_from_factors(
+                            solve_lhs,
+                            condition::SquareDeviceFactor::Qr {
+                                q: &q_handle,
+                                r: &r_handle,
+                            },
+                        )
+                        .await
+                    } else {
+                        self.svd_rcond("linsolve_tall_qr_rcond", &r_handle).await
+                    } {
                         Ok(value) => value,
                         Err(err) => {
                             drop(q_handle);
                             drop(r_handle);
-                            return Err(err);
+                            return Err(err.with_unproven_effects());
                         }
                     };
                     if let Err(err) = self.enforce_device_rcond(options, rcond) {
                         drop(q_handle);
                         drop(r_handle);
-                        return Err(err.into());
+                        return Err(runmat_accelerate_api::ProviderExecutionError::from(err)
+                            .with_unproven_effects());
                     }
                     rcond
                 } else {

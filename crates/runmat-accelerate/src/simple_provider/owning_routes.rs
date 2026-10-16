@@ -3,6 +3,134 @@ use futures::executor::block_on;
 use runmat_accelerate_api::HostLogicalTensorView;
 
 #[test]
+fn real_floating_linalg_hooks_preserve_class_owner_and_reject_unimplemented_views() {
+    use runmat_accelerate_api::{GpuTensorLayout, GpuTensorView, TransposeInfo};
+
+    let provider = InProcessProvider::new();
+    for data in [
+        HostNumericDataOwned::F32(vec![4.0, 0.0, 0.0, 2.0]),
+        HostNumericDataOwned::F64(vec![4.0, 0.0, 0.0, 2.0]),
+    ] {
+        let input_class = data.element_type();
+        let input = provider
+            .upload_numeric(&HostNumericTensorView {
+                data: data.as_view(),
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let cases = [
+            (
+                "inv",
+                block_on(provider.inv(&input, ProviderInvOptions::default())).unwrap(),
+                vec![0.25, 0.0, 0.0, 0.5],
+                vec![2, 2],
+                input_class,
+            ),
+            (
+                "pinv",
+                block_on(provider.pinv(&input, ProviderPinvOptions::default())).unwrap(),
+                vec![0.25, 0.0, 0.0, 0.5],
+                vec![2, 2],
+                input_class,
+            ),
+            (
+                "cond",
+                block_on(provider.cond(&input, ProviderCondNorm::Two)).unwrap(),
+                vec![2.0],
+                vec![1, 1],
+                input_class,
+            ),
+            (
+                "norm",
+                block_on(provider.norm(&input, ProviderNormOrder::Two)).unwrap(),
+                vec![4.0],
+                vec![1, 1],
+                input_class,
+            ),
+            (
+                "rank",
+                block_on(provider.rank(&input, None)).unwrap(),
+                vec![2.0],
+                vec![1, 1],
+                NumericElementType::F64,
+            ),
+            (
+                "rcond",
+                block_on(provider.rcond(&input)).unwrap(),
+                vec![0.5],
+                vec![1, 1],
+                input_class,
+            ),
+        ];
+        for (name, output, expected, shape, class) in cases {
+            assert_eq!(output.shape(), shape, "{name}");
+            assert_eq!(output.physical().element_type(), class, "{name}");
+            assert!(!output.shares_allocation_with(&input), "{name}");
+            assert_eq!(output.device_id(), input.device_id(), "{name}");
+            let actual = block_on(provider.download_numeric(&output)).unwrap();
+            let actual = match actual.data {
+                HostNumericDataOwned::F32(values) => {
+                    values.into_iter().map(f64::from).collect::<Vec<_>>()
+                }
+                HostNumericDataOwned::F64(values) => values,
+                other => panic!("{name}: unexpected output storage {other:?}"),
+            };
+            assert_eq!(actual.len(), expected.len(), "{name}");
+            let tolerance = if data.element_type() == NumericElementType::F32 {
+                1e-5
+            } else {
+                1e-12
+            };
+            for (observed, target) in actual.iter().zip(&expected) {
+                assert!(
+                    (*observed - *target).abs() <= tolerance,
+                    "{name}: {observed} vs {target}"
+                );
+            }
+            assert!(output.allocation_lease().validate_live().is_ok(), "{name}");
+            assert!(input.allocation_lease().validate_live().is_ok(), "{name}");
+        }
+        // The owner rejects lazy layouts for every current in-process kernel.
+        // A readback implementation must not widen that allocation authority.
+        let proposed =
+            input
+                .view()
+                .clone()
+                .with_layout(GpuTensorLayout::Transpose(TransposeInfo {
+                    base_rows: 2,
+                    base_cols: 2,
+                }));
+        assert!(matches!(
+            input.with_view(proposed),
+            Err(runmat_accelerate_api::allocation::AllocationAcquisitionError::Unsupported)
+        ));
+    }
+
+    let integer = provider
+        .upload_numeric(&HostNumericTensorView {
+            data: HostNumericDataView::U64(&[1, 3, 2, 4]),
+            shape: &[2, 2],
+            storage: GpuTensorStorage::Real,
+        })
+        .unwrap();
+    let proposed = GpuTensorView::contiguous(vec![2, 2]).with_layout(GpuTensorLayout::Transpose(
+        TransposeInfo {
+            base_rows: 2,
+            base_cols: 2,
+        },
+    ));
+    assert!(matches!(
+        integer.with_view(proposed),
+        Err(runmat_accelerate_api::allocation::AllocationAcquisitionError::Unsupported)
+    ));
+    assert_eq!(
+        block_on(provider.download_numeric(&integer)).unwrap().data,
+        HostNumericDataOwned::U64(vec![1, 3, 2, 4])
+    );
+}
+
+#[test]
 fn polynomial_eligibility_keeps_complex_integration_and_authenticates_both_inputs() {
     let provider = InProcessProvider::new();
     let complex = provider

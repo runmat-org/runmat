@@ -2,15 +2,11 @@
 
 use encoding_rs::Encoding;
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    MAT2STR_DESCRIPTOR, MAT2STR_ERROR_TOO_MANY_OUTPUTS, MAT2STR_INTEGER_PRECISION_EXTENSION,
+    MAT2STR_TEXT_INPUT_EXTENSION, NATIVE2UNICODE_DESCRIPTOR, NATIVE2UNICODE_ERROR_TOO_MANY_OUTPUTS,
+    SSCANF_DESCRIPTOR, SSCANF_ERROR_TOO_MANY_OUTPUTS, STR2NUM_DESCRIPTOR,
+    STR2NUM_ERROR_TOO_MANY_OUTPUTS, STRTOK_DESCRIPTOR, STRTOK_ERROR_TOO_MANY_OUTPUTS,
 };
-use runmat_builtins::{BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind};
 use runmat_macros::runtime_builtin;
 use runmat_value::NumericStorage;
 use runmat_value::{
@@ -28,321 +24,6 @@ use crate::builtins::strings::core::numeric_length::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, make_cell_with_shape, BuiltinResult};
 
-const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "out",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Output value.",
-}];
-
-const IN_TEXT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "text",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input text.",
-}];
-
-const IN_TEXT_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "text",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input text.",
-    },
-    BuiltinParamDescriptor {
-        name: "arg",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional arguments.",
-    },
-];
-
-const NO_ERRORS: [BuiltinErrorDescriptor; 0] = [];
-
-macro_rules! descriptor {
-    ($name:ident, $label:expr, $inputs:expr, $outputs:expr) => {
-        const $name: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &[BuiltinSignatureDescriptor {
-                label: $label,
-                inputs: $inputs,
-                outputs: $outputs,
-            }],
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &NO_ERRORS,
-        };
-    };
-}
-
-macro_rules! descriptor_by_outputs {
-    ($name:ident, $label:expr, $inputs:expr, $outputs:expr) => {
-        const $name: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &[BuiltinSignatureDescriptor {
-                label: $label,
-                inputs: $inputs,
-                outputs: $outputs,
-            }],
-            output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &NO_ERRORS,
-        };
-    };
-}
-
-descriptor_by_outputs!(
-    STRTOK_DESCRIPTOR,
-    "[tok, rem] = strtok(text, delimiters)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
-pub const STRTOK_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "strtok accepts host text and an optional text delimiter. Integer, numeric, and provider-resident values in either role reject before provider access and are not interpreted as character codes.",
-};
-descriptor_by_outputs!(
-    STR2NUM_DESCRIPTOR,
-    "[x, tf] = str2num(text)",
-    &IN_TEXT,
-    &OUT_ANY
-);
-pub const STR2NUM_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "str2num evaluates scalar string or character text and therefore has no integer input role. Integer, numeric, and provider-resident input rejects before provider access; parsed numeric output is a separate result-class concern.",
-};
-const MAT2STR_INPUT_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Numeric or logical matrix to serialize.",
-}];
-const MAT2STR_INPUT_N: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or logical matrix to serialize.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Positive number of significant digits.",
-    },
-];
-const MAT2STR_INPUT_CLASS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or logical matrix to serialize.",
-    },
-    BuiltinParamDescriptor {
-        name: "n",
-        ty: BuiltinParamType::IntegerScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Optional positive number of significant digits.",
-    },
-    BuiltinParamDescriptor {
-        name: "class",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"class\""),
-        description: "Include the input class constructor in the expression.",
-    },
-];
-const MAT2STR_INPUT_CLASS_ONLY: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric or logical matrix to serialize.",
-    },
-    BuiltinParamDescriptor {
-        name: "class",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("\"class\""),
-        description: "Include the input class constructor in the expression.",
-    },
-];
-const MAT2STR_SIGNATURES: [BuiltinSignatureDescriptor; 4] = [
-    BuiltinSignatureDescriptor {
-        label: "s = mat2str(A)",
-        inputs: &MAT2STR_INPUT_A,
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = mat2str(A, n)",
-        inputs: &MAT2STR_INPUT_N,
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = mat2str(A, 'class')",
-        inputs: &MAT2STR_INPUT_CLASS_ONLY,
-        outputs: &OUT_ANY,
-    },
-    BuiltinSignatureDescriptor {
-        label: "s = mat2str(A, n, 'class')",
-        inputs: &MAT2STR_INPUT_CLASS,
-        outputs: &OUT_ANY,
-    },
-];
-const MAT2STR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MAT2STR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &NO_ERRORS,
-};
-
-const MAT2STR_INTEGER_PRECISION_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "mat2str-integer-precision",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "typed integer mat2str precision is a RunMat extension because the public MATLAB page requires a positive integer without enumerating native integer storage classes",
-        error_identifier: Some("RunMat:compatibility:Mat2strIntegerPrecisionExtension"),
-    };
-const MAT2STR_TEXT_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "mat2str-text-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "mat2str input outside the documented numeric and logical matrix domain is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:Mat2strTextInputExtension"),
-};
-pub const MAT2STR_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    MAT2STR_INTEGER_PRECISION_EXTENSION,
-    MAT2STR_TEXT_INPUT_EXTENSION,
-];
-
-const MAT2STR_INTEGER_DATA_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer matrix classes serialize from exact native values; the 'class' option emits the matching constructor.",
-    }];
-const MAT2STR_INTEGER_PRECISION_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "n",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat accepts an exact positive typed integer precision under its extension policy; strict compatibility retains the publicly evidenced floating scalar form.",
-    }];
-pub const MAT2STR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "s = mat2str(integer_A[, n][, 'class'])",
-        inputs: &MAT2STR_INTEGER_DATA_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Decimal serialization never crosses binary64; automatic residency gathers authoritatively, while explicit gpuArray input is unsupported.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "s = mat2str(A, integer_n[, 'class'])",
-        inputs: &MAT2STR_INTEGER_PRECISION_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The RunMat-only typed precision is read exactly and must be positive; explicit resident precision rejects before transfer.",
-    },
-];
-
-const NATIVE2UNICODE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "bytes",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Numeric byte vector with values in the range 0 through 255.",
-    },
-    BuiltinParamDescriptor {
-        name: "encoding",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Optional,
-        default: Some("\"UTF-8\""),
-        description: "Source character encoding.",
-    },
-];
-descriptor!(
-    NATIVE2UNICODE_DESCRIPTOR,
-    "text = native2unicode(bytes, encoding)",
-    &NATIVE2UNICODE_INPUTS,
-    &OUT_ANY
-);
-
-const NATIVE2UNICODE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "bytes",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are documented for byte vectors; every element must be exactly within 0 through 255.",
-    }];
-pub const NATIVE2UNICODE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "text = native2unicode(integer_bytes[, encoding])",
-        inputs: &NATIVE2UNICODE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GpuRestricted,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native byte extraction is exact and range checked before decoding to a host character vector; explicit gpuArray input is unsupported and automatic residency gathers transparently.",
-    }];
-descriptor_by_outputs!(
-    SSCANF_DESCRIPTOR,
-    "[A, count, errmsg, nextindex] = sscanf(text, format, size)",
-    &IN_TEXT_REST,
-    &OUT_ANY
-);
-const SSCANF_INTEGER_SIZE_INPUT: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "sizeA",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The optional output-size scalar or two-element vector accepts every built-in integer class and is decoded directly from native storage.",
-    }];
-pub const SSCANF_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "A = sscanf(text, format, integer_sizeA)",
-        inputs: &SSCANF_INTEGER_SIZE_INPUT,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "sizeA controls output shape only. Pure %ld/%li scans return int64, pure %lu/%lo/%lx scans return uint64, and other numeric scan formats return double.",
-    }];
-
-fn any_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
-fn string_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::String
-}
-
-fn tensor_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::tensor()
-}
-
 pub(crate) fn compat_error(name: &str, message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin(name).build()
 }
@@ -353,16 +34,21 @@ fn map_flow(name: &'static str) -> impl Fn(crate::RuntimeError) -> crate::Runtim
 
 #[runtime_builtin(
     name = "strtok",
-    category = "strings/core",
-    summary = "Return the first token from text using delimiter characters.",
-    keywords = "strtok,tokenize,delimiter,text",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::core::compat::STRTOK_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::compat::STRTOK_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &STRTOK_DESCRIPTOR,
+        &STRTOK_ERROR_TOO_MANY_OUTPUTS,
+        "strtok",
+    )?;
+    if rest.len() > 1 {
+        return Err(compat_error(
+            "strtok",
+            "strtok: expected text and optional delimiters",
+        ));
+    }
     if contains_numeric_or_resident_text_input(&text)
         || rest
             .first()
@@ -399,16 +85,15 @@ async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "str2num",
-    category = "strings/core",
-    summary = "Convert text containing numeric literals to a numeric array.",
-    keywords = "str2num,string numeric conversion,text",
-    accel = "sink",
-    type_resolver(tensor_type),
-    descriptor(crate::builtins::strings::core::compat::STR2NUM_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::core::compat::STR2NUM_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn str2num_builtin(text: Value) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &STR2NUM_DESCRIPTOR,
+        &STR2NUM_ERROR_TOO_MANY_OUTPUTS,
+        "str2num",
+    )?;
     if contains_numeric_or_resident_text_input(&text) {
         return Err(compat_error(
             "str2num",
@@ -433,17 +118,15 @@ async fn str2num_builtin(text: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "mat2str",
-    category = "strings/core",
-    summary = "Convert numeric, logical, character, and string values to MATLAB expression text.",
-    keywords = "mat2str,array string conversion,text",
-    accel = "sink",
-    type_resolver(string_type),
-    descriptor(crate::builtins::strings::core::compat::MAT2STR_DESCRIPTOR),
-    integer_capabilities(crate::builtins::strings::core::compat::MAT2STR_INTEGER_CAPABILITIES),
-    extensions(crate::builtins::strings::core::compat::MAT2STR_EXTENSIONS),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn mat2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &MAT2STR_DESCRIPTOR,
+        &MAT2STR_ERROR_TOO_MANY_OUTPUTS,
+        "mat2str",
+    )?;
     if rest.len() > 2 {
         return Err(compat_error(
             "mat2str",
@@ -511,18 +194,15 @@ async fn mat2str_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "native2unicode",
-    category = "strings/core",
-    summary = "Decode native byte values into Unicode text.",
-    keywords = "native2unicode,unicode,encoding,text,uint8",
-    accel = "sink",
-    type_resolver(string_type),
-    descriptor(crate::builtins::strings::core::compat::NATIVE2UNICODE_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::strings::core::compat::NATIVE2UNICODE_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn native2unicode_builtin(bytes: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &NATIVE2UNICODE_DESCRIPTOR,
+        &NATIVE2UNICODE_ERROR_TOO_MANY_OUTPUTS,
+        "native2unicode",
+    )?;
     if rest.len() > 1 {
         return Err(compat_error(
             "native2unicode",
@@ -533,7 +213,9 @@ async fn native2unicode_builtin(bytes: Value, rest: Vec<Value>) -> BuiltinResult
     let bytes = gather_if_needed_async(&bytes)
         .await
         .map_err(map_flow("native2unicode"))?;
-    if matches!(&bytes, Value::String(_) | Value::CharArray(_)) {
+    if matches!(&bytes, Value::String(_) | Value::CharArray(_))
+        || matches!(&bytes, Value::StringArray(array) if array.data.len() == 1)
+    {
         return Ok(bytes);
     }
     let encoding = if let Some(value) = rest.first() {
@@ -572,16 +254,31 @@ fn is_typed_integer_value(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "sscanf",
-    category = "strings/core",
-    summary = "Parse formatted numeric values from text.",
-    keywords = "sscanf,scan,format,text,numeric",
-    accel = "sink",
-    type_resolver(tensor_type),
-    descriptor(crate::builtins::strings::core::compat::SSCANF_DESCRIPTOR),
-    integer_capabilities(crate::builtins::strings::core::compat::SSCANF_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::core::compat"
 )]
 async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    crate::output_count::validate_bounded_outputs(
+        &SSCANF_DESCRIPTOR,
+        &SSCANF_ERROR_TOO_MANY_OUTPUTS,
+        "sscanf",
+    )?;
+    if rest.len() > 2 {
+        return Err(compat_error(
+            "sscanf",
+            "sscanf: expected text, format, and optional size",
+        ));
+    }
+    if contains_numeric_or_resident_text_input(&text)
+        || rest
+            .first()
+            .is_some_and(contains_numeric_or_resident_text_input)
+    {
+        return Err(compat_error(
+            "sscanf",
+            "sscanf: expected host text and a host text format",
+        ));
+    }
     let text = gather_if_needed_async(&text)
         .await
         .map_err(map_flow("sscanf"))?;
@@ -1883,6 +1580,22 @@ mod tests {
         ))
         .expect("rank-one bytes");
         assert_eq!(row, Value::CharArray(CharArray::new_row("hi")));
+
+        let scalar_text = Value::StringArray(
+            StringArray::new(vec!["hé".into()], vec![1, 1]).expect("string scalar"),
+        );
+        assert_eq!(
+            block(native2unicode_builtin(scalar_text.clone(), Vec::new()))
+                .expect("documented string-scalar pass-through"),
+            scalar_text
+        );
+        let array_text = Value::StringArray(
+            StringArray::new(vec!["a".into(), "b".into()], vec![1, 2])
+                .expect("nonscalar string array"),
+        );
+        let error = block(native2unicode_builtin(array_text, Vec::new()))
+            .expect_err("nonscalar string array must not pass through");
+        assert!(error.message().contains("numeric byte vector"));
     }
 
     #[test]
@@ -2584,6 +2297,43 @@ mod tests {
             .unwrap(),
             Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap())
         );
+    }
+
+    #[test]
+    fn migrated_text_output_bounds_precede_input_materialization() {
+        {
+            let _outputs = crate::output_count::push_output_count(Some(3));
+            let strtok = block(strtok_builtin(Value::Num(7.0), Vec::new()))
+                .expect_err("strtok must reject excess outputs first");
+            assert_eq!(
+                strtok.identifier(),
+                STRTOK_ERROR_TOO_MANY_OUTPUTS.identifier
+            );
+            let str2num = block(str2num_builtin(Value::Num(7.0)))
+                .expect_err("str2num must reject excess outputs first");
+            assert_eq!(
+                str2num.identifier(),
+                STR2NUM_ERROR_TOO_MANY_OUTPUTS.identifier
+            );
+        }
+        {
+            let _outputs = crate::output_count::push_output_count(Some(5));
+            let sscanf = block(sscanf_builtin(Value::Num(7.0), Vec::new()))
+                .expect_err("sscanf must reject excess outputs first");
+            assert_eq!(
+                sscanf.identifier(),
+                SSCANF_ERROR_TOO_MANY_OUTPUTS.identifier
+            );
+        }
+        {
+            let _outputs = crate::output_count::push_output_count(Some(2));
+            let mat2str = block(mat2str_builtin(Value::Num(7.0), Vec::new()))
+                .expect_err("mat2str must reject excess outputs first");
+            assert_eq!(
+                mat2str.identifier(),
+                MAT2STR_ERROR_TOO_MANY_OUTPUTS.identifier
+            );
+        }
     }
 
     #[test]

@@ -196,7 +196,11 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
     let is_nonfloating = runmat_accelerate_api::handle_integer_type(&handle).is_some()
         || runmat_accelerate_api::handle_is_logical(&handle);
 
-    if let Some(provider) = maybe_provider.filter(|_| !is_nonfloating) {
+    if let Some(provider) = maybe_provider.filter(|_| {
+        !is_nonfloating
+            && runmat_accelerate_api::handle_storage(&handle)
+                == runmat_accelerate_api::GpuTensorStorage::Real
+    }) {
         let provider_order = ProviderNormOrder::from(order);
         let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
         let provider_result = provider.norm(&handle, provider_order).await;
@@ -212,7 +216,7 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(result, error));
             }
-            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => {
                 let mut failure =
                     build_runtime_error(format!("{NAME}: provider norm execution failed: {error}"))
@@ -224,17 +228,32 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
                         )
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                         .build();
-                failure =
-                    crate::runtime_error::with_provider_execution_source(failure, error.into());
+                failure = crate::runtime_error::with_provider_execution_source(failure, error);
                 return Err(failure);
             }
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
         .await
         .map_err(map_control_flow)?;
-    let norm = norm_real_tensor(&tensor, order)?;
+    let norm = match gathered {
+        Value::ComplexTensor(tensor) => norm_complex_tensor(&tensor, order)?,
+        Value::Complex(real, imaginary) => {
+            let tensor =
+                ComplexTensor::new(vec![(real, imaginary)], vec![1, 1]).map_err(builtin_error)?;
+            norm_complex_tensor(&tensor, order)?
+        }
+        Value::Tensor(tensor) => norm_real_tensor(&tensor, order)?,
+        Value::Num(number) => {
+            let tensor = Tensor::new(vec![number], vec![1, 1]).map_err(builtin_error)?;
+            norm_real_tensor(&tensor, order)?
+        }
+        other => {
+            let tensor = tensor::value_into_tensor_for(NAME, other).map_err(builtin_error)?;
+            norm_real_tensor(&tensor, order)?
+        }
+    };
 
     let source_is_single = !is_nonfloating
         && runmat_accelerate_api::handle_precision(&handle)
@@ -276,23 +295,19 @@ fn valid_provider_norm_result(
     source: &GpuTensorHandle,
     result: &GpuTensorHandle,
 ) -> bool {
-    !source.shares_allocation_with(result)
-        && result.shape() == [1, 1]
-        && result.device_id() == provider.device_id()
-        && gpu_helpers::exact_provider_for_handle(result)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && runmat_accelerate_api::handle_storage(result)
-            == runmat_accelerate_api::GpuTensorStorage::Real
-        && runmat_accelerate_api::handle_precision(result)
-            == runmat_accelerate_api::handle_precision(source)
-        && runmat_accelerate_api::handle_integer_type(result).is_none()
-        && !runmat_accelerate_api::handle_is_logical(result)
-        && gpu_helpers::gpu_class_metadata_matches(
-            result,
-            runmat_accelerate_api::handle_precision(source),
-            None,
-            false,
-        )
+    gpu_helpers::unary_gpu_output_matches_shape(
+        result,
+        source,
+        provider,
+        &[1, 1],
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            precision: runmat_accelerate_api::handle_precision(source),
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        },
+    )
 }
 
 fn norm_real_tensor(tensor: &Tensor, order: NormOrder) -> BuiltinResult<f64> {

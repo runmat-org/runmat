@@ -1,6 +1,72 @@
 use super::*;
 use runmat_value::IntegerStorage;
 
+fn build_spline_pp(
+    series: &NumericSeries,
+    name: &'static str,
+) -> BuiltinResult<PiecewisePolynomial> {
+    futures::executor::block_on(super::build_spline_pp(series, name, &mut ()))
+}
+
+#[test]
+fn long_spline_coefficient_work_suspends_and_retires_on_cancel() {
+    use crate::execution::{CpuCooperationBudget, CpuCooperationPolicy, ExecutionServiceError};
+    use runmat_execution::cancellation::CancellationSource;
+    use runmat_execution::CancellationReason;
+    use std::cell::Cell;
+    use std::future::Future;
+    use std::num::NonZeroU64;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::task::{Context, Poll};
+
+    struct PendingTurn(Rc<Cell<bool>>);
+    impl Future for PendingTurn {
+        type Output = Result<(), ExecutionServiceError>;
+        fn poll(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+    impl Drop for PendingTurn {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    let source = CancellationSource::new();
+    let retired = Rc::new(Cell::new(false));
+    let retired_turn = retired.clone();
+    let mut work = Some(CpuCooperationBudget::with_test_turn(
+        CpuCooperationPolicy::WorkQuantum(NonZeroU64::new(1).unwrap()),
+        source.token(),
+        move || Box::pin(PendingTurn(retired_turn.clone())),
+    ));
+    let x: Vec<f64> = (0..8192).map(|index| index as f64).collect();
+    let y: Vec<f64> = x.iter().map(|value| value * value).collect();
+    let mut future = Box::pin(super::coefficients::spline_coefs_for_series(
+        &x, &y, None, &mut work,
+    ));
+    let waker = futures::task::noop_waker();
+    let mut context = Context::from_waker(&waker);
+    assert!(
+        future.as_mut().poll(&mut context).is_pending(),
+        "coefficient work must yield before completion"
+    );
+    source.cancel(CancellationReason::User);
+    let Poll::Ready(Err(error)) = future.as_mut().poll(&mut context) else {
+        panic!("cancelled pending coefficient work must fail")
+    };
+    assert_eq!(error.identifier(), Some("RunMat:parallel:Cancelled"));
+    assert!(error.source.as_deref().is_some_and(|source| {
+        matches!(
+            source.downcast_ref::<ExecutionServiceError>(),
+            Some(ExecutionServiceError::Cancelled)
+        )
+    }));
+    drop(future);
+    assert!(retired.get(), "pending service turn must be retired");
+}
+
 fn scalar_series(y: &[f64]) -> NumericSeries {
     NumericSeries {
         x: (1..=y.len()).map(|v| v as f64).collect(),

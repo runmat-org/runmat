@@ -373,11 +373,7 @@ impl WgpuProvider {
         product: &GpuTensorHandle,
         options: &ProviderQrOptions,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderQrPowerIterResult>> {
-        let host_product = self.download_exec(product).await?;
-        let tensor =
-            Tensor::new(host_product.data.clone(), host_product.shape.clone()).map_err(|e| {
-                anyhow!("qr_power_iter: failed to construct host tensor for fallback: {e}")
-            })?;
+        let tensor = self.download_real_floating_tensor_exec(product).await?;
         Ok(Some(self.qr_host_result(tensor, options).await?))
     }
 
@@ -394,11 +390,7 @@ impl WgpuProvider {
         .map_err(runtime_flow_to_provider_error)?;
         let upload = |value| -> Result<GpuTensorHandle> {
             let tensor = host_tensor_from_value("qr", value)?;
-            let data = tensor.materialize_f64();
-            self.upload_exec(&HostTensorView {
-                data: &data,
-                shape: tensor.shape(),
-            })
+            self.upload_real_floating_tensor_exec(&tensor)
         };
         match options.outputs {
             ProviderQrOutputs::R => Ok(ProviderQrResult::R {
@@ -470,9 +462,7 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         lower: bool,
     ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderCholResult> {
-        let host = self.download_exec(handle).await?;
-        let tensor =
-            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("chol: {e}"))?;
+        let tensor = self.download_real_floating_tensor_exec(handle).await?;
         let mut args = Vec::new();
         if lower {
             args.push(Value::from("lower"));
@@ -484,11 +474,7 @@ impl WgpuProvider {
         .await
         .map_err(runtime_flow_to_provider_error)?;
         let factor_tensor = host_tensor_from_value("chol", eval.factor())?;
-        let factor_data = factor_tensor.materialize_f64();
-        let factor = self.upload_exec(&HostTensorView {
-            data: &factor_data,
-            shape: factor_tensor.shape(),
-        })?;
+        let factor = self.upload_real_floating_tensor_exec(&factor_tensor)?;
         Ok(ProviderCholResult {
             factor,
             info: eval.flag_index() as u32,
@@ -500,9 +486,7 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         options: ProviderQrOptions,
     ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderQrResult> {
-        let host = self.download_exec(handle).await?;
-        let tensor =
-            Tensor::new(host.data.clone(), host.shape.clone()).map_err(|e| anyhow!("qr: {e}"))?;
+        let tensor = self.download_real_floating_tensor_exec(handle).await?;
         self.qr_host_result(tensor, &options).await
     }
 }

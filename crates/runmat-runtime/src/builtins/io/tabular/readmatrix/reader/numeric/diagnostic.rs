@@ -176,7 +176,7 @@ mod tests {
                     &options,
                     runmat_value::NumericDType::U64,
                     12,
-                    34,
+                    options.column_from_source(33),
                     Some(&reservation),
                 )
                 .expect_err("invalid integer token")
@@ -185,7 +185,7 @@ mod tests {
                     "αbad",
                     &options,
                     12,
-                    34,
+                    options.column_from_source(33),
                     Some(&reservation),
                 )
                 .expect_err("invalid numeric token")

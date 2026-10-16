@@ -37,33 +37,33 @@ pub(super) fn parse_numeric_token(
     token: &str,
     options: &ReadMatrixOptions,
     line_number: usize,
-    column_number: usize,
+    column: MatrixFieldColumn,
 ) -> BuiltinResult<f64> {
-    parse_numeric_token_with_reservation(token, options, line_number, column_number, None)
+    parse_numeric_token_with_reservation(token, options, line_number, column, None)
 }
 
 pub(in crate::builtins::io::tabular::readmatrix::reader) fn parse_numeric_token_with_reservation(
     token: &str,
     options: &ReadMatrixOptions,
     line_number: usize,
-    column_number: usize,
+    column: MatrixFieldColumn,
     reservation: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<f64> {
     let trimmed = token.trim();
     if trimmed.is_empty() {
-        return Ok(options.empty_value_f64());
+        return Ok(options.empty_value_for(column)?.materialize_f64());
     }
     let unquoted = unquote(trimmed);
     let inner = unquoted.trim();
     if inner.is_empty() {
-        return Ok(options.empty_value_f64());
+        return Ok(options.empty_value_for(column)?.materialize_f64());
     }
-    if options.is_missing_token(inner) {
-        return Ok(f64::NAN);
+    if options.is_missing_token_for(inner, column) {
+        return Ok(options.missing_value_for(column)?.materialize_f64());
     }
-    let normalized = normalize_numeric_token(inner, options);
+    let normalized = normalize_numeric_token(inner, options, column);
     if normalized.is_empty() {
-        return Ok(options.empty_value_f64());
+        return Ok(options.empty_value_for(column)?.materialize_f64());
     }
     if normalized.eq_ignore_ascii_case("nan") {
         return Ok(f64::NAN);
@@ -80,28 +80,28 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) fn parse_numeric_token_
     {
         return Ok(f64::NEG_INFINITY);
     }
-    normalized
-        .parse::<f64>()
-        .map_err(|_| invalid_numeric_token(inner, line_number, column_number, reservation))
+    normalized.parse::<f64>().map_err(|_| {
+        invalid_numeric_token(inner, line_number, column.diagnostic_number(), reservation)
+    })
 }
 
 pub(super) fn validate_numeric_token(
     token: &str,
     options: &ReadMatrixOptions,
     line_number: usize,
-    column_number: usize,
+    column: MatrixFieldColumn,
 ) -> BuiltinResult<()> {
-    parse_numeric_token(token, options, line_number, column_number).map(|_| ())
+    parse_numeric_token(token, options, line_number, column).map(|_| ())
 }
 
 pub(in crate::builtins::io::tabular::readmatrix::reader) fn validate_numeric_token_with_reservation(
     token: &str,
     options: &ReadMatrixOptions,
     line_number: usize,
-    column_number: usize,
+    column: MatrixFieldColumn,
     reservation: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<()> {
-    parse_numeric_token_with_reservation(token, options, line_number, column_number, reservation)
+    parse_numeric_token_with_reservation(token, options, line_number, column, reservation)
         .map(|_| ())
 }
 
@@ -136,16 +136,9 @@ pub(in crate::builtins::io::tabular::readmatrix) fn parse_integer_numeric_token(
     options: &ReadMatrixOptions,
     dtype: NumericDType,
     line_number: usize,
-    column_number: usize,
+    column: MatrixFieldColumn,
 ) -> BuiltinResult<NumericScalar> {
-    parse_integer_numeric_token_with_reservation(
-        token,
-        options,
-        dtype,
-        line_number,
-        column_number,
-        None,
-    )
+    parse_integer_numeric_token_with_reservation(token, options, dtype, line_number, column, None)
 }
 
 pub(in crate::builtins::io::tabular::readmatrix::reader) fn parse_integer_numeric_token_with_reservation(
@@ -153,21 +146,30 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) fn parse_integer_numeri
     options: &ReadMatrixOptions,
     dtype: NumericDType,
     line_number: usize,
-    column_number: usize,
+    column: MatrixFieldColumn,
     reservation: Option<&dyn DiagnosticReservation>,
 ) -> BuiltinResult<NumericScalar> {
     let trimmed = token.trim();
     let unquoted = unquote(trimmed);
     let inner = unquoted.trim();
     if inner.is_empty() {
-        return Ok(integer_scalar_from_numeric(dtype, options.empty_value()));
+        return Ok(integer_scalar_from_numeric(
+            dtype,
+            options.empty_value_for(column)?,
+        ));
     }
-    if options.is_missing_token(inner) {
-        return Ok(integer_scalar_from_f64(dtype, f64::NAN));
+    if options.is_missing_token_for(inner, column) {
+        return Ok(integer_scalar_from_numeric(
+            dtype,
+            options.missing_value_for(column)?,
+        ));
     }
-    let normalized = normalize_numeric_token(inner, options);
+    let normalized = normalize_numeric_token(inner, options, column);
     if normalized.is_empty() {
-        return Ok(integer_scalar_from_numeric(dtype, options.empty_value()));
+        return Ok(integer_scalar_from_numeric(
+            dtype,
+            options.empty_value_for(column)?,
+        ));
     }
     if normalized.eq_ignore_ascii_case("nan") {
         return Ok(integer_scalar_from_f64(dtype, f64::NAN));
@@ -184,7 +186,8 @@ pub(in crate::builtins::io::tabular::readmatrix::reader) fn parse_integer_numeri
     {
         return Ok(integer_scalar_from_f64(dtype, f64::NEG_INFINITY));
     }
-    let invalid = || invalid_numeric_token(inner, line_number, column_number, reservation);
+    let invalid =
+        || invalid_numeric_token(inner, line_number, column.diagnostic_number(), reservation);
     if normalized.chars().any(|ch| matches!(ch, '.' | 'e' | 'E')) {
         return normalized
             .parse::<f64>()
@@ -322,17 +325,29 @@ fn integer_scalar_from_f64(dtype: NumericDType, value: f64) -> NumericScalar {
     }
 }
 
-fn normalize_numeric_token<'a>(token: &'a str, options: &ReadMatrixOptions) -> Cow<'a, str> {
-    let mut text = Cow::Borrowed(token);
-    if let Some(thousands) = options.thousands_separator {
-        if thousands != options.decimal_separator && text.contains(thousands) {
-            text = Cow::Owned(text.chars().filter(|ch| *ch != thousands).collect());
-        }
-    }
-    if options.decimal_separator != '.' && text.contains(options.decimal_separator) {
-        text = Cow::Owned(text.replace(options.decimal_separator, "."));
-    }
-    text
+fn normalize_numeric_token<'a>(
+    token: &'a str,
+    options: &ReadMatrixOptions,
+    column: MatrixFieldColumn,
+) -> Cow<'a, str> {
+    let (decimal_separator, thousands_separator) = options
+        .variable(column)
+        .map(|variable| {
+            (
+                variable
+                    .decimal_separator
+                    .unwrap_or(options.decimal_separator),
+                variable
+                    .thousands_separator
+                    .unwrap_or(options.thousands_separator),
+            )
+        })
+        .unwrap_or((options.decimal_separator, options.thousands_separator));
+    super::super::super::import_options::normalize_numeric_token(
+        token,
+        decimal_separator,
+        thousands_separator,
+    )
 }
 
 fn unquote(token: &str) -> &str {

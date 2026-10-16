@@ -167,7 +167,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(result, error));
             }
-            Err(error) if provider_inv_is_unsupported(&error) => {}
+            Err(error) if error.is_unsupported() => {}
             Err(error) => {
                 let mut failure =
                     build_runtime_error(format!("inv: provider execution failed: {error}"))
@@ -179,8 +179,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
                         )
                         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                         .build();
-                failure =
-                    crate::runtime_error::with_provider_execution_source(failure, error.into());
+                failure = crate::runtime_error::with_provider_execution_source(failure, error);
                 return Err(failure);
             }
         }
@@ -202,10 +201,6 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
 }
 
-fn provider_inv_is_unsupported(error: &anyhow::Error) -> bool {
-    gpu_helpers::provider_hook_is_unsupported(error)
-}
-
 fn valid_inv_gpu_output(
     input: &GpuTensorHandle,
     output: &GpuTensorHandle,
@@ -213,16 +208,18 @@ fn valid_inv_gpu_output(
     expected_storage: runmat_accelerate_api::GpuTensorStorage,
     expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
 ) -> bool {
-    output.shape() == input.shape()
-        && output.device_id() == input.device_id()
-        && !input.shares_allocation_with(output)
-        && gpu_helpers::exact_provider_for_handle(output)
-            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
-        && runmat_accelerate_api::handle_storage(output) == expected_storage
-        && runmat_accelerate_api::handle_precision(output) == expected_precision
-        && runmat_accelerate_api::handle_integer_type(output).is_none()
-        && !runmat_accelerate_api::handle_is_logical(output)
-        && gpu_helpers::gpu_class_metadata_matches(output, expected_precision, None, false)
+    gpu_helpers::unary_gpu_output_matches(
+        output,
+        input,
+        provider,
+        gpu_helpers::UnaryGpuOutputContract {
+            storage: expected_storage,
+            precision: expected_precision,
+            integer: None,
+            logical: false,
+            alias: gpu_helpers::GpuOutputAliasPolicy::RequireDistinctAllocation,
+        },
+    )
 }
 
 fn inv_real_value(tensor: Tensor) -> BuiltinResult<Value> {
@@ -414,12 +411,17 @@ pub(crate) mod tests {
 
     #[test]
     fn inv_provider_unsupported_classification_is_exact() {
-        assert!(!provider_inv_is_unsupported(&anyhow::anyhow!(
-            "inv not supported by provider"
-        )));
-        assert!(!provider_inv_is_unsupported(&anyhow::anyhow!(
-            "inv not supported by provider: device lost"
-        )));
+        let unsupported = runmat_accelerate_api::ProviderExecutionError::from(
+            runmat_accelerate_api::unsupported_provider_operation("inv unavailable"),
+        );
+        assert!(unsupported.is_unsupported());
+        assert!(!unsupported.with_unproven_effects().is_unsupported());
+        assert!(
+            !runmat_accelerate_api::ProviderExecutionError::from(anyhow::anyhow!(
+                "inv not supported by provider"
+            ))
+            .is_unsupported()
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

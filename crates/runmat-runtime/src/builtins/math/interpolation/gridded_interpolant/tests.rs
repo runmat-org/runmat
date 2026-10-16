@@ -2,6 +2,28 @@ use super::*;
 use crate::{OBJECT_INDEX_MEMBER, OBJECT_INDEX_PAREN};
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, NumericStorage};
+use std::rc::Rc;
+
+struct ManagedSplineService(crate::context::host_effect::ManagedHostEffectLedger);
+
+impl crate::context::RuntimeParallelService for ManagedSplineService {
+    fn supports(&self, _: crate::context::ParallelCapability) -> bool {
+        false
+    }
+    fn placement_resources(&self) -> crate::context::RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        crate::context::RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..crate::context::RuntimeParallelResources::default()
+        }
+    }
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<crate::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
 
 async fn gridded_interpolant_subsref(
     obj: Value,
@@ -259,6 +281,78 @@ fn two_dimensional_grid_vectors_interpolate() {
 }
 
 #[test]
+fn two_dimensional_spline_uses_shared_not_a_knot_tensor_product() {
+    let y = [-1.0, 0.0, 1.5, 3.0];
+    let x = [0.0, 0.7, 2.0, 4.0];
+    let polynomial = |x: f64, y: f64| x * x + 3.0 * x * y + 2.0 * y * y;
+    let values: Vec<f64> = x
+        .iter()
+        .flat_map(|&col| y.iter().map(move |&row| polynomial(col, row)))
+        .collect();
+    let vectors = CellArray::new_with_shape(vec![col(&y), row(&x)], vec![1, 2]).unwrap();
+    let obj = call(vec![
+        Value::Cell(vectors),
+        Value::Tensor(Tensor::new(values, vec![4, 4]).unwrap()),
+        Value::String("spline".into()),
+    ])
+    .expect("2-D spline interpolant");
+    let result = subsref(obj, vec![Value::Num(0.4), Value::Num(1.2)]).expect("2-D spline query");
+    let Value::Num(actual) = result.value() else {
+        panic!("double scalar expected")
+    };
+    assert!((*actual - polynomial(1.2, 0.4)).abs() < 1e-9);
+}
+
+#[test]
+fn two_dimensional_spline_query_retains_exact_single_output_claim() {
+    let vectors = CellArray::new_with_shape(
+        vec![col(&[0.0, 1.0, 2.0, 3.0]), col(&[0.0, 1.0, 2.0, 3.0])],
+        vec![1, 2],
+    )
+    .unwrap();
+    let samples = Tensor::from_f32((0..16).map(|n| n as f32).collect(), vec![4, 4]).unwrap();
+    let receiver = call(vec![
+        Value::Cell(vectors),
+        Value::Tensor(samples),
+        Value::String("spline".into()),
+    ])
+    .unwrap();
+    let ledger =
+        crate::context::host_effect::ManagedHostEffectLedger::new_with_epoch(1_000_000, 19);
+    let runtime = crate::context::RuntimeContext::new(Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        crate::context::RuntimeServicePorts::default()
+            .with_parallel(Rc::new(ManagedSplineService(ledger.clone()))),
+    );
+    let queries = Value::Cell(
+        CellArray::new_with_shape(vec![col(&[0.5, 1.5]), col(&[0.5, 1.5])], vec![1, 2]).unwrap(),
+    );
+    let subscript =
+        crate::object::indexing::standard_substruct_fixture_from_parts(OBJECT_INDEX_PAREN, queries)
+            .unwrap();
+    let output = block_on(gridded_interpolant_subsref_registered(
+        Some(runtime),
+        receiver,
+        subscript,
+    ))
+    .unwrap();
+    let Value::Tensor(tensor) = output.value() else {
+        panic!("single tensor expected")
+    };
+    assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+    assert_eq!(tensor.shape(), &[2, 1]);
+    let retained =
+        runmat_value::ExactHostTensorAllocation::requested_bytes(NumericDType::F32, &[2, 1])
+            .unwrap() as u64;
+    assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, retained);
+    drop(output);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn full_query_grid_visits_column_major_points_without_changing_shape() {
     let grid =
         CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2]).unwrap();
@@ -375,15 +469,22 @@ fn unsupported_cubic_method_is_explicit() {
 
 #[test]
 fn higher_order_methods_reject_nd_grids_explicitly() {
-    let grid =
-        CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 2.0])], vec![1, 2]).unwrap();
-    let values = Tensor::new(vec![0.0, 10.0, 20.0, 30.0], vec![2, 2]).unwrap();
+    let grid = CellArray::new_with_shape(
+        vec![col(&[0.0, 1.0]), col(&[0.0, 2.0]), col(&[0.0, 3.0])],
+        vec![1, 3],
+    )
+    .unwrap();
+    let values = Tensor::new(
+        vec![0.0, 10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0],
+        vec![2, 2, 2],
+    )
+    .unwrap();
     let err = call(vec![
         Value::Cell(grid),
         Value::Tensor(values),
         Value::String("spline".to_string()),
     ])
-    .expect_err("N-D spline is not implemented");
+    .expect_err("three-dimensional spline is not implemented");
     assert_eq!(
         err.identifier(),
         Some("RunMat:griddedInterpolant:UnsupportedMethod")

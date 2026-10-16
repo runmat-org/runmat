@@ -25,6 +25,10 @@ use runmat_builtins::{BuiltinErrorDescriptor, FactorOption};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, NumericScalar, Tensor, Value};
 
+#[path = "eig_publication.rs"]
+mod publication;
+use publication::upload_eig_eval_to_owner;
+
 const BUILTIN_NAME: &str = "eig";
 
 const REAL_EPS: f64 = 1e-12;
@@ -40,7 +44,7 @@ use runmat_builtins::{
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "eig",
     op_kind: GpuOpKind::Custom("eig-factor"),
-    supported_precisions: &[ScalarType::F64],
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[ProviderHook::Custom("eig")],
     constant_strategy: ConstantStrategy::InlineLiteral,
@@ -49,7 +53,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Prefers the provider `eig` hook for standard eig(A) (WGPU reuploads host-computed results for real spectra) and falls back to the CPU implementation for generalized eig(A,B), complex spectra, or unsupported options.",
+    notes: "The WGPU `eig` hook gathers real single/double matrices, computes the host eigensystem, and restores real or complex factors in the source class. Generalized inputs and unsupported options use the exact-owner host path.",
 };
 
 fn eig_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
@@ -228,21 +232,17 @@ pub async fn evaluate(value: Value, args: &[Value], require_left: bool) -> Built
     match value {
         Value::GpuTensor(handle) => {
             if is_nonfloating_coefficient(&Value::GpuTensor(handle.clone())) {
-                let tensor = gpu_helpers::gather_tensor_async(&handle)
-                    .await
-                    .map_err(with_eig_context)?;
-                ensure_exact_eig_integer_boundary(&Value::Tensor(tensor.clone()), "A")?;
-                let eval = evaluate_host(Value::Tensor(tensor), options, require_left).await?;
-                return upload_eig_eval_to_owner(eval, &handle);
+                let gathered = gather_eig_resident_value(&handle).await?;
+                ensure_exact_eig_integer_boundary(&gathered, "A")?;
+                let eval = evaluate_host(gathered, options, require_left).await?;
+                return upload_eig_eval_to_owner(eval, &handle, options.vector_output, &[]);
             }
             if let Some(eval) = evaluate_gpu(&handle, options, require_left).await? {
                 return Ok(eval);
             }
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(with_eig_context)?;
-            let eval = evaluate_host(Value::Tensor(tensor), options, require_left).await?;
-            upload_eig_eval_to_owner(eval, &handle)
+            let gathered = gather_eig_resident_value(&handle).await?;
+            let eval = evaluate_host(gathered, options, require_left).await?;
+            upload_eig_eval_to_owner(eval, &handle, options.vector_output, &[])
         }
         other => {
             ensure_exact_eig_integer_boundary(&other, "A")?;
@@ -256,11 +256,6 @@ async fn evaluate_gpu(
     options: EigOptions,
     require_left: bool,
 ) -> BuiltinResult<Option<EigEval>> {
-    if runmat_accelerate_api::handle_precision(handle)
-        == Some(runmat_accelerate_api::ProviderPrecision::F32)
-    {
-        return Ok(None);
-    }
     if options.vector_output {
         return Ok(None);
     }
@@ -329,8 +324,9 @@ fn valid_provider_eig_result(
     if require_left && result.left.is_none() {
         return false;
     }
-    let expected_precision =
-        runmat_accelerate_api::handle_precision(input).unwrap_or_else(|| provider.precision());
+    let Some(expected_precision) = runmat_accelerate_api::handle_precision(input) else {
+        return false;
+    };
     let expected_class = match expected_precision {
         runmat_accelerate_api::ProviderPrecision::F32 => runmat_types::standard::SINGLE,
         runmat_accelerate_api::ProviderPrecision::F64 => runmat_types::standard::DOUBLE,
@@ -396,11 +392,13 @@ async fn evaluate_generalized(
     options: EigOptions,
     require_left: bool,
 ) -> BuiltinResult<EigEval> {
-    let gpu_source = match (&a_value, &b_value) {
-        (Value::GpuTensor(handle), _) => Some(handle.clone()),
-        (_, Value::GpuTensor(handle)) => Some(handle.clone()),
-        _ => None,
-    };
+    let gpu_sources = [&a_value, &b_value]
+        .into_iter()
+        .filter_map(|value| match value {
+            Value::GpuTensor(handle) => Some(handle.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     let a_value = gather_eig_coefficient(a_value).await?;
     let b_value = gather_eig_coefficient(b_value).await?;
     ensure_exact_eig_integer_boundary(&a_value, "A")?;
@@ -412,20 +410,25 @@ async fn evaluate_generalized(
         compute_generalized_eigen(a, b, options, require_left)?,
         precision,
     )?;
-    match gpu_source {
-        Some(source) => upload_eig_eval_to_owner(eval, &source),
+    match gpu_sources.first() {
+        Some(source) => upload_eig_eval_to_owner(eval, source, options.vector_output, &gpu_sources),
         None => Ok(eval),
     }
 }
 
 async fn gather_eig_coefficient(value: Value) -> BuiltinResult<Value> {
     match value {
-        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map(Value::Tensor)
-            .map_err(with_eig_context),
+        Value::GpuTensor(handle) => gather_eig_resident_value(&handle).await,
         other => Ok(other),
     }
+}
+
+async fn gather_eig_resident_value(handle: &GpuTensorHandle) -> BuiltinResult<Value> {
+    let owner = gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| eig_internal_error("eig: no exact owner for resident input"))?;
+    gpu_helpers::download_value_preserving_residency_async(owner, handle)
+        .await
+        .map_err(with_eig_context)
 }
 
 fn ensure_eig_coefficient_extension_enabled(value: &Value) -> BuiltinResult<()> {
@@ -566,42 +569,13 @@ fn cast_eig_value_to_single(value: Value) -> BuiltinResult<Value> {
         Value::Num(number) => Tensor::from_f32(vec![number as f32], vec![1, 1])
             .map(Value::Tensor)
             .map_err(|err| eig_internal_error(format!("eig: {err}"))),
+        Value::Complex(real, imaginary) => {
+            ComplexTensor::from_f32(vec![(real as f32, imaginary as f32)], vec![1, 1])
+                .map(Value::ComplexTensor)
+                .map_err(|err| eig_internal_error(format!("eig: {err}")))
+        }
         other => Ok(other),
     }
-}
-
-fn upload_eig_eval_to_owner(eval: EigEval, source: &GpuTensorHandle) -> BuiltinResult<EigEval> {
-    let provider = runmat_accelerate_api::provider_for_handle(source)
-        .ok_or_else(|| eig_internal_error("eig: source GPU provider is unavailable"))?;
-    Ok(EigEval {
-        eigenvalues: upload_eig_value(provider, eval.eigenvalues)?,
-        diagonal_matrix: upload_eig_value(provider, eval.diagonal_matrix)?,
-        diagonal_output: upload_eig_value(provider, eval.diagonal_output)?,
-        right: upload_eig_value(provider, eval.right)?,
-        left: eval
-            .left
-            .map(|value| upload_eig_value(provider, value))
-            .transpose()?,
-    })
-}
-
-fn upload_eig_value(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    value: Value,
-) -> BuiltinResult<Value> {
-    let handle = match value {
-        Value::Tensor(tensor) => gpu_helpers::upload_tensor(provider, &tensor)
-            .map_err(|err| eig_internal_error(format!("eig: {err}")))?,
-        Value::ComplexTensor(tensor) => gpu_helpers::upload_complex_tensor(provider, &tensor)?,
-        Value::Num(number) => {
-            let tensor = Tensor::new(vec![number], vec![1, 1])
-                .map_err(|err| eig_internal_error(format!("eig: {err}")))?;
-            gpu_helpers::upload_tensor(provider, &tensor)
-                .map_err(|err| eig_internal_error(format!("eig: {err}")))?
-        }
-        other => return Ok(other),
-    };
-    gpu_helpers::resident_gpu_value(handle)
 }
 
 fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
@@ -1099,12 +1073,18 @@ async fn value_to_complex_matrix(value: Value) -> BuiltinResult<DMatrix<Complex6
             Complex64::new(if b { 1.0 } else { 0.0 }, 0.0),
         )),
         Value::Complex(re, im) => Ok(DMatrix::from_element(1, 1, Complex64::new(re, im))),
-        Value::GpuTensor(handle) => {
-            let tensor = gpu_helpers::gather_tensor_async(&handle)
-                .await
-                .map_err(with_eig_context)?;
-            tensor_to_matrix(&tensor)
-        }
+        Value::GpuTensor(handle) => match gather_eig_resident_value(&handle).await? {
+            Value::Tensor(tensor) => tensor_to_matrix(&tensor),
+            Value::ComplexTensor(tensor) => complex_tensor_to_matrix(&tensor),
+            Value::LogicalArray(logical) => {
+                let tensor = tensor::logical_to_tensor(&logical)
+                    .map_err(|error| eig_internal_error(format!("eig: {error}")))?;
+                tensor_to_matrix(&tensor)
+            }
+            other => Err(eig_internal_error(format!(
+                "eig: exact-owner download returned unexpected value {other:?}"
+            ))),
+        },
         Value::String(_) | Value::StringArray(_) | Value::CharArray(_) => Err(eig_invalid_input(
             "eig: input must be numeric or logical; convert character data with double() first",
         )),
@@ -1927,6 +1907,28 @@ pub(crate) mod tests {
         let eval = evaluate(Value::GpuTensor(handle), &[Value::from("nobalance")], false)
             .expect("evaluate");
         assert!(matches!(eval.eigenvalues(), Value::GpuTensor(_)));
+
+        let complex = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
+        let source = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+        let eval = evaluate(Value::GpuTensor(source), &[], false).expect("resident complex eig");
+        let Value::GpuTensor(eigenvalues) = eval.eigenvalues() else {
+            panic!("complex eig did not restore resident eigenvalues");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&eigenvalues),
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
+        );
+        let gathered = block_on(gpu_helpers::download_value_preserving_residency_async(
+            provider,
+            &eigenvalues,
+        ))
+        .unwrap();
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("complex eig lost complex eigenvalue storage");
+        };
+        let (re, im) = gathered.materialize_f64()[0];
+        assert!((re - 2.0).abs() < 1e-5);
+        assert!((im - 1.0).abs() < 1e-5);
     }
 
     fn eig_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {

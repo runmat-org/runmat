@@ -9,8 +9,11 @@ pub fn table_replace_variables_like(
     variables: StructValue,
 ) -> BuiltinResult<Value> {
     let names = table_variable_names_from_object(source)?;
-    let replacement_names = variables.fields.keys().cloned().collect::<Vec<_>>();
-    if replacement_names != names {
+    if variables.fields.len() != names.len()
+        || names
+            .iter()
+            .any(|name| !variables.fields.contains_key(name))
+    {
         return Err(invalid_variable(
             "table: replacement variables must preserve variable names and order",
         ));
@@ -201,8 +204,38 @@ pub(crate) fn table_variables_ref(object: &ObjectInstance) -> BuiltinResult<Opti
 }
 
 pub fn table_variable_names_from_object(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
-    let variables = table_variables(object)?;
-    Ok(variables.fields.keys().cloned().collect())
+    let variables = table_variables_ref(object)?;
+    let properties = object
+        .properties
+        .get(TABLE_PROPERTIES_FIELD)
+        .or_else(|| object.properties.get(PROPERTIES_MEMBER));
+    let Some(properties) = properties else {
+        // Only legacy table objects with no Properties payload lack an order
+        // receipt. Their storage-key order remains the supported fallback.
+        return Ok(variables
+            .map(|variables| variables.fields.keys().cloned().collect())
+            .unwrap_or_default());
+    };
+    let Value::Struct(properties) = properties else {
+        return Err(invalid_variable("table: invalid Properties storage"));
+    };
+    let source = properties
+        .fields
+        .get(VARIABLE_NAMES)
+        .ok_or_else(|| invalid_variable("table: Properties.VariableNames is missing"))?;
+    let names = match source {
+        Value::StringArray(array) if array.data.is_empty() => Vec::new(),
+        _ => variable_name_list(source)?,
+    };
+    let actual = variables.ok_or_else(|| invalid_variable("table: variable storage is missing"))?;
+    if names.len() != actual.fields.len()
+        || names.iter().any(|name| !actual.fields.contains_key(name))
+    {
+        return Err(invalid_variable(
+            "table: Properties.VariableNames disagrees with variable storage",
+        ));
+    }
+    Ok(names)
 }
 
 pub fn table_height(object: &ObjectInstance) -> BuiltinResult<usize> {

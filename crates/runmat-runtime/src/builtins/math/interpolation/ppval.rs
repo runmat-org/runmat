@@ -104,7 +104,7 @@ mod tests {
             sample_axis: super::super::pp::SampleAxis::Last,
         };
         let pp = pp_to_value(
-            build_spline_pp(&series, "spline").expect("spline"),
+            block_on(build_spline_pp(&series, "spline", &mut ())).expect("spline"),
             "spline",
         )
         .expect("pp");

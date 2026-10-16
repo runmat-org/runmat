@@ -208,6 +208,47 @@ fn plan() -> FusionGroupPlan {
     }
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn unavailable_fused_shader_defers_explicit_source_to_original_provider_operations() {
+    runmat_gc::gc_test_context(|| {
+        let provider = FailingProvider::with_precision(usize::MAX, ProviderPrecision::F32);
+        let allocation = provider
+            .allocations
+            .allocate_zeroed(
+                vec![2, 1],
+                runmat_accelerate_api::NumericElementType::F32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        let explicit = allocation
+            .handle
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        let source = plan();
+        let request = FusionExecutionRequest {
+            plan: &source,
+            inputs: vec![Value::GpuTensor(explicit.clone()), Value::Num(2.0)],
+            placement: None,
+            runtime: None,
+        };
+        assert!(host_candidate::unfused_provider_required(&request));
+        let mut captured = source.clone();
+        captured.inputs = vec![1];
+        captured.const_values.insert(0, Value::GpuTensor(explicit));
+        let request = FusionExecutionRequest {
+            plan: &captured,
+            inputs: vec![Value::Num(2.0)],
+            placement: None,
+            runtime: None,
+        };
+        assert!(host_candidate::unfused_provider_required(&request));
+        assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+        assert_eq!(allocation.probe.retirements(), 0);
+    });
+}
+
 fn invoke(provider: &'static FailingProvider) -> ProviderExecutionError {
     runmat_gc::gc_test_context(|| {
         let _selected = ThreadProviderGuard::set(Some(provider));

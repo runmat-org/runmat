@@ -54,6 +54,9 @@ pub(crate) use exact_product::ExactProductReceipt;
 mod assembly;
 #[path = "semantics/request_literals.rs"]
 mod request_literals;
+#[path = "semantics/computed_scalars.rs"]
+mod computed_scalars;
+use computed_scalars::{ComputedScalars, ScalarEvidenceObservation};
 #[path = "semantics/sign.rs"]
 mod sign;
 #[path = "semantics/sign_reduction.rs"]
@@ -335,9 +338,12 @@ impl ResolvedProgram {
         )?;
         let mut real_ranges = None;
         let mut real_range_index_reported = false;
+        let mut computed_scalars = ComputedScalars::from_plan(plan);
+        let mut scalar_observation = ScalarEvidenceObservation::new(correlation);
         for (operation, snapshot) in plan.operations.iter().zip(snapshots) {
             let inferred = inferred_operation(&program, operation, *snapshot, &invocation_leaves)?;
-            let values = selected_values(&invocation_leaves, inferred.input_ids);
+            let values = selected_values(&invocation_leaves, &computed_scalars, inferred.input_ids);
+            let computed = scalar_observation.evaluate(operation, *snapshot, &values, &inferred);
             let admitted = if let (Some(output), Some(snapshot)) = (inferred.output, snapshot) {
                 if let Some(admit) = snapshot
                     .declaration
@@ -491,9 +497,16 @@ impl ResolvedProgram {
                 if let Some(((sign, kind), work)) = add_refinement {
                     assembly::record_sign_refinement(&mut program, output, sign, kind, None, work)?;
                 }
+                scalar_observation.record(
+                    &mut computed_scalars,
+                    output,
+                    computed,
+                    program.facts.get(&output),
+                );
             }
         }
         invocation_leaves.require_live_resident_inputs()?;
+        scalar_observation.completed();
         Ok(program)
     }
 

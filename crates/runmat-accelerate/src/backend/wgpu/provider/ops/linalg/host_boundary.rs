@@ -116,12 +116,4 @@ impl WgpuProvider {
             }),
         }
     }
-
-    pub(crate) fn upload_real_floating_scalar_exec(
-        &self,
-        value: f64,
-        precision: ProviderPrecision,
-    ) -> Result<GpuTensorHandle> {
-        self.upload_real_floating_values_exec(&[value], &[1, 1], precision)
-    }
 }

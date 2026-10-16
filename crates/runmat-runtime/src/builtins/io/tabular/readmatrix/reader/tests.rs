@@ -46,6 +46,120 @@ fn selected_path(bytes: &[u8]) -> (runmat_filesystem::ProviderGuard, TabularFsPa
     (restore, selected)
 }
 
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn offset_range_projects_variable_controls_identically_in_bounded_and_ordinary_readers() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let (_restore, selected) = selected_path(b"9,N/A,1.234\n8,2,2.500\n");
+    let mut missing = VariableImportOptions::new("B".into(), "double".into());
+    missing
+        .apply("TreatAsMissing", &Value::from("N/A"))
+        .unwrap();
+    missing.apply("FillValue", &Value::Num(0.0)).unwrap();
+    let mut grouped = VariableImportOptions::new("C".into(), "double".into());
+    grouped
+        .apply("DecimalSeparator", &Value::from(","))
+        .unwrap();
+    grouped
+        .apply("ThousandsSeparator", &Value::from("."))
+        .unwrap();
+    let options = ReadMatrixOptions {
+        delimiter: Some(Delimiter::Char(',')),
+        range: Some(RangeSpec {
+            start_row: 0,
+            start_col: 1,
+            end_row: None,
+            end_col: Some(2),
+        }),
+        variable_options: vec![
+            VariableImportOptions::new("A".into(), "double".into()),
+            missing,
+            grouped,
+        ],
+        ..ReadMatrixOptions::default()
+    };
+    options.validate().expect("admitted column projection");
+    assert_eq!(options.column_from_source(0).selected_index(), None);
+    assert_eq!(options.column_from_source(1).selected_index(), Some(0));
+    assert_eq!(options.column_from_selected(1).source_index(), 2);
+
+    let mut bounded_source = block_on(selected.open_bounded_input())
+        .expect("bounded open")
+        .expect("memory snapshot");
+    let mut bounded_work = TabularCooperation::new(None, BUILTIN_NAME);
+    let geometry = block_on(bounded::scan_utf8(
+        &mut bounded_source,
+        &mut bounded_work,
+        &selected,
+        &options,
+        bounded::ScanResources::default(),
+    ))
+    .expect("bounded scan");
+    let bounded_output = block_on(bounded::fill_utf8(
+        &mut bounded_source,
+        &geometry,
+        &mut bounded_work,
+        &selected,
+        &options,
+        bounded::FillResources::default(),
+    ))
+    .expect("bounded selected output");
+
+    let ordinary_file = block_on(selected.open_read()).expect("ordinary open");
+    let mut ordinary_work = TabularCooperation::new(None, BUILTIN_NAME);
+    let ordinary_output = block_on(read_numeric_matrix_from_bytes(
+        &mut ordinary_work,
+        &selected,
+        &options,
+        TabularReadSource::Ordinary(ordinary_file),
+    ))
+    .expect("ordinary selected output");
+    assert_eq!(bounded_output.shape(), &[2, 2]);
+    assert_eq!(
+        bounded_output.materialize_f64(),
+        vec![0.0, 2.0, 1234.0, 2500.0]
+    );
+    assert_eq!(ordinary_output, bounded_output);
+    let mut range_detected = options.clone();
+    range_detected.variable_source_origin = Some(1);
+    range_detected.variable_options.remove(0);
+    assert_eq!(
+        range_detected
+            .variable(range_detected.column_from_selected(0))
+            .unwrap()
+            .name,
+        "B"
+    );
+    assert_eq!(
+        range_detected
+            .variable(range_detected.column_from_selected(1))
+            .unwrap()
+            .name,
+        "C"
+    );
+    let mut selected_legacy = range_detected;
+    selected_legacy.variable_source_origin = None;
+    assert_eq!(
+        selected_legacy
+            .variable(selected_legacy.column_from_selected(0))
+            .unwrap()
+            .name,
+        "B"
+    );
+    assert_eq!(
+        selected_legacy
+            .variable(selected_legacy.column_from_selected(1))
+            .unwrap()
+            .name,
+        "C"
+    );
+    let mut explicit_zero = selected_legacy;
+    explicit_zero.variable_source_origin = Some(0);
+    assert!(explicit_zero
+        .variable(explicit_zero.column_from_selected(1))
+        .is_none());
+}
+
 struct TestDiagnosticStage(Arc<ManagedHostEffectStageReservation>);
 
 impl DiagnosticReservation for TestDiagnosticStage {
@@ -365,16 +479,25 @@ fn staged_field_scanner_reuses_exact_scratch_without_retaining_field_text() {
 #[test]
 fn numeric_token_borrowed_fast_path_preserves_case_and_separator_semantics() {
     let default = ReadMatrixOptions::default();
-    assert!(parse_numeric_token("nAn", &default, 1, 1)
-        .expect("mixed-case NaN")
-        .is_nan());
+    assert!(
+        parse_numeric_token("nAn", &default, 1, default.column_from_source(0))
+            .expect("mixed-case NaN")
+            .is_nan()
+    );
     assert_eq!(
-        parse_numeric_token("+InFiNiTy", &default, 1, 2).expect("mixed-case infinity"),
+        parse_numeric_token("+InFiNiTy", &default, 1, default.column_from_source(1))
+            .expect("mixed-case infinity"),
         f64::INFINITY
     );
     assert_eq!(
-        parse_integer_numeric_token("9007199254740993", &default, NumericDType::U64, 1, 3)
-            .expect("exact wide integer"),
+        parse_integer_numeric_token(
+            "9007199254740993",
+            &default,
+            NumericDType::U64,
+            1,
+            default.column_from_source(2)
+        )
+        .expect("exact wide integer"),
         NumericScalar::U64(9_007_199_254_740_993)
     );
     let nondefault = ReadMatrixOptions {
@@ -383,7 +506,8 @@ fn numeric_token_borrowed_fast_path_preserves_case_and_separator_semantics() {
         ..ReadMatrixOptions::default()
     };
     assert_eq!(
-        parse_numeric_token("1.234,5", &nondefault, 2, 1).expect("grouping and decimal"),
+        parse_numeric_token("1.234,5", &nondefault, 2, nondefault.column_from_source(0))
+            .expect("grouping and decimal"),
         1_234.5
     );
 }

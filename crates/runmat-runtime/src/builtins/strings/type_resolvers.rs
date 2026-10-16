@@ -4,10 +4,6 @@ pub fn string_array_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::cell_of(Type::String)
 }
 
-pub fn string_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::String
-}
-
 pub fn text_preserve_type(args: &[Type], _context: &ResolveContext) -> Type {
     match args.first() {
         Some(Type::String) => Type::String,
@@ -42,21 +38,6 @@ pub fn text_concat_type(args: &[Type], _context: &ResolveContext) -> Type {
     }
 
     Type::Unknown
-}
-
-pub fn text_search_indices_type(args: &[Type], _context: &ResolveContext) -> Type {
-    if args.iter().any(|ty| matches!(ty, Type::Unknown)) {
-        return Type::Unknown;
-    }
-
-    match args.first() {
-        Some(Type::String) => Type::tensor(),
-        Some(Type::Cell {
-            element_type: Some(element_type),
-            ..
-        }) if **element_type == Type::String => Type::cell(),
-        _ => Type::Unknown,
-    }
 }
 
 pub fn unknown_type(_args: &[Type], _context: &ResolveContext) -> Type {

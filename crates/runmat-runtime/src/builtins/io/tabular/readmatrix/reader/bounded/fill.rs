@@ -179,7 +179,7 @@ impl FillTarget<'_> {
                 self.options,
                 dtype,
                 line_number,
-                source_col + 1,
+                self.options.column_from_source(source_col),
                 self.diagnostic_reservation,
             )?;
             self.storage.set(index, value)?;
@@ -188,7 +188,7 @@ impl FillTarget<'_> {
                 token,
                 self.options,
                 line_number,
-                source_col + 1,
+                self.options.column_from_source(source_col),
                 self.diagnostic_reservation,
             )?;
             self.storage.set(index, NumericScalar::F64(value))?;

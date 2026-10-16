@@ -182,6 +182,30 @@ pub fn interp_error(name: &'static str, message: impl Into<String>) -> RuntimeEr
     build_runtime_error(message).with_builtin(name).build()
 }
 
+pub(crate) fn host_allocation_error(
+    name: &'static str,
+    source: crate::context::host_allocation::HostAllocationError,
+) -> RuntimeError {
+    use crate::context::host_allocation::HostAllocationError;
+    let mut error = match source {
+        HostAllocationError::Cancelled => {
+            crate::execution::ExecutionServiceError::Cancelled.into_runtime_error()
+        }
+        HostAllocationError::StaleAuthority | HostAllocationError::MissingManagedOwner => {
+            crate::execution::ExecutionServiceError::Infrastructure(
+                "managed host allocation authority changed".into(),
+            )
+            .into_runtime_error()
+        }
+        _ => build_runtime_error(format!("{name}: host allocation failed: {source}"))
+            .with_builtin(name)
+            .with_identifier("RunMat:Interpolation:HostAllocation")
+            .build(),
+    };
+    error.source = Some(Box::new(source));
+    crate::builtins::common::map_control_flow_with_builtin(error, name)
+}
+
 async fn materialize_if_resident(value: Value) -> BuiltinResult<Value> {
     match value {
         Value::GpuTensor(_) => dispatcher::gather_if_needed_async(&value).await,
@@ -193,21 +217,31 @@ async fn materialize_if_resident(value: Value) -> BuiltinResult<Value> {
 mod series;
 pub use series::*;
 
+#[path = "pp/tensor2_spline.rs"]
+mod tensor2_spline;
+pub(crate) use coefficients::AdmittedSplineWork;
+pub use tensor2_spline::TensorProductSpline2D;
+#[path = "pp/tensor2_allocation.rs"]
+mod tensor2_allocation;
+pub(crate) use tensor2_allocation::tensor_spline_allocation_plan;
+
 #[path = "pp/evaluation.rs"]
 mod evaluation;
 pub(super) use evaluation::{eval_pp_scalar, interval_index, out_of_range_value};
 pub use evaluation::{evaluate_linear_or_nearest, evaluate_pp};
-pub fn build_spline_pp(
+pub(crate) async fn build_spline_pp(
     series: &NumericSeries,
     name: &'static str,
+    work: &mut impl SplineCooperation,
 ) -> BuiltinResult<PiecewisePolynomial> {
-    build_spline_pp_with_slopes(series, None, name)
+    build_spline_pp_with_slopes(series, None, name, work).await
 }
 
-pub fn build_spline_pp_with_slopes(
+pub(crate) async fn build_spline_pp_with_slopes(
     series: &NumericSeries,
     endpoint_slopes: Option<&[EndpointSlopes]>,
     name: &'static str,
+    work: &mut impl SplineCooperation,
 ) -> BuiltinResult<PiecewisePolynomial> {
     series.validate_layout(name)?;
     let n = series.x.len();
@@ -228,7 +262,9 @@ pub fn build_spline_pp_with_slopes(
     )?;
     for s in 0..series.series {
         let y = &series.y[s * n..(s + 1) * n];
-        let local = spline_coefs_for_series(&series.x, y, endpoint_slopes.map(|slopes| slopes[s]))?;
+        let local =
+            spline_coefs_for_series(&series.x, y, endpoint_slopes.map(|slopes| slopes[s]), work)
+                .await?;
         for piece in 0..pieces {
             let row = piece * series.series + s;
             for col in 0..order {
@@ -332,6 +368,9 @@ pub(super) fn is_vector_shape(shape: &[usize]) -> bool {
 
 #[path = "pp/coefficients.rs"]
 mod coefficients;
+pub(crate) use coefficients::{
+    is_execution_failure as is_spline_execution_failure, SplineCooperation,
+};
 use coefficients::{
     makima_coefs_for_series, pchip_coefs_for_series, spline_coefs_for_series, validate_finite_coefs,
 };

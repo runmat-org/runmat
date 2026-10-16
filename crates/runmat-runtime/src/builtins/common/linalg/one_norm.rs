@@ -40,7 +40,9 @@ where
 
     let scale = matrix
         .iter()
-        .map(|value| (*value).modulus())
+        // Complex modulus can overflow although both stored components are
+        // finite. Choose the binary scale from authoritative components first.
+        .map(|value| (*value).real().abs().max((*value).imaginary().abs()))
         .fold(0.0_f64, f64::max);
     if scale == 0.0 {
         return 0.0;
@@ -79,11 +81,39 @@ where
         return 0.0;
     }
 
+    reciprocal_one_norm_from_solves(
+        order,
+        matrix_norm,
+        |rhs| lu.solve(rhs),
+        |rhs| solve_adjoint(lu, rhs),
+    )
+}
+
+/// The common bounded inverse-1-norm iteration. Factor owners supply solves
+/// with the matrix and its adjoint; no inverse matrix is materialized.
+pub(crate) fn reciprocal_one_norm_from_solves<T, Solve, Adjoint>(
+    order: usize,
+    matrix_norm: f64,
+    mut solve: Solve,
+    mut solve_adjoint: Adjoint,
+) -> f64
+where
+    T: ComplexField<RealField = f64> + Copy,
+    Solve: FnMut(&DVector<T>) -> Option<DVector<T>>,
+    Adjoint: FnMut(&DVector<T>) -> Option<DVector<T>>,
+{
+    if order == 0 {
+        return f64::INFINITY;
+    }
+    if matrix_norm == 0.0 {
+        return 0.0;
+    }
+
     let mut vector = DVector::from_element(order, T::from_real(1.0 / order as f64));
     let mut estimate = 0.0_f64;
     let mut previous_index = None;
     for _ in 0..MAX_ESTIMATE_ITERATIONS {
-        let Some(solution) = lu.solve(&vector) else {
+        let Some(solution) = solve(&vector) else {
             return 0.0;
         };
         estimate = estimate.max(vector_one_norm(&solution));
@@ -95,7 +125,7 @@ where
                 value / T::from_real(magnitude)
             }
         });
-        let Some(adjoint_solution) = solve_adjoint(lu, &signs) else {
+        let Some(adjoint_solution) = solve_adjoint(&signs) else {
             return 0.0;
         };
         let index = adjoint_solution
@@ -124,7 +154,7 @@ where
                 })
             }),
         );
-        let Some(solution) = lu.solve(&alternating) else {
+        let Some(solution) = solve(&alternating) else {
             return 0.0;
         };
         estimate = estimate.max(2.0 * vector_one_norm(&solution) / (3.0 * order as f64));
@@ -217,5 +247,11 @@ mod tests {
             (Complex64::new(1.0, 2.0).norm() + 3.0).max(Complex64::new(2.0, -1.0).norm());
         let expected = 1.0 / (matrix_norm * inverse_norm);
         assert!((reciprocal_one_norm(complex) - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn finite_large_complex_scalar_keeps_unit_reciprocal_condition() {
+        let matrix = DMatrix::from_element(1, 1, Complex64::new(1e308, 1e308));
+        assert!((reciprocal_one_norm(matrix) - 1.0).abs() < 1e-12);
     }
 }

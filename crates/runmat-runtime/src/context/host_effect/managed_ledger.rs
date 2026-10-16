@@ -141,6 +141,13 @@ pub struct ManagedHostEffectStageReservation {
 }
 
 impl ManagedHostEffectStageReservation {
+    /// Exact metadata retained by one owned temporary claim. Ordinary
+    /// numeric workspaces use the same stage claim and must include this in
+    /// their checked phase peak.
+    pub fn exact_temporary_claim_metadata_bytes() -> usize {
+        std::mem::size_of::<TemporaryClaim>()
+    }
+
     fn claim_temporary(
         &self,
         bytes: usize,

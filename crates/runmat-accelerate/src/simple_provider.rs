@@ -11,6 +11,7 @@ mod gather;
 mod iir;
 mod imfilter;
 mod integer_floating_sum;
+mod linalg;
 mod logarithms;
 mod logical;
 mod matmul;
@@ -4284,12 +4285,15 @@ impl AccelProvider for InProcessProvider {
         handle: &'a GpuTensorHandle,
     ) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move {
-            let data = numeric_registry()
-                .lock_for(self.device_id)
-                .unwrap_or_else(|error| error.into_inner())
-                .get(handle)
-                .cloned()
-                .ok_or_else(|| anyhow!("numeric buffer not found: {}", handle.buffer_id()))?;
+            let data = {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("in-process allocation owner is poisoned"))?;
+                let source = guard
+                    .get(handle)
+                    .ok_or_else(|| anyhow!("numeric buffer not found: {}", handle.buffer_id()))?;
+                source.clone()
+            };
             self.telemetry.record_download_bytes(data.byte_len());
             let output = HostNumericTensorOwned {
                 data: data.into_host_numeric(),
@@ -9258,21 +9262,11 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         _options: ProviderInvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(matrix)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("inv: unknown buffer {}", matrix.buffer_id()))?
-            };
-            let tensor =
-                Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("inv: {e}"))?;
-            let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-            let shape = result.shape().to_vec();
-            let data = result.materialize_f64();
-            self.allocate_tensor(data, shape)
+            let tensor = self.real_floating_linalg_input(matrix)?;
+            let result = inv_host_real_for_provider(&tensor).map_err(linalg::host_error)?;
+            self.publish_real_floating_linalg_tensor(result)
         })
     }
 
@@ -9280,22 +9274,12 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         options: ProviderPinvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(matrix)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("pinv: unknown buffer {}", matrix.buffer_id()))?
-            };
-            let tensor =
-                Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("pinv: {e}"))?;
+            let tensor = self.real_floating_linalg_input(matrix)?;
             let result = pinv_host_real_for_provider(&tensor, options.tolerance)
-                .map_err(|e| anyhow!("{e}"))?;
-            let shape = result.shape().to_vec();
-            let data = result.materialize_f64();
-            self.allocate_tensor(data, shape)
+                .map_err(linalg::host_error)?;
+            self.publish_real_floating_linalg_tensor(result)
         })
     }
 
@@ -9303,20 +9287,12 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         norm: ProviderCondNorm,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(matrix)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("cond: unknown buffer {}", matrix.buffer_id()))?
-            };
-            let tensor =
-                Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("cond: {e}"))?;
+            let tensor = self.real_floating_linalg_input(matrix)?;
             let cond_value =
-                cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
-            self.allocate_tensor(vec![cond_value], vec![1, 1])
+                cond_host_real_for_provider(&tensor, norm).map_err(linalg::host_error)?;
+            self.publish_real_floating_linalg_scalar(cond_value, tensor.numeric_dtype())
         })
     }
 
@@ -9324,20 +9300,12 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         tensor: &'a GpuTensorHandle,
         order: ProviderNormOrder,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(tensor)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("norm: unknown buffer {}", tensor.buffer_id()))?
-            };
-            let host_tensor =
-                Tensor::new(data, tensor.shape().to_vec()).map_err(|e| anyhow!("norm: {e}"))?;
+            let host_tensor = self.real_floating_linalg_input(tensor)?;
             let value =
-                norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
-            self.allocate_tensor(vec![value], vec![1, 1])
+                norm_host_real_for_provider(&host_tensor, order).map_err(linalg::host_error)?;
+            self.publish_real_floating_linalg_scalar(value, host_tensor.numeric_dtype())
         })
     }
 
@@ -9415,61 +9383,23 @@ impl AccelProvider for InProcessProvider {
         &'a self,
         matrix: &'a GpuTensorHandle,
         tolerance: Option<f64>,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let data = {
-                let guard = registry(self.device_id).lock().unwrap();
-                guard
-                    .get(matrix)
-                    .cloned()
-                    .ok_or_else(|| anyhow!("rank: unknown buffer {}", matrix.buffer_id()))?
-            };
-
-            let tensor =
-                Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("rank: {e}"))?;
+            let tensor = self.real_floating_linalg_input(matrix)?;
             let rank =
-                rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
-
-            self.allocate_tensor(vec![rank], vec![1, 1])
+                rank_host_real_for_provider(&tensor, tolerance).map_err(linalg::host_error)? as f64;
+            self.publish_real_floating_linalg_scalar(rank, runmat_value::NumericDType::F64)
         })
     }
 
     fn rcond<'a>(
         &'a self,
         matrix: &'a GpuTensorHandle,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let source_precision =
-                runmat_accelerate_api::handle_precision(matrix).ok_or_else(|| {
-                    runmat_accelerate_api::unsupported_provider_operation(
-                        "rcond: floating input is required",
-                    )
-                })?;
-            let data = {
-                let guard = numeric_registry()
-                    .lock_for(self.device_id)
-                    .unwrap_or_else(|error| error.into_inner());
-                match guard.get(matrix) {
-                    Some(InProcessNumericData::F32(values)) => {
-                        values.iter().copied().map(f64::from).collect()
-                    }
-                    Some(InProcessNumericData::F64(values)) => values.clone(),
-                    Some(_) => {
-                        return Err(runmat_accelerate_api::unsupported_provider_operation(
-                            "rcond: real floating input is required",
-                        ));
-                    }
-                    None => return Err(anyhow!("rcond: unknown buffer {}", matrix.buffer_id())),
-                }
-            };
-            let tensor =
-                Tensor::new(data, matrix.shape().to_vec()).map_err(|e| anyhow!("rcond: {e}"))?;
-            let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-            let values = match source_precision {
-                ProviderPrecision::F32 => InProcessNumericData::F32(vec![estimate as f32]),
-                ProviderPrecision::F64 => InProcessNumericData::F64(vec![estimate]),
-            };
-            self.allocate_produced(values, vec![1, 1], GpuTensorStorage::Real, false)
+            let tensor = self.real_floating_linalg_input(matrix)?;
+            let estimate = rcond_host_real_for_provider(&tensor).map_err(linalg::host_error)?;
+            self.publish_real_floating_linalg_scalar(estimate, tensor.numeric_dtype())
         })
     }
 

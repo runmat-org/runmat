@@ -30,9 +30,18 @@ mod strncmpi;
 mod support;
 mod text_boundary;
 mod wildcard_pattern;
+mod compose;
+mod mat2str;
+mod native2unicode;
+mod sprintf;
+mod sscanf;
+mod str2num;
+mod strtok;
+mod unicode2native;
 
 pub use self::blanks::*;
 pub use self::char::*;
+pub use self::compose::*;
 pub use self::convert_chars_to_strings::*;
 pub use self::convert_contained_strings_to_chars::*;
 pub use self::convert_strings_to_chars::*;
@@ -44,11 +53,16 @@ pub use self::isletter::*;
 pub use self::isspace::*;
 pub use self::isstrprop::*;
 pub use self::letters_pattern::*;
+pub use self::mat2str::*;
+pub use self::native2unicode::*;
 pub use self::newline::*;
 pub use self::num2str::*;
 pub use self::pattern::*;
 pub use self::regexp_pattern::*;
+pub use self::sprintf::*;
+pub use self::sscanf::*;
 pub use self::str2double::*;
+pub use self::str2num::*;
 pub use self::strcmp::*;
 pub use self::strcmpi::*;
 pub use self::string::*;
@@ -57,7 +71,9 @@ pub use self::strings::*;
 pub use self::strlength::*;
 pub use self::strncmp::*;
 pub use self::strncmpi::*;
+pub use self::strtok::*;
 pub use self::text_boundary::*;
+pub use self::unicode2native::*;
 pub use self::wildcard_pattern::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
@@ -89,4 +105,12 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(strncmpi::ENTRIES.iter().copied());
     values.extend(text_boundary::ENTRIES.iter().copied());
     values.extend(wildcard_pattern::ENTRIES.iter().copied());
+    values.extend(compose::ENTRIES.iter().copied());
+    values.extend(mat2str::ENTRIES.iter().copied());
+    values.extend(native2unicode::ENTRIES.iter().copied());
+    values.extend(sprintf::ENTRIES.iter().copied());
+    values.extend(sscanf::ENTRIES.iter().copied());
+    values.extend(str2num::ENTRIES.iter().copied());
+    values.extend(strtok::ENTRIES.iter().copied());
+    values.extend(unicode2native::ENTRIES.iter().copied());
 }

@@ -44,6 +44,7 @@ impl ResolvedProgram {
             None,
             snapshots,
         )?;
+        let mut computed_scalars = ComputedScalars::from_plan(plan);
         for (operation, snapshot) in plan.operations.iter().zip(snapshots) {
             let source_inputs = match operation {
                 FusionOp::Primitive { inputs, .. } | FusionOp::Builtin { inputs, .. } => inputs,
@@ -58,7 +59,7 @@ impl ResolvedProgram {
                 return Ok(None);
             }
             let inferred = inferred_operation(&program, operation, *snapshot, &leaves)?;
-            let mut values = selected_values(&leaves, inferred.input_ids);
+            let mut values = selected_values(&leaves, &computed_scalars, inferred.input_ids);
             if host {
                 // Static owners may inspect literal scalar controls (including
                 // Single scalars), but must not rescan host arrays or read a
@@ -73,6 +74,7 @@ impl ResolvedProgram {
                     }
                 }
             }
+            let computed = ComputedScalars::evaluate(operation, *snapshot, &values, &inferred);
             let admitted = if let (Some(_output), Some(snapshot)) = (inferred.output, snapshot) {
                 if let Some(semantics) = snapshot.declaration.semantics {
                     if semantics.admit.is_some() {
@@ -142,6 +144,9 @@ impl ResolvedProgram {
             record_operation(&mut program, inferred, *snapshot, &values, admitted)?;
             if let (Some(output), Some(((sign, kind), work))) = (output, add_refinement) {
                 assembly::record_sign_refinement(&mut program, output, sign, kind, None, work)?;
+            }
+            if let Some(output) = output {
+                computed_scalars.record(output, computed, program.facts.get(&output));
             }
         }
         leaves.require_live_resident_inputs()?;

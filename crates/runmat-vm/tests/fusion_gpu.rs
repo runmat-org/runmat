@@ -853,24 +853,39 @@ impl AccelProvider for TestProvider {
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _options: ProviderPinvOptions,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { bail!("pinv not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "pinv not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn cond<'a>(
         &'a self,
         _matrix: &'a GpuTensorHandle,
         _norm: ProviderCondNorm,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { bail!("cond not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "cond not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn norm<'a>(
         &'a self,
         _tensor: &'a GpuTensorHandle,
         _order: ProviderNormOrder,
-    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
-        Box::pin(async move { bail!("norm not supported by test provider") })
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            Err(runmat_accelerate_api::unsupported_provider_operation(
+                "norm not supported by test provider",
+            )
+            .into())
+        })
     }
 
     fn reduce_sum_dim<'a>(

@@ -6,14 +6,61 @@
 
 use anyhow::{anyhow, Result};
 use runmat_execution::Digest;
-use runmat_value::{IntValue, NumericDType, NumericScalar, Value};
-use serde::Serialize;
+use runmat_value::{
+    ComplexTensor, IntValue, NumericDType, NumericScalar, SparseTensor, Tensor, Value,
+};
+use serde::{ser::SerializeSeq, Serialize, Serializer};
 
 #[derive(Serialize)]
 enum ScalarBits {
     F64(u64),
     F32(u32),
     Integer(IntValue),
+}
+
+struct RealScalars<'a>(&'a Tensor);
+
+impl Serialize for RealScalars<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for index in 0..self.0.len() {
+            let value = self.0.numeric_value_at(index).ok_or_else(|| {
+                serde::ser::Error::custom("fusion constant has invalid numeric storage")
+            })?;
+            sequence.serialize_element(&ScalarBits::from(value))?;
+        }
+        sequence.end()
+    }
+}
+
+struct ComplexScalars<'a>(&'a ComplexTensor);
+
+impl Serialize for ComplexScalars<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for index in 0..self.0.len() {
+            let (real, imaginary) = self.0.numeric_value_at(index).ok_or_else(|| {
+                serde::ser::Error::custom("fusion constant has invalid complex storage")
+            })?;
+            sequence.serialize_element(&(ScalarBits::from(real), ScalarBits::from(imaginary)))?;
+        }
+        sequence.end()
+    }
+}
+
+struct SparseScalars<'a>(&'a SparseTensor);
+
+impl Serialize for SparseScalars<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(self.0.nnz()))?;
+        for index in 0..self.0.nnz() {
+            let value = self.0.numeric_value_at(index).ok_or_else(|| {
+                serde::ser::Error::custom("fusion constant has invalid sparse storage")
+            })?;
+            sequence.serialize_element(&ScalarBits::from(value))?;
+        }
+        sequence.end()
+    }
 }
 
 impl From<NumericScalar> for ScalarBits {
@@ -55,12 +102,12 @@ enum ConstantPayload<'a> {
     Tensor {
         shape: &'a [usize],
         dtype: NumericDType,
-        data: Vec<ScalarBits>,
+        data: RealScalars<'a>,
     },
     ComplexTensor {
         shape: &'a [usize],
         dtype: NumericDType,
-        data: Vec<(ScalarBits, ScalarBits)>,
+        data: ComplexScalars<'a>,
     },
     SparseReal {
         rows: usize,
@@ -69,7 +116,7 @@ enum ConstantPayload<'a> {
         row_indices: &'a [usize],
         logical: bool,
         dtype: Option<NumericDType>,
-        data: Vec<ScalarBits>,
+        data: SparseScalars<'a>,
     },
 }
 
@@ -97,26 +144,12 @@ pub(crate) fn exact_constant_digest(value: &Value) -> Result<Digest> {
         Value::Tensor(tensor) => ConstantPayload::Tensor {
             shape: tensor.shape(),
             dtype: tensor.numeric_dtype(),
-            data: (0..tensor.len())
-                .map(|index| {
-                    tensor
-                        .numeric_value_at(index)
-                        .map(ScalarBits::from)
-                        .ok_or_else(|| anyhow!("fusion constant has invalid numeric storage"))
-                })
-                .collect::<Result<Vec<_>>>()?,
+            data: RealScalars(tensor),
         },
         Value::ComplexTensor(tensor) => ConstantPayload::ComplexTensor {
             shape: tensor.shape(),
             dtype: tensor.numeric_dtype(),
-            data: (0..tensor.len())
-                .map(|index| {
-                    tensor
-                        .numeric_value_at(index)
-                        .map(|(real, imaginary)| (real.into(), imaginary.into()))
-                        .ok_or_else(|| anyhow!("fusion constant has invalid complex storage"))
-                })
-                .collect::<Result<Vec<_>>>()?,
+            data: ComplexScalars(tensor),
         },
         Value::SparseTensor(tensor) if !tensor.is_complex() => ConstantPayload::SparseReal {
             rows: tensor.rows,
@@ -125,24 +158,101 @@ pub(crate) fn exact_constant_digest(value: &Value) -> Result<Digest> {
             row_indices: &tensor.row_indices,
             logical: tensor.is_logical(),
             dtype: tensor.numeric_dtype(),
-            data: (0..tensor.nnz())
-                .map(|index| {
-                    tensor
-                        .numeric_value_at(index)
-                        .map(ScalarBits::from)
-                        .ok_or_else(|| anyhow!("fusion constant has invalid sparse storage"))
-                })
-                .collect::<Result<Vec<_>>>()?,
+            data: SparseScalars(tensor),
         },
         _ => return Err(anyhow!("fusion constant has no exact source identity")),
     };
-    Ok(Digest::sha256(serde_json::to_vec(&payload)?))
+    Ok(Digest::sha256_serialized(&payload)?)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use runmat_value::{ComplexTensor, IntegerStorage, SparseTensor, Tensor};
+
+    #[derive(Serialize)]
+    enum LegacyNumericPayload<'a> {
+        Tensor {
+            shape: &'a [usize],
+            dtype: NumericDType,
+            data: Vec<ScalarBits>,
+        },
+        ComplexTensor {
+            shape: &'a [usize],
+            dtype: NumericDType,
+            data: Vec<(ScalarBits, ScalarBits)>,
+        },
+        SparseReal {
+            rows: usize,
+            cols: usize,
+            col_ptrs: &'a [usize],
+            row_indices: &'a [usize],
+            logical: bool,
+            dtype: Option<NumericDType>,
+            data: Vec<ScalarBits>,
+        },
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn streamed_numeric_identity_matches_original_json_bytes() {
+        let values = [
+            Value::Tensor(
+                Tensor::new(
+                    vec![-0.0, f64::from_bits(0x7ff8_0000_0000_1234)],
+                    vec![1, 2],
+                )
+                .unwrap(),
+            ),
+            Value::Tensor(
+                Tensor::new_integer(IntegerStorage::U64(vec![u64::MAX]), vec![1, 1]).unwrap(),
+            ),
+            Value::ComplexTensor(
+                ComplexTensor::from_f32(vec![(-0.0, f32::from_bits(0x7fc0_1234))], vec![1, 1])
+                    .unwrap(),
+            ),
+            Value::SparseTensor(
+                SparseTensor::new(2, 2, vec![0, 1, 1], vec![1], vec![-0.0]).unwrap(),
+            ),
+        ];
+        for value in &values {
+            let legacy = match value {
+                Value::Tensor(tensor) => LegacyNumericPayload::Tensor {
+                    shape: tensor.shape(),
+                    dtype: tensor.numeric_dtype(),
+                    data: (0..tensor.len())
+                        .map(|index| ScalarBits::from(tensor.numeric_value_at(index).unwrap()))
+                        .collect(),
+                },
+                Value::ComplexTensor(tensor) => LegacyNumericPayload::ComplexTensor {
+                    shape: tensor.shape(),
+                    dtype: tensor.numeric_dtype(),
+                    data: (0..tensor.len())
+                        .map(|index| {
+                            let (real, imaginary) = tensor.numeric_value_at(index).unwrap();
+                            (real.into(), imaginary.into())
+                        })
+                        .collect(),
+                },
+                Value::SparseTensor(tensor) => LegacyNumericPayload::SparseReal {
+                    rows: tensor.rows,
+                    cols: tensor.cols,
+                    col_ptrs: &tensor.col_ptrs,
+                    row_indices: &tensor.row_indices,
+                    logical: tensor.is_logical(),
+                    dtype: tensor.numeric_dtype(),
+                    data: (0..tensor.nnz())
+                        .map(|index| ScalarBits::from(tensor.numeric_value_at(index).unwrap()))
+                        .collect(),
+                },
+                _ => unreachable!("numeric identity fixture"),
+            };
+            assert_eq!(
+                exact_constant_digest(value).unwrap(),
+                Digest::sha256(serde_json::to_vec(&legacy).unwrap())
+            );
+        }
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]

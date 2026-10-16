@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
-use crate::builtins::math::linalg::ops::transpose_real_sparse_tensor;
+use crate::builtins::math::linalg::ops::transpose_sparse_tensor;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage};
 use runmat_builtins::{
@@ -103,7 +103,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::ops::ctranspose"
 )]
-async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
+pub(super) async fn ctranspose_builtin(
+    mut args: Vec<Value>,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let value = match args.len() {
         0 => return Err(builtin_error(&CTRANSPOSE_ERROR_INVALID_ARGUMENT)),
         1 => args.remove(0),
@@ -122,7 +124,7 @@ async fn ctranspose_builtin(mut args: Vec<Value>) -> BuiltinResult<crate::execut
                 )?;
             }
             Ok(Value::SparseTensor(
-                transpose_real_sparse_tensor(s)
+                transpose_sparse_tensor(s, true)
                     .map_err(|e| internal_error(format!("{NAME}: {e}")))?,
             ))
         }

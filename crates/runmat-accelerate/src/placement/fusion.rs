@@ -43,6 +43,13 @@ pub(crate) struct FusionLeafIndexWork {
     pub resident_inputs_checked: u64,
 }
 
+/// Request-local exact scalar proof work, separate from selected domain probes.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct FusionScalarEvidenceWork {
+    pub attempted: u64,
+    pub produced: u64,
+}
+
 impl FusionPlacementObserver {
     pub(crate) fn new(correlation: Option<PlacementCorrelationId>) -> Self {
         Self { correlation }
@@ -73,6 +80,36 @@ impl FusionPlacementObserver {
             None,
             Some("fusion_leaf_index_wall"),
             Some(duration_ns_saturating(started.elapsed())),
+            None,
+            &attributes,
+        );
+    }
+
+    pub(crate) fn scalar_evidence_preparation(
+        &self,
+        duration_ns: u64,
+        work: FusionScalarEvidenceWork,
+        completed: bool,
+    ) {
+        if work.attempted == 0 {
+            return;
+        }
+        let attributes = [
+            ("completed", u64::from(completed)),
+            ("attempted", work.attempted),
+            ("produced", work.produced),
+        ]
+        .into_iter()
+        .map(|(key, value)| PlacementAttribute {
+            key: key.to_string(),
+            value,
+        })
+        .collect::<Vec<_>>();
+        self.event(
+            PlacementEventKind::Prepare,
+            None,
+            Some("fusion_scalar_evidence_wall"),
+            Some(duration_ns),
             None,
             &attributes,
         );

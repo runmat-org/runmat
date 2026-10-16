@@ -2,16 +2,15 @@
 
 use log::debug;
 use runmat_accelerate_api::{self, GpuTensorHandle};
+use runmat_builtins::BuiltinErrorDescriptor;
+#[cfg(test)]
+use runmat_builtins::{BANDWIDTH_DESCRIPTOR, BANDWIDTH_INTEGER_CAPABILITIES};
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
+    BANDWIDTH_ERROR_INTERNAL, BANDWIDTH_ERROR_INVALID_ARGUMENT, BANDWIDTH_ERROR_INVALID_INPUT,
+    BANDWIDTH_INTEGER_INPUT_EXTENSION, BANDWIDTH_LOGICAL_INPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, Tensor, Value};
+use runmat_value::{ComplexTensor, IntegerStorage, LogicalArray, SparseTensor, Tensor, Value};
 
 use super::kernel_error::{StructureKernelError, StructureKernelResult};
 use crate::builtins::common::spec::{
@@ -19,144 +18,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+#[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::bandwidth_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "bandwidth";
-
-const BANDWIDTH_OUTPUT_BW: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "lower",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Lower bandwidth scalar.",
-    },
-    BuiltinParamDescriptor {
-        name: "upper",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Upper bandwidth scalar.",
-    },
-];
-
-const BANDWIDTH_OUTPUT_SCALAR: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "b",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Selected lower or upper bandwidth scalar.",
-}];
-
-const BANDWIDTH_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input matrix.",
-}];
-
-const BANDWIDTH_INPUTS_SELECTOR: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input matrix.",
-    },
-    BuiltinParamDescriptor {
-        name: "selector",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Selector string: \"lower\" or \"upper\".",
-    },
-];
-
-const BANDWIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "[lower, upper] = bandwidth(A)",
-        inputs: &BANDWIDTH_INPUTS,
-        outputs: &BANDWIDTH_OUTPUT_BW,
-    },
-    BuiltinSignatureDescriptor {
-        label: "b = bandwidth(A, selector)",
-        inputs: &BANDWIDTH_INPUTS_SELECTOR,
-        outputs: &BANDWIDTH_OUTPUT_SCALAR,
-    },
-];
-
-const BANDWIDTH_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BANDWIDTH.INVALID_ARGUMENT",
-    identifier: Some("RunMat:bandwidth:InvalidArgument"),
-    when: "Selector argument is invalid or argument count exceeds supported forms.",
-    message: "bandwidth: invalid argument",
-};
-
-const BANDWIDTH_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BANDWIDTH.INVALID_INPUT",
-    identifier: Some("RunMat:bandwidth:InvalidInput"),
-    when: "Input type/shape cannot be processed as a numeric or logical 2-D matrix.",
-    message: "bandwidth: invalid input",
-};
-
-const BANDWIDTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.BANDWIDTH.INTERNAL",
-    identifier: Some("RunMat:bandwidth:Internal"),
-    when: "Runtime fails while constructing intermediate tensors or values.",
-    message: "bandwidth: internal runtime failure",
-};
-
-const BANDWIDTH_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    BANDWIDTH_ERROR_INVALID_ARGUMENT,
-    BANDWIDTH_ERROR_INVALID_INPUT,
-    BANDWIDTH_ERROR_INTERNAL,
-];
-
-pub const BANDWIDTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &BANDWIDTH_SIGNATURES,
-    output_mode: BuiltinOutputMode::ByRequestedOutputCount,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &BANDWIDTH_ERRORS,
-};
-
-const BANDWIDTH_INTEGER_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bandwidth-integer-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bandwidth with typed-integer input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BandwidthIntegerInputExtension"),
-};
-const BANDWIDTH_LOGICAL_INPUT_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "bandwidth-logical-input",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "bandwidth with logical input is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:BandwidthLogicalInputExtension"),
-};
-const BANDWIDTH_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    BANDWIDTH_INTEGER_INPUT_EXTENSION,
-    BANDWIDTH_LOGICAL_INPUT_EXTENSION,
-];
-
-const BANDWIDTH_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "The documented matrix domain is single/double; RunMat mode additionally accepts every real integer class and paired complex-integer storage.",
-    }];
-pub const BANDWIDTH_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "[lower, upper] = bandwidth(integer_A, ...)",
-        inputs: &BANDWIDTH_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::Double,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Host integer storage is scanned exactly for nonzero structure. Resident integer input is gated before provider dispatch, gathered exactly, and returns host double scalar metadata.",
-    }];
 
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
@@ -217,16 +83,7 @@ enum BandSelector {
 
 #[runtime_builtin(
     name = "bandwidth",
-    category = "math/linalg/structure",
-    summary = "Compute matrix lower and upper bandwidth.",
-    keywords = "bandwidth,lower bandwidth,upper bandwidth,structure,gpu",
-    accel = "structure",
-    type_resolver(bandwidth_type),
-    descriptor(crate::builtins::math::linalg::structure::bandwidth::BANDWIDTH_DESCRIPTOR),
-    extensions(BANDWIDTH_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::math::linalg::structure::bandwidth::BANDWIDTH_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
 async fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -245,6 +102,7 @@ fn ensure_input_extensions(value: &Value) -> BuiltinResult<()> {
     let integer = matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
         || matches!(value, Value::ComplexTensor(tensor) if tensor.integer_storage().is_some())
+        || matches!(value, Value::SparseTensor(sparse) if sparse.integer_storage().is_some())
         || matches!(
             value,
             Value::GpuTensor(handle)
@@ -257,6 +115,7 @@ fn ensure_input_extensions(value: &Value) -> BuiltinResult<()> {
         )?;
     }
     let logical = matches!(value, Value::Bool(_) | Value::LogicalArray(_))
+        || matches!(value, Value::SparseTensor(sparse) if sparse.is_logical())
         || matches!(
             value,
             Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_logical(handle)
@@ -357,6 +216,7 @@ fn logical_to_tensor(_name: &str, logical: &LogicalArray) -> BuiltinResult<Tenso
 enum MatrixData {
     Real(Tensor),
     Complex(ComplexTensor),
+    Sparse(SparseTensor),
     Gpu(GpuTensorHandle),
 }
 
@@ -370,6 +230,7 @@ impl MatrixData {
                 Ok(Self::Complex(tensor))
             }
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
+            Value::SparseTensor(sparse) => Ok(Self::Sparse(sparse)),
             other => {
                 let tensor = value_into_tensor_for(NAME, other)?;
                 Ok(Self::Real(tensor))
@@ -383,9 +244,22 @@ impl MatrixData {
             MatrixData::Complex(tensor) => {
                 bandwidth_host_complex_tensor(tensor).map_err(Into::into)
             }
+            MatrixData::Sparse(sparse) => Ok(bandwidth_host_sparse(sparse)),
             MatrixData::Gpu(handle) => bandwidth_gpu(handle).await,
         }
     }
+}
+
+fn bandwidth_host_sparse(sparse: &SparseTensor) -> (usize, usize) {
+    let (mut lower, mut upper) = (0, 0);
+    super::sparse_pattern::for_each_nonzero(sparse, |row, col| {
+        if row >= col {
+            lower = lower.max(row - col);
+        } else {
+            upper = upper.max(col - row);
+        }
+    });
+    (lower, upper)
 }
 
 async fn bandwidth_gpu(handle: &GpuTensorHandle) -> BuiltinResult<(usize, usize)> {
@@ -593,7 +467,65 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
-    use runmat_value::{IntegerComplexStorage, IntegerStorage, LogicalArray};
+    use runmat_value::{IntegerComplexStorage, IntegerStorage, LogicalArray, SparseTensor};
+
+    #[test]
+    fn bandwidth_sparse_csc_uses_typed_nonzero_values_and_rectangular_offsets() {
+        let double = SparseTensor::new(
+            4,
+            3,
+            vec![0, 2, 3, 4],
+            vec![0, 3, 1, 0],
+            vec![0.0, f64::NAN, -0.0, 2.0],
+        )
+        .unwrap();
+        assert_eq!(bandwidth_host_sparse(&double), (3, 2));
+        let single =
+            SparseTensor::new_f32(4, 3, vec![0, 1, 1, 2], vec![3, 0], vec![1.0, -2.0]).unwrap();
+        assert_eq!(bandwidth_host_sparse(&single), (3, 2));
+        let wide = SparseTensor::new_integer(
+            4,
+            3,
+            vec![0, 1, 1, 2],
+            vec![3, 0],
+            IntegerStorage::U64(vec![u64::MAX, 0]),
+        )
+        .unwrap();
+        assert_eq!(bandwidth_host_sparse(&wide), (3, 0));
+        let complex = SparseTensor::new_complex_f32(
+            4,
+            3,
+            vec![0, 1, 1, 2],
+            vec![3, 0],
+            vec![(0.0, 2.0), (0.0, 0.0)],
+        )
+        .unwrap();
+        assert_eq!(bandwidth_host_sparse(&complex), (3, 0));
+        let logical = SparseTensor::new_logical(4, 3, vec![0, 1, 1, 2], vec![3, 0]).unwrap();
+        assert_eq!(bandwidth_host_sparse(&logical), (3, 2));
+        assert_eq!(bandwidth_host_sparse(&SparseTensor::zeros(0, 3)), (0, 0));
+    }
+
+    #[test]
+    fn bandwidth_sparse_public_outputs_and_extension_gate() {
+        let sparse =
+            SparseTensor::new(3, 3, vec![0, 1, 2, 3], vec![2, 1, 0], vec![1.0; 3]).unwrap();
+        let _outputs = crate::output_count::push_output_count(Some(2));
+        assert_eq!(
+            bandwidth_builtin(Value::SparseTensor(sparse), Vec::new()).unwrap(),
+            Value::OutputList(vec![Value::Num(2.0), Value::Num(2.0)])
+        );
+        let integer = SparseTensor::new_integer(
+            2,
+            2,
+            vec![0, 1, 1],
+            vec![1],
+            IntegerStorage::U64(vec![u64::MAX]),
+        )
+        .unwrap();
+        let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
+        assert!(bandwidth_builtin(Value::SparseTensor(integer), Vec::new()).is_err());
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]

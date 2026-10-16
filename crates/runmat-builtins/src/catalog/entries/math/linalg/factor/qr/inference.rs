@@ -107,8 +107,9 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     let mut q = factor_output(&matrix, q_shape, false, false, false);
     let mut r = factor_output(&matrix, r_shape, false, false, false);
     if matrix.residency != ResidencyFact::Host {
-        // A resident result follows the exact owner's physical precision,
-        // which need not equal the source language class even for single input.
+        // A resident factor follows its admitted physical input class, which
+        // can differ from a static source-language fact. Permutations remain
+        // double through the separate binary64 output projection below.
         q.kind = ValueKindFact::Unknown;
         r.kind = ValueKindFact::Unknown;
     }

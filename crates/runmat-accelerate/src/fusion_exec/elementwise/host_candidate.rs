@@ -2,6 +2,14 @@
 //! sibling still uses the same candidate, resource and VM completion owners.
 use super::*;
 
+pub(super) fn unfused_provider_required(request: &FusionExecutionRequest<'_>) -> bool {
+    request
+        .inputs
+        .iter()
+        .chain(unbound_constant_values(request.plan))
+        .any(|value| matches!(value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_is_explicit(handle)))
+}
+
 pub(super) fn without_shader(
     request: &FusionExecutionRequest<'_>,
     output_ids: &[ValueId],
@@ -12,6 +20,14 @@ pub(super) fn without_shader(
     continuation: &mut Option<ElementwiseHostContinuation>,
 ) -> ExecutionResult<FusionExecutionOutcome<(HashMap<ValueId, Value>, FusionPlacementSelection)>> {
     let unavailable = || FusionExecutionOutcome::SharedRuntime(FusionCpuObservation::new(None));
+    // A fused shader was unavailable before any physical effect. Explicit
+    // resident input requires its provider, so a whole-group CPU candidate is
+    // illegal. Decline only this optimization and let the VM execute the
+    // original operations in order; do not prepare host readbacks or ask the
+    // local selector to manufacture a no-route failure for the fused group.
+    if unfused_provider_required(request) {
+        return Ok(unavailable());
+    }
     let Some((right, uses)) = right.zip(uses) else {
         return Ok(unavailable());
     };

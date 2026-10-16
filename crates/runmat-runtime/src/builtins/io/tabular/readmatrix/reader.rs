@@ -262,9 +262,20 @@ async fn read_numeric_matrix_from_bytes(
         }
         for (index, field) in fields.iter().enumerate() {
             if let Some(dtype) = integer_dtype {
-                parse_integer_numeric_token(field, options, dtype, *line_number, index + 1)?;
+                parse_integer_numeric_token(
+                    field,
+                    options,
+                    dtype,
+                    *line_number,
+                    options.column_from_source(index),
+                )?;
             } else {
-                validate_numeric_token(field, options, *line_number, index + 1)?;
+                validate_numeric_token(
+                    field,
+                    options,
+                    *line_number,
+                    options.column_from_source(index),
+                )?;
             }
             if (index + 1) % ROW_WORK_CHUNK == 0 {
                 checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
@@ -311,7 +322,7 @@ async fn read_numeric_matrix_from_bytes(
                     options,
                     dtype,
                     row_index + 1,
-                    col_index + 1,
+                    options.column_from_selected(col_index),
                 )?;
                 storage
                     .set_value(col_index * row_count + row_index, value)
@@ -342,8 +353,12 @@ async fn read_numeric_matrix_from_bytes(
     for (row_index, row) in rows.iter().enumerate() {
         for col_index in 0..max_cols {
             let token = row.get(col_index).map(|field| field.as_ref()).unwrap_or("");
-            data[col_index * row_count + row_index] =
-                parse_numeric_token(token, options, row_index + 1, col_index + 1)?;
+            data[col_index * row_count + row_index] = parse_numeric_token(
+                token,
+                options,
+                row_index + 1,
+                options.column_from_selected(col_index),
+            )?;
             if (col_index + 1) % ROW_WORK_CHUNK == 0 {
                 checked_row_work(cooperation, path, ROW_WORK_CHUNK).await?;
             }

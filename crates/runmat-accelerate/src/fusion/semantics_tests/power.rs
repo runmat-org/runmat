@@ -470,3 +470,269 @@ fn static_power_resolution_keeps_computed_producer_identity_and_matches_async_re
     }
     assert!(static_program.require_source_plan(&rewired).is_err());
 }
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn selected_scalar_cast_and_arithmetic_control_admit_produced_power_exponent() {
+    let mut source = plan(
+        vec![
+            cast("single", 1, 2),
+            FusionOp::Primitive {
+                op: PrimitiveOp::Add,
+                inputs: vec![2, 3],
+                output: Some(4),
+            },
+            FusionOp::Primitive {
+                op: PrimitiveOp::ElemPow,
+                inputs: vec![0, 4],
+                output: Some(5),
+            },
+        ],
+        5,
+    );
+    source.const_values.insert(
+        3,
+        Value::Tensor(runmat_value::Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
+    );
+    let base = Value::Tensor(runmat_value::Tensor::from_f32(vec![-2.0, 3.0], vec![1, 2]).unwrap());
+    let inputs = [base, Value::Num(2.0)];
+    let program = resolve_policy(
+        &source,
+        &inputs,
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .expect("selected pure scalar producers retain exact Single exponent");
+    assert_eq!(
+        program.power_arithmetic(5).unwrap().exponent_scalar,
+        Some(runmat_accelerate_api::PowerScalarControl::SingleBits(
+            2.0_f32.to_bits()
+        ))
+    );
+    let borrowed: Vec<_> = inputs.iter().collect();
+    let bindings = semantic_bindings::capture(&source).unwrap();
+    let static_program = ResolvedProgram::resolve_static_captured(
+        &source,
+        &borrowed,
+        ProviderPrecision::F32,
+        &bindings,
+    )
+    .unwrap()
+    .expect("same selected scalar control is available to static admission");
+    assert_eq!(
+        static_program.power_arithmetic(5),
+        program.power_arithmetic(5)
+    );
+    let mut named = source.clone();
+    named.operations[1] = FusionOp::Builtin {
+        origin: Default::default(),
+        name: "plus".into(),
+        inputs: vec![2, 3],
+        output: Some(4),
+    };
+    let named_program = resolve_policy(
+        &named,
+        &inputs,
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .expect("captured named arithmetic uses its selected represented recipe");
+    assert_eq!(
+        named_program.power_arithmetic(5),
+        program.power_arithmetic(5)
+    );
+    assert_eq!(
+        static_program.cache_identity().unwrap(),
+        program.cache_identity().unwrap()
+    );
+    let mut changed = inputs.clone();
+    changed[1] = Value::Num(3.0);
+    let changed_program = resolve_policy(
+        &source,
+        &changed,
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .unwrap();
+    assert_ne!(
+        program.power_arithmetic(5).unwrap().exponent_scalar,
+        changed_program.power_arithmetic(5).unwrap().exponent_scalar
+    );
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn produced_scalar_evidence_records_exact_preparation_without_provider_work() {
+    use crate::placement::{begin_trace, report, PlacementEventKind};
+
+    let mut source = plan(
+        vec![
+            cast("single", 1, 2),
+            FusionOp::Primitive {
+                op: PrimitiveOp::Add,
+                inputs: vec![2, 3],
+                output: Some(4),
+            },
+        ],
+        4,
+    );
+    source.const_values.insert(
+        3,
+        Value::Tensor(runmat_value::Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
+    );
+    let inputs = [
+        Value::Tensor(runmat_value::Tensor::from_f32(vec![-2.0, 3.0], vec![1, 2]).unwrap()),
+        Value::Num(2.0),
+    ];
+    let trace = begin_trace("fusion.scalar_evidence_preparation", None);
+    let correlation = trace.correlation();
+    let program = futures::executor::block_on(ResolvedProgram::resolve(
+        &source,
+        &inputs,
+        ProviderPrecision::F32,
+        Some(correlation),
+    ))
+    .expect("selected scalar control is admitted");
+    assert_eq!(
+        program.fact(4).unwrap().numeric().unwrap().class,
+        NumericClass::Single
+    );
+    let mut nonmonotonic = source.clone();
+    nonmonotonic.operations[0] = cast("single", 1, 9);
+    nonmonotonic.operations[1] = FusionOp::Primitive {
+        op: PrimitiveOp::Add,
+        inputs: vec![9, 3],
+        output: Some(4),
+    };
+    let reordered = futures::executor::block_on(ResolvedProgram::resolve(
+        &nonmonotonic,
+        &inputs,
+        ProviderPrecision::F32,
+        None,
+    ))
+    .expect("indexed scalar slots follow producer identity, not operation order");
+    assert_eq!(reordered.fact(4).unwrap(), program.fact(4).unwrap());
+    trace.complete(None, None);
+    let first_trace_report = report();
+    let recorded = first_trace_report
+        .traces
+        .iter()
+        .find(|trace| trace.correlation == correlation)
+        .unwrap();
+    let events = recorded
+        .events
+        .iter()
+        .filter(|event| event.reason.as_deref() == Some("fusion_scalar_evidence_wall"))
+        .collect::<Vec<_>>();
+    assert_eq!(events.len(), 1);
+    let event = events[0];
+    assert_eq!(event.kind, PlacementEventKind::Prepare);
+    assert!(event.duration_ns.is_some());
+    assert_eq!(event.bytes, None);
+    for (key, expected) in [("completed", 1), ("attempted", 2), ("produced", 2)] {
+        assert!(event
+            .attributes
+            .iter()
+            .any(|attribute| attribute.key == key && attribute.value == expected));
+    }
+
+    source.operations.push(FusionOp::Primitive {
+        op: PrimitiveOp::ElemPow,
+        inputs: vec![0, 4],
+        output: Some(5),
+    });
+    source.output = Some(5);
+    let rejected = begin_trace("fusion.scalar_evidence_then_domain_rejection", None);
+    let rejected_correlation = rejected.correlation();
+    let rejected_inputs = [inputs[0].clone(), Value::Num(0.5)];
+    assert!(futures::executor::block_on(ResolvedProgram::resolve(
+        &source,
+        &rejected_inputs,
+        ProviderPrecision::F32,
+        Some(rejected_correlation),
+    ))
+    .is_err());
+    rejected.complete(None, None);
+    let rejected_trace_report = report();
+    let rejected_trace = rejected_trace_report
+        .traces
+        .iter()
+        .find(|trace| trace.correlation == rejected_correlation)
+        .unwrap();
+    let event = rejected_trace
+        .events
+        .iter()
+        .find(|event| event.reason.as_deref() == Some("fusion_scalar_evidence_wall"))
+        .unwrap();
+    assert!(event.duration_ns.is_some());
+    for (key, expected) in [("completed", 0), ("attempted", 2), ("produced", 2)] {
+        assert!(event
+            .attributes
+            .iter()
+            .any(|attribute| attribute.key == key && attribute.value == expected));
+    }
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn vector_producer_does_not_gain_a_fake_value_when_scalar_control_is_computed() {
+    let source = plan(
+        vec![
+            cast("tanh", 0, 2),
+            cast("single", 1, 3),
+            FusionOp::Primitive {
+                op: PrimitiveOp::ElemPow,
+                inputs: vec![2, 3],
+                output: Some(4),
+            },
+        ],
+        4,
+    );
+    let signal = Value::Tensor(
+        runmat_value::Tensor::from_f32(vec![0.125, 0.25, 0.5, 0.75], vec![4, 1]).unwrap(),
+    );
+    let program = resolve_policy(
+        &source,
+        &[signal, Value::Num(2.0)],
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .expect("an exact computed exponent proves any real vector base");
+    let receipt = program.power_arithmetic(4).unwrap();
+    assert_eq!(receipt.base_id, 2);
+    assert_eq!(receipt.exponent_id, 3);
+    assert_eq!(
+        receipt.exponent_scalar,
+        Some(runmat_accelerate_api::PowerScalarControl::SingleBits(
+            2.0_f32.to_bits()
+        ))
+    );
+    assert_eq!(
+        program.evidence.get(&4),
+        Some(&runmat_accelerate_api::NumericalDomainEvidence::RealPower(
+            runmat_accelerate_api::PowerResultDomain::Real
+        ))
+    );
+    let non_scalar_control = plan(
+        vec![
+            cast("single", 1, 3),
+            FusionOp::Primitive {
+                op: PrimitiveOp::ElemPow,
+                inputs: vec![0, 3],
+                output: Some(4),
+            },
+        ],
+        4,
+    );
+    let vector = Value::Tensor(runmat_value::Tensor::new(vec![2.0, 4.0], vec![1, 2]).unwrap());
+    let base = Value::Tensor(runmat_value::Tensor::from_f32(vec![-2.0, 3.0], vec![1, 2]).unwrap());
+    assert!(matches!(
+        resolve_policy(
+            &non_scalar_control,
+            &[base, vector],
+            ProviderPrecision::F32,
+            PrecisionPolicy::Exact,
+        ),
+        Err(FusionResolveFailure::Structural(_))
+    ));
+}

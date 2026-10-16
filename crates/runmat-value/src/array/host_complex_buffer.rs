@@ -17,6 +17,10 @@ pub struct HostComplexBuffer<T: Clone + Copy> {
 }
 
 impl<T: Clone + Copy> HostComplexBuffer<T> {
+    pub(crate) const fn exact_metadata_bytes() -> usize {
+        HostBuffer::<HostData<ComplexElement<T>>>::exact_metadata_bytes()
+    }
+
     pub fn from_elements(values: Vec<ComplexElement<T>>) -> Self {
         Self {
             storage: HostBuffer::new(HostData::from_vec(values)),
@@ -30,6 +34,16 @@ impl<T: Clone + Copy> HostComplexBuffer<T> {
         HostData::try_adopt(allocation, len).map(|storage| Self {
             storage: HostBuffer::new(storage),
         })
+    }
+
+    pub(crate) fn try_adopt_exact(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<Self, String> {
+        let storage = HostData::try_adopt(allocation, len).map_err(|(_, detail)| detail)?;
+        let storage = HostBuffer::try_new_exact(storage)
+            .map_err(|_| "exact complex owner allocation failed".to_string())?;
+        Ok(Self { storage })
     }
 
     pub fn len(&self) -> usize {

@@ -97,16 +97,98 @@ fn real_linalg_fallback_preserves_physical_source_class() {
         provider.pinv_exec(&complex, ProviderPinvOptions { tolerance: None }),
     )
     .unwrap_err();
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &inv_error
-    ));
-    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
-        &pinv_error
-    ));
+    assert!(inv_error.is_unsupported());
+    assert!(pinv_error.is_unsupported());
     assert_eq!(
         runmat_accelerate_api::handle_storage(&complex),
         GpuTensorStorage::ComplexInterleaved
     );
+}
+
+#[test]
+#[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+fn host_factor_hooks_preserve_native_class_and_complex_eigen_spectrum() {
+    let provider = provider();
+    for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+        let single = [4.0_f32, 0.0, 0.0, 9.0];
+        let double = [4.0_f64, 0.0, 0.0, 9.0];
+        let data = match precision {
+            ProviderPrecision::F32 => HostNumericDataView::F32(&single),
+            ProviderPrecision::F64 => HostNumericDataView::F64(&double),
+        };
+        let source = provider
+            .upload_numeric_exec(&HostNumericTensorView {
+                data,
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let chol = futures::executor::block_on(provider.chol_exec(&source, false)).unwrap();
+        assert_eq!(chol.info, 0);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&chol.factor),
+            Some(precision)
+        );
+
+        let qr = futures::executor::block_on(provider.qr_exec(
+            &source,
+            ProviderQrOptions {
+                economy: false,
+                column_order: ProviderQrColumnOrder::Unpivoted,
+                outputs: ProviderQrOutputs::Qr,
+            },
+        ))
+        .unwrap();
+        let ProviderQrResult::Qr { q, r } = qr else {
+            panic!("unpivoted QR returned a different result variant");
+        };
+        assert_eq!(runmat_accelerate_api::handle_precision(&q), Some(precision));
+        assert_eq!(runmat_accelerate_api::handle_precision(&r), Some(precision));
+        let pivoted = futures::executor::block_on(provider.qr_exec(
+            &source,
+            ProviderQrOptions {
+                economy: false,
+                column_order: ProviderQrColumnOrder::Pivoted,
+                outputs: ProviderQrOutputs::Qrp(runmat_accelerate_api::ProviderQrPivot::Matrix),
+            },
+        ))
+        .unwrap();
+        let ProviderQrResult::Qrp { q, r, permutation } = pivoted else {
+            panic!("pivoted QR returned a different result variant");
+        };
+        assert_eq!(runmat_accelerate_api::handle_precision(&q), Some(precision));
+        assert_eq!(runmat_accelerate_api::handle_precision(&r), Some(precision));
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&permutation),
+            Some(ProviderPrecision::F64)
+        );
+
+        let single_rotation = [0.0_f32, 1.0, -1.0, 0.0];
+        let double_rotation = [0.0_f64, 1.0, -1.0, 0.0];
+        let rotation_data = match precision {
+            ProviderPrecision::F32 => HostNumericDataView::F32(&single_rotation),
+            ProviderPrecision::F64 => HostNumericDataView::F64(&double_rotation),
+        };
+        let rotation = provider
+            .upload_numeric_exec(&HostNumericTensorView {
+                data: rotation_data,
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let eig = futures::executor::block_on(provider.eig_exec(&rotation, false)).unwrap();
+        for output in [&eig.eigenvalues, &eig.diagonal, &eig.right] {
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(output),
+                Some(precision)
+            );
+            assert_eq!(
+                runmat_accelerate_api::handle_storage(output),
+                GpuTensorStorage::ComplexInterleaved
+            );
+            assert!(!output.shares_allocation_with(&rotation));
+        }
+    }
 }
 
 #[test]

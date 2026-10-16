@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::math::interpolation::pp::{
-    build_spline_pp, evaluate_pp, Extrapolation, NumericSeries, PpOutputLayout, QueryPoints,
-    SampleAxis,
+    build_spline_pp, evaluate_pp, is_spline_execution_failure, Extrapolation, NumericSeries,
+    PpOutputLayout, QueryPoints, SampleAxis, SplineCooperation,
 };
 use num_complex::Complex;
 use rustfft::FftPlanner;
@@ -36,6 +36,13 @@ impl<'a> NumericalWork<'a> {
         self.cooperation.completed(self.pending).await?;
         self.pending = 0;
         Ok(())
+    }
+}
+
+impl SplineCooperation for NumericalWork<'_> {
+    async fn checkpoint(&mut self, completed_work: u64) -> BuiltinResult<()> {
+        self.boundary().await?;
+        self.cooperation.completed(completed_work).await
     }
 }
 
@@ -269,9 +276,9 @@ pub(super) async fn peak_envelope(
         work.tick().await?;
     }
     work.boundary().await?;
-    let upper = spline_interpolate(&upper_points, &query)?;
+    let upper = spline_interpolate(&upper_points, &query, work).await?;
     work.boundary().await?;
-    let lower = spline_interpolate(&lower_points, &query)?;
+    let lower = spline_interpolate(&lower_points, &query, work).await?;
     work.boundary().await?;
     Ok((upper, lower))
 }
@@ -331,7 +338,11 @@ async fn extrema_points(
     Ok(selected)
 }
 
-fn spline_interpolate(points: &[(usize, f64)], query: &[f64]) -> BuiltinResult<Vec<f64>> {
+async fn spline_interpolate(
+    points: &[(usize, f64)],
+    query: &[f64],
+    work: &mut NumericalWork<'_>,
+) -> BuiltinResult<Vec<f64>> {
     if points.len() < 2 {
         return Err(envelope_error(&ENVELOPE_ERROR_INTERNAL));
     }
@@ -349,8 +360,15 @@ fn spline_interpolate(points: &[(usize, f64)], query: &[f64]) -> BuiltinResult<V
         values: query.to_vec(),
         shape: vec![1, query.len()],
     };
-    let pp = build_spline_pp(&series, BUILTIN_NAME)
-        .map_err(|err| envelope_error_with_detail(&ENVELOPE_ERROR_INTERNAL, err.message()))?;
+    let pp = build_spline_pp(&series, BUILTIN_NAME, work)
+        .await
+        .map_err(|err| {
+            if is_spline_execution_failure(&err) {
+                crate::builtins::common::map_control_flow_with_builtin(err, BUILTIN_NAME)
+            } else {
+                envelope_error_with_detail(&ENVELOPE_ERROR_INTERNAL, err.message())
+            }
+        })?;
     let value = evaluate_pp(
         &pp,
         &query,

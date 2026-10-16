@@ -83,3 +83,101 @@ fn mismatched_queries_do_not_receive_false_shape_fact() {
     let inferred = inference::infer(&request(vec![z, xq, yq], vec![]), &INTERP2_CATALOG_ENTRY);
     assert_eq!(inferred.outputs[0].shape, ShapeFact::Unknown);
 }
+
+#[test]
+fn literal_spline_retains_single_complex_sample_fact_without_claiming_dynamic_method() {
+    let samples = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(4), Some(4)]),
+        StorageFact::Dense,
+    );
+    let query = numeric(ShapeFact::Scalar);
+    let method = ValueFact::unknown(DynamicReason::RuntimeValue);
+    let literal = inference::infer(
+        &request(
+            vec![
+                samples.clone(),
+                query.clone(),
+                query.clone(),
+                method.clone(),
+            ],
+            vec![
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::Unknown,
+                LiteralValue::String("spline".into()),
+            ],
+        ),
+        &INTERP2_CATALOG_ENTRY,
+    );
+    assert_eq!(
+        literal.outputs[0].numeric(),
+        Some(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex
+        })
+    );
+    let dynamic = inference::infer(
+        &request(vec![samples, query.clone(), query, method], vec![]),
+        &INTERP2_CATALOG_ENTRY,
+    );
+    assert_eq!(dynamic.outputs[0].kind, ValueKindFact::Unknown);
+    assert!(
+        dynamic.diagnostics.is_empty(),
+        "a dynamic method may select spline"
+    );
+}
+
+#[test]
+fn later_method_option_controls_spline_class_inference() {
+    let samples = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::from(vec![Some(4), Some(4)]),
+        StorageFact::Dense,
+    );
+    let query = numeric(ShapeFact::Scalar);
+    let option = ValueFact::unknown(DynamicReason::RuntimeValue);
+    let arguments = vec![samples, query.clone(), query, option.clone(), option];
+    let literals = |last| {
+        vec![
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::Unknown,
+            LiteralValue::String("spline".into()),
+            last,
+        ]
+    };
+    let linear = inference::infer(
+        &request(
+            arguments.clone(),
+            literals(LiteralValue::String("linear".into())),
+        ),
+        &INTERP2_CATALOG_ENTRY,
+    );
+    assert_eq!(
+        linear.outputs[0].numeric().unwrap().class,
+        NumericClass::Double
+    );
+    let extrap = inference::infer(
+        &request(
+            arguments.clone(),
+            literals(LiteralValue::String("extrap".into())),
+        ),
+        &INTERP2_CATALOG_ENTRY,
+    );
+    assert_eq!(
+        extrap.outputs[0].numeric().unwrap().class,
+        NumericClass::Single
+    );
+    let unknown = inference::infer(
+        &request(arguments, literals(LiteralValue::Unknown)),
+        &INTERP2_CATALOG_ENTRY,
+    );
+    assert_eq!(unknown.outputs[0].kind, ValueKindFact::Unknown);
+}

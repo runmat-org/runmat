@@ -329,19 +329,7 @@ pub(super) fn datetime_object_from_serials(
 }
 
 pub(super) fn format_token_to_strftime(format: &str) -> String {
-    let mut out = format.to_string();
-    for (src, dst) in [
-        ("yyyy", "%Y"),
-        ("MMM", "%b"),
-        ("MM", "%m"),
-        ("dd", "%d"),
-        ("HH", "%H"),
-        ("mm", "%M"),
-        ("ss", "%S"),
-    ] {
-        out = out.replace(src, dst);
-    }
-    out
+    crate::builtins::common::validation::datetime_format_to_strftime(format)
 }
 
 pub(crate) fn datenum_from_naive(datetime: NaiveDateTime) -> f64 {

@@ -192,22 +192,145 @@ fn read_table_err(path: &Path, args: Vec<Value>) -> RuntimeError {
 }
 
 fn spreadsheet_options(args: Vec<Value>) -> StructValue {
-    match block_on(spreadsheet_import_options_builtin(args)).expect("spreadsheetImportOptions") {
-        Value::Struct(options) => options,
-        other => panic!("expected struct options, got {other:?}"),
-    }
+    let value =
+        block_on(spreadsheet_import_options_builtin(args)).expect("spreadsheetImportOptions");
+    crate::builtins::io::tabular::import_options::ImportOptions::decode(&value)
+        .expect("decode spreadsheet options")
+        .expect("spreadsheet options object")
+        .base()
+        .clone()
 }
 
 fn detect_options(path: &Path, args: Vec<Value>) -> StructValue {
-    match block_on(detect_import_options_builtin(
+    let value = block_on(detect_import_options_builtin(
         Value::from(path.to_string_lossy().to_string()),
         args,
     ))
-    .expect("detectImportOptions")
-    {
-        Value::Struct(options) => options,
-        other => panic!("expected struct options, got {other:?}"),
-    }
+    .expect("detectImportOptions");
+    crate::builtins::io::tabular::import_options::ImportOptions::decode(&value)
+        .expect("decode detected options")
+        .expect("detected options object")
+        .base()
+        .clone()
+}
+
+#[test]
+fn variable_import_options_modify_real_table_columns_and_preserve_object_identity() {
+    let path = unique_path("setvaropts_table_columns");
+    fs::write(
+        &path,
+        "Force_N,Amount,When\nN/A,1.234,31.12.2024\n2,2.500,01.01.2025\n",
+    )
+    .expect("write import fixture");
+    let filename = Value::from(path.to_string_lossy().to_string());
+    let detected = block_on(detect_import_options_builtin(filename.clone(), Vec::new()))
+        .expect("detect import options");
+    let numeric = block_on(setvartype_builtin(vec![
+        detected,
+        Value::from("Force_N"),
+        Value::from("double"),
+    ]))
+    .expect("set numeric variable type");
+    let typed = block_on(setvartype_builtin(vec![
+        numeric,
+        Value::from("When"),
+        Value::from("datetime"),
+    ]))
+    .expect("set datetime variable type");
+    let missing = block_on(setvaropts_builtin(vec![
+        typed,
+        Value::from("Force_N"),
+        Value::from("TreatAsMissing"),
+        Value::from("N/A"),
+        Value::from("FillValue"),
+        Value::Num(-1.0),
+    ]))
+    .expect("set missing rule");
+    let separated = block_on(setvaropts_builtin(vec![
+        missing,
+        Value::from("Amount"),
+        Value::from("DecimalSeparator"),
+        Value::from(","),
+        Value::from("ThousandsSeparator"),
+        Value::from("."),
+    ]))
+    .expect("set separators");
+    let formatted = block_on(setvaropts_builtin(vec![
+        separated,
+        Value::from("When"),
+        Value::from("InputFormat"),
+        Value::from("dd.MM.yyyy"),
+    ]))
+    .expect("set datetime input format");
+    let variable = block_on(getvaropts_builtin(vec![
+        formatted.clone(),
+        Value::from("Amount"),
+    ]))
+    .expect("get variable options");
+    assert!(matches!(variable, Value::Object(_)));
+    let table = object(
+        block_on(readtable_builtin(filename.clone(), vec![formatted.clone()]))
+            .expect("readtable with variable options"),
+    );
+    let Value::Tensor(force) = table_member_get(&table, &Value::from("Force_N")).unwrap() else {
+        panic!("expected numeric Force_N variable")
+    };
+    assert_eq!(force.materialize_f64(), vec![-1.0, 2.0]);
+    let Value::Tensor(amount) = table_member_get(&table, &Value::from("Amount")).unwrap() else {
+        panic!("expected numeric Amount variable")
+    };
+    assert_eq!(amount.materialize_f64(), vec![1234.0, 2500.0]);
+    let Value::Object(when) = table_member_get(&table, &Value::from("When")).unwrap() else {
+        panic!("expected parsed datetime variable")
+    };
+    assert!(when.is_class(runmat_types::standard::DATETIME));
+    let ranged = object(
+        block_on(readtable_builtin(
+            filename,
+            vec![formatted, Value::from("Range"), Value::from("B:C")],
+        ))
+        .expect("ranged table retains source-column options"),
+    );
+    assert_eq!(
+        table_variable_names_from_object(&ranged).unwrap(),
+        vec!["Amount", "When"]
+    );
+    let Value::Tensor(ranged_amount) = table_member_get(&ranged, &Value::from("Amount")).unwrap()
+    else {
+        panic!("expected ranged Amount variable")
+    };
+    assert_eq!(ranged_amount.materialize_f64(), vec![1234.0, 2500.0]);
+    let range_detected = block_on(detect_import_options_builtin(
+        Value::from(path.to_string_lossy().to_string()),
+        vec![Value::from("Range"), Value::from("B:C")],
+    ))
+    .expect("detect projected variables");
+    let range_set = block_on(setvaropts_builtin(vec![
+        range_detected,
+        Value::from("Amount"),
+        Value::from("DecimalSeparator"),
+        Value::from(","),
+        Value::from("ThousandsSeparator"),
+        Value::from("."),
+    ]))
+    .expect("configure detected ranged variable");
+    let from_range_detected = object(
+        block_on(readtable_builtin(
+            Value::from(path.to_string_lossy().to_string()),
+            vec![range_set],
+        ))
+        .expect("read detected ranged options"),
+    );
+    let Value::Tensor(range_detected_amount) =
+        table_member_get(&from_range_detected, &Value::from("Amount")).unwrap()
+    else {
+        panic!("expected detected ranged Amount variable")
+    };
+    assert_eq!(
+        range_detected_amount.materialize_f64(),
+        vec![1234.0, 2500.0]
+    );
+    let _ = fs::remove_file(path);
 }
 
 fn char_row(array: &CharArray, row: usize) -> String {
@@ -729,15 +852,19 @@ fn readtable_supports_explicit_names_and_missing_tokens() {
 #[test]
 fn readtable_preserves_variable_names_when_requested() {
     let path = unique_path("readtable_preserve_names");
-    fs::write(&path, "daily revenue,total orders\n100,10\n").expect("write sample");
+    fs::write(&path, " daily revenue ,total orders\n100,10\n").expect("write sample");
     let table = object(read_table(
         &path,
         vec![Value::from("VariableNamingRule"), Value::from("preserve")],
     ));
     assert_eq!(
         table_variable_names_from_object(&table).unwrap(),
-        vec!["daily revenue".to_string(), "total orders".to_string()]
+        vec![" daily revenue ".to_string(), "total orders".to_string()]
     );
+    match table_member_get(&table, &Value::from(" daily revenue ")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![100.0]),
+        other => panic!("expected numeric column, got {other:?}"),
+    }
     let _ = fs::remove_file(&path);
 }
 
@@ -976,10 +1103,13 @@ fn documented_table_import_integer_controls_remain_enabled_in_matlab_mode() {
         Value::Int(runmat_value::IntValue::U8(2)),
     ]))
     .expect("documented integer NumVariables");
-    let Value::Struct(options) = options else {
-        panic!("expected options structure");
-    };
-    assert_eq!(options.fields.get("NumVariables"), Some(&Value::Num(2.0)));
+    let options = crate::builtins::io::tabular::import_options::ImportOptions::decode(&options)
+        .expect("decode constructed options")
+        .expect("import options object");
+    assert_eq!(
+        options.base().fields.get("NumVariables"),
+        Some(&Value::Num(2.0))
+    );
     let _ = fs::remove_file(path);
 }
 
@@ -1612,6 +1742,38 @@ fn table_properties_variable_names_rename_columns() {
     assert_eq!(
         table_variable_names_from_object(&table).unwrap(),
         vec!["X".to_string(), "Y".to_string()]
+    );
+
+    let first = Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap());
+    let second = Value::Tensor(Tensor::new(vec![9.0], vec![1, 1]).unwrap());
+    let mut nonlexical =
+        object(table_from_columns(vec!["Z".into(), "A".into()], vec![first, second]).unwrap());
+    assert_eq!(
+        table_variable_names_from_object(&nonlexical).unwrap(),
+        vec!["Z".to_string(), "A".to_string()]
+    );
+    let mut properties = table_public_properties(&nonlexical).unwrap();
+    properties.insert(
+        VARIABLE_NAMES,
+        Value::StringArray(
+            StringArray::new(vec!["First".into(), "Second".into()], vec![1, 2]).unwrap(),
+        ),
+    );
+    table_member_set(
+        &mut nonlexical,
+        PROPERTIES_MEMBER,
+        Value::Struct(properties),
+    )
+    .unwrap();
+    let Value::Tensor(renamed_first) =
+        table_member_get(&nonlexical, &Value::from("First")).unwrap()
+    else {
+        panic!("first declared column was not retained across rename")
+    };
+    assert_eq!(renamed_first.materialize_f64(), vec![7.0]);
+    assert_eq!(
+        table_variable_names_from_object(&nonlexical).unwrap(),
+        vec!["First".to_string(), "Second".to_string()]
     );
 }
 
@@ -2355,6 +2517,37 @@ fn array2table_supports_current_names_and_properties_rules() {
         table_variable_names_from_object(&object(case_distinct)).unwrap(),
         vec!["A".to_string(), "a".to_string()]
     );
+    let whitespace = object(
+        block_on(array2table_builtin(
+            Value::Tensor(Tensor::new(vec![7.0], vec![1, 1]).unwrap()),
+            vec![
+                Value::from("VariableNames"),
+                Value::from(" "),
+                Value::from("DimensionNames"),
+                Value::StringArray(
+                    StringArray::new(vec!["  ".into(), "Variables".into()], vec![1, 2]).unwrap(),
+                ),
+            ],
+        ))
+        .unwrap(),
+    );
+    assert_eq!(
+        table_variable_names_from_object(&whitespace).unwrap(),
+        vec![" ".to_string()]
+    );
+    assert_eq!(
+        table_public_properties(&whitespace)
+            .unwrap()
+            .fields
+            .get(DIMENSION_NAMES),
+        Some(&Value::StringArray(
+            StringArray::new(vec!["  ".into(), "Variables".into()], vec![1, 2]).unwrap()
+        ))
+    );
+    match table_member_get(&whitespace, &Value::from(" ")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![7.0]),
+        other => panic!("expected numeric column, got {other:?}"),
+    }
 
     for options in [
         vec![
@@ -2822,6 +3015,18 @@ fn explicit_variable_names_reject_duplicates_and_accept_current_identifiers() {
         table_variable_names_from_object(&object(current)).unwrap(),
         vec!["1 bad".to_string(), "B".to_string()]
     );
+    let whitespace = object(
+        block_on(table_builtin(vec![
+            Value::Tensor(Tensor::new(vec![9.0], vec![1, 1]).unwrap()),
+            Value::from("VariableNames"),
+            Value::from(" "),
+        ]))
+        .unwrap(),
+    );
+    match table_member_get(&whitespace, &Value::from(" ")).unwrap() {
+        Value::Tensor(tensor) => assert_eq!(tensor.materialize_f64(), vec![9.0]),
+        other => panic!("expected numeric column, got {other:?}"),
+    }
 }
 
 #[test]
