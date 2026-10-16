@@ -5,6 +5,9 @@ use std::fmt;
 use runmat_builtins::Type;
 use runmat_value::Value as BuiltinValue;
 
+#[path = "graph/folded_unary.rs"]
+mod folded_unary;
+
 pub type NodeId = u32;
 pub type ValueId = u32;
 
@@ -434,6 +437,70 @@ mod tests {
         );
         assert!(graph.exact_folded_literal_array(2).is_some());
         assert!(graph.folded_literal_numeric_vector(2).is_none());
+    }
+
+    #[test]
+    fn bound_folded_unary_cast_retains_structural_proof_only() {
+        let [variant] = runmat_builtins::SINGLE_CATALOG_ENTRY.bindings else {
+            panic!("one canonical Single binding");
+        };
+        let binding = runmat_builtins::SINGLE_CATALOG_ENTRY.binding_identity(variant);
+        let mut graph = AccelGraph {
+            nodes: vec![AccelNode {
+                id: 0,
+                label: AccelNodeLabel::Builtin {
+                    name: "single".into(),
+                    origin: FusionCallOrigin::Named { binding },
+                },
+                category: AccelOpCategory::Elementwise,
+                inputs: vec![0],
+                outputs: vec![1],
+                span: InstrSpan { start: 1, end: 1 },
+                tags: vec![AccelGraphTag::Elementwise, AccelGraphTag::UnaryScalarFold],
+            }],
+            values: vec![
+                ValueInfo {
+                    id: 0,
+                    origin: ValueOrigin::Constant,
+                    ty: Type::Num,
+                    shape: ShapeInfo::Scalar,
+                    constant: Some(BuiltinValue::Num(-0.0)),
+                },
+                ValueInfo {
+                    id: 1,
+                    origin: ValueOrigin::NodeOutput { node: 0, output: 0 },
+                    ty: Type::Tensor {
+                        shape: Some(vec![Some(1), Some(1)]),
+                    },
+                    shape: ShapeInfo::Tensor(vec![Some(1), Some(1)]),
+                    constant: Some(BuiltinValue::Tensor(
+                        runmat_value::Tensor::from_f32(vec![-0.0], vec![1, 1]).unwrap(),
+                    )),
+                },
+            ],
+            var_bindings: HashMap::from([(
+                1,
+                VarBinding {
+                    kind: VarKind::Global,
+                    index: 1,
+                },
+            )]),
+            node_bindings: HashMap::from([(
+                0,
+                VarBinding {
+                    kind: VarKind::Global,
+                    index: 1,
+                },
+            )]),
+        };
+        assert!(graph.exact_folded_unary_scalar(1).is_some());
+        graph.values[1].constant = Some(BuiltinValue::Tensor(
+            runmat_value::Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap(),
+        ));
+        assert!(
+            graph.exact_folded_unary_scalar(1).is_none(),
+            "signed zero is semantic"
+        );
     }
 
     #[test]

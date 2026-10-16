@@ -11,8 +11,7 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 futures = "0.3"
 runmat-execution = { workspace = true }
-runmat-hir = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, default-features = false }
 runmat-native-codegen = { workspace = true, default-features = false }
 runmat-time = { workspace = true }
 runmat-types = { workspace = true }

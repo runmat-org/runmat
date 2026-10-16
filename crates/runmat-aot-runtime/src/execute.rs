@@ -4,9 +4,25 @@ use runmat_execution::ExecutableEntrypointKind;
 use runmat_native_executor::execute::NativeWorkspaceInput;
 use runmat_types::ProgramPointId;
 
-use crate::AotProcessInput;
+use crate::{input::LinkedAotProcessInput, AotProcessInput};
+
+#[path = "execute/linked_selected.rs"]
+mod linked_selected;
 
 pub fn execute(input: AotProcessInput) -> Result<(), String> {
+    execute_with_linked_authority(input, false, std::ptr::null())
+}
+
+pub(crate) fn execute_linked(input: LinkedAotProcessInput) -> Result<(), String> {
+    let (input, source_service_factory) = input.into_parts();
+    execute_with_linked_authority(input, true, source_service_factory)
+}
+
+fn execute_with_linked_authority(
+    input: AotProcessInput,
+    verified_link: bool,
+    source_service_factory: *const std::ffi::c_void,
+) -> Result<(), String> {
     let _console_forwarder = crate::output::install_console_forwarder();
     let assembly: runmat_native_codegen::NativeAssembly = serde_json::from_slice(&input.native_ir)
         .map_err(|error| format!("standalone Native IR is invalid: {error}"))?;
@@ -27,11 +43,8 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     {
         return Err("standalone program manifest does not match its Native IR".into());
     }
-    // Metadata and byte admission do not qualify the installed service ports.
-    // The host-unselected launcher must not silently execute a selected grant.
-    if program.product.selected().is_some() {
-        return Err("selected program requires installed selected-runtime authority".into());
-    }
+    let linked_selected =
+        linked_selected::admit(&program, &assembly, verified_link, source_service_factory)?;
     if program.foreign_policy.is_none()
         && (!interop.foreign_types.is_empty()
             || !interop.adapters.is_empty()
@@ -114,6 +127,16 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
         .with_local_tasks(local_tasks.submission_port(runtime.local_identity()))
         .with_call(Rc::new(runmat_runtime::context::RuntimeCallRouter));
     runtime = runtime.with_service_ports(ports);
+    #[cfg(feature = "source-evaluation")]
+    let (mut runtime, source_evaluation_owner) = if let Some(issuer) = linked_selected
+        .as_ref()
+        .and_then(|selected| selected.source_evaluation.clone())
+    {
+        let (runtime, owner) = crate::source_service::install(runtime, issuer)?;
+        (runtime, Some(owner))
+    } else {
+        (runtime, None)
+    };
     let lifecycle_host =
         runmat_runtime::context::RuntimeLifecycleHost::new(&runtime, local_tasks.clone())
             .map_err(|error| format!("standalone cleanup lifecycle host failed: {error}"))?;
@@ -178,16 +201,24 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     }
     let executable = runmat_native_executor::NativeExecutable::linked(entrypoints)
         .map_err(|error| format!("standalone native entrypoints are invalid: {error}"))?;
+    let options = runmat_native_executor::NativeExecutorOptions {
+        program_capture: Some(input.program.clone()),
+        interpreter_resume_points: resume_points,
+        ..runmat_native_executor::NativeExecutorOptions::default()
+    };
     let executor = Rc::new(
-        runmat_native_executor::NativeExecutor::bind(
-            assembly.clone(),
-            executable,
-            runmat_native_executor::NativeExecutorOptions {
-                program_capture: Some(input.program.clone()),
-                interpreter_resume_points: resume_points,
-                ..runmat_native_executor::NativeExecutorOptions::default()
-            },
-        )
+        match &linked_selected {
+            Some(linked) => runmat_native_executor::NativeExecutor::bind_linked_selected(
+                assembly.clone(),
+                executable,
+                options,
+                &linked.product,
+                linked.source_evaluation.clone(),
+            ),
+            None => {
+                runmat_native_executor::NativeExecutor::bind(assembly.clone(), executable, options)
+            }
+        }
         .map_err(|error| format!("standalone native host initialization failed: {error}"))?,
     );
 
@@ -294,7 +325,21 @@ pub fn execute(input: AotProcessInput) -> Result<(), String> {
     // callback driver while worker requests still have origin authority.
     mex_guard.force_abandon_if_needed();
     lifecycle_host.force_close();
-    result.map_err(|error| format!("standalone local task driver failed: {error}"))?
+    let execution_result = result
+        .map_err(|error| format!("standalone local task driver failed: {error}"))
+        .and_then(|result| result);
+    #[cfg(feature = "source-evaluation")]
+    let source_retirement = source_evaluation_owner
+        .map(|owner| {
+            owner
+                .close()
+                .map_err(|error| format!("standalone source evaluator retirement failed: {error}"))
+        })
+        .transpose();
+    execution_result?;
+    #[cfg(feature = "source-evaluation")]
+    let _ = source_retirement?;
+    Ok(())
 }
 
 fn execution_diagnostic(

@@ -12,7 +12,9 @@ use crate::accel::graph::{build_accel_graph_with_transcript, AccelLoad, AccelSto
 use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
 use crate::bytecode::Instr;
 
-use runmat_runtime::context::{RuntimeContext, VmFusionCompletionRight, VmFusionInstalledRegion};
+use runmat_runtime::context::{
+    RuntimeContext, VmFusionCompletionRight, VmFusionDeclineRight, VmFusionInstalledRegion,
+};
 
 #[path = "vm_fusion_plan/semantic_identity.rs"]
 mod semantic_identity;
@@ -91,6 +93,37 @@ impl VmFusionPlanInstallation {
             .flatten()
     }
 
+    /// Only a selected installed region can decline before effects. This is
+    /// deliberately separate from the FullCall completion/host-route right.
+    pub(crate) fn decline_for(
+        &self,
+        active_plan: &FusionPlanRef,
+        selected: &runmat_accelerate::FusionGroupPlan,
+        runtime: &RuntimeContext,
+    ) -> Option<VmFusionDeclineRight> {
+        if !Rc::ptr_eq(&self.plan, active_plan) || !selected.kernel.supported {
+            return None;
+        }
+        let original = self.plan.groups.iter().find(|group| {
+            group.index == selected.index
+                && group.group.id == selected.group.id
+                && group.group.span == selected.group.span
+                && group.output == selected.output
+        })?;
+        let installed = self
+            .regions
+            .iter()
+            .find_map(|(index, installed, _)| (*index == original.index).then_some(installed))?;
+        installed
+            .matches_group(
+                selected.group.id,
+                selected.group.span.start,
+                selected.group.span.end,
+            )
+            .then(|| installed.decline_right(runtime))
+            .flatten()
+    }
+
     pub(crate) fn publication_pc_for(
         &self,
         active_plan: &FusionPlanRef,
@@ -161,6 +194,7 @@ impl Bytecode {
             &groups,
             &crate::bytecode::fusion_private_temp::bridges(self),
             &crate::bytecode::fusion_private_temp::empty_controls(self),
+            &crate::bytecode::fusion_private_temp::literal_controls(self),
             &stores,
         ) {
             return (None, Some(graph), stores, loads);

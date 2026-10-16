@@ -273,7 +273,7 @@ pub(super) fn evaluate_rvalue(
             runmat_runtime::execution::validate_spawn_captures(&arguments)?;
             let mut invocation = runmat_runtime::execution::DeferredInvocation::callable(
                 runmat_runtime::call::descriptor::CallableDescriptor::resolved(
-                    runmat_hir::CallableIdentity::BoundFunction(*function),
+                    runmat_types::CallableIdentity::BoundFunction(*function),
                     arguments,
                     requested_outputs.executor_carrier_count().ok_or_else(|| {
                         NativeExecutorError::Host(
@@ -281,7 +281,7 @@ pub(super) fn evaluate_rvalue(
                                 .into(),
                         )
                     })?,
-                    runmat_hir::CallableFallbackPolicy::None,
+                    runmat_types::CallableFallbackPolicy::None,
                     runmat_runtime::call::descriptor::CallableCallKind::Direct,
                 ),
             );
@@ -367,7 +367,7 @@ pub(super) fn evaluate_rvalue(
 
 fn native_function_capabilities(
     state: &super::state::HostState,
-    function: runmat_hir::FunctionId,
+    function: runmat_types::FunctionId,
 ) -> NativeExecutorResult<runmat_types::CapabilitySet> {
     let Some(function) = u32::try_from(function.0)
         .ok()
@@ -461,8 +461,8 @@ pub(super) fn evaluate_operand(
             Ok(state.arena.insert(value))
         }
         MirOperand::FunctionHandle(identity) => {
-            if let runmat_hir::CallableIdentity::BoundFunction(function)
-            | runmat_hir::CallableIdentity::AnonymousFunction(function) = identity
+            if let runmat_types::CallableIdentity::BoundFunction(function)
+            | runmat_types::CallableIdentity::AnonymousFunction(function) = identity
             {
                 let function = u32::try_from(function.0)
                     .map(runmat_types::ProgramFunctionId)

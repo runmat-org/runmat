@@ -87,6 +87,30 @@ async fn call_identity_with_policy(
     }
 }
 
+async fn call_registered_method(
+    runtime: Option<&crate::context::RuntimeContext>,
+    method: crate::class_registry::BoundRuntimeMethod,
+    args: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<RootedValueSequence, RuntimeError> {
+    if let Some(binding) = method.bound_function {
+        let descriptor =
+            CallableDescriptor::bound(binding, args, requested_outputs, CallableCallKind::Direct);
+        return match runtime {
+            Some(runtime) => execute_callable_descriptor_in_context(runtime, descriptor).await,
+            None => execute_callable_descriptor(descriptor).await,
+        };
+    }
+    call_identity_with_policy(
+        runtime,
+        method.callable,
+        args,
+        requested_outputs,
+        method.fallback,
+    )
+    .await
+}
+
 async fn try_call_identity_with_policy(
     runtime: Option<&crate::context::RuntimeContext>,
     identity: CallableIdentity,
@@ -229,14 +253,7 @@ async fn call_member_index_on_object_like(
         let mut full_args = Vec::with_capacity(1 + args.len());
         full_args.push(receiver.clone());
         full_args.extend(args.iter().cloned());
-        return call_identity_with_policy(
-            runtime,
-            bound.callable,
-            full_args,
-            requested_outputs,
-            bound.fallback,
-        )
-        .await;
+        return call_registered_method(runtime, bound, full_args, requested_outputs).await;
     }
 
     let mut method_args = Vec::with_capacity(1 + args.len());
@@ -433,14 +450,7 @@ async fn call_rhs_operator_method_ordered_in_scope(
                 format!("Method '{}' is private", name),
             ));
         }
-        return call_identity_with_policy(
-            runtime,
-            bound.callable,
-            method_args,
-            requested_outputs,
-            bound.fallback,
-        )
-        .await;
+        return call_registered_method(runtime, bound, method_args, requested_outputs).await;
     }
 
     let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
@@ -940,6 +950,11 @@ async fn call_method_or_member_index_with_fallback_in_scope(
                         "MethodPrivate",
                         format!("Method '{}' is private", name),
                     ));
+                }
+                if let Some(bound) = crate::class_registry::lookup_bound_method(&cls, &method_name)
+                    .filter(|bound| bound.bound_function.is_some())
+                {
+                    return call_registered_method(runtime, bound, args, requested_outputs).await;
                 }
                 let (identity, fallback_policy) = runtime_named_identity(&m.function_name);
                 return call_identity_with_policy(

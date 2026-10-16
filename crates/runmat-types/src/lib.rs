@@ -22,12 +22,13 @@ pub mod version;
 pub use contract::*;
 pub use convolution::ConvolutionMode;
 pub use declaration::{
-    ClassArrayPayload, ClassArrayShape, ClassDeclaration, ClassKind, EnumerationDeclaration,
-    EventAccess, EventAttributes, EventDeclaration, ExternalClassDeclaration,
-    ExternalMethodDeclaration, ExternalPropertyDeclaration, FunctionArgDefaultValue,
-    FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec, FunctionArgValidationLiteral,
-    FunctionArgValidator, InheritanceDeclaration, MemberAccess, MethodAttributes,
-    MethodDeclaration, PropertyAttributes, PropertyDeclaration, SemanticAttribute,
+    CallSyntax, CapturedBinding, ClassArrayPayload, ClassArrayShape, ClassDeclaration, ClassKind,
+    EnumerationDeclaration, EnvironmentEffect, EventAccess, EventAttributes, EventDeclaration,
+    ExternalClassDeclaration, ExternalMethodDeclaration, ExternalPropertyDeclaration, FunctionAbi,
+    FunctionArgDefaultValue, FunctionArgDim, FunctionArgRangeInclusivity, FunctionArgSizeSpec,
+    FunctionArgValidationLiteral, FunctionArgValidator, FunctionArgumentValidation, FunctionKind,
+    FunctionModifiers, InheritanceDeclaration, MemberAccess, MethodAttributes, MethodDeclaration,
+    PropertyAttributes, PropertyDeclaration, SemanticAttribute, StringLiteral, WorkspaceEffect,
 };
 pub use dimension::{decode_shape_dimension, dimension_fits_platform, DimensionValueError};
 pub use fact::*;

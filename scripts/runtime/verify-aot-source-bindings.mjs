@@ -12,9 +12,16 @@ const binary = process.argv[2] && resolve(process.argv[2]);
 if (!binary || !existsSync(binary)) {
     throw new Error("pass an existing embedded-AOT runmat binary");
 }
-if (process.argv.length > 4 || (process.argv[3] && !["--java", "--java-only", "--super-only", "--super-package-only"].includes(process.argv[3]))) {
-    throw new Error("usage: node verify-aot-source-bindings.mjs <embedded-AOT runmat> [--java|--java-only|--super-only|--super-package-only]");
+const selectedSourceOnly = process.argv[3] === "--selected-source";
+if ((selectedSourceOnly && process.argv.length !== 7) ||
+    (!selectedSourceOnly && (process.argv.length > 4 || (process.argv[3] && !["--java", "--java-only", "--super-only", "--super-package-only"].includes(process.argv[3]))))) {
+    throw new Error("usage: node verify-aot-source-bindings.mjs <runmat> [--java|--java-only|--super-only|--super-package-only|--selected-source <canonical-pack-manifest> <component-root> <independent-host-admission>]");
 }
+const selectedCompileFlags = selectedSourceOnly ? [
+    "--selected-pack-manifest", resolve(process.argv[4]),
+    "--selected-components", resolve(process.argv[5]),
+    "--selected-host-admission", resolve(process.argv[6])
+] : [];
 const javaOnly = process.argv[3] === "--java-only";
 const superOnly = process.argv[3] === "--super-only";
 const superPackageOnly = process.argv[3] === "--super-package-only";
@@ -355,13 +362,102 @@ function verifyPureAotSources() {
     verifyAotSuperConstructors({ directory, compile, invoke });
 }
 
+function verifySelectedSourceEvaluation() {
+    function requireSelectedPlan(planPath) {
+        const plan = JSON.parse(readFileSync(planPath, "utf8"));
+        assert.equal(plan.product?.mode, "selected", "source witness must compile against a verified selected pack");
+        assert.equal(plan.runtime_capabilities?.dynamic_source_loading, true, "selected runtime lacks actual source service capability");
+        assert.ok(
+            plan.product.binding.required_services.some(service => service.kind === "source_evaluation") &&
+                plan.product.binding.services.some(service => service.kind === "source_evaluation"),
+            "selected program did not retain the SourceEvaluation service"
+        );
+    }
+    function compileSelected(name, source) {
+        const planPath = join(directory, `${name}.plan.json`);
+        const output = compile(name, source, ["--policy", "dynamic-runtime", "--link-plan-json", planPath, ...selectedCompileFlags]);
+        requireSelectedPlan(planPath);
+        return output;
+    }
+
+    const direct = compileSelected("aot_selected_numeric_text", [
+        "function result = aot_selected_numeric_text()",
+        "  result = str2num('1+2');",
+        "end",
+        ""
+    ].join("\n"));
+    const directResult = invoke(direct);
+    assert.equal(directResult.status, 0, `selected linked str2num failed:\n${directResult.stderr}`);
+    assert.equal(directResult.stdout.trim(), "3", "selected numeric text did not execute its linked evaluator");
+
+    const project = join(directory, "aot_selected_source_project");
+    const source = join(project, "src", "aot_selected_wide.m");
+    const privateSource = join(project, "src", "private", "private_offset.m");
+    const config = join(project, "runmat.toml");
+    const output = join(directory, process.platform === "win32" ? "aot_selected_wide.exe" : "aot_selected_wide");
+    const planPath = join(directory, "aot_selected_wide.plan.json");
+    mkdirSync(join(project, "src", "private"), { recursive: true });
+    writeFileSync(config, "[package]\nname = \"aot-selected-source\"\nversion = \"1.0.0\"\n\n[sources]\nroots = [\"src\"]\n");
+    writeFileSync(source, [
+        "function result = aot_selected_wide()",
+        "  result = 7 + str2num('local_double(2)+private_offset(3)');",
+        "end",
+        "function value = local_double(x)",
+        "  value = 2*x;",
+        "end",
+        ""
+    ].join("\n"));
+    writeFileSync(privateSource, "function value = private_offset(x)\n  value = x+5;\nend\n");
+    const compilation = invoke(binary, ["--color=never", "--config", config, "compile", source,
+        "--output", output, "--policy", "dynamic-runtime", "--link-plan-json", planPath, ...selectedCompileFlags]);
+    assert.equal(compilation.status, 0, `compiling selected local/private source failed:\n${compilation.stderr}`);
+    assert.ok(existsSync(output), "selected local/private source has no linked executable");
+    requireSelectedPlan(planPath);
+    renameSync(source, `${source}.removed-after-compile`);
+    renameSync(privateSource, `${privateSource}.removed-after-compile`);
+    const wideResult = invoke(output);
+    assert.equal(wideResult.status, 0, `selected local/private source failed:\n${wideResult.stderr}`);
+    assert.equal(wideResult.stdout.trim(), "19", "selected source lost exact local/private target ownership");
+
+    const escaped = compileSelected("aot_selected_escaped", [
+        "function result = aot_selected_escaped()",
+        "  callback = make_callback();",
+        "  result = callback(2);",
+        "end",
+        "function callback = make_callback()",
+        "  callback = @late_source;",
+        "end",
+        "function value = late_source(x)",
+        "  value = x + str2num('1+2');",
+        "end",
+        ""
+    ].join("\n"));
+    const escapedResult = invoke(escaped);
+    assert.equal(escapedResult.status, 0, `escaped selected callback failed:\n${escapedResult.stderr}`);
+    assert.equal(escapedResult.stdout.trim(), "5", "retired callback owner lost its linked source/code lease");
+
+    const silent = compileSelected("aot_selected_silent", [
+        "function result = aot_selected_silent()",
+        "  str2num('1+2');",
+        "  result = 9;",
+        "end",
+        ""
+    ].join("\n"));
+    const silentResult = invoke(silent);
+    assert.equal(silentResult.status, 0, `silent selected source failed:\n${silentResult.stderr}`);
+    assert.equal(silentResult.stdout.trim(), "9", "source evaluation leaked a suppressed intermediate result");
+}
+
 let failed = false;
 try {
-    if (superOnly || superPackageOnly) verifyAotSuperConstructors({ directory, compile, invoke, packageOnly: superPackageOnly });
+    if (selectedSourceOnly) verifySelectedSourceEvaluation();
+    else if (superOnly || superPackageOnly) verifyAotSuperConstructors({ directory, compile, invoke, packageOnly: superPackageOnly });
     else if (!javaOnly) verifyPureAotSources();
     if (javaRequested) verifyCapturedJavaPolicy();
 
-    console.log(superPackageOnly
+    console.log(selectedSourceOnly
+        ? "selected linked AOT SourceEvaluation, str2num, local/private, escaped callback, and silent-result witnesses passed"
+        : superPackageOnly
         ? "linked AOT packaged superclass witness passed"
         : superOnly
         ? "linked AOT superclass witnesses passed"

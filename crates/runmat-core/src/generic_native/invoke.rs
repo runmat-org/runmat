@@ -298,6 +298,7 @@ pub(crate) async fn invoke(
                 runmat_value::BoundFunctionAuthority::Portable { origin } => registry
                     .get_current(runmat_hir::FunctionId(binding.function))
                     .filter(|body| body.binding_origin == Some(*origin)),
+                runmat_value::BoundFunctionAuthority::SelectedNative { .. } => None,
             };
             let native_selected_body = is_native
                 && selected_body.is_some_and(|body| {
@@ -357,6 +358,7 @@ pub(crate) async fn invoke(
                             .get(function)
                             .is_some_and(|body| body.binding_origin == Some(*origin)),
                     ),
+                    runmat_value::BoundFunctionAuthority::SelectedNative { .. } => (None, false),
                 };
                 if let Some(owner) = constructor_owner.filter(|_| {
                     (super_body_owner.is_some()

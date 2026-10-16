@@ -15,6 +15,7 @@ pub struct LinkedProcessImage {
     pub argv: *const *const std::ffi::c_char,
     pub function_resolver: *const std::ffi::c_void,
     pub builtin_resolver: *const std::ffi::c_void,
+    pub source_service_factory: *const std::ffi::c_void,
     pub native_ir: *const u8,
     pub native_ir_len: u64,
     pub program: *const u8,
@@ -41,6 +42,32 @@ pub struct AotProcessInput {
     pub mex_artifacts: Vec<u8>,
     pub java_artifacts: Vec<u8>,
     pub python_artifacts: Vec<u8>,
+}
+
+/// Process bytes copied from the generated, qualified linked-image entry.
+/// Owned inputs supplied by embedders cannot construct this authority.
+pub(crate) struct LinkedAotProcessInput {
+    input: AotProcessInput,
+    source_service_factory: *const std::ffi::c_void,
+}
+
+impl LinkedAotProcessInput {
+    /// # Safety
+    /// The caller must be `runmat_aot_main` reached from the generated launcher
+    /// linked with the exact verified selected object and runtime closure.
+    pub(crate) unsafe fn from_verified_link(
+        input: AotProcessInput,
+        source_service_factory: *const std::ffi::c_void,
+    ) -> Self {
+        Self {
+            input,
+            source_service_factory,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (AotProcessInput, *const std::ffi::c_void) {
+        (self.input, self.source_service_factory)
+    }
 }
 
 impl AotProcessInput {
@@ -203,6 +230,7 @@ mod tests {
                 argv: std::ptr::null(),
                 function_resolver: std::ptr::null(),
                 builtin_resolver: std::ptr::null(),
+                source_service_factory: std::ptr::null(),
                 native_ir: std::ptr::null(),
                 native_ir_len: 1,
                 program: one.as_ptr(),
@@ -227,6 +255,7 @@ mod tests {
                 argv: std::ptr::null(),
                 function_resolver: std::ptr::dangling(),
                 builtin_resolver: std::ptr::dangling(),
+                source_service_factory: std::ptr::null(),
                 native_ir: one.as_ptr(),
                 native_ir_len: (512_u64 * 1024 * 1024) + 1,
                 program: one.as_ptr(),

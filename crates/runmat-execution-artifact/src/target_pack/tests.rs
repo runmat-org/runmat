@@ -2,12 +2,68 @@ use super::*;
 use crate::{ObjectDescriptor, ObjectNamespace};
 use runmat_execution::host::*;
 use runmat_types::{CapabilitySet, EffectKind, EffectSet};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 #[path = "tests/product.rs"]
 mod product;
 
 fn id(name: &str) -> ComponentId {
     ComponentId::new(name).unwrap()
+}
+
+#[test]
+fn source_evaluation_requires_exact_service_bytes_and_independent_host_grant() {
+    let (mut manifest, mut required, contents) = fixture();
+    let kind = TargetPackServiceKind::SourceEvaluation;
+    let abi = runmat_execution::host::native_source_evaluation_service_abi();
+    required.required_services.insert(kind);
+    assert!(manifest.select(&required, None).is_err());
+
+    let host = runmat_types::CapabilityRequirement::HostRuntime;
+    required.reached_capabilities.0.insert(host);
+    manifest.capabilities.0.insert(host);
+    required.authorized_runtime_capabilities.0.insert(host);
+    manifest.services.push(TargetPackService {
+        kind,
+        abi,
+        component: id("runtime"),
+        behavior: TargetPackServiceBehavior::DeterministicDeclared,
+    });
+    assert!(
+        manifest.select(&required, None).is_err(),
+        "ABI is not granted by inventory"
+    );
+    required.service_abis.insert(kind, abi);
+    let mut denied = required.clone();
+    denied.authorized_runtime_capabilities.0.remove(&host);
+    assert!(
+        manifest.select(&denied, None).is_err(),
+        "caller grant is mandatory"
+    );
+
+    let selected = manifest.select(&required, None).unwrap();
+    assert!(selected.runtime_components().contains(&id("runtime")));
+    let retained = selected
+        .components()
+        .iter()
+        .map(|id| (id.clone(), contents[id].clone()))
+        .collect();
+    let binding = manifest
+        .verify_selected_bytes(&selected, &retained)
+        .unwrap()
+        .selected_product_binding()
+        .unwrap();
+    assert_eq!(binding.required_services, BTreeSet::from([kind]));
+    assert_eq!(binding.services.len(), 1);
+    assert_eq!(
+        binding.services[0].implementation,
+        Digest::sha256(b"runtime")
+    );
+    let mut missing = binding.clone();
+    missing.services.clear();
+    assert!(
+        missing.validate().is_err(),
+        "selected binding cannot omit service"
+    );
 }
 
 #[test]
@@ -176,6 +232,7 @@ fn fixture() -> (
         reached_capabilities: CapabilitySet::default(),
         authorized_runtime_capabilities: CapabilitySet::default(),
         effects: EffectSet::default(),
+        required_services: BTreeSet::new(),
         components: vec![id("a")],
         platform_service_abi: service_abi,
         service_abis: [(

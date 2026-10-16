@@ -177,6 +177,12 @@ impl TypedProducer {
         let mut exact_power = false;
         let mut exact_product = false;
         let mut implementations = Vec::new();
+        let mut represented = Vec::new();
+        represented.try_reserve_exact(
+            selected
+                .as_ref()
+                .map_or(plan.operations.len(), HashSet::len),
+        )?;
         for (index, operation) in plan.operations.iter().enumerate() {
             if selected
                 .as_ref()
@@ -266,7 +272,8 @@ impl TypedProducer {
                     Ok((*id, format!("{operation_name}({expression})")))
                 })
                 .collect::<Result<HashMap<_, _>>>()?;
-            let resolved = program::resolved_operation(program, operation)?;
+            let resolved =
+                program::resolved_operation_with_represented(program, operation, &represented)?;
             let expression =
                 if let Some(runmat_types::ScalarOperation::RealArithmetic(recipe)) = resolved {
                     let [left, right] = inputs.as_slice() else {
@@ -332,6 +339,18 @@ impl TypedProducer {
                 word_expressions.insert(output, bits);
             }
             expressions.insert(output, temporary);
+            if let Some(fact) = program::represented_output_fact(program, operation, resolved)? {
+                let position = represented
+                    .binary_search_by_key(&output, |(id, _)| *id)
+                    .unwrap_or_else(|position| position);
+                if represented
+                    .get(position)
+                    .is_some_and(|(id, _)| *id == output)
+                {
+                    return Err(anyhow!("scalar producer has duplicate output identity"));
+                }
+                represented.insert(position, (output, fact));
+            }
         }
 
         if let Some(roots) = roots {

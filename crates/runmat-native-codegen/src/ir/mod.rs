@@ -6,6 +6,7 @@ mod ids;
 mod instruction;
 mod liveness;
 mod print;
+mod source_services;
 mod super_constructor;
 mod types;
 mod value;

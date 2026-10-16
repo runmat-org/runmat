@@ -1,6 +1,7 @@
 mod component;
 mod envelope;
 mod identity;
+mod linked_native_import;
 mod manifest;
 mod revision;
 mod section;
@@ -14,6 +15,10 @@ pub use envelope::{
     ExecutableUnitAdmission, ExecutableUnitEnvelope, EXECUTABLE_UNIT_ENVELOPE_MAX_BYTES,
 };
 pub use identity::{ExecutableEntrypointKind, ExecutableIdentity, ValidatedExecutableEntrypoint};
+pub use linked_native_import::{
+    decode_linked_native_imports, linked_native_import_section, LinkedNativeStaticImport,
+    LINKED_NATIVE_IMPORT_SCHEMA, LINKED_NATIVE_IMPORT_SECTION,
+};
 pub use manifest::{ExecutableUnitManifest, EXECUTABLE_UNIT_SCHEMA_VERSION};
 pub use revision::ExecutableComponentRevisions;
 pub use section::{

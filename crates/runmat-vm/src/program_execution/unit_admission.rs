@@ -33,6 +33,7 @@ pub struct AdmittedExecutableUnit {
     source_map: runmat_execution::ExecutableSourceMapV2,
     entrypoint: entrypoint::AdmittedEntrypoint,
     static_imports: Vec<runmat_execution::executable::ExecutableStaticImport>,
+    linked_native_imports: Vec<runmat_execution::executable::LinkedNativeStaticImport>,
 }
 
 /// Executable unit bound to one exact runtime source owner. The runtime must
@@ -48,6 +49,7 @@ pub struct RuntimeBoundExecutableUnit {
     runtime: runmat_runtime::context::RuntimeContext,
     entrypoint: RuntimeBoundEntrypoint,
     static_imports: Vec<runmat_execution::executable::ExecutableStaticImport>,
+    linked_native_imports: Vec<runmat_execution::executable::LinkedNativeStaticImport>,
     declares_interop: bool,
 }
 
@@ -97,6 +99,22 @@ impl AdmittedExecutableUnit {
         &self.static_imports
     }
 
+    pub fn linked_native_imports(
+        &self,
+    ) -> &[runmat_execution::executable::LinkedNativeStaticImport] {
+        &self.linked_native_imports
+    }
+
+    pub fn fingerprint_imports(&self) -> Vec<runmat_execution::executable::ExecutableStaticImport> {
+        self.static_imports
+            .iter()
+            .copied()
+            .chain(self.linked_native_imports.iter().copied().map(
+                runmat_execution::executable::LinkedNativeStaticImport::fingerprint_projection,
+            ))
+            .collect()
+    }
+
     /// Canonical per-origin definition fingerprints for this admitted unit.
     /// Portable source positions are resolved through this unit's validated
     /// source map and cannot be confused with immutable source identity.
@@ -109,7 +127,7 @@ impl AdmittedExecutableUnit {
         crate::bytecode::program::retained_artifacts::admitted_callable_origin_fingerprints_with_imports(
             &self.registry,
             &self.source_map,
-            &self.static_imports,
+            &self.fingerprint_imports(),
         )
     }
 
@@ -125,7 +143,7 @@ impl AdmittedExecutableUnit {
         crate::bytecode::program::retained_artifacts::admitted_semantic_body_digests(
             &self.registry,
             &self.source_map,
-            &self.static_imports,
+            &self.fingerprint_imports(),
         )
     }
 
@@ -278,6 +296,7 @@ impl AdmittedExecutableUnit {
                 runtime,
                 entrypoint,
                 static_imports: self.static_imports,
+                linked_native_imports: self.linked_native_imports,
                 declares_interop: has_interop,
             },
             interop_receipt,
@@ -328,6 +347,12 @@ impl RuntimeBoundExecutableUnit {
 
     pub fn static_imports(&self) -> &[runmat_execution::executable::ExecutableStaticImport] {
         &self.static_imports
+    }
+
+    pub fn linked_native_imports(
+        &self,
+    ) -> &[runmat_execution::executable::LinkedNativeStaticImport] {
+        &self.linked_native_imports
     }
 
     pub fn declares_interop(&self) -> bool {
@@ -452,6 +477,7 @@ impl RuntimeBoundExecutableUnit {
             runtime,
             entrypoint: RuntimeBoundEntrypoint::Fixture,
             static_imports: Vec::new(),
+            linked_native_imports: Vec::new(),
             declares_interop: false,
         }
     }
@@ -558,6 +584,7 @@ pub fn admit_executable_unit(
         .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?;
     let supported_sections = runmat_execution::ExecutableSectionSupport::known([
         runmat_execution::executable::KnownExecutableSection::StaticImports,
+        runmat_execution::executable::KnownExecutableSection::LinkedNativeImports,
     ])
     .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?;
     envelope
@@ -603,7 +630,8 @@ pub fn admit_executable_unit(
         .map_err(ExecutableUnitAdmissionError::InvalidSourceMap)?;
     let entrypoint =
         entrypoint::admit(&envelope, &mir, &bytecode, &registry, &layout, &source_map)?;
-    let static_imports = static_import::admit(&envelope, &bytecode, &registry)?;
+    let (static_imports, linked_native_imports) =
+        static_import::admit(&envelope, &bytecode, &registry)?;
     Ok(AdmittedExecutableUnit {
         envelope,
         canonical_v3: Arc::from(bytes),
@@ -613,6 +641,7 @@ pub fn admit_executable_unit(
         source_map,
         entrypoint,
         static_imports,
+        linked_native_imports,
     })
 }
 

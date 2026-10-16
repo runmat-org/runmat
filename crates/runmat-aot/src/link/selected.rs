@@ -130,9 +130,11 @@ fn plan(
                 let path = admission.hosted_dependencies.get(&key).ok_or_else(|| {
                     invalid("hosted native input lacks an explicit qualified sysroot locator")
                 })?;
-                super::native_input::validate_hosted_dependency(
+                super::native_input::validate_qualified_hosted_dependency(
                     inputs.sysroot_file(path)?,
                     target,
+                    &key,
+                    path,
                 )?;
                 reached_hosted.insert(key);
                 tokens.push(

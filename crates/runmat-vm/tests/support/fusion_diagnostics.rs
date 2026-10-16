@@ -13,9 +13,10 @@ struct FusionLogger;
 impl log::Log for FusionLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
         metadata.level() <= log::Level::Debug
-            && metadata
+            && (metadata
                 .target()
                 .starts_with("runmat_accelerate::fusion_exec")
+                || metadata.target().starts_with("runmat_vm::accel::fusion"))
     }
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {

@@ -196,6 +196,18 @@ async fn invoke_resolved_object_method_in_scope(
             );
             execute_callable_descriptor_in_context(&selected, descriptor).await
         }
+        ResolvedObjectMethodTarget::RegisteredBound(binding) => {
+            let descriptor = CallableDescriptor::bound(
+                binding.clone(),
+                arguments,
+                requested_outputs,
+                CallableCallKind::Direct,
+            );
+            match runtime {
+                Some(runtime) => execute_callable_descriptor_in_context(runtime, descriptor).await,
+                None => execute_callable_descriptor(descriptor).await,
+            }
+        }
         ResolvedObjectMethodTarget::Named(callable) => {
             let descriptor = CallableDescriptor::resolved(
                 callable.clone(),

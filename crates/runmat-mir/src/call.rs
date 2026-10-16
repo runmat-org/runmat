@@ -3,7 +3,7 @@ use runmat_builtins::{
     BuiltinEffects, BuiltinEnvironmentEffect, BuiltinPurity, BuiltinSemanticKind,
     BuiltinWorkspaceEffect,
 };
-use runmat_hir::{
+use runmat_types::{
     CallSyntax, CallableFallbackPolicy, CallableIdentity, RequestedOutputCount, Span,
 };
 use runmat_types::{ClassIdentity, MethodName};
@@ -18,7 +18,7 @@ pub struct MirCall {
     pub requested_outputs: RequestedOutputCount,
     pub fallback_policy: CallableFallbackPolicy,
     #[serde(default)]
-    pub workspace_first_name: Option<runmat_hir::SymbolName>,
+    pub workspace_first_name: Option<runmat_types::SymbolName>,
     #[serde(default)]
     pub bare_identifier: bool,
     pub async_behavior: AsyncBehaviorFact,
@@ -61,7 +61,7 @@ pub enum MirExpansionSource {
     ReturnedOutputs(MirOperand),
     Member {
         base: MirOperand,
-        member: runmat_hir::MemberName,
+        member: runmat_types::MemberName,
     },
     DynamicMember {
         base: MirOperand,

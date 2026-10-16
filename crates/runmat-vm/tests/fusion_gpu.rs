@@ -51,6 +51,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::{Mutex, OnceLock};
 
+#[path = "support/fusion_diagnostics.rs"]
+mod fusion_diagnostics;
+
 fn interpret(
     bytecode: &runmat_vm::Bytecode,
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
@@ -4633,6 +4636,7 @@ fn image_normalize_feasibility_admits_native_single_without_widening_other_fusio
 #[test]
 fn image_normalize_matches_cpu() {
     gc_test_context(|| {
+        fusion_diagnostics::enable();
         use runmat_accelerate::FusionKind;
         let source = r#"
         B = 4; H = 8; W = 12;

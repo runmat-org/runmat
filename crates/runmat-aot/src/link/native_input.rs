@@ -9,6 +9,11 @@ pub(crate) enum NativeImagePurpose {
 use object::Object;
 use runmat_execution::host::{NativeArchitecture, NativeObjectFormat, NativeTargetIdentity};
 use runmat_execution_artifact::target_pack::TargetPackComponentKind;
+use runmat_package::NormalizedRelativePath;
+
+use super::toolchain::NativeHostedDependency;
+
+mod tapi;
 
 pub(crate) fn validate(
     bytes: &[u8],
@@ -78,6 +83,18 @@ fn validate_object(bytes: &[u8], target: &NativeTargetIdentity) -> AotResult<()>
         ));
     }
     Ok(())
+}
+
+pub(crate) fn validate_qualified_hosted_dependency(
+    bytes: &[u8],
+    target: &NativeTargetIdentity,
+    dependency: &NativeHostedDependency,
+    locator: &NormalizedRelativePath,
+) -> AotResult<()> {
+    if locator.as_str().ends_with(".tbd") || bytes.starts_with(b"--- !tapi-tbd") {
+        return tapi::validate(bytes, target, dependency, locator);
+    }
+    validate_hosted_dependency(bytes, target)
 }
 
 pub(crate) fn validate_hosted_dependency(

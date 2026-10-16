@@ -165,6 +165,7 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &groups,
         &[bridge],
         &[],
+        &[],
         &stores
     ));
 
@@ -174,6 +175,7 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &mut missing_node,
         &groups,
         &[bridge],
+        &[],
         &[],
         &stores
     ));
@@ -191,6 +193,7 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &groups,
         &[bridge],
         &[],
+        &[],
         &stores
     ));
 
@@ -204,6 +207,7 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &mut graph.clone(),
         &groups,
         &[bridge],
+        &[],
         &[],
         &wrong_pc
     ));
@@ -450,6 +454,68 @@ fn only_terminal_reduction_throw_or_suspend_effects_cross_private_bridge() {
             "effect role must remain exact"
         );
     }
+}
+
+#[test]
+fn sealed_vecdim_controls_precede_image_group_recognition() {
+    let bytecode = compile_source(
+        "imgs = rand(2, 4, 5, 'single'); mu = mean(imgs, [2 3], 'native'); \
+         sigma = sqrt(mean((imgs - mu).^2, [2 3], 'native') + single(1e-6)); \
+         out = ((imgs - mu) ./ sigma) .^ single(1.8);",
+    );
+    let controls = literal_controls(&bytecode);
+    let (raw, stores) = crate::accel::graph::build_accel_graph_with_stores(
+        &bytecode.instructions,
+        &bytecode.var_types,
+    );
+    let vecdim = raw
+        .nodes
+        .iter()
+        .filter(|node| {
+            node.outputs.iter().any(|id| {
+                raw.exact_folded_literal_array(*id).is_some_and(|value| {
+                    matches!(value, Value::Tensor(tensor)
+                        if tensor.shape() == [1, 2]
+                        && tensor.as_f64_slice() == Some(&[2.0, 3.0][..]))
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(vecdim.len(), 2, "two exact source axis constructors");
+    for node in &vecdim {
+        let output = node.outputs[0];
+        let binding = raw.var_binding(output).expect("raw private value binding");
+        assert_eq!(raw.node_binding(node.id), Some(binding));
+        let control = controls
+            .iter()
+            .find(|control| control.slot == binding.index && control.producer_pc == node.span.end)
+            .expect("sealed unique StoreVar/LoadVar source-use certificate");
+        assert!(
+            matches!(bytecode.instructions[control.store_pc], Instr::StoreVar(slot) if slot == control.slot)
+        );
+        assert!(
+            matches!(bytecode.instructions[control.load_pc], Instr::LoadVar(slot) if slot == control.slot)
+        );
+        assert!(stores
+            .iter()
+            .any(|store| store.pc == control.store_pc && store.value_id == output));
+        assert!(
+            raw.folded_literal_numeric_vector(output).is_none(),
+            "bound source cannot substitute"
+        );
+    }
+    let (_, graph) = bytecode.prepare_vm_fusion_plan();
+    let graph = graph.expect("checked selected source graph");
+    for node in &vecdim {
+        let output = node.outputs[0];
+        assert!(graph.var_binding(output).is_none());
+        assert!(graph.node_binding(node.id).is_none());
+        assert!(graph.folded_literal_numeric_vector(output).is_some());
+    }
+    assert!(graph
+        .detect_fusion_groups()
+        .iter()
+        .any(|group| group.kind == FusionKind::ImageNormalize));
 }
 
 #[test]

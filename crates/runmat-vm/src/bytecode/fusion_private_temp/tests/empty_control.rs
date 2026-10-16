@@ -40,6 +40,7 @@ fn selected_empty_axis_control_projects_only_its_private_binding() {
         &groups,
         &bridges(&bytecode),
         &[],
+        &[],
         &stores,
     ));
     let selected_groups = bytecode.runtime_fusion_groups_for_graph(&bound_control);

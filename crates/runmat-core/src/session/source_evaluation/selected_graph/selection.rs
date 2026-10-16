@@ -180,7 +180,10 @@ impl SelectedLocalBody {
                 } else if body
                     .selected_executable_product
                     .as_ref()
-                    .is_some_and(|product| !product.static_imports().is_empty())
+                    .is_some_and(|product| {
+                        !product.static_imports().is_empty()
+                            || !product.linked_native_imports().is_empty()
+                    })
                 {
                     return Err(invalid("dependency lacks its sealed static capture"));
                 }

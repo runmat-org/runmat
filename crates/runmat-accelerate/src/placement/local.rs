@@ -309,6 +309,7 @@ pub(crate) fn plan_local(
         request,
         policy,
         None,
+        None,
         multi::LocalCpuAdmission::Legacy,
         LocalProviderAdmission::Available,
     )
@@ -319,6 +320,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
     request: LocalPlacementRequest<'_>,
     policy: PlacementPolicy,
     vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    vm_decline: Option<&runmat_runtime::context::VmFusionDeclineRight>,
     cpu_admission: multi::LocalCpuAdmission,
     implementation: LocalProviderAdmission,
 ) -> Result<LocalPlacementOutcome, Box<runmat_runtime::RuntimeError>> {
@@ -352,6 +354,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
             observation_contract,
             prepared_authority,
             vm_right,
+            vm_decline,
             family,
             cpu,
             cpu_admission,

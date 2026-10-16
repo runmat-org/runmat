@@ -1,10 +1,10 @@
-use runmat_execution::{Digest, ProgramEnvironment};
+use runmat_execution::ProgramEnvironment;
 
 use crate::CompatMode;
 
 pub const PROGRAM_SEMANTIC_SCHEMA: u32 = runmat_execution::schema::PROGRAM_SEMANTIC_SCHEMA_V2;
 pub const PROGRAM_COMPILER_SCHEMA: u32 = runmat_execution::schema::PROGRAM_COMPILER_SCHEMA_V2;
-pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = 1;
+pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = runmat_runtime::native::PROGRAM_RUNTIME_ABI_SCHEMA;
 
 /// Describe the portable execution compatibility of this RunMat runtime.
 ///
@@ -13,13 +13,8 @@ pub const PROGRAM_RUNTIME_ABI_SCHEMA: u32 = 1;
 /// not invent placeholder fingerprints.
 pub fn program_environment(compatibility_mode: CompatMode) -> ProgramEnvironment {
     runmat_runtime::builtins::wasm_registry::register_all();
-    let runtime_fingerprint = Digest::sha256(format!(
-        "runmat-runtime-compatibility-v2\0{}\0{}\0{}",
-        env!("CARGO_PKG_VERSION"),
-        PROGRAM_RUNTIME_ABI_SCHEMA,
-        runmat_runtime::native::native_abi_contract_fingerprint()
-    ));
-    let catalog_fingerprint = Digest::from_bytes(runmat_builtins::builtin_catalog_fingerprint());
+    let runtime_fingerprint = runmat_runtime::native::linked_runtime_fingerprint();
+    let catalog_fingerprint = runmat_runtime::native::linked_catalog_fingerprint();
     ProgramEnvironment::new(
         PROGRAM_SEMANTIC_SCHEMA,
         PROGRAM_COMPILER_SCHEMA,

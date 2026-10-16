@@ -54,6 +54,16 @@ impl BuiltinContractDeclaration {
     }
 
     pub fn capability_set(self) -> CapabilitySet {
-        CapabilitySet(self.capabilities.iter().copied().collect())
+        let mut capabilities = CapabilitySet(self.capabilities.iter().copied().collect());
+        if matches!(
+            self.workspace_effect,
+            Some(
+                BuiltinWorkspaceEffect::DynamicEval
+                    | BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
+            )
+        ) {
+            capabilities.0.insert(CapabilityRequirement::HostRuntime);
+        }
+        capabilities
     }
 }

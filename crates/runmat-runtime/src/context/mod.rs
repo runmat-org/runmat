@@ -174,9 +174,9 @@ pub use user_path::{
     UserPathSnapshot,
 };
 pub use vm_fusion_completion::{
-    RuntimeVmFusionGenerationPermit, VmFusionCompletionRight, VmFusionFeedbackLease,
-    VmFusionInstalledRegion, VmFusionRegionRegistration, VmFusionSemanticIdentity,
-    VmFusionSessionRegistration,
+    RuntimeVmFusionGenerationPermit, VmFusionCompletionRight, VmFusionDeclineRight,
+    VmFusionFeedbackLease, VmFusionInstalledRegion, VmFusionRegionRegistration,
+    VmFusionSemanticIdentity, VmFusionSessionRegistration,
 };
 pub use vm_fusion_host_route::{VmFusionHostInstruction, VmFusionHostOperation, VmFusionHostRoute};
 

@@ -162,6 +162,7 @@ pub(super) fn choose(
             },
             prepared_authority: None,
             vm_right,
+            vm_decline: None,
             family: ProviderOperationFamily::Fusion,
             cpu: cpu.into(),
             cpu_admission,

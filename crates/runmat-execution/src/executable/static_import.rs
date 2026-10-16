@@ -71,6 +71,9 @@ pub enum ExecutableStaticCaller {
 pub enum ExecutableStaticImportKind {
     ExplicitExternal,
     PartitionedDefinition,
+    /// Internal semantic-fingerprint projection of the separately versioned
+    /// linked-native section. Never encoded in the VM static-import section.
+    LinkedNative,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -107,7 +110,10 @@ pub fn selected_unit_content_digest(
             optional_sections: manifest
                 .optional_sections
                 .iter()
-                .filter(|section| section.name != STATIC_IMPORT_SECTION)
+                .filter(|section| {
+                    section.name != STATIC_IMPORT_SECTION
+                        && section.name != super::linked_native_import::LINKED_NATIVE_IMPORT_SECTION
+                })
                 .collect(),
         },
         payloads: &envelope.payloads,
@@ -195,6 +201,12 @@ fn import_key(
 fn validate_imports(imports: &[ExecutableStaticImport]) -> Result<(), ContractError> {
     let mut sites = BTreeSet::new();
     for import in imports {
+        if import.kind == ExecutableStaticImportKind::LinkedNative {
+            return Err(ContractError::invalid(
+                "executable.static_imports",
+                "linked-native edges require their own typed section",
+            ));
+        }
         let key = import_key(import);
         if sites.last().is_some_and(|previous| previous >= &key) || !sites.insert(key) {
             return Err(ContractError::invalid(

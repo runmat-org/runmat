@@ -34,8 +34,8 @@ mod selected_class_product;
 #[path = "program/selected_executable_product.rs"]
 mod selected_executable_product;
 pub use selected_executable_product::{
-    SelectedExecutableProduct, SelectedStaticCapture, SelectedStaticProductDependency,
-    SelectedStaticProductTarget, SelectedStaticSiteOwner,
+    SelectedExecutableProduct, SelectedLinkedNativeSite, SelectedStaticCapture,
+    SelectedStaticProductDependency, SelectedStaticProductTarget, SelectedStaticSiteOwner,
 };
 #[path = "program/selected_registry.rs"]
 mod selected_registry;
@@ -603,7 +603,7 @@ pub struct FunctionArgumentValidation {
 #[derive(Debug, Clone, Default)]
 pub struct FunctionRegistry {
     data: std::rc::Rc<FunctionRegistryData>,
-    static_overlay: Option<std::sync::Arc<StaticDefinitionOverlay>>,
+    static_overlay: Option<std::rc::Rc<StaticDefinitionOverlay>>,
 }
 
 /// Exact bodies reachable through a retained bound value. Dynamic name calls
@@ -1044,7 +1044,7 @@ impl FunctionRegistry {
         authority.local_lease(function.0)?;
         Some(Self {
             data: std::rc::Rc::clone(&self.data),
-            static_overlay: Some(std::sync::Arc::new(StaticDefinitionOverlay {
+            static_overlay: Some(std::rc::Rc::new(StaticDefinitionOverlay {
                 authority: authority.clone(),
                 execution_stacks: OnceLock::new(),
             })),

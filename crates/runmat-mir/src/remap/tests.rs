@@ -1,6 +1,6 @@
 use super::*;
 
-use runmat_hir::{FunctionAbi, MemberName, Span};
+use runmat_types::{FunctionAbi, MemberName, Span};
 use runmat_types::{ObjectIndexingContext, SequenceUse};
 
 fn external(function: FunctionId) -> CallableIdentity {

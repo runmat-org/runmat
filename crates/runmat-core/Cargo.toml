@@ -14,7 +14,7 @@ runmat-types = { workspace = true }
 runmat-lexer = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-execution = { workspace = true }

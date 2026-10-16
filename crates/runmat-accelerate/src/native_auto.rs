@@ -1369,6 +1369,7 @@ impl NativeAutoOffload {
                 },
                 PlacementPolicy::default(),
                 None,
+                None,
                 cpu_admission,
                 LocalProviderAdmission::Available,
             ) {

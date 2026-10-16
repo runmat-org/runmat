@@ -152,7 +152,7 @@ pub async fn evaluate_numeric_text_source_in_context(
         select_product: Some(&requires_product),
         selected_sources: super::super::eval_static_selection::EvalSelectedSources::default(),
     });
-    let Some(compiled) = (match compiled {
+    let Some(mut compiled) = (match compiled {
         Ok(compiled) => compiled,
         Err(failure)
             if failure.source_kind == Some(runmat_hir::HirErrorKind::UndefinedVariable) =>
@@ -163,6 +163,79 @@ pub async fn evaluate_numeric_text_source_in_context(
     }) else {
         return empty_result();
     };
+    // The first compile supplies compiler-owned HIR site IDs. Only an exact
+    // direct entry-frontier call can be observed before this expression runs;
+    // a wider expression keeps ordinary dynamic resolution because earlier
+    // elements or arguments may change path/source state. Selection itself is
+    // the shared live observer and Core still seals the resulting import.
+    if method == NumericTextEvaluation::All {
+        if let DynamicEvalCompiled::Selected(provisional) = &compiled {
+            let sites = provisional
+                .hir
+                .entrypoints
+                .first()
+                .and_then(|entry| {
+                    provisional
+                        .hir
+                        .functions
+                        .iter()
+                        .find(|function| function.id == entry.target)
+                })
+                .map(super::super::eval_hir_sites::numeric_text_entry_sites)
+                .unwrap_or_default();
+            if !sites.is_empty() {
+                let alias_floor = provisional
+                    .canonical_bytecode
+                    .function_registry
+                    .functions
+                    .keys()
+                    .chain(
+                        provisional
+                            .canonical_bytecode
+                            .layout
+                            .iter()
+                            .flat_map(|layout| layout.functions.keys()),
+                    )
+                    .map(|function| function.0)
+                    .max()
+                    .unwrap_or(0);
+                let selected_sources = super::super::eval_static_selection::select_sites(
+                    &sites,
+                    alias_floor,
+                    &runtime,
+                    function_registry,
+                    &names,
+                    &selected.port,
+                )
+                .await?;
+                if !selected_sources.sources.is_empty()
+                    || !selected_sources.external_sources.is_empty()
+                    || !selected_sources.natives.is_empty()
+                {
+                    compiled =
+                        compile_dynamic_workspace_eval_inner_typed(DynamicEvalCompileRequest {
+                            builtin: "str2num",
+                            ast: &ast,
+                            workspace_bindings: &names,
+                            lowering_bindings: &names,
+                            function_registry,
+                            source_ref: Some(source_ref),
+                            requested_outputs: 1,
+                            result_capture: DynamicEvalResultCapture::ExpressionStatement,
+                            select_product: Some(&requires_product),
+                            selected_sources,
+                        })?
+                        .ok_or_else(|| {
+                            runmat_runtime::build_runtime_error(
+                                "selected numeric text has no compiler product",
+                            )
+                            .with_identifier("RunMat:SourceEvaluation:MissingNumericResult")
+                            .build()
+                        })?;
+                }
+            }
+        }
+    }
     let (bytecode, result_slot, runtime, _publication) = match compiled {
         DynamicEvalCompiled::Ordinary(bytecode, result_slot) => (
             *bytecode,
@@ -197,7 +270,7 @@ pub async fn evaluate_numeric_text_source_in_context(
     // No base-workspace snapshot or projection is created here. Ordinary
     // local expression slots live only for this interpreter invocation.
     let admission =
-        crate::runtime::workspace::transactional_workspace_admission_with_global_bindings(
+        crate::runtime::workspace::detached_transactional_workspace_admission_with_global_bindings(
             names,
             assigned,
             runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
@@ -295,5 +368,28 @@ mod tests {
             [crate::bytecode::Instr::EmitStackTop { label: crate::bytecode::EmitLabel::InternalCapture }, crate::bytecode::Instr::StoreVar(output)]
                 if *output == slot
         )));
+    }
+
+    #[test]
+    fn selected_numeric_entry_is_the_exact_first_hir_call() {
+        let bindings = HashMap::new();
+        let sites = |source| {
+            let ast = parse_dynamic_eval("str2num", source).expect("numeric text syntax");
+            let lowered = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::new(&bindings))
+                .expect("numeric text HIR");
+            let entry = lowered.assembly.entrypoints.first().expect("script entry");
+            let function = lowered
+                .assembly
+                .functions
+                .iter()
+                .find(|function| function.id == entry.target)
+                .expect("entry body");
+            super::super::super::eval_hir_sites::numeric_text_entry_sites(function)
+        };
+        let direct = sites("[selected_numeric(2)]");
+        assert_eq!(direct.len(), 1);
+        assert_eq!(direct[0].name, "selected_numeric");
+        assert!(sites("[1, selected_numeric(2)]").is_empty());
+        assert!(sites("[selected_numeric(other_call())]").is_empty());
     }
 }

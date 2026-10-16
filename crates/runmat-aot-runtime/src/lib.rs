@@ -12,7 +12,12 @@ mod native_interfaces;
 mod output;
 mod program;
 mod python_artifacts;
+#[cfg(feature = "source-evaluation")]
+mod source_service;
 
+/// Owned embedding input remains host-unselected; it cannot mint a selected
+/// linked-image grant from decoded bytes.
+pub use execute::execute;
 pub use input::AotProcessInput;
 
 pub const EXIT_SUCCESS: i32 = 0;
@@ -31,7 +36,9 @@ pub const EXIT_RUNTIME_FAILURE: i32 = 70;
 /// the exact `AotFunctionResolver` and `AotBuiltinResolver` ABIs. Every non-null
 /// function address must identify Runtime's exact `NativeEntryPoint` ABI, and
 /// every non-null builtin address must identify an immutable
-/// `RuntimeBuiltinBinding`. Each payload pointer must address an immutable
+/// `RuntimeBuiltinBinding`. A non-null `source_service_factory` must identify
+/// the optional factory symbol from the exact verified linked runtime archive.
+/// Each payload pointer must address an immutable
 /// allocation of its corresponding declared length for the duration of this
 /// call. When `argc` is positive, `argv` must be a valid C argument vector.
 #[no_mangle]
@@ -40,6 +47,7 @@ pub unsafe extern "C" fn runmat_aot_main(
     argv: *const *const std::ffi::c_char,
     function_resolver: *const std::ffi::c_void,
     builtin_resolver: *const std::ffi::c_void,
+    source_service_factory: *const std::ffi::c_void,
     native_ir: *const u8,
     native_ir_len: u64,
     program: *const u8,
@@ -89,6 +97,7 @@ pub unsafe extern "C" fn runmat_aot_main(
             argv,
             function_resolver,
             builtin_resolver,
+            source_service_factory,
             native_ir,
             native_ir_len,
             program,
@@ -107,7 +116,12 @@ pub unsafe extern "C" fn runmat_aot_main(
         // SAFETY: the raw pointers were checked and converted to bounded borrows
         // above; both resolver contracts are documented on this entry.
         let input = unsafe { AotProcessInput::copy_from_linked(linked) }?;
-        execute::execute(input)
+        // SAFETY: this entry is only called by the generated launcher in the
+        // qualified linked image described by this function's safety contract.
+        let linked = unsafe {
+            input::LinkedAotProcessInput::from_verified_link(input, source_service_factory)
+        };
+        execute::execute_linked(linked)
     }));
     match result {
         Ok(Ok(())) => EXIT_SUCCESS,

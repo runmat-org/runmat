@@ -278,6 +278,44 @@ pub(super) fn all_unresolved_sites(function: &HirFunction) -> Vec<HirUnresolvedS
     sites
 }
 
+/// Numeric text is one bracketed expression. Its direct single-element call
+/// is an entry-frontier site only when every argument is inert; selection is
+/// still performed by the live source observer, never by this HIR inspection.
+/// A wider matrix expression can have earlier effects, so it keeps ordinary
+/// dynamic dispatch instead of borrowing entry-time source authority.
+pub(super) fn numeric_text_entry_sites(function: &HirFunction) -> Vec<HirUnresolvedSite> {
+    if function.kind != FunctionKind::SyntheticEntrypoint {
+        return Vec::new();
+    }
+    let [statement] = function.body.statements.as_slice() else {
+        return Vec::new();
+    };
+    let HirStmtKind::ExprStmt(expression, _) = &statement.kind else {
+        return Vec::new();
+    };
+    let HirExprKind::Tensor(rows) = &expression.kind else {
+        return Vec::new();
+    };
+    let [row] = rows.as_slice() else {
+        return Vec::new();
+    };
+    let [element] = row.as_slice() else {
+        return Vec::new();
+    };
+    let HirExprKind::Call(call) = &element.kind else {
+        return Vec::new();
+    };
+    if !matches!(&call.callee, HirCallableRef::Unresolved(_))
+        || !call.args.iter().all(side_effect_free_input)
+    {
+        return Vec::new();
+    }
+    all_unresolved_sites(function)
+        .into_iter()
+        .filter(|site| site.expression == element.id)
+        .collect()
+}
+
 fn direct_pre_effect_call(function: &HirFunction) -> Option<&HirExpr> {
     // Named/nested callable issuance is not its invocation boundary. A later
     // caller may mutate source state before entering it, and argument

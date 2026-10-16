@@ -10,6 +10,7 @@ fn declaration(name: &str, parent: Option<&str>) -> CheckedClassRegistration {
             methods: HashMap::new(),
             events: HashMap::new(),
         },
+        method_bindings: HashMap::new(),
         is_sealed: false,
         is_abstract: false,
         enumerations: Vec::new(),

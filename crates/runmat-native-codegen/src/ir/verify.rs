@@ -161,10 +161,10 @@ impl NativeAssembly {
                 }
                 let expected_effect = match binding.kind {
                     NativeInheritedStorageKind::Global => {
-                        runmat_hir::WorkspaceEffect::MutatesGlobal
+                        runmat_types::WorkspaceEffect::MutatesGlobal
                     }
                     NativeInheritedStorageKind::Persistent => {
-                        runmat_hir::WorkspaceEffect::MutatesPersistent
+                        runmat_types::WorkspaceEffect::MutatesPersistent
                     }
                 };
                 let declared = owner.locals.iter().any(|local| {

@@ -27,7 +27,8 @@ use super::{
 #[path = "dynamic_admission/static_import.rs"]
 mod static_import;
 use static_import::{
-    selected_pending_closure_imports_with_preselected, selected_static_imports_with_preselected,
+    selected_pending_closure_imports_with_preselected_and_linked,
+    selected_static_imports_with_preselected_and_linked, static_capture_with_linked,
 };
 pub(in crate::session) use static_import::{
     selected_static_imports, static_capture, SelectedStaticTarget,
@@ -206,12 +207,24 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 return Err(invalid("precompiled source repeats a compiler alias"));
             }
         }
-        let static_imports = selected_static_imports_with_preselected(
+        let mut linked_native = std::collections::HashMap::new();
+        for source in &product.selected_external_sources {
+            if !source.target.is_live()
+                || linked_native
+                    .insert(source.alias, source.target.clone())
+                    .is_some()
+                || preselected.contains_key(&source.alias)
+            {
+                return Err(invalid("precompiled linked source lost its exact target"));
+            }
+        }
+        let static_imports = selected_static_imports_with_preselected_and_linked(
             &unit,
             inherited,
             &original_ids,
             &HashSet::new(),
             &preselected,
+            &linked_native,
         )
         .map_err(invalid)?;
         let serialize = |interop| {
@@ -265,6 +278,21 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
             let section =
                 runmat_execution::executable::static_import_section(static_imports.imports)
                     .map_err(|error| invalid(error.to_string()))?;
+            envelope.manifest.optional_sections.push(section);
+            envelope
+                .manifest
+                .optional_sections
+                .sort_by(|left, right| left.name.cmp(&right.name));
+        }
+        if !static_imports.linked_native.is_empty() {
+            let section = runmat_execution::executable::linked_native_import_section(
+                static_imports
+                    .linked_native
+                    .iter()
+                    .map(|target| target.import)
+                    .collect(),
+            )
+            .map_err(|error| invalid(error.to_string()))?;
             envelope.manifest.optional_sections.push(section);
             envelope
                 .manifest
@@ -355,8 +383,12 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 Some(DynamicEvalAdmissionPort::new(Rc::new(self.clone()))),
             )
             .map_err(invalid)?;
-        let capture = static_capture(Rc::clone(&selected_product), &static_imports.targets)
-            .map_err(invalid)?;
+        let capture = static_capture_with_linked(
+            Rc::clone(&selected_product),
+            &static_imports.targets,
+            &static_imports.linked_native,
+        )
+        .map_err(invalid)?;
         active
             .attach_current_selected_executable_product(
                 current_ids.iter().copied(),
@@ -366,6 +398,29 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
         active
             .attach_current_selected_static_capture(current_ids.iter().copied(), &capture)
             .map_err(invalid)?;
+        let mut script_sites = std::collections::HashMap::new();
+        for target in &static_imports.targets {
+            if target.import.caller == runmat_execution::executable::ExecutableStaticCaller::Script
+                && script_sites
+                    .insert(target.import.site, target.binding.clone())
+                    .is_some()
+            {
+                return Err(invalid("selected script repeats a VM static site"));
+            }
+        }
+        for site in capture.linked_native() {
+            if site.import().caller == runmat_execution::executable::ExecutableStaticCaller::Script
+            {
+                let target = site
+                    .binding()
+                    .ok_or_else(|| invalid("linked-native script site source retired"))?;
+                if script_sites.insert(site.import().site, target).is_some() {
+                    return Err(invalid(
+                        "selected script repeats a VM or native static site",
+                    ));
+                }
+            }
+        }
         execution_bytecode.function_registry = active.clone();
         for id in &current_ids {
             if let (Some(selected), Some(bound)) = (
@@ -415,6 +470,19 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
             selected_runtime
                 .with_service_ports(ports)
                 .with_selected_graph_program(SelectedGraphSnapshot::program(primary, &evaluator))
+        };
+        let selected_runtime = if script_sites.is_empty() {
+            selected_runtime
+        } else {
+            let script_sites = Rc::new(script_sites);
+            let retained_capture = Rc::clone(&capture);
+            selected_runtime.with_selected_static_site_resolver(Rc::new(move |caller, site| {
+                let _retained_code = &retained_capture;
+                Ok(caller
+                    .is_none()
+                    .then(|| script_sites.get(&site).cloned())
+                    .flatten())
+            }))
         };
         Ok(AdmittedDynamicEval {
             runtime: selected_runtime,
@@ -536,6 +604,23 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 return Err(invalid("late source repeats one compiler alias"));
             }
         }
+        let mut linked_native = std::collections::HashMap::new();
+        for source in &product.selected_external_sources {
+            if !source.target.is_live()
+                || linked_native
+                    .insert(source.alias, source.target.clone())
+                    .is_some()
+                || preselected.contains_key(&source.alias)
+            {
+                return Err(invalid("late linked source lost its exact target"));
+            }
+            let mut fingerprint = runmat_execution::DigestStream::new();
+            fingerprint.update(b"runmat-pending-linked-native-basis-v1\0");
+            fingerprint.update(source.target.selected_product().bytes());
+            fingerprint.update(source.target.native_ir().bytes());
+            fingerprint.update(source.target.native_function().bytes());
+            selected_basis.push((source.alias, fingerprint.finish()));
+        }
         let mut partitioned_siblings = HashSet::new();
         for sibling in siblings {
             if sibling.local_function == local_function
@@ -618,6 +703,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
             if preselected
                 .insert(sibling.local_function, (binding, view))
                 .is_some()
+                || linked_native.contains_key(&sibling.local_function)
             {
                 return Err(invalid(
                     "pending Local dependency conflicts with a source alias",
@@ -660,12 +746,13 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
         )
         .map_err(invalid)?
         .seal();
-        let static_imports = selected_pending_closure_imports_with_preselected(
+        let static_imports = selected_pending_closure_imports_with_preselected_and_linked(
             &unit,
             compile_inherited,
             local_function,
             &partitioned_siblings,
             &preselected,
+            &linked_native,
         )
         .map_err(invalid)?;
         for sibling in siblings {
@@ -721,6 +808,21 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
             let section =
                 runmat_execution::executable::static_import_section(static_imports.imports)
                     .map_err(|error| invalid(error.to_string()))?;
+            envelope.manifest.optional_sections.push(section);
+            envelope
+                .manifest
+                .optional_sections
+                .sort_by(|left, right| left.name.cmp(&right.name));
+        }
+        if !static_imports.linked_native.is_empty() {
+            let section = runmat_execution::executable::linked_native_import_section(
+                static_imports
+                    .linked_native
+                    .iter()
+                    .map(|target| target.import)
+                    .collect(),
+            )
+            .map_err(|error| invalid(error.to_string()))?;
             envelope.manifest.optional_sections.push(section);
             envelope
                 .manifest
@@ -795,8 +897,12 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
                 Some(DynamicEvalAdmissionPort::new(Rc::new(self.clone()))),
             )
             .map_err(invalid)?;
-        let capture = static_capture(Rc::clone(&selected_product), &static_imports.targets)
-            .map_err(invalid)?;
+        let capture = static_capture_with_linked(
+            Rc::clone(&selected_product),
+            &static_imports.targets,
+            &static_imports.linked_native,
+        )
+        .map_err(invalid)?;
         let mut selected = FunctionRegistry::default();
         // This registry is private to admission. Its temporary name index is
         // never published; only the validated body moves to the unnamed view.

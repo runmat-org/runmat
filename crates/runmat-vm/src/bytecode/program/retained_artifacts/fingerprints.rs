@@ -283,7 +283,11 @@ fn fingerprint_body_with_imports(
             match imported_sites.get(&site) {
                 Some(import)
                     if (kind == function_remap::FunctionReferenceKind::External
-                        && import.kind == ExecutableStaticImportKind::ExplicitExternal)
+                        && matches!(
+                            import.kind,
+                            ExecutableStaticImportKind::ExplicitExternal
+                                | ExecutableStaticImportKind::LinkedNative
+                        ))
                         || (kind == function_remap::FunctionReferenceKind::Local
                             && import.kind
                                 == ExecutableStaticImportKind::PartitionedDefinition) =>

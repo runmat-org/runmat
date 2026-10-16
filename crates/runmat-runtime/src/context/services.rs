@@ -1,7 +1,7 @@
 use super::{
     RuntimeCallableArtifactService, RuntimeCapability, RuntimeCapabilityError,
-    RuntimeGraphicsPresentationService, RuntimePreferenceService, RuntimeSourceEvaluationService,
-    RuntimeTcpService, RuntimeTimingService, RuntimeUserPathService,
+    RuntimeGraphicsPresentationService, RuntimePreferenceService, RuntimeTcpService,
+    RuntimeTimingService, RuntimeUserPathService,
 };
 use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
@@ -1249,6 +1249,7 @@ pub struct RuntimeServicePorts {
     timing: Rc<dyn RuntimeTimingService>,
     local_tasks: Option<Rc<dyn super::RuntimeLocalTaskService>>,
     source_evaluation: Option<Rc<dyn super::RuntimeSourceEvaluationService>>,
+    selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
     callable_artifacts: Option<Rc<dyn super::RuntimeCallableArtifactService>>,
 }
 
@@ -1282,6 +1283,7 @@ impl Default for RuntimeServicePorts {
             timing: super::timing::platform_service(),
             local_tasks: None,
             source_evaluation: None,
+            selected_source_evaluation: None,
             callable_artifacts: None,
         }
     }
@@ -1322,6 +1324,10 @@ impl std::fmt::Debug for RuntimeServicePorts {
         debug.field("timing", &"installed");
         debug.field("local_tasks", &self.local_tasks.is_some());
         debug.field("source_evaluation", &self.source_evaluation.is_some());
+        debug.field(
+            "selected_source_evaluation",
+            &self.selected_source_evaluation.is_some(),
+        );
         debug.field("callable_artifacts", &self.callable_artifacts.is_some());
         #[cfg(not(target_arch = "wasm32"))]
         debug.field("process", &self.process.is_some());
@@ -1441,14 +1447,66 @@ impl RuntimeServicePorts {
         RuntimeBaseWorkspaceService,
         BaseWorkspace
     );
-    port_accessors!(
-        with_source_evaluation,
-        source_evaluation,
-        require_source_evaluation,
-        source_evaluation,
-        RuntimeSourceEvaluationService,
-        SourceEvaluation
-    );
+    pub fn with_source_evaluation(
+        mut self,
+        service: Rc<dyn super::RuntimeSourceEvaluationService>,
+    ) -> Self {
+        self.source_evaluation = Some(service);
+        self.selected_source_evaluation = None;
+        self
+    }
+
+    pub fn with_selected_source_evaluation(
+        mut self,
+        service: Rc<dyn super::RuntimeSourceEvaluationService>,
+        issuer: runmat_execution::host::VerifiedNativeServiceIssuer,
+    ) -> Result<Self, crate::RuntimeError> {
+        if issuer.binding().kind
+            != runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation
+        {
+            return Err(crate::build_runtime_error(
+                "selected source-evaluation port has a different service identity",
+            )
+            .with_identifier("RunMat:SourceEvaluation:SelectedServiceMismatch")
+            .build());
+        }
+        self.source_evaluation = Some(service);
+        self.selected_source_evaluation = Some(issuer);
+        Ok(self)
+    }
+
+    pub fn source_evaluation(&self) -> Option<&Rc<dyn super::RuntimeSourceEvaluationService>> {
+        self.source_evaluation.as_ref()
+    }
+
+    pub fn require_source_evaluation(
+        &self,
+        operation: impl Into<String>,
+    ) -> Result<&Rc<dyn super::RuntimeSourceEvaluationService>, super::RuntimeCapabilityError> {
+        self.source_evaluation.as_ref().ok_or_else(|| {
+            super::RuntimeCapabilityError::new(
+                super::RuntimeCapability::SourceEvaluation,
+                operation,
+            )
+        })
+    }
+
+    pub fn require_selected_source_evaluation(
+        &self,
+        expected: &runmat_execution::host::VerifiedNativeServiceIssuer,
+    ) -> Result<&Rc<dyn super::RuntimeSourceEvaluationService>, crate::RuntimeError> {
+        let service = self
+            .require_source_evaluation("execute selected native source evaluation")
+            .map_err(super::RuntimeCapabilityError::into_runtime_error)?;
+        if self.selected_source_evaluation.as_ref() != Some(expected) {
+            return Err(crate::build_runtime_error(
+                "live source-evaluation port differs from the verified selected service issuer",
+            )
+            .with_identifier("RunMat:SourceEvaluation:SelectedServiceMismatch")
+            .build());
+        }
+        Ok(service)
+    }
     port_accessors!(
         with_callable_artifacts,
         callable_artifacts,

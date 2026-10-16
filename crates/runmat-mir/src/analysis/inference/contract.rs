@@ -70,9 +70,14 @@ pub(crate) fn statement_contract(
         }
         MirStmtKind::PlaceMutation(_) => (EffectSet::default(), CapabilitySet::default()),
         MirStmtKind::StatementOutput(_) => crate::statement_declared_requirements(&statement.kind),
-        MirStmtKind::WorkspaceEffect { .. } => (
+        MirStmtKind::WorkspaceEffect { effect, .. } => (
             EffectSet([EffectKind::WorkspaceWrite].into_iter().collect()),
-            CapabilitySet::default(),
+            CapabilitySet(
+                (*effect == runmat_hir::WorkspaceEffect::DynamicEval)
+                    .then_some(CapabilityRequirement::HostRuntime)
+                    .into_iter()
+                    .collect(),
+            ),
         ),
         MirStmtKind::EnvironmentEffect(_) => (
             EffectSet([EffectKind::EnvironmentWrite].into_iter().collect()),
@@ -119,6 +124,15 @@ fn rvalue_contract_with_facts_and_literals(
             effects = inference.effects;
             extend_declared_call_effects(&mut effects, &call.effects);
             capabilities = inference.capabilities;
+            if matches!(
+                call.workspace_effect,
+                Some(
+                    runmat_builtins::BuiltinWorkspaceEffect::DynamicEval
+                        | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
+                )
+            ) {
+                capabilities.0.insert(CapabilityRequirement::HostRuntime);
+            }
         }
         MirRvalue::Index { base, .. } => {
             if let runmat_types::ValueKindFact::Callable(callable) =

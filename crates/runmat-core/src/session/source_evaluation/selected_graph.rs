@@ -322,7 +322,7 @@ impl SelectedGraphPrimary {
             .and_then(|function| self.selected_registry.get_current(*function))
             .and_then(|body| body.selected_executable_product.as_ref());
         let imports = if selected_ids.is_empty() {
-            &[][..]
+            Vec::new()
         } else {
             let product = product.ok_or("current selected body has no exact code product")?;
             if selected_ids.iter().any(|function| {
@@ -333,11 +333,11 @@ impl SelectedGraphPrimary {
             }) {
                 return Err("current selected bodies do not share one exact code product".into());
             }
-            product.static_imports()
+            product.fingerprint_imports()
         };
         let mut selected_fingerprints = self
             .selected_registry
-            .selected_runtime_body_fingerprints_with_imports(&selected_ids, imports)
+            .selected_runtime_body_fingerprints_with_imports(&selected_ids, &imports)
             .map_err(|error| error.to_string())?;
         for (function, origin) in selected_functions {
             let (checked_origin, fingerprint) = selected_fingerprints

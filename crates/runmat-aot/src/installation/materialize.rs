@@ -46,6 +46,7 @@ struct InstalledRecord {
     bytes: Vec<u8>,
     identity: Digest,
     revoked: Cell<bool>,
+    source_evaluation_issuer: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
 }
 
 /// A revocable physical receipt, not a runtime grant or loaded provider proof.
@@ -88,6 +89,19 @@ impl InstalledNativeArtifact {
             .target
             .require_host_executable()
             .map_err(invalid)
+    }
+
+    /// Host composition may pair this verified installed-service identity with
+    /// the actual live evaluator only after revalidating current installation.
+    /// The host, not this receipt, vouches for the evaluator's implementation.
+    pub fn source_evaluation_issuer(
+        &self,
+    ) -> AotResult<runmat_execution::host::VerifiedNativeServiceIssuer> {
+        self.require_current_host()?;
+        self.0
+            .source_evaluation_issuer
+            .clone()
+            .ok_or_else(|| invalid("installation has no selected source-evaluation service"))
     }
 }
 
@@ -230,6 +244,7 @@ fn receipt(
         bytes: bundle.bytes,
         identity: bundle.identity,
         revoked: Cell::new(false),
+        source_evaluation_issuer: bundle.source_evaluation_issuer,
     }));
     installed
         .revalidate()

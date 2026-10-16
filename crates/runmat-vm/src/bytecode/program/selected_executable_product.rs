@@ -29,6 +29,7 @@ pub struct SelectedExecutableProduct {
     body_fingerprints: HashMap<FunctionBindingOrigin, String>,
     body_semantic_digests: HashMap<FunctionBindingOrigin, SelectedBodySemanticDigest>,
     static_imports: Vec<ExecutableStaticImport>,
+    linked_native_imports: Vec<runmat_execution::executable::LinkedNativeStaticImport>,
     foreign_basis: Option<Digest>,
     interop_receipt: Option<std::rc::Rc<crate::SelectedUnitInteropReceipt>>,
     /// Original invocation's finite dynamic-source authority. This local
@@ -68,6 +69,54 @@ pub struct SelectedStaticCapture {
     product: Rc<SelectedExecutableProduct>,
     dependencies: Rc<Vec<SelectedStaticProductDependency>>,
     site_owners: Rc<Vec<SelectedStaticSiteOwner>>,
+    linked_native: Rc<Vec<SelectedLinkedNativeSite>>,
+}
+
+/// A source- and loaded-code-pinned native site in the separately tagged
+/// linked-native section. It carries no fabricated VM definition lease.
+#[derive(Clone, Debug)]
+pub struct SelectedLinkedNativeSite {
+    caller: Rc<SelectedExecutableProduct>,
+    import: runmat_execution::executable::LinkedNativeStaticImport,
+    target: runmat_runtime::user_functions::SelectedExternalSourceTarget,
+}
+
+impl SelectedLinkedNativeSite {
+    pub fn new(
+        caller: Rc<SelectedExecutableProduct>,
+        import: runmat_execution::executable::LinkedNativeStaticImport,
+        target: runmat_runtime::user_functions::SelectedExternalSourceTarget,
+    ) -> Result<Self, &'static str> {
+        if !target.same_issuing_session(caller.source_owner())
+            || target.linked_import(import.caller, import.site) != Some(import)
+            || !caller.linked_native_imports().contains(&import)
+        {
+            return Err("linked-native site differs from its sealed code/source target");
+        }
+        Ok(Self {
+            caller,
+            import,
+            target,
+        })
+    }
+
+    pub fn caller(&self) -> &Rc<SelectedExecutableProduct> {
+        &self.caller
+    }
+
+    pub fn import(&self) -> runmat_execution::executable::LinkedNativeStaticImport {
+        self.import
+    }
+
+    pub fn same_target(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.caller, &other.caller)
+            && self.import == other.import
+            && self.target.same_loaded_target(&other.target)
+    }
+
+    pub fn binding(&self) -> Option<runmat_value::BoundFunctionBinding> {
+        self.target.binding()
+    }
 }
 
 /// Unmetered body-owned target facts. Counted leases are issued only into an
@@ -85,11 +134,61 @@ impl SelectedStaticCapture {
         product: Rc<SelectedExecutableProduct>,
         dependencies: Vec<SelectedStaticProductDependency>,
     ) -> Result<Rc<Self>, &'static str> {
+        Self::admit_with_linked(product, dependencies, Vec::new())
+    }
+
+    pub fn admit_with_linked(
+        product: Rc<SelectedExecutableProduct>,
+        dependencies: Vec<SelectedStaticProductDependency>,
+        linked_native: Vec<SelectedLinkedNativeSite>,
+    ) -> Result<Rc<Self>, &'static str> {
         validate_static_product_dependencies(&product, &dependencies)?;
+        let mut linked_by_caller = HashMap::<usize, HashSet<_>>::new();
+        for site in &linked_native {
+            if !site.target.same_issuing_session(product.source_owner())
+                || site
+                    .target
+                    .linked_import(site.import.caller, site.import.site)
+                    != Some(site.import)
+                || !site.caller.linked_native_imports().contains(&site.import)
+                || !linked_by_caller
+                    .entry(Rc::as_ptr(&site.caller) as usize)
+                    .or_default()
+                    .insert((site.import.caller, site.import.site))
+            {
+                return Err("selected linked-native capture has a contradictory site");
+            }
+        }
+        let mut pending = vec![Rc::clone(&product)];
+        let mut visited = HashSet::new();
+        while let Some(caller) = pending.pop() {
+            let key = Rc::as_ptr(&caller) as usize;
+            if !visited.insert(key) {
+                continue;
+            }
+            let captured = linked_by_caller.get(&key);
+            if caller.linked_native_imports().len() != captured.map_or(0, HashSet::len)
+                || caller.linked_native_imports().iter().any(|import| {
+                    captured.is_none_or(|sites| !sites.contains(&(import.caller, import.site)))
+                })
+            {
+                return Err("selected linked-native capture omits a sealed site");
+            }
+            pending.extend(
+                dependencies
+                    .iter()
+                    .filter(|edge| Rc::ptr_eq(edge.caller(), &caller))
+                    .map(|edge| Rc::clone(edge.target())),
+            );
+        }
+        if linked_by_caller.keys().any(|key| !visited.contains(key)) {
+            return Err("selected linked-native capture omits or repeats a sealed site");
+        }
         Ok(Rc::new(Self {
             product,
             dependencies: Rc::new(dependencies),
             site_owners: Rc::new(Vec::new()),
+            linked_native: Rc::new(linked_native),
         }))
     }
 
@@ -112,6 +211,7 @@ impl SelectedStaticCapture {
             product: Rc::clone(&self.product),
             dependencies: Rc::clone(&self.dependencies),
             site_owners: Rc::new(site_owners),
+            linked_native: Rc::clone(&self.linked_native),
         }))
     }
 
@@ -134,6 +234,10 @@ impl SelectedStaticCapture {
 
     pub fn dependencies(&self) -> &[SelectedStaticProductDependency] {
         &self.dependencies
+    }
+
+    pub fn linked_native(&self) -> &[SelectedLinkedNativeSite] {
+        &self.linked_native
     }
 }
 
@@ -362,6 +466,22 @@ impl SelectedExecutableProduct {
         &self.static_imports
     }
 
+    pub fn linked_native_imports(
+        &self,
+    ) -> &[runmat_execution::executable::LinkedNativeStaticImport] {
+        &self.linked_native_imports
+    }
+
+    pub fn fingerprint_imports(&self) -> Vec<ExecutableStaticImport> {
+        self.static_imports
+            .iter()
+            .copied()
+            .chain(self.linked_native_imports.iter().copied().map(
+                runmat_execution::executable::LinkedNativeStaticImport::fingerprint_projection,
+            ))
+            .collect()
+    }
+
     pub fn admit(
         canonical_v3: Arc<[u8]>,
         source_owner: SelectedProgramSourceOwner,
@@ -440,6 +560,7 @@ impl SelectedExecutableProduct {
             .admitted_semantic_body_digests()
             .map_err(|error| error.to_string())?;
         let static_imports = admitted.static_imports().to_vec();
+        let linked_native_imports = admitted.linked_native_imports().to_vec();
         Ok(Rc::new(Self {
             full_digest: Digest::sha256(&canonical_v3),
             canonical_v3,
@@ -449,6 +570,7 @@ impl SelectedExecutableProduct {
             body_fingerprints,
             body_semantic_digests,
             static_imports,
+            linked_native_imports,
             foreign_basis,
             interop_receipt,
             dynamic_admission,
@@ -514,7 +636,7 @@ impl FunctionRegistry {
     ) -> Result<(), &'static str> {
         let ids = ids.into_iter().collect::<Vec<_>>();
         let selected_fingerprints = self
-            .selected_runtime_body_fingerprints_with_imports(&ids, product.static_imports())
+            .selected_runtime_body_fingerprints_with_imports(&ids, &product.fingerprint_imports())
             .map_err(|_| "selected executable body fingerprints are invalid")?;
         for id in &ids {
             let body = self

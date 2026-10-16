@@ -63,7 +63,7 @@ runmat-java = { workspace = true }
 runmat-process-host = { workspace = true }
 runmat-parser = { version = "=0.6.2", path = "../runmat-parser" }
 runmat-hir = { version = "=0.6.2", path = "../runmat-hir" }
-runmat-mir = { version = "=0.6.2", path = "../runmat-mir" }
+runmat-mir = { version = "=0.6.2", path = "../runmat-mir", features = ["compiler"] }
 runmat-vm = { version = "=0.6.2", path = "../runmat-vm" }
 runmat-runtime = { version = "=0.6.2", path = "../runmat-runtime" }
 runmat-gc = { version = "=0.6.2", path = "../runmat-gc" }

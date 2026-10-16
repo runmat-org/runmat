@@ -300,6 +300,9 @@ pub async fn observe_runtime_name(
     ) {
         if let Some(method) = crate::dispatcher::observe_registered_static_method(name) {
             let source = match &method.target {
+                crate::dispatcher::RegisteredStaticMethodTarget::Bound(binding) => {
+                    source_function_for(binding.function)
+                }
                 crate::dispatcher::RegisteredStaticMethodTarget::Semantic(function) => {
                     source_function_for(*function)
                 }

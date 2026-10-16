@@ -2,7 +2,7 @@ use crate::{
     BasicBlock, BasicBlockId, CatchScopeId, MirLocalId, MirOutputTarget, MirPlace,
     MirStatementOutputLabel, MirStatementOutputSource, MirStmtKind,
 };
-use runmat_hir::{BindingId, FunctionAbi, FunctionId, Span};
+use runmat_types::{BindingId, FunctionAbi, FunctionId, Span};
 use serde::{Deserialize, Serialize};
 
 #[path = "body/expression_region_validation/mod.rs"]

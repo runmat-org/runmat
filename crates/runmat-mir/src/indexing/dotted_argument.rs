@@ -1,5 +1,5 @@
 use crate::{MirCallArg, MirExpressionRegion, MirExpressionStep, MirOperand, MirSequenceLocalId};
-use runmat_hir::Span;
+use runmat_types::Span;
 use serde::{Deserialize, Serialize};
 
 /// One source-level dotted-call argument. The expression preparation remains

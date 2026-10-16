@@ -1,5 +1,5 @@
 use crate::{MirExpressionStep, MirOperand, MirSequenceLocalId};
-use runmat_hir::{IndexKind, IndexResultContext};
+use runmat_types::{IndexKind, IndexResultContext};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -17,10 +17,10 @@ pub struct MirSubscriptChain {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MirSubscriptStep {
     Index(MirIndexing),
-    Member(runmat_hir::MemberName),
+    Member(runmat_types::MemberName),
     DynamicMember(MirOperand),
     DottedInvoke {
-        member: runmat_hir::MemberName,
+        member: runmat_types::MemberName,
         arguments: Vec<MirDottedInvokeArgument>,
         semantic_fallback: Option<runmat_types::CallableIdentity>,
     },
@@ -57,17 +57,17 @@ impl fmt::Display for MirSubscriptChainError {
 
 impl MirSubscriptStep {
     /// Call syntax represented directly by this ordered path step.
-    pub fn call_syntax(&self) -> Option<runmat_hir::CallSyntax> {
+    pub fn call_syntax(&self) -> Option<runmat_types::CallSyntax> {
         match self {
-            Self::DottedInvoke { .. } => Some(runmat_hir::CallSyntax::DottedInvoke),
+            Self::DottedInvoke { .. } => Some(runmat_types::CallSyntax::DottedInvoke),
             Self::Index(_) | Self::Member(_) | Self::DynamicMember(_) => None,
         }
     }
 
     /// Fallback policy attached to a call-shaped ordered path step.
-    pub fn fallback_policy(&self) -> Option<runmat_hir::CallableFallbackPolicy> {
+    pub fn fallback_policy(&self) -> Option<runmat_types::CallableFallbackPolicy> {
         match self {
-            Self::DottedInvoke { .. } => Some(runmat_hir::CallableFallbackPolicy::ObjectDispatch),
+            Self::DottedInvoke { .. } => Some(runmat_types::CallableFallbackPolicy::ObjectDispatch),
             Self::Index(_) | Self::Member(_) | Self::DynamicMember(_) => None,
         }
     }

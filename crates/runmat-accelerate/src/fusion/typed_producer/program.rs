@@ -26,15 +26,32 @@ impl TypedProducer {
         // Check every selected advertised binding before an unsupported legacy
         // operation can request fallback. A malformed closed binding must not
         // execute through its older expression template by accident.
-        let resolved = plan
-            .operations
-            .iter()
-            .enumerate()
-            .filter(|(index, _)| selected.contains(index))
-            .map(|(index, operation)| {
-                resolved_operation(program, operation).map(|identity| (index, identity))
-            })
-            .collect::<Result<HashMap<_, _>>>()?;
+        let mut resolved = HashMap::new();
+        let mut represented = Vec::new();
+        represented.try_reserve_exact(selected.len())?;
+        for (index, operation) in plan.operations.iter().enumerate() {
+            if !selected.contains(&index) {
+                continue;
+            }
+            let identity = resolved_operation_with_represented(program, operation, &represented)?;
+            if let Some(output) = match operation {
+                FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => output,
+            } {
+                if let Some(fact) = represented_output_fact(program, operation, identity)? {
+                    let position = represented
+                        .binary_search_by_key(output, |(id, _)| *id)
+                        .unwrap_or_else(|position| position);
+                    if represented
+                        .get(position)
+                        .is_some_and(|(id, _)| id == output)
+                    {
+                        return Err(anyhow!("scalar producer has duplicate output identity"));
+                    }
+                    represented.insert(position, (*output, fact));
+                }
+            }
+            resolved.insert(index, identity);
+        }
         if resolved.values().any(Option::is_none) {
             return Ok(None);
         }
@@ -374,6 +391,14 @@ pub(super) fn resolved_operation(
     program: &ResolvedProgram,
     operation: &FusionOp,
 ) -> Result<Option<ScalarOperation>> {
+    resolved_operation_with_represented(program, operation, &[])
+}
+
+pub(super) fn resolved_operation_with_represented(
+    program: &ResolvedProgram,
+    operation: &FusionOp,
+    represented: &[(ValueId, runmat_types::ValueFact)],
+) -> Result<Option<ScalarOperation>> {
     let (inputs, output) = match operation {
         FusionOp::Primitive { inputs, output, .. } | FusionOp::Builtin { inputs, output, .. } => {
             (inputs, output)
@@ -409,7 +434,8 @@ pub(super) fn resolved_operation(
             == Some(ScalarOperation::Operator(OperatorKind::MatrixMultiply))
             && matches!(inputs.as_slice(), [left, right]
                 if runmat_types::RealFloatingRecipe::for_facts(OperatorKind::MatrixMultiply,
-                    program.fact(*left)?, program.fact(*right)?).is_some());
+                    represented_operand(program, represented, *left)?,
+                    represented_operand(program, represented, *right)?).is_some());
         if !scalar_matrix_product
             && !declaration
                 .spec
@@ -445,8 +471,8 @@ pub(super) fn resolved_operation(
             };
             let recipe = runmat_types::RealFloatingRecipe::for_facts(
                 operator,
-                program.fact(*left)?,
-                program.fact(*right)?,
+                represented_operand(program, represented, *left)?,
+                represented_operand(program, represented, *right)?,
             )
             .ok_or_else(|| anyhow!("real scalar arithmetic has no represented recipe"))?;
             if class != recipe.result_class() {
@@ -478,6 +504,61 @@ pub(super) fn resolved_operation(
         }
     }
     Ok(identity)
+}
+
+fn represented_operand<'a>(
+    program: &'a ResolvedProgram,
+    represented: &'a [(ValueId, runmat_types::ValueFact)],
+    id: ValueId,
+) -> Result<&'a runmat_types::ValueFact> {
+    match represented.binary_search_by_key(&id, |(value_id, _)| *value_id) {
+        Ok(index) => Ok(&represented[index].1),
+        Err(_) => program.fact(id),
+    }
+}
+
+/// A selected scalar operation constructs a fresh numerical intermediate;
+/// its eventual host/device publication is not an input-carrier fact. This
+/// local projection is shared by checked receipts and legacy WGSL emission.
+pub(super) fn represented_output_fact(
+    program: &ResolvedProgram,
+    operation: &FusionOp,
+    identity: Option<ScalarOperation>,
+) -> Result<Option<runmat_types::ValueFact>> {
+    let output = match operation {
+        FusionOp::Primitive { output, .. } | FusionOp::Builtin { output, .. } => {
+            output.ok_or_else(|| anyhow!("represented operation has no output"))?
+        }
+    };
+    let selected_legacy_template = identity.is_none()
+        && matches!(operation, FusionOp::Builtin { .. })
+        && program.declaration(output).is_some_and(|declaration| {
+            let precision = match program.floating_class(output) {
+                Ok(NumericClass::Single) => ScalarType::F32,
+                Ok(NumericClass::Double) => ScalarType::F64,
+                _ => return false,
+            };
+            declaration
+                .spec
+                .elementwise
+                .as_ref()
+                .is_some_and(|template| template.scalar_precisions.contains(&precision))
+        });
+    if identity.is_none() && !selected_legacy_template {
+        return Ok(None);
+    }
+    let mut fact = program.fact(output)?.clone();
+    if fact.numeric().is_some_and(|numeric| {
+        numeric.domain == runmat_types::NumericDomain::Real
+            && matches!(numeric.class, NumericClass::Single | NumericClass::Double)
+    }) && matches!(
+        fact.storage,
+        runmat_types::StorageFact::Unknown | runmat_types::StorageFact::Opaque
+    ) {
+        fact.storage = runmat_types::StorageFact::Dense;
+        return Ok(Some(fact));
+    }
+    Ok(None)
 }
 
 /// The only WGSL renderer for represented real arithmetic, shared by checked

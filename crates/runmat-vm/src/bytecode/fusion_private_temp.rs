@@ -28,6 +28,15 @@ pub(crate) struct FusionPrivateEmptyControl {
     pub consumer_pc: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FusionPrivateLiteralControl {
+    pub slot: usize,
+    pub store_pc: usize,
+    pub load_pc: usize,
+    pub producer_pc: usize,
+    pub consumer_pc: usize,
+}
+
 #[path = "fusion_private_temp/coalesce.rs"]
 mod coalesce;
 #[path = "fusion_private_temp/projection_index.rs"]
@@ -41,6 +50,10 @@ pub(crate) fn bridges(bytecode: &Bytecode) -> Vec<FusionPrivateTempBridge> {
 
 pub(crate) fn empty_controls(bytecode: &Bytecode) -> Vec<FusionPrivateEmptyControl> {
     proof::empty_controls(bytecode)
+}
+
+pub(crate) fn literal_controls(bytecode: &Bytecode) -> Vec<FusionPrivateLiteralControl> {
+    proof::literal_controls(bytecode)
 }
 
 /// Only sealed, group-contained stores may be omitted by a final-only
@@ -103,6 +116,7 @@ pub(crate) fn project_private_bindings(
     groups: &[FusionGroup],
     bridges: &[FusionPrivateTempBridge],
     controls: &[FusionPrivateEmptyControl],
+    literals: &[FusionPrivateLiteralControl],
     stores: &[AccelStore],
 ) -> bool {
     let index = projection_index::ProjectionIndex::new(graph, groups, stores);
@@ -179,6 +193,72 @@ pub(crate) fn project_private_bindings(
             || !exact_empty
             || !consumer.is_reduction()
             || !consumer.inputs.contains(output)
+            || store.value_id != *output
+            || store.binding != expected
+            || graph.var_binding(*output) != Some(&expected)
+            || graph.node_binding(producer.id) != Some(&expected)
+            || index.has_other_consumer(*output, consumer.id)
+        {
+            return false;
+        }
+        graph.var_bindings.remove(output);
+        graph.node_bindings.remove(&producer.id);
+    }
+    for literal in literals {
+        // The source-use certificate is intentionally independent of the
+        // producer's graph operation. Existing private-edge/empty-control
+        // owners may already have projected this exact store.
+        if bridges.iter().any(|bridge| {
+            bridge.slot == literal.slot
+                && bridge.store_pc == literal.store_pc
+                && bridge.producer_pc == literal.producer_pc
+                && bridge.consumer_pc == literal.consumer_pc
+                && index.region_covers(bridge.producer_pc, bridge.consumer_pc)
+        }) || controls.iter().any(|control| {
+            control.slot == literal.slot
+                && control.store_pc == literal.store_pc
+                && control.producer_pc == literal.producer_pc
+                // The empty-control certificate ends at the unique reduction
+                // call. The literal-use certificate ends at its containing
+                // statement. Their exact store, producer, and private slot
+                // identify the same selected value; the reduction call must
+                // still be inside that sealed use, after its unique load.
+                && literal.load_pc < control.consumer_pc
+                && control.consumer_pc <= literal.consumer_pc
+                && index.reduction_covers(control.producer_pc, control.consumer_pc)
+        }) {
+            continue;
+        }
+        let (Some(producer_position), Some(store_position)) = (
+            index.producer_at(literal.producer_pc),
+            index.store_at(literal.store_pc),
+        ) else {
+            continue;
+        };
+        let (producer, store) = (&graph.nodes[producer_position], &stores[store_position]);
+        let [output] = producer.outputs.as_slice() else {
+            return false;
+        };
+        let expected = VarBinding {
+            kind: VarKind::Global,
+            index: literal.slot,
+        };
+        let exact_immutable = graph.exact_folded_literal_array(*output).is_some()
+            || graph.exact_folded_unary_scalar(*output).is_some();
+        if !exact_immutable {
+            // A sealed single-use temporary need not be a literal control.
+            // Leave its binding intact; it has not acquired fold authority.
+            continue;
+        }
+        let Some(consumer_position) = graph.nodes.iter().position(|node| {
+            node.span.start >= literal.load_pc
+                && node.span.end <= literal.consumer_pc
+                && node.inputs.contains(output)
+        }) else {
+            return false;
+        };
+        let consumer = &graph.nodes[consumer_position];
+        if !consumer.inputs.contains(output)
             || store.value_id != *output
             || store.binding != expected
             || graph.var_binding(*output) != Some(&expected)

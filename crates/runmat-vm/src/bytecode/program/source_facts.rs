@@ -129,7 +129,10 @@ impl FunctionRegistry {
             return body
                 .selected_executable_product
                 .as_ref()
-                .is_none_or(|product| product.static_imports().is_empty())
+                .is_none_or(|product| {
+                    product.static_imports().is_empty()
+                        && product.linked_native_imports().is_empty()
+                })
                 .then(Vec::new);
         };
         let product = body.selected_executable_product.as_ref()?;

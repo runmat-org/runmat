@@ -69,7 +69,7 @@ fn rhs_statement_is_not_replayed_when_final_truth_suspends() {
                 place: MirPlace::Local(MirLocalId(0)),
                 value: MirRvalue::Use(MirOperand::Constant(MirConstant::Number("7".into()))),
             },
-            span: runmat_hir::Span::default(),
+            span: runmat_types::Span::default(),
         }];
         state.begin_contextual_site(request).unwrap();
         assert!(matches!(

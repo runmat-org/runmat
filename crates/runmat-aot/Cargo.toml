@@ -16,7 +16,7 @@ runmat-package-cache = { workspace = true }
 runmat-package = { workspace = true }
 runmat-core = { workspace = true }
 runmat-builtins = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-native-codegen = { workspace = true, features = ["compiler"] }
 runmat-native-ffi = { workspace = true }
 runmat-mex = { workspace = true }
@@ -25,6 +25,7 @@ runmat-python = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
 target-lexicon = { workspace = true }
 tempfile = "3.12"
 thiserror = { workspace = true }

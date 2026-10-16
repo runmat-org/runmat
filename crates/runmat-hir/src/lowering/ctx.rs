@@ -490,7 +490,7 @@ impl LoweringCtx {
                 kind: FunctionKind::SyntheticEntrypoint,
                 params: vec![],
                 outputs: vec![],
-                abi: FunctionAbi::empty(),
+                abi: FunctionAbi::default(),
                 argument_validations: vec![],
                 locals,
                 captures: vec![],
@@ -3888,19 +3888,6 @@ fn def_path_for_import_path(path: &QualifiedName) -> DefPath {
         package: PackageName(package),
         module: path.clone(),
         item: vec![DefPathSegment::Function(item_name)],
-    }
-}
-
-impl FunctionAbi {
-    fn empty() -> Self {
-        Self {
-            fixed_inputs: vec![],
-            varargin: None,
-            fixed_outputs: vec![],
-            varargout: None,
-            implicit_nargin: None,
-            implicit_nargout: None,
-        }
     }
 }
 

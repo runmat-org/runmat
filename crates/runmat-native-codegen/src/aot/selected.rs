@@ -1,6 +1,6 @@
 //! Selected compilation metadata derives from authenticated retained bytes.
 //! This owner does not qualify providers, execute code, or admit a linker.
-use runmat_execution::host::NativeProductMode;
+use runmat_execution::host::{NativeProductMode, NativeSelectedProductBinding};
 use runmat_execution::Digest;
 use runmat_execution_artifact::target_pack::VerifiedTargetPackContents;
 
@@ -10,6 +10,33 @@ pub struct SelectedNativeProduct<'a> {
     contents: &'a VerifiedTargetPackContents<'a>,
     target: NativeTarget,
     product: NativeProductMode,
+}
+
+/// Selected authority from the qualified linker and generated linked-image
+/// entry, as distinct from a caller-owned decoded product declaration.
+pub struct LinkedNativeProduct {
+    binding: NativeSelectedProductBinding,
+}
+
+impl LinkedNativeProduct {
+    /// # Safety
+    /// Only the generated launcher linked with exact verified object/runtime
+    /// bytes may issue this. The binding must come from its immutable program
+    /// symbol; arbitrary decoded manifests do not establish this authority.
+    pub unsafe fn from_verified_link(
+        binding: NativeSelectedProductBinding,
+    ) -> NativeCodegenResult<Self> {
+        binding.validate().map_err(error)?;
+        Ok(Self { binding })
+    }
+
+    pub fn validate_assembly(&self, assembly: &NativeAssembly) -> NativeCodegenResult<()> {
+        validate_selected_assembly(&self.binding, assembly)
+    }
+
+    pub fn binding(&self) -> &NativeSelectedProductBinding {
+        &self.binding
+    }
 }
 
 impl<'a> SelectedNativeProduct<'a> {
@@ -41,52 +68,67 @@ impl<'a> SelectedNativeProduct<'a> {
         &self.product
     }
 
-    pub fn validate_assembly(&self, assembly: &NativeAssembly) -> NativeCodegenResult<()> {
-        assembly.verify()?;
+    pub fn source_evaluation_issuer(
+        &self,
+    ) -> NativeCodegenResult<Option<runmat_execution::host::VerifiedNativeServiceIssuer>> {
         let binding = self.product.selected().expect("selected constructor");
-        validate_native_product(
-            &self.product,
-            &assembly.target,
-            *assembly.program.runtime_fingerprint(),
-            *assembly.program.catalog_fingerprint(),
-            binding.optimization,
-        )?;
-        if assembly.target != self.target
-            || !assembly
-                .requirements
-                .capabilities
-                .0
-                .is_subset(&binding.reached_capabilities.0)
-            || assembly
-                .functions
-                .iter()
-                .flat_map(|function| &function.blocks)
-                .flat_map(|block| &block.instructions)
-                .any(|instruction| !instruction.effects.0.is_subset(&binding.reached_effects.0))
-            || assembly
-                .requirements
-                .regions
-                .iter()
-                .any(|region| !region.effects.0.is_subset(&binding.reached_effects.0))
-            || assembly
-                .requirements
-                .parallel
-                .parfor_regions
-                .iter()
-                .any(|region| !region.effects.0.is_subset(&binding.reached_effects.0))
-            || assembly
-                .requirements
-                .parallel
-                .spmd_regions
-                .iter()
-                .any(|region| !region.effects.0.is_subset(&binding.reached_effects.0))
+        if !binding
+            .required_services
+            .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
         {
-            return Err(error(
-                "Native IR requirements differ from selected pack admission",
-            ));
+            return Ok(None);
+        }
+        self.contents
+            .verified_service_issuer(
+                runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation,
+            )
+            .map(Some)
+            .map_err(error)
+    }
+
+    pub fn validate_assembly(&self, assembly: &NativeAssembly) -> NativeCodegenResult<()> {
+        validate_selected_assembly(
+            self.product.selected().expect("selected constructor"),
+            assembly,
+        )?;
+        if assembly.target != self.target {
+            return Err(error("Native IR target differs from verified pack probe"));
         }
         Ok(())
     }
+}
+
+fn validate_selected_assembly(
+    binding: &NativeSelectedProductBinding,
+    assembly: &NativeAssembly,
+) -> NativeCodegenResult<()> {
+    assembly.verify()?;
+    validate_native_product(
+        &NativeProductMode::Selected {
+            binding: Box::new(binding.clone()),
+        },
+        &assembly.target,
+        *assembly.program.runtime_fingerprint(),
+        *assembly.program.catalog_fingerprint(),
+        binding.optimization,
+    )?;
+    if assembly.target.native_parts()?.0 != &binding.target
+        || assembly.required_runtime_services() != binding.required_services
+        || !assembly
+            .requirements
+            .capabilities
+            .0
+            .is_subset(&binding.reached_capabilities.0)
+        || !assembly
+            .required_effects()
+            .0
+            .is_subset(&binding.reached_effects.0)
+    {
+        return Err(error(
+            "Native IR requirements differ from selected pack admission",
+        ));
+    }
+    Ok(())
 }
 
 /// Shared cross-envelope consistency, not authentication or execution admission.

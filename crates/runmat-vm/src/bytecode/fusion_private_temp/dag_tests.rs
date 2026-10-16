@@ -521,6 +521,7 @@ fn private_dag_rejects_graph_fanout_and_preserves_user_store() {
         &groups,
         &edges,
         &[],
+        &[],
         &stores
     ));
 

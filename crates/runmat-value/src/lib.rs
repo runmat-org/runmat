@@ -31,8 +31,8 @@ pub use callable::{
     BoundFunctionAuthority, BoundFunctionBinding, BoundFunctionHandle, BoundFunctionHandleData,
     CallableInstanceId, CallableInstanceKey, Closure, ClosureData, FunctionDefinitionLease,
     FunctionDefinitionOwner, LexicalEnvironment, LocalExport, NamedFunctionHandle,
-    SelectedReceiverDeclarationKey, SelectedReceiverDeclarationSeal, SelectedStaticSiteBinding,
-    StaticSiteDefinitionLease,
+    SelectedNativeFunctionLease, SelectedReceiverDeclarationKey, SelectedReceiverDeclarationSeal,
+    SelectedStaticSiteBinding, StaticSiteDefinitionLease,
 };
 pub use display::{
     format_number, get_display_format, select_display_format_owner, set_display_format,

@@ -83,7 +83,7 @@ pub(super) fn without_shader(
             preparation_program: None,
             shader_requirements: None,
         },
-        Some(right),
+        Some(super::super::VmFusionSelectionRight::Completion(right)),
         super::super::host_readback::CpuHostPlacement::Readbacks(&admission.resources),
         crate::placement::LocalProviderAdmission::ImplementationUnavailable,
     )?;

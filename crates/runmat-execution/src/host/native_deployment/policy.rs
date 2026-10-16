@@ -2,6 +2,13 @@ use crate::ContractError;
 use runmat_types::EffectKind;
 use serde::{Deserialize, Serialize};
 
+/// Exact Rust-linked optional source compiler/service ABI. Target packs must
+/// bind this ABI to the actual retained implementation archive; a label or
+/// product manifest alone never certifies the archive bytes.
+pub fn native_source_evaluation_service_abi() -> crate::Digest {
+    crate::Digest::sha256(b"runmat-native-source-evaluation-factory-v2-runtime-ptr-owner-ptr")
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NativeDeploymentProfile {
@@ -24,6 +31,7 @@ pub enum NativeDeploymentServiceBehavior {
 pub enum NativeDeploymentServiceKind {
     Effect(EffectKind),
     HostedDynamicDispatch,
+    SourceEvaluation,
 }
 
 impl NativeDeploymentServiceKind {

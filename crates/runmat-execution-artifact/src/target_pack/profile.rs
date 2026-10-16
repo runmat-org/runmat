@@ -2,7 +2,7 @@ use super::*;
 use runmat_execution::host::{
     NativeAbiBinding, NativeNumericalPolicy, NativeOptimization, SelectedNativeTarget,
 };
-use runmat_types::{CapabilitySet, EffectKind, EffectSet};
+use runmat_types::{CapabilityRequirement, CapabilitySet, EffectKind, EffectSet};
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -26,6 +26,8 @@ pub struct TargetPackRequirements {
     /// pack selection and byte verification do not execute or qualify it.
     pub authorized_runtime_capabilities: CapabilitySet,
     pub effects: EffectSet,
+    /// Exact non-effect service demands from the selected canonical program.
+    pub required_services: BTreeSet<TargetPackServiceKind>,
     pub components: Vec<ComponentId>,
     pub platform_service_abi: Digest,
     /// Trusted expected ABIs; this map is not serialized into pack JSON.
@@ -57,6 +59,7 @@ pub struct TargetPackSelection {
     pub(super) reached_capabilities: CapabilitySet,
     pub(super) authorized_runtime_capabilities: CapabilitySet,
     pub(super) reached_effects: EffectSet,
+    pub(super) required_services: BTreeSet<TargetPackServiceKind>,
 }
 impl TargetPackSelection {
     pub fn pack(&self) -> TargetPackId {
@@ -91,8 +94,11 @@ impl TargetPackSelection {
     pub fn reached_effects(&self) -> &EffectSet {
         &self.reached_effects
     }
+    pub fn required_services(&self) -> &BTreeSet<TargetPackServiceKind> {
+        &self.required_services
+    }
     pub fn fingerprint(&self) -> Digest {
-        Digest::sha256_serialized(&("runmat-target-pack-selection-v2", self))
+        Digest::sha256_serialized(&("runmat-target-pack-selection-v3", self))
             .expect("selected target pack serializes")
     }
 }
@@ -144,6 +150,30 @@ impl TargetPackManifest {
             }
         }
         let index = components::index(&self.components)?;
+        for kind in &required.required_services {
+            kind.validate().map_err(contract)?;
+            if *kind == TargetPackServiceKind::SourceEvaluation
+                && required.service_abis.get(kind)
+                    != Some(&runmat_execution::host::native_source_evaluation_service_abi())
+            {
+                return Err(invalid(
+                    "selected source evaluation requires the exact linked factory ABI",
+                ));
+            }
+            if *kind == TargetPackServiceKind::SourceEvaluation
+                && ![
+                    &required.reached_capabilities,
+                    &required.authorized_runtime_capabilities,
+                    &self.capabilities,
+                ]
+                .into_iter()
+                .all(|capabilities| capabilities.0.contains(&CapabilityRequirement::HostRuntime))
+            {
+                return Err(invalid(
+                    "source evaluation lacks an exact host-runtime grant",
+                ));
+            }
+        }
         let mut roots = required.components.iter().cloned().collect::<BTreeSet<_>>();
         roots.insert(self.runtime_component.clone());
         roots.insert(self.numerical_backend_component.clone());
@@ -194,6 +224,8 @@ impl TargetPackManifest {
                 .iter()
                 .copied()
                 .filter_map(TargetPackServiceKind::for_effect)
+                .chain(required.required_services.iter().copied())
+                .collect::<BTreeSet<_>>()
             {
                 let service = self
                     .services
@@ -202,6 +234,13 @@ impl TargetPackManifest {
                     .ok_or_else(|| {
                         invalid("reached effect has no target service implementation")
                     })?;
+                if kind == TargetPackServiceKind::SourceEvaluation
+                    && service.component != self.runtime_component
+                {
+                    return Err(invalid(
+                        "linked source compiler must share the selected runtime archive",
+                    ));
+                }
                 if required.service_abis.get(&kind) != Some(&service.abi)
                     || (required.profile == TargetPackProfile::DeterministicDeployed
                         && service.behavior != TargetPackServiceBehavior::DeterministicDeclared)
@@ -269,6 +308,7 @@ impl TargetPackManifest {
             reached_capabilities: required.reached_capabilities.clone(),
             authorized_runtime_capabilities: required.authorized_runtime_capabilities.clone(),
             reached_effects,
+            required_services: required.required_services.clone(),
         })
     }
 }

@@ -122,7 +122,7 @@ url = { version = "2", features = ["serde"] }
 runmat-lexer = { version = "=0.6.2", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.6.2", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.6.2", path = "crates/runmat-hir" }
-runmat-mir = { version = "=0.6.2", path = "crates/runmat-mir" }
+runmat-mir = { version = "=0.6.2", path = "crates/runmat-mir", default-features = false }
 runmat-native-codegen = { version = "=0.6.2", path = "crates/runmat-native-codegen", default-features = false }
 runmat-extension-abi = { version = "=0.6.2", path = "crates/runmat-extension-abi" }
 runmat-native-ffi = { version = "=0.6.2", path = "crates/runmat-native-ffi" }

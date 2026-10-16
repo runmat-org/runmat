@@ -77,25 +77,7 @@ pub fn read_native_abi_probe(archive: &[u8]) -> AotResult<NativeAbiProbe> {
                 .map_err(invalid)?
                 .ok_or_else(|| invalid("probe extends beyond initialized section bytes"))?;
             let probe = NativeAbiProbe::from_canonical_bytes(bytes).map_err(invalid)?;
-            let architecture = match file.architecture() {
-                object::Architecture::X86_64 => NativeArchitecture::X86_64,
-                object::Architecture::Aarch64 => NativeArchitecture::Aarch64,
-                _ => return Err(invalid("unsupported probe object architecture")),
-            };
-            let compatible_format = matches!(
-                (file.format(), probe.operating_system),
-                (object::BinaryFormat::Elf, NativeOperatingSystem::Linux)
-                    | (object::BinaryFormat::MachO, NativeOperatingSystem::Macos)
-                    | (object::BinaryFormat::Coff, NativeOperatingSystem::Windows)
-            );
-            if probe.architecture != architecture
-                || file.sub_architecture().is_some()
-                || !compatible_format
-                // COFF has a 32-bit container header even for the checked
-                // 64-bit machine architectures; ELF/Mach-O encode width.
-                || (file.format() != object::BinaryFormat::Coff && !file.is_64())
-                || !file.is_little_endian()
-            {
+            if !member_matches_probe_target(&file, &probe) {
                 return Err(invalid(
                     "probe target facts disagree with the containing object",
                 ));
@@ -104,6 +86,29 @@ pub fn read_native_abi_probe(archive: &[u8]) -> AotResult<NativeAbiProbe> {
         }
     }
     found.ok_or_else(|| invalid("target-built runtime archive has no ABI probe"))
+}
+
+/// Same physical target admission for the probe and any linked runtime
+/// service definition. A name in a foreign archive member is not a service.
+pub(crate) fn member_matches_probe_target(file: &object::File<'_>, probe: &NativeAbiProbe) -> bool {
+    let architecture = match file.architecture() {
+        object::Architecture::X86_64 => NativeArchitecture::X86_64,
+        object::Architecture::Aarch64 => NativeArchitecture::Aarch64,
+        _ => return false,
+    };
+    let compatible_format = matches!(
+        (file.format(), probe.operating_system),
+        (object::BinaryFormat::Elf, NativeOperatingSystem::Linux)
+            | (object::BinaryFormat::MachO, NativeOperatingSystem::Macos)
+            | (object::BinaryFormat::Coff, NativeOperatingSystem::Windows)
+    );
+    file.kind() == object::ObjectKind::Relocatable
+        && probe.architecture == architecture
+        && file.sub_architecture().is_none()
+        && compatible_format
+        // COFF has a 32-bit container header even for 64-bit machines.
+        && (file.format() == object::BinaryFormat::Coff || file.is_64())
+        && file.is_little_endian()
 }
 fn invalid(error: impl std::fmt::Display) -> AotError {
     AotError::contract("aot.archive.abi_probe", error.to_string())

@@ -384,10 +384,17 @@ fn select_fusion_provider_with_contract_vm_cpu(
         bindings,
         provider,
         contract,
-        vm_right,
+        vm_right.map(VmFusionSelectionRight::Completion),
         host,
         crate::placement::LocalProviderAdmission::Available,
     )
+}
+
+/// A FullCall continuation and an optimization-only decline are distinct
+/// selection routes. A request cannot promote the latter into the former.
+enum VmFusionSelectionRight<'a> {
+    Completion(&'a runmat_runtime::context::VmFusionCompletionRight),
+    Decline(&'a runmat_runtime::context::VmFusionDeclineRight),
 }
 
 fn select_fusion_provider_with_implementation(
@@ -395,10 +402,25 @@ fn select_fusion_provider_with_implementation(
     bindings: &AdmittedBindings,
     provider: &dyn AccelProvider,
     contract: FusionProviderContract<'_>,
-    vm_right: Option<&runmat_runtime::context::VmFusionCompletionRight>,
+    vm_selection: Option<VmFusionSelectionRight<'_>>,
     host: host_readback::CpuHostPlacement<'_>,
     implementation: crate::placement::LocalProviderAdmission,
 ) -> ExecutionResult<FusionExecutionOutcome<FusionPlacementSelection>> {
+    let (vm_right, vm_decline) = match vm_selection {
+        Some(VmFusionSelectionRight::Completion(right)) => (Some(right), None),
+        Some(VmFusionSelectionRight::Decline(right)) => (None, Some(right)),
+        None => (None, None),
+    };
+    let vm_decline = vm_decline.filter(|right| {
+        request.runtime.as_ref().is_some_and(|runtime| {
+            right.is_current(runtime)
+                && right.matches_group(
+                    request.plan.group.id,
+                    request.plan.group.span.start,
+                    request.plan.group.span.end,
+                )
+        })
+    });
     let FusionProviderContract {
         elementwise_abi,
         input_indices,
@@ -660,6 +682,7 @@ fn select_fusion_provider_with_implementation(
         },
         PlacementPolicy::default(),
         vm_right,
+        vm_decline,
         cpu_admission,
         implementation,
     )
@@ -668,7 +691,14 @@ fn select_fusion_provider_with_implementation(
         LocalPlacementOutcome::ProviderRejected { code, feedback, .. } => {
             observer.provider_rejected(code);
             if host_unavailable {
-                if vm_right.is_some() {
+                if vm_right.is_some()
+                    || vm_decline.is_some_and(|right| {
+                        request
+                            .runtime
+                            .as_ref()
+                            .is_some_and(|runtime| right.is_current(runtime))
+                    })
+                {
                     // No fused provider or whole-group host route exists, but
                     // the VM still owns the original ordered instructions.
                     // Decline before effects and without a CPU FullCall claim.
@@ -1274,6 +1304,15 @@ pub async fn execute_image_normalize(
 pub async fn execute_image_normalize_placed(
     request: FusionExecutionRequest<'_>,
 ) -> ExecutionResult<FusionExecutionOutcome<Value>> {
+    execute_image_normalize_vm(request, None).await
+}
+
+/// The VM may decline an unselected image optimization before provider
+/// effects. This route carries no host execution or FullCall completion right.
+pub async fn execute_image_normalize_vm(
+    request: FusionExecutionRequest<'_>,
+    decline: Option<&runmat_runtime::context::VmFusionDeclineRight>,
+) -> ExecutionResult<FusionExecutionOutcome<Value>> {
     let Some(bindings) = AdmittedBindings::new(&request) else {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
@@ -1368,7 +1407,7 @@ pub async fn execute_image_normalize_placed(
         }
         _ => input_precision,
     };
-    let selection = select_fusion_provider_with_contract(
+    let selection = select_fusion_provider_with_implementation(
         &request,
         &bindings,
         provider,
@@ -1383,6 +1422,9 @@ pub async fn execute_image_normalize_placed(
             preparation_program: None,
             shader_requirements: None,
         },
+        decline.map(VmFusionSelectionRight::Decline),
+        host_readback::CpuHostPlacement::Legacy,
+        crate::placement::LocalProviderAdmission::Available,
     )?;
     let selection = match selection {
         FusionExecutionOutcome::Executed(selection) => selection,

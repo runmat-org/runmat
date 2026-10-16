@@ -116,6 +116,19 @@ pub async fn try_call_bound_function(
     let runtime = crate::context::legacy::active()?;
     if matches!(
         &binding.authority,
+        runmat_value::BoundFunctionAuthority::SelectedNative { .. }
+    ) {
+        return try_call_bound_function_with_environment_in_context(
+            &runtime,
+            binding,
+            args,
+            requested_outputs,
+            None,
+        )
+        .await;
+    }
+    if matches!(
+        &binding.authority,
         runmat_value::BoundFunctionAuthority::Local { .. }
     ) && !binding.authority.admits_local(&runtime.session_lease())
     {
@@ -173,6 +186,22 @@ pub fn try_call_bound_function_with_environment_in_context<'a>(
             Ok(admission) => admission,
             Err(error) => return Some(Err(error)),
         };
+        if let runmat_value::BoundFunctionAuthority::SelectedNative { origin, lease } =
+            &binding.authority
+        {
+            return Some(
+                super::source_facts::invoke_selected_native_lease(
+                    runtime.clone(),
+                    binding.function,
+                    *origin,
+                    Rc::clone(lease),
+                    args.values().to_vec(),
+                    requested_outputs,
+                    lexical_environment,
+                )
+                .await,
+            );
+        }
         if matches!(
             &binding.authority,
             runmat_value::BoundFunctionAuthority::Local { .. }

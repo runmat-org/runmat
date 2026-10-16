@@ -1,8 +1,9 @@
 use super::NativeFunction;
 use crate::NativeTarget;
 use runmat_execution::{Digest, ExecutableIdentity, ProgramRevision};
-use runmat_types::{CapabilitySet, InteropManifest, ParallelManifest, RegionContract};
+use runmat_types::{CapabilitySet, EffectSet, InteropManifest, ParallelManifest, RegionContract};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,6 +44,30 @@ struct NativeAssemblyAdmission {
 }
 
 impl NativeAssembly {
+    /// Exact retained Native IR effect demand used by selection and execution
+    /// validation. The CLI must not rediscover this semantic inventory.
+    pub fn required_effects(&self) -> EffectSet {
+        let mut effects = BTreeSet::new();
+        for instruction in self
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.instructions)
+        {
+            effects.extend(instruction.effects.0.iter().copied());
+        }
+        for region in &self.requirements.regions {
+            effects.extend(region.effects.0.iter().copied());
+        }
+        for region in &self.requirements.parallel.parfor_regions {
+            effects.extend(region.effects.0.iter().copied());
+        }
+        for region in &self.requirements.parallel.spmd_regions {
+            effects.extend(region.effects.0.iter().copied());
+        }
+        EffectSet(effects)
+    }
+
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, crate::NativeCodegenError> {
         self.verify()?;
         let value = serde_json::to_value(self).map_err(|error| {

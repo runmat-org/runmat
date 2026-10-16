@@ -523,8 +523,8 @@ fn drive(
 #[cfg(test)]
 mod creation_policy_tests {
     use super::*;
-    use runmat_hir::{IndexResultContext, MemberName};
     use runmat_mir::{MirIndexComponent, MirIndexPlan, MirIndexing};
+    use runmat_types::{IndexResultContext, MemberName};
 
     #[test]
     fn typed_outer_policy_rejects_malformed_creation_and_deletion() {

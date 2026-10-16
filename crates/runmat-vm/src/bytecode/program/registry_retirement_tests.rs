@@ -828,7 +828,7 @@ fn old_caller_view_retains_old_helper_without_name_fallback() {
     let nested = old
         .owned_view(FunctionId(2), &helper_binding.authority)
         .expect("shared retained graph selects helper");
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(std::rc::Rc::ptr_eq(
         old.static_overlay.as_ref().unwrap(),
         nested.static_overlay.as_ref().unwrap()
     ));
@@ -1016,7 +1016,7 @@ fn retained_execution_stack_cache_is_owned_by_the_exact_overlay() {
     );
 
     let retained_clone = retained.clone();
-    assert!(std::sync::Arc::ptr_eq(
+    assert!(std::rc::Rc::ptr_eq(
         retained.static_overlay.as_ref().unwrap(),
         retained_clone.static_overlay.as_ref().unwrap()
     ));

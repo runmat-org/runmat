@@ -92,6 +92,9 @@ pub struct BoundRuntimeMethod {
     pub declaration: RuntimeMethod,
     pub declaring_class: ClassIdentity,
     pub callable: CallableIdentity,
+    /// Exact issued function authority, when the class was admitted from a
+    /// retained executable rather than a textual declaration.
+    pub bound_function: Option<runmat_value::BoundFunctionBinding>,
     pub fallback: CallableFallbackPolicy,
     pub convention: RuntimeMethodCallingConvention,
 }
@@ -655,9 +658,25 @@ fn bind_methods_for_class(
     class: &RuntimeClass,
     generation: ClassRegistryRevision,
 ) -> impl Iterator<Item = ((ClassIdentity, MethodName), BoundRuntimeMethod)> + '_ {
+    bind_methods_for_class_with(class, generation, None)
+}
+
+fn bind_methods_for_class_with<'a>(
+    class: &'a RuntimeClass,
+    generation: ClassRegistryRevision,
+    explicit: Option<&'a std::collections::HashMap<MethodName, runmat_value::BoundFunctionBinding>>,
+) -> impl Iterator<Item = ((ClassIdentity, MethodName), BoundRuntimeMethod)> + 'a {
     class.methods.values().cloned().map(move |declaration| {
         let method = declaration.name.clone();
-        let (callable, fallback) = resolve_method_callable(&class.name, &declaration);
+        let bound_function = explicit.and_then(|bindings| bindings.get(&method)).cloned();
+        let (callable, fallback) = if let Some(binding) = &bound_function {
+            (
+                CallableIdentity::BoundFunction(runmat_types::FunctionId(binding.function)),
+                CallableFallbackPolicy::None,
+            )
+        } else {
+            resolve_method_callable(&class.name, &declaration)
+        };
         let convention = if crate::object::protocol::ObjectProtocol::from_method(&method)
             .is_some_and(crate::object::protocol::ObjectProtocol::uses_standard_substruct)
         {
@@ -672,6 +691,7 @@ fn bind_methods_for_class(
                 declaration,
                 declaring_class: class.name.clone(),
                 callable,
+                bound_function,
                 fallback,
                 convention,
             },

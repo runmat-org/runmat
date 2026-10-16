@@ -1,9 +1,9 @@
 use crate::{MirCallArg, MirIndexing, MirOperand, MirStmt};
-use runmat_hir::{
+use runmat_types::ClassIdentity;
+use runmat_types::{
     CallSyntax, FunctionId, MemberName, OperatorKind, QualifiedName, RequestedOutputCount,
     SymbolName,
 };
-use runmat_types::ClassIdentity;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

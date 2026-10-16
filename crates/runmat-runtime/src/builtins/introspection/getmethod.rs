@@ -135,15 +135,27 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 &o.class_name,
                 &runmat_types::MethodName::from(method_name),
             ) {
-                let bound_function = crate::user_functions::resolve_semantic_function_by_name(
-                    &resolved.function_name,
-                );
+                let registered = crate::class_registry::lookup_bound_method(
+                    &o.class_name,
+                    &runmat_types::MethodName::from(method_name),
+                )
+                .and_then(|method| method.bound_function);
+                let bound_function =
+                    registered
+                        .as_ref()
+                        .map(|binding| binding.function)
+                        .or_else(|| {
+                            crate::user_functions::resolve_semantic_function_by_name(
+                                &resolved.function_name,
+                            )
+                        });
                 return Ok(Value::Closure(runmat_value::Closure::from_data(
                     runmat_value::ClosureData {
                         lexical_environment: None,
                         function_name: resolved.function_name.clone(),
-                        binding: bound_function
-                            .map(crate::user_functions::bound_function_binding_for),
+                        binding: registered.or_else(|| {
+                            bound_function.map(crate::user_functions::bound_function_binding_for)
+                        }),
                         source_role: runmat_types::FunctionSourceRole::Method,
                         source_file: bound_function
                             .and_then(crate::user_functions::source_file_for)
@@ -173,15 +185,27 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
                 &h.class_name,
                 &runmat_types::MethodName::from(method_name),
             ) {
-                let bound_function = crate::user_functions::resolve_semantic_function_by_name(
-                    &resolved.function_name,
-                );
+                let registered = crate::class_registry::lookup_bound_method(
+                    &h.class_name,
+                    &runmat_types::MethodName::from(method_name),
+                )
+                .and_then(|method| method.bound_function);
+                let bound_function =
+                    registered
+                        .as_ref()
+                        .map(|binding| binding.function)
+                        .or_else(|| {
+                            crate::user_functions::resolve_semantic_function_by_name(
+                                &resolved.function_name,
+                            )
+                        });
                 return Ok(Value::Closure(runmat_value::Closure::from_data(
                     runmat_value::ClosureData {
                         lexical_environment: None,
                         function_name: resolved.function_name.clone(),
-                        binding: bound_function
-                            .map(crate::user_functions::bound_function_binding_for),
+                        binding: registered.or_else(|| {
+                            bound_function.map(crate::user_functions::bound_function_binding_for)
+                        }),
                         source_role: runmat_types::FunctionSourceRole::Method,
                         source_file: bound_function
                             .and_then(crate::user_functions::source_file_for)
@@ -207,6 +231,27 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         }
         Value::ClassRef(cls) => {
             ensure_method_accessible(&cls, method_name)?;
+            let method = runmat_types::MethodName::from(method_name);
+            if let Some((declaration, _)) = crate::class_registry::lookup_method(&cls, &method) {
+                if declaration.is_static {
+                    if let Some(binding) = crate::class_registry::lookup_bound_method(&cls, &method)
+                        .and_then(|method| method.bound_function)
+                    {
+                        let function = binding.function;
+                        return Ok(Value::Closure(runmat_value::Closure::from_data(
+                            runmat_value::ClosureData {
+                                lexical_environment: None,
+                                function_name: declaration.function_name,
+                                binding: Some(binding),
+                                source_role: runmat_types::FunctionSourceRole::Method,
+                                source_file: crate::user_functions::source_file_for(function)
+                                    .map(String::into_boxed_str),
+                                captures: vec![],
+                            },
+                        )));
+                    }
+                }
+            }
             crate::builtins::introspection::function_handle_text::dispatch_str2func(Value::String(
                 format!("@{cls}.{method_name}"),
             ))

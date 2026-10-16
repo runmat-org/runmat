@@ -5,6 +5,8 @@ use runmat_types::ProgramFunctionId;
 use runmat_value::{Value, ValueSequence};
 
 mod bound;
+mod external_sources;
+mod name_selection;
 mod super_constructor;
 mod class_registration;
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -33,17 +35,17 @@ pub async fn invoke(
     class_registration::install(&executor, &runtime).map_err(|error| *error)?;
     let runtime =
         super_constructor::bind_selected(&executor, function, runtime).map_err(|error| *error)?;
-    let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let selected = runtime.clone();
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
+            let _active =
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
             executor
                 .invoke_async(function, arguments, requested_outputs, selected)
                 .await
                 .map_err(native_executor_error)
         })
         .await;
-    drop(active);
     drop(guards);
     execution
 }
@@ -65,17 +67,17 @@ pub async fn invoke_workspace(
     class_registration::install(&executor, &runtime).map_err(|error| *error)?;
     let runtime =
         super_constructor::bind_selected(&executor, function, runtime).map_err(|error| *error)?;
-    let active = runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
     let selected = runtime.clone();
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
+            let _active =
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
             executor
                 .invoke_workspace_async(function, workspace, requested_outputs, selected)
                 .await
                 .map_err(native_executor_error)
         })
         .await;
-    drop(active);
     drop(guards);
     execution
 }
@@ -85,6 +87,7 @@ struct ProgramInvocationGuards {
     _bound: runmat_runtime::user_functions::BoundFunctionInvokerGuard,
     _lexical: runmat_runtime::user_functions::LexicalFunctionInvokerGuard,
     _resolver: runmat_runtime::user_functions::FunctionResolverGuard,
+    _scoped: runmat_runtime::user_functions::ScopedNameTargetResolverGuard,
     _name_candidates: runmat_runtime::user_functions::SemanticNameCandidatesGuard,
     _catalog: runmat_runtime::user_functions::SourceFunctionCatalogGuard,
     _execution_source: runmat_runtime::user_functions::ExecutionSourceResolverGuard,
@@ -356,6 +359,9 @@ impl ProgramInvocationGuards {
                         placement,
                         roots,
                         async move {
+                            let _active = runmat_runtime::user_functions::push_active_semantic_function(
+                                function.0 as usize,
+                            );
                             let _environment_roots = environment_roots;
                             executor
                                 .invoke_request_async_in_environment(
@@ -394,7 +400,9 @@ impl ProgramInvocationGuards {
             runmat_runtime::user_functions::current_semantic_function_resolver();
         let previous_candidates =
             runmat_runtime::user_functions::current_semantic_name_candidates();
+        let previous_scoped = runmat_runtime::user_functions::current_scoped_name_target_resolver();
         let resolver_program = Arc::new(program.clone());
+        let scoped_program = Arc::clone(&resolver_program);
         let source_facts = Arc::new(
             functions
                 .iter()
@@ -404,22 +412,52 @@ impl ProgramInvocationGuards {
         let candidates: Arc<runmat_runtime::user_functions::SemanticNameCandidates> =
             Arc::new(move |name| {
                 let mut candidates = Vec::new();
-                if let Some(function) = resolver_program.resolve_name(name) {
-                    let function = function.0 as usize;
-                    candidates.push(runmat_runtime::user_functions::SemanticNameCandidate {
-                        function,
-                        source: source_facts.get(&function).cloned(),
-                        definition_owner: None,
-                    });
-                }
-                if let Some(previous) = &previous_candidates {
-                    for candidate in previous(name) {
-                        if !candidates
-                            .iter()
-                            .any(|existing| existing.same_definition(&candidate))
-                        {
-                            candidates.push(candidate);
+                // The active caller's already-issued private/retained target
+                // precedes a public name, including when a nested selected
+                // source service installed that target before this AOT guard.
+                let caller = runmat_runtime::user_functions::current_active_semantic_function();
+                let own_scoped = name_selection::select_scoped(&resolver_program, caller, name);
+                let scoped = runmat_runtime::user_functions::current_scoped_name_target_resolver()
+                    .and_then(|resolver| resolver(name))
+                    .map(|target| target.function().0);
+                let previous_offers = previous_candidates
+                    .as_ref()
+                    .map(|previous| previous(name))
+                    .unwrap_or_default();
+                let selected = scoped.or_else(|| {
+                    name_selection::select(&resolver_program, caller, name)
+                        .map(|function| function.0 as usize)
+                });
+                if let Some(function) = selected {
+                    let own_source = own_scoped
+                        .filter(|selected| selected.0 as usize == function)
+                        .and_then(|_| source_facts.get(&function).cloned());
+                    let previous = (scoped.is_some() && own_source.is_none())
+                        .then(|| {
+                            previous_offers
+                                .iter()
+                                .find(|candidate| candidate.function == function)
+                                .cloned()
+                        })
+                        .flatten();
+                    candidates.push(previous.unwrap_or_else(|| {
+                        runmat_runtime::user_functions::SemanticNameCandidate {
+                            function,
+                            source: if scoped.is_some() && own_source.is_none() {
+                                None
+                            } else {
+                                own_source.or_else(|| source_facts.get(&function).cloned())
+                            },
+                            definition_owner: None,
                         }
+                    }));
+                }
+                for candidate in previous_offers {
+                    if !candidates
+                        .iter()
+                        .any(|existing| existing.same_definition(&candidate))
+                    {
+                        candidates.push(candidate);
                     }
                 }
                 if let Some(previous) = previous_resolver
@@ -450,16 +488,43 @@ impl ProgramInvocationGuards {
         ));
         let name_candidates =
             runmat_runtime::user_functions::install_semantic_name_candidates(Some(candidates));
+        let installed_external =
+            external_sources::install(Rc::clone(&executor), program, runtime, &functions)?;
+        let execution_source = installed_external.guard;
+        let scoped_bindings = installed_external.scoped_bindings;
+        let scoped = runmat_runtime::user_functions::install_scoped_name_target_resolver(Some(
+            Rc::new(move |name| {
+                let selected = name_selection::select_scoped(
+                    &scoped_program,
+                    runmat_runtime::user_functions::current_active_semantic_function(),
+                    name,
+                );
+                let Some(selected) = selected else {
+                    return previous_scoped.as_ref().and_then(|resolver| resolver(name));
+                };
+                if scoped_program.product.selected().is_some() {
+                    let binding = scoped_bindings.get(&selected)?.clone();
+                    Some(
+                        runmat_runtime::user_functions::ScopedSemanticNameTarget::Retained(binding),
+                    )
+                } else {
+                    Some(
+                        runmat_runtime::user_functions::ScopedSemanticNameTarget::Published(
+                            runmat_types::FunctionId(selected.0 as usize),
+                        ),
+                    )
+                }
+            }),
+        ));
         let catalog = runmat_runtime::user_functions::install_source_function_catalog(Some(
             Arc::new(functions),
         ));
-        let execution_source =
-            runmat_runtime::user_functions::install_execution_source_resolver(None);
         Ok(Self {
             _semantic: semantic,
             _bound: bound,
             _lexical: lexical,
             _resolver: resolver,
+            _scoped: scoped,
             _name_candidates: name_candidates,
             _catalog: catalog,
             _execution_source: execution_source,
@@ -497,6 +562,8 @@ async fn invoke_native_values(
     let selected = runtime.clone();
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
+            let _active =
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
             let _environment_roots = environment_roots;
             executor
                 .invoke_request_async_in_environment(

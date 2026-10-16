@@ -140,6 +140,15 @@ fn installed_right_requires_retained_reconciled_plan_group_and_runtime_provenanc
     let exact = installation
         .right_for(&plan, &selected, &runtime)
         .expect("exact retained plan and group must issue a right");
+    let decline = installation
+        .decline_for(&plan, &selected, &runtime)
+        .expect("same selected region can decline only before effects");
+    assert!(decline.is_current(&runtime));
+    assert!(decline.matches_group(
+        selected.group.id,
+        selected.group.span.start,
+        selected.group.span.end
+    ));
     assert!(exact.planning_revision(&runtime).is_some());
     let publication_pc = installation
         .publication_pc_for(&plan, &selected)
@@ -156,6 +165,9 @@ fn installed_right_requires_retained_reconciled_plan_group_and_runtime_provenanc
         .is_none());
     assert!(installation
         .right_for(&equal_but_foreign, &selected, &runtime)
+        .is_none());
+    assert!(installation
+        .decline_for(&equal_but_foreign, &selected, &runtime)
         .is_none());
 
     let mut changed = selected.clone();
@@ -178,6 +190,9 @@ fn installed_right_requires_retained_reconciled_plan_group_and_runtime_provenanc
         service.clone(),
     );
     assert!(installation.right_for(&plan, &selected, &foreign).is_none());
+    assert!(installation
+        .decline_for(&plan, &selected, &foreign)
+        .is_none());
 
     let changed_program = runtime
         .clone()
@@ -191,6 +206,7 @@ fn installed_right_requires_retained_reconciled_plan_group_and_runtime_provenanc
     assert!(installation
         .right_for(&plan, &selected, &changed_program)
         .is_none());
+    assert!(!decline.is_current(&changed_program));
 
     let changed_generation = CancellationSource::new();
     let changed_generation_runtime = runtime
@@ -199,8 +215,10 @@ fn installed_right_requires_retained_reconciled_plan_group_and_runtime_provenanc
     assert!(installation
         .right_for(&plan, &selected, &changed_generation_runtime)
         .is_none());
+    assert!(!decline.is_current(&changed_generation_runtime));
 
     drop(installation);
+    assert!(!decline.is_current(&runtime));
     assert!(exact.placement_revision().is_none());
     assert!(exact.planning_revision(&runtime).is_none());
 

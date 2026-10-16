@@ -7,8 +7,8 @@ mod named;
 
 pub use binding::{
     BoundFunctionAuthority, BoundFunctionBinding, FunctionDefinitionLease, FunctionDefinitionOwner,
-    LocalExport, SelectedReceiverDeclarationKey, SelectedReceiverDeclarationSeal,
-    SelectedStaticSiteBinding, StaticSiteDefinitionLease,
+    LocalExport, SelectedNativeFunctionLease, SelectedReceiverDeclarationKey,
+    SelectedReceiverDeclarationSeal, SelectedStaticSiteBinding, StaticSiteDefinitionLease,
 };
 pub use bound_handle::{BoundFunctionHandle, BoundFunctionHandleData};
 pub use closure::{Closure, ClosureData};

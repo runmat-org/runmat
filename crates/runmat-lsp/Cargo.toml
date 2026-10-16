@@ -26,7 +26,7 @@ log = { workspace = true }
 env_logger = { workspace = true, optional = true }
 runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-mir = { workspace = true }
+runmat-mir = { workspace = true, features = ["compiler"] }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
 runmat-vm = { workspace = true }

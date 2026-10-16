@@ -3,8 +3,9 @@ use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
-    capture_workspace_target, workspace_assign_target, WorkspaceAssignedReport, WorkspaceTarget,
-    WorkspaceTargetSnapshot, WorkspaceValueSnapshot,
+    base_target_authority, capture_workspace_target, workspace_assign_target, BaseTargetAuthority,
+    WorkspaceAssignedReport, WorkspaceTarget, WorkspaceTargetIdentity, WorkspaceTargetSnapshot,
+    WorkspaceValueSnapshot,
 };
 use runmat_hir::{FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
@@ -15,6 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 #[path = "builtins/eval_hir_sites.rs"]
 mod eval_hir_sites;
+#[path = "builtins/dynamic_base_target.rs"]
+mod dynamic_base_target;
 #[path = "builtins/eval_static_selection.rs"]
 mod eval_static_selection;
 pub(crate) use eval_hir_sites::PendingClosurePlan;
@@ -404,7 +407,16 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
                     ),
                 ));
             }
-            workspace_assign_target(target, &name, args[2].clone()).map_err(|err| {
+            let assigned = if target == WorkspaceTarget::Base
+                && matches!(
+                    base_target_authority(),
+                    Some(BaseTargetAuthority::CanonicalService)
+                ) {
+                dynamic_base_target::ExplicitBaseTarget::assign(runtime, &name, args[2].clone())
+            } else {
+                workspace_assign_target(target, &name, args[2].clone())
+            };
+            assigned.map_err(|err| {
                 let failure_origin = err.failure_origin;
                 let gpu_gather_retry = err.gpu_gather_retry;
                 let mut failure = runmat_runtime::runtime_error::semantic_error_with_source(
@@ -552,6 +564,7 @@ pub struct DynamicEvalCompileProduct {
     /// Compiler-only aliases paired with exact no-invoke source selections.
     /// Core consumes these at sealed-site admission; they never enter names.
     pub selected_sources: Vec<EvalSelectedSource>,
+    pub selected_external_sources: Vec<eval_static_selection::EvalSelectedExternalSource>,
     /// Installed native selections observed at this closure's unresolved HIR
     /// sites. Core must reprove them against the exact prepared project scope.
     pub(crate) selected_natives: Vec<eval_static_selection::EvalSelectedNative>,
@@ -995,8 +1008,23 @@ async fn eval_workspace_source(
             &format!("{builtin}: dynamic eval is disabled by host execution policy"),
         ));
     }
-    let (identity, frame) = capture_workspace_target(target)
-        .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+    // An explicit base selector in a detached source-evaluation frame must
+    // not alias that frame. Its typed admission selects the session owner;
+    // ordinary VM frames retain their installed base-frame authority.
+    let (identity, explicit_base, frame) = if target == WorkspaceTarget::Base
+        && matches!(
+            base_target_authority(),
+            Some(BaseTargetAuthority::CanonicalService)
+        ) {
+        let (identity, _) = capture_workspace_target(WorkspaceTarget::Current)
+            .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+        let (base, frame) = dynamic_base_target::ExplicitBaseTarget::capture(&runtime)?;
+        (identity, Some(std::rc::Rc::new(base)), frame)
+    } else {
+        let (identity, frame) = capture_workspace_target(target)
+            .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+        (identity, None, frame)
+    };
     let frame = RootedDynamicEvalInput::new(frame)?;
     // FunctionRegistry is an Rc-backed immutable execution snapshot. This
     // clone carries the exact pre-eval code owner into the queued request; it
@@ -1004,7 +1032,11 @@ async fn eval_workspace_source(
     let function_registry = function_registry.clone();
     let continuation_runtime = runtime.clone();
     let work_runtime = runtime.clone();
+    let base_at_entry = explicit_base.clone();
     let work = async move {
+        if let Some(base) = &base_at_entry {
+            base.ensure_effect_authority()?;
+        }
         if current_dynamic_eval_options() != options {
             return Err(mex(
                 "DynamicWorkspaceCompile",
@@ -1145,15 +1177,13 @@ async fn eval_workspace_source(
                 let vars = completion.values;
                 if let Some(snapshot) = updated_workspace {
                     let (_workspace_roots, snapshot) = snapshot.into_parts();
-                    identity
-                        .commit(
-                            snapshot.vars,
-                            snapshot.names,
-                            snapshot.assigned,
-                            snapshot.global_aliases,
-                            effects.workspace_report.clone(),
-                        )
-                        .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
+                    commit_dynamic_workspace_target(
+                        identity,
+                        explicit_base.as_deref(),
+                        snapshot,
+                        effects.workspace_report.clone(),
+                    )
+                    .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
                 }
                 let value = if requested_outputs == 0 {
                     Value::OutputList(Vec::new())
@@ -1175,15 +1205,13 @@ async fn eval_workspace_source(
             if commit_workspace_on_error {
                 if let Some(snapshot) = updated_workspace {
                     let (_workspace_roots, snapshot) = snapshot.into_parts();
-                    identity
-                        .commit(
-                            snapshot.vars,
-                            snapshot.names,
-                            snapshot.assigned,
-                            snapshot.global_aliases,
-                            effects.workspace_report.clone(),
-                        )
-                        .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
+                    commit_dynamic_workspace_target(
+                        identity,
+                        explicit_base.as_deref(),
+                        snapshot,
+                        effects.workspace_report.clone(),
+                    )
+                    .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
                 }
             }
             effects.replay();
@@ -1365,6 +1393,32 @@ fn dynamic_workspace_commit_error(builtin: &str, source: RuntimeError) -> Runtim
         .build()
 }
 
+fn commit_dynamic_workspace_target(
+    identity: WorkspaceTargetIdentity,
+    explicit_base: Option<&dynamic_base_target::ExplicitBaseTarget>,
+    snapshot: WorkspaceValueSnapshot,
+    report: WorkspaceAssignedReport,
+) -> Result<(), RuntimeError> {
+    if let Some(base) = explicit_base {
+        identity.ensure_current()?;
+        base.commit(
+            snapshot.vars,
+            snapshot.names,
+            snapshot.assigned,
+            snapshot.global_aliases,
+            report,
+        )
+    } else {
+        identity.commit(
+            snapshot.vars,
+            snapshot.names,
+            snapshot.assigned,
+            snapshot.global_aliases,
+            report,
+        )
+    }
+}
+
 #[cfg(test)]
 fn compile_dynamic_workspace_eval(
     builtin: &str,
@@ -1476,6 +1530,22 @@ fn compile_dynamic_workspace_eval_inner_typed(
             .into());
         }
     }
+    for source in &selected_sources.external_sources {
+        let (fixed_outputs, has_varargout) = source.target.output_arity();
+        if function_output_arities
+            .insert(
+                source.alias,
+                runmat_hir::FunctionOutputArity::new(fixed_outputs, has_varargout),
+            )
+            .is_some()
+        {
+            return Err(mex(
+                "DynamicWorkspaceCompile",
+                "selected external source alias collides with a function signature",
+            )
+            .into());
+        }
+    }
     let mut bound_names = function_registry.names.clone();
     bound_names.extend(
         selected_sources
@@ -1522,7 +1592,9 @@ fn compile_dynamic_workspace_eval_inner_typed(
         .transpose()?
         .unwrap_or(false);
     if !retain_product
-        && (!selected_sources.sources.is_empty() || !selected_sources.natives.is_empty())
+        && (!selected_sources.sources.is_empty()
+            || !selected_sources.external_sources.is_empty()
+            || !selected_sources.natives.is_empty())
     {
         return Err(mex(
             "DynamicWorkspaceCompile",
@@ -1571,6 +1643,7 @@ fn compile_dynamic_workspace_eval_inner_typed(
                 workspace_slot_remap,
                 result_slot,
                 selected_sources: selected_sources.sources,
+                selected_external_sources: selected_sources.external_sources,
                 selected_natives: selected_sources.natives,
                 workspace_bindings: workspace_bindings.clone(),
                 requested_outputs,

@@ -241,7 +241,18 @@ fn emit_object(
         let resolver = super::launcher::define_resolver(&mut module, &linked_functions)?;
         let builtin_resolver =
             super::launcher::define_builtin_resolver(&mut module, &builtin_bindings)?;
-        super::launcher::define(&mut module, resolver, builtin_resolver, &linked_data)?;
+        let source_service = product_mode.selected().is_some_and(|binding| {
+            binding
+                .required_services
+                .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
+        });
+        super::launcher::define(
+            &mut module,
+            resolver,
+            builtin_resolver,
+            source_service,
+            &linked_data,
+        )?;
     }
 
     let product = module.finish();

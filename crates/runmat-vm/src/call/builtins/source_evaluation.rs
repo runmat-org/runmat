@@ -173,7 +173,7 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         .clone()
         .with_workspace(projection.clone());
     let execution_runtime = runtime.with_service_ports(services);
-    let admission = crate::runtime::workspace::workspace_admission_with_global_bindings(
+    let admission = crate::runtime::workspace::detached_workspace_admission_with_global_bindings(
         names,
         assigned,
         global_aliases,

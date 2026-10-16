@@ -9,6 +9,40 @@ use object::{
 use runmat_execution::host::{NativeAbiField, NativeEnvironment};
 use std::io::Cursor;
 
+struct UnusedSourceEvaluationPort;
+
+impl runmat_runtime::context::RuntimeSourceEvaluationService for UnusedSourceEvaluationPort {
+    fn bind_background_authority(
+        &self,
+    ) -> Result<
+        std::rc::Rc<dyn runmat_runtime::context::RuntimeSourceEvaluationService>,
+        runmat_runtime::RuntimeError,
+    > {
+        unreachable!("selected-port admission never calls the evaluator")
+    }
+
+    fn capture_session_source(
+        &self,
+        _: &runmat_runtime::context::RuntimeContext,
+        _: std::sync::Arc<str>,
+        _: std::sync::Arc<str>,
+        _: usize,
+    ) -> Result<runmat_runtime::context::SessionSourceEvaluation, runmat_runtime::RuntimeError>
+    {
+        unreachable!("selected-port admission never captures source")
+    }
+
+    fn evaluate_session_source(
+        &self,
+        _: runmat_runtime::context::RuntimeContext,
+        _: runmat_runtime::context::SessionSourceEvaluation,
+    ) -> runmat_runtime::context::RuntimeServiceFuture<
+        Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError>,
+    > {
+        Box::pin(async { unreachable!("selected-port admission never evaluates source") })
+    }
+}
+
 fn archive(objects: &[Vec<u8>]) -> Vec<u8> {
     let members = objects
         .iter()
@@ -265,6 +299,7 @@ fn selected_archive_binds_verified_bytes_and_target_probe_without_host_target_in
         reached_capabilities: CapabilitySet::default(),
         authorized_runtime_capabilities: CapabilitySet::default(),
         effects: EffectSet::default(),
+        required_services: std::collections::BTreeSet::new(),
         components: Vec::new(),
         platform_service_abi: manifest.platform_service_abi,
         service_abis: BTreeMap::new(),
@@ -314,6 +349,92 @@ fn selected_archive_binds_verified_bytes_and_target_probe_without_host_target_in
         changed.native_link_tokens.push("-lambient".into());
         assert!(changed.validate().is_err());
     }
+    let mut source_manifest = manifest.clone();
+    let source_kind = runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation;
+    let host_runtime = runmat_types::CapabilityRequirement::HostRuntime;
+    source_manifest.capabilities.0.insert(host_runtime);
+    source_manifest.services.push(TargetPackService {
+        kind: source_kind,
+        abi: runmat_execution::host::native_source_evaluation_service_abi(),
+        component: id("runtime"),
+        behavior: TargetPackServiceBehavior::DeterministicDeclared,
+    });
+    let mut source_required = required.clone();
+    source_required.reached_capabilities.0.insert(host_runtime);
+    source_required
+        .authorized_runtime_capabilities
+        .0
+        .insert(host_runtime);
+    source_required.required_services.insert(source_kind);
+    source_required.service_abis.insert(
+        source_kind,
+        runmat_execution::host::native_source_evaluation_service_abi(),
+    );
+    let source_selection = source_manifest.select(&source_required, None).unwrap();
+    let source_verified = source_manifest
+        .verify_selected_bytes(&source_selection, &contents)
+        .unwrap();
+    let source_selected = SelectedNativeProduct::from_verified(&source_verified).unwrap();
+    let issuer = source_verified
+        .verified_service_issuer(source_kind)
+        .unwrap();
+    let source_port: std::rc::Rc<dyn runmat_runtime::context::RuntimeSourceEvaluationService> =
+        std::rc::Rc::new(UnusedSourceEvaluationPort);
+    let empty_ports = runmat_runtime::context::RuntimeServicePorts::default();
+    assert!(empty_ports
+        .require_selected_source_evaluation(&issuer)
+        .is_err());
+    let selected_ports = empty_ports
+        .with_selected_source_evaluation(source_port.clone(), issuer.clone())
+        .unwrap();
+    assert!(selected_ports
+        .require_selected_source_evaluation(&issuer)
+        .is_ok());
+    assert!(selected_ports
+        .with_source_evaluation(source_port.clone())
+        .require_selected_source_evaluation(&issuer)
+        .is_err());
+    let mut changed_manifest = source_manifest.clone();
+    changed_manifest.services[0].abi = Digest::sha256("another source evaluation ABI");
+    let mut changed_required = source_required.clone();
+    changed_required
+        .service_abis
+        .insert(source_kind, changed_manifest.services[0].abi);
+    assert!(changed_manifest.select(&changed_required, None).is_err());
+
+    // A different valid implementation declaration can issue its own token,
+    // but that token must not authenticate this selected service binding.
+    let mut changed_manifest = source_manifest.clone();
+    changed_manifest.services[0].behavior = TargetPackServiceBehavior::HostedAmbient;
+    let changed_required = source_required.clone();
+    let changed_selection = changed_manifest.select(&changed_required, None).unwrap();
+    let changed_verified = changed_manifest
+        .verify_selected_bytes(&changed_selection, &contents)
+        .unwrap();
+    let changed_issuer = changed_verified
+        .verified_service_issuer(source_kind)
+        .unwrap();
+    assert!(runmat_runtime::context::RuntimeServicePorts::default()
+        .with_selected_source_evaluation(source_port, changed_issuer)
+        .unwrap()
+        .require_selected_source_evaluation(&issuer)
+        .is_err());
+    assert!(super::super::build_selected_runtime_archive(
+        &source_selected,
+        &environment,
+        super::super::RuntimeArchiveEncoding::Raw,
+        super::super::RuntimeArchiveCapabilities::standalone_host(),
+    )
+    .is_err());
+    let mut source_capabilities = super::super::RuntimeArchiveCapabilities::standalone_host();
+    source_capabilities.dynamic_source_loading = true;
+    assert!(super::super::build_selected_runtime_archive(
+        &source_selected,
+        &environment,
+        super::super::RuntimeArchiveEncoding::Raw,
+        source_capabilities,
+    )
+    .is_ok());
     assert!(validate_native_product(
         selected.product(),
         selected.target(),

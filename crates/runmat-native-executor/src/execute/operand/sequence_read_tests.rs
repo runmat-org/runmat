@@ -1,9 +1,9 @@
 use super::*;
 use crate::execute::region::observation::test_support::observed_state;
 use crate::region::placement_test_support::Probe;
-use runmat_hir::MemberName;
 use runmat_mir::MirLocalId;
 use runmat_runtime::native::{NativeSitePhase, NativeSiteRequest};
+use runmat_types::MemberName;
 use runmat_value::StructValue;
 use std::rc::Rc;
 

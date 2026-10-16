@@ -280,6 +280,7 @@ fn try_plan_physical_set_with_context<'a>(
             observation_contract: TotalCandidateObservationContract::PreparationBodyCleanup,
             prepared_authority: None,
             vm_right: None,
+            vm_decline: None,
             family: ProviderOperationFamily::Fusion,
             cpu: LocalCpuCandidate::host(
                 "cpu.shared.fusion.reduction".into(),

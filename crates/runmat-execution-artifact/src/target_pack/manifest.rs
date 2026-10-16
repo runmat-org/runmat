@@ -5,7 +5,7 @@ use runmat_execution::host::{
 use runmat_types::CapabilitySet;
 use serde::{Deserialize, Serialize};
 
-pub const TARGET_PACK_SCHEMA_VERSION: u16 = 2;
+pub const TARGET_PACK_SCHEMA_VERSION: u16 = 3;
 pub use runmat_execution::host::{
     NativeDeploymentServiceBehavior as TargetPackServiceBehavior,
     NativeDeploymentServiceKind as TargetPackServiceKind,

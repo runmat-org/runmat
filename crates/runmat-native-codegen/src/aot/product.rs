@@ -4,12 +4,13 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 12;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 13;
 pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 8;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
 pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
+pub const AOT_SOURCE_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_source_evaluation_component_v2";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";
 pub const AOT_RESUME_POINTS_SYMBOL: &str = "runmat_aot_resume_points";
@@ -297,17 +298,82 @@ impl AotProgramManifest {
         Ok(manifest)
     }
 
+    /// Only a unique public primary can be selected without a caller/source
+    /// context. Local, nested, method, and private names require their own
+    /// exact lexical or source-scoped selection authority.
     pub fn resolve_name(&self, name: &str) -> Option<ProgramFunctionId> {
-        self.functions
-            .iter()
-            .find(|function| function.name == name)
-            .map(|function| function.function)
+        resolve_unique_public_name(&self.functions, &self.source_map, name)
     }
+}
+
+fn resolve_unique_public_name(
+    functions: &[AotProgramFunction],
+    source_map: &runmat_execution::ExecutableSourceMapV2,
+    name: &str,
+) -> Option<ProgramFunctionId> {
+    let mut matches = functions.iter().filter(|function| {
+        if function.name != name || function.role != runmat_types::FunctionSourceRole::Primary {
+            return false;
+        }
+        let Some(source) = usize::try_from(function.source.0)
+            .ok()
+            .and_then(|ordinal| source_map.entries.get(ordinal))
+        else {
+            return false;
+        };
+        std::path::Path::new(&source.relative_path)
+            .parent()
+            .and_then(std::path::Path::file_name)
+            != Some(std::ffi::OsStr::new("private"))
+    });
+    let selected = matches.next()?.function;
+    matches.next().is_none().then_some(selected)
 }
 
 #[cfg(test)]
 mod admission_tests {
     use super::{AotBuiltinBinding, AotProgramManifest};
+
+    #[test]
+    fn public_name_requires_unique_primary_and_never_leaks_private_or_nested() {
+        use runmat_execution::{Digest, ExecutableSourceMapV2, ExecutableSourceRecordV2};
+        use runmat_types::{FunctionSourceRole, ProgramFunctionId, ProgramSourceId};
+
+        let source_map = ExecutableSourceMapV2 {
+            entries: ["a/helper.m", "b/helper.m", "a/private/helper.m"]
+                .into_iter()
+                .enumerate()
+                .map(|(ordinal, path)| ExecutableSourceRecordV2 {
+                    source_id: ProgramSourceId(u32::try_from(ordinal).expect("fixture ordinal")),
+                    owner_identity: "package".into(),
+                    relative_path: path.into(),
+                    content_revision: Digest::sha256(b"source"),
+                    display_name: path.into(),
+                    text: "source".into(),
+                })
+                .collect(),
+        };
+        let function = |ordinal, source, role| super::AotProgramFunction {
+            function: ProgramFunctionId(ordinal),
+            source: ProgramSourceId(source),
+            name: "helper".into(),
+            role,
+        };
+        let mut functions = vec![
+            function(0, 2, FunctionSourceRole::Primary),
+            function(1, 0, FunctionSourceRole::Nested),
+            function(2, 0, FunctionSourceRole::Primary),
+        ];
+        assert_eq!(
+            super::resolve_unique_public_name(&functions, &source_map, "helper"),
+            Some(ProgramFunctionId(2))
+        );
+        functions.push(function(3, 1, FunctionSourceRole::Primary));
+        assert_eq!(
+            super::resolve_unique_public_name(&functions, &source_map, "helper"),
+            None
+        );
+    }
 
     #[test]
     fn stale_program_manifest_is_rejected_before_changed_function_shape() {

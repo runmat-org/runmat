@@ -76,8 +76,8 @@ fn read_inner(
                     components: materialized.components,
                 };
                 steps.push(match indexing.kind {
-                    runmat_hir::IndexKind::Paren => ObjectSubscript::parentheses(selector),
-                    runmat_hir::IndexKind::Brace => ObjectSubscript::braces(selector),
+                    runmat_types::IndexKind::Paren => ObjectSubscript::parentheses(selector),
+                    runmat_types::IndexKind::Brace => ObjectSubscript::braces(selector),
                 });
             }
             MirSubscriptStep::DottedInvoke {

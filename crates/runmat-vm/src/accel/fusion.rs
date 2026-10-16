@@ -5,10 +5,9 @@ use crate::interpreter::errors::mex;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram_placed, execute_elementwise_placed, execute_explained_variance_placed,
-    execute_image_normalize_placed, execute_matmul_epilogue_placed,
-    execute_power_step_normalize_placed, execute_reduction_with_shape_placed_async,
-    execute_reduction_with_shape_placed_async_vm, CpuReadbackFailure, FusionExecutionOutcome,
-    FusionExecutionRequest, FusionProviderCompletion,
+    execute_matmul_epilogue_placed, execute_power_step_normalize_placed,
+    execute_reduction_with_shape_placed_async, execute_reduction_with_shape_placed_async_vm,
+    CpuReadbackFailure, FusionExecutionOutcome, FusionExecutionRequest, FusionProviderCompletion,
 };
 use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
@@ -670,6 +669,7 @@ pub async fn execute_fusion_special_kind(
     plan_inputs: &[runmat_accelerate::graph::ValueId],
     request: FusionExecutionRequest<'_>,
     stack_guard: StackSliceGuard<'_>,
+    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
 ) -> Result<FusionExecutionOutcome<Value>, FusionAttemptError> {
     match kind {
         FusionKind::CenteredGram => {
@@ -690,9 +690,11 @@ pub async fn execute_fusion_special_kind(
         FusionKind::MatmulEpilogue => {
             finish_provider_execution(execute_matmul_epilogue_placed(request).await, stack_guard)
         }
-        FusionKind::ImageNormalize => {
-            finish_provider_execution(execute_image_normalize_placed(request).await, stack_guard)
-        }
+        FusionKind::ImageNormalize => finish_provider_execution(
+            runmat_accelerate::fusion_exec::execute_image_normalize_vm(request, decline.as_ref())
+                .await,
+            stack_guard,
+        ),
         _ => Err(FusionAttemptError::Terminal(mex(
             "FusionUnsupportedKind",
             "fusion: unsupported fusion kind",
@@ -807,6 +809,7 @@ pub async fn try_execute_fusion_group(
         placement,
         VmFusionInvocation {
             right,
+            decline: None,
             input_uses: None,
         },
     )
@@ -815,6 +818,7 @@ pub async fn try_execute_fusion_group(
 
 pub(crate) struct VmFusionInvocation<'a> {
     pub right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    pub decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
     pub input_uses: Option<&'a runmat_accelerate::fusion_exec::VmHostInputUses>,
 }
 
@@ -827,7 +831,11 @@ pub(crate) async fn try_execute_fusion_group_with_inputs(
     placement: Option<PlacementCorrelationId>,
     invocation: VmFusionInvocation<'_>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
-    let VmFusionInvocation { right, input_uses } = invocation;
+    let VmFusionInvocation {
+        right,
+        decline,
+        input_uses,
+    } = invocation;
     let (stack_guard, request, _consumed_inputs) =
         gather_fusion_inputs(plan, graph, stack, vars, context, placement)
             .map_err(FusionAttemptError::Terminal)?;
@@ -850,9 +858,15 @@ pub(crate) async fn try_execute_fusion_group_with_inputs(
     } else if plan.group.kind.is_reduction() {
         execute_fusion_reduction(plan, request, stack_guard, right).await
     } else {
-        execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard)
-            .await
-            .map(without_intermediate_stores)
+        execute_fusion_special_kind(
+            plan.group.kind.clone(),
+            &plan.inputs,
+            request,
+            stack_guard,
+            decline,
+        )
+        .await
+        .map(without_intermediate_stores)
     }
 }
 

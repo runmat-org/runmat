@@ -22,6 +22,11 @@ pub struct EvalSelectedSource {
     pub has_varargout: bool,
 }
 
+pub struct EvalSelectedExternalSource {
+    pub alias: FunctionId,
+    pub target: runmat_runtime::user_functions::SelectedExternalSourceTarget,
+}
+
 /// A no-execute installed native selection at an exact unresolved HIR site.
 /// The identity is only a claim until Core matches the original prepared
 /// project scope and seals the selected function-only unit.
@@ -34,6 +39,7 @@ pub(crate) struct EvalSelectedNative {
 pub(super) struct EvalSelectedSources {
     pub names: HashMap<String, FunctionId>,
     pub sources: Vec<EvalSelectedSource>,
+    pub external_sources: Vec<EvalSelectedExternalSource>,
     pub natives: Vec<EvalSelectedNative>,
 }
 
@@ -71,6 +77,7 @@ pub(super) async fn select_sites(
     })?;
     let mut selected_names = HashMap::new();
     let mut sources = Vec::new();
+    let mut external_sources = Vec::new();
     let mut natives = Vec::new();
     for name in names {
         if assigned_workspace.contains_key(name) {
@@ -92,6 +99,34 @@ pub(super) async fn select_sites(
                     &format!("eval source observation failed: {error}"),
                 )
             })?;
+        if let Some(RuntimeNameCandidate::Semantic {
+            function,
+            source: Some(source),
+            definition_owner: None,
+        }) = observed.selected()
+        {
+            if let Some(origin) = source.binding_origin {
+                let target =
+                    runmat_runtime::user_functions::selected_external_source_target(origin)
+                        .filter(|target| target.function() == *function && target.is_live())
+                        .ok_or_else(|| {
+                            mex(
+                                "DynamicWorkspaceSource",
+                                "selected semantic source lacks exact linked target authority",
+                            )
+                        })?;
+                let alias = FunctionId(next_alias);
+                next_alias = next_alias.checked_add(1).ok_or_else(|| {
+                    mex(
+                        "DynamicWorkspaceCompile",
+                        "eval static source ID domain is exhausted",
+                    )
+                })?;
+                selected_names.insert(name.to_owned(), alias);
+                external_sources.push(EvalSelectedExternalSource { alias, target });
+                continue;
+            }
+        }
         if let Some(RuntimeNameCandidate::Native(native)) = observed.selected() {
             let Some(artifact) = native.installed_artifact.as_ref() else {
                 continue;
@@ -175,6 +210,7 @@ pub(super) async fn select_sites(
     Ok(EvalSelectedSources {
         names: selected_names,
         sources,
+        external_sources,
         natives,
     })
 }

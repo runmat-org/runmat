@@ -109,12 +109,49 @@ fn visit<'a>(
         }
     }
     let mut methods = HashMap::new();
+    let mut method_bindings = HashMap::new();
     for method in &class.methods {
-        let function_name = executor
+        let metadata = executor
             .function_metadata(method.function)
-            .ok_or_else(|| native_error("linked class method has no executable body"))?
-            .name
-            .clone();
+            .ok_or_else(|| native_error("linked class method has no executable body"))?;
+        if metadata.class_method_owner.as_ref().is_none_or(|owner| {
+            owner.declaring_class != class.class
+                || owner.method != method.name
+                || owner.is_static != method.is_static
+        }) {
+            return Err(Box::new(native_error(
+                "linked class method disagrees with its typed body owner",
+            )));
+        }
+        let function_name = metadata.name.clone();
+        let function = usize::try_from(method.function.0)
+            .map_err(|_| native_error("linked method identity exceeds host indexing"))?;
+        let origin = runmat_execution::FunctionBindingOrigin::from_revision(
+            executor.program_revision(),
+            method.function,
+        )
+        .map_err(native_error)?;
+        // ProgramInvocationGuards installed the selected source catalog and
+        // execution-source resolver before this class batch. They are the
+        // only authority allowed to issue the retained method lease: a
+        // selected product receives SelectedNative, while an unselected
+        // portable catalog receives the exact immutable origin.
+        let binding = runmat_runtime::user_functions::bound_function_binding_for(function);
+        let issued_origin = match &binding.authority {
+            runmat_value::BoundFunctionAuthority::Portable { origin } => Some(*origin),
+            runmat_value::BoundFunctionAuthority::SelectedNative { origin, lease }
+                if lease.is_live() && lease.origin() == *origin =>
+            {
+                Some(*origin)
+            }
+            _ => None,
+        };
+        if binding.function != function || issued_origin != Some(origin) {
+            return Err(Box::new(native_error(
+                "linked class method has no live exact issued binding",
+            )));
+        }
+        method_bindings.insert(method.name.clone(), binding);
         if methods
             .insert(
                 method.name.clone(),
@@ -156,6 +193,7 @@ fn visit<'a>(
     };
     batch.push(CheckedClassRegistration {
         class: definition,
+        method_bindings,
         is_sealed: class.is_sealed,
         is_abstract: class.is_abstract,
         enumerations: class

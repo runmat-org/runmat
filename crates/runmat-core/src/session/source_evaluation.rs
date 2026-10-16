@@ -67,6 +67,40 @@ pub(super) struct SessionSourceEvaluator {
     self_weak: Weak<Self>,
 }
 
+/// The compiler-bearing half of a selected native image's optional source
+/// service. Construction does not grant HostRuntime or publish a port.
+pub struct SelectedNativeSourceEvaluator {
+    evaluator: Rc<SessionSourceEvaluator>,
+    base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
+}
+
+impl SelectedNativeSourceEvaluator {
+    pub fn new(runtime: &RuntimeContext) -> Self {
+        let base_workspace = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let evaluator =
+            SessionSourceEvaluator::new(base_workspace.clone(), runtime.local_identity());
+        Self {
+            evaluator,
+            base_workspace,
+        }
+    }
+
+    pub fn service(&self) -> Rc<dyn RuntimeSourceEvaluationService> {
+        self.evaluator
+            .source_evaluation_for_selected_body(Some(self.evaluator.dynamic_admission_port()))
+    }
+
+    pub fn base_workspace_service(&self) -> Rc<runmat_runtime::workspace::BaseWorkspaceService> {
+        Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+            self.base_workspace.clone(),
+        ))
+    }
+
+    pub fn close(&self) -> Result<bool, runmat_runtime::workspace::BaseWorkspaceError> {
+        self.base_workspace.close()
+    }
+}
+
 pub(super) struct FunctionRegistryPublication {
     evaluator: Rc<SessionSourceEvaluator>,
     active: Rc<FunctionRegistryGeneration>,

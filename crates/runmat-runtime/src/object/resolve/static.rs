@@ -38,13 +38,20 @@ pub fn load_static_member(
                 &format!("Method '{}' is not static", field),
             ));
         }
+        let binding =
+            crate::class_registry::lookup_bound_method(cls, &runmat_types::MethodName::from(field))
+                .and_then(|method| method.bound_function);
+        let source_file = binding
+            .as_ref()
+            .and_then(|binding| crate::user_functions::source_file_for(binding.function))
+            .map(String::into_boxed_str);
         Ok(Value::Closure(Closure::from_data(
             runmat_value::ClosureData {
                 lexical_environment: None,
                 function_name: m.function_name,
-                binding: None,
+                binding,
                 source_role: runmat_types::FunctionSourceRole::Method,
-                source_file: None,
+                source_file,
                 captures: vec![],
             },
         )))

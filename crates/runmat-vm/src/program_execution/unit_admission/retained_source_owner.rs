@@ -72,7 +72,7 @@ impl RetainedExecutableSourceOwner {
         let ids = bodies.iter().map(|body| body.function).collect::<Vec<_>>();
         let mut actual = std::collections::HashMap::new();
         for (origin, fingerprint) in selected
-            .selected_runtime_body_fingerprints_with_imports(&ids, admitted.static_imports())
+            .selected_runtime_body_fingerprints_with_imports(&ids, &admitted.fingerprint_imports())
             .map_err(|error| error.to_string())?
             .into_values()
         {

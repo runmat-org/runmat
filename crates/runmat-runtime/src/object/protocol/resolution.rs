@@ -30,6 +30,9 @@ pub struct ResolvedObjectMethod {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ResolvedObjectMethodTarget {
     Named(CallableIdentity),
+    /// Registered linked body selected by its exact portable/local issuance,
+    /// not by the method's textual declaration name.
+    RegisteredBound(runmat_value::BoundFunctionBinding),
     /// Receiver storage is not issuance authority. The selected VM invoker
     /// checks this owner and lease against the actual body before execution.
     Selected(
@@ -50,7 +53,11 @@ pub fn resolved_method_is_current(method: &ResolvedObjectMethod) -> bool {
     crate::class_registry::lookup_bound_method(&method.class, &method.method).is_some_and(|bound| {
         Some(bound.registry_generation) == method.registry_generation
             && bound.declaring_class == method.declaring_class
-            && method.target == ResolvedObjectMethodTarget::Named(bound.callable)
+            && method.target
+                == bound
+                    .bound_function
+                    .map(ResolvedObjectMethodTarget::RegisteredBound)
+                    .unwrap_or(ResolvedObjectMethodTarget::Named(bound.callable))
             && bound.convention
                 == match method.convention {
                     ObjectProtocolCallingConvention::StandardSubstruct => {
@@ -308,7 +315,10 @@ pub fn resolve_object_protocol(
             class,
             declaring_class: bound.declaring_class,
             method: method_name,
-            target: ResolvedObjectMethodTarget::Named(bound.callable),
+            target: bound
+                .bound_function
+                .map(ResolvedObjectMethodTarget::RegisteredBound)
+                .unwrap_or(ResolvedObjectMethodTarget::Named(bound.callable)),
             fallback: bound.fallback,
             convention,
             access: method.access,
@@ -367,7 +377,10 @@ pub fn resolve_declared_object_method(
         class,
         declaring_class: bound.declaring_class,
         method: method_name.clone(),
-        target: ResolvedObjectMethodTarget::Named(bound.callable),
+        target: bound
+            .bound_function
+            .map(ResolvedObjectMethodTarget::RegisteredBound)
+            .unwrap_or(ResolvedObjectMethodTarget::Named(bound.callable)),
         fallback: bound.fallback,
         convention: ObjectProtocolCallingConvention::DirectArguments,
         access: method.access,

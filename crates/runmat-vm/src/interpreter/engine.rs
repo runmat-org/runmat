@@ -32,6 +32,7 @@ pub fn prepare_workspace_guard(
             filtered_assigned,
             vars,
             pending.policy,
+            pending.base_target,
             global_aliases.clone(),
         )
     });

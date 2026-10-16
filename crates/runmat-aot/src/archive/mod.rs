@@ -14,6 +14,7 @@ pub use manifest::{
 pub(crate) use manifest::{MAX_RUNTIME_ARCHIVE_BYTES, MAX_RUNTIME_PAYLOAD_BYTES};
 #[cfg(target_os = "windows")]
 pub use msvc::{prepare_msvc_runtime_archive, PreparedMsvcRuntimeArchive};
+pub(crate) use probe::member_matches_probe_target;
 pub use probe::read_native_abi_probe;
 pub use product::{build_runtime_archive, RuntimeArchive};
 pub use selected::build_selected_runtime_archive;

@@ -94,6 +94,7 @@ pub(crate) fn checked_class_registration(
     };
     runmat_runtime::class_registry::CheckedClassRegistration {
         class: def,
+        method_bindings: std::collections::HashMap::new(),
         is_sealed,
         is_abstract,
         enumerations,

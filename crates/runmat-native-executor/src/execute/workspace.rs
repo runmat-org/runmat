@@ -4,13 +4,13 @@ use std::{
     rc::{Rc, Weak},
 };
 
-use runmat_hir::{EnvironmentEffect, WorkspaceEffect};
 use runmat_mir::{MirLocalId, MirStmtKind};
 use runmat_native_codegen::NativeInstruction;
 use runmat_runtime::context::RuntimeWorkspaceService;
 use runmat_runtime::workspace::bindings::FrameGlobalBindings;
 use runmat_runtime::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
 use runmat_types::BindingId;
+use runmat_types::{EnvironmentEffect, WorkspaceEffect};
 use runmat_value::Value;
 
 use crate::{NativeExecutorError, NativeExecutorResult};

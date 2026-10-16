@@ -12,7 +12,11 @@ mod frame;
 mod lexical_error;
 use activation::active_frame;
 pub(crate) use activation::WorkspaceFrameActivation;
-pub(crate) use admission::transactional_workspace_admission_with_global_bindings;
+pub(crate) use admission::{
+    detached_transactional_workspace_admission_with_global_bindings,
+    detached_workspace_admission_with_global_bindings,
+    transactional_workspace_admission_with_global_bindings,
+};
 pub use admission::{
     workspace_admission, workspace_admission_with_global_bindings, PendingWorkspaceAdmission,
     WorkspaceExecutionCompletion,
@@ -89,6 +93,7 @@ struct WorkspaceFrame {
     state: WorkspaceState,
     global_aliases: FrameGlobalBindings,
     policy: WorkspaceFramePolicy,
+    base_target: BaseTargetAuthority,
 }
 
 struct LexicalWorkspaceBindings {
@@ -122,6 +127,7 @@ pub(crate) struct PendingWorkspace {
     pub(crate) names: HashMap<String, usize>,
     pub(crate) assigned: HashSet<String>,
     pub(crate) policy: WorkspaceFramePolicy,
+    pub(crate) base_target: BaseTargetAuthority,
     pub(crate) global_aliases: FrameGlobalBindings,
 }
 
@@ -138,6 +144,32 @@ pub enum WorkspaceTarget {
     Current,
     Caller,
     Base,
+}
+
+/// Whether `Base` is an installed VM frame or an explicitly selected session
+/// owner. This provenance is issued with the exact workspace admission, not
+/// inferred from the presence of a runtime service or a builtin name.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum BaseTargetAuthority {
+    Frame,
+    CanonicalService,
+}
+
+pub(crate) fn base_target_authority() -> Option<BaseTargetAuthority> {
+    let owner = current_owner();
+    with_stack(owner, |stack| {
+        let mut frame = active_frame(owner).or_else(|| (stack.len() == 1).then(|| stack[0].id))?;
+        loop {
+            let current = stack.iter().find(|candidate| candidate.id == frame)?;
+            if current.base_target == BaseTargetAuthority::CanonicalService {
+                return Some(BaseTargetAuthority::CanonicalService);
+            }
+            match current.parent {
+                Some(parent) => frame = parent,
+                None => return Some(BaseTargetAuthority::Frame),
+            }
+        }
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -160,6 +192,17 @@ pub(crate) struct WorkspaceTargetIdentity {
 }
 
 impl WorkspaceTargetIdentity {
+    pub(crate) fn ensure_current(self) -> Result<(), runmat_runtime::RuntimeError> {
+        if current_owner() != self.owner
+            || target_frame_id(self.owner, self.selector) != Some(self.target)
+        {
+            return Err(workspace_target_error(
+                "captured workspace target has changed",
+            ));
+        }
+        Ok(())
+    }
+
     pub(crate) fn scope<F: std::future::Future>(
         self,
         future: F,
@@ -175,13 +218,7 @@ impl WorkspaceTargetIdentity {
         global_aliases: HashMap<usize, FrameGlobalBinding>,
         report: WorkspaceAssignedReport,
     ) -> Result<(), runmat_runtime::RuntimeError> {
-        if current_owner() != self.owner
-            || target_frame_id(self.owner, self.selector) != Some(self.target)
-        {
-            return Err(workspace_target_error(
-                "captured workspace target has changed",
-            ));
-        }
+        self.ensure_current()?;
         replace_workspace_target_vars_and_state(
             self.selector,
             vars,
@@ -503,6 +540,7 @@ pub fn set_workspace_state(
         assigned,
         vars,
         WorkspaceFramePolicy::TopLevel,
+        BaseTargetAuthority::Frame,
         global_aliases,
     )
 }
@@ -518,6 +556,7 @@ pub fn set_transient_workspace_state(
         assigned,
         vars,
         WorkspaceFramePolicy::Transient,
+        BaseTargetAuthority::Frame,
         global_aliases,
     )
 }
@@ -527,6 +566,7 @@ fn install_workspace_state(
     assigned: HashSet<String>,
     vars: &mut [Value],
     policy: WorkspaceFramePolicy,
+    base_target: BaseTargetAuthority,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
     let mut slot_lifecycle = HashMap::new();
@@ -568,6 +608,7 @@ fn install_workspace_state(
                 pending_var_reconciliation: HashSet::new(),
             },
             policy,
+            base_target,
         });
     });
     WorkspaceStateGuard {
@@ -610,9 +651,10 @@ pub(crate) fn set_workspace_state_with_policy(
     assigned: HashSet<String>,
     vars: &mut [Value],
     policy: WorkspaceFramePolicy,
+    base_target: BaseTargetAuthority,
     global_aliases: FrameGlobalBindings,
 ) -> WorkspaceStateGuard {
-    install_workspace_state(names, assigned, vars, policy, global_aliases)
+    install_workspace_state(names, assigned, vars, policy, base_target, global_aliases)
 }
 
 pub fn refresh_workspace_state(vars: &[Value]) {
@@ -992,7 +1034,7 @@ pub fn replace_workspace_target_vars_and_state(
     .unwrap_or_else(|| Err(workspace_target_error("workspace state unavailable")))
 }
 
-fn active_named_global_bindings(
+pub(crate) fn active_named_global_bindings(
     names: &HashMap<String, usize>,
     global_aliases: &HashMap<usize, FrameGlobalBinding>,
 ) -> HashSet<String> {
@@ -1297,6 +1339,7 @@ mod tests {
                 HashSet::from(["x".to_string()]),
                 &mut vars,
                 WorkspaceFramePolicy::Transactional,
+                BaseTargetAuthority::Frame,
                 FrameGlobalBindings::default(),
             );
             let frame = with_stack(current_owner(), |stack| stack.last().unwrap().id);
@@ -1312,6 +1355,34 @@ mod tests {
     }
 
     #[test]
+    fn detached_source_base_selection_is_explicit_admission_provenance() {
+        let mut vars = Vec::new();
+        {
+            let _guard = set_workspace_state_with_policy(
+                HashMap::new(),
+                HashSet::new(),
+                &mut vars,
+                WorkspaceFramePolicy::TopLevel,
+                BaseTargetAuthority::CanonicalService,
+                FrameGlobalBindings::default(),
+            );
+            assert_eq!(
+                base_target_authority(),
+                Some(BaseTargetAuthority::CanonicalService)
+            );
+        }
+        {
+            let _guard = set_workspace_state(
+                HashMap::new(),
+                HashSet::new(),
+                &mut vars,
+                FrameGlobalBindings::default(),
+            );
+            assert_eq!(base_target_authority(), Some(BaseTargetAuthority::Frame));
+        }
+    }
+
+    #[test]
     fn transient_frames_do_not_become_host_completions() {
         let _ = take_updated_workspace_state();
         let mut vars = vec![Value::Num(1.0)];
@@ -1321,6 +1392,7 @@ mod tests {
                 HashSet::from(["x".to_string()]),
                 &mut vars,
                 WorkspaceFramePolicy::Transient,
+                BaseTargetAuthority::Frame,
                 FrameGlobalBindings::default(),
             );
         }

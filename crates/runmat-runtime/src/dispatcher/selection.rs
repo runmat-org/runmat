@@ -85,7 +85,10 @@ pub enum ObservedBuiltinDispatchTarget {
         owner: ClassIdentity,
         method: runmat_types::MethodName,
     },
-    StaticMethod(RegisteredStaticMethodResolution),
+    StaticMethod {
+        owner: ClassIdentity,
+        method: runmat_types::MethodName,
+    },
     Constructor(ClassIdentity),
 }
 
@@ -104,10 +107,9 @@ impl ObservedBuiltinDispatchTarget {
             Self::InstanceMethod { owner, method } => {
                 ObservedBuiltinDispatchIdentity::InstanceMethod(owner.clone(), method.clone())
             }
-            Self::StaticMethod(resolution) => ObservedBuiltinDispatchIdentity::StaticMethod(
-                resolution.registration.class.clone(),
-                resolution.registration.method_name.clone(),
-            ),
+            Self::StaticMethod { owner, method } => {
+                ObservedBuiltinDispatchIdentity::StaticMethod(owner.clone(), method.clone())
+            }
             Self::Constructor(class) => ObservedBuiltinDispatchIdentity::Constructor(class.clone()),
         }
     }
@@ -142,13 +144,17 @@ pub fn observe_builtin_dispatch_target(
         )));
     }
     if let Some(method) = observe_registered_static_method(name) {
-        return Ok(Some(ObservedBuiltinDispatchTarget::StaticMethod(method)));
+        return Ok(Some(ObservedBuiltinDispatchTarget::StaticMethod {
+            owner: method.registration.class,
+            method: method.registration.method_name,
+        }));
     }
     Ok(crate::class_registry::registered_constructor_identity(name)
         .map(ObservedBuiltinDispatchTarget::Constructor))
 }
 
 pub(super) enum InstanceMethodRoute {
+    Bound(runmat_value::BoundFunctionBinding),
     SemanticName(String),
     BuiltinName(String),
 }
@@ -162,6 +168,7 @@ pub(super) struct SelectedInstanceMethod {
 impl SelectedInstanceMethod {
     fn has_executable_route(&self) -> bool {
         self.routes.iter().any(|route| match route {
+            InstanceMethodRoute::Bound(_) => true,
             InstanceMethodRoute::SemanticName(name) => semantic_name_is_executable(name),
             InstanceMethodRoute::BuiltinName(_) => true,
         })
@@ -205,6 +212,15 @@ pub(super) fn select_instance_method(
         ))
         .with_identifier("RunMat:MethodPrivate")
         .build());
+    }
+    if let Some(binding) = crate::class_registry::lookup_bound_method(class_name, &method_identity)
+        .and_then(|method| method.bound_function)
+    {
+        return Ok(Some(SelectedInstanceMethod {
+            owner,
+            method: method_identity,
+            routes: vec![InstanceMethodRoute::Bound(binding)],
+        }));
     }
     let mut routes = Vec::with_capacity(4);
     let mut append_routes = |name: &str| {

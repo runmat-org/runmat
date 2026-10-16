@@ -1,8 +1,8 @@
-use runmat_hir::{
+use runmat_types::ProgramSourceId;
+use runmat_types::{
     CapturedBinding, ClassId, FunctionArgumentValidation, FunctionId, FunctionKind,
     FunctionModifiers, FunctionName, Span,
 };
-use runmat_types::ProgramSourceId;
 use serde::{Deserialize, Serialize};
 
 /// Immutable frontend metadata required by MIR-owned semantic analysis.

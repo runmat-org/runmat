@@ -80,6 +80,7 @@ mod run;
 mod s1_compiled_call_tests;
 pub(crate) mod semantic_definition;
 mod source_evaluation;
+pub use source_evaluation::SelectedNativeSourceEvaluator;
 #[cfg(not(target_arch = "wasm32"))]
 mod tcp_host;
 mod user_path;

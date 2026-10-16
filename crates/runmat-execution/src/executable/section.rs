@@ -20,18 +20,21 @@ pub enum SectionRequirement {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum KnownExecutableSection {
     StaticImports,
+    LinkedNativeImports,
 }
 
 impl KnownExecutableSection {
     pub const fn name(self) -> &'static str {
         match self {
             Self::StaticImports => "runmat.static_imports",
+            Self::LinkedNativeImports => "runmat.linked_native_imports",
         }
     }
 
     pub const fn schema_version(self) -> u16 {
         match self {
             Self::StaticImports => 1,
+            Self::LinkedNativeImports => 1,
         }
     }
 }

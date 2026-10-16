@@ -12,6 +12,7 @@ repository = "https://github.com/runmat-org/runmat"
 crate-type = ["rlib", "staticlib"]
 
 [dependencies]
+runmat-core = { workspace = true, default-features = false, optional = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-config = { workspace = true }
@@ -30,6 +31,10 @@ runmat-value = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt", "time"] }
 tempfile = "3.12"
+
+[features]
+default = []
+source-evaluation = ["dep:runmat-core"]
 
 [dev-dependencies]
 runmat-core = { workspace = true }

@@ -25,6 +25,9 @@ pub struct NativeExecutor {
     pub(super) compile_duration_ns: u64,
     entry_profile: Option<EntryRepresentationProfile>,
     optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
+    required_runtime_services:
+        std::collections::BTreeSet<runmat_execution::host::NativeDeploymentServiceKind>,
+    selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
 }
 
 struct EntryRepresentationProfile {
@@ -93,6 +96,53 @@ impl NativeExecutor {
         executable: NativeExecutable,
         options: NativeExecutorOptions,
     ) -> NativeExecutorResult<Self> {
+        Self::bind_with_selected_service(assembly, executable, options, None)
+    }
+
+    /// Selected entry requires the already verified target-pack product, never
+    /// a decoded product declaration or a service identity copied by a caller.
+    pub fn bind_selected(
+        assembly: runmat_native_codegen::NativeAssembly,
+        executable: NativeExecutable,
+        options: NativeExecutorOptions,
+        selected: &runmat_native_codegen::aot::SelectedNativeProduct<'_>,
+    ) -> NativeExecutorResult<Self> {
+        selected.validate_assembly(&assembly)?;
+        let issuer = selected.source_evaluation_issuer()?;
+        Self::bind_with_selected_service(assembly, executable, options, issuer)
+    }
+
+    /// Bound only by the generated standalone linked-image entry.
+    pub fn bind_linked_selected(
+        assembly: runmat_native_codegen::NativeAssembly,
+        executable: NativeExecutable,
+        options: NativeExecutorOptions,
+        linked: &runmat_native_codegen::aot::LinkedNativeProduct,
+        source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+    ) -> NativeExecutorResult<Self> {
+        linked.validate_assembly(&assembly)?;
+        if source_evaluation.as_ref().map(|issuer| issuer.product())
+            != linked
+                .binding()
+                .required_services
+                .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
+                .then(|| linked.binding().fingerprint())
+                .transpose()
+                .map_err(|error| NativeExecutorError::Executable(error.to_string()))?
+        {
+            return Err(NativeExecutorError::Executable(
+                "linked source service differs from selected product".into(),
+            ));
+        }
+        Self::bind_with_selected_service(assembly, executable, options, source_evaluation)
+    }
+
+    fn bind_with_selected_service(
+        assembly: runmat_native_codegen::NativeAssembly,
+        executable: NativeExecutable,
+        options: NativeExecutorOptions,
+        selected_source_evaluation: Option<runmat_execution::host::VerifiedNativeServiceIssuer>,
+    ) -> NativeExecutorResult<Self> {
         assembly.verify()?;
         assembly.target.require_host_executable()?;
         let ir_functions = assembly
@@ -110,6 +160,7 @@ impl NativeExecutor {
             ));
         }
         let regions = assembly.requirements.regions.clone();
+        let required_runtime_services = assembly.required_runtime_services();
         let profiled_function = assembly.selected_entrypoint;
         let optimized_regions = if options.entry_profile.is_some() {
             crate::region::derive_plans(&assembly.functions, &regions)
@@ -125,6 +176,8 @@ impl NativeExecutor {
             interpreter_resume_points: options.interpreter_resume_points,
             coverage_sites: options.coverage_sites,
             regions,
+            required_runtime_services,
+            selected_source_evaluation,
             compile_duration_ns: options.compile_duration_ns,
             entry_profile: options
                 .entry_profile
@@ -398,6 +451,21 @@ impl NativeExecutor {
             osr_target,
             workspace,
         } = request;
+        if self
+            .required_runtime_services
+            .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
+        {
+            if let Some(issuer) = &self.selected_source_evaluation {
+                runtime
+                    .service_ports()
+                    .require_selected_source_evaluation(issuer)?;
+            } else {
+                runtime
+                    .service_ports()
+                    .require_source_evaluation("execute native source evaluation")
+                    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+            }
+        }
         let mut profile_values = arguments.clone();
         if let Some(workspace) = &workspace {
             profile_values.extend(workspace.profile_values());

@@ -255,7 +255,8 @@ async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec
             }
             RuntimeNameCandidate::RegisteredStaticMethod { resolution, source } => {
                 match &resolution.target {
-                    crate::dispatcher::RegisteredStaticMethodTarget::Semantic(_) => {
+                    crate::dispatcher::RegisteredStaticMethodTarget::Bound(_)
+                    | crate::dispatcher::RegisteredStaticMethodTarget::Semantic(_) => {
                         match source
                             .as_ref()
                             .and_then(|source| source.source_file.as_ref())

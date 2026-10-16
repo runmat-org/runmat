@@ -1,4 +1,6 @@
+#[cfg(feature = "compiler")]
 pub mod analysis;
+#[cfg(feature = "compiler")]
 pub mod lowering;
 pub mod parallel;
 
@@ -9,6 +11,7 @@ mod async_;
 mod block;
 mod body;
 mod call;
+#[cfg(feature = "compiler")]
 mod diagnostics;
 mod expression_region;
 mod function;
@@ -28,6 +31,7 @@ pub use block::*;
 pub use body::*;
 pub use call::*;
 pub use construct::*;
+#[cfg(feature = "compiler")]
 pub use diagnostics::*;
 pub use expression_region::*;
 pub use function::*;

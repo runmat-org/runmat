@@ -6,14 +6,15 @@ use std::rc::Rc;
 
 use runmat_execution::executable::{
     ExecutableStaticCaller, ExecutableStaticImport, ExecutableStaticImportKind,
+    LinkedNativeStaticImport,
 };
 use runmat_execution::value::GraphStaticReferenceSite;
 use runmat_runtime::source_context::SelectedProgramSourceOwner;
 use runmat_value::{BoundFunctionBinding, FunctionDefinitionLease, FunctionDefinitionOwner};
 use runmat_vm::{
     instruction_reference_sites, BytecodeSourceRef, FunctionReferenceKind, FunctionRegistry,
-    SelectedExecutableProduct, SelectedStaticCapture, SelectedStaticProductDependency,
-    SelectedStaticSiteOwner,
+    SelectedExecutableProduct, SelectedLinkedNativeSite, SelectedStaticCapture,
+    SelectedStaticProductDependency, SelectedStaticSiteOwner,
 };
 
 /// One immutable, invocation-local source selection. It keeps a definition
@@ -34,6 +35,13 @@ pub(in crate::session) struct SelectedStaticTarget {
 pub(in crate::session) struct SelectedStaticImports {
     pub imports: Vec<ExecutableStaticImport>,
     pub targets: Vec<SelectedStaticTarget>,
+    pub linked_native: Vec<SelectedLinkedNativeTarget>,
+}
+
+#[derive(Debug)]
+pub(in crate::session) struct SelectedLinkedNativeTarget {
+    pub import: LinkedNativeStaticImport,
+    pub target: runmat_runtime::user_functions::SelectedExternalSourceTarget,
 }
 
 fn add_static_edge(
@@ -73,9 +81,27 @@ pub(in crate::session) fn static_capture(
     product: Rc<SelectedExecutableProduct>,
     targets: &[SelectedStaticTarget],
 ) -> Result<Rc<SelectedStaticCapture>, &'static str> {
+    static_capture_with_linked(product, targets, &[])
+}
+
+pub(in crate::session) fn static_capture_with_linked(
+    product: Rc<SelectedExecutableProduct>,
+    targets: &[SelectedStaticTarget],
+    linked_targets: &[SelectedLinkedNativeTarget],
+) -> Result<Rc<SelectedStaticCapture>, &'static str> {
     let mut edges = Vec::new();
     let mut owners = Vec::new();
     let mut by_site = HashMap::new();
+    let mut linked = Vec::<SelectedLinkedNativeSite>::new();
+    let mut linked_by_site = HashMap::new();
+    for target in linked_targets {
+        let site = SelectedLinkedNativeSite::new(
+            Rc::clone(&product),
+            target.import,
+            target.target.clone(),
+        )?;
+        add_linked_site(&mut linked, &mut linked_by_site, site)?;
+    }
     for target in targets {
         let body = target
             .view
@@ -149,11 +175,38 @@ pub(in crate::session) fn static_capture(
                     owner.clone(),
                 )?;
             }
-        } else if !target.product.static_imports().is_empty() {
+            for inherited in captured.linked_native() {
+                add_linked_site(&mut linked, &mut linked_by_site, inherited.clone())?;
+            }
+        } else if !target.product.static_imports().is_empty()
+            || !target.product.linked_native_imports().is_empty()
+        {
             return Err("selected static target lacks its transitive captured imports");
         }
     }
-    SelectedStaticCapture::admit(product, edges)?.with_site_owners(owners)
+    SelectedStaticCapture::admit_with_linked(product, edges, linked)?.with_site_owners(owners)
+}
+
+fn add_linked_site(
+    linked: &mut Vec<SelectedLinkedNativeSite>,
+    by_site: &mut HashMap<(usize, ExecutableStaticCaller, GraphStaticReferenceSite), usize>,
+    site: SelectedLinkedNativeSite,
+) -> Result<(), &'static str> {
+    let import = site.import();
+    let key = (
+        Rc::as_ptr(site.caller()) as usize,
+        import.caller,
+        import.site,
+    );
+    if let Some(existing) = by_site.get(&key) {
+        if !linked[*existing].same_target(&site) {
+            return Err("selected linked-native site has contradictory loaded code");
+        }
+    } else {
+        by_site.insert(key, linked.len());
+        linked.push(site);
+    }
+    Ok(())
 }
 
 struct SelectionInputs<'a> {
@@ -161,6 +214,10 @@ struct SelectionInputs<'a> {
     included_current_ids: &'a HashSet<runmat_hir::FunctionId>,
     partitioned_reused_ids: &'a HashSet<runmat_hir::FunctionId>,
     preselected: &'a HashMap<runmat_hir::FunctionId, (BoundFunctionBinding, FunctionRegistry)>,
+    linked_native: &'a HashMap<
+        runmat_hir::FunctionId,
+        runmat_runtime::user_functions::SelectedExternalSourceTarget,
+    >,
 }
 
 pub(in crate::session) fn selected_static_imports(
@@ -188,12 +245,34 @@ pub(in crate::session) fn selected_static_imports_with_preselected(
     partitioned_reused_ids: &HashSet<runmat_hir::FunctionId>,
     preselected: &HashMap<runmat_hir::FunctionId, (BoundFunctionBinding, FunctionRegistry)>,
 ) -> Result<SelectedStaticImports, String> {
+    selected_static_imports_with_preselected_and_linked(
+        unit,
+        inherited,
+        included_current_ids,
+        partitioned_reused_ids,
+        preselected,
+        &HashMap::new(),
+    )
+}
+
+pub(in crate::session) fn selected_static_imports_with_preselected_and_linked(
+    unit: &crate::ExecutableUnit,
+    inherited: &FunctionRegistry,
+    included_current_ids: &HashSet<runmat_hir::FunctionId>,
+    partitioned_reused_ids: &HashSet<runmat_hir::FunctionId>,
+    preselected: &HashMap<runmat_hir::FunctionId, (BoundFunctionBinding, FunctionRegistry)>,
+    linked_native: &HashMap<
+        runmat_hir::FunctionId,
+        runmat_runtime::user_functions::SelectedExternalSourceTarget,
+    >,
+) -> Result<SelectedStaticImports, String> {
     selected_static_imports_with_preselected_mode(
         unit,
         inherited,
         included_current_ids,
         partitioned_reused_ids,
         preselected,
+        linked_native,
         true,
     )
 }
@@ -201,12 +280,16 @@ pub(in crate::session) fn selected_static_imports_with_preselected(
 /// The eval script is already executing when its closure is issued. Its
 /// instructions are not part of the function-only selected product and must
 /// not contribute imports to that product's sealed static section.
-pub(in crate::session) fn selected_pending_closure_imports_with_preselected(
+pub(in crate::session) fn selected_pending_closure_imports_with_preselected_and_linked(
     unit: &crate::ExecutableUnit,
     inherited: &FunctionRegistry,
     function: runmat_hir::FunctionId,
     partitioned_siblings: &HashSet<runmat_hir::FunctionId>,
     preselected: &HashMap<runmat_hir::FunctionId, (BoundFunctionBinding, FunctionRegistry)>,
+    linked_native: &HashMap<
+        runmat_hir::FunctionId,
+        runmat_runtime::user_functions::SelectedExternalSourceTarget,
+    >,
 ) -> Result<SelectedStaticImports, String> {
     if partitioned_siblings
         .iter()
@@ -220,6 +303,7 @@ pub(in crate::session) fn selected_pending_closure_imports_with_preselected(
         &HashSet::from([function]),
         partitioned_siblings,
         preselected,
+        linked_native,
         false,
     )
 }
@@ -230,6 +314,10 @@ fn selected_static_imports_with_preselected_mode(
     included_current_ids: &HashSet<runmat_hir::FunctionId>,
     partitioned_reused_ids: &HashSet<runmat_hir::FunctionId>,
     preselected: &HashMap<runmat_hir::FunctionId, (BoundFunctionBinding, FunctionRegistry)>,
+    linked_native: &HashMap<
+        runmat_hir::FunctionId,
+        runmat_runtime::user_functions::SelectedExternalSourceTarget,
+    >,
     include_script: bool,
 ) -> Result<SelectedStaticImports, String> {
     if !included_current_ids
@@ -247,6 +335,7 @@ fn selected_static_imports_with_preselected_mode(
     let mut selected = SelectedStaticImports {
         imports: Vec::new(),
         targets: Vec::new(),
+        linked_native: Vec::new(),
     };
     let mut selected_views =
         HashMap::<runmat_hir::FunctionId, (BoundFunctionBinding, FunctionRegistry)>::new();
@@ -255,6 +344,7 @@ fn selected_static_imports_with_preselected_mode(
         included_current_ids,
         partitioned_reused_ids,
         preselected,
+        linked_native,
     };
     if include_script {
         collect(
@@ -292,6 +382,13 @@ fn selected_static_imports_with_preselected_mode(
         .iter()
         .map(|target| target.import)
         .collect();
+    selected.linked_native.sort_by_key(|target| {
+        let caller = match target.import.caller {
+            ExecutableStaticCaller::Script => None,
+            ExecutableStaticCaller::Function(origin) => Some((origin.program, origin.function.0)),
+        };
+        (caller, target.import.site)
+    });
     Ok(selected)
 }
 
@@ -321,6 +418,21 @@ fn collect(
                 }
             };
             let caller = caller.ok_or("selected static caller lacks its portable origin")?;
+            if let Some(target) = inputs.linked_native.get(&function) {
+                if kind != FunctionReferenceKind::External {
+                    return Err("linked native target is not an external reference".into());
+                }
+                let import = target
+                    .linked_import(caller, site)
+                    .ok_or("linked native target source or loaded code has retired")?;
+                selected_imports
+                    .linked_native
+                    .push(SelectedLinkedNativeTarget {
+                        import,
+                        target: target.clone(),
+                    });
+                continue;
+            }
             // External sites were emitted from the pre-merge inherited
             // registry. Partitioned sites have a separately proved reused-ID
             // exclusion, and must also prove the exact inherited body.

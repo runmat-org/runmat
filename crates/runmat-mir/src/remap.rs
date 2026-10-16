@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 
-use runmat_hir::{CallableIdentity, FunctionId};
+use runmat_types::{CallableIdentity, FunctionId};
 
 use crate::{
     parallel::{MirCollectiveOp, MirDistributedOp, MirSpmdHeader},

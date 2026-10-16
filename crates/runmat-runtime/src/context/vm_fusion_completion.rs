@@ -56,6 +56,17 @@ pub struct VmFusionCompletionRight {
     session: Option<VmFusionSessionRegistration>,
 }
 
+/// Exact installed VM region may abandon an optimization before provider
+/// effects and resume its original instructions. This carries no placement
+/// session, host route, feedback, or publication authority.
+pub struct VmFusionDeclineRight {
+    registration: VmFusionRegionRegistration,
+    owner: RuntimeContextLocalId,
+    program: Option<ProgramRevision>,
+    cancellation: CancellationToken,
+    issuer_live: Weak<()>,
+}
+
 impl VmFusionInstalledRegion {
     /// Trusted Rust-host issuance point. The VM path registers only its
     /// already-reconciled plan; external hosts using this public API are
@@ -125,6 +136,39 @@ impl VmFusionInstalledRegion {
             feedback_live: Arc::downgrade(&self.feedback_live),
             session,
         })
+    }
+
+    pub fn decline_right(&self, runtime: &RuntimeContext) -> Option<VmFusionDeclineRight> {
+        if runtime.local_identity() != self.owner
+            || runtime.program_revision() != self.program.as_ref()
+            || !runtime.cancellation().same_generation(&self.cancellation)
+            || runtime.is_cancelled()
+        {
+            return None;
+        }
+        Some(VmFusionDeclineRight {
+            registration: self.registration,
+            owner: self.owner,
+            program: self.program.clone(),
+            cancellation: self.cancellation.clone(),
+            issuer_live: Arc::downgrade(&self.issuer_live),
+        })
+    }
+}
+
+impl VmFusionDeclineRight {
+    pub fn is_current(&self, runtime: &RuntimeContext) -> bool {
+        self.issuer_live.upgrade().is_some()
+            && runtime.local_identity() == self.owner
+            && runtime.program_revision() == self.program.as_ref()
+            && runtime.cancellation().same_generation(&self.cancellation)
+            && !runtime.is_cancelled()
+    }
+
+    pub fn matches_group(&self, group_id: usize, span_start: usize, span_end: usize) -> bool {
+        self.registration.group_id == group_id
+            && self.registration.span_start == span_start
+            && self.registration.span_end == span_end
     }
 }
 

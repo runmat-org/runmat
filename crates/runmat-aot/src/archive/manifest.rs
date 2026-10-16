@@ -3,7 +3,7 @@ use runmat_native_codegen::{aot::NATIVE_OBJECT_SCHEMA_VERSION, NativeTarget};
 
 use crate::{AotError, AotResult};
 
-pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 6;
+pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 7;
 pub const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RUNTIME_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_LINK_TOKENS: usize = 256;
@@ -128,6 +128,16 @@ impl RuntimeArchiveManifest {
             .validate()
             .map_err(|error| AotError::contract("aot.archive.product", error.to_string()))?;
         if let Some(binding) = self.product.selected() {
+            if binding
+                .required_services
+                .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
+                && !self.capabilities.dynamic_source_loading
+            {
+                return Err(AotError::contract(
+                    "aot.archive.source_evaluation",
+                    "selected source evaluation requires an admitted dynamic source loader",
+                ));
+            }
             runmat_native_codegen::aot::validate_native_product(
                 &self.product,
                 &self.native_target,

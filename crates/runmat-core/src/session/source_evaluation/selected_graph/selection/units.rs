@@ -86,6 +86,11 @@ impl SelectedGraphUnits {
             .map_err(|_| invalid("selected primary V3 product cannot be encoded"))?;
         let admitted = runmat_vm::admit_executable_unit(&bytes)
             .map_err(|_| invalid("selected primary V3 product is invalid"))?;
+        if !admitted.linked_native_imports().is_empty() {
+            return Err(invalid(
+                "selected Graph transfer has no linked-native code lease handoff",
+            ));
+        }
         let revision = &admitted.envelope().manifest.identity.program;
         if revision
             .identity_digest()
@@ -352,6 +357,11 @@ impl SelectedGraphUnits {
         let bytes = bound.canonical_v3();
         let admitted = runmat_vm::admit_executable_unit(bytes)
             .map_err(|_| invalid("exception source V3 product is invalid"))?;
+        if !admitted.linked_native_imports().is_empty() {
+            return Err(invalid(
+                "exception graph source has linked-native imports without code handoff",
+            ));
+        }
         let admitted_map = admitted.admitted_source_map();
         if selected.portable_map() != admitted_map {
             return Err(invalid("exception source differs from its admitted V3 map"));
@@ -431,6 +441,11 @@ fn select_retained_unit(
     };
     let admitted = runmat_vm::admit_executable_unit(&bytes)
         .map_err(|_| invalid("retained callable V3 product is invalid"))?;
+    if !admitted.linked_native_imports().is_empty() {
+        return Err(invalid(
+            "retained Graph callable has linked-native imports without code handoff",
+        ));
+    }
     let revision = &admitted.envelope().manifest.identity.program;
     if revision
         .identity_digest()

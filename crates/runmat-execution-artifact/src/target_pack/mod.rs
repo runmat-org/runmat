@@ -4,6 +4,7 @@
 mod codec;
 mod components;
 mod manifest;
+mod issuer;
 mod profile;
 mod probe;
 mod product;

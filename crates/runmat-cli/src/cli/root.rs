@@ -263,6 +263,15 @@ pub enum Commands {
         /// Explicit system linker driver
         #[arg(long)]
         linker: Option<PathBuf>,
+        /// Canonical selected target-pack manifest (requires separate host admission)
+        #[arg(long, requires_all = ["selected_components", "selected_host_admission"], conflicts_with = "linker")]
+        selected_pack_manifest: Option<PathBuf>,
+        /// Directory of raw target-pack components, addressed by component ID
+        #[arg(long, requires_all = ["selected_pack_manifest", "selected_host_admission"])]
+        selected_components: Option<PathBuf>,
+        /// Independent operator-issued target, capability and qualified-link admission
+        #[arg(long, requires_all = ["selected_pack_manifest", "selected_components"])]
+        selected_host_admission: Option<PathBuf>,
         /// Retain temporary object, archive, and response-file inputs
         #[arg(long)]
         keep_temps: bool,
@@ -564,6 +573,56 @@ mod tests {
             link_plan_json.as_deref(),
             Some(std::path::Path::new("build/main.link.json"))
         );
+    }
+
+    #[test]
+    fn selected_compile_requires_separate_pack_and_host_admission_inputs() {
+        let selected = Cli::try_parse_from([
+            "runmat",
+            "compile",
+            "main.m",
+            "--policy",
+            "dynamic-runtime",
+            "--selected-pack-manifest",
+            "pack.json",
+            "--selected-components",
+            "pack-bytes",
+            "--selected-host-admission",
+            "qualified-host.json",
+        ])
+        .unwrap();
+        assert!(matches!(
+            selected.command,
+            Some(Commands::Compile {
+                selected_pack_manifest: Some(_),
+                selected_components: Some(_),
+                selected_host_admission: Some(_),
+                linker: None,
+                ..
+            })
+        ));
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "compile",
+            "main.m",
+            "--selected-pack-manifest",
+            "pack.json",
+        ])
+        .is_err());
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "compile",
+            "main.m",
+            "--selected-pack-manifest",
+            "pack.json",
+            "--selected-components",
+            "pack-bytes",
+            "--selected-host-admission",
+            "host.json",
+            "--linker",
+            "/usr/bin/cc",
+        ])
+        .is_err());
     }
 
     #[test]

@@ -5,7 +5,10 @@ use crate::tree::{
     ResolvedNativeTree,
 };
 use crate::{AotError, AotResult};
-use runmat_execution::{host::NativeSelectedProductBinding, Digest};
+use runmat_execution::{
+    host::{NativeSelectedProductBinding, VerifiedNativeServiceIssuer},
+    Digest,
+};
 use runmat_execution_artifact::target_pack::VerifiedTargetPackContents;
 use runmat_package::{ContentDigest, NormalizedRelativePath};
 use runmat_package_cache::{TreeEntry, TreeManifest};
@@ -51,6 +54,7 @@ pub struct NativeInstallationBundle<'a> {
     pub(super) manifest: NativeInstallationManifest,
     pub(super) bytes: Vec<u8>,
     pub(super) identity: Digest,
+    pub(super) source_evaluation_issuer: Option<VerifiedNativeServiceIssuer>,
 }
 impl NativeInstallationBundle<'_> {
     pub fn manifest(&self) -> &NativeInstallationManifest {
@@ -71,6 +75,16 @@ pub fn prepare_native_installation<'a>(
     expected: &ExternalNativeInstallationAdmission,
 ) -> AotResult<NativeInstallationBundle<'a>> {
     let product = contents.selected_product_binding().map_err(invalid)?;
+    let source_evaluation_issuer = product
+        .required_services
+        .contains(&runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation)
+        .then(|| {
+            contents.verified_service_issuer(
+                runmat_execution::host::NativeDeploymentServiceKind::SourceEvaluation,
+            )
+        })
+        .transpose()
+        .map_err(invalid)?;
     let product_id = product.fingerprint().map_err(invalid)?;
     if linked.product.selected() != Some(&product)
         || linked.output_digest != expected.image
@@ -242,6 +256,7 @@ pub fn prepare_native_installation<'a>(
         manifest,
         bytes,
         identity: digest.finish(),
+        source_evaluation_issuer,
     })
 }
 
@@ -268,12 +283,17 @@ fn validate_loader_inventory(
         ));
     }
     let mut required = std::collections::BTreeSet::from([layout.executable.as_str().to_owned()]);
-    for (_, path) in &build.hosted_dependencies {
+    for (dependency, path) in &build.hosted_dependencies {
         let installed = format!("{}/{}", layout.sysroot.as_str(), path.as_str());
         let bytes = tree
             .file(&installed)
             .ok_or_else(|| invalid("hosted dependency is not retained"))?;
-        crate::link::native_input::validate_hosted_dependency(bytes, &product.target.target)?;
+        crate::link::native_input::validate_qualified_hosted_dependency(
+            bytes,
+            &product.target.target,
+            dependency,
+            path,
+        )?;
         use object::Object;
         if object::File::parse(bytes).is_ok_and(|image| {
             matches!(

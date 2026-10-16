@@ -1,5 +1,5 @@
 use crate::{MirIndexing, MirLocalId, MirOperand};
-use runmat_hir::{AssignmentCreationPolicy, BindingId, IndexKind, MemberName};
+use runmat_types::{AssignmentCreationPolicy, BindingId, IndexKind, MemberName};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,7 +62,7 @@ impl MirPlace {
 mod tests {
     use super::*;
     use crate::{MirIndexPlan, MirLocalId};
-    use runmat_hir::{IndexKind, IndexResultContext};
+    use runmat_types::{IndexKind, IndexResultContext};
 
     #[test]
     fn outer_creation_policy_is_distinct_from_nested_root_segment() {

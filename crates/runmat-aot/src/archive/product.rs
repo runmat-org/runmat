@@ -196,11 +196,17 @@ mod tests {
         ))
         .unwrap_err();
         assert!(error.to_string().contains("aot.archive.schema"));
-        assert!(error.to_string().contains("actual 3, expected 6"));
+        assert!(error.to_string().contains(&format!(
+            "actual 3, expected {}",
+            RUNTIME_ARCHIVE_SCHEMA_VERSION
+        )));
 
         let changed_fields = br#"{"schema_version":3,"native_ir_schema_version":5,"native_object_schema_version":4,"native_link_tokens":"changed representation"}"#;
         let error = RuntimeArchiveManifest::from_json(changed_fields).unwrap_err();
         assert!(error.to_string().contains("aot.archive.schema"));
-        assert!(error.to_string().contains("actual 3, expected 6"));
+        assert!(error.to_string().contains(&format!(
+            "actual 3, expected {}",
+            RUNTIME_ARCHIVE_SCHEMA_VERSION
+        )));
     }
 }

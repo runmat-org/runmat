@@ -104,6 +104,7 @@ fn boxed_fusion_execution<'a>(
     frame: FusionExecutionFrame<'a>,
     placement: Option<runmat_accelerate::placement::PlacementCorrelationId>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
+    decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
     input_uses: Option<&'a runmat_accelerate::fusion_exec::VmHostInputUses>,
 ) -> FusionExecutionFuture<'a> {
     #[cfg(test)]
@@ -148,7 +149,11 @@ fn boxed_fusion_execution<'a>(
             vars,
             context,
             placement,
-            accel_fusion::VmFusionInvocation { right, input_uses },
+            accel_fusion::VmFusionInvocation {
+                right,
+                decline,
+                input_uses,
+            },
         )
         .await
     })
@@ -312,6 +317,11 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         } else {
                             None
                         };
+                    let decline = fusion_installation.as_ref().and_then(|installation| {
+                        fusion_plan.as_ref().and_then(|active| {
+                            installation.decline_for(active, &plan, &context.runtime)
+                        })
+                    });
                     let publication_pc =
                         if plan.group.kind.is_reduction() || plan.group.kind.is_elementwise() {
                             fusion_installation.as_ref().and_then(|installation| {
@@ -339,6 +349,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         },
                         Some(trace.correlation()),
                         right,
+                        decline,
                         input_uses,
                     );
                     let fusion_result = if let Some(exception) = active_catch.clone() {

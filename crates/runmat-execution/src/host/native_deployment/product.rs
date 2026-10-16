@@ -5,11 +5,11 @@ use crate::host::{
     NativeAbiBinding, NativeNumericalPolicy, NativeOptimization, SelectedNativeTarget,
 };
 use crate::{ContractError, Digest};
-use runmat_types::{CapabilitySet, EffectKind, EffectSet};
+use runmat_types::{CapabilityRequirement, CapabilitySet, EffectKind, EffectSet};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 
-pub const NATIVE_SELECTED_PRODUCT_SCHEMA_VERSION: u16 = 1;
+pub const NATIVE_SELECTED_PRODUCT_SCHEMA_VERSION: u16 = 2;
 
 /// Opaque portable carrier. The artifact codec alone computes the pack digest
 /// from its canonical manifest. Constructing/decoding this ID authenticates no
@@ -62,6 +62,8 @@ pub struct NativeSelectedProductBinding {
     /// Independent trusted caller envelope; inventory is never an implicit grant.
     pub authorized_runtime_capabilities: CapabilitySet,
     pub reached_effects: EffectSet,
+    /// Non-effect runtime services demanded by canonical Native IR operations.
+    pub required_services: BTreeSet<NativeDeploymentServiceKind>,
     pub services: Vec<NativeSelectedServiceBinding>,
 }
 
@@ -106,13 +108,30 @@ impl NativeSelectedProductBinding {
                 "inconsistent target, grant, profile or service inventory",
             ));
         }
-        let needed = self
+        let mut needed = self
             .reached_effects
             .0
             .iter()
             .copied()
             .filter_map(NativeDeploymentServiceKind::for_effect)
             .collect::<BTreeSet<_>>();
+        for kind in &self.required_services {
+            kind.validate()?;
+            if *kind == NativeDeploymentServiceKind::SourceEvaluation
+                && ![
+                    &self.reached_capabilities,
+                    &self.available_runtime_capabilities,
+                    &self.authorized_runtime_capabilities,
+                ]
+                .into_iter()
+                .all(|capabilities| capabilities.0.contains(&CapabilityRequirement::HostRuntime))
+            {
+                return Err(invalid(
+                    "source evaluation lacks an exact host-runtime grant",
+                ));
+            }
+            needed.insert(*kind);
+        }
         if !self.services.iter().map(|service| service.kind).eq(needed) {
             return Err(invalid(
                 "service bindings do not match the exact reached effect closure",
@@ -135,7 +154,7 @@ impl NativeSelectedProductBinding {
     pub fn fingerprint(&self) -> Result<Digest, ContractError> {
         self.validate()?;
         Ok(
-            Digest::sha256_serialized(&("runmat-selected-native-product-v1", self))
+            Digest::sha256_serialized(&("runmat-selected-native-product-v2", self))
                 .expect("selected native product serializes"),
         )
     }

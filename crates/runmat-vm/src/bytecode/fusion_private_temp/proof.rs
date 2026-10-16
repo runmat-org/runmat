@@ -15,6 +15,8 @@ use crate::bytecode::fusion_effects::elementwise_statement_effects_are_compatibl
 
 #[path = "proof/empty_control.rs"]
 mod empty_control;
+#[path = "proof/literal_control.rs"]
+mod literal_control;
 
 struct SlotAccessIndex(BTreeMap<usize, Vec<(usize, VmSlotAccess)>>);
 
@@ -175,6 +177,23 @@ pub(super) fn empty_controls(bytecode: &Bytecode) -> Vec<super::FusionPrivateEmp
     result
 }
 
+pub(super) fn literal_controls(bytecode: &Bytecode) -> Vec<super::FusionPrivateLiteralControl> {
+    let Some(proof) = validated_proof(bytecode) else {
+        return Vec::new();
+    };
+    let mut result = Vec::new();
+    for pair in &proof.projection.private_temporary_slots {
+        if private_pair_owned_by_layout(&proof, None, pair) {
+            if let Some(control) = literal_control::sealed_literal_control(&proof, pair) {
+                result.push(control);
+            }
+        }
+    }
+    result.sort_by_key(|control| control.store_pc);
+    result.dedup();
+    result
+}
+
 fn validated_proof(bytecode: &Bytecode) -> Option<BridgeProof<'_>> {
     if bytecode.validate_fusion_stage_projection().is_err()
         || bytecode.catch_scopes.len() != bytecode.instructions.len()
@@ -200,36 +219,55 @@ fn private_pair_owned(
     candidate: &FusionCandidateGroup,
     pair: &crate::bytecode::fusion_stage::CompiledPrivateTemporarySlot,
 ) -> bool {
+    private_pair_owned_by_layout(proof, Some(candidate.function), pair)
+}
+
+fn private_pair_owned_by_layout(
+    proof: &BridgeProof<'_>,
+    function_id: Option<runmat_hir::FunctionId>,
+    pair: &crate::bytecode::fusion_stage::CompiledPrivateTemporarySlot,
+) -> bool {
     let bytecode = proof.bytecode;
     let projection = proof.projection;
     match projection.selection_origin {
-        Some(FusionStageSelectionOrigin::EntrypointStream) => bytecode
-            .layout
-            .as_ref()
-            .and_then(|layout| layout.functions.get(&candidate.function))
-            .is_some_and(|function| {
-                function.function == candidate.function
-                    && function.resume_points == bytecode.resume_points
-                    && function
-                        .mir_local_slots
-                        .get(&runmat_mir::MirLocalId(pair.local as usize))
-                        == Some(&crate::layout::VmSlotId(pair.slot))
-                    && !function
-                        .binding_slots
-                        .values()
-                        .any(|bound| bound.0 == pair.slot)
-            }),
+        Some(FusionStageSelectionOrigin::EntrypointStream) => {
+            bytecode.layout.as_ref().is_some_and(|layout| {
+                layout
+                    .functions
+                    .values()
+                    .filter(|function| {
+                        function_id.is_none_or(|expected| function.function == expected)
+                            && function.resume_points == bytecode.resume_points
+                            && function
+                                .resume_points
+                                .keys()
+                                .all(|point| point.function == projection.owner)
+                            && function
+                                .mir_local_slots
+                                .get(&runmat_mir::MirLocalId(pair.local as usize))
+                                == Some(&crate::layout::VmSlotId(pair.slot))
+                            && !function
+                                .binding_slots
+                                .values()
+                                .any(|bound| bound.0 == pair.slot)
+                    })
+                    .count()
+                    == 1
+            })
+        }
         Some(FusionStageSelectionOrigin::FunctionBody) => bytecode
             .function_private_layout
             .as_ref()
             .is_some_and(|layout| {
-                bytecode.active_function == Some(candidate.function)
-                    && layout.matches_candidate(
-                        candidate.function,
-                        &bytecode.resume_points,
-                        projection.portable_origin,
-                    )
-                    && layout.owns_private_pair(*pair)
+                bytecode.active_function.is_some_and(|active| {
+                    function_id.is_none_or(|expected| active == expected)
+                        && layout.matches_candidate(
+                            active,
+                            &bytecode.resume_points,
+                            projection.portable_origin,
+                        )
+                        && layout.owns_private_pair(*pair)
+                })
             }),
         None => false,
     }

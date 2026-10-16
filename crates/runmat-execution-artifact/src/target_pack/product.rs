@@ -18,6 +18,8 @@ impl VerifiedTargetPackContents<'_> {
             .iter()
             .copied()
             .filter_map(TargetPackServiceKind::for_effect)
+            .chain(selection.required_services().iter().copied())
+            .collect::<std::collections::BTreeSet<_>>()
         {
             let service = manifest
                 .services
@@ -52,6 +54,7 @@ impl VerifiedTargetPackContents<'_> {
             available_runtime_capabilities: manifest.capabilities.clone(),
             authorized_runtime_capabilities: selection.authorized_runtime_capabilities().clone(),
             reached_effects: selection.reached_effects().clone(),
+            required_services: selection.required_services().clone(),
             services,
         };
         binding.validate().map_err(contract)?;

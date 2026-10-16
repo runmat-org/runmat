@@ -102,11 +102,23 @@ pub fn load_method_closure(
         Value::Object(object) => {
             let function_name =
                 external_qualified_display_name(object.class_name.display_name(), &name);
+            let registered = crate::class_registry::lookup_bound_method(
+                &object.class_name,
+                &runmat_types::MethodName::from(name.as_str()),
+            )
+            .and_then(|method| method.bound_function);
             let bound_function =
-                crate::user_functions::resolve_semantic_function_by_name(&function_name);
+                registered
+                    .as_ref()
+                    .map(|binding| binding.function)
+                    .or_else(|| {
+                        crate::user_functions::resolve_semantic_function_by_name(&function_name)
+                    });
             Ok(Value::Closure(Closure::new(
                 function_name,
-                bound_function.map(crate::user_functions::bound_function_binding_for),
+                registered.or_else(|| {
+                    bound_function.map(crate::user_functions::bound_function_binding_for)
+                }),
                 runmat_types::FunctionSourceRole::Method,
                 bound_function.and_then(crate::user_functions::source_file_for),
                 vec![Value::Object(object)],
@@ -130,11 +142,25 @@ pub fn load_method_closure(
                         format!("Method '{name}' is private"),
                     ));
                 }
+                let registered =
+                    crate::class_registry::lookup_bound_method(&class_name, &method_name)
+                        .and_then(|method| method.bound_function);
                 let bound_function =
-                    resolve_method_semantic_function_id(&owner, &name, &method.function_name);
+                    registered
+                        .as_ref()
+                        .map(|binding| binding.function)
+                        .or_else(|| {
+                            resolve_method_semantic_function_id(
+                                &owner,
+                                &name,
+                                &method.function_name,
+                            )
+                        });
                 return Ok(Value::Closure(Closure::new(
                     method.function_name,
-                    bound_function.map(crate::user_functions::bound_function_binding_for),
+                    registered.or_else(|| {
+                        bound_function.map(crate::user_functions::bound_function_binding_for)
+                    }),
                     runmat_types::FunctionSourceRole::Method,
                     bound_function.and_then(crate::user_functions::source_file_for),
                     vec![],

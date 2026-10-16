@@ -59,7 +59,8 @@ pub(super) fn bind_selected_body_sites(
         ));
     }
     let Some(capture) = body.selected_static_capture.as_ref() else {
-        return if product.static_imports().is_empty() {
+        return if product.static_imports().is_empty() && product.linked_native_imports().is_empty()
+        {
             Ok(runtime)
         } else {
             Err(invalid("selected callable lacks sealed static capture"))
@@ -144,11 +145,36 @@ pub(super) fn bind_selected_body_sites(
             return Err(invalid("selected callable repeats one sealed site"));
         }
     }
+    for site in capture.linked_native() {
+        if !Rc::ptr_eq(site.caller(), product) {
+            continue;
+        }
+        let import = site.import();
+        if import.caller != ExecutableStaticCaller::Function(origin) {
+            continue;
+        }
+        let target = site
+            .binding()
+            .ok_or_else(|| invalid("linked-native static site source has retired"))?;
+        if selected
+            .insert((Some(origin), import.site), target)
+            .is_some()
+        {
+            return Err(invalid(
+                "selected callable repeats a VM or linked-native site",
+            ));
+        }
+    }
     let expected = product
         .static_imports()
         .iter()
         .filter(|import| import.caller == ExecutableStaticCaller::Function(origin))
-        .count();
+        .count()
+        + product
+            .linked_native_imports()
+            .iter()
+            .filter(|import| import.caller == ExecutableStaticCaller::Function(origin))
+            .count();
     if selected.len() != expected {
         return Err(invalid("selected callable omits a sealed static site"));
     }

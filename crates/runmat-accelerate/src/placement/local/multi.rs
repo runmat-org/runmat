@@ -80,6 +80,7 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
     pub(crate) prepared_authority:
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     pub(crate) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
+    pub(crate) vm_decline: Option<&'a runmat_runtime::context::VmFusionDeclineRight>,
     pub(crate) family: ProviderOperationFamily,
     pub(crate) cpu: LocalCpuCandidate,
     pub(crate) cpu_admission: LocalCpuAdmission,
@@ -114,6 +115,7 @@ pub(super) fn plan_local_multi_with_provider(
         observation_contract,
         prepared_authority,
         vm_right,
+        vm_decline,
         family,
         mut cpu,
         cpu_admission,
@@ -440,7 +442,10 @@ pub(super) fn plan_local_multi_with_provider(
             // A VM-owned fusion window can decline this optimization and run
             // its original instructions. That is not a host candidate for
             // this whole group and must not receive a completion receipt.
-            if vm_right.is_some() {
+            if vm_right.is_some()
+                || vm_decline
+                    .is_some_and(|right| runtime.is_some_and(|context| right.is_current(context)))
+            {
                 if let Some((_, _, code)) = rejected.first() {
                     return Ok(LocalPlacementOutcome::ProviderRejected {
                         code: *code,

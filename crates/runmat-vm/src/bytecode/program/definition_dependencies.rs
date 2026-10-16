@@ -66,6 +66,23 @@ pub(super) fn owners(
                     return Err(SuperConstructorDependencyError::MissingOrigin);
                 }
             }
+            for site in capture.linked_native() {
+                if !Rc::ptr_eq(site.caller(), product) {
+                    continue;
+                }
+                let import = site.import();
+                if import.caller
+                    == ExecutableStaticCaller::Function(
+                        body.binding_origin
+                            .ok_or(SuperConstructorDependencyError::MissingOrigin)?,
+                    )
+                    && imports
+                        .insert(import.site, import.fingerprint_projection())
+                        .is_some()
+                {
+                    return Err(SuperConstructorDependencyError::MissingOrigin);
+                }
+            }
         } else if let (Some(product), Some(origin)) = (
             body.selected_executable_product.as_ref(),
             body.binding_origin,
@@ -74,6 +91,10 @@ pub(super) fn owners(
                 .static_imports()
                 .iter()
                 .any(|import| import.caller == ExecutableStaticCaller::Function(origin))
+                || product
+                    .linked_native_imports()
+                    .iter()
+                    .any(|import| import.caller == ExecutableStaticCaller::Function(origin))
             {
                 return Err(SuperConstructorDependencyError::MissingOrigin);
             }
@@ -90,6 +111,9 @@ pub(super) fn owners(
                         (
                             FunctionReferenceKind::External,
                             ExecutableStaticImportKind::ExplicitExternal
+                        ) | (
+                            FunctionReferenceKind::External,
+                            ExecutableStaticImportKind::LinkedNative
                         ) | (
                             FunctionReferenceKind::Local,
                             ExecutableStaticImportKind::PartitionedDefinition

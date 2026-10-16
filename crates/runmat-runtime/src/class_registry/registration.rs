@@ -10,6 +10,10 @@ mod preflight;
 
 pub struct CheckedClassRegistration {
     pub class: RuntimeClass,
+    /// Exact executable-method bindings. Empty for ordinary source/builtin
+    /// registration, whose existing method resolution remains unchanged.
+    pub method_bindings:
+        std::collections::HashMap<runmat_types::MethodName, runmat_value::BoundFunctionBinding>,
     pub is_sealed: bool,
     pub is_abstract: bool,
     pub enumerations: Vec<String>,
@@ -23,6 +27,7 @@ pub fn register_checked_class(
 ) -> Result<(), crate::RuntimeError> {
     register_checked_classes(vec![CheckedClassRegistration {
         class,
+        method_bindings: std::collections::HashMap::new(),
         is_sealed,
         is_abstract,
         enumerations,
@@ -63,6 +68,7 @@ pub fn prepare_selected_class_projection(
         .map_err(|error| error.into_runtime_error())?;
     let mut proposed = BTreeMap::new();
     for registration in classes {
+        validate_method_bindings(&registration)?;
         if proposed
             .insert(registration.class.name.clone(), registration)
             .is_some()
@@ -89,7 +95,11 @@ pub fn prepare_selected_class_projection(
             .remove(&name)
             .expect("selected preflight returned only proposed classes");
         let class = registration.class;
-        method_bindings.extend(super::bind_methods_for_class(&class, generation));
+        method_bindings.extend(super::bind_methods_for_class_with(
+            &class,
+            generation,
+            Some(&registration.method_bindings),
+        ));
         if registration.is_sealed {
             sealed.insert(name.clone());
         }
@@ -154,6 +164,7 @@ fn register_classes(
         .map_err(|error| error.into_runtime_error())?;
     let mut proposed = BTreeMap::new();
     for registration in classes {
+        validate_method_bindings(&registration)?;
         if proposed
             .insert(registration.class.name.clone(), registration)
             .is_some()
@@ -178,9 +189,10 @@ fn register_classes(
                 .expect("preflight returned only proposed classes");
             let class = registration.class;
             state.generation = state.generation.wrapping_add(1).max(1);
-            let bindings = super::bind_methods_for_class(
+            let bindings = super::bind_methods_for_class_with(
                 &class,
                 ClassRegistryRevision::Current(state.generation),
+                Some(&registration.method_bindings),
             )
             .collect::<Vec<_>>();
             state.method_bindings.retain(|(owner, _), _| owner != &name);
@@ -197,6 +209,37 @@ fn register_classes(
         Ok::<_, crate::RuntimeError>(retired)
     })?;
     drop(retired);
+    Ok(())
+}
+fn validate_method_bindings(
+    registration: &CheckedClassRegistration,
+) -> Result<(), crate::RuntimeError> {
+    if registration
+        .method_bindings
+        .iter()
+        .any(|(method, binding)| {
+            if !registration.class.methods.contains_key(method) {
+                return true;
+            }
+            let issued = match &binding.authority {
+                runmat_value::BoundFunctionAuthority::Portable { origin } => Some(*origin),
+                runmat_value::BoundFunctionAuthority::SelectedNative { origin, lease }
+                    if lease.is_live() && lease.origin() == *origin =>
+                {
+                    Some(*origin)
+                }
+                _ => None,
+            };
+            issued.is_none_or(|origin| {
+                usize::try_from(origin.function.0).ok() != Some(binding.function)
+            })
+        })
+    {
+        return Err(error(
+            "RunMat:ClassMethodBinding",
+            "exact method binding has no declared method or live issued authority",
+        ));
+    }
     Ok(())
 }
 fn error(identifier: &str, message: &str) -> crate::RuntimeError {
@@ -222,6 +265,7 @@ mod tests {
     fn checked(class: RuntimeClass, is_sealed: bool) -> CheckedClassRegistration {
         CheckedClassRegistration {
             class,
+            method_bindings: std::collections::HashMap::new(),
             is_sealed,
             is_abstract: false,
             enumerations: Vec::new(),

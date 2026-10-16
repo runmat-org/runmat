@@ -3,8 +3,8 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_hir::{FunctionId, WorkspaceEffect};
 use runmat_types::{BindingId, FunctionSourceRole};
+use runmat_types::{FunctionId, WorkspaceEffect};
 
 use crate::{MirAssembly, MirStmtKind};
 
@@ -174,7 +174,7 @@ impl MirAssembly {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler"))]
 mod tests {
     use super::*;
     use crate::{MirBody, MirFunctionMetadata, MirLocal, MirLocalId, MirLocalKind};

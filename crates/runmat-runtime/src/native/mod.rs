@@ -7,6 +7,7 @@
 
 mod call;
 mod control;
+mod environment;
 mod frame;
 mod host;
 mod root;
@@ -20,6 +21,7 @@ mod probe;
 
 pub use call::*;
 pub use control::*;
+pub use environment::*;
 pub use frame::*;
 pub use host::*;
 #[cfg(not(target_arch = "wasm32"))]

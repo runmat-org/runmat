@@ -60,13 +60,13 @@ fn evaluate_inner(
     };
     if matches!(
         call.syntax,
-        runmat_hir::CallSyntax::Method | runmat_hir::CallSyntax::DottedInvoke
+        runmat_types::CallSyntax::Method | runmat_types::CallSyntax::DottedInvoke
     ) {
         if let MirCallee::Static(identity) = &call.callee {
             if !matches!(
                 identity,
-                runmat_hir::CallableIdentity::BoundFunction(_)
-                    | runmat_hir::CallableIdentity::ExternalFunction { .. }
+                runmat_types::CallableIdentity::BoundFunction(_)
+                    | runmat_types::CallableIdentity::ExternalFunction { .. }
             ) {
                 if arguments.is_empty() {
                     return Err(NativeExecutorError::Host(
@@ -248,11 +248,11 @@ fn evaluate_inner(
 }
 
 fn local_program_function(
-    identity: &runmat_hir::CallableIdentity,
+    identity: &runmat_types::CallableIdentity,
 ) -> NativeExecutorResult<Option<runmat_types::ProgramFunctionId>> {
     let function = match identity {
-        runmat_hir::CallableIdentity::BoundFunction(function)
-        | runmat_hir::CallableIdentity::AnonymousFunction(function) => function.0,
+        runmat_types::CallableIdentity::BoundFunction(function)
+        | runmat_types::CallableIdentity::AnonymousFunction(function) => function.0,
         _ => return Ok(None),
     };
     u32::try_from(function)

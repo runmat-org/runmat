@@ -4,8 +4,9 @@
 use std::collections::{HashMap, HashSet};
 
 use runmat_execution::executable::{
-    decode_static_imports, ExecutableStaticCaller, ExecutableStaticImport,
-    ExecutableStaticImportKind, STATIC_IMPORT_SECTION,
+    decode_linked_native_imports, decode_static_imports, ExecutableStaticCaller,
+    ExecutableStaticImport, ExecutableStaticImportKind, LinkedNativeStaticImport,
+    LINKED_NATIVE_IMPORT_SECTION, STATIC_IMPORT_SECTION,
 };
 use runmat_execution::value::GraphStaticReferenceSite;
 use runmat_execution::ExecutableUnitEnvelope;
@@ -20,13 +21,25 @@ pub(super) fn admit(
     envelope: &ExecutableUnitEnvelope,
     bytecode: &Bytecode,
     registry: &FunctionRegistry,
-) -> Result<Vec<ExecutableStaticImport>, ExecutableUnitAdmissionError> {
+) -> Result<
+    (Vec<ExecutableStaticImport>, Vec<LinkedNativeStaticImport>),
+    ExecutableUnitAdmissionError,
+> {
     let imports = envelope
         .manifest
         .optional_sections
         .iter()
         .find(|section| section.name == STATIC_IMPORT_SECTION)
         .map(decode_static_imports)
+        .transpose()
+        .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?
+        .unwrap_or_default();
+    let linked_native = envelope
+        .manifest
+        .optional_sections
+        .iter()
+        .find(|section| section.name == LINKED_NATIVE_IMPORT_SECTION)
+        .map(decode_linked_native_imports)
         .transpose()
         .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?
         .unwrap_or_default();
@@ -48,6 +61,28 @@ pub(super) fn admit(
             .is_some()
         {
             return Err(invalid("static import repeats one instruction site"));
+        }
+    }
+    for import in &linked_native {
+        if let ExecutableStaticCaller::Function(caller) = import.caller {
+            let program = envelope
+                .manifest
+                .identity
+                .program
+                .identity_digest()
+                .map_err(ExecutableUnitAdmissionError::InvalidEnvelope)?;
+            if caller.program != program {
+                return Err(invalid("linked-native caller belongs to another program"));
+            }
+        }
+        if declared
+            .insert(
+                (import.caller, import.site),
+                (import.target, ExecutableStaticImportKind::ExplicitExternal),
+            )
+            .is_some()
+        {
+            return Err(invalid("linked-native import repeats a VM or native site"));
         }
     }
     let mut observed = HashSet::new();
@@ -75,7 +110,7 @@ pub(super) fn admit(
             "static-import section has an unused reference site",
         ));
     }
-    Ok(imports)
+    Ok((imports, linked_native))
 }
 
 fn validate_stream(

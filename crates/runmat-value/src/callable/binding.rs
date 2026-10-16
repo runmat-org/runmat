@@ -185,6 +185,21 @@ pub enum BoundFunctionAuthority {
     Portable {
         origin: FunctionBindingOrigin,
     },
+    /// An invocation-local selected native target. Its typed lease retains
+    /// executable code and source authority; it is not a portable export.
+    SelectedNative {
+        origin: FunctionBindingOrigin,
+        lease: std::rc::Rc<dyn SelectedNativeFunctionLease>,
+    },
+}
+
+/// Neutral lifetime/identity contract for a selected native callable. The
+/// Runtime owner supplies the actual invocation implementation; Value never
+/// depends on a compiler, executor or runtime context.
+pub trait SelectedNativeFunctionLease: std::fmt::Debug + std::any::Any {
+    fn origin(&self) -> FunctionBindingOrigin;
+    fn is_live(&self) -> bool;
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// An export identity is inert for local execution. It can only be converted
@@ -231,13 +246,28 @@ impl BoundFunctionBinding {
             authority: BoundFunctionAuthority::portable(origin),
         }
     }
+
+    pub fn selected_native(
+        function: usize,
+        lease: std::rc::Rc<dyn SelectedNativeFunctionLease>,
+    ) -> Option<Self> {
+        (lease.is_live() && u32::try_from(function).ok() == Some(lease.origin().function.0)).then(
+            || Self {
+                function,
+                authority: BoundFunctionAuthority::SelectedNative {
+                    origin: lease.origin(),
+                    lease,
+                },
+            },
+        )
+    }
 }
 
 impl BoundFunctionAuthority {
     pub fn local_dependencies(&self) -> Option<&[FunctionDefinitionLease]> {
         match self {
             Self::Local { dependencies, .. } => Some(dependencies),
-            Self::Portable { .. } => None,
+            Self::Portable { .. } | Self::SelectedNative { .. } => None,
         }
     }
 
@@ -311,7 +341,7 @@ impl BoundFunctionAuthority {
             Self::Local { issuer, .. } => {
                 issuer.strong_count() != 0 && Weak::ptr_eq(issuer, current)
             }
-            Self::Portable { .. } => false,
+            Self::Portable { .. } | Self::SelectedNative { .. } => false,
         }
     }
 
@@ -319,13 +349,14 @@ impl BoundFunctionAuthority {
         match self {
             Self::Local { .. } => None,
             Self::Portable { origin } => Some(*origin),
+            Self::SelectedNative { .. } => None,
         }
     }
 
     pub fn local_definition(&self) -> Option<&FunctionDefinitionLease> {
         match self {
             Self::Local { definition, .. } => Some(definition),
-            Self::Portable { .. } => None,
+            Self::Portable { .. } | Self::SelectedNative { .. } => None,
         }
     }
 
@@ -350,7 +381,7 @@ impl BoundFunctionAuthority {
     pub fn static_sites(&self) -> &[StaticSiteDefinitionLease] {
         match self {
             Self::Local { static_sites, .. } => static_sites,
-            Self::Portable { .. } => &[],
+            Self::Portable { .. } | Self::SelectedNative { .. } => &[],
         }
     }
 
@@ -446,6 +477,7 @@ impl BoundFunctionAuthority {
                 ..
             } if self.admits_local(current) => Some(*origin),
             Self::Portable { origin } => Some(*origin),
+            Self::SelectedNative { .. } => None,
             _ => None,
         }
     }
@@ -479,6 +511,16 @@ impl PartialEq for BoundFunctionAuthority {
                     && left_export == right_export
             }
             (Self::Portable { origin: left }, Self::Portable { origin: right }) => left == right,
+            (
+                Self::SelectedNative {
+                    origin: left,
+                    lease: left_lease,
+                },
+                Self::SelectedNative {
+                    origin: right,
+                    lease: right_lease,
+                },
+            ) => left == right && std::rc::Rc::ptr_eq(left_lease, right_lease),
             _ => false,
         }
     }
@@ -489,6 +531,52 @@ impl Eq for BoundFunctionAuthority {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[derive(Debug)]
+    struct TestSelectedNativeLease {
+        origin: FunctionBindingOrigin,
+        live: Rc<Cell<bool>>,
+    }
+
+    impl SelectedNativeFunctionLease for TestSelectedNativeLease {
+        fn origin(&self) -> FunctionBindingOrigin {
+            self.origin
+        }
+
+        fn is_live(&self) -> bool {
+            self.live.get()
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
+    #[test]
+    fn selected_native_binding_retains_exact_nonportable_invocation_lease() {
+        let origin = FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256(b"selected native test"),
+            function: runmat_types::ProgramFunctionId(7),
+        };
+        let live = Rc::new(Cell::new(true));
+        let lease: Rc<dyn SelectedNativeFunctionLease> = Rc::new(TestSelectedNativeLease {
+            origin,
+            live: Rc::clone(&live),
+        });
+        assert!(BoundFunctionBinding::selected_native(8, Rc::clone(&lease)).is_none());
+        let binding = BoundFunctionBinding::selected_native(7, Rc::clone(&lease))
+            .expect("selected target is live and exact");
+        assert!(matches!(
+            &binding.authority,
+            BoundFunctionAuthority::SelectedNative { .. }
+        ));
+        assert_eq!(binding.authority.portable_origin(), None);
+        assert_eq!(binding.authority.export_origin(&Weak::new()), None);
+        live.set(false);
+        assert!(BoundFunctionBinding::selected_native(7, lease).is_none());
+    }
     #[test]
     fn local_authority_expires_and_never_becomes_portable() {
         let owner = Arc::new(());

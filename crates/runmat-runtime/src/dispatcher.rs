@@ -889,6 +889,29 @@ async fn try_call_registered_instance_method_sequence(
     let receiver = args.first().expect("instance method has a receiver");
     for route in selected.routes {
         match route {
+            selection::InstanceMethodRoute::Bound(binding) => {
+                let requested = output_count.unwrap_or(1);
+                let invoked = match context {
+                    Some(runtime) => {
+                        crate::user_functions::try_call_bound_function_in_context(
+                            runtime, binding, args, requested,
+                        )
+                        .await
+                    }
+                    None => {
+                        crate::user_functions::try_call_bound_function(binding, args, requested)
+                            .await
+                    }
+                };
+                let result = invoked.ok_or_else(|| {
+                    crate::runtime_error::semantic_error(
+                        "UnavailableBoundFunction",
+                        "registered instance method has no bound executor",
+                    )
+                })?;
+                return finalize_instance_method_result(&selected.method, receiver, result)
+                    .map(Some);
+            }
             selection::InstanceMethodRoute::SemanticName(name) => {
                 if let Some(result) =
                     crate::user_functions::try_call_semantic_function_by_name_in_context(
@@ -945,6 +968,7 @@ fn finalize_instance_method_result(
 
 #[derive(Debug, Clone)]
 pub enum RegisteredStaticMethodTarget {
+    Bound(runmat_value::BoundFunctionBinding),
     Semantic(usize),
     Builtin(runmat_types::BuiltinId),
 }
@@ -994,6 +1018,15 @@ pub fn observe_registered_static_method(
     qualified_name: &str,
 ) -> Option<RegisteredStaticMethodResolution> {
     let registration = crate::class_registry::registered_public_static_method(qualified_name)?;
+    if let Some(binding) =
+        crate::class_registry::lookup_bound_method(&registration.class, &registration.method_name)
+            .and_then(|method| method.bound_function)
+    {
+        return Some(RegisteredStaticMethodResolution {
+            registration,
+            target: RegisteredStaticMethodTarget::Bound(binding),
+        });
+    }
     let executable_semantic = crate::user_functions::current_semantic_function_invoker().is_some();
     let select = |name: &str| {
         if executable_semantic {
@@ -1039,6 +1072,28 @@ async fn try_call_registered_static_method(
     });
     let args = adapted.as_deref().unwrap_or(args);
     match resolved.target {
+        RegisteredStaticMethodTarget::Bound(binding) => {
+            let requested = output_count.unwrap_or(1);
+            let invoked = match context {
+                Some(runtime) => {
+                    crate::user_functions::try_call_bound_function_in_context(
+                        runtime, binding, args, requested,
+                    )
+                    .await
+                }
+                None => {
+                    crate::user_functions::try_call_bound_function(binding, args, requested).await
+                }
+            };
+            invoked
+                .ok_or_else(|| {
+                    crate::runtime_error::semantic_error(
+                        "UnavailableBoundFunction",
+                        "registered static method has no bound executor",
+                    )
+                })?
+                .map(Some)
+        }
         RegisteredStaticMethodTarget::Semantic(function) => {
             crate::user_functions::try_call_semantic_function_in_context(
                 context,
@@ -1209,7 +1264,37 @@ async fn call_class_constructor(
                         invoke(selected.clone()).await?,
                     )?));
                 }
-                ConstructorInvocationTarget::Registered => {}
+                ConstructorInvocationTarget::Registered => {
+                    // A linked class declaration already carries the exact
+                    // method body. Public textual name resolution is not an
+                    // authority for a constructor Method-role function.
+                    if let Some(bound) =
+                        crate::class_registry::lookup_bound_method(&class_identity, &ctor.name)
+                            .filter(|bound| bound.declaring_class == owner)
+                            .and_then(|bound| bound.bound_function)
+                    {
+                        let selected = context.ok_or_else(|| {
+                            build_runtime_error(
+                                "registered bound constructor lacks a selected runtime",
+                            )
+                            .with_identifier("RunMat:ConstructorOwnerInvalid")
+                            .build()
+                        })?;
+                        let result = crate::user_functions::try_call_bound_function_in_context(
+                            selected,
+                            bound,
+                            args,
+                            requested_outputs,
+                        )
+                        .await
+                        .ok_or_else(|| {
+                            build_runtime_error("registered constructor has no exact invoker")
+                                .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
+                                .build()
+                        })??;
+                        return Ok(Some(resolve_single_sequence(result)?));
+                    }
+                }
             }
             if let Some(result) =
                 crate::user_functions::try_call_semantic_function_by_name_in_context(
@@ -2252,5 +2337,113 @@ mod tests {
                 .unwrap()
             );
         }
+    }
+
+    #[test]
+    fn registered_static_observation_and_handles_keep_exact_method_binding() {
+        let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let _scope = runtime.enter();
+        let class = runmat_types::ClassIdentity::from(unique_class_name("bound_static"));
+        let method = runmat_types::MethodName::from("build");
+        let origin = runmat_execution::FunctionBindingOrigin {
+            program: runmat_execution::Digest::sha256("bound static method fixture"),
+            function: runmat_types::ProgramFunctionId(42),
+        };
+        let binding = runmat_value::BoundFunctionBinding {
+            function: 42,
+            authority: runmat_value::BoundFunctionAuthority::Portable { origin },
+        };
+        let instance_method = runmat_types::MethodName::from("advance");
+        let instance_binding = runmat_value::BoundFunctionBinding {
+            function: 43,
+            authority: runmat_value::BoundFunctionAuthority::Portable {
+                origin: runmat_execution::FunctionBindingOrigin {
+                    program: origin.program,
+                    function: runmat_types::ProgramFunctionId(43),
+                },
+            },
+        };
+        let declaration = crate::class_registry::RuntimeMethod {
+            name: method.clone(),
+            is_static: true,
+            is_abstract: false,
+            is_sealed: false,
+            access: MemberAccess::Public,
+            function_name: "unpublished_method_body".into(),
+            implicit_class_argument: None,
+            role: runmat_types::ClassMethodRole::Ordinary,
+        };
+        crate::class_registry::register_checked_classes(vec![
+            crate::class_registry::CheckedClassRegistration {
+                class: crate::class_registry::RuntimeClass {
+                    name: class.clone(),
+                    parent: None,
+                    properties: HashMap::new(),
+                    methods: HashMap::from([
+                        (method.clone(), declaration),
+                        (
+                            instance_method.clone(),
+                            crate::class_registry::RuntimeMethod {
+                                name: instance_method.clone(),
+                                is_static: false,
+                                is_abstract: false,
+                                is_sealed: false,
+                                access: MemberAccess::Public,
+                                function_name: "unpublished_instance_body".into(),
+                                implicit_class_argument: None,
+                                role: runmat_types::ClassMethodRole::Ordinary,
+                            },
+                        ),
+                    ]),
+                    events: HashMap::new(),
+                },
+                method_bindings: HashMap::from([
+                    (method.clone(), binding.clone()),
+                    (instance_method, instance_binding.clone()),
+                ]),
+                is_sealed: false,
+                is_abstract: false,
+                enumerations: Vec::new(),
+            },
+        ])
+        .expect("register exact static body");
+        let qualified = format!("{class}.build");
+        let resolved = super::observe_registered_static_method(&qualified)
+            .expect("registered static method is executable by exact binding");
+        assert!(matches!(
+            resolved.target,
+            super::RegisteredStaticMethodTarget::Bound(ref selected) if selected == &binding
+        ));
+        let Value::Closure(loaded) =
+            crate::object::resolve::load_static_member(&class, "build", None)
+                .expect("static member closure")
+        else {
+            panic!("static method must load a closure");
+        };
+        assert_eq!(loaded.binding.as_ref(), Some(&binding));
+        let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
+        let Value::Closure(handle) = crate::builtins::introspection::getmethod::dispatch_getmethod(
+            Value::ClassRef(class.clone()),
+            "build".into(),
+        )
+        .expect("getmethod closure") else {
+            panic!("getmethod must return a closure");
+        };
+        assert_eq!(handle.binding.as_ref(), Some(&binding));
+        let selected = super::selection::select_instance_method(
+            "advance",
+            &[Value::Object(runmat_value::ObjectInstance::new(
+                class.clone(),
+            ))],
+        )
+        .expect("registered instance selection")
+        .expect("instance method declaration");
+        assert!(matches!(
+            selected.routes.as_slice(),
+            [super::selection::InstanceMethodRoute::Bound(selected)]
+                if selected == &instance_binding
+        ));
     }
 }

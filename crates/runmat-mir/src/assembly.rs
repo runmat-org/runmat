@@ -1,5 +1,5 @@
 use crate::{MirBody, MirFunctionMetadata};
-use runmat_hir::FunctionId;
+use runmat_types::FunctionId;
 use runmat_types::{ClassDeclaration, ClassId, IntegerLiteral, MemberName};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -53,8 +53,8 @@ impl MirAssembly {
                     "function {cursor:?} has a cross-source lexical parent {parent:?}"
                 ));
             }
-            if parent_metadata.kind == runmat_hir::FunctionKind::SyntheticEntrypoint {
-                if current.kind != runmat_hir::FunctionKind::Anonymous
+            if parent_metadata.kind == runmat_types::FunctionKind::SyntheticEntrypoint {
+                if current.kind != runmat_types::FunctionKind::Anonymous
                     || current.source_role != runmat_types::FunctionSourceRole::Anonymous
                     || parent_metadata.source_role != runmat_types::FunctionSourceRole::Synthetic
                     || parent_metadata.parent.is_some()
@@ -75,7 +75,7 @@ impl MirAssembly {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "compiler"))]
 mod tests {
     use super::*;
 

@@ -10,6 +10,8 @@ use crate::{
     presentation,
 };
 
+mod selected;
+
 pub struct CompileRequest {
     pub file: PathBuf,
     pub output: Option<PathBuf>,
@@ -18,6 +20,9 @@ pub struct CompileRequest {
     pub explain_link: bool,
     pub link_plan_json: Option<PathBuf>,
     pub linker: Option<PathBuf>,
+    pub selected_pack_manifest: Option<PathBuf>,
+    pub selected_components: Option<PathBuf>,
+    pub selected_host_admission: Option<PathBuf>,
     pub keep_temps: bool,
     pub force: bool,
 }
@@ -35,6 +40,9 @@ pub async fn execute(
         explain_link,
         link_plan_json,
         linker,
+        selected_pack_manifest,
+        selected_components,
+        selected_host_admission,
         keep_temps,
         force,
     } = request;
@@ -46,18 +54,29 @@ pub async fn execute(
     {
         anyhow::bail!("runmat compile currently accepts a .m entrypoint");
     }
-    let runtime = runmat_aot::archive::embedded_runtime_archive()?.ok_or_else(|| {
-        anyhow::anyhow!(
-            "this RunMat build does not contain a native compile runtime; rebuild it with scripts/build-runmat-with-aot-runtime.sh (or the Windows PowerShell equivalent)"
-        )
-    })?;
+    let selected_paths = selected::SelectedPaths::from_options(
+        selected_pack_manifest,
+        selected_components,
+        selected_host_admission,
+    )?;
+    let runtime = if selected_paths.is_some() {
+        None
+    } else {
+        Some(runmat_aot::archive::embedded_runtime_archive()?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "this RunMat build does not contain a native compile runtime; rebuild it with scripts/build-runmat-with-aot-runtime.sh (or the Windows PowerShell equivalent)"
+            )
+        })?)
+    };
     let policy = match policy {
         AotPolicy::NativeSpecialized => runmat_aot::compile::CompilationPolicy::NativeSpecialized,
         AotPolicy::ClosedWorld => runmat_aot::compile::CompilationPolicy::ClosedWorld,
         AotPolicy::DynamicRuntime => runmat_aot::compile::CompilationPolicy::DynamicRuntime,
         AotPolicy::Portable => runmat_aot::compile::CompilationPolicy::Portable,
     };
-    policy.validate(&runtime.manifest.capabilities)?;
+    if let Some(runtime) = runtime.as_ref() {
+        policy.validate(&runtime.manifest.capabilities)?;
+    }
     let source_text = std::fs::read_to_string(&file)
         .with_context(|| format!("failed to read compile entrypoint `{}`", file.display()))?;
     let mut session =
@@ -158,6 +177,26 @@ pub async fn execute(
         foreign_artifacts.interop.clone(),
     ])
     .map_err(|error| anyhow::anyhow!("{}: {}", error.path, error.message))?;
+    let output = output.unwrap_or_else(|| default_output(&file));
+    if let Some(paths) = selected_paths {
+        return selected::execute(
+            &unit,
+            interop,
+            foreign_artifacts,
+            config,
+            selected::SelectedCompileRequest {
+                paths,
+                output,
+                optimization,
+                policy,
+                explain_link,
+                link_plan_json,
+                keep_temps,
+                force,
+            },
+        );
+    }
+    let runtime = runtime.expect("pure compile route has an embedded runtime");
     let program_link_plan = runmat_aot::compile::build_program_link_plan_with_interop(
         &unit, &runtime, policy, interop,
     )?;
@@ -194,7 +233,6 @@ pub async fn execute(
             python_artifacts: foreign_artifacts.python_artifacts,
         },
     )?;
-    let output = output.unwrap_or_else(|| default_output(&file));
     let linked = runmat_aot::link::link_standalone(
         &object,
         &runtime,

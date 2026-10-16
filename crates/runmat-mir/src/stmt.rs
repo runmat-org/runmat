@@ -1,5 +1,5 @@
 use crate::{MirExpansionSource, MirLocalId, MirPlace, MirRvalue, MirSequenceLocalId};
-use runmat_hir::{
+use runmat_types::{
     AssignmentCreationPolicy, AssignmentShapePolicy, EnvironmentEffect, PlaceMutationKind,
     RequestedOutputCount, Span, WorkspaceEffect,
 };
@@ -257,7 +257,7 @@ pub enum MirStatementOutputSource {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MirStatementOutputLabel {
     Ans,
-    Binding(runmat_hir::BindingId),
+    Binding(runmat_types::BindingId),
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -310,7 +310,7 @@ pub enum MirOutputTarget {
 pub enum MirSequenceTarget {
     Member {
         base: MirPlace,
-        member: runmat_hir::MemberName,
+        member: runmat_types::MemberName,
     },
     DynamicMember {
         base: MirPlace,
@@ -334,7 +334,7 @@ pub enum SequenceRootCreation {
 impl MirSequenceTarget {
     pub fn root_creation(&self) -> SequenceRootCreation {
         match self.base().first_root_step() {
-            Some(crate::MirRootStep::Index(runmat_hir::IndexKind::Brace)) => {
+            Some(crate::MirRootStep::Index(runmat_types::IndexKind::Brace)) => {
                 SequenceRootCreation::EmptyCell
             }
             None if matches!(self, Self::CellContents { .. }) => SequenceRootCreation::EmptyCell,

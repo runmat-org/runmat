@@ -192,6 +192,15 @@ pub fn rvalue_declared_requirements(
     let mut capabilities = CapabilitySet::default();
     match value {
         crate::MirRvalue::Call(call) => {
+            if matches!(
+                call.workspace_effect,
+                Some(
+                    runmat_builtins::BuiltinWorkspaceEffect::DynamicEval
+                        | runmat_builtins::BuiltinWorkspaceEffect::DynamicEvalCurrentWorkspace
+                )
+            ) {
+                capabilities.0.insert(CapabilityRequirement::HostRuntime);
+            }
             if !matches!(call.async_behavior, crate::AsyncBehaviorFact::NeverSuspends) {
                 effects.0.insert(EffectKind::MaySuspend);
             }
@@ -225,9 +234,10 @@ pub fn rvalue_declared_requirements(
         }
         crate::MirRvalue::ShortCircuit { right_temps, .. } => {
             for statement in right_temps {
-                effects
-                    .0
-                    .extend(statement_declared_effects(&statement.kind).0);
+                let (nested_effects, nested_capabilities) =
+                    statement_declared_requirements(&statement.kind);
+                effects.0.extend(nested_effects.0);
+                capabilities.0.extend(nested_capabilities.0);
                 if let Some(value) = statement_rvalue(&statement.kind) {
                     let (nested_effects, nested_capabilities) = rvalue_declared_requirements(value);
                     effects.0.extend(nested_effects.0);
@@ -291,7 +301,7 @@ pub fn statement_declared_effects(statement: &crate::MirStmtKind) -> runmat_type
 pub fn statement_declared_requirements(
     statement: &crate::MirStmtKind,
 ) -> (runmat_types::EffectSet, runmat_types::CapabilitySet) {
-    use runmat_hir::WorkspaceEffect;
+    use runmat_types::WorkspaceEffect;
     use runmat_types::{CapabilityRequirement, CapabilitySet, EffectKind, EffectSet};
 
     let mut effects = EffectSet::default();
@@ -310,6 +320,9 @@ pub fn statement_declared_requirements(
             | WorkspaceEffect::LoadsExternalBindings
             | WorkspaceEffect::DynamicEval => {
                 effects.0.insert(EffectKind::WorkspaceWrite);
+                if *effect == WorkspaceEffect::DynamicEval {
+                    capabilities.0.insert(CapabilityRequirement::HostRuntime);
+                }
             }
         },
         crate::MirStmtKind::EnvironmentEffect(_) => {
