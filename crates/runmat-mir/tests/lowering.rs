@@ -815,6 +815,42 @@ fn analyze_body_applies_canonical_index_member_and_mutation_rules() {
 }
 
 #[test]
+fn indexed_assignment_cannot_reuse_an_old_literal_shape_after_unknown_growth() {
+    let (body, store) = analyze_single_body("function y = f(k); a = [1, 2]; a(k) = 7; y = a; end");
+    let output = output_fact(&body, &store);
+    assert_eq!(output.shape, ShapeFact::Unknown);
+    assert!(matches!(
+        output.kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })
+    ));
+
+    let (body, store) = analyze_single_body("function y = f(); a = [1, 2]; a(2) = 7; y = a; end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(1), Some(2)])
+    );
+    let (body, store) = analyze_single_body("function y = f(); a = [1, 2]; a(3) = 7; y = a; end");
+    assert_eq!(
+        output_fact(&body, &store).shape,
+        ShapeFact::from(vec![Some(1), Some(3)])
+    );
+    let (body, store) = analyze_single_body("function y = f(); a = [1, 2]; a(1) = 2i; y = a; end");
+    assert_eq!(
+        output_fact(&body, &store).numeric().unwrap().domain,
+        NumericDomain::Complex
+    );
+}
+
+#[test]
+fn indexed_assignment_does_not_infer_rhs_class_for_an_unknown_base() {
+    let (body, store) = analyze_single_body("function y = f(); a(2) = uint8(7); y = a; end");
+    assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Unknown);
+}
+
+#[test]
 fn subscript_chain_analysis_preserves_default_facts_and_defers_at_objects() {
     for (source, expected_kind) in [
         ("function y = f(); a = [1, 2]; y = a(1)(1); end", "numeric"),

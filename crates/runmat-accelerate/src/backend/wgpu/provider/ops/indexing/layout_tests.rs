@@ -31,6 +31,16 @@ fn transposed_diag_gather_and_in_place_scatter_use_logical_order() {
             shape: &[2, 1],
         })
         .unwrap();
+    let functional = provider
+        .scatter_linear_functional_exec(&transposed, &[1, 4], &replacement)
+        .unwrap();
+    assert!(!functional.shares_allocation_with(&source));
+    assert!(!functional.shares_allocation_with(&replacement));
+    assert_eq!(
+        values(&provider, &functional),
+        vec![1., 20., 5., 2., 30., 6.]
+    );
+    assert_eq!(values(&provider, &source), vec![1., 2., 3., 4., 5., 6.]);
     provider
         .scatter_linear_exec(&transposed, &[1, 4], &replacement)
         .unwrap();

@@ -2423,6 +2423,20 @@ pub trait AccelProvider: AcceleratorThreadBound {
         ))
     }
 
+    /// Functional linear scatter: publish a fresh allocation while leaving
+    /// both `target` and `values` (including their retained aliases) unchanged.
+    /// Indices address logical elements, with all storage lanes copied. An
+    /// unsupported result must occur before mutation or publication; an
+    /// operational failure after work has begun must retain its typed cause.
+    fn scatter_linear_functional<'a>(
+        &'a self,
+        _target: &'a GpuTensorHandle,
+        _indices: &'a [u32],
+        _values: &'a GpuTensorHandle,
+    ) -> ProviderExecutionFuture<'a, GpuTensorHandle> {
+        unsupported_execution_future("functional scatter_linear not supported by provider")
+    }
+
     /// Structured device information (optional to override). Default adapts from `device_info()`.
     fn device_info_struct(&self) -> ApiDeviceInfo {
         ApiDeviceInfo {

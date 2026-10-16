@@ -1,10 +1,11 @@
 use super::{
-    assign_integer_scalar_with_plan, build_assignment_plan, build_assignment_selectors,
-    build_index_plan, build_slice_selectors, build_sparse_assignment_plan, idx_write_slice,
-    integer_scalar_tensor, logical_value_from_tensor, map_slice_plan_error, map_slice_shape_error,
-    object_slice_selector, resolve_object_index_protocol, ObjectIndexOp, ObjectSubscript,
-    ObjectSubscriptPath, RuntimeError, Value,
+    assign_integer_scalar_with_plan, build_index_plan, build_slice_selectors,
+    build_sparse_assignment_plan, idx_write_slice, integer_scalar_tensor,
+    logical_value_from_tensor, map_slice_plan_error, map_slice_shape_error, object_slice_selector,
+    resolve_object_index_protocol, ObjectIndexOp, ObjectSubscript, ObjectSubscriptPath,
+    RuntimeError, Value,
 };
+use runmat_runtime::indexing::plan::{build_indexed_store_plan, IndexedStorePlanMode};
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
@@ -19,6 +20,11 @@ pub(super) async fn dispatch(
         crate::bytecode::Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask)
         | crate::bytecode::Instr::StoreSliceDelete(dims, numeric_count, colon_mask, end_mask) => {
             let delete = matches!(instr, crate::bytecode::Instr::StoreSliceDelete(_, _, _, _));
+            let plan_mode = if delete {
+                IndexedStorePlanMode::Bounded
+            } else {
+                IndexedStorePlanMode::Grow
+            };
             let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
                 "stack underflow",
@@ -80,10 +86,15 @@ pub(super) async fn dispatch(
                     ));
                 }
                 Value::Tensor(t) => {
-                    let selectors =
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, t.shape())
-                            .await?;
-                    let plan = build_index_plan(&selectors, *dims, t.shape())?;
+                    let plan = build_indexed_store_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        t.shape(),
+                        plan_mode,
+                    )
+                    .await?;
                     stack.push(if delete {
                         idx_write_slice::delete_tensor_with_plan(t, &plan, &rhs)?
                     } else {
@@ -92,15 +103,15 @@ pub(super) async fn dispatch(
                 }
                 Value::Int(value) => {
                     let tensor = integer_scalar_tensor(value.clone())?;
-                    let selectors = build_slice_selectors(
+                    let plan = build_indexed_store_plan(
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
                         tensor.shape(),
+                        plan_mode,
                     )
                     .await?;
-                    let plan = build_index_plan(&selectors, *dims, tensor.shape())?;
                     stack.push(assign_integer_scalar_with_plan(value, &plan, &rhs, delete).await?);
                 }
                 Value::LogicalArray(la) => {
@@ -111,15 +122,15 @@ pub(super) async fn dispatch(
                         .collect();
                     let tensor = runmat_value::Tensor::new(data, la.shape.clone())
                         .map_err(|e| map_slice_shape_error("slice assign", e))?;
-                    let selectors = build_slice_selectors(
+                    let plan = build_indexed_store_plan(
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
                         tensor.shape(),
+                        plan_mode,
                     )
                     .await?;
-                    let plan = build_index_plan(&selectors, *dims, tensor.shape())?;
                     let updated = if delete {
                         idx_write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)?
                     } else {
@@ -133,15 +144,15 @@ pub(super) async fn dispatch(
                     });
                 }
                 Value::GpuTensor(handle) => stack.push({
-                    let selectors = build_slice_selectors(
+                    let plan = build_indexed_store_plan(
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
                         handle.shape(),
+                        plan_mode,
                     )
                     .await?;
-                    let plan = build_index_plan(&selectors, *dims, handle.shape())?;
                     if delete {
                         idx_write_slice::delete_gpu_slice_with_plan(&handle, &plan, &rhs).await?
                     } else {
@@ -149,12 +160,16 @@ pub(super) async fn dispatch(
                     }
                 }),
                 Value::ComplexTensor(ct) => {
-                    let selectors =
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, ct.shape())
-                            .await
-                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                    let plan = build_index_plan(&selectors, *dims, ct.shape())
-                        .map_err(|e| map_slice_plan_error("slice assign", e))?;
+                    let plan = build_indexed_store_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        ct.shape(),
+                        plan_mode,
+                    )
+                    .await
+                    .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if delete {
                         stack.push(idx_write_slice::delete_complex_with_plan(ct, &plan, &rhs)?);
                         return Ok(true);
@@ -185,18 +200,15 @@ pub(super) async fn dispatch(
                         Value::StructArray(array) => array.shape().to_vec(),
                         _ => vec![1, 1],
                     };
-                    let selectors = if delete {
-                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
-                            .await?
-                    } else {
-                        build_assignment_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
-                            .await?
-                    };
-                    let plan = if delete {
-                        build_index_plan(&selectors, *dims, &shape)?
-                    } else {
-                        build_assignment_plan(&selectors, *dims, &shape)?
-                    };
+                    let plan = build_indexed_store_plan(
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        &shape,
+                        plan_mode,
+                    )
+                    .await?;
                     stack.push(runmat_runtime::indexing::structure::assign_with_plan(
                         base, &plan, rhs, delete,
                     )?);

@@ -2524,6 +2524,51 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
 }
 
 #[test]
+fn numeric_indexed_growth_uses_assignment_shape_for_loop_range_and_typed_matrix() {
+    for (source, shape) in [
+        ("x = 1; x(1,2) = 7; out = x;", [1, 2]),
+        ("x = 1; x(2,1) = 7; out = x;", [2, 1]),
+    ] {
+        let vars = execute_source(source).expect("scalar two-subscript growth");
+        assert!(
+            matches!(vars.last(),
+            Some(Value::Tensor(tensor)) if tensor.shape() == shape && tensor.materialize_f64() == [1.0, 7.0]),
+            "{source}"
+        );
+    }
+
+    let aliased =
+        execute_source("a = [1 3; 2 4]; original = a; a(3,2) = 9; grown = a; old = original;")
+            .expect("matrix two-subscript growth must preserve source alias");
+    assert!(matches!(&aliased[2], Value::Tensor(tensor)
+        if tensor.shape() == [3, 2] && tensor.materialize_f64() == [1.0, 2.0, 0.0, 3.0, 4.0, 9.0]));
+    assert!(matches!(&aliased[3], Value::Tensor(tensor)
+        if tensor.shape() == [2, 2] && tensor.materialize_f64() == [1.0, 2.0, 3.0, 4.0]));
+    let deletion = execute_source("x = [1 2]; x(1,2) = [];")
+        .expect_err("two-subscript scalar deletion stays unsupported");
+    assert_eq!(deletion.identifier(), Some("RunMat:UnsupportedDeletion"));
+
+    let looped = execute_source("for k = 1:3; g(k) = k^2; end; out = g;")
+        .expect("undefined numeric indexed growth in a loop");
+    assert!(matches!(looped.last(),
+        Some(Value::Tensor(tensor)) if tensor.shape() == [1, 3]
+            && tensor.materialize_f64() == [1.0, 4.0, 9.0]));
+
+    let ranged = execute_source("a = [1 2]; a(4:6) = [4 5 6]; out = a;")
+        .expect("numeric range indexed growth");
+    assert!(matches!(ranged.last(),
+        Some(Value::Tensor(tensor)) if tensor.shape() == [1, 6]
+            && tensor.materialize_f64() == [1.0, 2.0, 0.0, 4.0, 5.0, 6.0]));
+
+    let matrix =
+        execute_source("a = uint64([1 9223372036854775808; 2 4]); a(3,2) = uint64(9); out = a;")
+            .expect("typed numeric matrix indexed growth");
+    assert!(matches!(matrix.last(),
+        Some(Value::Tensor(tensor)) if tensor.shape() == [3, 2]
+            && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 2, 0, 9_223_372_036_854_775_808, 4, 9]))));
+}
+
+#[test]
 fn sparse_arithmetic_interops_with_dense_and_scalar_values() {
     let vars = execute_source(
         "s = sparse([1 3 2], [1 1 2], [10 30 20], 3, 2); t = sparse([3 1 2], [1 2 2], [5 7 -20], 3, 2); a = s + t; af = full(a); atf = issparse(a); b = s + 2; c = [1 2; 3 4; 5 6] - s; d = s .* [2 2; 3 3; 4 4]; df = full(d); dtf = issparse(d); e = 3 .* s; ef = full(e); etf = issparse(e);",

@@ -8,6 +8,9 @@ use runmat_accelerate_api::{
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+#[path = "resident/functional_scatter_tests.rs"]
+mod functional_scatter_tests;
 
 fn optional<T>(result: anyhow::Result<T>, context: &str) -> Result<Option<T>, RuntimeError> {
     match result {
@@ -41,9 +44,12 @@ fn same_owner(left: &GpuTensorHandle, right: &GpuTensorHandle) -> bool {
 fn functional_result(
     output: GpuTensorHandle,
     target: &GpuTensorHandle,
-    rhs: &GpuTensorHandle,
+    protected_rhs: &[&GpuTensorHandle],
 ) -> Result<Value, RuntimeError> {
-    if output.shares_allocation_with(rhs) {
+    if protected_rhs
+        .iter()
+        .any(|rhs| output.shares_allocation_with(rhs))
+    {
         return Err(gpu_helpers::reject_gpu_output(
             output,
             mex(
@@ -72,6 +78,10 @@ pub async fn assign_gpu_slice_with_plan(
             "gpuArray indexed assignment does not support repeated target subscripts",
         ));
     }
+    let growing = plan.base_shape != target.shape();
+    if growing {
+        super::empty_rhs::validate_resident_rhs(target, rhs, plan)?;
+    }
     let provider = ownership::owner(target)?;
     let protected: Vec<_> = match rhs {
         Value::GpuTensor(handle) => vec![handle],
@@ -82,6 +92,23 @@ pub async fn assign_gpu_slice_with_plan(
         .iter()
         .map(|input| gpu_helpers::ResidencyRestoreGuard::new(input))
         .collect();
+    if growing {
+        // Same-shape scatter hooks cannot publish the new shape. Preserve the
+        // input leases, gather once, and restore the class-checked grown host
+        // result to the original provider with both operands protected.
+        let host = ownership::gather_numeric(target).await?;
+        let result = match host {
+            Value::Tensor(tensor) => assign_tensor_with_plan(tensor, plan, rhs).await?,
+            Value::ComplexTensor(tensor) => assign_complex_with_plan(tensor, plan, rhs).await?,
+            _ => {
+                return Err(mex(
+                    "AccelerationOperationFailed",
+                    "Invalid resident slice assignment carrier",
+                ))
+            }
+        };
+        return ownership::restore(target, result, &protected);
+    }
     let integer = runmat_accelerate_api::handle_integer_type(target).is_some();
     let real = runmat_accelerate_api::handle_storage(target) == GpuTensorStorage::Real;
     if let Value::GpuTensor(rhs_handle) = rhs {
@@ -125,13 +152,13 @@ pub async fn assign_gpu_slice_with_plan(
                         }
                     };
                     if let Some(values) = values {
-                        if optional(
-                            provider.scatter_linear(target, &plan.indices, &values),
+                        if let Some(output) = optional_execution(
+                            provider
+                                .scatter_linear_functional(target, &plan.indices, &values)
+                                .await,
                             "integer slice assignment",
-                        )?
-                        .is_some()
-                        {
-                            return Ok(Value::GpuTensor(target.clone()));
+                        )? {
+                            return functional_result(output, target, &[&values, rhs_handle]);
                         }
                     }
                 }
@@ -146,7 +173,7 @@ pub async fn assign_gpu_slice_with_plan(
                             provider.scatter_column(target, col, rhs_handle).await,
                             "column assignment",
                         )? {
-                            return functional_result(output, target, rhs_handle);
+                            return functional_result(output, target, &[rhs_handle]);
                         }
                     }
                 }
@@ -158,7 +185,7 @@ pub async fn assign_gpu_slice_with_plan(
                             provider.scatter_row(target, row, rhs_handle).await,
                             "row assignment",
                         )? {
-                            return functional_result(output, target, rhs_handle);
+                            return functional_result(output, target, &[rhs_handle]);
                         }
                     }
                 }
@@ -193,13 +220,15 @@ pub async fn assign_gpu_slice_with_plan(
             }
         };
         if let Some(values) = prepared {
-            if optional(
-                provider.scatter_linear(target, &plan.indices, &values),
+            if let Some(output) = optional_execution(
+                provider
+                    .scatter_linear_functional(target, &plan.indices, &values)
+                    .await,
                 "slice assignment",
-            )?
-            .is_some()
-            {
-                return Ok(Value::GpuTensor(target.clone()));
+            )? {
+                let mut rhs_owners = vec![&values];
+                rhs_owners.extend(protected.iter().copied());
+                return functional_result(output, target, &rhs_owners);
             }
         }
     }

@@ -1,10 +1,11 @@
 use runmat_mir::{MirIndexComponent, MirIndexing, MirOperand};
 use runmat_runtime::execution::{RootedValueLease, RootedValues};
-use runmat_runtime::indexing::plan::{build_assignment_plan, build_index_plan, IndexPlan};
-use runmat_runtime::indexing::read_slice;
-use runmat_runtime::indexing::selectors::{
-    build_assignment_selectors, build_slice_selectors, index_scalar_from_value,
+use runmat_runtime::indexing::plan::{
+    build_index_plan, build_indexed_store_plan, IndexPlan, IndexedStorePlanMode,
 };
+use runmat_runtime::indexing::read_slice;
+use runmat_runtime::indexing::selectors::{build_slice_selectors, index_scalar_from_value};
+use runmat_runtime::indexing::value as index_value;
 use runmat_runtime::indexing::write_slice;
 use runmat_runtime::object::dispatch::{
     invoke_resolved_object_index_path_method_in_context, resolve_object_index_protocol,
@@ -228,6 +229,21 @@ fn assign_inner_with_completion(
     )
     .finish(state)?;
     let updated = match base {
+        value @ (Value::Num(_) | Value::Int(_)) => {
+            if delete {
+                let tensor =
+                    index_value::numeric_scalar_tensor(value).map_err(NativeExecutorError::from)?;
+                write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)
+                    .map_err(NativeExecutorError::from)
+            } else {
+                super::sync::complete(
+                    &state.runtime,
+                    index_value::assign_with_plan(value, &plan, rhs),
+                    "scalar numeric indexed assignment",
+                )
+                .finish(state)
+            }
+        }
         Value::Tensor(value) => {
             if delete {
                 write_slice::delete_tensor_with_plan(value, &plan, &rhs)
@@ -672,24 +688,33 @@ async fn plan_for_assignment(
     allow_growth: bool,
 ) -> NativeExecutorResult<IndexPlan> {
     let shape = value_shape(base);
-    if allow_growth
+    let mode = if allow_growth
         && matches!(
             base,
-            Value::SparseTensor(_) | Value::Struct(_) | Value::StructArray(_)
-        )
-    {
-        let built = build_assignment_selectors(
-            selectors.dims,
-            selectors.colon_mask,
-            selectors.end_mask,
-            &selectors.numeric,
-            &shape,
-        )
-        .await?;
-        return build_assignment_plan(&built, selectors.dims, &shape)
-            .map_err(NativeExecutorError::from);
-    }
-    plan_for(base, selectors).await
+            Value::SparseTensor(_)
+                | Value::Struct(_)
+                | Value::StructArray(_)
+                | Value::Tensor(_)
+                | Value::Num(_)
+                | Value::Int(_)
+                | Value::LogicalArray(_)
+                | Value::GpuTensor(_)
+                | Value::ComplexTensor(_)
+        ) {
+        IndexedStorePlanMode::Grow
+    } else {
+        IndexedStorePlanMode::Bounded
+    };
+    build_indexed_store_plan(
+        selectors.dims,
+        selectors.colon_mask,
+        selectors.end_mask,
+        &selectors.numeric,
+        &shape,
+        mode,
+    )
+    .await
+    .map_err(NativeExecutorError::from)
 }
 
 fn assign_brace(
@@ -930,9 +955,34 @@ fn shape_error(error: impl std::fmt::Display) -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
-    use super::{read_with_plan, selector_dimension_length};
+    use super::{
+        plan_for_assignment, read_with_plan, selector_dimension_length, MaterializedSelectors,
+    };
     use runmat_runtime::indexing::plan::IndexPlan;
     use runmat_value::{CharArray, Value};
+
+    #[test]
+    fn native_numeric_scalar_planning_uses_shared_bounded_and_growth_modes() {
+        let selectors = MaterializedSelectors {
+            dims: 1,
+            colon_mask: 0,
+            end_mask: 0,
+            numeric: vec![Value::Num(3.0)],
+            positional: vec![Value::Num(3.0)],
+        };
+        for base in [
+            Value::Num(9.0),
+            Value::Int(runmat_value::IntValue::U64(9_007_199_254_740_993)),
+        ] {
+            let plan = futures::executor::block_on(plan_for_assignment(&base, &selectors, true))
+                .expect("scalar assignment must admit growth");
+            assert_eq!(plan.base_shape, vec![1, 3]);
+            assert!(
+                futures::executor::block_on(plan_for_assignment(&base, &selectors, false)).is_err(),
+                "scalar deletion must remain bounded"
+            );
+        }
+    }
 
     #[test]
     fn native_end_extent_collapses_trailing_dimensions() {

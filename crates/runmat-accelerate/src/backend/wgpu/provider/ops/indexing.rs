@@ -2,6 +2,8 @@ use super::*;
 
 #[path = "indexing/validated_plan.rs"]
 mod validated_plan;
+#[path = "indexing/functional_scatter.rs"]
+mod functional_scatter;
 
 fn indexing_unproven(
     error: impl Into<runmat_accelerate_api::ProviderExecutionError>,
@@ -29,37 +31,6 @@ mod layout_tests;
 #[cfg(test)]
 #[path = "indexing/validated_actual_tests.rs"]
 mod validated_actual_tests;
-
-fn linear_storage_lane_factor(
-    integer_type: Option<runmat_accelerate_api::IntegerElementType>,
-    storage: GpuTensorStorage,
-) -> usize {
-    match integer_type {
-        Some(
-            runmat_accelerate_api::IntegerElementType::I64
-            | runmat_accelerate_api::IntegerElementType::U64,
-        ) => 2,
-        Some(_) => 1,
-        None => match storage {
-            GpuTensorStorage::Real => 1,
-            GpuTensorStorage::ComplexInterleaved => 2,
-        },
-    }
-}
-
-fn linear_values_entry_len(
-    integer_type: Option<runmat_accelerate_api::IntegerElementType>,
-    storage: GpuTensorStorage,
-    index_count: usize,
-) -> Option<usize> {
-    // Integer BufferEntry lengths are logical element counts; only float/complex
-    // buffers expose their storage-lane count as len.
-    if integer_type.is_some() {
-        Some(index_count)
-    } else {
-        index_count.checked_mul(linear_storage_lane_factor(integer_type, storage))
-    }
-}
 
 impl WgpuProvider {
     pub(crate) async fn scatter_column_exec(
@@ -1008,28 +979,15 @@ impl WgpuProvider {
         let source_contiguous = self.reshape_exec(source, source.shape())?;
         let source = &source_contiguous;
 
-        let entry = self.get_entry_raw(source)?;
-        let integer_type = entry.integer_type();
-        if integer_type.is_none() && entry.precision != self.precision {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "gather_linear: input requires a precision-aware provider kernel",
-            ));
-        }
+        let entry = self.get_entry_for_bitwise_move(source, "gather_linear")?;
         let expected = product_checked(output_shape)
             .ok_or_else(|| anyhow!("gather_linear: output shape product overflow"))?;
-        let lane_factor = linear_storage_lane_factor(integer_type, entry.storage);
-        if integer_type.is_none() {
-            ensure!(
-                entry.len % lane_factor == 0,
-                "gather_linear: source raw length {} is not aligned to storage lane factor {}",
-                entry.len,
-                lane_factor
-            );
-        }
-        let source_logical_len = if integer_type.is_some() {
-            entry.len
+        let source_logical_len = product_checked(source.shape())
+            .ok_or_else(|| anyhow!("gather_linear: source shape product overflow"))?;
+        let lane_factor = if source_logical_len == 0 {
+            1
         } else {
-            entry.len / lane_factor
+            functional_scatter::word_geometry(source)?.1
         };
         let _span = info_span!(
             "gpu.gather_linear",
@@ -1049,23 +1007,13 @@ impl WgpuProvider {
             let out = self.with_emission(|emission, _| {
                 self.create_storage_buffer(emission, 0, "runmat-gather-linear-empty")
             })??;
-            let handle = if entry.logical {
-                self.register_logical_buffer(
-                    out,
-                    output_shape.to_vec(),
-                    0,
-                    BufferUsageClass::Generic,
-                )?
-            } else if let Some(element_type) = integer_type {
-                self.register_integer_buffer(out, output_shape.to_vec(), 0, element_type, 0)?
-            } else {
-                self.register_existing_buffer_with_storage(
-                    out,
-                    output_shape.to_vec(),
-                    0,
-                    entry.storage,
-                )?
-            };
+            let handle = self.register_storage_move_buffer(
+                out.clone(),
+                &entry,
+                output_shape.to_vec(),
+                0,
+                out.size(),
+            )?;
             return Ok(handle);
         }
         ensure!(
@@ -1083,109 +1031,104 @@ impl WgpuProvider {
             "gather_linear: index out of bounds for source tensor"
         );
         let indices_len_bytes = std::mem::size_of_val(indices) as u64;
-        let (out_buffer, raw_output_len) =
-            self.with_emission(|emission, pending| -> Result<_> {
-                let indices_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
-                    emission.device().create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("runmat-gather-linear-indices"),
-                        size: indices_len_bytes.max(4),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }),
-                );
-                if !indices.is_empty() {
-                    emission.write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
-                }
-                log::trace!(
-                    "gather_linear begin source_buffer={} ptr=0x{:x} out_shape={:?} count={}",
-                    source.buffer_id(),
-                    entry.buffer.as_ref() as *const wgpu::Buffer as usize,
-                    output_shape,
-                    indices.len()
-                );
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            let indices_buffer = runmat_accelerate_api::WgpuBufferOwner::new(
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-gather-linear-indices"),
+                    size: indices_len_bytes.max(4),
+                    usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }),
+            );
+            if !indices.is_empty() {
+                emission.write_buffer(indices_buffer.as_ref(), 0, cast_slice(indices));
+            }
+            log::trace!(
+                "gather_linear begin source_buffer={} ptr=0x{:x} out_shape={:?} count={}",
+                source.buffer_id(),
+                entry.buffer.as_ref() as *const wgpu::Buffer as usize,
+                output_shape,
+                indices.len()
+            );
 
-                let raw_output_len = expected * lane_factor;
-                let out_buffer = self.create_storage_buffer_checked(
-                    emission,
-                    raw_output_len,
-                    "runmat-gather-linear-out",
-                )?;
-                let params = LinearGatherParams {
-                    count: indices.len() as u32,
-                    lane_factor: lane_factor as u32,
-                    _pad: [0; 2],
-                };
-                let params_buffer =
-                    self.uniform_buffer(emission, &params, "runmat-gather-linear-params")?;
-                let bind_group = emission
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-gather-linear-bind"),
-                        layout: &self.pipelines.gather_linear.get(emission)?.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: indices_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    indices.len() as u32,
-                    self.workgroup_config.scalar,
-                );
-                crate::backend::wgpu::dispatch::creation::run(
-                    emission,
-                    pending,
-                    &self.pipelines.gather_linear.get(emission)?.pipeline,
-                    &bind_group,
-                    workgroups,
-                    "runmat-gather-linear-encoder",
-                    "runmat-gather-linear-pass",
-                )?;
-                log::trace!(
-                    "gather_linear complete source_buffer={} out_ptr=0x{:x} count={}",
-                    source.buffer_id(),
-                    out_buffer.as_ref() as *const wgpu::Buffer as usize,
-                    indices.len()
-                );
-
-                Ok((out_buffer, raw_output_len))
-            })??;
-        let handle = if entry.logical {
-            self.register_logical_buffer(
-                out_buffer,
-                output_shape.to_vec(),
+            let raw_output_len = expected * lane_factor;
+            let out_buffer = self.create_storage_buffer_checked_with_element_size(
+                emission,
                 raw_output_len,
+                "runmat-gather-linear-out",
                 BufferUsageClass::Generic,
-            )?
-        } else if let Some(element_type) = integer_type {
-            self.register_integer_buffer(
-                out_buffer,
-                output_shape.to_vec(),
-                expected,
-                element_type,
-                (raw_output_len * std::mem::size_of::<u32>()) as u64,
-            )?
+                4,
+            )?;
+            let params = LinearGatherParams {
+                count: indices.len() as u32,
+                lane_factor: lane_factor as u32,
+                _pad: [0; 2],
+            };
+            let params_buffer =
+                self.uniform_buffer(emission, &params, "runmat-gather-linear-params")?;
+            let bind_group = emission
+                .device()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-gather-linear-bind"),
+                    layout: &self.pipelines.gather_linear.get(emission)?.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: indices_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                indices.len() as u32,
+                self.workgroup_config.scalar,
+            );
+            crate::backend::wgpu::dispatch::creation::run(
+                emission,
+                pending,
+                &self.pipelines.gather_linear.get(emission)?.pipeline,
+                &bind_group,
+                workgroups,
+                "runmat-gather-linear-encoder",
+                "runmat-gather-linear-pass",
+            )?;
+            log::trace!(
+                "gather_linear complete source_buffer={} out_ptr=0x{:x} count={}",
+                source.buffer_id(),
+                out_buffer.as_ref() as *const wgpu::Buffer as usize,
+                indices.len()
+            );
+
+            Ok(out_buffer)
+        })??;
+        let registration_len = if entry.integer_type().is_some() {
+            expected
         } else {
-            self.register_existing_buffer_with_storage(
-                out_buffer,
-                output_shape.to_vec(),
-                raw_output_len,
-                entry.storage,
-            )?
+            expected
+                .checked_mul(match entry.storage {
+                    GpuTensorStorage::Real => 1,
+                    GpuTensorStorage::ComplexInterleaved => 2,
+                })
+                .ok_or_else(|| anyhow!("gather_linear: registration length overflow"))?
         };
+        let handle = self.register_storage_move_buffer(
+            out_buffer.clone(),
+            &entry,
+            output_shape.to_vec(),
+            registration_len,
+            out_buffer.size(),
+        )?;
         Ok(handle)
     }
 
@@ -1202,7 +1145,7 @@ impl WgpuProvider {
             indices.len() <= u32::MAX as usize,
             "scatter_linear: index count exceeds GPU limits"
         );
-        let target_entry = self.get_entry_raw(target)?;
+        let target_entry = self.get_entry_for_bitwise_move(target, "scatter_linear")?;
         let values_contiguous = if values.shares_allocation_with(target) {
             // A read/write binding to the same physical buffer is not a snapshot.
             // Preserve assignment values before mutating any aliased target view.
@@ -1214,7 +1157,7 @@ impl WgpuProvider {
             self.reshape_exec(values, values.shape())?
         };
         let values = &values_contiguous;
-        let values_entry = self.get_entry_raw(values)?;
+        let values_entry = self.get_entry_for_bitwise_move(values, "scatter_linear values")?;
         let physical_indices;
         let indices = if runmat_accelerate_api::handle_is_transposed(target) {
             let view = super::backend_shared::build_matrix_operand_view(target, &target_entry)?;
@@ -1245,20 +1188,10 @@ impl WgpuProvider {
                 "scatter_linear: logical allocation requires canonical logical values",
             ));
         }
-        let integer_type = target_entry.integer_type();
-        if integer_type.is_none()
-            && (target_entry.precision != self.precision
-                || values_entry.precision != self.precision)
-        {
-            return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "scatter_linear: inputs require a precision-aware provider kernel",
-            ));
-        }
         ensure!(
-            integer_type == values_entry.integer_type(),
-            "scatter_linear: integer storage mismatch target={:?} values={:?}",
-            integer_type,
-            values_entry.integer_type()
+            target_entry.element_type == values_entry.element_type
+                && target_entry.logical == values_entry.logical,
+            "scatter_linear: physical element or logical storage mismatch"
         );
         ensure!(
             target_entry.storage == values_entry.storage,
@@ -1266,20 +1199,8 @@ impl WgpuProvider {
             target_entry.storage,
             values_entry.storage
         );
-        let lane_factor = linear_storage_lane_factor(integer_type, target_entry.storage);
-        if integer_type.is_none() {
-            ensure!(
-                target_entry.len % lane_factor == 0,
-                "scatter_linear: target raw length {} is not aligned to storage lane factor {}",
-                target_entry.len,
-                lane_factor
-            );
-        }
-        let target_logical_len = if integer_type.is_some() {
-            target_entry.len
-        } else {
-            target_entry.len / lane_factor
-        };
+        let (target_logical_len, lane_factor) = functional_scatter::word_geometry(target)?;
+        let (values_logical_len, values_lane_factor) = functional_scatter::word_geometry(values)?;
         let _span = info_span!(
             "gpu.scatter_linear",
             target_len = target_entry.len,
@@ -1288,13 +1209,10 @@ impl WgpuProvider {
             values_len = values_entry.len
         )
         .entered();
-        let expected_values_len =
-            linear_values_entry_len(integer_type, target_entry.storage, indices.len())
-                .ok_or_else(|| anyhow!("scatter_linear: values length overflow"))?;
         ensure!(
-            values_entry.len == expected_values_len,
-            "scatter_linear: values length {} does not match index count {} for lane factor {}",
-            values_entry.len,
+            values_logical_len == indices.len() && values_lane_factor == lane_factor,
+            "scatter_linear: values length {} does not match index count {} for word factor {}",
+            values_logical_len,
             indices.len(),
             lane_factor
         );
@@ -1581,36 +1499,6 @@ mod tests {
     };
 
     #[test]
-    fn linear_scatter_length_uses_logical_counts_for_all_integer_types() {
-        use runmat_accelerate_api::IntegerElementType;
-
-        for integer_type in [
-            IntegerElementType::I8,
-            IntegerElementType::I16,
-            IntegerElementType::I32,
-            IntegerElementType::I64,
-            IntegerElementType::U8,
-            IntegerElementType::U16,
-            IntegerElementType::U32,
-            IntegerElementType::U64,
-        ] {
-            assert_eq!(
-                linear_values_entry_len(Some(integer_type), GpuTensorStorage::Real, 3),
-                Some(3),
-                "{integer_type:?} must use logical element count"
-            );
-        }
-        assert_eq!(
-            linear_values_entry_len(None, GpuTensorStorage::Real, 3),
-            Some(3)
-        );
-        assert_eq!(
-            linear_values_entry_len(None, GpuTensorStorage::ComplexInterleaved, 3),
-            Some(6)
-        );
-    }
-
-    #[test]
     #[ignore = "requires an actual WGPU device"]
     fn functional_scatter_preserves_logical_output_and_borrowed_source() {
         use runmat_accelerate_api::{AccelProvider, HostLogicalTensorView};
@@ -1777,6 +1665,27 @@ mod tests {
                 assert_eq!(
                     block_on(provider.download_integer_exec(&target))
                         .expect("download target")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], 0, ($expected)[1]])
+                );
+                let preserved = target.clone();
+                let functional = provider
+                    .scatter_linear_functional_exec(&target, &[1, 2], &gathered)
+                    .expect("functional integer scatter");
+                assert!(!functional.shares_allocation_with(&preserved));
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&functional))
+                        .expect("download functional result")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![
+                        ($expected)[0],
+                        ($expected)[0],
+                        ($expected)[1]
+                    ])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer_exec(&preserved))
+                        .expect("download retained source")
                         .data,
                     HostIntegerDataOwned::$owned(vec![($expected)[0], 0, ($expected)[1]])
                 );

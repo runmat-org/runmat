@@ -318,7 +318,7 @@ fn indexed_mutation_tracks_proven_growth_and_cell_payload_updates() {
     assert_eq!(updated.elements, vec![assigned]);
 
     let created = infer_index_mutation(
-        &ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue),
+        &infer_cell_aggregate(&[]).fact,
         &[IndexSelectorFact::KnownOneBasedIndex(2)],
         &ValueFact::scalar(ValueKindFact::String),
         MutationContract {
@@ -365,7 +365,237 @@ fn indexed_mutation_tracks_proven_growth_and_cell_payload_updates() {
 }
 
 #[test]
-fn indexed_creation_infers_new_array_category_and_cell_assignment_mode() {
+fn indexed_mutation_invalidates_only_unproved_growth_and_physical_facts() {
+    let mut base = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(1), Some(2)]),
+    );
+    base.storage = runmat_types::StorageFact::Dense;
+    let assigned = numeric(NumericClass::Double, ShapeFact::Scalar);
+    let contract = MutationContract {
+        kind: PlaceMutationKind::IndexedAssign,
+        creation: AssignmentCreationPolicy::CreateArrayByIndex,
+        shape: AssignmentShapePolicy::MatlabCompatible,
+    };
+    let unknown = IndexSelectorFact::Numeric(ValueFact::unknown(
+        runmat_types::DynamicReason::RuntimeValue,
+    ));
+    let uncertain = infer_index_mutation(&base, &[unknown.clone()], &assigned, contract).fact;
+    assert_eq!(uncertain.shape, ShapeFact::Unknown);
+    assert_eq!(uncertain.kind, base.kind);
+    assert_eq!(uncertain.storage, runmat_types::StorageFact::Dense);
+    assert_eq!(uncertain.layout, runmat_types::LayoutFact::Unknown);
+    assert_eq!(uncertain.view, runmat_types::ViewFact::Unknown);
+    assert_eq!(uncertain.alias, runmat_types::AliasFact::Unknown);
+
+    for selector in [
+        IndexSelectorFact::KnownOneBasedIndex(2),
+        IndexSelectorFact::Colon,
+        IndexSelectorFact::Logical(ValueFact::scalar(ValueKindFact::Logical)),
+    ] {
+        let bounded = infer_index_mutation(&base, &[selector], &assigned, contract).fact;
+        assert_eq!(bounded.shape, base.shape);
+        assert_eq!(bounded.layout, base.layout);
+    }
+    let scalar = numeric(NumericClass::Double, ShapeFact::Scalar);
+    let scalar_write = infer_index_mutation(
+        &scalar,
+        &[IndexSelectorFact::KnownOneBasedIndex(1)],
+        &assigned,
+        contract,
+    )
+    .fact;
+    assert_eq!(scalar_write.shape, ShapeFact::Scalar);
+    assert_eq!(scalar_write.storage, runmat_types::StorageFact::Dense);
+    let dynamic_rhs = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
+    assert_eq!(
+        infer_index_mutation(
+            &scalar,
+            &[IndexSelectorFact::KnownOneBasedIndex(1)],
+            &dynamic_rhs,
+            contract,
+        )
+        .fact
+        .storage,
+        runmat_types::StorageFact::Dense,
+        "unknown RHS domain cannot restore the primitive scalar carrier"
+    );
+
+    let mut shared_view = base.clone();
+    shared_view.view = runmat_types::ViewFact::ReadOnlyView;
+    shared_view.alias = runmat_types::AliasFact::Shared;
+    shared_view.layout = runmat_types::LayoutFact::Strided;
+    shared_view.contiguity = runmat_types::ContiguityFact::NonContiguous;
+    let detached = infer_index_mutation(
+        &shared_view,
+        &[IndexSelectorFact::KnownOneBasedIndex(2)],
+        &assigned,
+        contract,
+    )
+    .fact;
+    assert_eq!(detached.shape, shared_view.shape);
+    assert_eq!(detached.layout, runmat_types::LayoutFact::Unknown);
+    assert_eq!(detached.contiguity, runmat_types::ContiguityFact::Unknown);
+    assert_eq!(detached.view, runmat_types::ViewFact::Unknown);
+    assert_eq!(detached.alias, runmat_types::AliasFact::Unknown);
+    let grown = infer_index_mutation(
+        &base,
+        &[IndexSelectorFact::KnownOneBasedIndex(3)],
+        &assigned,
+        contract,
+    )
+    .fact;
+    assert_eq!(grown.shape, ShapeFact::from(vec![Some(1), Some(3)]));
+    assert_eq!(grown.layout, runmat_types::LayoutFact::Unknown);
+    let mut complex_rhs = assigned.clone();
+    complex_rhs.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    });
+    let promoted_without_growth = infer_index_mutation(
+        &base,
+        &[IndexSelectorFact::KnownOneBasedIndex(2)],
+        &complex_rhs,
+        contract,
+    )
+    .fact;
+    assert_eq!(promoted_without_growth.shape, base.shape);
+    assert_eq!(
+        promoted_without_growth.numeric().unwrap().domain,
+        NumericDomain::Complex
+    );
+    assert_eq!(
+        promoted_without_growth.view,
+        runmat_types::ViewFact::Unknown
+    );
+    assert_eq!(
+        infer_index_mutation(
+            &base,
+            &[IndexSelectorFact::End { offset: 1 }],
+            &assigned,
+            contract,
+        )
+        .fact
+        .shape,
+        grown.shape
+    );
+
+    let empty = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(0), Some(0)]),
+    );
+    assert_eq!(
+        infer_index_mutation(
+            &empty,
+            &[IndexSelectorFact::Logical(ValueFact::scalar(
+                ValueKindFact::Logical
+            ))],
+            &assigned,
+            contract,
+        )
+        .fact
+        .shape,
+        ShapeFact::Unknown,
+        "a scalar true logical selector can address position one of an empty array"
+    );
+    assert_eq!(
+        infer_index_mutation(
+            &base,
+            &[unknown, IndexSelectorFact::KnownOneBasedIndex(1)],
+            &assigned,
+            contract,
+        )
+        .fact
+        .shape,
+        ShapeFact::Unknown,
+        "an unknown first subscript may extend the leading dimension"
+    );
+}
+
+#[test]
+fn indexed_mutation_follows_collapsed_nd_growth_and_complex_promotion() {
+    let mut base = numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(2), Some(2), Some(2)]),
+    );
+    base.storage = runmat_types::StorageFact::Dense;
+    let real = numeric(NumericClass::Double, ShapeFact::Scalar);
+    let mut complex = real.clone();
+    complex.kind = ValueKindFact::Numeric(NumericFact {
+        class: NumericClass::Double,
+        domain: NumericDomain::Complex,
+    });
+    let contract = MutationContract {
+        kind: PlaceMutationKind::IndexedAssign,
+        creation: AssignmentCreationPolicy::CreateArrayByIndex,
+        shape: AssignmentShapePolicy::MatlabCompatible,
+    };
+    let collapsed = infer_index_mutation(
+        &base,
+        &[
+            IndexSelectorFact::KnownOneBasedIndex(2),
+            IndexSelectorFact::KnownOneBasedIndex(5),
+        ],
+        &real,
+        contract,
+    )
+    .fact;
+    assert_eq!(collapsed.shape, ShapeFact::from(vec![Some(2), Some(5)]));
+    let linear = infer_index_mutation(
+        &base,
+        &[IndexSelectorFact::KnownOneBasedIndex(9)],
+        &real,
+        contract,
+    )
+    .fact;
+    assert_eq!(
+        linear.shape,
+        ShapeFact::from(vec![Some(2), Some(2), Some(3)])
+    );
+    let unchanged = infer_index_mutation(
+        &base,
+        &[
+            IndexSelectorFact::KnownOneBasedIndex(2),
+            IndexSelectorFact::KnownOneBasedIndex(4),
+        ],
+        &real,
+        contract,
+    )
+    .fact;
+    assert_eq!(unchanged.shape, base.shape);
+
+    let promoted = infer_index_mutation(
+        &base,
+        &[IndexSelectorFact::KnownOneBasedIndex(9)],
+        &complex,
+        contract,
+    )
+    .fact;
+    assert_eq!(promoted.numeric().unwrap().class, NumericClass::Single);
+    assert_eq!(promoted.numeric().unwrap().domain, NumericDomain::Complex);
+    let unknown_shape_base = numeric(NumericClass::Single, ShapeFact::Unknown);
+    let promoted_unknown_shape = infer_index_mutation(
+        &unknown_shape_base,
+        &[IndexSelectorFact::KnownOneBasedIndex(1)],
+        &complex,
+        contract,
+    )
+    .fact;
+    assert_eq!(
+        promoted_unknown_shape.numeric().unwrap().domain,
+        NumericDomain::Complex,
+        "a positive literal selector is nonempty even if the old extent is unknown"
+    );
+    let unknown = IndexSelectorFact::Numeric(ValueFact::unknown(
+        runmat_types::DynamicReason::RuntimeValue,
+    ));
+    let maybe_empty = infer_index_mutation(&base, &[unknown], &complex, contract).fact;
+    assert_eq!(maybe_empty.kind, ValueKindFact::Unknown);
+    assert_eq!(maybe_empty.shape, ShapeFact::Unknown);
+}
+
+#[test]
+fn indexed_creation_requires_a_known_base_for_class_and_cell_facts() {
     let unknown = ValueFact::unknown(runmat_types::DynamicReason::RuntimeValue);
     let assigned = numeric(NumericClass::UInt16, ShapeFact::Scalar);
     let created = infer_index_mutation(
@@ -378,8 +608,30 @@ fn indexed_creation_infers_new_array_category_and_cell_assignment_mode() {
             shape: AssignmentShapePolicy::MatlabCompatible,
         },
     );
-    assert_eq!(created.fact.kind, assigned.kind);
-    assert_eq!(created.fact.shape, ShapeFact::from(vec![Some(1), Some(3)]));
+    assert_eq!(created.fact.kind, ValueKindFact::Unknown);
+    assert_eq!(created.fact.shape, ShapeFact::Unknown);
+
+    let mut empty_double = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(0), Some(0)]),
+    );
+    empty_double.storage = runmat_types::StorageFact::Dense;
+    let from_empty_double = infer_index_mutation(
+        &empty_double,
+        &[IndexSelectorFact::KnownOneBasedIndex(3)],
+        &assigned,
+        MutationContract {
+            kind: PlaceMutationKind::IndexedAssign,
+            creation: AssignmentCreationPolicy::CreateArrayByIndex,
+            shape: AssignmentShapePolicy::MatlabCompatible,
+        },
+    )
+    .fact;
+    assert_eq!(from_empty_double.kind, empty_double.kind);
+    assert_eq!(
+        from_empty_double.shape,
+        ShapeFact::from(vec![Some(1), Some(3)])
+    );
 
     let cell = infer_index_mutation(
         &unknown,
@@ -391,11 +643,11 @@ fn indexed_creation_infers_new_array_category_and_cell_assignment_mode() {
             shape: AssignmentShapePolicy::MatlabCompatible,
         },
     );
-    assert!(matches!(cell.fact.kind, ValueKindFact::Cell(_)));
-    assert_eq!(cell.fact.shape, ShapeFact::from(vec![Some(1), Some(2)]));
+    assert_eq!(cell.fact.kind, ValueKindFact::Unknown);
+    assert_eq!(cell.fact.shape, ShapeFact::Unknown);
 
     let invalid = infer_index_mutation(
-        &cell.fact,
+        &infer_cell_aggregate(&[]).fact,
         &[IndexSelectorFact::KnownOneBasedIndex(1)],
         &ValueFact::scalar(ValueKindFact::String),
         MutationContract {

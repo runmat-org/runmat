@@ -1,8 +1,10 @@
 use super::{
     assign_object_scalar_indices, build_assignment_plan, build_index_plan, idx_write_linear,
-    idx_write_slice, index_scalar_from_value, integer_scalar_tensor, map_slice_shape_error,
-    IntValue, RuntimeError, SliceSelector, Value,
+    idx_write_slice, index_scalar_from_value, map_slice_shape_error, IntValue, RuntimeError,
+    SliceSelector, Value,
 };
+use runmat_runtime::indexing::plan::{build_indexed_store_plan, IndexedStorePlanMode};
+use runmat_runtime::indexing::value as index_value;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
@@ -100,25 +102,78 @@ pub(super) async fn dispatch(
                         "Function handle call does not support assignment selector syntax",
                     ));
                 }
-                Value::Tensor(t) => stack
-                    .push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs, delete).await?),
-                Value::ComplexTensor(t) => stack.push(
-                    idx_write_linear::assign_complex_scalar(t, &indices, &rhs, delete).await?,
-                ),
-                Value::Num(n) => {
-                    let scalar = runmat_value::Tensor::new(vec![n], vec![1, 1])
-                        .map_err(|e| map_slice_shape_error("scalar index assign", e))?;
-                    stack.push(
-                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
-                            .await?,
-                    );
-                }
-                Value::Int(i) => {
-                    let scalar = integer_scalar_tensor(i)?;
-                    stack.push(
-                        idx_write_linear::assign_tensor_scalar(scalar, &indices, &rhs, delete)
-                            .await?,
-                    );
+                base @ (Value::Tensor(_)
+                | Value::ComplexTensor(_)
+                | Value::Num(_)
+                | Value::Int(_)
+                | Value::GpuTensor(_)) => {
+                    if indices.is_empty() || indices.len() > 2 {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedAssignmentRank",
+                            "Only 1D/2D scalar assignment supported",
+                        ));
+                    }
+                    if delete && indices.len() != 1 {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedDeletion",
+                            "Indexed deletion is only supported for linear vector indices",
+                        ));
+                    }
+                    let shape = index_value::shape(&base).ok_or_else(|| {
+                        crate::interpreter::errors::mex(
+                            "IndexAssignmentUnsupportedBase",
+                            "Numeric indexed assignment requires a numeric base",
+                        )
+                    })?;
+                    let numeric = indices
+                        .iter()
+                        .copied()
+                        .map(|index| {
+                            u64::try_from(index)
+                                .map(|index| Value::Int(IntValue::U64(index)))
+                                .map_err(|_| {
+                                    crate::interpreter::errors::mex(
+                                        "IndexOutOfBounds",
+                                        "Index out of bounds",
+                                    )
+                                })
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let mode = if delete {
+                        IndexedStorePlanMode::Bounded
+                    } else {
+                        IndexedStorePlanMode::Grow
+                    };
+                    let plan =
+                        build_indexed_store_plan(indices.len(), 0, 0, &numeric, &shape, mode)
+                            .await?;
+                    let updated = if delete {
+                        match base {
+                            Value::Tensor(t) => {
+                                idx_write_slice::delete_tensor_with_plan(t, &plan, &rhs)?
+                            }
+                            Value::ComplexTensor(t) => {
+                                idx_write_slice::delete_complex_with_plan(t, &plan, &rhs)?
+                            }
+                            value @ (Value::Num(_) | Value::Int(_)) => {
+                                let tensor = index_value::numeric_scalar_tensor(value)?;
+                                idx_write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)?
+                            }
+                            Value::GpuTensor(handle) => {
+                                idx_write_slice::delete_gpu_slice_with_plan(&handle, &plan, &rhs)
+                                    .await?
+                            }
+                            _ => {
+                                return Err(crate::interpreter::errors::mex(
+                                    "IndexAssignmentUnsupportedBase",
+                                    "Numeric indexed assignment requires a numeric base",
+                                ));
+                            }
+                        }
+                    } else {
+                        index_value::assign_with_plan(base, &plan, rhs).await?
+                    };
+                    stack.push(updated);
                 }
                 Value::Bool(b) => {
                     let scalar =
@@ -190,8 +245,6 @@ pub(super) async fn dispatch(
                 Value::SparseTensor(sparse) => stack.push(
                     idx_write_linear::assign_sparse_scalar(sparse, &indices, &rhs, delete).await?,
                 ),
-                Value::GpuTensor(h) => stack
-                    .push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs, delete).await?),
                 _ => {
                     if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                         let kind = |v: &Value| match v {

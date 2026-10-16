@@ -967,6 +967,15 @@ impl AccelProvider for WgpuProvider {
         self.scatter_linear_exec(target, indices, values)
     }
 
+    fn scatter_linear_functional<'a>(
+        &'a self,
+        target: &'a GpuTensorHandle,
+        indices: &'a [u32],
+        values: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.scatter_linear_functional_exec(target, indices, values) })
+    }
+
     fn zeros(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         self.zeros_exec(shape)
     }

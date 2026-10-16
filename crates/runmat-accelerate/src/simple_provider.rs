@@ -568,6 +568,35 @@ fn scatter_integer_data(
     }
 }
 
+fn scatter_floating_data<T: Copy>(
+    target: &mut [T],
+    indices: &[u32],
+    values: &[T],
+    lane_factor: usize,
+) -> Result<()> {
+    let expected_values = indices
+        .len()
+        .checked_mul(lane_factor)
+        .ok_or_else(|| anyhow!("functional scatter: RHS length overflow"))?;
+    ensure!(
+        values.len() == expected_values && target.len() % lane_factor == 0,
+        "functional scatter: physical lane geometry mismatch"
+    );
+    let target_len = target.len() / lane_factor;
+    for (position, &index) in indices.iter().enumerate() {
+        let index = index as usize;
+        ensure!(
+            index < target_len,
+            "functional scatter: index out of bounds"
+        );
+        let output_start = index * lane_factor;
+        let value_start = position * lane_factor;
+        target[output_start..output_start + lane_factor]
+            .copy_from_slice(&values[value_start..value_start + lane_factor]);
+    }
+    Ok(())
+}
+
 fn reduce_integer_data_dim(
     data: &HostIntegerDataOwned,
     shape: &[usize],
@@ -4147,6 +4176,65 @@ impl AccelProvider for InProcessProvider {
                 .copy_from_slice(&values_data[values_start..values_start + lane_factor]);
         }
         Ok(())
+    }
+
+    fn scatter_linear_functional<'a>(
+        &'a self,
+        target: &'a GpuTensorHandle,
+        indices: &'a [u32],
+        values: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let data = (|| -> Result<InProcessNumericData> {
+                let guard = numeric_registry()
+                    .lock_for(self.device_id)
+                    .map_err(|_| anyhow!("functional scatter: allocation owner is poisoned"))?;
+                let target_data = guard
+                    .get(target)
+                    .ok_or_else(|| anyhow!("functional scatter: unknown target allocation"))?;
+                let values_data = guard
+                    .get(values)
+                    .ok_or_else(|| anyhow!("functional scatter: unknown RHS allocation"))?;
+                ensure!(
+                    target.physical().element_type() == values.physical().element_type()
+                        && runmat_accelerate_api::handle_storage(target)
+                            == runmat_accelerate_api::handle_storage(values)
+                        && runmat_accelerate_api::handle_is_logical(target)
+                            == runmat_accelerate_api::handle_is_logical(values),
+                    "functional scatter: physical class, storage, or logical flag mismatch"
+                );
+                let lane_factor = match runmat_accelerate_api::handle_storage(target) {
+                    GpuTensorStorage::Real => 1,
+                    GpuTensorStorage::ComplexInterleaved => 2,
+                };
+                let mut output = target_data.clone();
+                match (&mut output, values_data) {
+                    (
+                        InProcessNumericData::Integer(target),
+                        InProcessNumericData::Integer(values),
+                    ) => {
+                        scatter_integer_data(target, indices, values)?;
+                    }
+                    (InProcessNumericData::F64(target), InProcessNumericData::F64(values)) => {
+                        scatter_floating_data(target, indices, values, lane_factor)?;
+                    }
+                    (InProcessNumericData::F32(target), InProcessNumericData::F32(values)) => {
+                        scatter_floating_data(target, indices, values, lane_factor)?;
+                    }
+                    _ => return Err(anyhow!("functional scatter: payload class mismatch")),
+                }
+                Ok(output)
+            })()?;
+            self.allocate_produced(
+                data,
+                target.shape().to_vec(),
+                runmat_accelerate_api::handle_storage(target),
+                runmat_accelerate_api::handle_is_logical(target),
+            )
+            .map_err(|error| {
+                runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
+            })
+        })
     }
 
     fn precision(&self) -> ProviderPrecision {
@@ -11275,6 +11363,22 @@ mod tests {
             &[(2.0, 20.0), (0.0, 0.0), (4.0, 40.0), (0.0, 0.0)],
             &[1, 4],
         );
+        let functional = block_on(provider.scatter_linear_functional(&target, &[1, 3], &gathered))
+            .expect("functional complex scatter");
+        assert!(!functional.shares_allocation_with(&target));
+        assert!(!functional.shares_allocation_with(&gathered));
+        assert_complex_close(
+            &provider,
+            &functional,
+            &[(2.0, 20.0), (2.0, 20.0), (4.0, 40.0), (4.0, 40.0)],
+            &[1, 4],
+        );
+        assert_complex_close(
+            &provider,
+            &target,
+            &[(2.0, 20.0), (0.0, 0.0), (4.0, 40.0), (0.0, 0.0)],
+            &[1, 4],
+        );
     }
 
     #[test]
@@ -11314,6 +11418,26 @@ mod tests {
                 assert_eq!(
                     block_on(provider.download_integer(&target))
                         .expect("download target")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![($expected)[0], 0, ($expected)[1]])
+                );
+                let functional =
+                    block_on(provider.scatter_linear_functional(&target, &[1, 2], &gathered))
+                        .expect("functional integer scatter");
+                assert!(!functional.shares_allocation_with(&target));
+                assert_eq!(
+                    block_on(provider.download_integer(&functional))
+                        .expect("download functional output")
+                        .data,
+                    HostIntegerDataOwned::$owned(vec![
+                        ($expected)[0],
+                        ($expected)[0],
+                        ($expected)[1]
+                    ])
+                );
+                assert_eq!(
+                    block_on(provider.download_integer(&target))
+                        .expect("download retained target")
                         .data,
                     HostIntegerDataOwned::$owned(vec![($expected)[0], 0, ($expected)[1]])
                 );

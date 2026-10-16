@@ -225,6 +225,30 @@ async fn floating_scatter_covers_both_selected_workgroup_tails_without_mutating_
             shape: &[extent, 1],
         })
         .unwrap();
+    let scalar_replacement = [9001.0, 9002.0];
+    let scalar_values = provider
+        .upload(&HostTensorView {
+            data: &scalar_replacement,
+            shape: &[2, 1],
+        })
+        .unwrap();
+    let functional = provider
+        .scatter_linear_functional_exec(&matrix, &[1, (extent + 1) as u32], &scalar_values)
+        .unwrap();
+    let mut functional_expected = source.clone();
+    functional_expected[1] = scalar_replacement[0];
+    functional_expected[extent + 1] = scalar_replacement[1];
+    assert!(!functional.shares_allocation_with(&matrix));
+    assert!(!functional.shares_allocation_with(&scalar_values));
+    assert_eq!(
+        provider.download(&functional).await.unwrap().data,
+        functional_expected
+    );
+    assert_eq!(provider.download(&matrix).await.unwrap().data, source);
+    assert_eq!(
+        provider.download(&scalar_values).await.unwrap().data,
+        scalar_replacement
+    );
     if provider.precision() == runmat_accelerate_api::ProviderPrecision::F32 {
         let output = provider
             .scatter_column_exec(&matrix, 1, &values)

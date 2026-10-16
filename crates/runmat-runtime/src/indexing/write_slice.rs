@@ -9,8 +9,9 @@ use crate::indexing::plan::IndexPlan;
 use crate::runtime_error::semantic_error as mex;
 use crate::RuntimeError;
 use runmat_value::{
-    CharArray, ComplexStorage, ComplexTensor, IntegerComplexStorage, IntegerStorage, NumericDType,
-    NumericScalar, NumericStorage, SparseTensor, StringArray, Tensor, Value,
+    CharArray, ComplexElement, ComplexStorage, ComplexTensor, IntegerComplexStorage,
+    IntegerStorage, NumericDType, NumericScalar, NumericStorage, SparseTensor, StringArray, Tensor,
+    Value,
 };
 
 fn map_slice_shape_error(context: &str, err: impl std::fmt::Display) -> RuntimeError {
@@ -44,27 +45,58 @@ pub(crate) fn real_tensor_to_complex(
     tensor: Tensor,
     context: &str,
 ) -> Result<ComplexTensor, RuntimeError> {
-    let shape = tensor.shape().to_vec();
-    let storage = tensor
-        .into_numeric_storage()
+    tensor
+        .validate_shape()
         .map_err(|error| map_slice_shape_error(context, error))?;
-    match storage.into_integer_storage() {
-        Ok(real) => {
+    let shape = tensor.shape().to_vec();
+    match tensor.numeric_dtype() {
+        NumericDType::F32 => ComplexTensor::from_complex_storage(
+            ComplexStorage::F32(
+                tensor
+                    .as_f32_slice()
+                    .expect("single tensor has authoritative single storage")
+                    .iter()
+                    .copied()
+                    .map(|real| ComplexElement(real, 0.0))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            shape,
+        )
+        .map_err(|error| map_slice_shape_error(context, error)),
+        NumericDType::F64 => ComplexTensor::from_complex_storage(
+            ComplexStorage::F64(
+                tensor
+                    .as_f64_slice()
+                    .expect("double tensor has authoritative double storage")
+                    .iter()
+                    .copied()
+                    .map(|real| ComplexElement(real, 0.0))
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            shape,
+        )
+        .map_err(|error| map_slice_shape_error(context, error)),
+        NumericDType::I8
+        | NumericDType::I16
+        | NumericDType::I32
+        | NumericDType::I64
+        | NumericDType::U8
+        | NumericDType::U16
+        | NumericDType::U32
+        | NumericDType::U64 => {
+            let real = tensor
+                .into_numeric_storage()
+                .map_err(|error| map_slice_shape_error(context, error))?
+                .into_integer_storage()
+                .expect("integer tensor has exact integer storage");
             let imag = real.zeros_like(real.len());
             let storage = IntegerComplexStorage::new(real, imag)
                 .expect("same-class real and imaginary integer storage must be valid");
             ComplexTensor::new_integer(storage, shape)
                 .map_err(|error| map_slice_shape_error(context, error))
         }
-        Err(storage) => ComplexTensor::new(
-            storage
-                .materialize_f64()
-                .into_iter()
-                .map(|real| (real, 0.0))
-                .collect(),
-            shape,
-        )
-        .map_err(|error| map_slice_shape_error(context, error)),
     }
 }
 
@@ -134,7 +166,9 @@ pub(crate) fn delete_integer_complex_storage_positions(
 }
 
 mod empty_rhs;
+mod growth;
 mod rhs_shape;
+use growth::{grow_complex_tensor, grow_numeric_tensor};
 use rhs_shape::{checked_assignment_element_count, validated_assignment_rhs_shape};
 
 pub enum ComplexRhsView<'a> {
@@ -942,27 +976,27 @@ pub async fn assign_tensor_with_plan(
             )
         })
     })?;
-    let mut storage = t
-        .into_numeric_storage()
+    t.validate_shape()
         .map_err(|error| map_slice_shape_error("slice assign", error))?;
-    if target_len < storage.len() {
+    if target_len < t.len() {
         return Err(mex(
             "InvalidAssignmentPlan",
             "slice assignment plan cannot shrink numeric storage",
         ));
     }
-    storage.resize_zeroed(target_len);
-    let storage = match storage.into_integer_storage() {
-        Ok(mut storage) => {
-            let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
-            integer_assignment::scatter(&mut storage, plan, &rhs_values)?;
-            NumericStorage::from_integer_storage(storage)
-        }
-        Err(mut storage) => {
-            let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
-            scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
-            storage
-        }
+    let storage = if t.integer_storage().is_some() {
+        let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
+        let storage = grow_numeric_tensor(t, &plan.base_shape, target_len)?;
+        let Ok(mut storage) = storage.into_integer_storage() else {
+            unreachable!("typed growth retains integer class")
+        };
+        integer_assignment::scatter(&mut storage, plan, &rhs_values)?;
+        NumericStorage::from_integer_storage(storage)
+    } else {
+        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let mut storage = grow_numeric_tensor(t, &plan.base_shape, target_len)?;
+        scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
+        storage
     };
     Tensor::from_numeric_storage(storage, plan.base_shape.clone())
         .map(Value::Tensor)
@@ -970,7 +1004,7 @@ pub async fn assign_tensor_with_plan(
 }
 
 pub async fn assign_complex_with_plan(
-    mut tensor: ComplexTensor,
+    tensor: ComplexTensor,
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
@@ -980,6 +1014,7 @@ pub async fn assign_complex_with_plan(
     }
     if tensor.integer_storage().is_some() {
         let rhs_values = materialize_complex_integer_rhs_for_plan(rhs, plan).await?;
+        let tensor = grow_complex_tensor(tensor, &plan.base_shape)?;
         let (storage, shape) = tensor.into_complex_storage_and_shape();
         let ComplexStorage::Integer(storage) = storage else {
             unreachable!("typed complex tensor must retain exact storage");
@@ -998,6 +1033,7 @@ pub async fn assign_complex_with_plan(
             .map_err(|error| map_slice_shape_error("typed complex slice assign", error));
     }
     let rhs_view = build_complex_rhs_view(rhs, &plan.selection_lengths)?;
+    let mut tensor = grow_complex_tensor(tensor, &plan.base_shape)?;
     scatter_complex_with_plan(&mut tensor, plan, &rhs_view)?;
     Ok(Value::ComplexTensor(tensor))
 }
@@ -1320,7 +1356,7 @@ mod tests {
         delete_tensor_with_plan, integer_gpu_rhs_indices_for_plan, materialize_rhs_linear_real,
         materialize_rhs_nd_real, validated_assignment_rhs_shape, ComplexRhsView, StringRhsView,
     };
-    use crate::indexing::plan::{build_sparse_assignment_plan, IndexPlan};
+    use crate::indexing::plan::{build_assignment_plan, build_sparse_assignment_plan, IndexPlan};
     use crate::indexing::selectors::SliceSelector;
     use futures::executor::block_on;
     use runmat_value::{
@@ -1876,6 +1912,73 @@ mod tests {
             output.integer_storage(),
             Some(&IntegerStorage::I8(vec![i8::MAX, i8::MAX]))
         );
+    }
+
+    #[test]
+    fn real_floating_to_complex_assignment_retains_class_and_original_alias() {
+        for (dtype, source) in [
+            (
+                NumericDType::F32,
+                Tensor::from_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            ),
+            (
+                NumericDType::F64,
+                Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap(),
+            ),
+        ] {
+            let original_alias = source.clone();
+            let bounded = build_assignment_plan(
+                &[SliceSelector::Scalar(1), SliceSelector::Scalar(2)],
+                2,
+                source.shape(),
+            )
+            .unwrap();
+            let Value::ComplexTensor(updated) = block_on(assign_tensor_with_plan(
+                source.clone(),
+                &bounded,
+                &Value::Complex(9.0, -8.0),
+            ))
+            .unwrap() else {
+                panic!("bounded real-to-complex assignment must publish complex storage")
+            };
+            assert_eq!(updated.numeric_dtype(), dtype);
+            assert_eq!(updated.shape(), &[2, 2]);
+            assert_eq!(
+                updated.materialize_f64(),
+                vec![(1.0, 0.0), (2.0, 0.0), (9.0, -8.0), (4.0, 0.0)]
+            );
+
+            let growing = build_assignment_plan(
+                &[SliceSelector::Scalar(3), SliceSelector::Scalar(2)],
+                2,
+                source.shape(),
+            )
+            .unwrap();
+            let Value::ComplexTensor(updated) = block_on(assign_tensor_with_plan(
+                source,
+                &growing,
+                &Value::Complex(9.0, -8.0),
+            ))
+            .unwrap() else {
+                panic!("grown real-to-complex assignment must publish complex storage")
+            };
+            assert_eq!(updated.numeric_dtype(), dtype);
+            assert_eq!(updated.shape(), &[3, 2]);
+            assert_eq!(
+                updated.materialize_f64(),
+                vec![
+                    (1.0, 0.0),
+                    (2.0, 0.0),
+                    (0.0, 0.0),
+                    (3.0, 0.0),
+                    (4.0, 0.0),
+                    (9.0, -8.0),
+                ]
+            );
+            assert_eq!(original_alias.numeric_dtype(), dtype);
+            assert_eq!(original_alias.shape(), &[2, 2]);
+            assert_eq!(original_alias.materialize_f64(), vec![1.0, 2.0, 3.0, 4.0]);
+        }
     }
 
     #[test]

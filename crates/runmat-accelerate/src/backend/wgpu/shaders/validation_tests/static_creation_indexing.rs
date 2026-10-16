@@ -80,16 +80,6 @@ fn indexing_templates_validate_at_selected_scalar_workgroups() {
     validate_pairs(
         &[
             PrecisionPair {
-                name: "linear-gather",
-                single: index_select::LINEAR_GATHER_SHADER_F32,
-                double: index_select::LINEAR_GATHER_SHADER_F64,
-            },
-            PrecisionPair {
-                name: "linear-scatter",
-                single: index_select::LINEAR_SCATTER_SHADER_F32,
-                double: index_select::LINEAR_SCATTER_SHADER_F64,
-            },
-            PrecisionPair {
                 name: "diag-from-vector",
                 single: diag::DIAG_FROM_VECTOR_SHADER_F32,
                 double: diag::DIAG_FROM_VECTOR_SHADER_F64,
@@ -105,15 +95,23 @@ fn indexing_templates_validate_at_selected_scalar_workgroups() {
                 double: find::FIND_SHADER_F64,
             },
         ],
-        5,
+        3,
         SCALAR_WORKGROUPS,
     );
     validate_singles(
         &[
             ("scatter-col", scatter::SCATTER_COL_SHADER_F32),
             ("scatter-row", scatter::SCATTER_ROW_SHADER_F32),
+            (
+                "linear-gather-words",
+                index_select::LINEAR_GATHER_WORDS_SHADER,
+            ),
+            (
+                "linear-scatter-words",
+                index_select::LINEAR_SCATTER_WORDS_SHADER,
+            ),
         ],
-        2,
+        4,
         SCALAR_WORKGROUPS,
     );
 }

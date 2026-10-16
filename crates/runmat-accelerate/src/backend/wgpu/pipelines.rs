@@ -197,14 +197,10 @@ const STOCHASTIC_EVOLUTION_SHADER_F64: &str =
     crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F64;
 const STOCHASTIC_EVOLUTION_SHADER_F32: &str =
     crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F32;
-const LINEAR_GATHER_SHADER_F64: &str =
-    crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_SHADER_F64;
-const LINEAR_GATHER_SHADER_F32: &str =
-    crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_SHADER_F32;
-const LINEAR_SCATTER_SHADER_F64: &str =
-    crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F64;
-const LINEAR_SCATTER_SHADER_F32: &str =
-    crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_SHADER_F32;
+const LINEAR_GATHER_WORDS_SHADER: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_WORDS_SHADER;
+const LINEAR_SCATTER_WORDS_SHADER: &str =
+    crate::backend::wgpu::shaders::index_select::LINEAR_SCATTER_WORDS_SHADER;
 
 pub struct CompiledPipelineBundle {
     pub pipeline: wgpu::ComputePipeline,
@@ -1830,11 +1826,7 @@ impl WgpuPipelines {
                 storage_read_write_entry(2),
                 uniform_entry(3),
             ],
-            match precision {
-                NumericPrecision::F64 => LINEAR_GATHER_SHADER_F64,
-                NumericPrecision::F32 => LINEAR_GATHER_SHADER_F32,
-            }
-            .replace("@WG@", &linear_launch.workgroup().to_string()),
+            LINEAR_GATHER_WORDS_SHADER.replace("@WG@", &linear_launch.workgroup().to_string()),
         );
 
         let scatter_linear = create_pipeline(
@@ -1848,11 +1840,7 @@ impl WgpuPipelines {
                 storage_read_entry(2),
                 uniform_entry(3),
             ],
-            match precision {
-                NumericPrecision::F64 => LINEAR_SCATTER_SHADER_F64,
-                NumericPrecision::F32 => LINEAR_SCATTER_SHADER_F32,
-            }
-            .replace("@WG@", &linear_launch.workgroup().to_string()),
+            LINEAR_SCATTER_WORDS_SHADER.replace("@WG@", &linear_launch.workgroup().to_string()),
         );
 
         let find = create_pipeline(

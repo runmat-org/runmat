@@ -30,6 +30,90 @@ fn slice_assignment_and_deletion_preserve_single_complex_integer_and_logical_cla
         };
         let actual = futures::executor::block_on(provider.download_numeric(&result)).unwrap();
         assert_eq!(actual.data, HostNumericDataOwned::F32(vec![1.0, 9.0]));
+        let Value::GpuTensor(complex_single) = futures::executor::block_on(
+            assign_gpu_slice_with_plan(&single, &plan, &Value::Complex(9.0, -8.0)),
+        )
+        .unwrap() else {
+            panic!("resident single complex promotion");
+        };
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&complex_single),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&complex_single),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
+        );
+        let actual =
+            futures::executor::block_on(provider.download_numeric(&complex_single)).unwrap();
+        assert_eq!(
+            actual.data,
+            HostNumericDataOwned::F32(vec![1.0, 0.0, 9.0, -8.0])
+        );
+        let original = futures::executor::block_on(provider.download_numeric(&single)).unwrap();
+        assert_eq!(original.data, HostNumericDataOwned::F32(vec![1.0, 2.0]));
+
+        let matrix = runmat_accelerate_api::upload_numeric_protecting(
+            provider,
+            &HostNumericTensorView {
+                data: HostNumericDataView::F32(&[1.0, 2.0, 3.0, 4.0]),
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            },
+            &[],
+        )
+        .unwrap();
+        let growth = crate::indexing::plan::build_assignment_plan(
+            &[
+                crate::indexing::selectors::SliceSelector::Scalar(3),
+                crate::indexing::selectors::SliceSelector::Scalar(2),
+            ],
+            2,
+            &[2, 2],
+        )
+        .unwrap();
+        let Value::GpuTensor(grown) = futures::executor::block_on(assign_gpu_slice_with_plan(
+            &matrix,
+            &growth,
+            &Value::Num(9.0),
+        ))
+        .unwrap() else {
+            panic!("resident matrix growth")
+        };
+        assert_eq!(grown.shape(), &[3, 2]);
+        let actual = futures::executor::block_on(provider.download_numeric(&grown)).unwrap();
+        assert_eq!(
+            actual.data,
+            HostNumericDataOwned::F32(vec![1.0, 2.0, 0.0, 3.0, 4.0, 9.0])
+        );
+        let original = futures::executor::block_on(provider.download_numeric(&matrix)).unwrap();
+        assert_eq!(
+            original.data,
+            HostNumericDataOwned::F32(vec![1.0, 2.0, 3.0, 4.0])
+        );
+        let Value::GpuTensor(complex_grown) = futures::executor::block_on(
+            assign_gpu_slice_with_plan(&matrix, &growth, &Value::Complex(9.0, -8.0)),
+        )
+        .unwrap() else {
+            panic!("resident single complex growth");
+        };
+        assert_eq!(complex_grown.shape(), &[3, 2]);
+        assert_eq!(
+            runmat_accelerate_api::handle_storage(&complex_grown),
+            GpuTensorStorage::ComplexInterleaved
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(&complex_grown),
+            Some(runmat_accelerate_api::ProviderPrecision::F32)
+        );
+        let actual =
+            futures::executor::block_on(provider.download_numeric(&complex_grown)).unwrap();
+        assert_eq!(
+            actual.data,
+            HostNumericDataOwned::F32(vec![
+                1.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 4.0, 0.0, 9.0, -8.0
+            ])
+        );
 
         let complex = runmat_accelerate_api::upload_numeric_protecting(
             provider,
@@ -234,13 +318,18 @@ impl AccelProvider for FailingProvider {
     fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         panic!("operational failure must not gather and retry")
     }
-    fn scatter_linear(
-        &self,
-        _: &GpuTensorHandle,
-        _: &[u32],
-        _: &GpuTensorHandle,
-    ) -> anyhow::Result<()> {
-        Err(anyhow::Error::new(DeviceFailure))
+    fn scatter_linear_functional<'a>(
+        &'a self,
+        _: &'a GpuTensorHandle,
+        _: &'a [u32],
+        _: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async {
+            Err(
+                runmat_accelerate_api::ProviderExecutionError::from_source(DeviceFailure)
+                    .after_effect(),
+            )
+        })
     }
 }
 

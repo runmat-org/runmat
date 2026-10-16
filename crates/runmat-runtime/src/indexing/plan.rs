@@ -1,6 +1,6 @@
 use crate::indexing::selectors::{
-    index_scalar_from_value, logical_indices_linear, materialize_index_value,
-    numeric_tensor_indices, SliceSelector,
+    build_assignment_selectors, build_slice_selectors, index_scalar_from_value,
+    logical_indices_linear, materialize_index_value, numeric_tensor_indices, SliceSelector,
 };
 use crate::indexing::EndExpr;
 use crate::runtime_error::semantic_error as mex;
@@ -9,6 +9,37 @@ use runmat_value::Value;
 use std::future::Future;
 
 pub type VmResult<T> = Result<T, RuntimeError>;
+
+/// Whether an indexed store may extend numeric selector bounds. Deletion and
+/// other bounded stores retain the ordinary read-selector policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexedStorePlanMode {
+    Bounded,
+    Grow,
+}
+
+/// Executor-neutral selector and plan admission for indexed stores.
+pub async fn build_indexed_store_plan(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+    mode: IndexedStorePlanMode,
+) -> VmResult<IndexPlan> {
+    let selectors = match mode {
+        IndexedStorePlanMode::Bounded => {
+            build_slice_selectors(dims, colon_mask, end_mask, numeric, base_shape).await?
+        }
+        IndexedStorePlanMode::Grow => {
+            build_assignment_selectors(dims, colon_mask, end_mask, numeric, base_shape).await?
+        }
+    };
+    match mode {
+        IndexedStorePlanMode::Bounded => build_index_plan(&selectors, dims, base_shape),
+        IndexedStorePlanMode::Grow => build_assignment_plan(&selectors, dims, base_shape),
+    }
+}
 
 const MAX_INDEX_PLAN_ELEMENTS: usize = 50_000_000;
 

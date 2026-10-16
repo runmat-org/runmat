@@ -33,6 +33,16 @@ pub fn shape(value: &Value) -> Option<Vec<usize>> {
     }
 }
 
+/// Canonical exact scalar numeric carrier for indexed writes and deletion.
+/// Integer classes stay in their native storage rather than an f64 mirror.
+pub fn numeric_scalar_tensor(value: Value) -> Result<Tensor, RuntimeError> {
+    match value {
+        Value::Num(value) => Tensor::new(vec![value], vec![1, 1]).map_err(shape_error),
+        Value::Int(value) => integer_scalar_tensor(value),
+        _ => Err(invalid_base()),
+    }
+}
+
 pub fn read_with_plan(value: Value, plan: &IndexPlan) -> Result<Value, RuntimeError> {
     match value {
         Value::Tensor(value) => super::read_slice::read_tensor_slice_from_plan(&value, plan),
@@ -50,11 +60,9 @@ pub fn read_with_plan(value: Value, plan: &IndexPlan) -> Result<Value, RuntimeEr
         value @ (Value::Object(_) | Value::HandleObject(_) | Value::ObjectArray(_)) => {
             super::object::read_with_plan(&value, plan)
         }
-        Value::Num(value) => read_with_plan(
-            Value::Tensor(Tensor::new(vec![value], vec![1, 1]).map_err(shape_error)?),
-            plan,
-        ),
-        Value::Int(value) => read_with_plan(Value::Tensor(integer_scalar_tensor(value)?), plan),
+        value @ (Value::Num(_) | Value::Int(_)) => {
+            read_with_plan(Value::Tensor(numeric_scalar_tensor(value)?), plan)
+        }
         Value::Bool(value) => read_logical(
             &LogicalArray::new(vec![u8::from(value)], vec![1, 1]).map_err(shape_error)?,
             plan,
@@ -100,12 +108,8 @@ pub async fn assign_with_plan(
         value @ (Value::Object(_) | Value::HandleObject(_) | Value::ObjectArray(_)) => {
             super::object::assign_with_plan(value, plan, rhs, false)
         }
-        Value::Num(value) => {
-            let value = Tensor::new(vec![value], vec![1, 1]).map_err(shape_error)?;
-            super::write_slice::assign_tensor_with_plan(value, plan, &rhs).await
-        }
-        Value::Int(value) => {
-            let value = integer_scalar_tensor(value)?;
+        value @ (Value::Num(_) | Value::Int(_)) => {
+            let value = numeric_scalar_tensor(value)?;
             super::write_slice::assign_tensor_with_plan(value, plan, &rhs).await
         }
         Value::Bool(value) => assign_logical(
