@@ -1,6 +1,6 @@
 //! MATLAB-compatible `linsolve` builtin with structural hints and GPU-aware fallbacks.
 
-use nalgebra::{linalg::SVD, DMatrix};
+use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, ProviderLinsolveOptions, ProviderLinsolveResult,
@@ -22,15 +22,16 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{
-    gpu_helpers,
-    linalg::{diagonal_rcond, singular_value_rcond},
-    tensor,
-};
+use crate::builtins::common::{gpu_helpers, linalg::diagonal_rcond, tensor};
 use crate::builtins::math::elementwise::complex_components::conjugate_integer_imaginary_storage;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "linsolve";
+
+mod general;
+#[cfg(test)]
+use general::binary_scale_preserves_component;
+use general::{solve_general_complex, solve_general_real};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::linsolve")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -405,6 +406,17 @@ async fn try_gpu_linsolve(
         let aliases_rhs = solution.shares_allocation_with(rhs_operand.handle());
         let expected_rows = effective_cols;
         let expected_cols = rhs_operand.handle().shape().get(1).copied().unwrap_or(1);
+        let expected_precision = match (
+            runmat_accelerate_api::handle_precision(lhs_operand.handle()),
+            runmat_accelerate_api::handle_precision(rhs_operand.handle()),
+        ) {
+            (
+                Some(runmat_accelerate_api::ProviderPrecision::F32),
+                Some(runmat_accelerate_api::ProviderPrecision::F32),
+            ) => Some(runmat_accelerate_api::ProviderPrecision::F32),
+            (Some(_), Some(_)) => Some(runmat_accelerate_api::ProviderPrecision::F64),
+            _ => None,
+        };
         let valid = !aliases_lhs
             && !aliases_rhs
             && solution.shape() == vec![expected_rows, expected_cols]
@@ -414,7 +426,8 @@ async fn try_gpu_linsolve(
             })
             && runmat_accelerate_api::handle_storage(&solution)
                 == runmat_accelerate_api::GpuTensorStorage::Real
-            && runmat_accelerate_api::handle_precision(&solution) == Some(provider.precision())
+            && expected_precision.is_some()
+            && runmat_accelerate_api::handle_precision(&solution) == expected_precision
             && runmat_accelerate_api::handle_integer_type(&solution).is_none()
             && !runmat_accelerate_api::handle_is_logical(&solution);
         if !valid {
@@ -729,19 +742,14 @@ fn upload_tensor(
     tensor: &Tensor,
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<GpuTensorHandle> {
-    // The current provider view is floating; materialize that transfer
-    // boundary from authoritative host storage without consulting a mirror.
-    let values = tensor::tensor_values_f64_cow(tensor);
-    let transfer = match provider.precision() {
-        runmat_accelerate_api::ProviderPrecision::F64 => {
-            Tensor::new(values.into_owned(), tensor.shape().to_vec())
-        }
-        runmat_accelerate_api::ProviderPrecision::F32 => Tensor::from_f32(
-            values.iter().map(|value| *value as f32).collect(),
-            tensor.shape().to_vec(),
-        ),
+    if tensor.integer_storage().is_none() {
+        return gpu_helpers::upload_tensor_protecting(provider, tensor, protected);
     }
-    .map_err(builtin_error)?;
+    // The integer extension has an explicit floating boundary. It does not
+    // inherit the provider's preferred precision or round through F32.
+    let values = tensor::tensor_values_f64_cow(tensor);
+    let transfer =
+        Tensor::new(values.into_owned(), tensor.shape().to_vec()).map_err(builtin_error)?;
     gpu_helpers::upload_tensor_protecting(provider, &transfer, protected)
 }
 
@@ -1009,57 +1017,6 @@ fn backward_substitution_complex(
     Ok((tensor, rcond))
 }
 
-fn solve_general_real(lhs: &Tensor, rhs: &Tensor) -> BuiltinResult<(Tensor, f64, f64)> {
-    let lhs_values = tensor::tensor_values_f64_cow(lhs);
-    let rhs_values = tensor::tensor_values_f64_cow(rhs);
-    let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), lhs_values.as_ref());
-    let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), rhs_values.as_ref());
-    let svd = SVD::new(a.clone(), true, true);
-    let rcond = singular_value_rcond(svd.singular_values.as_slice());
-    let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
-    let rank = svd
-        .singular_values
-        .iter()
-        .filter(|value| **value > tol)
-        .count() as f64;
-    let solution = svd
-        .solve(&b, tol)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
-    let tensor = matrix_real_to_tensor(solution, real_solution_dtype(lhs, rhs))?;
-    Ok((tensor, rcond, rank))
-}
-
-fn solve_general_complex(
-    lhs: &ComplexTensor,
-    rhs: &ComplexTensor,
-) -> BuiltinResult<(ComplexTensor, f64, f64)> {
-    let a_data: Vec<Complex64> = lhs
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect();
-    let b_data: Vec<Complex64> = rhs
-        .materialize_f64()
-        .iter()
-        .map(|&(re, im)| Complex64::new(re, im))
-        .collect();
-    let a = DMatrix::from_column_slice(lhs.rows(), lhs.cols(), &a_data);
-    let b = DMatrix::from_column_slice(rhs.rows(), rhs.cols(), &b_data);
-    let svd = SVD::new(a.clone(), true, true);
-    let rcond = singular_value_rcond(svd.singular_values.as_slice());
-    let tol = compute_svd_tolerance(svd.singular_values.as_slice(), lhs.rows(), lhs.cols());
-    let rank = svd
-        .singular_values
-        .iter()
-        .filter(|value| **value > tol)
-        .count() as f64;
-    let solution = svd
-        .solve(&b, tol)
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))?;
-    let tensor = matrix_complex_to_tensor(solution)?;
-    Ok((tensor, rcond, rank))
-}
-
 fn normalize_rhs_tensor(rhs: Tensor, expected_rows: usize) -> BuiltinResult<Tensor> {
     if rhs.rows() == expected_rows {
         return Ok(rhs);
@@ -1142,18 +1099,45 @@ fn real_solution_tensor(
     tensor.map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
-fn matrix_complex_to_tensor(matrix: DMatrix<Complex64>) -> BuiltinResult<ComplexTensor> {
+fn complex_solution_tensor(
+    matrix: DMatrix<Complex64>,
+    lhs: &ComplexTensor,
+    rhs: &ComplexTensor,
+) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    if lhs.numeric_dtype() == NumericDType::F32 && rhs.numeric_dtype() == NumericDType::F32 {
+        ComplexTensor::from_f32(
+            matrix
+                .as_slice()
+                .iter()
+                .map(|c| (c.re as f32, c.im as f32))
+                .collect(),
+            vec![rows, cols],
+        )
+    } else {
+        ComplexTensor::new(
+            matrix.as_slice().iter().map(|c| (c.re, c.im)).collect(),
+            vec![rows, cols],
+        )
+    }
+    .map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn promote_real_tensor(tensor: &Tensor) -> BuiltinResult<ComplexTensor> {
-    let values = tensor::tensor_values_f64_cow(tensor);
-    let data: Vec<(f64, f64)> = values.iter().map(|&re| (re, 0.0)).collect();
-    ComplexTensor::new(data, tensor.shape().to_vec())
-        .map_err(|e| builtin_error(format!("{NAME}: {e}")))
+    let result = if let Some(values) = tensor.as_f32_slice() {
+        ComplexTensor::from_f32(
+            values.iter().map(|&real| (real, 0.0)).collect(),
+            tensor.shape().to_vec(),
+        )
+    } else {
+        let values = tensor::tensor_values_f64_cow(tensor);
+        ComplexTensor::new(
+            values.iter().map(|&real| (real, 0.0)).collect(),
+            tensor.shape().to_vec(),
+        )
+    };
+    result.map_err(|e| builtin_error(format!("{NAME}: {e}")))
 }
 
 fn ensure_matrix_shape(name: &str, shape: &[usize]) -> BuiltinResult<()> {
@@ -1208,13 +1192,20 @@ fn transpose_tensor(tensor: &Tensor) -> Tensor {
 fn transpose_complex(tensor: &ComplexTensor) -> ComplexTensor {
     let rows = tensor.rows();
     let cols = tensor.cols();
-    let mut data = vec![(0.0, 0.0); tensor.materialize_f64().len()];
+    let mut indices = vec![0usize; tensor.len()];
     for r in 0..rows {
         for c in 0..cols {
-            data[c + r * cols] = tensor.materialize_f64()[r + c * rows];
+            indices[c + r * cols] = r + c * rows;
         }
     }
-    ComplexTensor::new(data, vec![cols, rows]).expect("transpose_complex valid")
+    ComplexTensor::from_complex_storage(
+        tensor
+            .complex_storage()
+            .gather(&indices)
+            .expect("transpose indices in bounds"),
+        vec![cols, rows],
+    )
+    .expect("transpose complex shape matches storage")
 }
 
 fn conjugate_in_place(_tensor: &mut Tensor) {
@@ -1895,6 +1886,56 @@ pub(crate) mod tests {
             other => panic!("unexpected rcond value {other:?}"),
         };
         approx_eq(rcond_value, 1.0);
+    }
+
+    #[test]
+    fn general_square_lu_preserves_forward_solution_near_svd_rank_cutoff() {
+        let gap = 1e-12;
+        let a = Tensor::new(vec![1.0, 1.0, 1.0, 1.0 + gap], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![2.0, 2.0 + gap], vec![2, 1]).unwrap();
+        let (solution, rcond, rank) = solve_general_real(&a, &b).unwrap();
+        let values = solution.materialize_f64();
+        assert!((values[0] - 1.0).abs() < 1e-6, "{values:?}");
+        assert!((values[1] - 1.0).abs() < 1e-6, "{values:?}");
+        assert!(rcond > 0.0 && rcond < 1e-8);
+        assert_eq!(rank, 2.0);
+
+        let single_a = ComplexTensor::from_f32(
+            vec![(2.0, 1.0), (0.0, 0.0), (0.0, 0.0), (3.0, -1.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let single_b = ComplexTensor::from_f32(vec![(2.0, 1.0), (3.0, -1.0)], vec![2, 1]).unwrap();
+        let (single_solution, _, _) = solve_general_complex(&single_a, &single_b).unwrap();
+        assert_eq!(single_solution.numeric_dtype(), NumericDType::F32);
+        assert!(!binary_scale_preserves_component(1.0, 2.0_f64.powi(1023)));
+        assert!(!binary_scale_preserves_component(
+            f64::MAX,
+            f64::MIN_POSITIVE
+        ));
+        let mixed_scale = Tensor::new(vec![1e308, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+        let mixed_rhs = Tensor::new(vec![1e308, 1.0], vec![2, 1]).unwrap();
+        let (mixed_solution, _, _) = solve_general_real(&mixed_scale, &mixed_rhs).unwrap();
+        assert_eq!(mixed_solution.materialize_f64(), vec![1.0, 1.0]);
+        let tiny = Tensor::new(vec![f64::from_bits(1)], vec![1, 1]).unwrap();
+        let unit = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
+        let error = solve_general_real(&tiny, &unit)
+            .expect_err("an unrepresentable finite-input solution must not publish infinity");
+        assert_eq!(error.identifier(), LINSOLVE_ERROR_INVALID_INPUT.identifier);
+
+        let complex_a = ComplexTensor::new(
+            vec![(1.0, 1.0), (1.0, 1.0), (1.0, 1.0), (1.0 + gap, 1.0)],
+            vec![2, 2],
+        )
+        .unwrap();
+        let complex_b = ComplexTensor::new(vec![(2.0, 2.0), (2.0 + gap, 2.0)], vec![2, 1]).unwrap();
+        let (solution, rcond, rank) = solve_general_complex(&complex_a, &complex_b).unwrap();
+        for (real, imaginary) in solution.materialize_f64() {
+            assert!((real - 1.0).abs() < 1e-6);
+            assert!(imaginary.abs() < 1e-6);
+        }
+        assert!(rcond > 0.0 && rcond < 1e-8);
+        assert_eq!(rank, 2.0);
     }
 
     #[test]

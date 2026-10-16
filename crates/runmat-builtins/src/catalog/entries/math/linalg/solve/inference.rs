@@ -230,7 +230,7 @@ pub(super) fn infer_pinv(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
     finish_fixed_outputs(
         entry,
         request,
-        vec![output(&matrix, output_shape, false, true)],
+        vec![output(&matrix, output_shape, false, false)],
         diagnostics(request, 2, super::PINV_ERROR_INVALID_ARGUMENT.code),
     )
 }

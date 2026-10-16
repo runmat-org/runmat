@@ -6,12 +6,12 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderPinvOptions};
 #[cfg(test)]
 use runmat_builtins::PINV_DESCRIPTOR;
 use runmat_builtins::{
-    BuiltinErrorDescriptor, PINV_ERROR_INVALID_ARGUMENT, PINV_ERROR_INVALID_INPUT,
-    PINV_INTEGER_INPUT_EXTENSION, PINV_INTEGER_TOLERANCE_EXTENSION, PINV_LOGICAL_INPUT_EXTENSION,
-    PINV_LOGICAL_TOLERANCE_EXTENSION,
+    BuiltinErrorDescriptor, PINV_ERROR_INTERNAL, PINV_ERROR_INVALID_ARGUMENT,
+    PINV_ERROR_INVALID_INPUT, PINV_INTEGER_INPUT_EXTENSION, PINV_INTEGER_TOLERANCE_EXTENSION,
+    PINV_LOGICAL_INPUT_EXTENSION, PINV_LOGICAL_TOLERANCE_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, Tensor, Value};
+use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::linalg::{
     matrix_dimensions_for, parse_tolerance_arg, svd_default_tolerance,
@@ -155,30 +155,106 @@ async fn pinv_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
 }
 
 async fn pinv_gpu(handle: GpuTensorHandle, tol: Option<f64>) -> BuiltinResult<Value> {
-    if let Some(provider) = gpu_helpers::exact_provider_for_handle(&handle) {
-        if runmat_accelerate_api::handle_integer_type(&handle).is_none() {
-            let options = ProviderPinvOptions { tolerance: tol };
-            match provider.pinv(&handle, options).await {
-                Ok(result) => return Ok(Value::GpuTensor(result)),
-                Err(_) => {
-                    // Fall through to host implementation and attempt to re-upload.
-                }
+    let provider = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
+        pinv_error_with_message(
+            "pinv: resident input has no exact provider owner",
+            &PINV_ERROR_INTERNAL,
+        )
+    })?;
+    let _residency = gpu_helpers::ResidencyRestoreGuard::new(&handle);
+    if runmat_accelerate_api::handle_integer_type(&handle).is_none()
+        && !runmat_accelerate_api::handle_is_logical(&handle)
+    {
+        let precision = runmat_accelerate_api::handle_precision(&handle);
+        if precision.is_none()
+            || !gpu_helpers::gpu_class_metadata_matches(&handle, precision, None, false)
+        {
+            return Err(pinv_error_with_message(
+                "pinv: input has contradictory floating metadata",
+                &PINV_ERROR_INTERNAL,
+            ));
+        }
+        let options = ProviderPinvOptions { tolerance: tol };
+        match provider.pinv(&handle, options).await {
+            Ok(mut result) if valid_pinv_gpu_output(&handle, &result, provider) => {
+                gpu_helpers::propagate_output_provenance(&mut result, [&handle])?;
+                return gpu_helpers::resident_gpu_value(result);
+            }
+            Ok(result) => {
+                let mut error = pinv_error_with_message(
+                    "pinv: provider returned malformed or aliased output",
+                    &PINV_ERROR_INTERNAL,
+                );
+                error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(gpu_helpers::reject_gpu_output(result, error));
+            }
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
+            Err(error) => {
+                let mut failure = pinv_error_with_message(
+                    format!("pinv: provider execution failed: {error}"),
+                    &PINV_ERROR_INTERNAL,
+                );
+                failure.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                return Err(crate::runtime_error::with_provider_execution_source(
+                    failure,
+                    error.into(),
+                ));
             }
         }
-        let gathered = gpu_helpers::gather_tensor_async(&handle)
-            .await
-            .map_err(map_control_flow)?;
-        let pinv = pinv_real_tensor(&gathered, tol)?;
-        if let Ok(uploaded) = gpu_helpers::upload_tensor(provider, &pinv) {
-            return Ok(Value::GpuTensor(uploaded));
-        }
-        return Ok(tensor::tensor_into_value(pinv));
     }
-    let gathered = gpu_helpers::gather_tensor_async(&handle)
+    let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle)
         .await
         .map_err(map_control_flow)?;
-    let pinv = pinv_real_tensor(&gathered, tol)?;
-    Ok(tensor::tensor_into_value(pinv))
+    let result = match gathered {
+        Value::ComplexTensor(tensor) => Value::ComplexTensor(pinv_complex_tensor(&tensor, tol)?),
+        Value::Complex(real, imaginary) => {
+            let tensor =
+                ComplexTensor::new(vec![(real, imaginary)], vec![1, 1]).map_err(builtin_error)?;
+            Value::ComplexTensor(pinv_complex_tensor(&tensor, tol)?)
+        }
+        real => {
+            let tensor = tensor::value_into_tensor_for(NAME, real).map_err(builtin_error)?;
+            Value::Tensor(pinv_real_tensor(&tensor, tol)?)
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
+}
+
+fn valid_pinv_gpu_output(
+    input: &GpuTensorHandle,
+    output: &GpuTensorHandle,
+    provider: &dyn runmat_accelerate_api::AccelProvider,
+) -> bool {
+    let rows = input.shape().first().copied().unwrap_or(1);
+    let cols = input.shape().get(1).copied().unwrap_or(1);
+    output.shape() == [cols, rows]
+        && output.device_id() == input.device_id()
+        && !input.shares_allocation_with(output)
+        && gpu_helpers::exact_provider_for_handle(output)
+            .is_some_and(|owner| runmat_accelerate_api::same_provider_instance(owner, provider))
+        && runmat_accelerate_api::handle_storage(output)
+            == runmat_accelerate_api::handle_storage(input)
+        && runmat_accelerate_api::handle_precision(output) == pinv_output_precision(input)
+        && runmat_accelerate_api::handle_integer_type(output).is_none()
+        && !runmat_accelerate_api::handle_is_logical(output)
+        && gpu_helpers::gpu_class_metadata_matches(
+            output,
+            pinv_output_precision(input),
+            None,
+            false,
+        )
+}
+
+fn pinv_output_precision(
+    input: &GpuTensorHandle,
+) -> Option<runmat_accelerate_api::ProviderPrecision> {
+    if runmat_accelerate_api::handle_integer_type(input).is_some()
+        || runmat_accelerate_api::handle_is_logical(input)
+    {
+        Some(runmat_accelerate_api::ProviderPrecision::F64)
+    } else {
+        runmat_accelerate_api::handle_precision(input)
+    }
 }
 
 fn pinv_real_value(tensor: Tensor, tol: Option<f64>) -> BuiltinResult<Value> {
@@ -201,14 +277,35 @@ fn pinv_complex_tensor(matrix: &ComplexTensor, tol: Option<f64>) -> BuiltinResul
 
 fn pinv_real_tensor_impl(matrix: &Tensor, tol: Option<f64>) -> BuiltinResult<Tensor> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
+    let dtype = matrix.numeric_dtype();
     if rows == 0 || cols == 0 {
-        return Tensor::new(vec![0.0; cols * rows], vec![cols, rows])
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
+        return Tensor::new_with_dtype(
+            vec![0.0; cols * rows],
+            vec![cols, rows],
+            result_dtype(dtype),
+        )
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
     let values = tensor::tensor_values_f64_cow(matrix);
+    if values.iter().any(|value| !value.is_finite()) {
+        return Tensor::new_with_dtype(
+            vec![f64::NAN; cols * rows],
+            vec![cols, rows],
+            result_dtype(dtype),
+        )
+        .map_err(builtin_error);
+    }
     let dm = DMatrix::from_column_slice(rows, cols, &values);
     let pinv = pseudoinverse_real(&dm, tol)?;
-    matrix_to_tensor(NAME, pinv)
+    matrix_to_tensor(NAME, pinv, result_dtype(dtype))
+}
+
+fn result_dtype(input: NumericDType) -> NumericDType {
+    if input == NumericDType::F32 {
+        NumericDType::F32
+    } else {
+        NumericDType::F64
+    }
 }
 
 fn pinv_complex_tensor_impl(
@@ -216,18 +313,34 @@ fn pinv_complex_tensor_impl(
     tol: Option<f64>,
 ) -> BuiltinResult<ComplexTensor> {
     let (rows, cols) = matrix_dimensions_for(NAME, matrix.shape()).map_err(builtin_error)?;
+    let dtype = result_dtype(matrix.numeric_dtype());
     if rows == 0 || cols == 0 {
-        return ComplexTensor::new(vec![(0.0, 0.0); cols * rows], vec![cols, rows])
-            .map_err(|e| builtin_error(format!("{NAME}: {e}")));
+        return ComplexTensor::from_f64_values_with_dtype(
+            vec![(0.0, 0.0); cols * rows],
+            vec![cols, rows],
+            dtype,
+        )
+        .map_err(|e| builtin_error(format!("{NAME}: {e}")));
     }
-    let data: Vec<Complex64> = matrix
-        .materialize_f64()
+    let source = matrix.materialize_f64();
+    if source
+        .iter()
+        .any(|(re, im)| !re.is_finite() || !im.is_finite())
+    {
+        return ComplexTensor::from_f64_values_with_dtype(
+            vec![(f64::NAN, f64::NAN); cols * rows],
+            vec![cols, rows],
+            dtype,
+        )
+        .map_err(builtin_error);
+    }
+    let data: Vec<Complex64> = source
         .iter()
         .map(|&(re, im)| Complex64::new(re, im))
         .collect();
     let dm = DMatrix::from_column_slice(rows, cols, &data);
     let pinv = pseudoinverse_complex(&dm, tol)?;
-    matrix_to_complex_tensor(NAME, pinv)
+    matrix_to_complex_tensor(NAME, pinv, dtype)
 }
 
 fn pseudoinverse_real(matrix: &DMatrix<f64>, tol: Option<f64>) -> BuiltinResult<DMatrix<f64>> {
@@ -270,21 +383,27 @@ fn pseudoinverse_complex(
     Ok(v * sigma_plus * u_h)
 }
 
-fn matrix_to_tensor(label: &str, matrix: DMatrix<f64>) -> BuiltinResult<Tensor> {
+fn matrix_to_tensor(
+    label: &str,
+    matrix: DMatrix<f64>,
+    dtype: NumericDType,
+) -> BuiltinResult<Tensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
+    Tensor::new_with_dtype(matrix.as_slice().to_vec(), vec![rows, cols], dtype)
         .map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 fn matrix_to_complex_tensor(
     label: &str,
     matrix: DMatrix<Complex64>,
+    dtype: NumericDType,
 ) -> BuiltinResult<ComplexTensor> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
     let data: Vec<(f64, f64)> = matrix.as_slice().iter().map(|c| (c.re, c.im)).collect();
-    ComplexTensor::new(data, vec![rows, cols]).map_err(|e| builtin_error(format!("{label}: {e}")))
+    ComplexTensor::from_f64_values_with_dtype(data, vec![rows, cols], dtype)
+        .map_err(|e| builtin_error(format!("{label}: {e}")))
 }
 
 /// Host helper used by acceleration providers that delegate `pinv` back to the CPU path.
@@ -320,6 +439,36 @@ pub(crate) mod tests {
             Value::Num(v) => assert!((v - 0.25).abs() < 1e-12),
             other => panic!("expected scalar result, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pinv_preserves_single_class_and_returns_nan_for_nonfinite_input() {
+        let real = Tensor::from_f32(vec![2.0, 0.0, 0.0, 4.0], vec![2, 2]).unwrap();
+        let inverse = pinv_real_tensor(&real, None).unwrap();
+        assert_eq!(inverse.numeric_dtype(), NumericDType::F32);
+        approx_equal(&inverse.materialize_f64(), &[0.5, 0.0, 0.0, 0.25], 1e-6);
+
+        let complex = ComplexTensor::from_f32(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
+        let inverse = pinv_complex_tensor(&complex, None).unwrap();
+        assert_eq!(inverse.numeric_dtype(), NumericDType::F32);
+
+        let bad_real = Tensor::from_f32(vec![f32::INFINITY, 1.0], vec![1, 2]).unwrap();
+        let nan_real = pinv_real_tensor(&bad_real, None).unwrap();
+        assert_eq!(nan_real.numeric_dtype(), NumericDType::F32);
+        assert_eq!(nan_real.shape(), [2, 1]);
+        assert!(nan_real
+            .as_f32_slice()
+            .unwrap()
+            .iter()
+            .all(|value| value.is_nan()));
+
+        let bad_complex = ComplexTensor::from_f32(vec![(1.0, f32::NAN)], vec![1, 1]).unwrap();
+        let nan_complex = pinv_complex_tensor(&bad_complex, None).unwrap();
+        assert_eq!(nan_complex.numeric_dtype(), NumericDType::F32);
+        assert!(nan_complex
+            .materialize_f64()
+            .iter()
+            .all(|(re, im)| re.is_nan() && im.is_nan()));
     }
 
     #[test]
@@ -508,6 +657,23 @@ pub(crate) mod tests {
                 approx_equal(&gathered.materialize_f64(), &cpu.materialize_f64(), 5e-5);
             }
         }
+
+        let complex = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
+        let source = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+        let result = pinv_builtin(Value::GpuTensor(source), Vec::new()).expect("complex gpu pinv");
+        let Value::GpuTensor(output) = result else {
+            panic!("complex pseudoinverse did not restore resident output");
+        };
+        let gathered = futures::executor::block_on(
+            gpu_helpers::download_value_preserving_residency_async(provider, &output),
+        )
+        .unwrap();
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("complex pseudoinverse lost complex storage");
+        };
+        let (re, im) = gathered.materialize_f64()[0];
+        assert!((re - 0.4).abs() < 1e-5);
+        assert!((im + 0.2).abs() < 1e-5);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

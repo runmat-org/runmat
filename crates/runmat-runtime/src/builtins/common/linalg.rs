@@ -2,6 +2,8 @@ use runmat_value::{ComplexTensor, Tensor, Value};
 
 use super::tensor;
 
+pub(crate) mod one_norm;
+
 /// Perform column-major matrix multiplication for real tensors.
 pub(crate) fn matmul_real(a: &Tensor, b: &Tensor) -> Result<Tensor, String> {
     if a.cols() != b.rows() {

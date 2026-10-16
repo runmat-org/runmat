@@ -10,6 +10,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "Complex matrices are handled in full complex arithmetic via `A = U * Σ * Vᴴ`.",
             "Empty matrices return the appropriately sized zero matrix (`size(pinv(A)) == fliplr(size(A))`).",
             "The result always has size `n × m` if the input is `m × n`.",
+            "RunMat preserves single or double floating class in the result, including complex inputs; its integer and logical input extensions produce double. Nonfinite inputs produce NaN-valued results instead of entering the SVD solver.",
             "A typed-integer tolerance is a separate RunMat extension because the public scalar tolerance does not enumerate integer classes. It must be exactly representable as binary64 before threshold computation; logical tolerance is independently gated.",
             "Resident integer input bypasses floating provider pseudoinverse kernels, gathers through its exact owner, and restores the double result to that owner when supported."
         ]

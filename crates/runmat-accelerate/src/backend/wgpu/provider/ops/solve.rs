@@ -1,5 +1,4 @@
 use super::*;
-use runmat_accelerate_api::{HostNumericDataView, HostNumericTensorView};
 
 #[path = "solve/validated_triangular.rs"]
 mod validated_triangular;
@@ -26,19 +25,8 @@ impl WgpuProvider {
             return Ok(result);
         }
         let start = Instant::now();
-        let HostTensorOwned {
-            data: lhs_data,
-            shape: lhs_shape,
-            ..
-        } = self.download_exec(lhs).await?;
-        let HostTensorOwned {
-            data: rhs_data,
-            shape: rhs_shape,
-            ..
-        } = self.download_exec(rhs).await?;
-
-        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
-        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("linsolve: {e}"))?;
+        let lhs_tensor = self.download_real_floating_tensor_exec(lhs).await?;
+        let rhs_tensor = self.download_real_floating_tensor_exec(rhs).await?;
 
         let (solution, rcond) = linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
             .map_err(|e| anyhow!("{e}"))?;
@@ -46,11 +34,7 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("linsolve:host_reupload");
 
-        let solution_data = solution.materialize_f64();
-        let handle = self.upload_exec(&HostTensorView {
-            data: &solution_data,
-            shape: solution.shape(),
-        })?;
+        let handle = self.upload_real_floating_tensor_exec(&solution)?;
 
         Ok(ProviderLinsolveResult {
             solution: handle,
@@ -59,14 +43,9 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn inv_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("inv: {e}"))?;
+        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
         let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        let result_data = result.materialize_f64();
-        self.upload_exec(&HostTensorView {
-            data: &result_data,
-            shape: result.shape(),
-        })
+        self.upload_real_floating_tensor_exec(&result)
     }
 
     pub(crate) async fn pinv_exec(
@@ -74,15 +53,10 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         options: ProviderPinvOptions,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("pinv: {e}"))?;
+        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
         let result =
             pinv_host_real_for_provider(&tensor, options.tolerance).map_err(|e| anyhow!("{e}"))?;
-        let result_data = result.materialize_f64();
-        self.upload_exec(&HostTensorView {
-            data: &result_data,
-            shape: result.shape(),
-        })
+        self.upload_real_floating_tensor_exec(&result)
     }
 
     pub(crate) async fn cond_exec(
@@ -90,15 +64,10 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         norm: ProviderCondNorm,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("cond: {e}"))?;
+        let precision = self.real_floating_input_precision_exec(matrix)?;
+        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
         let cond_value = cond_host_real_for_provider(&tensor, norm).map_err(|e| anyhow!("{e}"))?;
-        let scalar = [cond_value];
-        let shape = [1usize, 1usize];
-        self.upload_exec(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
-        })
+        self.upload_real_floating_scalar_exec(cond_value, precision)
     }
 
     pub(crate) async fn norm_exec(
@@ -106,15 +75,10 @@ impl WgpuProvider {
         tensor: &GpuTensorHandle,
         order: ProviderNormOrder,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } = self.download_exec(tensor).await?;
-        let host_tensor = Tensor::new(data, shape).map_err(|e| anyhow!("norm: {e}"))?;
+        let precision = self.real_floating_input_precision_exec(tensor)?;
+        let host_tensor = self.download_real_floating_tensor_exec(tensor).await?;
         let value = norm_host_real_for_provider(&host_tensor, order).map_err(|e| anyhow!("{e}"))?;
-        let scalar = [value];
-        let shape = [1usize, 1usize];
-        self.upload_exec(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
-        })
+        self.upload_real_floating_scalar_exec(value, precision)
     }
 
     pub(crate) async fn rank_exec(
@@ -122,43 +86,17 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         tolerance: Option<f64>,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rank: {e}"))?;
+        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
         let rank =
             rank_host_real_for_provider(&tensor, tolerance).map_err(|e| anyhow!("{e}"))? as f64;
-        let scalar = [rank];
-        let shape = [1usize, 1usize];
-        self.upload_exec(&HostTensorView {
-            data: &scalar,
-            shape: &shape,
-        })
+        self.upload_real_floating_scalar_exec(rank, ProviderPrecision::F64)
     }
 
     pub(crate) async fn rcond_exec(&self, matrix: &GpuTensorHandle) -> Result<GpuTensorHandle> {
-        let source_precision = runmat_accelerate_api::handle_precision(matrix)
-            .ok_or_else(|| anyhow!("rcond: floating input is required"))?;
-        let HostTensorOwned { data, shape, .. } = self.download_exec(matrix).await?;
-        let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
+        let source_precision = self.real_floating_input_precision_exec(matrix)?;
+        let tensor = self.download_real_floating_tensor_exec(matrix).await?;
         let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
-        let shape = [1usize, 1usize];
-        match source_precision {
-            ProviderPrecision::F32 => {
-                let scalar = [estimate as f32];
-                self.upload_numeric_exec(&HostNumericTensorView {
-                    data: HostNumericDataView::F32(&scalar),
-                    shape: &shape,
-                    storage: GpuTensorStorage::Real,
-                })
-            }
-            ProviderPrecision::F64 => {
-                let scalar = [estimate];
-                self.upload_numeric_exec(&HostNumericTensorView {
-                    data: HostNumericDataView::F64(&scalar),
-                    shape: &shape,
-                    storage: GpuTensorStorage::Real,
-                })
-            }
-        }
+        self.upload_real_floating_scalar_exec(estimate, source_precision)
     }
 
     pub(crate) async fn mldivide_exec(
@@ -174,19 +112,8 @@ impl WgpuProvider {
             self.telemetry.record_mldivide_duration(start.elapsed());
             return Ok(result.solution);
         }
-        let HostTensorOwned {
-            data: lhs_data,
-            shape: lhs_shape,
-            ..
-        } = self.download_exec(lhs).await?;
-        let HostTensorOwned {
-            data: rhs_data,
-            shape: rhs_shape,
-            ..
-        } = self.download_exec(rhs).await?;
-
-        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
-        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mldivide: {e}"))?;
+        let lhs_tensor = self.download_real_floating_tensor_exec(lhs).await?;
+        let rhs_tensor = self.download_real_floating_tensor_exec(rhs).await?;
 
         let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
             .map_err(|e| anyhow!("{e}"))?;
@@ -194,11 +121,7 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("mldivide:host_reupload");
 
-        let result_data = result.materialize_f64();
-        let handle = self.upload_exec(&HostTensorView {
-            data: &result_data,
-            shape: result.shape(),
-        })?;
+        let handle = self.upload_real_floating_tensor_exec(&result)?;
         Ok(handle)
     }
 
@@ -212,19 +135,8 @@ impl WgpuProvider {
             self.telemetry.record_mrdivide_duration(start.elapsed());
             return Ok(result);
         }
-        let HostTensorOwned {
-            data: lhs_data,
-            shape: lhs_shape,
-            ..
-        } = self.download_exec(lhs).await?;
-        let HostTensorOwned {
-            data: rhs_data,
-            shape: rhs_shape,
-            ..
-        } = self.download_exec(rhs).await?;
-
-        let lhs_tensor = Tensor::new(lhs_data, lhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
-        let rhs_tensor = Tensor::new(rhs_data, rhs_shape).map_err(|e| anyhow!("mrdivide: {e}"))?;
+        let lhs_tensor = self.download_real_floating_tensor_exec(lhs).await?;
+        let rhs_tensor = self.download_real_floating_tensor_exec(rhs).await?;
 
         let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
             .map_err(|e| anyhow!("{e}"))?;
@@ -232,11 +144,7 @@ impl WgpuProvider {
         self.telemetry
             .record_solve_fallback("mrdivide:host_reupload");
 
-        let result_data = result.materialize_f64();
-        let handle = self.upload_exec(&HostTensorView {
-            data: &result_data,
-            shape: result.shape(),
-        })?;
+        let handle = self.upload_real_floating_tensor_exec(&result)?;
         Ok(handle)
     }
 
@@ -949,6 +857,17 @@ impl WgpuProvider {
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderLinsolveResult>> {
+        // These device solvers use the provider's F32 shader ABI. A provider
+        // configured for F32 may still own F64 inputs; such operands must use
+        // the exact-class host boundary instead of being reinterpreted.
+        let lhs_precision = self.real_floating_input_precision_exec(lhs)?;
+        let rhs_precision = self.real_floating_input_precision_exec(rhs)?;
+        if self.provider_precision_exec() != ProviderPrecision::F32
+            || lhs_precision != ProviderPrecision::F32
+            || rhs_precision != ProviderPrecision::F32
+        {
+            return Ok(None);
+        }
         if let Some(result) = self
             .try_triangular_linsolve_device(lhs, rhs, options)
             .await?
@@ -966,6 +885,14 @@ impl WgpuProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
+        let lhs_precision = self.real_floating_input_precision_exec(lhs)?;
+        let rhs_precision = self.real_floating_input_precision_exec(rhs)?;
+        if self.provider_precision_exec() != ProviderPrecision::F32
+            || lhs_precision != ProviderPrecision::F32
+            || rhs_precision != ProviderPrecision::F32
+        {
+            return Ok(None);
+        }
         let _ = Self::matrix_dims_for_solve(lhs.shape())?;
         let _ = Self::matrix_dims_for_solve(rhs.shape())?;
         let rhs_t = self.permute_exec(rhs, &[1, 0])?;

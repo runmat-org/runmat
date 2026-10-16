@@ -212,11 +212,7 @@ async fn norm_gpu(handle: GpuTensorHandle, order: NormOrder) -> BuiltinResult<Va
                 error.gpu_gather_retry = crate::GpuGatherRetry::Never;
                 return Err(gpu_helpers::reject_gpu_output(result, error));
             }
-            Err(error)
-                if gpu_helpers::provider_hook_is_unsupported(&error)
-                    || error
-                        .chain()
-                        .any(|cause| cause.to_string() == "norm not supported by provider") => {}
+            Err(error) if gpu_helpers::provider_hook_is_unsupported(&error) => {}
             Err(error) => {
                 let mut failure =
                     build_runtime_error(format!("{NAME}: provider norm execution failed: {error}"))

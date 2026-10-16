@@ -9,7 +9,24 @@ use nalgebra::{linalg::LU, ComplexField, DMatrix, DVector, Dyn};
 
 const MAX_ESTIMATE_ITERATIONS: usize = 5;
 
-pub(super) fn reciprocal_one_norm<T>(mut matrix: DMatrix<T>) -> f64
+/// A finite binary power near the largest input component. Dividing by this
+/// scale does not perturb values near one as division by an arbitrary matrix
+/// maximum would. Clamp the exponent because the next power above f64::MAX
+/// is not representable, while subnormals share the minimum normal scale.
+pub(crate) fn binary_lu_scale(max_component: f64) -> Option<f64> {
+    if !max_component.is_finite() || max_component <= 0.0 {
+        return None;
+    }
+    let exponent_field = ((max_component.to_bits() >> 52) & 0x7ff) as i32;
+    let exponent = if exponent_field == 0 {
+        -1022
+    } else {
+        exponent_field - 1023
+    };
+    Some(f64::from_bits(((exponent + 1023) as u64) << 52))
+}
+
+pub(crate) fn reciprocal_one_norm<T>(mut matrix: DMatrix<T>) -> f64
 where
     T: ComplexField<RealField = f64> + Copy,
 {
@@ -33,12 +50,31 @@ where
     }
     // Scaling keeps the 1-norm and LU solves away from avoidable overflow;
     // rcond is invariant under multiplication by a nonzero scalar.
+    let scale = binary_lu_scale(scale).expect("finite positive matrix maximum");
     matrix.apply(|value| *value /= T::from_real(scale));
     let matrix_norm = matrix
         .column_iter()
         .map(|column| column.iter().map(|value| (*value).modulus()).sum::<f64>())
         .fold(0.0_f64, f64::max);
     let lu = matrix.lu();
+    if !lu.is_invertible() {
+        return 0.0;
+    }
+
+    reciprocal_one_norm_from_lu(&lu, matrix_norm)
+}
+
+/// Estimate reciprocal condition from an already factored, scaled matrix.
+/// The caller supplies the 1-norm of that same scaled matrix. This permits
+/// linear solves and `rcond` to share one factorization and one estimator.
+pub(crate) fn reciprocal_one_norm_from_lu<T>(lu: &LU<T, Dyn, Dyn>, matrix_norm: f64) -> f64
+where
+    T: ComplexField<RealField = f64> + Copy,
+{
+    let order = lu.lu_internal().nrows();
+    if order == 0 {
+        return f64::INFINITY;
+    }
     if !lu.is_invertible() {
         return 0.0;
     }
@@ -59,7 +95,7 @@ where
                 value / T::from_real(magnitude)
             }
         });
-        let Some(adjoint_solution) = solve_adjoint(&lu, &signs) else {
+        let Some(adjoint_solution) = solve_adjoint(lu, &signs) else {
             return 0.0;
         };
         let index = adjoint_solution
@@ -150,6 +186,16 @@ mod tests {
         let actual = reciprocal_one_norm(real);
         // ||A||_1 = 6; ||A^-1||_1 = 3.5.
         assert!((actual - 1.0 / 21.0).abs() < 1e-12);
+        let unfactored = DMatrix::from_column_slice(2, 2, &[1.0, 3.0, 2.0, 4.0]);
+        let factor = unfactored.lu();
+        assert!((reciprocal_one_norm_from_lu(&factor, 6.0) - actual).abs() < 1e-12);
+
+        assert_eq!(binary_lu_scale(1.0 + 1e-12), Some(1.0));
+        assert_eq!(
+            binary_lu_scale(f64::MAX),
+            Some(f64::from_bits(2046_u64 << 52))
+        );
+        assert_eq!(binary_lu_scale(f64::from_bits(1)), Some(f64::MIN_POSITIVE));
 
         let complex = DMatrix::from_column_slice(
             2,

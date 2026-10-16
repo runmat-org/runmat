@@ -71,7 +71,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         title: "Summing singular values with the nuclear norm",
         program: "A = [2 0 0; 0 1 0];\ntau = norm(A, 'nuc')",
         display_output: Some("tau = 3"),
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,

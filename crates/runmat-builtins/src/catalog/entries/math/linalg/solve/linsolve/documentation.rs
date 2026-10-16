@@ -7,8 +7,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "Inputs must behave like 2-D matrices (trailing singleton dimensions are accepted). `size(A, 1)` must match `size(B, 1)` after accounting for `opts.TRANSA`.",
             "When `opts.LT` or `opts.UT` are supplied, `linsolve` performs forward/back substitution instead of a full factorization. Singular pivots trigger the MATLAB error `\"linsolve: matrix is singular to working precision.\"`",
             "A logical `opts.TRANSA` is supported in compatibility mode (`false` means no transpose and `true` means conjugate transpose). Text values `'N'`, `'T'`, and `'C'` are a RunMat-only extension.",
-            "`opts.POSDEF`, `opts.SYM`, and `opts.RECT` are parsed and forwarded to acceleration providers. On the host, general non-triangular cases currently use the shared SVD-based dense solver rather than specialised structural algorithms.",
-            "For a square system, the optional second output is a reciprocal condition estimate. For a rectangular system, the second output is the estimated rank.",
+            "`opts.POSDEF`, `opts.SYM`, and `opts.RECT` are parsed and forwarded to acceleration providers. On the host, nonsingular square systems use pivoted LU; singular and rectangular systems use the shared SVD minimum-norm solver. These hints do not select specialised structural host algorithms.",
+            "For a nonsingular square system, the optional second output estimates reciprocal 1-norm condition using the same LU factors as the solve. For a rectangular system, the second output is the estimated rank.",
             "Logical and integer coefficient inputs are RunMat-only extensions and are promoted to double; integer values must be exactly representable in binary64. Complex floating inputs use complex arithmetic, while typed complex-integer inputs are rejected.",
             "Typed-integer values for `LT`, `UT`, `RECT`, `SYM`, and `POSDEF`, the `RCOND` option, and two-output calls with explicit `gpuArray` operands are RunMat-only extensions."
         ]
@@ -62,7 +62,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         title: "Solving the transposed system",
         program: "A = [2 1 0; 0 3 4; 0 0 5];\nb = [3; 11; 5];\nopts.UT = true;\nopts.TRANSA = 'T';\nx = linsolve(A, b, opts)",
         display_output: Some("x = [3/2; 19/6; -23/15]"),
-        compatibility: BuiltinExampleCompatibility::Matlab,
+        compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
@@ -93,7 +93,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(norm(A*x-b) < 1e-8); assert(rcond_est > 0 && rcond_est < 1e-8);"
+            source: "assert(norm(A*x-b) < 1e-8); assert(norm(x-[1;1]) < 1e-6); assert(rcond_est > 0 && rcond_est < 1e-8);"
         }
     },
 ];
@@ -113,7 +113,7 @@ const FAQS: &[BuiltinDocumentationFaq] = &[
     },
     BuiltinDocumentationFaq {
         question: "Do `opts.SYM` or `opts.POSDEF` change the algorithm today?",
-        answer: "They are parsed and forwarded to providers. The host path currently uses the general dense SVD solver for non-triangular systems, so these hints do not select specialised host algorithms. WGPU implements a selected real F32 positive-definite path; support for other cases remains provider-specific."
+        answer: "They are parsed and forwarded to providers. The host path uses pivoted LU for nonsingular square systems and SVD for singular or rectangular systems; these hints do not select specialised host algorithms. WGPU implements a selected real F32 positive-definite path; support for other cases remains provider-specific."
     },
     BuiltinDocumentationFaq {
         question: "Can I use higher-dimensional arrays?",

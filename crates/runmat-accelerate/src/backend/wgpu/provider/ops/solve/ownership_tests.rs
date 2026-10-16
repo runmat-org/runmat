@@ -1,4 +1,5 @@
 use super::*;
+use runmat_accelerate_api::{HostNumericDataOwned, HostNumericDataView, HostNumericTensorView};
 
 fn provider() -> WgpuProvider {
     WgpuProvider::new(WgpuProviderOptions::default()).expect("required WGPU adapter")
@@ -17,6 +18,95 @@ fn download(provider: &WgpuProvider, handle: &GpuTensorHandle) -> Vec<f64> {
     futures::executor::block_on(provider.download_exec(handle))
         .unwrap()
         .data
+}
+
+#[test]
+#[ignore = "requires provisioned WGPU adapter; run with --ignored"]
+fn real_linalg_fallback_preserves_physical_source_class() {
+    let provider = provider();
+    for precision in [ProviderPrecision::F32, ProviderPrecision::F64] {
+        let single = [3.0_f32, 0.0, 1.0, 2.0];
+        let double = [3.0_f64, 0.0, 1.0, 2.0];
+        let data = match precision {
+            ProviderPrecision::F32 => HostNumericDataView::F32(&single),
+            ProviderPrecision::F64 => HostNumericDataView::F64(&double),
+        };
+        let source = provider
+            .upload_numeric_exec(&HostNumericTensorView {
+                data,
+                shape: &[2, 2],
+                storage: GpuTensorStorage::Real,
+            })
+            .unwrap();
+        let inverse = futures::executor::block_on(provider.inv_exec(&source)).unwrap();
+        let norm = futures::executor::block_on(provider.norm_exec(&source, ProviderNormOrder::Fro))
+            .unwrap();
+        let pinv = futures::executor::block_on(
+            provider.pinv_exec(&source, ProviderPinvOptions { tolerance: None }),
+        )
+        .unwrap();
+        let lu = futures::executor::block_on(provider.lu_exec(&source)).unwrap();
+        let solved = futures::executor::block_on(provider.mldivide_exec(&source, &source)).unwrap();
+        for output in [&inverse, &norm, &pinv, &lu.lower, &lu.upper, &solved] {
+            assert_eq!(
+                runmat_accelerate_api::handle_precision(output),
+                Some(precision)
+            );
+            assert!(!source.shares_allocation_with(output));
+            let readback =
+                futures::executor::block_on(provider.download_numeric_exec(output)).unwrap();
+            assert!(matches!(
+                (precision, readback.data),
+                (ProviderPrecision::F32, HostNumericDataOwned::F32(_))
+                    | (ProviderPrecision::F64, HostNumericDataOwned::F64(_))
+            ));
+        }
+        let inv = futures::executor::block_on(provider.download_numeric_exec(&inverse)).unwrap();
+        let inv = match inv.data {
+            HostNumericDataOwned::F32(values) => {
+                values.into_iter().map(f64::from).collect::<Vec<_>>()
+            }
+            HostNumericDataOwned::F64(values) => values,
+            other => panic!("unexpected inverse storage: {other:?}"),
+        };
+        assert!((3.0 * inv[0] + inv[1] - 1.0).abs() < 1e-5);
+        assert!((2.0 * inv[1]).abs() < 1e-5);
+        assert!((3.0 * inv[2] + inv[3]).abs() < 1e-5);
+        assert!((2.0 * inv[3] - 1.0).abs() < 1e-5);
+        let solved = futures::executor::block_on(provider.download_numeric_exec(&solved)).unwrap();
+        let solved = match solved.data {
+            HostNumericDataOwned::F32(values) => {
+                values.into_iter().map(f64::from).collect::<Vec<_>>()
+            }
+            HostNumericDataOwned::F64(values) => values,
+            other => panic!("unexpected solved storage: {other:?}"),
+        };
+        for (actual, expected) in solved.into_iter().zip([1.0, 0.0, 0.0, 1.0]) {
+            assert!((actual - expected).abs() < 1e-5);
+        }
+    }
+    let complex = provider
+        .upload_numeric_exec(&HostNumericTensorView {
+            data: HostNumericDataView::F32(&[2.0, 1.0]),
+            shape: &[1, 1],
+            storage: GpuTensorStorage::ComplexInterleaved,
+        })
+        .unwrap();
+    let inv_error = futures::executor::block_on(provider.inv_exec(&complex)).unwrap_err();
+    let pinv_error = futures::executor::block_on(
+        provider.pinv_exec(&complex, ProviderPinvOptions { tolerance: None }),
+    )
+    .unwrap_err();
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &inv_error
+    ));
+    assert!(runmat_accelerate_api::is_unsupported_provider_operation(
+        &pinv_error
+    ));
+    assert_eq!(
+        runmat_accelerate_api::handle_storage(&complex),
+        GpuTensorStorage::ComplexInterleaved
+    );
 }
 
 #[test]

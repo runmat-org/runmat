@@ -359,7 +359,13 @@ async fn evaluate_gpu(
         if runmat_accelerate_api::handle_storage(handle)
             != runmat_accelerate_api::GpuTensorStorage::Real
             || runmat_accelerate_api::handle_is_logical(handle)
-            || runmat_accelerate_api::handle_precision(handle) != Some(provider.precision())
+            || runmat_accelerate_api::handle_precision(handle).is_none()
+            || !gpu_helpers::gpu_class_metadata_matches(
+                handle,
+                runmat_accelerate_api::handle_precision(handle),
+                None,
+                false,
+            )
         {
             return Ok(None);
         }

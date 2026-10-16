@@ -24,7 +24,7 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "rcond";
 
-mod one_norm;
+use crate::builtins::common::linalg::one_norm;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::rcond")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

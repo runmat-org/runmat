@@ -423,15 +423,17 @@ impl WgpuProvider {
     }
 
     pub(crate) async fn lu_exec(&self, handle: &GpuTensorHandle) -> Result<ProviderLuResult> {
-        let entry = self.get_entry_raw(handle)?;
-        if entry.integer_type().is_some()
-            || entry.storage != runmat_accelerate_api::GpuTensorStorage::Real
-        {
+        let source_precision = self.real_floating_input_precision_exec(handle)?;
+        let host = self.download_real_floating_tensor_exec(handle).await?;
+        let data: Cow<'_, [f64]> = if let Some(values) = host.as_f64_slice() {
+            Cow::Borrowed(values)
+        } else if let Some(values) = host.as_f32_slice() {
+            Cow::Owned(values.iter().map(|&value| value as f64).collect())
+        } else {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
-                "lu: real floating kernel cannot consume this physical storage",
+                "lu: real floating input must be F32 or F64",
             ));
-        }
-        let host = self.download_exec(handle).await?;
+        };
         let LuHostFactors {
             combined,
             lower,
@@ -443,27 +445,17 @@ impl WgpuProvider {
             upper_shape,
             perm_shape,
             pivot_shape,
-        } = lu_factor_host(&host.data, &host.shape)?;
-        let combined = self.upload_exec(&HostTensorView {
-            data: &combined,
-            shape: &combined_shape,
-        })?;
-        let lower = self.upload_exec(&HostTensorView {
-            data: &lower,
-            shape: &lower_shape,
-        })?;
-        let upper = self.upload_exec(&HostTensorView {
-            data: &upper,
-            shape: &upper_shape,
-        })?;
-        let perm_matrix = self.upload_exec(&HostTensorView {
-            data: &perm_matrix,
-            shape: &perm_shape,
-        })?;
-        let perm_vector = self.upload_exec(&HostTensorView {
-            data: &pivot_vector,
-            shape: &pivot_shape,
-        })?;
+        } = lu_factor_host(&data, host.shape())?;
+        let combined =
+            self.upload_real_floating_values_exec(&combined, &combined_shape, source_precision)?;
+        let lower =
+            self.upload_real_floating_values_exec(&lower, &lower_shape, source_precision)?;
+        let upper =
+            self.upload_real_floating_values_exec(&upper, &upper_shape, source_precision)?;
+        let perm_matrix =
+            self.upload_real_floating_values_exec(&perm_matrix, &perm_shape, source_precision)?;
+        let perm_vector =
+            self.upload_real_floating_values_exec(&pivot_vector, &pivot_shape, source_precision)?;
         Ok(ProviderLuResult {
             combined,
             lower,

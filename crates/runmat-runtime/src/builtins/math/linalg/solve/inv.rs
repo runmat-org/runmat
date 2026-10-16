@@ -21,7 +21,6 @@ use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "inv";
-const PROVIDER_UNSUPPORTED: &str = "inv not supported by provider";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::linalg::solve::inv")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -138,7 +137,7 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
             expected_storage,
             runmat_accelerate_api::GpuTensorStorage::Real
                 | runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
-        ) || expected_precision != Some(provider.precision())
+        ) || expected_precision.is_none()
             || !gpu_helpers::gpu_class_metadata_matches(&handle, expected_precision, None, false)
         {
             return Err(inv_error_with_message(
@@ -188,13 +187,23 @@ async fn inv_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     }
     let gathered = gpu_helpers::download_value_preserving_residency_async(provider, &handle).await;
     let gathered = gathered.map_err(map_control_flow)?;
-    let tensor = tensor::value_into_tensor_for(NAME, gathered).map_err(builtin_error)?;
-    let inv = inv_real_tensor(&tensor)?;
-    gpu_helpers::restore_class_preserving_value(&handle, Value::Tensor(inv), NAME)
+    let result = match gathered {
+        Value::ComplexTensor(tensor) => Value::ComplexTensor(inv_complex_tensor(&tensor)?),
+        Value::Complex(real, imaginary) => {
+            let tensor =
+                ComplexTensor::new(vec![(real, imaginary)], vec![1, 1]).map_err(builtin_error)?;
+            Value::ComplexTensor(inv_complex_tensor(&tensor)?)
+        }
+        real => {
+            let tensor = tensor::value_into_tensor_for(NAME, real).map_err(builtin_error)?;
+            Value::Tensor(inv_real_tensor(&tensor)?)
+        }
+    };
+    gpu_helpers::restore_class_preserving_value(&handle, result, NAME)
 }
 
 fn provider_inv_is_unsupported(error: &anyhow::Error) -> bool {
-    gpu_helpers::provider_hook_is_unsupported(error) || error.to_string() == PROVIDER_UNSUPPORTED
+    gpu_helpers::provider_hook_is_unsupported(error)
 }
 
 fn valid_inv_gpu_output(
@@ -405,8 +414,8 @@ pub(crate) mod tests {
 
     #[test]
     fn inv_provider_unsupported_classification_is_exact() {
-        assert!(provider_inv_is_unsupported(&anyhow::anyhow!(
-            PROVIDER_UNSUPPORTED
+        assert!(!provider_inv_is_unsupported(&anyhow::anyhow!(
+            "inv not supported by provider"
         )));
         assert!(!provider_inv_is_unsupported(&anyhow::anyhow!(
             "inv not supported by provider: device lost"
@@ -715,6 +724,23 @@ pub(crate) mod tests {
         {
             assert!((*a - *b).abs() < tol, "expected {b}, got {a}");
         }
+
+        let complex = ComplexTensor::new(vec![(2.0, 1.0)], vec![1, 1]).unwrap();
+        let source = gpu_helpers::upload_complex_tensor(provider, &complex).unwrap();
+        let result = inv_builtin(Value::GpuTensor(source)).expect("complex gpu inv");
+        let Value::GpuTensor(output) = result else {
+            panic!("complex inverse did not restore resident output");
+        };
+        let gathered = block_on(gpu_helpers::download_value_preserving_residency_async(
+            provider, &output,
+        ))
+        .unwrap();
+        let Value::ComplexTensor(gathered) = gathered else {
+            panic!("complex inverse lost complex storage");
+        };
+        let (re, im) = gathered.materialize_f64()[0];
+        assert!((re - 0.4).abs() < tol);
+        assert!((im + 0.2).abs() < tol);
     }
 
     fn inv_builtin(value: Value) -> BuiltinResult<Value> {

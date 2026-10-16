@@ -59,14 +59,14 @@ fn all_eleven_solve_identities_own_typed_contracts_and_original_programs() {
 #[test]
 fn solve_shape_and_host_precision_facts_follow_actual_output_geometry() {
     let input = matrix(3, 2, NumericClass::Single);
-    let pinv = infer_catalog_call(&PINV_CATALOG_ENTRY, &request(vec![input.clone()], 1));
-    assert_eq!(
-        pinv.outputs[0].shape,
-        ShapeFact::from(vec![Some(2), Some(3)])
-    );
-    assert!(
-        matches!(pinv.outputs[0].kind, ValueKindFact::Numeric(n) if n.class == NumericClass::Double)
-    );
+    for class in [NumericClass::Single, NumericClass::Double] {
+        let pinv = infer_catalog_call(&PINV_CATALOG_ENTRY, &request(vec![matrix(3, 2, class)], 1));
+        assert_eq!(
+            pinv.outputs[0].shape,
+            ShapeFact::from(vec![Some(2), Some(3)])
+        );
+        assert!(matches!(pinv.outputs[0].kind, ValueKindFact::Numeric(n) if n.class == class));
+    }
 
     let null = infer_catalog_call(&NULL_CATALOG_ENTRY, &request(vec![input.clone()], 1));
     assert_eq!(null.outputs[0].shape, ShapeFact::from(vec![Some(2), None]));
