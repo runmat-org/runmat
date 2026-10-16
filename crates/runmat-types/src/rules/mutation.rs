@@ -297,7 +297,7 @@ fn effective_dimensions(shape: &[usize], count: usize) -> Option<Vec<usize>> {
 }
 
 fn known_shape(dims: Vec<usize>) -> ShapeFact {
-    ShapeFact::from(dims.into_iter().map(Some).collect())
+    ShapeFact::from(dims.into_iter().map(Some).collect::<Vec<_>>())
 }
 
 fn definitely_bounded_without_extent(selector: &IndexSelectorFact) -> bool {
