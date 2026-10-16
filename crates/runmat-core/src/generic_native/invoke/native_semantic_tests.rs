@@ -127,8 +127,8 @@ fn undefined_indexed_root_completes_in_forced_generic_native_with_vm_parity() {
     let expected = Value::Tensor(
         runmat_value::Tensor::new(vec![1.0, 4.0, 9.0], vec![1, 3]).expect("expected row vector"),
     );
-    assert_eq!(vm.as_slice(), &[expected.clone()]);
-    assert_eq!(native.as_slice(), &[expected]);
+    assert_eq!(vm.as_slice(), std::slice::from_ref(&expected));
+    assert_eq!(native.as_slice(), std::slice::from_ref(&expected));
 }
 
 #[test]
