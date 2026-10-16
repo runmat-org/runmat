@@ -377,6 +377,72 @@ impl Camera {
         self.view_proj_dirty = true;
     }
 
+    /// Fit a Figure's perspective camera to every displayed box corner at its plot-rect aspect.
+    /// This deliberately does not alter the legacy geometry-scene `fit_bounds` policy.
+    pub fn fit_figure_perspective_bounds(
+        &mut self,
+        min_bounds: Vec3,
+        max_bounds: Vec3,
+        viewport: (u32, u32),
+    ) -> bool {
+        let ProjectionType::Perspective { fov, .. } = self.projection else {
+            return false;
+        };
+        if !min_bounds.is_finite()
+            || !max_bounds.is_finite()
+            || min_bounds.cmpgt(max_bounds).any()
+            || viewport.0 == 0
+            || viewport.1 == 0
+        {
+            return false;
+        }
+        let center = (min_bounds + max_bounds) * 0.5;
+        let direction = (self.position - self.target).normalize_or_zero();
+        let forward = -direction;
+        let right = forward.cross(self.up).normalize_or_zero();
+        let screen_up = right.cross(forward).normalize_or_zero();
+        if direction.length_squared() < 0.5
+            || right.length_squared() < 0.5
+            || !fov.is_finite()
+            || fov <= 0.0
+            || fov >= std::f32::consts::PI
+        {
+            return false;
+        }
+        let aspect = viewport.0 as f32 / viewport.1 as f32;
+        let tangent = (fov * 0.5).tan();
+        let mut distance = 0.0_f32;
+        let mut closest = f32::NEG_INFINITY;
+        let mut farthest = f32::INFINITY;
+        for x in [min_bounds.x, max_bounds.x] {
+            for y in [min_bounds.y, max_bounds.y] {
+                for z in [min_bounds.z, max_bounds.z] {
+                    let offset = Vec3::new(x, y, z) - center;
+                    let toward_eye = offset.dot(direction);
+                    closest = closest.max(toward_eye);
+                    farthest = farthest.min(toward_eye);
+                    let horizontal = offset.dot(right).abs() / (tangent * aspect);
+                    let vertical = offset.dot(screen_up).abs() / tangent;
+                    distance = distance.max(toward_eye + horizontal.max(vertical));
+                }
+            }
+        }
+        let radius = (max_bounds - min_bounds).length() * 0.5;
+        distance = distance.max(closest + radius * 0.01).max(1.0e-3) * 1.1;
+        if !distance.is_finite() {
+            return false;
+        }
+        self.target = center;
+        self.position = center + direction * distance;
+        self.aspect_ratio = aspect;
+        if let ProjectionType::Perspective { near, far, .. } = &mut self.projection {
+            *near = (distance - closest).max(1.0e-3) * 0.5;
+            *far = ((distance - farthest) * 1.5).max(*near + 1.0);
+        }
+        self.view_proj_dirty = true;
+        true
+    }
+
     pub fn set_clip_planes(&mut self, near: f32, far: f32) {
         match &mut self.projection {
             ProjectionType::Perspective {
@@ -908,5 +974,36 @@ mod tests {
         assert!((offset.length() - 2.0).abs() < 1e-5);
         assert!(offset.x.abs() < 1e-4);
         assert!((offset.y - 2.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn figure_fit_contains_all_display_corners_at_wide_and_narrow_aspects() {
+        let min = Vec3::new(-8.0, 2.0, -0.5);
+        let max = Vec3::new(12.0, 7.0, 2.5);
+        for viewport in [(1200, 400), (200, 700)] {
+            for angles in [(45.0, 30.0), (-120.0, 50.0)] {
+                let mut camera = Camera::new();
+                camera.set_view_angles_deg(angles.0, angles.1);
+                let original_direction = (camera.position - camera.target).normalize();
+                assert!(camera.fit_figure_perspective_bounds(min, max, viewport));
+                assert!(
+                    ((camera.position - camera.target).normalize() - original_direction).length()
+                        < 1.0e-5
+                );
+                let matrix = camera.view_proj_matrix();
+                for x in [min.x, max.x] {
+                    for y in [min.y, max.y] {
+                        for z in [min.z, max.z] {
+                            let clip = matrix * Vec3::new(x, y, z).extend(1.0);
+                            let ndc = clip.truncate() / clip.w;
+                            assert!(
+                                clip.w > 0.0 && ndc.x.abs() < 1.0 && ndc.y.abs() < 1.0,
+                                "corner ({x},{y},{z}) outside {viewport:?}: {ndc:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }

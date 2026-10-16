@@ -3995,7 +3995,8 @@ fn every_mir_construct_has_one_explicit_native_lowering_class() {
     use runmat_mir::{MirConstructKind, NativeLoweringClass};
     use std::collections::HashSet;
 
-    assert_eq!(MirConstructKind::ALL.len(), 58);
+    // StatementOutput is a distinct construct from expression evaluation.
+    assert_eq!(MirConstructKind::ALL.len(), 59);
     assert_eq!(
         MirConstructKind::ALL
             .into_iter()

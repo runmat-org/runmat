@@ -73,6 +73,8 @@ Default scene replay limits are:
 
 Large scenes can reference external array payloads. The import path can hydrate supported surface and 3-D scatter fields from dataset manifests or chunk references before reconstructing the figure.
 
+Scene version 6 preserves the exact IEEE-754 bits of nonfinite single- and double-precision plot source values in JSON. Finite values retain their ordinary numeric representation. Older finite scenes remain readable, but an older reader cannot open a version 6 scene. A legacy typed source containing JSON `null` is rejected because the original NaN or infinity value cannot be recovered from it.
+
 ## Export Path
 
 Export renders a figure through the headless image exporter. The runtime can render PNG bytes or raw RGBA bytes, with default camera state, one explicit camera, or per-axes cameras.

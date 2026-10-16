@@ -412,7 +412,7 @@ mod mixed_add_tests {
     }
 
     #[test]
-    fn mixed_real_add_proves_single_and_broadcast_without_widening_other_operators() {
+    fn mixed_real_add_proves_single_and_shared_arithmetic_contracts() {
         let single = real(crate::NumericClass::Single, &[Some(2), Some(1)]);
         let double_scalar = real(crate::NumericClass::Double, &[Some(1), Some(1)]);
         let inferred = infer_binary(OperatorKind::Add, &single, &double_scalar);
@@ -446,11 +446,14 @@ mod mixed_add_tests {
                 .shape,
             ShapeFact::from(vec![Some(2), Some(3)])
         );
-        assert!(
+        assert_eq!(
             infer_binary(OperatorKind::Subtract, &single, &double_scalar)
                 .fact
-                .numeric()
-                .is_none()
+                .kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: crate::NumericClass::Single,
+                domain: crate::NumericDomain::Real,
+            })
         );
         let mismatch = real(crate::NumericClass::Double, &[Some(3), Some(2)]);
         assert!(!infer_binary(OperatorKind::Add, &single, &mismatch)
@@ -523,16 +526,24 @@ mod mixed_add_tests {
             broadcast.fact.numeric().map(|numeric| numeric.class),
             Some(crate::NumericClass::Single)
         );
-        for operator in [
-            OperatorKind::Subtract,
-            OperatorKind::ElementwiseDivide,
-            OperatorKind::ElementwisePower,
-        ] {
-            assert!(infer_binary(operator, &single, &double_scalar)
+        for operator in [OperatorKind::Subtract, OperatorKind::ElementwiseDivide] {
+            let inferred = infer_binary(operator, &single, &double_scalar);
+            assert!(inferred.diagnostics.is_empty());
+            assert_eq!(inferred.fact.shape, single.shape);
+            assert_eq!(
+                inferred.fact.kind,
+                ValueKindFact::Numeric(NumericFact {
+                    class: crate::NumericClass::Single,
+                    domain: crate::NumericDomain::Real,
+                })
+            );
+        }
+        assert!(
+            infer_binary(OperatorKind::ElementwisePower, &single, &double_scalar)
                 .fact
                 .numeric()
-                .is_none());
-        }
+                .is_none()
+        );
     }
 
     #[test]

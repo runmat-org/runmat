@@ -2,7 +2,7 @@ use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f
 use runmat_runtime::call::arguments::expand_brace_values;
 use runmat_runtime::execution::{RootedValue, RootedValueSequence};
 use runmat_runtime::indexing::plan::{
-    build_assignment_plan, build_index_plan, build_sparse_assignment_plan, IndexPlan,
+    build_assignment_plan, build_index_plan, build_sparse_assignment_plan,
 };
 use runmat_runtime::indexing::read_linear as idx_read_linear;
 use runmat_runtime::indexing::read_slice as idx_read_slice;
@@ -19,7 +19,7 @@ use runmat_runtime::object::indexing::{
 };
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_value::{CellArray, IntValue, IntegerStorage, SymbolicExpr, Tensor, Value};
+use runmat_value::{CellArray, SymbolicExpr, Tensor, Value};
 
 mod scalar_read_and_cell;
 mod scalar_store;
@@ -53,40 +53,6 @@ fn resolve_single_sequence(sequence: RootedValueSequence) -> Result<RootedValue,
         },
         |error| error.into_runtime_error(),
     )
-}
-
-/// Materializes an integer scalar for indexed assignment without routing it
-/// through the lossy floating-point tensor mirror.
-fn integer_scalar_tensor(value: IntValue) -> Result<Tensor, RuntimeError> {
-    let storage = match value {
-        IntValue::I8(value) => IntegerStorage::I8(vec![value]),
-        IntValue::I16(value) => IntegerStorage::I16(vec![value]),
-        IntValue::I32(value) => IntegerStorage::I32(vec![value]),
-        IntValue::I64(value) => IntegerStorage::I64(vec![value]),
-        IntValue::U8(value) => IntegerStorage::U8(vec![value]),
-        IntValue::U16(value) => IntegerStorage::U16(vec![value]),
-        IntValue::U32(value) => IntegerStorage::U32(vec![value]),
-        IntValue::U64(value) => IntegerStorage::U64(vec![value]),
-    };
-    Tensor::new_integer(storage, vec![1, 1])
-        .map_err(|e| map_slice_shape_error("scalar index assign", e))
-}
-
-/// Applies a slice assignment to an integer scalar after materializing its
-/// exact storage. This keeps slice stores on the same path as
-/// StoreIndex instead of constructing an f64 compatibility tensor first.
-async fn assign_integer_scalar_with_plan(
-    value: IntValue,
-    plan: &IndexPlan,
-    rhs: &Value,
-    delete: bool,
-) -> Result<Value, RuntimeError> {
-    let tensor = integer_scalar_tensor(value)?;
-    if delete {
-        idx_write_slice::delete_tensor_with_plan(tensor, plan, rhs)
-    } else {
-        idx_write_slice::assign_tensor_with_plan(tensor, plan, rhs).await
-    }
 }
 
 fn logical_value_from_tensor(t: runmat_value::Tensor) -> Result<Value, RuntimeError> {
@@ -952,63 +918,9 @@ pub async fn dispatch_indexing(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        assign_integer_scalar_with_plan, integer_scalar_tensor, map_slice_plan_error,
-        symbolic_scalar_from_value,
-    };
+    use super::{map_slice_plan_error, symbolic_scalar_from_value};
     use futures::executor::block_on;
-    use runmat_runtime::indexing::plan::IndexPlan;
-    use runmat_value::{
-        IntValue, IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor, Value,
-    };
-
-    #[test]
-    fn integer_scalar_index_assignment_materialization_preserves_all_integer_classes() {
-        macro_rules! assert_scalar_storage {
-            ($value:expr, $storage:expr) => {{
-                let tensor = integer_scalar_tensor($value).expect("integer scalar tensor");
-                assert_eq!(tensor.integer_storage(), Some(&$storage));
-            }};
-        }
-
-        assert_scalar_storage!(IntValue::I8(i8::MIN), IntegerStorage::I8(vec![i8::MIN]));
-        assert_scalar_storage!(IntValue::I16(i16::MIN), IntegerStorage::I16(vec![i16::MIN]));
-        assert_scalar_storage!(IntValue::I32(i32::MIN), IntegerStorage::I32(vec![i32::MIN]));
-        assert_scalar_storage!(IntValue::I64(i64::MIN), IntegerStorage::I64(vec![i64::MIN]));
-        assert_scalar_storage!(IntValue::U8(u8::MAX), IntegerStorage::U8(vec![u8::MAX]));
-        assert_scalar_storage!(IntValue::U16(u16::MAX), IntegerStorage::U16(vec![u16::MAX]));
-        assert_scalar_storage!(IntValue::U32(u32::MAX), IntegerStorage::U32(vec![u32::MAX]));
-        assert_scalar_storage!(IntValue::U64(u64::MAX), IntegerStorage::U64(vec![u64::MAX]));
-    }
-
-    #[test]
-    fn integer_scalar_slice_assignment_preserves_all_integer_classes() {
-        macro_rules! assert_slice_assignment {
-            ($value:expr, $storage:expr) => {{
-                let plan = IndexPlan::new(vec![0], vec![1, 1], vec![1], 1, vec![1, 1]);
-                let result = block_on(assign_integer_scalar_with_plan(
-                    $value.clone(),
-                    &plan,
-                    &Value::Int($value),
-                    false,
-                ))
-                .expect("integer scalar slice assignment");
-                let Value::Tensor(tensor) = result else {
-                    panic!("integer scalar slice assignment must return a tensor");
-                };
-                assert_eq!(tensor.integer_storage(), Some(&$storage));
-            }};
-        }
-
-        assert_slice_assignment!(IntValue::I8(i8::MIN), IntegerStorage::I8(vec![i8::MIN]));
-        assert_slice_assignment!(IntValue::I16(i16::MIN), IntegerStorage::I16(vec![i16::MIN]));
-        assert_slice_assignment!(IntValue::I32(i32::MIN), IntegerStorage::I32(vec![i32::MIN]));
-        assert_slice_assignment!(IntValue::I64(i64::MIN), IntegerStorage::I64(vec![i64::MIN]));
-        assert_slice_assignment!(IntValue::U8(u8::MAX), IntegerStorage::U8(vec![u8::MAX]));
-        assert_slice_assignment!(IntValue::U16(u16::MAX), IntegerStorage::U16(vec![u16::MAX]));
-        assert_slice_assignment!(IntValue::U32(u32::MAX), IntegerStorage::U32(vec![u32::MAX]));
-        assert_slice_assignment!(IntValue::U64(u64::MAX), IntegerStorage::U64(vec![u64::MAX]));
-    }
+    use runmat_value::{IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor, Value};
 
     #[test]
     fn map_slice_plan_error_preserves_identifier_and_adds_context() {

@@ -25,8 +25,11 @@ use std::sync::OnceLock;
 
 type ViewBounds2D = (f64, f64, f64, f64);
 type PerAxesViewBounds = Vec<Option<ViewBounds2D>>;
+#[path = "plot_renderer/figure_camera_fit.rs"]
+mod figure_camera_fit;
 #[path = "plot_renderer/y_direction.rs"]
 mod y_direction;
+use figure_camera_fit::FigureCameraFitState;
 
 #[derive(Clone, Debug)]
 struct CachedSceneBuffers {
@@ -142,6 +145,8 @@ pub struct PlotRenderer {
 
     /// If false, do not auto-fit camera when the figure updates (user has interacted).
     camera_auto_fit: bool,
+    /// Automatically fitted Figure cameras follow viewport size until user or host control.
+    figure_camera_fit: Vec<FigureCameraFitState>,
     /// Per-axes 2D camera ownership. True means the user has interacted and automatic 2D refits
     /// should not overwrite the camera during ordinary figure updates.
     axes_2d_camera_user_controlled: Vec<bool>,
@@ -360,6 +365,7 @@ impl PlotRenderer {
             last_axes_view_bounds: None,
             last_axes_view_contract: None,
             camera_auto_fit: true,
+            figure_camera_fit: vec![FigureCameraFitState::Inactive],
             axes_2d_camera_user_controlled: vec![false],
             axes_applied_view_revisions: vec![None],
             scene_buffer_cache: RefCell::new(HashMap::new()),
@@ -420,6 +426,69 @@ impl PlotRenderer {
             log::debug!(target: "runmat_plot", "camera_auto_fit disabled (user interaction)");
         }
         self.camera_auto_fit = false;
+        self.figure_camera_fit.fill(FigureCameraFitState::Inactive);
+    }
+
+    /// An explicit camera override owns its view; an initial Figure fit must not replace it.
+    pub fn cancel_figure_viewport_fit(&mut self, axes_index: usize) {
+        if let Some(state) = self.figure_camera_fit.get_mut(axes_index) {
+            *state = FigureCameraFitState::Inactive;
+        }
+    }
+
+    pub fn fit_pending_figure_camera_for_viewport(
+        &mut self,
+        axes_index: usize,
+        viewport: (u32, u32),
+    ) {
+        if !self
+            .figure_camera_fit
+            .get(axes_index)
+            .copied()
+            .unwrap_or_default()
+            .pending_for(viewport)
+            || !self.axes_has_3d_content(axes_index)
+        {
+            return;
+        }
+        let Some(bounds) = self.display_bounds_3d_for_axes(axes_index) else {
+            return;
+        };
+        if let Some(camera) = self.axes_cameras.get_mut(axes_index) {
+            if camera.fit_figure_perspective_bounds(bounds.min, bounds.max, viewport) {
+                if let Some(state) = self.figure_camera_fit.get_mut(axes_index) {
+                    state.fitted(viewport);
+                }
+            }
+        }
+    }
+
+    pub fn fit_pending_figure_cameras_for_viewports(&mut self, viewports: &[(u32, u32)]) {
+        for (axes_index, viewport) in viewports.iter().copied().enumerate() {
+            self.fit_pending_figure_camera_for_viewport(axes_index, viewport);
+        }
+    }
+
+    /// Non-overlay Figure rendering uses the same per-axes tile extents as scene drawing.
+    pub fn fit_pending_figure_cameras_for_surface(&mut self, width: u32, height: u32) {
+        let viewports = self.compute_axes_viewports_px(width.max(1), height.max(1));
+        for (axes_index, (_, _, tile_width, tile_height)) in viewports.into_iter().enumerate() {
+            self.fit_pending_figure_camera_for_viewport(axes_index, (tile_width, tile_height));
+        }
+    }
+
+    fn arm_figure_camera_fits(&mut self) {
+        self.figure_camera_fit
+            .resize(self.axes_cameras.len(), FigureCameraFitState::Inactive);
+        for axes_index in 0..self.axes_cameras.len() {
+            self.figure_camera_fit[axes_index] = if self.axes_has_3d_content(axes_index) {
+                FigureCameraFitState::Auto {
+                    last_viewport: None,
+                }
+            } else {
+                FigureCameraFitState::Inactive
+            };
+        }
     }
 
     pub fn note_axes_camera_interaction(&mut self, axes_index: usize) {
@@ -558,6 +627,11 @@ impl PlotRenderer {
             self.camera_auto_fit = false;
         }
         self.apply_stored_axes_views();
+        self.figure_camera_fit
+            .resize(num_axes, FigureCameraFitState::Inactive);
+        if fit_applied {
+            self.arm_figure_camera_fits();
+        }
     }
 
     /// Set a chunked geometry scene to render.
@@ -577,6 +651,7 @@ impl PlotRenderer {
         geometry_scene: GeometryScene,
         mut presentation: GeometryScenePresentation,
     ) {
+        self.figure_camera_fit.fill(FigureCameraFitState::Inactive);
         let cache_key = geometry_scene.cache_key();
         let same_scene_identity = self
             .last_geometry_scene_key
@@ -1192,6 +1267,9 @@ impl PlotRenderer {
         } else {
             self.fit_camera_to_data()
         };
+        if self.last_figure.is_some() {
+            self.arm_figure_camera_fits();
+        }
         self.clear_all_axes_camera_interaction();
         self.camera_auto_fit = false;
         self.needs_update = true;
@@ -1243,6 +1321,9 @@ impl PlotRenderer {
             }
         }
 
+        if self.last_figure.is_some() {
+            self.arm_figure_camera_fits();
+        }
         self.clear_all_axes_camera_interaction();
         self.camera_auto_fit = false;
         self.needs_update = true;

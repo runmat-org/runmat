@@ -795,7 +795,7 @@ impl<'window> PlotWindow<'window> {
 
             let frame_info = self.plot_overlay.render(
                 ctx,
-                &self.plot_renderer,
+                &mut self.plot_renderer,
                 &overlay_config,
                 overlay_metrics,
             );

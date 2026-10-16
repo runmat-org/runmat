@@ -7253,6 +7253,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-thread-local",
  "runmat-time",
+ "runmat-types",
  "runmat-value",
  "serde",
  "serde_json",

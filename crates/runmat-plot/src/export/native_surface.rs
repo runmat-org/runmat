@@ -565,11 +565,13 @@ impl NativeSurfaceRenderContext {
         self.renderer.set_figure(emission, figure.clone());
         if let Some(camera) = camera {
             *self.renderer.camera_mut() = camera.clone();
+            self.renderer.cancel_figure_viewport_fit(0);
         }
         if let Some(overrides) = axes_cameras {
             for (index, override_camera) in overrides.iter().enumerate() {
                 if let Some(target) = self.renderer.axes_camera_mut(index) {
                     *target = override_camera.clone();
+                    self.renderer.cancel_figure_viewport_fit(index);
                 }
             }
         }
@@ -611,6 +613,10 @@ impl NativeSurfaceRenderContext {
             let Some(overlay) = self.overlay.as_mut() else {
                 log::debug!(
                     "runmat-plot: native_surface.render_scene_with_overlay.branch_no_overlay"
+                );
+                self.renderer.fit_pending_figure_cameras_for_surface(
+                    self.config.width.max(1),
+                    self.config.height.max(1),
                 );
                 let result = self
                     .renderer
@@ -686,7 +692,7 @@ impl NativeSurfaceRenderContext {
                 };
                 let frame_info = overlay.plot_overlay.render(
                     ctx,
-                    &self.renderer,
+                    &mut self.renderer,
                     &overlay_config,
                     overlay_metrics,
                 );
@@ -1000,6 +1006,10 @@ impl NativeSurfaceRenderContext {
 
         #[cfg(not(feature = "egui-overlay"))]
         {
+            self.renderer.fit_pending_figure_cameras_for_surface(
+                self.config.width.max(1),
+                self.config.height.max(1),
+            );
             let result = self
                 .renderer
                 .render_scene_to_target(emission, encoder, target_view, &self.config)

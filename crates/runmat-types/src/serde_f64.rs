@@ -4,9 +4,9 @@
 //! numbers use one canonical IEEE-754 bit tag, avoiding JSON's lossy `null`
 //! encoding and JavaScript's inability to represent all 64-bit integers.
 //! Binary formats retain their native f64 encoding.
-use serde::de::{self, MapAccess, Visitor};
+use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::ser::SerializeMap;
-use serde::{Deserialize, Deserializer, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
 pub fn serialize<S: Serializer>(value: &f64, serializer: S) -> Result<S::Ok, S::Error> {
@@ -26,6 +26,58 @@ pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f64, D:
 }
 
 struct FloatVisitor;
+
+/// Lossless vectors for scene and artifact fields without changing finite JSON arrays.
+pub mod vec {
+    use super::*;
+    use serde::ser::SerializeSeq;
+
+    pub fn serialize<S: Serializer>(values: &[f64], serializer: S) -> Result<S::Ok, S::Error> {
+        let mut sequence = serializer.serialize_seq(Some(values.len()))?;
+        for value in values {
+            sequence.serialize_element(&FloatRef(value))?;
+        }
+        sequence.end()
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<f64>, D::Error> {
+        deserializer.deserialize_seq(VecVisitor)
+    }
+
+    struct FloatRef<'a>(&'a f64);
+
+    impl Serialize for FloatRef<'_> {
+        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            super::serialize(self.0, serializer)
+        }
+    }
+
+    struct FloatValue(f64);
+
+    impl<'de> Deserialize<'de> for FloatValue {
+        fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            super::deserialize(deserializer).map(Self)
+        }
+    }
+
+    struct VecVisitor;
+
+    impl<'de> Visitor<'de> for VecVisitor {
+        type Value = Vec<f64>;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a sequence of lossless f64 values")
+        }
+
+        fn visit_seq<A: SeqAccess<'de>>(self, mut sequence: A) -> Result<Self::Value, A::Error> {
+            let mut values = Vec::new();
+            while let Some(FloatValue(value)) = sequence.next_element()? {
+                values.push(value);
+            }
+            Ok(values)
+        }
+    }
+}
 
 impl<'de> Visitor<'de> for FloatVisitor {
     type Value = f64;

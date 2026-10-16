@@ -774,6 +774,10 @@ impl WebRenderer {
         let preparation: Vec<wgpu::CommandBuffer>;
         if !use_overlay {
             // Existing fast path: full-surface render (clears).
+            self.plot_renderer.fit_pending_figure_cameras_for_surface(
+                self.render_config.width.max(1),
+                self.render_config.height.max(1),
+            );
             let use_msaa = requested_samples > 1;
             if use_msaa {
                 self.ensure_msaa_texture(emission)?;
@@ -922,7 +926,7 @@ impl WebRenderer {
                     };
                     let frame_info = overlay.plot_overlay.render(
                         ctx,
-                        &self.plot_renderer,
+                        &mut self.plot_renderer,
                         &overlay_config,
                         overlay_metrics,
                     );

@@ -4,6 +4,9 @@ use serde::Serialize;
 #[derive(Debug, Serialize, Deserialize)]
 struct Float(#[serde(with = "super")] f64);
 
+#[derive(Debug, Serialize, Deserialize)]
+struct Floats(#[serde(with = "super::vec")] Vec<f64>);
+
 #[test]
 fn finite_float_payloads_are_byte_identical_to_existing_serde_numbers() {
     for value in [
@@ -44,6 +47,24 @@ fn nonfinite_tags_are_deterministic_and_preserve_every_payload_bit() {
         let decoded: Float = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.0.to_bits(), bits);
     }
+}
+
+#[test]
+fn float_vectors_keep_finite_numbers_and_nonfinite_bits() {
+    let values = vec![
+        1.5,
+        -0.0,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::from_bits(0x7ff8_0000_0000_0042),
+    ];
+    let encoded = serde_json::to_string(&Floats(values.clone())).unwrap();
+    assert!(encoded.starts_with("[1.5,-0.0,{\"f64_bits\":"));
+    let decoded: Floats = serde_json::from_str(&encoded).unwrap();
+    for (actual, expected) in decoded.0.iter().zip(values) {
+        assert_eq!(actual.to_bits(), expected.to_bits());
+    }
+    assert!(serde_json::from_str::<Floats>("[1.0,null]").is_err());
 }
 
 #[test]

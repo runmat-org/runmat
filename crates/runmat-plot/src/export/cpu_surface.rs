@@ -1,4 +1,4 @@
-use crate::core::{Camera, ImageData, PipelineType, ProjectionType, RenderData};
+use crate::core::{Camera, ImageData, PipelineType, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{AxesKind, Figure, PlotElement};
 use crate::styling::PlotThemeConfig;
@@ -672,22 +672,14 @@ fn choose_axes_bounds_3d(
     (bounds.min, bounds.max)
 }
 
-fn default_3d_camera_for_bounds(min: Vec3, max: Vec3) -> Camera {
+fn default_3d_camera_for_bounds(min: Vec3, max: Vec3, viewport: (u32, u32)) -> Camera {
     let center = (min + max) * 0.5;
-    let extent = (max - min).abs();
-    let radius = extent.length().max(1e-3) * 0.5;
-
     let mut cam = Camera::new();
-    let fov = match cam.projection {
-        ProjectionType::Perspective { fov, .. } => fov.max(0.2),
-        _ => 45.0f32.to_radians(),
-    };
-    let distance = (radius / (fov * 0.5).tan()).max(radius * 2.5) * 1.05;
-
     let dir = Vec3::new(1.0, -1.0, 0.8).normalize_or_zero();
     cam.target = center;
-    cam.position = center + dir * distance;
+    cam.position = center + dir;
     cam.up = Vec3::Z;
+    cam.fit_figure_perspective_bounds(min, max, viewport);
     cam
 }
 
@@ -697,6 +689,7 @@ fn choose_axes_camera(
     axes_cameras: Option<&[Camera]>,
     min: Vec3,
     max: Vec3,
+    viewport: (u32, u32),
 ) -> Camera {
     if let Some(cams) = axes_cameras {
         if let Some(cam) = cams.get(axes_index) {
@@ -704,11 +697,12 @@ fn choose_axes_camera(
         }
     }
 
-    let mut cam = default_3d_camera_for_bounds(min, max);
+    let mut cam = default_3d_camera_for_bounds(min, max, viewport);
 
     if let Some(meta) = figure.axes_metadata(axes_index) {
         if let (Some(az), Some(el)) = (meta.view_azimuth_deg, meta.view_elevation_deg) {
             cam.set_view_angles_deg(az, el);
+            cam.fit_figure_perspective_bounds(min, max, viewport);
         }
     }
 
@@ -1772,10 +1766,24 @@ pub async fn render_figure_rgba_bytes(
         let camera_3d = if has_3d {
             Some(if axes_count == 1 {
                 camera.cloned().unwrap_or_else(|| {
-                    choose_axes_camera(&figure, axes_index, axes_cameras, bmin, bmax)
+                    choose_axes_camera(
+                        &figure,
+                        axes_index,
+                        axes_cameras,
+                        bmin,
+                        bmax,
+                        (plot_rect.2, plot_rect.3),
+                    )
                 })
             } else {
-                choose_axes_camera(&figure, axes_index, axes_cameras, bmin, bmax)
+                choose_axes_camera(
+                    &figure,
+                    axes_index,
+                    axes_cameras,
+                    bmin,
+                    bmax,
+                    (plot_rect.2, plot_rect.3),
+                )
             })
         } else {
             None
@@ -2147,6 +2155,24 @@ mod tests {
     use crate::plots::{MeshEdgeMode, MeshFieldLocation, MeshPlot, MeshScalarField};
     use glam::Vec3;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn cpu_figure_fit_uses_plot_rect_and_keeps_explicit_camera() {
+        let figure = Figure::new();
+        let min = Vec3::new(-3.0, -2.0, -1.0);
+        let max = Vec3::new(5.0, 4.0, 8.0);
+        let wide = choose_axes_camera(&figure, 0, None, min, max, (1200, 400));
+        let narrow = choose_axes_camera(&figure, 0, None, min, max, (200, 700));
+        assert!(
+            (narrow.position - narrow.target).length() > (wide.position - wide.target).length()
+        );
+        let mut explicit = Camera::new();
+        explicit.position = Vec3::new(40.0, 30.0, 20.0);
+        let chosen =
+            choose_axes_camera(&figure, 0, Some(&[explicit.clone()]), min, max, (200, 700));
+        assert_eq!(chosen.position, explicit.position);
+        assert_eq!(chosen.target, explicit.target);
+    }
 
     #[test]
     fn cpu_export_large_line_tessellates_once_after_limit_resolution() {

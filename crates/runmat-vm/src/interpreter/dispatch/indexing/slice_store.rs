@@ -1,6 +1,5 @@
 use super::{
-    assign_integer_scalar_with_plan, build_index_plan, build_slice_selectors,
-    build_sparse_assignment_plan, idx_write_slice, integer_scalar_tensor,
+    build_index_plan, build_slice_selectors, build_sparse_assignment_plan, idx_write_slice,
     logical_value_from_tensor, map_slice_plan_error, map_slice_shape_error, object_slice_selector,
     resolve_object_index_protocol, ObjectIndexOp, ObjectSubscript, ObjectSubscriptPath,
     RuntimeError, Value,
@@ -42,6 +41,12 @@ pub(super) async fn dispatch(
                 "stack underflow",
             ))?;
             let _operand_roots = crate::call::root_values(numeric.iter().chain([&base, &rhs]))?;
+            let base = match base {
+                value @ (Value::Num(_) | Value::Int(_)) => Value::Tensor(
+                    runmat_runtime::indexing::value::numeric_scalar_tensor(value)?,
+                ),
+                other => other,
+            };
             match base {
                 base @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
                     let resolution =
@@ -100,19 +105,6 @@ pub(super) async fn dispatch(
                     } else {
                         idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?
                     });
-                }
-                Value::Int(value) => {
-                    let tensor = integer_scalar_tensor(value.clone())?;
-                    let plan = build_indexed_store_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        &numeric,
-                        tensor.shape(),
-                        plan_mode,
-                    )
-                    .await?;
-                    stack.push(assign_integer_scalar_with_plan(value, &plan, &rhs, delete).await?);
                 }
                 Value::LogicalArray(la) => {
                     let data: Vec<f64> = la

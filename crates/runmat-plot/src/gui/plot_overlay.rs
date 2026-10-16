@@ -997,7 +997,7 @@ impl PlotOverlay {
     pub fn render(
         &mut self,
         ctx: &Context,
-        plot_renderer: &PlotRenderer,
+        plot_renderer: &mut PlotRenderer,
         config: &OverlayConfig,
         metrics: OverlayMetrics,
     ) -> FrameInfo {
@@ -1202,7 +1202,7 @@ impl PlotOverlay {
     fn render_plot_area(
         &mut self,
         ui: &mut egui::Ui,
-        plot_renderer: &PlotRenderer,
+        plot_renderer: &mut PlotRenderer,
         config: &OverlayConfig,
     ) -> Rect {
         let available_rect = ui.available_rect_before_wrap();
@@ -1247,13 +1247,20 @@ impl PlotOverlay {
             };
             for (i, cell_rect) in rects.iter().enumerate() {
                 let cell_rect = Self::positioned_axes_outer_rect(*cell_rect, plot_renderer, i);
-                let cam = plot_renderer
-                    .axes_camera(i)
-                    .unwrap_or_else(|| plot_renderer.camera());
                 let panel_layout =
                     self.panel_layout_for_axes(cell_rect, plot_renderer, i, config.font_scale);
                 let r =
                     Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
+                plot_renderer.fit_pending_figure_camera_for_viewport(
+                    i,
+                    (
+                        (r.width() * ui.ctx().pixels_per_point()).round().max(1.0) as u32,
+                        (r.height() * ui.ctx().pixels_per_point()).round().max(1.0) as u32,
+                    ),
+                );
+                let cam = plot_renderer
+                    .axes_camera(i)
+                    .unwrap_or_else(|| plot_renderer.camera());
                 let frame_rect =
                     Self::snap_rect_to_pixels(panel_layout.frame_rect, ui.ctx().pixels_per_point());
                 rendered_axes_rects.push(r);
@@ -1391,11 +1398,22 @@ impl PlotOverlay {
                 }
             }
         } else {
-            let cam = plot_renderer.camera();
             let panel_layout =
                 self.panel_layout_for_axes(plot_area_rect, plot_renderer, 0, config.font_scale);
             let centered_plot_rect =
                 Self::snap_rect_to_pixels(panel_layout.plot_rect, ui.ctx().pixels_per_point());
+            plot_renderer.fit_pending_figure_camera_for_viewport(
+                0,
+                (
+                    (centered_plot_rect.width() * ui.ctx().pixels_per_point())
+                        .round()
+                        .max(1.0) as u32,
+                    (centered_plot_rect.height() * ui.ctx().pixels_per_point())
+                        .round()
+                        .max(1.0) as u32,
+                ),
+            );
+            let cam = plot_renderer.camera();
             let centered_frame_rect =
                 Self::snap_rect_to_pixels(panel_layout.frame_rect, ui.ctx().pixels_per_point());
             rendered_axes_rects.push(centered_plot_rect);
@@ -2994,6 +3012,7 @@ impl PlotOverlay {
         point: glam::Vec3,
     ) -> Option<Pos2> {
         let mut cam = camera.clone();
+        cam.update_aspect_ratio(plot_rect.width().max(1.0) / plot_rect.height().max(1.0));
         let clip = cam.view_proj_matrix() * point.extend(1.0);
         if !clip.x.is_finite() || !clip.y.is_finite() || !clip.z.is_finite() || !clip.w.is_finite()
         {
@@ -3235,7 +3254,9 @@ fn truncate_label(label: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod positioned_axes_tests {
     use super::PlotOverlay;
+    use crate::core::Camera;
     use egui::{pos2, vec2, Rect};
+    use glam::Vec3;
 
     #[test]
     fn positioned_axes_accepts_a_surface_smaller_than_overlay_margins() {
@@ -3253,5 +3274,23 @@ mod positioned_axes_tests {
         assert!((rect.min.y - 20.0).abs() < 1.0e-4);
         assert!((rect.width() - 60.0).abs() < 1.0e-4);
         assert!((rect.height() - 60.0).abs() < 1.0e-4);
+    }
+
+    #[test]
+    fn projected_world_text_uses_the_plot_rect_camera_aspect() {
+        let overlay = PlotOverlay::new();
+        let rect = Rect::from_min_size(pos2(20.0, 30.0), vec2(200.0, 700.0));
+        let mut camera = Camera::new();
+        let point = Vec3::new(0.3, 0.0, 0.0);
+        let screen = overlay
+            .project_world_to_screen(rect, &camera, point)
+            .unwrap();
+        camera.update_aspect_ratio(rect.width() / rect.height());
+        let clip = camera.view_proj_matrix() * point.extend(1.0);
+        let ndc = clip.truncate() / clip.w;
+        let expected_x = rect.min.x + (ndc.x + 1.0) * 0.5 * rect.width();
+        let expected_y = rect.min.y + (1.0 - (ndc.y + 1.0) * 0.5) * rect.height();
+        assert!((screen.x - expected_x).abs() < 1.0e-4);
+        assert!((screen.y - expected_y).abs() < 1.0e-4);
     }
 }

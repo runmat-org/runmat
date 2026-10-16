@@ -56,8 +56,8 @@ pub struct FigureScene {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "dtype", content = "values", rename_all = "lowercase")]
 pub enum SceneNumericStorage {
-    F64(Vec<f64>),
-    F32(Vec<f32>),
+    F64(#[serde(with = "runmat_types::serde_f64::vec")] Vec<f64>),
+    F32(#[serde(with = "runmat_types::serde_f32::vec")] Vec<f32>),
     I8(Vec<i8>),
     I16(Vec<i16>),
     I32(Vec<i32>),
@@ -676,7 +676,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 5;
+    pub const SCHEMA_VERSION: u32 = 6;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -4718,6 +4718,92 @@ mod tests {
             y.unwrap().storage(),
             &NumericStorage::I64(vec![-(wide as i64), 7])
         );
+    }
+
+    #[test]
+    fn figure_scene_json_roundtrip_preserves_nonfinite_native_float_sources() {
+        let double_bits = [
+            0x3ff8_0000_0000_0000,
+            0x8000_0000_0000_0000,
+            0x7ff0_0000_0000_0000,
+            0xfff0_0000_0000_0000,
+            0x7ff8_0000_0000_0042,
+        ];
+        let single_bits = [
+            0x3fc0_0000,
+            0x8000_0000,
+            0x7f80_0000,
+            0xff80_0000,
+            0x7fc0_0042,
+        ];
+        let x = NumericPlotData::new(
+            NumericStorage::F64(double_bits.map(f64::from_bits).to_vec()),
+            vec![1, double_bits.len()],
+        )
+        .unwrap();
+        let y = NumericPlotData::new(
+            NumericStorage::F32(single_bits.map(f32::from_bits).to_vec()),
+            vec![1, single_bits.len()],
+        )
+        .unwrap();
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::from_numeric_data(x, y).unwrap());
+
+        let scene = FigureScene::capture(&figure);
+        assert_eq!(scene.schema_version, 6);
+        let encoded = serde_json::to_string(&scene).unwrap();
+        assert!(encoded.contains(r#""f64_bits":"7ff8000000000042""#));
+        assert!(encoded.contains(r#""f32_bits":"7fc00042""#));
+        let rebuilt = serde_json::from_str::<FigureScene>(&encoded)
+            .unwrap()
+            .into_figure()
+            .unwrap();
+        let Some(PlotElement::Line(line)) = rebuilt.plots().next() else {
+            panic!("expected line")
+        };
+        let (x, y) = line.source_data();
+        let Some(NumericStorage::F64(x_values)) = x.map(NumericPlotData::storage) else {
+            panic!("expected native double source")
+        };
+        let Some(NumericStorage::F32(y_values)) = y.map(NumericPlotData::storage) else {
+            panic!("expected native single source")
+        };
+        assert_eq!(x.unwrap().shape(), &[1, double_bits.len()]);
+        assert_eq!(y.unwrap().shape(), &[1, single_bits.len()]);
+        assert_eq!(
+            x_values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            double_bits
+        );
+        assert_eq!(
+            y_values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            single_bits
+        );
+        assert!(
+            serde_json::from_str::<SceneNumericStorage>(r#"{"dtype":"f64","values":[null]}"#)
+                .is_err()
+        );
+
+        let mut legacy_figure = Figure::new();
+        legacy_figure.add_line_plot(
+            LinePlot::from_numeric_data(
+                NumericPlotData::new(NumericStorage::F64(vec![1.0, -0.0]), vec![1, 2]).unwrap(),
+                NumericPlotData::new(NumericStorage::F32(vec![2.0, 3.0]), vec![1, 2]).unwrap(),
+            )
+            .unwrap(),
+        );
+        let mut legacy = FigureScene::capture(&legacy_figure);
+        legacy.schema_version = 1;
+        let finite_legacy = serde_json::to_string(&legacy).unwrap();
+        serde_json::from_str::<FigureScene>(&finite_legacy)
+            .unwrap()
+            .into_figure()
+            .expect("finite legacy scene remains readable");
     }
 
     #[test]

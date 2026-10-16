@@ -13,6 +13,7 @@ pub mod rules;
 pub mod scalar_program;
 pub mod real_unary;
 pub mod reduction;
+pub mod serde_f32;
 pub mod serde_f64;
 pub mod source;
 pub mod symbolic;
