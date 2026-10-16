@@ -46,7 +46,7 @@ use crate::builtins::common::tensor as tensor_utils;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError, OBJECT_SUBSREF_METHOD};
 
 use super::pp::{
-    build_pchip_pp, build_spline_pp, eval_pp_scalar, Extrapolation, NumericSeries,
+    build_makima_pp, build_pchip_pp, build_spline_pp, eval_pp_scalar, Extrapolation, NumericSeries,
     PiecewisePolynomial,
 };
 
@@ -69,6 +69,7 @@ enum InterpMethod {
     Previous,
     Pchip,
     Spline,
+    Makima,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -79,6 +80,7 @@ enum ExtrapolationMethod {
     Previous,
     Pchip,
     Spline,
+    Makima,
     None,
 }
 

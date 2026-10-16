@@ -138,9 +138,9 @@ pub(super) fn factor_output(
     result
 }
 
-/// The host QR/SVD implementations cross a binary64 matrix boundary. A
-/// provider-facing QR call can still return its native precision, so callers
-/// must keep its class dynamic unless the input is proven host-resident.
+/// Project outputs whose host contract is binary64, such as SVD factors and
+/// QR permutations. Provider results can use their native precision, so keep
+/// their class dynamic unless the input is known to be host-resident.
 pub(super) fn binary64_output(
     input: &ValueFact,
     shape: ShapeFact,

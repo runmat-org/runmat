@@ -11,6 +11,73 @@ fn scalar_series(y: &[f64]) -> NumericSeries {
     }
 }
 
+#[test]
+fn makima_modified_weights_have_independent_local_oracle() {
+    let series = NumericSeries {
+        x: vec![0.0, 1.0, 2.0, 3.0, 4.0],
+        y: vec![0.0, 0.0, 0.0, 1.0, 0.0],
+        series: 1,
+        component_shape: Vec::new(),
+        sample_axis: SampleAxis::First,
+    };
+    let pp = build_makima_pp(&series, "interp1").expect("makima coefficients");
+    // On [2,3], the modified weights give endpoint slopes 0 and 5/11.
+    // Hermite evaluation at the midpoint is 1/2 - (5/11)/8 = 39/88.
+    assert!((eval_pp_scalar(&pp, 0, 2.5, &Extrapolation::Extrapolate) - 39.0 / 88.0).abs() < 1e-12);
+    assert_eq!(
+        eval_pp_scalar(&pp, 0, 0.5, &Extrapolation::Extrapolate),
+        0.0
+    );
+    assert_eq!(
+        eval_pp_scalar(&pp, 0, 1.5, &Extrapolation::Extrapolate),
+        0.0
+    );
+    for (index, expected) in series.y.iter().enumerate() {
+        assert!(
+            (eval_pp_scalar(&pp, 0, series.x[index], &Extrapolation::Extrapolate) - expected).abs()
+                < 1e-12
+        );
+    }
+    let two = NumericSeries {
+        x: vec![2.0, 4.0],
+        y: vec![3.0, 7.0],
+        series: 1,
+        component_shape: Vec::new(),
+        sample_axis: SampleAxis::First,
+    };
+    let two_pp = build_makima_pp(&two, "interp1").expect("two-point linear makima");
+    assert_eq!(
+        eval_pp_scalar(&two_pp, 0, 3.0, &Extrapolation::Extrapolate),
+        5.0
+    );
+    assert_eq!(
+        eval_pp_scalar(&two_pp, 0, 5.0, &Extrapolation::Extrapolate),
+        9.0
+    );
+}
+
+#[test]
+fn makima_large_finite_linear_samples_keep_finite_slopes() {
+    let scale = 1.0e200;
+    let series = scalar_series(&[0.0, scale, 2.0 * scale, 3.0 * scale, 4.0 * scale]);
+    let pp = build_makima_pp(&series, "interp1").expect("finite large-amplitude coefficients");
+    let value = eval_pp_scalar(&pp, 0, 2.5, &Extrapolation::Extrapolate);
+    assert!(value.is_finite());
+    assert!(((value / scale) - 1.5).abs() < 1.0e-12);
+
+    let steep = NumericSeries {
+        x: vec![0.0, 0.1, 0.2, 0.3, 0.4],
+        y: vec![0.0, 1.0e307, 2.0e307, 3.0e307, 4.0e307],
+        series: 1,
+        component_shape: Vec::new(),
+        sample_axis: SampleAxis::First,
+    };
+    let steep_pp = build_makima_pp(&steep, "interp1").expect("near-limit finite coefficients");
+    let steep_value = eval_pp_scalar(&steep_pp, 0, 0.15, &Extrapolation::Extrapolate);
+    assert!(steep_value.is_finite());
+    assert!(((steep_value / 1.0e307) - 1.5).abs() < 1.0e-12);
+}
+
 fn mirrorless_integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Tensor {
     Tensor::new_integer(storage, shape).expect("typed integer tensor")
 }

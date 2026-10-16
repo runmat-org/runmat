@@ -60,6 +60,7 @@ pub(super) fn parse_trailing_methods(
             InterpMethod::Previous => ExtrapolationMethod::Previous,
             InterpMethod::Pchip => ExtrapolationMethod::Pchip,
             InterpMethod::Spline => ExtrapolationMethod::Spline,
+            InterpMethod::Makima => ExtrapolationMethod::Makima,
         }
     };
     Ok((method, extrapolation))
@@ -76,9 +77,7 @@ pub(super) fn parse_interp_method(keyword: MethodKeyword) -> BuiltinResult<Inter
             "method 'cubic' is not yet implemented for griddedInterpolant",
         )),
         MethodKeyword::Spline => Ok(InterpMethod::Spline),
-        MethodKeyword::Makima => Err(unsupported(
-            "method 'makima' is not yet implemented for griddedInterpolant",
-        )),
+        MethodKeyword::Makima => Ok(InterpMethod::Makima),
         MethodKeyword::None => Err(invalid("'none' is only valid as an extrapolation method")),
     }
 }
@@ -95,9 +94,7 @@ pub(super) fn parse_extrap_method(keyword: MethodKeyword) -> BuiltinResult<Extra
         )),
         MethodKeyword::Spline => Ok(ExtrapolationMethod::Spline),
         MethodKeyword::None => Ok(ExtrapolationMethod::None),
-        MethodKeyword::Makima => Err(unsupported(
-            "extrapolation method 'makima' is not yet implemented for griddedInterpolant",
-        )),
+        MethodKeyword::Makima => Ok(ExtrapolationMethod::Makima),
     }
 }
 

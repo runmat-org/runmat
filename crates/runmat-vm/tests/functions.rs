@@ -529,6 +529,23 @@ fn nested_varargout_forwarding_with_nargout_slice_assignment() {
 }
 
 #[test]
+fn zero_requested_varargout_forwarding_still_executes_rhs_body() {
+    let error = execute_source_result(
+        r#"
+        outer(5);
+        function varargout = outer(x)
+            [varargout{1:nargout}] = inner(x);
+        end
+        function varargout = inner(v)
+            error('RunMat:ZeroOutputBodyReached', 'zero-output body was invoked');
+        end
+    "#,
+    )
+    .expect_err("the zero-output RHS call must still execute");
+    assert_eq!(error.identifier(), Some("RunMat:ZeroOutputBodyReached"));
+}
+
+#[test]
 fn nested_varargout_forwarding_with_nargout_slice_assignment_via_feval() {
     let source = r#"
         [a,b] = outer(5);

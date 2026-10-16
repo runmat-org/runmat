@@ -304,12 +304,12 @@ pub(super) fn validate_method_support(
     }
     if is_piecewise_method(method) && rank != 1 {
         return Err(unsupported(
-            "pchip and spline griddedInterpolant methods are currently supported for 1-D grids",
+            "pchip, spline, and makima griddedInterpolant methods are currently supported for 1-D grids",
         ));
     }
     if is_piecewise_extrapolation(extrapolation) && rank != 1 {
         return Err(unsupported(
-            "pchip and spline extrapolation methods are currently supported for 1-D grids",
+            "pchip, spline, and makima extrapolation methods are currently supported for 1-D grids",
         ));
     }
     match extrapolation {
@@ -321,6 +321,11 @@ pub(super) fn validate_method_support(
         ExtrapolationMethod::Spline if method != InterpMethod::Spline => {
             return Err(unsupported(
                 "spline extrapolation currently requires spline interpolation",
+            ))
+        }
+        ExtrapolationMethod::Makima if method != InterpMethod::Makima => {
+            return Err(unsupported(
+                "makima extrapolation currently requires makima interpolation",
             ))
         }
         _ => {}

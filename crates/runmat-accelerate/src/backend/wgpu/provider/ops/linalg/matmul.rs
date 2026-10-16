@@ -75,7 +75,13 @@ impl WgpuProvider {
         options: &ProviderQrOptions,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<ProviderQrPowerIterResult>> {
         let debug_qr = std::env::var("RUNMAT_DEBUG_QR").is_ok();
-        if !options.economy {
+        if !options.economy
+            || !matches!(options.column_order, ProviderQrColumnOrder::Unpivoted)
+            || !matches!(
+                options.outputs,
+                ProviderQrOutputs::Qr | ProviderQrOutputs::FullEnvelope
+            )
+        {
             return Ok(None);
         }
 
@@ -335,6 +341,13 @@ impl WgpuProvider {
             drop(handle);
         }
 
+        if matches!(options.outputs, ProviderQrOutputs::Qr) {
+            return Ok(Some(ProviderQrResult::Qr {
+                q: q_result,
+                r: r_handle,
+            }));
+        }
+
         let mut perm_matrix = vec![0.0f64; k * k];
         for i in 0..k {
             perm_matrix[i + i * k] = 1.0;
@@ -352,7 +365,7 @@ impl WgpuProvider {
             shape: &perm_vector_shape,
         })?;
 
-        Ok(Some(ProviderQrPowerIterResult {
+        Ok(Some(ProviderQrResult::FullEnvelope {
             q: q_result,
             r: r_handle,
             perm_matrix: perm_matrix_handle,

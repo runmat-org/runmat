@@ -21,10 +21,10 @@ use crate::builtins::common::spec::{
 };
 
 use super::pp::{
-    build_pchip_pp, build_spline_pp, evaluate_linear_or_nearest, evaluate_pp,
-    implicit_series_from_values, is_vector_shape, parse_extrapolation, parse_method, query_points,
-    series_from_values, validate_breaks, vector_from_value, Extrapolation, InterpMethod,
-    PpOutputLayout,
+    build_makima_pp, build_pchip_pp, build_spline_pp, evaluate_linear_or_nearest, evaluate_pp,
+    implicit_series_from_values, interp1_series_from_plan, is_vector_shape, parse_extrapolation,
+    parse_method, prepare_interp1_samples, query_points, Extrapolation, Interp1SamplePlan,
+    InterpMethod, PpOutputLayout,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
@@ -96,11 +96,22 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::interpolation::interp1"
 )]
 async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    preflight_interp1_inputs(&args).await?;
-    if let Some(output) = try_interp1_gpu(&args).await? {
+    let explicit = args.len() >= 3 && !third_arg_is_option(&args);
+    let sample_plan = if explicit {
+        preflight_interp1_explicit_x(&args[0]).await?;
+        Some(
+            prepare_interp1_samples(&args[0], NAME)
+                .await
+                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INVALID_INPUT))?,
+        )
+    } else {
+        None
+    };
+    preflight_interp1_inputs(&args, explicit).await?;
+    if let Some(output) = try_interp1_gpu(&args, sample_plan.as_ref()).await? {
         return Ok(output);
     }
-    let parsed = ParsedInterp1::parse(args)
+    let parsed = ParsedInterp1::parse(args, sample_plan)
         .await
         .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INVALID_INPUT))?;
     match parsed.method {
@@ -124,8 +135,20 @@ async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             )
             .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
         }
-        InterpMethod::Pchip => {
+        InterpMethod::Pchip | InterpMethod::Cubic => {
             let pp = build_pchip_pp(&parsed.series, NAME)
+                .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))?;
+            evaluate_pp(
+                &pp,
+                &parsed.query,
+                &parsed.extrap_for_cubic(),
+                PpOutputLayout::QueryLeading,
+                NAME,
+            )
+            .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))
+        }
+        InterpMethod::Makima => {
+            let pp = build_makima_pp(&parsed.series, NAME)
                 .map_err(|err| interp1_map_error(err, &INTERP1_ERROR_INTERNAL))?;
             evaluate_pp(
                 &pp,
@@ -139,7 +162,36 @@ async fn interp1_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 }
 
-async fn preflight_interp1_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
+async fn preflight_interp1_explicit_x(value: &Value) -> crate::BuiltinResult<()> {
+    use crate::builtins::common::validation::{
+        native_integer_value_is_exact_f64_async, value_has_logical_class,
+        value_has_native_integer_class,
+    };
+    if value_has_native_integer_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP1_INTEGER_SAMPLE_EXTENSION,
+            NAME,
+        )?;
+        if !native_integer_value_is_exact_f64_async(value).await? {
+            return Err(interp1_error_with_message(
+                "interp1: integer samples must be exactly representable as double",
+                &INTERP1_ERROR_INVALID_INPUT,
+            ));
+        }
+    }
+    if value_has_logical_class(value) {
+        crate::compatibility::ensure_builtin_extension_enabled(
+            &INTERP1_LOGICAL_INPUT_EXTENSION,
+            NAME,
+        )?;
+    }
+    Ok(())
+}
+
+async fn preflight_interp1_inputs(
+    args: &[Value],
+    explicit_x_admitted: bool,
+) -> crate::BuiltinResult<()> {
     use crate::builtins::common::validation::{
         native_integer_value_is_exact_f64_async, value_has_logical_class,
         value_has_native_integer_class,
@@ -153,7 +205,7 @@ async fn preflight_interp1_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
     } else {
         (&args[..1], &args[1])
     };
-    for value in samples {
+    for value in samples.iter().skip(usize::from(explicit_x_admitted)) {
         if value_has_native_integer_class(value) {
             crate::compatibility::ensure_builtin_extension_enabled(
                 &INTERP1_INTEGER_SAMPLE_EXTENSION,
@@ -214,7 +266,7 @@ async fn preflight_interp1_inputs(args: &[Value]) -> crate::BuiltinResult<()> {
 }
 
 struct GpuInterp1Series<'a> {
-    x: Vec<f64>,
+    x: std::borrow::Cow<'a, [f64]>,
     y: &'a GpuTensorHandle,
     sample_len: usize,
     series_count: usize,
@@ -232,7 +284,10 @@ struct GpuInterp1Query {
 #[path = "interp1/owning_tests.rs"]
 mod owning_tests;
 
-async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> {
+async fn try_interp1_gpu(
+    args: &[Value],
+    explicit_plan: Option<&Interp1SamplePlan>,
+) -> crate::BuiltinResult<Option<Value>> {
     if args.len() < 2 {
         return Ok(None);
     }
@@ -245,7 +300,11 @@ async fn try_interp1_gpu(args: &[Value]) -> crate::BuiltinResult<Option<Value>> 
         };
         (series, &args[1], &args[2..])
     } else {
-        let Some(series) = explicit_gpu_series(&args[0], &args[1]).await? else {
+        if matches!(&args[0], Value::GpuTensor(_)) {
+            return Ok(None);
+        }
+        let Some(series) = explicit_gpu_series(explicit_plan.expect("explicit X plan"), &args[1])?
+        else {
             return Ok(None);
         };
         (series, &args[2], &args[3..])
@@ -479,9 +538,11 @@ fn implicit_gpu_series(value: &Value) -> crate::BuiltinResult<Option<GpuInterp1S
     let Some((sample_len, series_count, trailing_shape)) = gpu_y_layout(handle, None)? else {
         return Ok(None);
     };
-    let x = (1..=sample_len).map(|value| value as f64).collect();
+    let x = (1..=sample_len)
+        .map(|value| value as f64)
+        .collect::<Vec<_>>();
     Ok(Some(GpuInterp1Series {
-        x,
+        x: x.into(),
         y: handle,
         sample_len,
         series_count,
@@ -489,22 +550,25 @@ fn implicit_gpu_series(value: &Value) -> crate::BuiltinResult<Option<GpuInterp1S
     }))
 }
 
-async fn explicit_gpu_series<'a>(
-    x_value: &Value,
+fn explicit_gpu_series<'a>(
+    plan: &'a Interp1SamplePlan,
     y_value: &'a Value,
 ) -> crate::BuiltinResult<Option<GpuInterp1Series<'a>>> {
     let Value::GpuTensor(handle) = y_value else {
         return Ok(None);
     };
-    if matches!(x_value, Value::GpuTensor(_))
-        || runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
+    if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real
         || runmat_accelerate_api::handle_integer_type(handle).is_some()
         || runmat_accelerate_api::handle_is_logical(handle)
     {
         return Ok(None);
     }
-    let x = vector_from_value(x_value.clone(), "X", NAME).await?;
-    validate_breaks(&x, NAME)?;
+    // The provider hook indexes Y in its original order. A distinct but
+    // nonascending X must take the host path, which permutes X and Y together.
+    if !plan.is_ascending() {
+        return Ok(None);
+    }
+    let x = std::borrow::Cow::Borrowed(plan.x());
     let Some((sample_len, series_count, trailing_shape)) = gpu_y_layout(handle, Some(x.len()))?
     else {
         return Ok(None);
@@ -660,7 +724,10 @@ struct ParsedInterp1 {
 }
 
 impl ParsedInterp1 {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(
+        args: Vec<Value>,
+        explicit_plan: Option<Interp1SamplePlan>,
+    ) -> crate::BuiltinResult<Self> {
         if args.len() < 2 {
             return Err(interp1_invalid_argument(
                 "expected at least Y and Xq arguments",
@@ -669,6 +736,7 @@ impl ParsedInterp1 {
 
         let mut method = InterpMethod::Linear;
         let mut extrap = Extrapolation::Nan;
+        let mut explicit_extrapolation = false;
         let (series, query, options) = if args.len() == 2 || third_arg_is_option(&args) {
             let mut iter = args.into_iter();
             let y = iter.next().expect("Y argument");
@@ -678,10 +746,11 @@ impl ParsedInterp1 {
             (series, query, iter.collect::<Vec<_>>())
         } else {
             let mut iter = args.into_iter();
-            let x = iter.next().expect("X argument");
+            let _x = iter.next().expect("X argument");
             let y = iter.next().expect("Y argument");
             let xq = iter.next().expect("Xq argument");
-            let series = series_from_values(x, y, NAME).await?;
+            let series =
+                interp1_series_from_plan(explicit_plan.expect("explicit X plan"), y, NAME).await?;
             let query = query_points(xq, NAME).await?;
             (series, query, iter.collect::<Vec<_>>())
         };
@@ -689,6 +758,7 @@ impl ParsedInterp1 {
         for option in &options {
             if let Some(parsed) = parse_extrapolation(option, NAME).await? {
                 extrap = parsed;
+                explicit_extrapolation = true;
                 continue;
             }
             if let Some(parsed) = parse_method(option, NAME)? {
@@ -699,6 +769,15 @@ impl ParsedInterp1 {
                 "interp1: unsupported interpolation option",
                 &INTERP1_ERROR_INVALID_ARGUMENT,
             ));
+        }
+
+        if !explicit_extrapolation
+            && matches!(
+                method,
+                InterpMethod::Spline | InterpMethod::Pchip | InterpMethod::Makima
+            )
+        {
+            extrap = Extrapolation::Extrapolate;
         }
 
         Ok(Self {
@@ -756,6 +835,135 @@ mod tests {
     }
 
     #[test]
+    fn interp1_pairs_distinct_unsorted_x_with_each_sample_channel() {
+        let y = Value::Tensor(
+            Tensor::new(vec![30.0, 10.0, 20.0, 300.0, 100.0, 200.0], vec![3, 2])
+                .expect("two sample channels"),
+        );
+        let result = run(vec![
+            row(&[3.0, 1.0, 2.0]),
+            y,
+            row(&[0.0, 1.5, 3.5]),
+            Value::String("linear".to_string()),
+            Value::String("extrap".to_string()),
+        ])
+        .expect("distinct unsorted interp1");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected query-by-channel output");
+        };
+        assert_eq!(tensor.shape(), &[1, 3, 2]);
+        assert_eq!(
+            tensor.materialize_f64(),
+            vec![0.0, 15.0, 35.0, 0.0, 150.0, 350.0]
+        );
+
+        let nd = run(vec![
+            row(&[3.0, 1.0, 2.0]),
+            Value::Tensor(
+                Tensor::new(vec![30.0, 10.0, 20.0, 300.0, 100.0, 200.0], vec![3, 1, 2])
+                    .expect("N-D sample channels"),
+            ),
+            row(&[1.5, 2.5]),
+        ])
+        .expect("N-D paired sample ordering");
+        let Value::Tensor(tensor) = nd else {
+            panic!("expected N-D query-by-channel output");
+        };
+        assert_eq!(tensor.shape(), &[1, 2, 1, 2]);
+        assert_eq!(tensor.materialize_f64(), vec![15.0, 25.0, 150.0, 250.0]);
+
+        let descending = run(vec![
+            row(&[3.0, 2.0, 1.0]),
+            row(&[30.0, 20.0, 10.0]),
+            row(&[0.0, 1.5, 3.5]),
+            Value::String("linear".to_string()),
+            Value::String("extrap".to_string()),
+        ])
+        .expect("descending interp1");
+        let Value::Tensor(tensor) = descending else {
+            panic!("expected query-shaped descending output");
+        };
+        assert_eq!(tensor.materialize_f64(), vec![0.0, 15.0, 35.0]);
+
+        for method in ["pchip", "spline"] {
+            let unordered = run(vec![
+                row(&[3.0, 1.0, 4.0, 2.0]),
+                row(&[9.0, 1.0, 16.0, 4.0]),
+                Value::Num(2.5),
+                Value::String(method.to_string()),
+            ])
+            .expect("higher-order unordered interpolation");
+            let ordered = run(vec![
+                row(&[1.0, 2.0, 3.0, 4.0]),
+                row(&[1.0, 4.0, 9.0, 16.0]),
+                Value::Num(2.5),
+                Value::String(method.to_string()),
+            ])
+            .expect("higher-order ordered reference");
+            assert_eq!(unordered, ordered, "paired ordering for {method}");
+        }
+
+        let duplicate = run(vec![row(&[-0.0, 0.0]), row(&[1.0, 2.0]), Value::Num(0.5)])
+            .expect_err("signed-zero duplicate points must be rejected");
+        assert!(duplicate.message().contains("distinct"));
+        let nonfinite = run(vec![
+            row(&[1.0, f64::INFINITY]),
+            row(&[10.0, 20.0]),
+            Value::Num(1.5),
+        ])
+        .expect_err("nonfinite sample point must be rejected");
+        assert!(nonfinite.message().contains("finite"));
+    }
+
+    #[test]
+    fn interp1_nonascending_host_x_with_resident_y_uses_paired_host_path() {
+        test_support::with_test_provider(|provider| {
+            let y = provider
+                .upload(&HostTensorView {
+                    data: &[30.0, 10.0, 20.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload unordered samples");
+            let result = run(vec![
+                row(&[3.0, 1.0, 2.0]),
+                Value::GpuTensor(y.clone()),
+                row(&[1.5, 2.5]),
+            ])
+            .expect("host ordering of resident Y");
+            let Value::Tensor(tensor) = result else {
+                panic!("nonascending X must not reach the ascending-only provider hook");
+            };
+            assert_eq!(tensor.materialize_f64(), vec![15.0, 25.0]);
+            let duplicate = run(vec![
+                row(&[2.0, 1.0, 2.0]),
+                Value::GpuTensor(y.clone()),
+                Value::Num(1.5),
+            ])
+            .expect_err("duplicate host X must fail before resident Y materialization");
+            assert!(duplicate.message().contains("distinct"));
+            y.release().expect("release borrowed Y");
+
+            let x = provider
+                .upload(&HostTensorView {
+                    data: &[3.0, 1.0, 2.0],
+                    shape: &[1, 3],
+                })
+                .expect("upload unordered X");
+            let result = run(vec![
+                Value::GpuTensor(x.clone()),
+                row(&[30.0, 10.0, 20.0]),
+                row(&[1.5, 2.5]),
+            ])
+            .expect("resident X host validation and ordering");
+            let Value::Tensor(tensor) = result else {
+                panic!("resident X follows host ordering admission");
+            };
+            assert_eq!(tensor.materialize_f64(), vec![15.0, 25.0]);
+            x.release().expect("release borrowed X");
+        });
+    }
+
+    #[test]
     fn interp1_nearest() {
         let result = run(vec![
             row(&[1.0, 2.0, 3.0]),
@@ -768,6 +976,79 @@ mod tests {
             panic!("expected tensor");
         };
         assert_eq!(tensor.materialize_f64(), vec![10.0, 40.0]);
+    }
+
+    #[test]
+    fn interp1_makima_uses_modified_slopes_and_preserves_query_shape() {
+        let result = run(vec![
+            row(&[0.0, 1.0, 2.0, 3.0, 4.0]),
+            row(&[0.0, 0.0, 0.0, 1.0, 0.0]),
+            row(&[2.5, 4.0]),
+            Value::String("makima".to_string()),
+        ])
+        .expect("makima interp1");
+        let Value::Tensor(tensor) = result else {
+            panic!("expected query-shaped tensor");
+        };
+        assert_eq!(tensor.shape(), &[1, 2]);
+        assert!((tensor.materialize_f64()[0] - 39.0 / 88.0).abs() < 1e-12);
+        assert_eq!(tensor.materialize_f64()[1], 0.0);
+
+        let extrapolated = run(vec![
+            row(&[0.0, 1.0]),
+            row(&[0.0, 1.0]),
+            Value::Num(-1.0),
+            Value::String("makima".to_string()),
+        ])
+        .expect("two-point makima extrapolation");
+        assert_eq!(extrapolated, Value::Num(-1.0));
+
+        let filled = run(vec![
+            row(&[0.0, 1.0]),
+            row(&[0.0, 1.0]),
+            Value::Num(-1.0),
+            Value::String("makima".to_string()),
+            Value::Num(99.0),
+        ])
+        .expect("explicit makima fill");
+        assert_eq!(filled, Value::Num(99.0));
+    }
+
+    #[test]
+    fn interp1_cubic_keeps_nan_default_distinct_from_pchip() {
+        let samples = || {
+            vec![
+                row(&[0.0, 1.0, 2.0]),
+                row(&[0.0, 1.0, 4.0]),
+                Value::Num(-1.0),
+            ]
+        };
+        let mut cubic = samples();
+        cubic.push(Value::String("cubic".to_string()));
+        let Value::Num(default_cubic) = run(cubic).expect("cubic default") else {
+            panic!("expected scalar cubic output");
+        };
+        assert!(default_cubic.is_nan());
+
+        let mut pchip = samples();
+        pchip.push(Value::String("pchip".to_string()));
+        let Value::Num(default_pchip) = run(pchip).expect("pchip default") else {
+            panic!("expected scalar pchip output");
+        };
+        assert!(default_pchip.is_finite());
+
+        let mut explicit = samples();
+        explicit.push(Value::String("cubic".to_string()));
+        explicit.push(Value::String("extrap".to_string()));
+        assert_eq!(
+            run(explicit).expect("explicit cubic extrapolation"),
+            Value::Num(default_pchip)
+        );
+
+        let mut filled = samples();
+        filled.push(Value::String("cubic".to_string()));
+        filled.push(Value::Num(17.0));
+        assert_eq!(run(filled).expect("explicit cubic fill"), Value::Num(17.0));
     }
 
     #[test]

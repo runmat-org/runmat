@@ -46,7 +46,7 @@ use runmat_accelerate_api::{
     ProviderLuResult, ProviderModulationRequest, ProviderMovingWindowEndpoints,
     ProviderMovingWindowOp, ProviderMovingWindowRequest, ProviderNanMode, ProviderNdgridRequest,
     ProviderNdgridResult, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
+    ProviderPrecision, ProviderQrOptions, ProviderQrResult, ProviderScanDirection,
     ProviderStdNormalization, ProviderSymmetryKind, ProviderTrapezoidSpacing, SetdiffOptions,
     SetdiffResult, SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
@@ -8814,44 +8814,38 @@ impl AccelProvider for InProcessProvider {
             };
             let tensor =
                 Tensor::new(data, handle.shape().to_vec()).map_err(|e| anyhow!("qr: {e}"))?;
-            let mut args = Vec::new();
-            if options.economy {
-                args.push(Value::Num(0.0));
-            }
-            if matches!(options.pivot, ProviderQrPivot::Vector) {
-                args.push(Value::from("vector"));
-            }
-            let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+            let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate_provider(
                 Value::Tensor(tensor),
-                &args,
+                options,
             )
             .await
             .map_err(runtime_flow_to_provider_error)?;
-
-            let q_tensor = tensor_from_value("qr", eval.q())?;
-            let r_tensor = tensor_from_value("qr", eval.r())?;
-            let perm_matrix_tensor = tensor_from_value("qr", eval.permutation_matrix())?;
-            let perm_vector_tensor = tensor_from_value("qr", eval.permutation_vector())?;
-
-            let q_handle =
-                self.allocate_tensor(q_tensor.materialize_f64(), q_tensor.shape().to_vec())?;
-            let r_handle =
-                self.allocate_tensor(r_tensor.materialize_f64(), r_tensor.shape().to_vec())?;
-            let perm_matrix_handle = self.allocate_tensor(
-                perm_matrix_tensor.materialize_f64(),
-                perm_matrix_tensor.shape().to_vec(),
-            )?;
-            let perm_vector_handle = self.allocate_tensor(
-                perm_vector_tensor.materialize_f64(),
-                perm_vector_tensor.shape().to_vec(),
-            )?;
-
-            Ok(ProviderQrResult {
-                q: q_handle,
-                r: r_handle,
-                perm_matrix: perm_matrix_handle,
-                perm_vector: perm_vector_handle,
-            })
+            let upload = |value| -> Result<GpuTensorHandle> {
+                let tensor = tensor_from_value("qr", value)?;
+                self.allocate_tensor(tensor.materialize_f64(), tensor.shape().to_vec())
+            };
+            match options.outputs {
+                runmat_accelerate_api::ProviderQrOutputs::R => Ok(ProviderQrResult::R {
+                    r: upload(eval.r())?,
+                }),
+                runmat_accelerate_api::ProviderQrOutputs::Qr => Ok(ProviderQrResult::Qr {
+                    q: upload(eval.q())?,
+                    r: upload(eval.r())?,
+                }),
+                runmat_accelerate_api::ProviderQrOutputs::Qrp(_) => Ok(ProviderQrResult::Qrp {
+                    q: upload(eval.q())?,
+                    r: upload(eval.r())?,
+                    permutation: upload(eval.permutation())?,
+                }),
+                runmat_accelerate_api::ProviderQrOutputs::FullEnvelope => {
+                    Ok(ProviderQrResult::FullEnvelope {
+                        q: upload(eval.q())?,
+                        r: upload(eval.r())?,
+                        perm_matrix: upload(eval.permutation_matrix())?,
+                        perm_vector: upload(eval.permutation_vector())?,
+                    })
+                }
+            }
         })
     }
 

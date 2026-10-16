@@ -62,6 +62,28 @@ impl AccelProvider for Provider {
 }
 
 #[test]
+fn invalid_explicit_x_is_rejected_before_resident_y_download() {
+    let provider = Box::leak(Box::new(Provider {
+        owner: TestAllocationOwner::new(),
+        uploads: Mutex::new(Vec::new()),
+        mode: Mode::Failure,
+    }));
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let input = provider
+        .owner
+        .allocate_zeroed(vec![3, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .expect("resident Y fixture");
+    let result = futures::executor::block_on(interp1_builtin(vec![
+        Value::Tensor(Tensor::new(vec![2.0, 1.0, 2.0], vec![1, 3]).unwrap()),
+        Value::GpuTensor(input.handle.clone()),
+        Value::Num(1.5),
+    ]));
+    let error = result.expect_err("duplicate X must be rejected before the download hook");
+    assert!(error.message().contains("distinct"), "{error}");
+    assert_eq!(input.probe.retirements(), 0);
+}
+
+#[test]
 fn interpolation_uploads_retire_on_pending_drop_failure_unsupported_and_alias_rejection() {
     for mode in [
         Mode::Pending,
@@ -83,7 +105,7 @@ fn interpolation_uploads_retire_on_pending_drop_failure_unsupported_and_alias_re
             Value::GpuTensor(input.handle.clone()),
             Value::Tensor(Tensor::new(vec![1.5, 2.5], vec![2, 1]).unwrap()),
         ];
-        let mut future = Box::pin(try_interp1_gpu(&args));
+        let mut future = Box::pin(try_interp1_gpu(&args, None));
         let waker = futures::task::noop_waker();
         match (mode, future.as_mut().poll(&mut Context::from_waker(&waker))) {
             (Mode::Pending, Poll::Pending) | (Mode::Unsupported, Poll::Ready(Ok(None))) => {}

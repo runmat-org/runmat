@@ -213,6 +213,87 @@ pub(super) fn pchip_coefs_for_series(x: &[f64], y: &[f64]) -> Vec<[f64; 4]> {
     coefs
 }
 
+/// Modified Akima slopes use the adjacent secants and two linearly extended
+/// secants at each boundary. The Hermite coefficients share the same local pp
+/// representation as pchip, but the derivatives are deliberately different.
+pub(super) fn makima_coefs_for_series(
+    x: &[f64],
+    y: &[f64],
+    name: &'static str,
+) -> BuiltinResult<Vec<[f64; 4]>> {
+    let n = x.len();
+    if n == 2 {
+        return Ok(vec![[0.0, 0.0, (y[1] - y[0]) / (x[1] - x[0]), y[0]]]);
+    }
+    let secant_count = n
+        .checked_add(3)
+        .ok_or_else(|| interp_error(name, format!("{name}: interpolation size overflow")))?;
+    let mut secants = zeroed_buffer(secant_count, name)?;
+    for i in 0..n - 1 {
+        secants[i + 2] = (y[i + 1] - y[i]) / (x[i + 1] - x[i]);
+    }
+    // Express linear extension as a secant plus its finite difference. The
+    // algebraically equivalent 2*a-b can overflow before cancellation.
+    secants[1] = secants[2] + (secants[2] - secants[3]);
+    secants[0] = secants[1] + (secants[1] - secants[2]);
+    secants[n + 1] = secants[n] + (secants[n] - secants[n - 1]);
+    secants[n + 2] = secants[n + 1] + (secants[n + 1] - secants[n]);
+
+    let mut slopes = zeroed_buffer(n, name)?;
+    for i in 0..n {
+        let before = secants[i + 1];
+        let after = secants[i + 2];
+        let next = secants[i + 3];
+        let previous = secants[i];
+        let mut right_weight = (next - after).abs() + (0.5 * next + 0.5 * after).abs();
+        let mut left_weight = (before - previous).abs() + (0.5 * before + 0.5 * previous).abs();
+        if !right_weight.is_finite() || !left_weight.is_finite() {
+            // Preserve the weight ratio when finite secants have a difference
+            // too large to represent directly.
+            let scale = previous
+                .abs()
+                .max(before.abs())
+                .max(after.abs())
+                .max(next.abs());
+            right_weight = ((next / scale) - (after / scale)).abs()
+                + (0.5 * (next / scale) + 0.5 * (after / scale)).abs();
+            left_weight = ((before / scale) - (previous / scale)).abs()
+                + (0.5 * (before / scale) + 0.5 * (previous / scale)).abs();
+        }
+        let weight_scale = left_weight.max(right_weight);
+        slopes[i] = if weight_scale == 0.0 {
+            0.5 * before + 0.5 * after
+        } else {
+            let right_fraction = right_weight / weight_scale;
+            let left_fraction = left_weight / weight_scale;
+            (right_fraction / (right_fraction + left_fraction)) * before
+                + (left_fraction / (right_fraction + left_fraction)) * after
+        };
+    }
+
+    let mut coefs = Vec::new();
+    coefs.try_reserve_exact(n - 1).map_err(|_| {
+        interp_error(
+            name,
+            format!("{name}: insufficient memory for interpolation data"),
+        )
+    })?;
+    for i in 0..n - 1 {
+        let h = x[i + 1] - x[i];
+        let delta = secants[i + 2];
+        let c0 = y[i];
+        let c1 = slopes[i];
+        // Form Hermite numerators from deviations from the local secant, so
+        // a large finite linear slope does not overflow in 3*delta or 2*m.
+        let left_deviation = delta - slopes[i];
+        let right_deviation = delta - slopes[i + 1];
+        let c2 = (left_deviation + (left_deviation + right_deviation)) / h;
+        let c3 = -(left_deviation + right_deviation) / h / h;
+        coefs.push([c3, c2, c1, c0]);
+    }
+    Ok(coefs)
+}
+
 fn endpoint_slope(h0: f64, h1: f64, del0: f64, del1: f64) -> f64 {
     let mut slope = ((2.0 * h0 + h1) * del0 - h0 * del1) / (h0 + h1);
     if slope.signum() != del0.signum() {

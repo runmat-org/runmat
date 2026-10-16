@@ -11,7 +11,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     slug: Some("griddedInterpolant"),
     summary: "Create an object that interpolates real dense data on a rectilinear grid.",
     description: "`griddedInterpolant` constructs an interpolant object with GridVectors, Values, Method, and ExtrapolationMethod properties. Calling the object with parentheses evaluates it at query points.",
-    keywords: &["griddedInterpolant", "interpolation", "grid", "linear", "nearest", "pchip", "spline"],
+    keywords: &["griddedInterpolant", "interpolation", "grid", "linear", "nearest", "pchip", "spline", "makima"],
     related: &["interp1", "interp2", "pchip", "spline"],
     sections: &[
         BuiltinDocumentationSection {
@@ -19,7 +19,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "`griddedInterpolant(V)` uses default grid vectors `1:size(V,dim)`. `griddedInterpolant(x,v)` and `griddedInterpolant({x1,...,xn},V)` use explicit compact grid vectors. Full-grid `griddedInterpolant(X1,...,Xn,V)` extracts vectors from rectilinear monotone grids.",
                 "Grid vectors are finite, strictly increasing real vectors with at least two points. Values are real dense arrays whose leading dimensions match the grid. Single-precision Values remain single in the object and in tensor evaluation; scalar double results use numeric scalars.",
-                "Method may be linear, nearest, next, previous, pchip, or spline; pchip and spline are 1-D only. ExtrapolationMethod also accepts none. Cubic, makima, and unsupported N-D higher-order forms return explicit errors rather than a substitute interpolation.",
+                "Method may be linear, nearest, next, previous, pchip, spline, or makima; pchip, spline, and makima are 1-D only. ExtrapolationMethod also accepts none. Cubic and unsupported N-D higher-order forms return explicit errors rather than a substitute interpolation. Makima extrapolation currently requires makima interpolation.",
             ],
         },
         BuiltinDocumentationSection {
@@ -52,6 +52,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(abs(yq-15)<1e-12);" },
+        },
+        BuiltinExample {
+            id: "one-dimensional-makima",
+            title: "Evaluate modified Akima interpolation",
+            program: "F = griddedInterpolant([0 1 2 3 4],[0 0 0 1 0],'makima'); yq = F(2.5)",
+            display_output: Some("yq = 0.443181818181818"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(abs(yq-39/88)<1e-12);" },
         },
     ],
     example_exemption: None,

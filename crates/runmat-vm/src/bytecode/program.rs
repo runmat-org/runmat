@@ -77,6 +77,8 @@ mod bound_binding;
 pub(crate) mod retained_artifacts;
 #[path = "program/semantic_fingerprint.rs"]
 mod semantic_fingerprint;
+#[path = "program/slot_set_serde.rs"]
+mod slot_set_serde;
 #[path = "program/source_facts.rs"]
 mod source_facts;
 #[path = "program/source_projection.rs"]
@@ -348,7 +350,7 @@ pub struct FunctionBytecode {
     pub creates_lexical_environment: bool,
     #[serde(default)]
     pub var_names: HashMap<usize, String>,
-    #[serde(default)]
+    #[serde(default, with = "slot_set_serde")]
     pub initially_unassigned_slots: HashSet<usize>,
     #[serde(default)]
     pub argument_validations: Vec<FunctionArgumentValidation>,
@@ -1878,7 +1880,7 @@ pub struct Bytecode {
     pub var_types: Vec<Type>,
     #[serde(default)]
     pub var_names: HashMap<usize, String>,
-    #[serde(default)]
+    #[serde(default, with = "slot_set_serde")]
     pub initially_unassigned_slots: HashSet<usize>,
     #[serde(default)]
     pub layout: Option<VmAssemblyLayout>,

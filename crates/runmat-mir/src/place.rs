@@ -18,6 +18,16 @@ pub enum MirRootStep {
 }
 
 impl MirPlace {
+    pub fn root_local(&self) -> Option<MirLocalId> {
+        match self {
+            Self::Local(local) => Some(*local),
+            Self::Binding(_) => None,
+            Self::Member(base, _) | Self::DynamicMember(base, _) | Self::Index(base, _) => {
+                base.root_local()
+            }
+        }
+    }
+
     /// First operation rooted in the binding, not the outermost operation
     /// of a nested assignment path.
     pub fn first_root_step(&self) -> Option<MirRootStep> {

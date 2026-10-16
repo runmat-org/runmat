@@ -1225,7 +1225,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
-    use runmat_builtins::{builtin_function_by_name, ResolveContext, Type};
+    use runmat_builtins::{builtin_catalog_entry_by_name, ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage};
 
     fn error_message(err: RuntimeError) -> String {
@@ -1477,7 +1477,8 @@ pub(crate) mod tests {
             panic!("expected real single vectors");
         };
         assert_eq!(vectors.numeric_dtype(), NumericDType::F32);
-        let builtin = builtin_function_by_name(BUILTIN_NAME).expect("registered eig");
+        let builtin =
+            builtin_catalog_entry_by_name(BUILTIN_NAME).expect("registered eig catalog entry");
         assert_eq!(builtin.extensions, &EIG_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 2);
     }

@@ -5,23 +5,23 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     title: Some("interp1"),
     slug: Some("interp1"),
     summary: "Interpolate one-dimensional sampled data.",
-    description: "`interp1(X,Y,Xq)` estimates sampled values at query locations. `interp1(Y,Xq)` uses implicit sample locations `1:n`, where `n` is the length of Y's first non-singleton sample dimension. The default method is linear; nearest, spline, and pchip are also available.",
-    keywords: &["interp1", "interpolation", "linear", "nearest", "spline", "pchip"],
+    description: "`interp1(X,Y,Xq)` estimates sampled values at query locations. `interp1(Y,Xq)` uses implicit sample locations `1:n`, where `n` is the length of Y's first non-singleton sample dimension. The default method is linear; nearest, spline, pchip, cubic (PCHIP coefficients), and makima are also available.",
+    keywords: &["interp1", "interpolation", "linear", "nearest", "spline", "pchip", "makima"],
     related: &["spline", "pchip", "interp2"],
     sections: &[
         BuiltinDocumentationSection {
             heading: "Syntax and geometry",
             paragraphs: &[
-                "`Vq = interp1(Y,Xq)` uses sample points `1:n` along Y's first non-singleton dimension (`1:numel(Y)` for vector Y). `Vq = interp1(X,Y,Xq)` uses a strictly increasing sample-location vector X. Optional method and extrapolation arguments follow Xq.",
+                "`Vq = interp1(Y,Xq)` uses sample points `1:n` along Y's first non-singleton dimension (`1:numel(Y)` for vector Y). `Vq = interp1(X,Y,Xq)` accepts distinct finite sample locations X in any order and pairs each location with its Y sample before interpolation. Optional method and extrapolation arguments follow Xq.",
                 "Vector Y follows X and preserves the shape of Xq. Matrix or N-D Y is interpolated along its first sample dimension; the output places the query dimensions before the remaining component dimensions. A scalar query produces a scalar for vector Y.",
-                "The supported methods are `linear`, `nearest`, `spline`, and `pchip`; `linear` is the default. Out-of-range queries return NaN unless `extrap` or a scalar fill value is supplied. Cubic methods use the shared spline and shape-preserving piecewise-polynomial implementations.",
+                "The supported methods are `linear`, `nearest`, `spline`, `pchip`, `cubic`, and `makima`; `linear` is the default. `cubic` uses PCHIP coefficients but retains its NaN default for out-of-range queries. Spline, pchip, and makima extrapolate by default; linear and nearest return NaN. An explicit `extrap` or scalar fill value overrides the default. Higher-order methods use the shared piecewise-polynomial implementation; makima uses modified Akima slopes, not pchip slopes.",
             ],
         },
         BuiltinDocumentationSection {
             heading: "Classes and device execution",
             paragraphs: &[
                 "Host interpolation currently computes real double values. Typed integer sample locations, values, query coordinates, or scalar fills use a RunMat-only checked conversion to binary64; logical numeric inputs are also RunMat-only extensions. Values that cannot cross the exact integer boundary are rejected.",
-                "For real resident Y and resident or host Xq, linear and nearest interpolation may execute on the owning provider and return a resident output when X is implicit or host-validated. Provider precision can be single or double. The host path handles spline and pchip, unavailable provider hooks, and resident-X breakpoint validation. A provider failure is not silently treated as an unsupported hook.",
+                "For real resident Y and resident or host Xq, linear and nearest interpolation may execute on the owning provider and return a resident output when X is implicit or host-validated as ascending. Provider precision can be single or double. The host path handles spline, pchip, and makima, nonascending X with paired sample ordering, unavailable provider hooks, and resident-X validation. A provider failure is not silently treated as an unsupported hook.",
                 "Interpolation is a fusion boundary. Provider ownership, input/output aliasing, storage class, shape, and precision are validated around the resident call. Static class and residency facts remain dynamic when the selected device route is not known ahead of time.",
             ],
         },
@@ -48,6 +48,17 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             fixture: BuiltinExampleFixture::None,
             requirements: BuiltinExampleRequirements::NONE,
             verification: BuiltinExampleVerification::Assertions { source: "assert(numel(yq)==2); assert(abs(yq(1)-2.25)<1e-12); assert(abs(yq(2)-6.25)<1e-12);" },
+        },
+        BuiltinExample {
+            id: "makima-modified-slopes",
+            title: "Interpolate with modified Akima slopes",
+            program: "x = [0 1 2 3 4]; y = [0 0 0 1 0]; yq = interp1(x,y,2.5,'makima')",
+            display_output: Some("yq = 0.443181818181818"),
+            compatibility: BuiltinExampleCompatibility::Matlab,
+            harness: BuiltinExampleHarness::Portable,
+            fixture: BuiltinExampleFixture::None,
+            requirements: BuiltinExampleRequirements::NONE,
+            verification: BuiltinExampleVerification::Assertions { source: "assert(abs(yq-39/88)<1e-12);" },
         },
         BuiltinExample {
             id: "implicit-matrix-samples",

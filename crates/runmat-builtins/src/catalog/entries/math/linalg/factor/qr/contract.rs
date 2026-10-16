@@ -66,7 +66,7 @@ pub const QR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::GatherFallback,
         overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "The gated matrix crosses one checked binary64 QR boundary. Q, R, and matrix-form P are double; vector-form P is a one-based double index vector, and automatic residency may restore outputs to the owner.",
+        notes: "The gated matrix crosses one checked binary64 QR boundary. Q, R, and matrix-form P are double; vector-form P is a one-based double index vector. Exact-owner restoration preserves these classes and input provenance through checked uploads; unsupported transfers report an error. Only requested outputs are materialized.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "[Q, R, P] = qr(A, integer_zero)",

@@ -660,8 +660,8 @@ pub(crate) mod tests {
 
     #[test]
     fn chol_registers_integer_extension_and_capability() {
-        let builtin =
-            runmat_builtins::builtin_function_by_name(BUILTIN_NAME).expect("chol builtin");
+        let builtin = runmat_builtins::builtin_catalog_entry_by_name(BUILTIN_NAME)
+            .expect("chol catalog entry");
         assert_eq!(builtin.extensions.len(), 2);
         assert_eq!(builtin.extensions[0].id, "chol-integer-input");
         assert_eq!(builtin.extensions[1].id, "chol-logical-input");

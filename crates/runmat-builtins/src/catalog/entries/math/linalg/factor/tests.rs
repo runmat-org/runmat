@@ -89,7 +89,36 @@ fn factor_literal_options_follow_runtime_normalization_and_last_selector() {
 }
 
 #[test]
-fn rectangular_lu_and_binary64_host_factor_classes_match_runtime_constructors() {
+fn qr_diagnoses_only_the_final_explicit_permutation_option() {
+    let mut overridden = factor_request_with_options(3, 2, NumericClass::Double, 2, &["vector"]);
+    overridden
+        .arguments
+        .push(ValueFact::scalar(ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        })));
+    overridden
+        .literals
+        .literal_args
+        .push(LiteralValue::Number(0.0));
+    let inferred = infer_catalog_call(&QR_CATALOG_ENTRY, &overridden);
+    assert!(
+        inferred.diagnostics.is_empty(),
+        "{:?}",
+        inferred.diagnostics
+    );
+
+    overridden.arguments.swap(1, 2);
+    overridden.literals.literal_args.swap(1, 2);
+    let inferred = infer_catalog_call(&QR_CATALOG_ENTRY, &overridden);
+    assert!(inferred
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == QR_ERROR_INVALID_ARGUMENT.code));
+}
+
+#[test]
+fn rectangular_lu_and_host_factor_classes_match_runtime_constructors() {
     let lu = infer_catalog_call(
         &LU_CATALOG_ENTRY,
         &factor_request_with_options(3, 2, NumericClass::Single, 3, &[]),
@@ -108,14 +137,17 @@ fn rectangular_lu_and_binary64_host_factor_classes_match_runtime_constructors() 
         matches!(&lu_vector.outputs[2].kind, ValueKindFact::Numeric(n) if n.class == NumericClass::Double)
     );
 
-    for entry in [&QR_CATALOG_ENTRY, &SVD_CATALOG_ENTRY] {
+    for (entry, expected_class) in [
+        (&QR_CATALOG_ENTRY, NumericClass::Single),
+        (&SVD_CATALOG_ENTRY, NumericClass::Double),
+    ] {
         let inferred = infer_catalog_call(
             entry,
             &factor_request_with_options(3, 2, NumericClass::Single, 2, &[]),
         );
         for output in &inferred.outputs[..2] {
             assert!(
-                matches!(&output.kind, ValueKindFact::Numeric(n) if n.class == NumericClass::Double),
+                matches!(&output.kind, ValueKindFact::Numeric(n) if n.class == expected_class),
                 "{}: {output:?}",
                 entry.identity.name
             );

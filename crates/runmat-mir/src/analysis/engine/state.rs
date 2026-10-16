@@ -5,7 +5,7 @@ use runmat_types::{
     ValueSequenceFact,
 };
 
-use crate::{MirBody, MirLocalId, MirSequenceLocalId};
+use crate::{MirBody, MirLocalId, MirPlace, MirSequenceLocalId, SequenceRootCreation};
 
 use super::super::InitFact;
 
@@ -50,6 +50,22 @@ pub(crate) struct FlowState {
 }
 
 impl FlowState {
+    /// Only the local lifecycle proves an absent binding. An unknown value,
+    /// parameter, capture, or declared workspace slot cannot be used as a
+    /// creation receipt for a new cell root.
+    pub(crate) fn absent_cell_root_for_place(
+        &self,
+        place: &MirPlace,
+        creation: SequenceRootCreation,
+    ) -> Option<(MirLocalId, ValueFact)> {
+        if creation != SequenceRootCreation::EmptyCell {
+            return None;
+        }
+        let local = place.root_local()?;
+        (self.locals.get(local.0)?.assignment == InitFact::Unassigned)
+            .then(|| (local, runmat_types::infer_cell_aggregate(&[]).fact))
+    }
+
     pub fn entry(
         body: &MirBody,
         parameters: &[ValueFact],
@@ -66,6 +82,38 @@ impl FlowState {
         let mut parameter = 0;
         let mut capture = 0;
         for local in &body.locals {
+            if local.binding == body.abi.varargout && local.binding.is_some() {
+                state.locals[local.id.0] = LocalState::assigned(
+                    ValueFact::proven(
+                        runmat_types::ValueKindFact::Cell(runmat_types::CellFact {
+                            element: Box::new(ValueFact::unknown(
+                                runmat_types::DynamicReason::RuntimeValue,
+                            )),
+                            elements: Vec::new(),
+                            elements_complete: true,
+                        }),
+                        runmat_types::ShapeFact::from(vec![Some(1), Some(0)]),
+                        runmat_types::StorageFact::Dense,
+                    ),
+                    LiteralValue::Unknown,
+                );
+                continue;
+            }
+            if local.binding.is_some_and(|binding| {
+                body.abi.implicit_nargin == Some(binding)
+                    || body.abi.implicit_nargout == Some(binding)
+            }) {
+                state.locals[local.id.0] = LocalState::assigned(
+                    ValueFact::scalar(runmat_types::ValueKindFact::Numeric(
+                        runmat_types::NumericFact {
+                            class: runmat_types::NumericClass::Double,
+                            domain: runmat_types::NumericDomain::Real,
+                        },
+                    )),
+                    LiteralValue::Unknown,
+                );
+                continue;
+            }
             let fact = match local.kind {
                 crate::MirLocalKind::Parameter => {
                     let value = parameters.get(parameter).cloned();

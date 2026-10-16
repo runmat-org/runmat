@@ -2,17 +2,17 @@ use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior",
-paragraphs: &["Single output: `R = qr(A)` returns the upper-triangular (or upper-trapezoidal) factor. Column pivoting is applied implicitly for numerical stability.",
-"Two outputs: `[Q, R] = qr(A)` yields the orthonormal/unitary factor `Q` and the upper-triangular `R` such that `Q * R = A * E`, where `E` is the column permutation matrix selected during factorization. When you omit `E`, the columns of `R` already appear in that permuted order.",
+paragraphs: &["Single output: `R = qr(A)` returns the upper-triangular (or upper-trapezoidal) factor of the unpivoted decomposition `A = Q * R` without materializing `Q`.",
+"Two outputs: `[Q, R] = qr(A)` yields the orthonormal/unitary factor `Q` and the upper-triangular `R` such that `Q * R = A`; the input columns are not permuted.",
 "Three outputs: `[Q, R, E] = qr(A)` additionally returns the column permutation so that `A * E = Q * R`. Use the `'vector'` option to receive a pivot vector instead of a permutation matrix.",
 "Economy size: `qr(A, 0)` or `qr(A, 'econ')` returns the reduced-size factors: when `m ≥ n`, `Q` is `m × n` and `R` is `n × n`; for wide matrices (`m < n`) the economy form equals the full form. The legacy numeric-zero syntax selects vector permutation output when a third output is requested.",
 "Public MATLAB matrix classes are single and double. RunMat mode separately admits logical matrices and every real integer class through named extensions; integer matrix values cross only after exact binary64 representability checks. Scalars and vectors are treated as 1-D or 2-D dense arrays.",
 "Typed-integer and logical zero economy selectors are separately gated RunMat extensions. An explicit resident option is independently gated and read through its exact owner; nonzero or nonscalar numeric options reject.",
-"Integer inputs never enter a floating provider QR kernel. Resident integer input gathers through its exact owner and restores the double Q, R, and permutation outputs to that owner when supported."] },
+"Integer inputs never enter a floating provider QR kernel. Resident integer input gathers through its exact owner, computes double factors, and restores only requested outputs through checked class-preserving uploads. Unsupported transfers report an error."] },
     BuiltinDocumentationSection { heading: "Acceleration and residency",
-paragraphs: &["When the active acceleration provider exposes the dedicated QR hook (the bundled WGPU backend does), RunMat stages the input through the provider, performs the factorisation via the runtime implementation, and re-uploads all outputs so they remain resident as `gpuTensor` handles.",
-"If no provider hook is present, RunMat gathers the input to the host, performs the CPU factorisation, and leaves the outputs on the host until an explicit `gpuArray` request.",
-"Bundled WGPU provider reuses the host QR and re-uploads outputs; other providers fall back to the same host path automatically."] },
+paragraphs: &["For a resident input, RunMat selects the handle's exact provider owner for the QR hook. The bundled WGPU backend computes ordinary QR through its host implementation and re-uploads only the requested output form as `gpuTensor` handles.",
+"If the exact owner has no QR hook, RunMat downloads through that owner without changing the input's residency, computes CPU factors, and uploads all requested outputs with their classes and device intent preserved. Unsupported uploads and provider failures report an error; they do not return a partial or mixed-residency result.",
+"The economy two-output power-iteration optimization uses its unpivoted device route when eligible; a three-output pivoted request uses the correctness-oriented factorization path."] },
 ];
 const EXAMPLES: &[BuiltinExample] = &[
     BuiltinExample {
@@ -97,23 +97,23 @@ const EXAMPLES: &[BuiltinExample] = &[
 ];
 const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq { question: "Does `qr(A)` always perform column pivoting?",
-answer: "Yes. MATLAB switched to pivoted QR for the single-output form many releases ago; RunMat mirrors that behaviour for improved numerical stability." },
+answer: "No. One or two outputs use the original column order and satisfy `A = Q * R`. Three outputs request column pivoting and return the permutation satisfying `A * P = Q * R`." },
     BuiltinDocumentationFaq { question: "How do I request the reduced (economy) factors?",
-answer: "Pass `0`, `'0'`, or `'econ'` as the second argument. For example, `[Q,R] = qr(A,0)` or `[Q,R] = qr(A,'econ')`." },
+answer: "Pass numeric `0` or `'econ'` as the second argument. For example, `[Q,R] = qr(A,0)` or `[Q,R] = qr(A,'econ')`." },
     BuiltinDocumentationFaq { question: "How can I obtain the permutation vector instead of a matrix?",
 answer: "Add the option `'vector'`, e.g., `[Q,R,p] = qr(A,'vector')`. When you also request economy size, use `[Q,R,p] = qr(A,'econ','vector')`." },
     BuiltinDocumentationFaq { question: "Are complex matrices supported?",
-answer: "Yes. Inputs of type complex double produce complex orthonormal factors using complex Householder reflectors." },
+answer: "Yes. Complex single and double inputs use complex Householder reflectors, and Q and R retain the input floating class." },
     BuiltinDocumentationFaq { question: "What precision do the returned factors use?",
-answer: "The builtin always produces double-precision (or complex double) outputs, matching MATLAB’s dense QR behaviour." },
+answer: "For dense single input, Q and R retain single precision; double, logical, and gated exact-integer inputs produce double factors. Host permutation vectors use one-based double indices; resident outputs follow the exact provider's physical precision." },
     BuiltinDocumentationFaq { question: "Can I call `qr` on logical arrays?",
 answer: "Yes. Logical inputs are converted to double precision before factorisation." },
     BuiltinDocumentationFaq { question: "What happens if I pass more than two option arguments?",
-answer: "The builtin raises a MATLAB-compatible error (`qr: too many option arguments`). Only one size option and one permutation option are accepted." },
+answer: "The builtin rejects more than two option arguments. The `'matrix'` and `'vector'` permutation forms require three requested outputs." },
     BuiltinDocumentationFaq { question: "Do gpuArray outputs stay on the device?",
-answer: "Yes when an acceleration provider exposes the QR hook; the bundled WGPU backend does so by staging through the host implementation and re-uploading the factors. Otherwise RunMat gathers the data to the host, factors it there, and uploads the results back automatically." },
+answer: "The exact owner is used for the QR hook. Bundled WGPU stages ordinary QR through its host implementation and uploads the requested factors. If the hook is unavailable, host fallback restores all requested outputs through checked uploads; unsupported transfers report an error rather than silently leaving outputs on the host." },
     BuiltinDocumentationFaq { question: "How can I verify the factorisation?",
-answer: "Check that `Q'*Q` is (approximately) the identity matrix and that `Q*R` equals `A*E`. For vector permutations, `A(:,p)` reproduces the pivoted columns." },
+answer: "For two outputs, check `Q'*Q ≈ I` and `Q*R ≈ A`. For three outputs, check `Q*R ≈ A*P`, or `Q*R ≈ A(:,p)` for a permutation vector." },
 ];
 const LINKS: &[BuiltinDocumentationLink] = &[
     BuiltinDocumentationLink {

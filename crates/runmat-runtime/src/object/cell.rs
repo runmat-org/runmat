@@ -114,6 +114,10 @@ fn parse_cell_index_value_for_len(value: &Value, len: usize) -> Result<usize, Ru
 
 fn parse_cell_index_values_for_assignment(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     match value {
+        // An empty numeric selector has zero brace-assignment destinations.
+        // The prepared-output cardinality owner already reports zero for it;
+        // do not misroute it through scalar index conversion.
+        Value::Tensor(t) if t.is_empty() => Ok(Vec::new()),
         Value::Tensor(t) if tensor_element_len(t) > 1 => (0..t.len())
             .map(|index| {
                 parse_positive_cell_index(index_scalar_from_numeric(
@@ -705,6 +709,40 @@ mod tests {
         let err = expand_cell_indices(&cell, &[Value::Tensor(tensor)])
             .expect_err("fractional tensor index should fail");
         assert_eq!(err.identifier(), Some("RunMat:CellIndexType"));
+    }
+
+    #[test]
+    fn empty_typed_numeric_brace_assignment_selectors_have_zero_positions() {
+        let cell = CellArray::new(vec![Value::Num(10.0)], 1, 1).expect("cell");
+        let mut selectors = vec![
+            Value::Tensor(Tensor::new(Vec::new(), vec![1, 0]).expect("empty double")),
+            Value::Tensor(Tensor::from_f32(Vec::new(), vec![1, 0]).expect("empty single")),
+        ];
+        for storage in [
+            IntegerStorage::I8(Vec::new()),
+            IntegerStorage::I16(Vec::new()),
+            IntegerStorage::I32(Vec::new()),
+            IntegerStorage::I64(Vec::new()),
+            IntegerStorage::U8(Vec::new()),
+            IntegerStorage::U16(Vec::new()),
+            IntegerStorage::U32(Vec::new()),
+            IntegerStorage::U64(Vec::new()),
+        ] {
+            selectors.push(Value::Tensor(
+                Tensor::new_integer(storage, vec![1, 0]).expect("empty integer"),
+            ));
+        }
+        for selector in selectors {
+            let positions = resolve_cell_assignment_positions(&cell, &[selector])
+                .expect("empty numeric selector has zero destinations");
+            assert!(positions.is_empty());
+            let unchanged =
+                super::assign_cell_value_multi(cell.clone(), &positions, &[], |_, _| {
+                    panic!("zero-output assignment must not write a cell element")
+                })
+                .expect("zero-output assignment is a no-op");
+            assert_eq!(unchanged, Value::Cell(cell.clone()));
+        }
     }
 
     #[test]

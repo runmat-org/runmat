@@ -1376,7 +1376,7 @@ fn complex_tensor_element_len(tensor: &ComplexTensor) -> usize {
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::builtin_function_by_name;
+    use runmat_builtins::builtin_catalog_entry_by_name;
     use runmat_value::{CharArray, IntegerComplexStorage, IntegerStorage, SparseTensor};
 
     fn real_matrix(data: Vec<f64>, rows: usize, cols: usize) -> Value {
@@ -1586,7 +1586,7 @@ mod tests {
         let output = tensor(call(a, vec![Value::Num(1.0)]).unwrap());
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
 
-        let builtin = builtin_function_by_name(NAME).expect("registered eigs");
+        let builtin = builtin_catalog_entry_by_name(NAME).expect("registered eigs catalog entry");
         assert_eq!(builtin.extensions, &EIGS_EXTENSIONS);
         assert_eq!(builtin.integer_capabilities.len(), 4);
     }

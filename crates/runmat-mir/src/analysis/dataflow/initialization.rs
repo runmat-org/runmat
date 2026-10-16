@@ -56,7 +56,15 @@ pub(super) fn compute_init_dataflow(
 
     let mut initial = vec![InitFact::Unassigned; local_count];
     for local in &body.locals {
-        if matches!(local.kind, MirLocalKind::Parameter | MirLocalKind::Capture) {
+        // Invocation installs counts and an empty varargout cell through
+        // the ABI, not source assignments. Compiler-private anonymous names
+        // obey the same rule; do not infer this from binding spelling.
+        let implicit_input = local.binding.is_some_and(|binding| {
+            body.abi.implicit_nargin == Some(binding)
+                || body.abi.implicit_nargout == Some(binding)
+                || body.abi.varargout == Some(binding)
+        });
+        if matches!(local.kind, MirLocalKind::Parameter | MirLocalKind::Capture) || implicit_input {
             initial[local.id.0] = InitFact::DefinitelyAssigned;
         }
     }

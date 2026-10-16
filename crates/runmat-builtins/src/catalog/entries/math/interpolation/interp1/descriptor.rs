@@ -69,7 +69,8 @@ const INTERP1_INPUTS_Y_XQ_METHOD: [BuiltinParamDescriptor; 3] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+        description:
+            "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\".",
     },
 ];
 
@@ -93,14 +94,15 @@ const INTERP1_INPUTS_Y_XQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+        description:
+            "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\".",
     },
     BuiltinParamDescriptor {
         name: "extrap",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Optional,
-        default: Some("NaN"),
-        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
+        default: None,
+        description: "Extrapolation mode: \"extrap\" or scalar fill value; when omitted, the default depends on the method.",
     },
 ];
 
@@ -131,7 +133,8 @@ const INTERP1_INPUTS_X_Y_XQ_METHOD: [BuiltinParamDescriptor; 4] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+        description:
+            "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\".",
     },
 ];
 
@@ -162,14 +165,15 @@ const INTERP1_INPUTS_X_Y_XQ_METHOD_EXTRAP: [BuiltinParamDescriptor; 5] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Optional,
         default: Some("\"linear\""),
-        description: "Interpolation method: \"linear\", \"nearest\", \"spline\", or \"pchip\".",
+        description:
+            "Interpolation method: \"linear\", \"nearest\", \"spline\", \"pchip\", \"cubic\", or \"makima\".",
     },
     BuiltinParamDescriptor {
         name: "extrap",
         ty: BuiltinParamType::Any,
         arity: BuiltinParamArity::Optional,
-        default: Some("NaN"),
-        description: "Extrapolation mode: \"extrap\" or scalar fill value.",
+        default: None,
+        description: "Extrapolation mode: \"extrap\" or scalar fill value; when omitted, the default depends on the method.",
     },
 ];
 

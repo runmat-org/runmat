@@ -1,16 +1,40 @@
 use super::{QR_ERROR_INVALID_ARGUMENT, QR_ERROR_INVALID_INPUT};
 use crate::catalog::entries::math::linalg::factor::inference::{
-    binary64_output, dimensions, literal_factor_option, matrix_input, matrix_shape,
+    binary64_output, dimensions, factor_output, literal_factor_option, matrix_input, matrix_shape,
 };
-use crate::catalog::inference::finish_fixed_outputs;
+use crate::catalog::inference::{argument_error, finish_fixed_outputs};
 use crate::BuiltinCatalogEntry;
 use crate::FactorOption;
 use runmat_types::{
-    CallInference, CallRequest, DynamicReason, NumericDomain, ShapeFact, ValueFact, ValueKindFact,
+    CallInference, CallRequest, DynamicReason, LiteralValue, NumericDomain, ResidencyFact,
+    ShapeFact, ValueFact, ValueKindFact,
 };
 
+#[derive(Clone, Copy)]
+enum PermutationChoice {
+    MatrixDefault,
+    NumericZeroVector,
+    ExplicitMatrix(usize),
+    ExplicitVector(usize),
+    Unknown,
+}
+
+fn exact_zero_literal(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Number(value) => *value == 0.0,
+        LiteralValue::Real { text, .. } => text.parse::<f64>().is_ok_and(|value| value == 0.0),
+        LiteralValue::Integer { .. } => literal.integer_value_i128() == Some(0),
+        LiteralValue::Bool(value) => !value,
+        LiteralValue::Vector(values) if values.len() == 1 => exact_zero_literal(&values[0]),
+        LiteralValue::Matrix(rows) if rows.len() == 1 && rows[0].len() == 1 => {
+            exact_zero_literal(&rows[0][0])
+        }
+        _ => false,
+    }
+}
+
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    let diagnostics = matrix_input(
+    let mut diagnostics = matrix_input(
         request,
         3,
         false,
@@ -34,25 +58,60 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
     } else {
         ShapeFact::Ranked { rank: 2 }
     };
-    let mut pivot = Some(FactorOption::Matrix);
+    let mut permutation = PermutationChoice::MatrixDefault;
     for index in 1..request.arguments.len() {
+        if request
+            .literals
+            .literal_args
+            .get(index)
+            .is_some_and(exact_zero_literal)
+        {
+            permutation = PermutationChoice::NumericZeroVector;
+            continue;
+        }
         match literal_factor_option(request, index) {
-            Some(FactorOption::Vector) => pivot = Some(FactorOption::Vector),
-            Some(FactorOption::Matrix) => pivot = Some(FactorOption::Matrix),
+            Some(FactorOption::Vector) => permutation = PermutationChoice::ExplicitVector(index),
+            Some(FactorOption::Matrix) => permutation = PermutationChoice::ExplicitMatrix(index),
             Some(FactorOption::Economy) => {}
             Some(_) | None => {
-                pivot = None;
+                permutation = PermutationChoice::Unknown;
                 break;
             }
         }
     }
-    let permutation_shape = match pivot {
-        Some(FactorOption::Vector) => matrix_shape(columns, Some(1)),
-        Some(FactorOption::Matrix) => matrix_shape(columns, columns),
-        _ => ShapeFact::Ranked { rank: 2 },
+    let permutation_shape = match permutation {
+        PermutationChoice::NumericZeroVector | PermutationChoice::ExplicitVector(_) => {
+            matrix_shape(columns, Some(1))
+        }
+        PermutationChoice::MatrixDefault | PermutationChoice::ExplicitMatrix(_) => {
+            matrix_shape(columns, columns)
+        }
+        PermutationChoice::Unknown => ShapeFact::Ranked { rank: 2 },
     };
-    let mut q = binary64_output(&matrix, q_shape, false, false);
-    let mut r = binary64_output(&matrix, r_shape, false, false);
+    if let PermutationChoice::ExplicitMatrix(index) | PermutationChoice::ExplicitVector(index) =
+        permutation
+    {
+        if request
+            .outputs
+            .requested
+            .known_count()
+            .is_some_and(|count| count < 3)
+        {
+            diagnostics.push(argument_error(
+                QR_ERROR_INVALID_ARGUMENT.code,
+                "permutation output form requires three outputs",
+                index,
+            ));
+        }
+    }
+    let mut q = factor_output(&matrix, q_shape, false, false, false);
+    let mut r = factor_output(&matrix, r_shape, false, false, false);
+    if matrix.residency != ResidencyFact::Host {
+        // A resident result follows the exact owner's physical precision,
+        // which need not equal the source language class even for single input.
+        q.kind = ValueKindFact::Unknown;
+        r.kind = ValueKindFact::Unknown;
+    }
     if matches!(&matrix.kind, ValueKindFact::Numeric(numeric) if numeric.domain == NumericDomain::Complex)
     {
         // The host QR value converter may erase numerically zero imaginary

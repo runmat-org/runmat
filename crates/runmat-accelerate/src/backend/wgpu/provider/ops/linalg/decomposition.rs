@@ -378,13 +378,7 @@ impl WgpuProvider {
             Tensor::new(host_product.data.clone(), host_product.shape.clone()).map_err(|e| {
                 anyhow!("qr_power_iter: failed to construct host tensor for fallback: {e}")
             })?;
-        let host_result = self.qr_host_result(tensor, options).await?;
-        Ok(Some(ProviderQrPowerIterResult {
-            q: host_result.q,
-            r: host_result.r,
-            perm_matrix: host_result.perm_matrix,
-            perm_vector: host_result.perm_vector,
-        }))
+        Ok(Some(self.qr_host_result(tensor, options).await?))
     }
 
     pub(super) async fn qr_host_result(
@@ -392,52 +386,40 @@ impl WgpuProvider {
         tensor: Tensor,
         options: &ProviderQrOptions,
     ) -> runmat_accelerate_api::ProviderExecutionResult<ProviderQrResult> {
-        let mut args = Vec::new();
-        if options.economy {
-            args.push(Value::Num(0.0));
-        }
-        if matches!(options.pivot, ProviderQrPivot::Vector) {
-            args.push(Value::from("vector"));
-        }
-        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate(
+        let eval = runmat_runtime::builtins::math::linalg::factor::qr::evaluate_provider(
             Value::Tensor(tensor),
-            &args,
+            *options,
         )
         .await
         .map_err(runtime_flow_to_provider_error)?;
-
-        let q_tensor = host_tensor_from_value("qr", eval.q())?;
-        let r_tensor = host_tensor_from_value("qr", eval.r())?;
-        let perm_matrix_tensor = host_tensor_from_value("qr", eval.permutation_matrix())?;
-        let perm_vector_tensor = host_tensor_from_value("qr", eval.permutation_vector())?;
-
-        let q_data = q_tensor.materialize_f64();
-        let r_data = r_tensor.materialize_f64();
-        let perm_matrix_data = perm_matrix_tensor.materialize_f64();
-        let perm_vector_data = perm_vector_tensor.materialize_f64();
-        let q = self.upload_exec(&HostTensorView {
-            data: &q_data,
-            shape: q_tensor.shape(),
-        })?;
-        let r = self.upload_exec(&HostTensorView {
-            data: &r_data,
-            shape: r_tensor.shape(),
-        })?;
-        let perm_matrix = self.upload_exec(&HostTensorView {
-            data: &perm_matrix_data,
-            shape: perm_matrix_tensor.shape(),
-        })?;
-        let perm_vector = self.upload_exec(&HostTensorView {
-            data: &perm_vector_data,
-            shape: perm_vector_tensor.shape(),
-        })?;
-
-        Ok(ProviderQrResult {
-            q,
-            r,
-            perm_matrix,
-            perm_vector,
-        })
+        let upload = |value| -> Result<GpuTensorHandle> {
+            let tensor = host_tensor_from_value("qr", value)?;
+            let data = tensor.materialize_f64();
+            self.upload_exec(&HostTensorView {
+                data: &data,
+                shape: tensor.shape(),
+            })
+        };
+        match options.outputs {
+            ProviderQrOutputs::R => Ok(ProviderQrResult::R {
+                r: upload(eval.r())?,
+            }),
+            ProviderQrOutputs::Qr => Ok(ProviderQrResult::Qr {
+                q: upload(eval.q())?,
+                r: upload(eval.r())?,
+            }),
+            ProviderQrOutputs::Qrp(_) => Ok(ProviderQrResult::Qrp {
+                q: upload(eval.q())?,
+                r: upload(eval.r())?,
+                permutation: upload(eval.permutation())?,
+            }),
+            ProviderQrOutputs::FullEnvelope => Ok(ProviderQrResult::FullEnvelope {
+                q: upload(eval.q())?,
+                r: upload(eval.r())?,
+                perm_matrix: upload(eval.permutation_matrix())?,
+                perm_vector: upload(eval.permutation_vector())?,
+            }),
+        }
     }
 
     pub(crate) async fn lu_exec(&self, handle: &GpuTensorHandle) -> Result<ProviderLuResult> {

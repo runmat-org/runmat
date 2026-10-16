@@ -4,7 +4,9 @@
 mod retirement;
 use bytemuck::cast_slice;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
-use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderQrOptions, ProviderQrPivot};
+use runmat_accelerate_api::{
+    AccelProvider, HostTensorView, ProviderQrOptions, ProviderQrOutputs, ProviderQrResult,
+};
 use std::{fs, path::Path};
 
 fn register_provider() -> &'static dyn AccelProvider {
@@ -48,7 +50,8 @@ async fn matmul_pca_zero_regression() {
 
     let options = ProviderQrOptions {
         economy: true,
-        pivot: ProviderQrPivot::Matrix,
+        column_order: runmat_accelerate_api::ProviderQrColumnOrder::Unpivoted,
+        outputs: ProviderQrOutputs::Qr,
     };
 
     for iter in 0..15 {
@@ -120,12 +123,12 @@ async fn matmul_pca_zero_regression() {
             .await
             .expect("invoke qr_power_iter")
             .expect("device qr path");
+        let ProviderQrResult::Qr { q, r } = result else {
+            panic!("QR request must return Q and R only");
+        };
         retirement::release_all([product_handle]);
 
-        let gpu_host = provider
-            .download(&result.q)
-            .await
-            .expect("download q result");
+        let gpu_host = provider.download(&q).await.expect("download q result");
         let max_gpu = gpu_host
             .data
             .iter()
@@ -140,7 +143,8 @@ async fn matmul_pca_zero_regression() {
         );
 
         retirement::release_all([rhs_handle]);
-        rhs_handle = result.q;
+        retirement::release_all([r]);
+        rhs_handle = q;
     }
 
     let mut cpu_product = vec![0.0f64; 1024 * 8];

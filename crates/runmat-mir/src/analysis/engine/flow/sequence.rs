@@ -3,7 +3,7 @@ use runmat_types::{
     LiteralValue, MutationContract, PlaceMutationKind, ValueFact, ValueKindFact,
 };
 
-use crate::{MirPlace, MirSequenceTarget, SequenceRootCreation};
+use crate::{MirPlace, MirSequenceTarget};
 
 use super::FlowState;
 
@@ -12,7 +12,7 @@ pub(super) fn assign_sequence_target(
     output: Option<&ValueFact>,
     state: &mut FlowState,
 ) {
-    let Some(local) = place_root_local(target.base()) else {
+    let Some(local) = target.base().root_local() else {
         return;
     };
     // A runtime-width comma list, nested path, or non-cell receiver must not
@@ -34,16 +34,15 @@ pub(super) fn assign_sequence_target(
                 .all(|selector| matches!(selector, IndexSelectorFact::KnownOneBasedIndex(index) if *index > 0));
         if scalar_selection {
             let prior = &state.locals[base_local.0];
-            let base = if prior.assignment == crate::analysis::InitFact::Unassigned
-                && target.root_creation() == SequenceRootCreation::EmptyCell
-            {
-                Some(runmat_types::infer_cell_aggregate(&[]).fact)
-            } else {
-                prior
-                    .fact
-                    .clone()
-                    .filter(|fact| matches!(fact.kind, ValueKindFact::Cell(_)))
-            };
+            let base = state
+                .absent_cell_root_for_place(target.base(), target.root_creation())
+                .map(|(_, fact)| fact)
+                .or_else(|| {
+                    prior
+                        .fact
+                        .clone()
+                        .filter(|fact| matches!(fact.kind, ValueKindFact::Cell(_)))
+                });
             if let Some(base) = base {
                 let inferred = runmat_types::infer_index_mutation(
                     &base,
@@ -66,14 +65,4 @@ pub(super) fn assign_sequence_target(
         ValueFact::unknown(DynamicReason::RuntimeValue),
         LiteralValue::Unknown,
     );
-}
-
-fn place_root_local(place: &MirPlace) -> Option<crate::MirLocalId> {
-    match place {
-        MirPlace::Local(local) => Some(*local),
-        MirPlace::Binding(_) => None,
-        MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) | MirPlace::Index(base, _) => {
-            place_root_local(base)
-        }
-    }
 }

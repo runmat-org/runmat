@@ -4,7 +4,7 @@ use futures::executor::block_on;
 use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{
-    AccelProvider, CorrcoefOptions, HostTensorView, ProviderQrOptions, ProviderQrPivot,
+    AccelProvider, CorrcoefOptions, HostTensorView, ProviderQrOptions, ProviderQrResult,
 };
 #[cfg(feature = "wgpu")]
 use std::sync::{Mutex, MutexGuard};
@@ -240,25 +240,35 @@ fn qr_power_iter_device_path_avoids_host_downloads() {
     provider.reset_telemetry();
     let options = ProviderQrOptions {
         economy: true,
-        pivot: ProviderQrPivot::Matrix,
+        column_order: runmat_accelerate_api::ProviderQrColumnOrder::Unpivoted,
+        ..ProviderQrOptions::default()
     };
     let qr = block_on(provider.qr_power_iter(&product, Some(&lhs_handle), &q_handle, &options))
         .expect("qr_power_iter call")
         .expect("device qr result");
+    let ProviderQrResult::FullEnvelope {
+        q,
+        r,
+        perm_matrix,
+        perm_vector,
+    } = qr
+    else {
+        panic!("explicit full-envelope request must return every factor");
+    };
     let telemetry = provider.telemetry_snapshot();
     assert_eq!(
         telemetry.download_bytes, 0,
         "qr_power_iter device path should not download tensors to host"
     );
-    assert_eq!(qr.q.shape(), vec![n, k], "unexpected Q shape");
-    assert_eq!(qr.r.shape(), vec![k, k], "unexpected R shape");
+    assert_eq!(q.shape(), vec![n, k], "unexpected Q shape");
+    assert_eq!(r.shape(), vec![k, k], "unexpected R shape");
 
     lhs_handle.release().unwrap();
     q_handle.release().unwrap();
-    qr.q.release().unwrap();
-    qr.r.release().unwrap();
-    qr.perm_matrix.release().unwrap();
-    qr.perm_vector.release().unwrap();
+    q.release().unwrap();
+    r.release().unwrap();
+    perm_matrix.release().unwrap();
+    perm_vector.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -296,19 +306,29 @@ fn qr_power_iter_zero_product_path_remains_stable() {
     provider.reset_telemetry();
     let options = ProviderQrOptions {
         economy: true,
-        pivot: ProviderQrPivot::Matrix,
+        column_order: runmat_accelerate_api::ProviderQrColumnOrder::Unpivoted,
+        ..ProviderQrOptions::default()
     };
     let qr = block_on(provider.qr_power_iter(&product, Some(&lhs_handle), &q_handle, &options))
         .expect("qr_power_iter call")
         .expect("qr result");
+    let ProviderQrResult::FullEnvelope {
+        q,
+        r,
+        perm_matrix,
+        perm_vector,
+    } = qr
+    else {
+        panic!("explicit full-envelope request must return every factor");
+    };
     let telemetry = provider.telemetry_snapshot();
     assert!(
         telemetry.download_bytes > 0,
         "expected host fallback download for zero-product qr_power_iter edge path"
     );
 
-    let q_host = block_on(provider.download(&qr.q)).expect("download q");
-    let r_host = block_on(provider.download(&qr.r)).expect("download r");
+    let q_host = block_on(provider.download(&q)).expect("download q");
+    let r_host = block_on(provider.download(&r)).expect("download r");
     assert!(
         q_host.data.iter().all(|v| v.is_finite()),
         "Q contained non-finite values in zero-product edge path"
@@ -320,10 +340,10 @@ fn qr_power_iter_zero_product_path_remains_stable() {
 
     lhs_handle.release().unwrap();
     q_handle.release().unwrap();
-    qr.q.release().unwrap();
-    qr.r.release().unwrap();
-    qr.perm_matrix.release().unwrap();
-    qr.perm_vector.release().unwrap();
+    q.release().unwrap();
+    r.release().unwrap();
+    perm_matrix.release().unwrap();
+    perm_vector.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -368,11 +388,21 @@ fn qr_power_iter_rank_deficient_path_remains_finite() {
     provider.reset_telemetry();
     let options = ProviderQrOptions {
         economy: true,
-        pivot: ProviderQrPivot::Matrix,
+        column_order: runmat_accelerate_api::ProviderQrColumnOrder::Unpivoted,
+        ..ProviderQrOptions::default()
     };
     let qr = block_on(provider.qr_power_iter(&product, Some(&lhs_handle), &q_handle, &options))
         .expect("qr_power_iter call")
         .expect("qr result");
+    let ProviderQrResult::FullEnvelope {
+        q,
+        r,
+        perm_matrix,
+        perm_vector,
+    } = qr
+    else {
+        panic!("explicit full-envelope request must return every factor");
+    };
 
     let telemetry = provider.telemetry_snapshot();
     assert_eq!(
@@ -380,8 +410,8 @@ fn qr_power_iter_rank_deficient_path_remains_finite() {
         "rank-deficient qr_power_iter should stay on the device path for this case"
     );
 
-    let q_host = block_on(provider.download(&qr.q)).expect("download q");
-    let r_host = block_on(provider.download(&qr.r)).expect("download r");
+    let q_host = block_on(provider.download(&q)).expect("download q");
+    let r_host = block_on(provider.download(&r)).expect("download r");
     assert!(
         q_host.data.iter().all(|v| v.is_finite()),
         "Q contained non-finite values in rank-deficient edge path"
@@ -393,10 +423,10 @@ fn qr_power_iter_rank_deficient_path_remains_finite() {
 
     lhs_handle.release().unwrap();
     q_handle.release().unwrap();
-    qr.q.release().unwrap();
-    qr.r.release().unwrap();
-    qr.perm_matrix.release().unwrap();
-    qr.perm_vector.release().unwrap();
+    q.release().unwrap();
+    r.release().unwrap();
+    perm_matrix.release().unwrap();
+    perm_vector.release().unwrap();
 }
 
 #[cfg(feature = "wgpu")]
@@ -408,7 +438,8 @@ fn qr_column_counts_use_correctness_fallback() {
 
     let options = ProviderQrOptions {
         economy: true,
-        pivot: ProviderQrPivot::Matrix,
+        column_order: runmat_accelerate_api::ProviderQrColumnOrder::Unpivoted,
+        ..ProviderQrOptions::default()
     };
 
     let rows = 80usize;
@@ -427,13 +458,22 @@ fn qr_column_counts_use_correctness_fallback() {
         .expect("upload 64-col matrix");
     provider.reset_telemetry();
     let qr64 = block_on(provider.qr(&h64, options)).expect("qr 64-col");
+    let ProviderQrResult::FullEnvelope {
+        q: q64,
+        r: r64,
+        perm_matrix: matrix64,
+        perm_vector: vector64,
+    } = qr64
+    else {
+        panic!("explicit full-envelope request must return every factor");
+    };
     let telem64 = provider.telemetry_snapshot();
     assert!(
         telem64.download_bytes > 0,
         "cols=64 should use the correctness-first host QR fallback"
     );
-    assert_eq!(qr64.q.shape(), vec![rows, cols_device]);
-    assert_eq!(qr64.r.shape(), vec![cols_device, cols_device]);
+    assert_eq!(q64.shape(), vec![rows, cols_device]);
+    assert_eq!(r64.shape(), vec![cols_device, cols_device]);
 
     let cols_host = 65usize;
     let mut data_65 = vec![0.0f64; rows * cols_host];
@@ -450,22 +490,31 @@ fn qr_column_counts_use_correctness_fallback() {
         .expect("upload 65-col matrix");
     provider.reset_telemetry();
     let qr65 = block_on(provider.qr(&h65, options)).expect("qr 65-col");
+    let ProviderQrResult::FullEnvelope {
+        q: q65,
+        r: r65,
+        perm_matrix: matrix65,
+        perm_vector: vector65,
+    } = qr65
+    else {
+        panic!("explicit full-envelope request must return every factor");
+    };
     let telem65 = provider.telemetry_snapshot();
     assert!(
         telem65.download_bytes > 0,
         "cols=65 should use the correctness-first host QR fallback"
     );
-    assert_eq!(qr65.q.shape(), vec![rows, cols_host]);
-    assert_eq!(qr65.r.shape(), vec![cols_host, cols_host]);
+    assert_eq!(q65.shape(), vec![rows, cols_host]);
+    assert_eq!(r65.shape(), vec![cols_host, cols_host]);
 
     h64.release().unwrap();
     h65.release().unwrap();
-    qr64.q.release().unwrap();
-    qr64.r.release().unwrap();
-    qr64.perm_matrix.release().unwrap();
-    qr64.perm_vector.release().unwrap();
-    qr65.q.release().unwrap();
-    qr65.r.release().unwrap();
-    qr65.perm_matrix.release().unwrap();
-    qr65.perm_vector.release().unwrap();
+    q64.release().unwrap();
+    r64.release().unwrap();
+    matrix64.release().unwrap();
+    vector64.release().unwrap();
+    q65.release().unwrap();
+    r65.release().unwrap();
+    matrix65.release().unwrap();
+    vector65.release().unwrap();
 }

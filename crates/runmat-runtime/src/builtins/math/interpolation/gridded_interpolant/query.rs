@@ -104,6 +104,8 @@ pub(super) fn evaluate_piecewise_interpolant(
             }
             InterpMethod::Spline => build_spline_pp(&series_data, BUILTIN_NAME)
                 .map_err(|err| internal(err.message()))?,
+            InterpMethod::Makima => build_makima_pp(&series_data, BUILTIN_NAME)
+                .map_err(|err| internal(err.message()))?,
             _ => unreachable!("piecewise evaluator only handles higher-order methods"),
         };
         plan.for_each_point(|point| {

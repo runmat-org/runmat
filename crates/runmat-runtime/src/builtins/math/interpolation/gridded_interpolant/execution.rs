@@ -17,7 +17,7 @@ pub(super) fn interpolate_point(
         InterpMethod::Nearest => interpolate_nearest(spec, values, point, series_offset),
         InterpMethod::Next => interpolate_step(spec, values, point[0], series_offset, true),
         InterpMethod::Previous => interpolate_step(spec, values, point[0], series_offset, false),
-        InterpMethod::Pchip | InterpMethod::Spline => {
+        InterpMethod::Pchip | InterpMethod::Spline | InterpMethod::Makima => {
             unreachable!("higher-order methods use evaluate_piecewise_interpolant")
         }
     }
@@ -44,14 +44,17 @@ pub(super) fn extrapolate_point(
         ExtrapolationMethod::Previous => {
             interpolate_step(spec, values, point[0], series_offset, false)
         }
-        ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {
+        ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline | ExtrapolationMethod::Makima => {
             unreachable!("piecewise extrapolation uses evaluate_piecewise_interpolant")
         }
     }
 }
 
 pub(super) fn is_piecewise_method(method: InterpMethod) -> bool {
-    matches!(method, InterpMethod::Pchip | InterpMethod::Spline)
+    matches!(
+        method,
+        InterpMethod::Pchip | InterpMethod::Spline | InterpMethod::Makima
+    )
 }
 
 pub(super) fn is_step_method(method: InterpMethod) -> bool {
@@ -68,7 +71,7 @@ pub(super) fn is_step_extrapolation(method: ExtrapolationMethod) -> bool {
 pub(super) fn is_piecewise_extrapolation(method: ExtrapolationMethod) -> bool {
     matches!(
         method,
-        ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline
+        ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline | ExtrapolationMethod::Makima
     )
 }
 
@@ -100,7 +103,9 @@ pub(super) fn evaluate_piecewise_scalar(
             ExtrapolationMethod::Linear => {
                 return interpolate_linear(spec, values, &[coord], series_offset);
             }
-            ExtrapolationMethod::Pchip | ExtrapolationMethod::Spline => {}
+            ExtrapolationMethod::Pchip
+            | ExtrapolationMethod::Spline
+            | ExtrapolationMethod::Makima => {}
         }
     }
     eval_pp_scalar(pp, 0, coord, &Extrapolation::Extrapolate)
@@ -277,6 +282,7 @@ pub(super) fn interp_method_name(method: InterpMethod) -> &'static str {
         InterpMethod::Previous => "previous",
         InterpMethod::Pchip => "pchip",
         InterpMethod::Spline => "spline",
+        InterpMethod::Makima => "makima",
     }
 }
 
@@ -288,6 +294,7 @@ pub(super) fn extrap_method_name(method: ExtrapolationMethod) -> &'static str {
         ExtrapolationMethod::Previous => "previous",
         ExtrapolationMethod::Pchip => "pchip",
         ExtrapolationMethod::Spline => "spline",
+        ExtrapolationMethod::Makima => "makima",
         ExtrapolationMethod::None => "none",
     }
 }

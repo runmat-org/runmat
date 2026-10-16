@@ -467,12 +467,43 @@ fn member_subsref_returns_public_properties() {
 }
 
 #[test]
-fn unsupported_makima_method_is_explicit() {
-    let err = call(vec![
-        row(&[1.0, 2.0, 3.0]),
+fn one_dimensional_makima_preserves_class_and_rejects_nd() {
+    let values = Tensor::from_f32(vec![0.0, 0.0, 0.0, 1.0, 0.0], vec![5, 1]).unwrap();
+    let obj = call(vec![
+        col(&[0.0, 1.0, 2.0, 3.0, 4.0]),
+        Value::Tensor(values),
         Value::String("makima".to_string()),
     ])
-    .expect_err("makima is not implemented yet");
+    .expect("one-dimensional makima");
+    let Value::Object(ref object) = obj else {
+        panic!("expected interpolant object");
+    };
+    assert_eq!(
+        object.properties.get(METHOD),
+        Some(&Value::String("makima".to_string()))
+    );
+    assert_eq!(
+        object.properties.get(EXTRAPOLATION_METHOD),
+        Some(&Value::String("makima".to_string()))
+    );
+    let result = subsref(obj, vec![row(&[2.5, 4.0])]).expect("makima query");
+    let Value::Tensor(tensor) = result.value() else {
+        panic!("expected single tensor");
+    };
+    assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+    let actual = tensor.materialize_f64();
+    assert!((actual[0] - 39.0 / 88.0).abs() < 1e-7);
+    assert_eq!(actual[1], 0.0);
+
+    let grid =
+        CellArray::new_with_shape(vec![col(&[0.0, 1.0]), col(&[0.0, 1.0])], vec![1, 2]).unwrap();
+    let values = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
+    let err = call(vec![
+        Value::Cell(grid),
+        Value::Tensor(values),
+        Value::String("makima".to_string()),
+    ])
+    .expect_err("N-D makima remains unavailable");
     assert_eq!(
         err.identifier(),
         Some("RunMat:griddedInterpolant:UnsupportedMethod")

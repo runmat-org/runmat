@@ -852,20 +852,29 @@ pub struct ProviderCholResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ProviderQrResult {
-    pub q: GpuTensorHandle,
-    pub r: GpuTensorHandle,
-    pub perm_matrix: GpuTensorHandle,
-    pub perm_vector: GpuTensorHandle,
+pub enum ProviderQrResult {
+    R {
+        r: GpuTensorHandle,
+    },
+    Qr {
+        q: GpuTensorHandle,
+        r: GpuTensorHandle,
+    },
+    Qrp {
+        q: GpuTensorHandle,
+        r: GpuTensorHandle,
+        permutation: GpuTensorHandle,
+    },
+    /// Internal Rust factor envelope; not used by a script output-count request.
+    FullEnvelope {
+        q: GpuTensorHandle,
+        r: GpuTensorHandle,
+        perm_matrix: GpuTensorHandle,
+        perm_vector: GpuTensorHandle,
+    },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct ProviderQrPowerIterResult {
-    pub q: GpuTensorHandle,
-    pub r: GpuTensorHandle,
-    pub perm_matrix: GpuTensorHandle,
-    pub perm_vector: GpuTensorHandle,
-}
+pub type ProviderQrPowerIterResult = ProviderQrResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub struct ProviderLinsolveOptions {
@@ -1018,16 +1027,33 @@ pub enum ProviderQrPivot {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderQrOutputs {
+    R,
+    Qr,
+    Qrp(ProviderQrPivot),
+    FullEnvelope,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ProviderQrColumnOrder {
+    Unpivoted,
+    #[default]
+    Pivoted,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderQrOptions {
     pub economy: bool,
-    pub pivot: ProviderQrPivot,
+    pub column_order: ProviderQrColumnOrder,
+    pub outputs: ProviderQrOutputs,
 }
 
 impl Default for ProviderQrOptions {
     fn default() -> Self {
         Self {
             economy: false,
-            pivot: ProviderQrPivot::Matrix,
+            column_order: ProviderQrColumnOrder::Pivoted,
+            outputs: ProviderQrOutputs::FullEnvelope,
         }
     }
 }

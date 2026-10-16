@@ -10,6 +10,9 @@ pub enum InterpMethod {
     Nearest,
     Spline,
     Pchip,
+    /// Uses PCHIP coefficients, but retains the spelled method's NaN default.
+    Cubic,
+    Makima,
 }
 
 #[derive(Clone, Debug)]
@@ -249,6 +252,24 @@ pub fn build_pchip_pp(
     series: &NumericSeries,
     name: &'static str,
 ) -> BuiltinResult<PiecewisePolynomial> {
+    build_local_cubic_pp(series, name, |x, y, _| Ok(pchip_coefs_for_series(x, y)))
+}
+
+pub fn build_makima_pp(
+    series: &NumericSeries,
+    name: &'static str,
+) -> BuiltinResult<PiecewisePolynomial> {
+    build_local_cubic_pp(series, name, makima_coefs_for_series)
+}
+
+type LocalCubicCoefficientBuilder =
+    fn(&[f64], &[f64], &'static str) -> BuiltinResult<Vec<[f64; 4]>>;
+
+fn build_local_cubic_pp(
+    series: &NumericSeries,
+    name: &'static str,
+    coefficients: LocalCubicCoefficientBuilder,
+) -> BuiltinResult<PiecewisePolynomial> {
     series.validate_layout(name)?;
     let n = series.x.len();
     let pieces = n - 1;
@@ -262,7 +283,7 @@ pub fn build_pchip_pp(
     )?;
     for s in 0..series.series {
         let y = &series.y[s * n..(s + 1) * n];
-        let local = pchip_coefs_for_series(&series.x, y);
+        let local = coefficients(&series.x, y, name)?;
         for piece in 0..pieces {
             let row = piece * series.series + s;
             for col in 0..order {
@@ -311,7 +332,9 @@ pub(super) fn is_vector_shape(shape: &[usize]) -> bool {
 
 #[path = "pp/coefficients.rs"]
 mod coefficients;
-use coefficients::{pchip_coefs_for_series, spline_coefs_for_series, validate_finite_coefs};
+use coefficients::{
+    makima_coefs_for_series, pchip_coefs_for_series, spline_coefs_for_series, validate_finite_coefs,
+};
 
 #[cfg(test)]
 #[path = "pp/tests.rs"]

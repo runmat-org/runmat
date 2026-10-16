@@ -813,12 +813,33 @@ fn analyze_body_applies_canonical_index_member_and_mutation_rules() {
     let (body, store) = analyze_single_body("function y = f(); c{2} = 'created'; y = c{2}; end");
     assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Character);
 
+    let (body, store) = analyze_single_body("function y = f(); c{1,2} = 'created'; y = c; end");
+    let created_cell = output_fact(&body, &store);
+    assert!(matches!(created_cell.kind, ValueKindFact::Cell(_)));
+    assert_eq!(created_cell.shape, ShapeFact::from(vec![Some(1), Some(2)]));
+
     let (body, store) = analyze_single_body("function y = f(c); c{2} = 'created'; y = c{2}; end");
+    assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Unknown);
+
+    let (body, store) = analyze_single_body("function y = f(c); c{1,2} = 'created'; y = c; end");
     assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Unknown);
 
     let (body, store) =
         analyze_single_body("function y = f(); c = 0; c{2} = 'created'; y = c{2}; end");
     assert_eq!(output_fact(&body, &store).kind, ValueKindFact::Unknown);
+
+    let (body, store) =
+        analyze_single_body("function y = f(); c = 0; c{1,2} = 'created'; y = c; end");
+    assert!(!matches!(
+        output_fact(&body, &store).kind,
+        ValueKindFact::Cell(_)
+    ));
+
+    let (body, store) = analyze_single_body("function y = f(); s.c{2} = 'created'; y = s; end");
+    assert!(!matches!(
+        output_fact(&body, &store).kind,
+        ValueKindFact::Cell(_)
+    ));
 }
 
 #[test]
@@ -1209,6 +1230,62 @@ fn summary_records_function_outputs_and_store_entry() {
     assert_eq!(body.abi.fixed_outputs.len(), 1);
     assert!(body.abi.implicit_nargin.is_some());
     assert!(body.abi.implicit_nargout.is_some());
+}
+
+#[test]
+fn call_abi_seeds_implicit_counts_and_empty_varargout_without_seeding_fixed_outputs() {
+    let source =
+        "function varargout = f(varargin); copy = varargout; count = nargin + nargout; end";
+    let mir = lower_mir(source);
+    let body = mir.bodies.values().next().expect("function body");
+    let store = analyze_assembly(&mir);
+    assert!(
+        !store
+            .diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+        "ABI-installed values are assigned at entry: {:#?}",
+        store.diagnostics
+    );
+    let varargout = body.abi.varargout.expect("variadic output binding");
+    let local = body
+        .locals
+        .iter()
+        .find(|local| local.binding == Some(varargout))
+        .expect("variadic output local");
+    let fact = final_local_fact(body, &store, local.id);
+    assert!(matches!(fact.kind, ValueKindFact::Cell(_)));
+    assert_eq!(fact.shape, ShapeFact::from(vec![Some(1), Some(0)]));
+
+    let diagnostics =
+        analyze_assembly(&lower_mir("function y = f(); z = y; y = 1; end")).diagnostics;
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-MIR0001"));
+}
+
+#[test]
+fn implicit_abi_counts_are_initialized_in_named_and_anonymous_frames() {
+    for source in [
+        "function y = f(x); y = nargin + nargout; end",
+        "function varargout = f(x); operation = @(v) deal(v, v+1); [varargout{1:nargout}] = operation(x); end",
+    ] {
+        let diagnostics = analyze_assembly(&lower_mir(source)).diagnostics;
+        assert!(
+            !diagnostics.iter().any(|diagnostic| matches!(
+                diagnostic.code.as_str(),
+                "RM-MIR0001" | "RM-MIR0002"
+            )),
+            "{source}: {diagnostics:#?}"
+        );
+    }
+    let diagnostics = analyze_assembly(&lower_mir(
+        "function y = f(x); if x; unassigned = 1; end; y = unassigned + nargout; end",
+    ))
+    .diagnostics;
+    assert!(diagnostics
+        .iter()
+        .any(|diagnostic| matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002")));
 }
 
 #[test]
