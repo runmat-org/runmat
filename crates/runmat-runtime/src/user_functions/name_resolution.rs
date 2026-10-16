@@ -225,6 +225,19 @@ pub async fn observe_runtime_name(
             .map(|context| context.native_resolution_scope())
         {
             Some(NativeResolutionScope::Selected(route)) => route.observe(name.to_owned()).await?,
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(NativeResolutionScope::SelectedOrdinary {
+                route,
+                source_owner,
+                ..
+            }) if context
+                .as_ref()
+                .is_some_and(|runtime| source_owner.is_bound_in(runtime)) =>
+            {
+                route.observe(name.to_owned()).await?
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            Some(NativeResolutionScope::SelectedOrdinary { .. }) => None,
             Some(NativeResolutionScope::SelectedClosed) => None,
             Some(NativeResolutionScope::Session) | None => {
                 if let Some(observer) = context

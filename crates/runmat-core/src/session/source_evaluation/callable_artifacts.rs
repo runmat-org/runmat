@@ -405,6 +405,7 @@ pub(in crate::session) fn install_bound_invoker(
                                 primary,
                                 Some(selected_body),
                                 receipt,
+                                None,
                             )?
                         }
                         #[cfg(target_arch = "wasm32")]

@@ -17,10 +17,11 @@ mod source_ref;
 mod statement_pc;
 mod subscript;
 
-/// Portable schema for serialized [`Bytecode`] payloads.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 19;
+/// Portable schema for serialized [`Bytecode`] payloads. Version 20 forwards
+/// anonymous body calls through destination-cardinality result sequences.
+pub const BYTECODE_SCHEMA_VERSION: u16 = 20;
 /// Portable schema for serialized [`FunctionRegistry`] payloads.
-pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 15;
+pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 16;
 
 pub use artifact::{
     decode_interpreter_program_v2, decode_interpreter_script_v2, encode_interpreter_program_v2,

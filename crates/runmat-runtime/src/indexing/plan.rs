@@ -357,7 +357,6 @@ pub fn build_index_plan(
 
     let mut out_shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
     if selection_lengths.contains(&0) {
-        let selection_lengths = out_shape.clone();
         return Ok(IndexPlan::new(
             Vec::new(),
             out_shape,
@@ -411,7 +410,6 @@ pub fn build_index_plan(
     if total_out == 1 {
         out_shape = vec![1, 1];
     }
-    let selection_lengths = out_shape.clone();
     Ok(IndexPlan::new(
         indices,
         out_shape,
@@ -1082,6 +1080,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.indices, vec![7]);
+    }
+
+    #[test]
+    fn bounded_plan_preserves_selector_geometry_separately_from_result_shape() {
+        let shape = [1, 1, 3];
+        let scalar = build_index_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(2),
+            ],
+            3,
+            &shape,
+        )
+        .unwrap();
+        assert_eq!(scalar.output_shape, vec![1, 1]);
+        assert_eq!(scalar.selection_lengths, vec![1, 1, 1]);
+        assert_eq!(scalar.indices, vec![1]);
+
+        let empty = build_index_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Indices(Vec::new()),
+            ],
+            3,
+            &shape,
+        )
+        .unwrap();
+        assert!(empty.indices.is_empty());
+        assert_eq!(empty.selection_lengths, vec![1, 1, 0]);
     }
 
     #[test]

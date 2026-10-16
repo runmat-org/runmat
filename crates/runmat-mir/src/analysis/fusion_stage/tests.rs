@@ -10,6 +10,101 @@ fn analyze(source: &str) -> (crate::MirAssembly, crate::analysis::AnalysisStore)
 }
 
 #[test]
+fn indexed_array_shape_survives_source_calls_and_structural_transforms() {
+    use crate::{MirCallee, MirPlace, MirRvalue, MirStmtKind};
+    use runmat_types::{ProgramPointId, RegionValueId, ShapeFact};
+
+    for (source, expected) in [
+        (
+            "mask = false(2,1,3); mask(1,1,2) = true; rotated = permute(mask,[3 1 2]); orig = ipermute(rotated,[3 1 2]); a = rotated(2,1,1); b = orig(1,1,2);",
+            vec![
+                ("false", vec![2, 1, 3]),
+                ("indexed write", vec![2, 1, 3]),
+                ("permute", vec![3, 2, 1]),
+                ("ipermute", vec![2, 1, 3]),
+            ],
+        ),
+        (
+            "T = zeros(1,1,5); T(:,:,3) = 7; vec = squeeze(T); a = vec(3);",
+            vec![
+                ("zeros", vec![1, 1, 5]),
+                ("indexed write", vec![1, 1, 5]),
+                ("squeeze", vec![5, 1]),
+            ],
+        ),
+    ] {
+        let (mir, analysis) = analyze(source);
+        let mut observed = Vec::new();
+        for (function, body) in &mir.bodies {
+            let function = ProgramFunctionId(u32::try_from(function.0).unwrap());
+            for block in &body.blocks {
+                for (position, statement) in block.statements.iter().enumerate() {
+                    let (label, local) = match &statement.kind {
+                        MirStmtKind::Assign {
+                            place: MirPlace::Local(local),
+                            value: MirRvalue::Call(call),
+                        } => {
+                            let MirCallee::Static(identity) = &call.callee else {
+                                continue;
+                            };
+                            let Some(name) = identity.display_name() else {
+                                continue;
+                            };
+                            (name, *local)
+                        }
+                        MirStmtKind::Assign {
+                            place: MirPlace::Index(base, _),
+                            ..
+                        } => {
+                            let MirPlace::Local(local) = base.as_ref() else {
+                                continue;
+                            };
+                            ("indexed write".to_owned(), *local)
+                        }
+                        _ => continue,
+                    };
+                    let point = ProgramPointId {
+                        function,
+                        block: u32::try_from(block.id.0).unwrap(),
+                        position: u32::try_from(position + 1).unwrap(),
+                    };
+                    let shape = analysis
+                        .facts_at(point)
+                        .expect("post-statement facts")
+                        .local(RegionValueId {
+                            function,
+                            local: u32::try_from(local.0).unwrap(),
+                        })
+                        .and_then(|local| local.fact.as_ref())
+                        .expect("assigned array fact")
+                        .shape
+                        .clone();
+                    observed.push((label, shape));
+                }
+            }
+        }
+        for (name, dimensions) in expected {
+            let shape = ShapeFact::from(dimensions.into_iter().map(Some).collect());
+            assert!(
+                observed
+                    .iter()
+                    .any(|(label, found)| label == name && found.is_proven_equivalent(&shape)),
+                "{name} must retain {shape:?}; observed {observed:?}; diagnostics {:#?}",
+                analysis.diagnostics
+            );
+        }
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .all(|item| item.code != "RM-TYPE-INDEX-BOUNDS"),
+            "valid source indices cannot exceed a falsely narrowed bound: {:#?}",
+            analysis.diagnostics
+        );
+    }
+}
+
+#[test]
 fn same_pass_stage_contracts_preserve_statement_uses_defs_and_live_after() {
     let (mir, analysis) = analyze("a=1; b=a+1; c=b.*2;");
     let (function, body) = mir.bodies.iter().next().expect("selected body");

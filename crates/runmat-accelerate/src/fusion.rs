@@ -574,10 +574,7 @@ fn is_elementwise_max_min(graph: &AccelGraph, node: &AccelNode) -> bool {
 }
 
 fn value_is_placeholder(graph: &AccelGraph, vid: ValueId) -> bool {
-    let Some(info) = graph.value(vid) else {
-        return false;
-    };
-    let Some(constant) = &info.constant else {
+    let Some(constant) = source_literal_constant(graph, vid) else {
         return false;
     };
     match constant {
@@ -1049,7 +1046,10 @@ impl FusionGroupPlan {
                         }
                         ValueOrigin::Variable { .. } => (true, true, None),
                         ValueOrigin::NodeOutput { .. } if binding.is_some() => (true, true, None),
-                        ValueOrigin::Constant => (true, false, info.constant.clone()),
+                        ValueOrigin::Constant if binding.is_none() => {
+                            (true, false, info.constant.clone())
+                        }
+                        ValueOrigin::Constant => (true, true, None),
                         _ => (true, false, None),
                     },
                     None => (true, false, None),
@@ -1193,10 +1193,8 @@ impl FusionGroupPlan {
         for node_id in &plan.group.nodes {
             if let Some(node) = graph.node(*node_id) {
                 for &inp in &node.inputs {
-                    if let Some(info) = graph.value(inp) {
-                        if let Some(cv) = info.constant.clone() {
-                            plan.const_values.insert(inp, cv);
-                        }
+                    if let Some(cv) = source_literal_constant(graph, *inp) {
+                        plan.const_values.insert(inp, cv.clone());
                     }
                 }
             }
@@ -1338,7 +1336,7 @@ impl FusionGroupPlan {
                         {
                             // Skip trivial constants embedded in const_values; those are handled separately
                             let is_const = plan.const_values.contains_key(&p)
-                                || graph.value(p).and_then(|vi| vi.constant.as_ref()).is_some();
+                                || source_literal_constant(graph, p).is_some();
                             if !is_const {
                                 deps.push(p);
                             }
@@ -1365,10 +1363,8 @@ impl FusionGroupPlan {
                         if plan.const_values.contains_key(vid) {
                             continue;
                         }
-                        if let Some(info) = graph.value(*vid) {
-                            if let Some(cv) = info.constant.clone() {
-                                plan.const_values.insert(*vid, cv);
-                            }
+                        if let Some(cv) = source_literal_constant(graph, *vid) {
+                            plan.const_values.insert(*vid, cv.clone());
                         }
                     }
                 }
@@ -1387,12 +1383,8 @@ impl FusionGroupPlan {
                 // Rebuild constants map using the new input ordering.
                 let mut new_constants: HashMap<usize, Value> = HashMap::new();
                 for (idx, vid) in plan.inputs.iter().enumerate() {
-                    if let Some(value) = plan.const_values.get(vid) {
+                    if let Some(value) = source_literal_constant(graph, *vid) {
                         new_constants.insert(idx, value.clone());
-                    } else if let Some(info) = graph.value(*vid) {
-                        if let Some(cv) = info.constant.clone() {
-                            new_constants.insert(idx, cv);
-                        }
                     }
                 }
                 plan.constants = new_constants;
@@ -1431,12 +1423,8 @@ impl FusionGroupPlan {
         if plan.group.kind.is_reduction() {
             let original_inputs = plan.inputs.clone();
             plan.inputs.retain(|vid| {
-                if let Some(info) = graph.value(*vid) {
-                    !matches!(info.origin, ValueOrigin::Constant)
-                        && !plan.const_values.contains_key(vid)
-                } else {
-                    true
-                }
+                source_literal_constant(graph, *vid).is_none()
+                    && !plan.const_values.contains_key(vid)
             });
             if plan.inputs.len() != original_inputs.len() {
                 let mut new_stack: Vec<usize> = Vec::new();
@@ -2268,13 +2256,8 @@ fn detect_centered_gram(
             continue;
         }
         let (numerator_id, denom_id) = (div_node.inputs[0], div_node.inputs[1]);
-        let denom_info = match graph.value(denom_id) {
-            Some(info) => info,
-            None => continue,
-        };
-        let denom_const = match &denom_info.constant {
+        let denom_const = match source_literal_constant(graph, denom_id) {
             Some(Value::Num(v)) => Some(*v),
-            Some(Value::Int(_)) => None,
             _ => None,
         };
         if denom_const.is_some_and(|v| v == 0.0) {
@@ -2876,6 +2859,10 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
 
     loop {
         let info = graph.value(current)?;
+        // A constant-shaped fact on a published binding is not a frozen value.
+        if graph.var_binding(current).is_some() {
+            return None;
+        }
         match &info.origin {
             ValueOrigin::Constant => {
                 let base = value_info_scalar(info)?;
@@ -2885,6 +2872,9 @@ fn collect_scalar_constant(graph: &AccelGraph, vid: ValueId) -> Option<ConstantT
                 });
             }
             ValueOrigin::NodeOutput { node, output } => {
+                if graph.node_binding(*node).is_some() {
+                    return None;
+                }
                 if !visited.insert(*node) {
                     return None;
                 }
@@ -3079,6 +3069,12 @@ fn value_info_scalar(info: &ValueInfo) -> Option<f64> {
 
 fn value_constant_f64(graph: &AccelGraph, vid: ValueId) -> Option<f64> {
     resolve_scalar_constant(graph, vid)
+}
+
+/// A numeric fact attached to a variable or published node is not a frozen
+/// input value: the binding may have changed before this plan executes.
+fn source_literal_constant(graph: &AccelGraph, vid: ValueId) -> Option<&Value> {
+    graph.source_literal_constant(vid)
 }
 
 fn primitive_expr(
@@ -3405,23 +3401,23 @@ fn resolve_numeric_vector_constant(graph: &AccelGraph, vid: ValueId) -> Option<V
     if let Some(scalar) = resolve_scalar_constant(graph, vid) {
         return Some(vec![scalar]);
     }
-    let info = graph.value(vid)?;
-    match &info.constant {
+    let constant = source_literal_constant(graph, vid)?;
+    match constant {
         // Axis and dimension vectors feed floating shader literals below, so
         // native integer tensors must take the normal unfused path rather than
         // being derived from their f64 mirror.
-        Some(Value::Tensor(tensor)) if tensor.integer_storage().is_none() && !tensor.is_empty() => {
+        Value::Tensor(tensor) if tensor.integer_storage().is_none() && !tensor.is_empty() => {
             Some(tensor.materialize_f64())
         }
-        Some(Value::LogicalArray(arr)) if !arr.data.is_empty() => Some(
+        Value::LogicalArray(arr) if !arr.data.is_empty() => Some(
             arr.data
                 .iter()
                 .map(|v| if *v == 0 { 0.0 } else { 1.0 })
                 .collect(),
         ),
-        Some(Value::Bool(flag)) => Some(vec![if *flag { 1.0 } else { 0.0 }]),
-        Some(Value::Int(_)) => None,
-        Some(Value::Num(num)) => Some(vec![*num]),
+        Value::Bool(flag) => Some(vec![if *flag { 1.0 } else { 0.0 }]),
+        Value::Int(_) => None,
+        Value::Num(num) => Some(vec![*num]),
         _ => None,
     }
 }
@@ -3436,7 +3432,8 @@ fn match_mean_axes(graph: &AccelGraph, vid: ValueId) -> Option<(NodeId, ValueId,
         return None;
     }
     if let Some(control_vid) = node.inputs.get(2) {
-        let control = match graph.value(*control_vid)?.constant.as_ref()? {
+        let control_value = source_literal_constant(graph, *control_vid)?;
+        let control = match control_value {
             Value::String(text) => MeanControl::from_public_option(text),
             Value::CharArray(chars) if chars.rows == 1 => {
                 MeanControl::from_public_option(&chars.data.iter().collect::<String>())
@@ -3844,6 +3841,31 @@ mod tests {
     }
 
     #[test]
+    fn live_variable_fact_never_becomes_a_frozen_fusion_input() {
+        let mut graph = simple_elementwise_graph();
+        graph.values[0].constant = Some(Value::Num(41.0));
+        let group = detect_fusion_groups(&graph).remove(0);
+        let plan = FusionGroupPlan::new(0, group, &graph);
+        let slot = plan.inputs.iter().position(|value| *value == 0).unwrap();
+        assert!(!plan.constants.contains_key(&slot));
+        assert!(!plan.const_values.contains_key(&0));
+
+        graph.values[0].origin = ValueOrigin::Constant;
+        graph.var_bindings.insert(
+            0,
+            crate::graph::VarBinding {
+                kind: VarKind::Global,
+                index: 0,
+            },
+        );
+        let group = detect_fusion_groups(&graph).remove(0);
+        let plan = FusionGroupPlan::new(0, group, &graph);
+        let slot = plan.inputs.iter().position(|value| *value == 0).unwrap();
+        assert!(!plan.constants.contains_key(&slot));
+        assert!(!plan.const_values.contains_key(&0));
+    }
+
+    #[test]
     fn prepare_fusion_plan_requires_semantic_candidate_groups() {
         let graph = simple_elementwise_graph();
         let groups = detect_fusion_groups(&graph);
@@ -4120,6 +4142,32 @@ mod tests {
         assert_eq!(resolve_numeric_vector_constant(&graph, 99), None);
     }
 
+    #[test]
+    fn bound_dimension_vector_fact_is_not_an_inline_literal() {
+        let mut graph = simple_elementwise_graph();
+        graph.values.push(ValueInfo {
+            id: 3,
+            origin: ValueOrigin::Constant,
+            ty: Type::tensor(),
+            shape: ShapeInfo::Tensor(vec![Some(1), Some(2)]),
+            constant: Some(Value::Tensor(
+                runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(),
+            )),
+        });
+        assert_eq!(
+            resolve_numeric_vector_constant(&graph, 3),
+            Some(vec![1.0, 2.0])
+        );
+        graph.var_bindings.insert(
+            3,
+            crate::graph::VarBinding {
+                kind: VarKind::Global,
+                index: 3,
+            },
+        );
+        assert_eq!(resolve_numeric_vector_constant(&graph, 3), None);
+    }
+
     fn folded_single_clamp_graph(input: Value, folded: Option<Value>) -> AccelGraph {
         AccelGraph {
             values: vec![
@@ -4213,6 +4261,32 @@ mod tests {
         let serialized = serde_json::to_string(&graph).expect("serialize graph");
         let restored: AccelGraph = serde_json::from_str(&serialized).expect("deserialize graph");
         assert!(collect_scalar_constant(&restored, 2).is_none());
+    }
+
+    #[test]
+    fn constant_traces_reject_bound_sources_and_published_fold_outputs() {
+        let original = folded_single_clamp_graph(Value::Num(0.0), Some(folded_single(0.0)));
+        assert!(collect_scalar_constant(&original, 2).is_some());
+
+        let mut bound_source = original.clone();
+        bound_source.var_bindings.insert(
+            1,
+            crate::graph::VarBinding {
+                kind: VarKind::Global,
+                index: 1,
+            },
+        );
+        assert!(collect_scalar_constant(&bound_source, 2).is_none());
+
+        let mut published_fold = original;
+        published_fold.node_bindings.insert(
+            0,
+            crate::graph::VarBinding {
+                kind: VarKind::Global,
+                index: 2,
+            },
+        );
+        assert!(collect_scalar_constant(&published_fold, 2).is_none());
     }
 
     #[test]

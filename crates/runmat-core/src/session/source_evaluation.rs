@@ -34,6 +34,8 @@ mod dynamic_identity;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "source_evaluation/selected_foreign.rs"]
 mod selected_foreign;
+#[cfg(not(target_arch = "wasm32"))]
+pub(in crate::session) use selected_foreign::ordinary_native_route;
 #[path = "source_evaluation/selected_graph.rs"]
 mod selected_graph;
 use dynamic_identity::ProjectSourceIdentityIndex;

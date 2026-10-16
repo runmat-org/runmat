@@ -182,6 +182,46 @@ fn forced_generic_native_deal_preserves_requested_discarded_and_zero_outputs() {
 }
 
 #[test]
+fn forced_generic_native_anonymous_body_forwards_requested_outputs() {
+    runmat_gc::gc_test_context(|| {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        let unit = block_on(session.compile_executable_unit(
+            ExecutableSource::new(
+                "native-anonymous-forward@1",
+                "nativeAnonForward.m",
+                "function varargout = nativeAnonForward(x)\nbias = 2; operation = @(v) deal(v + bias, v + bias + 1);\n[varargout{1:nargout}] = operation(x);\nend\nfunction varargout = nativeAnonZero(x)\noperation = @(v) deal(v);\n[varargout{1:nargout}] = operation(x);\nend\n",
+            ),
+            None,
+        ))
+        .expect("compile anonymous forwarding forms");
+        let control = InvocationControl::default().force_generic_native();
+        let outputs = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("nativeAnonForward".into()),
+                arguments: vec![Value::Num(5.0)],
+                requested_outputs: 2,
+            },
+            &control,
+        ))
+        .expect("execute native anonymous two-output forwarding");
+        assert_output_values(&outputs, &[Value::Num(7.0), Value::Num(8.0)]);
+
+        let zero = block_on(session.invoke_executable(
+            &unit,
+            ProcedureInvocation {
+                target: ProcedureTarget::Function("nativeAnonZero".into()),
+                arguments: vec![Value::Num(5.0)],
+                requested_outputs: 0,
+            },
+            &control,
+        ))
+        .expect("execute native anonymous zero-output forwarding");
+        assert_output_values(&zero, &[]);
+    });
+}
+
+#[test]
 fn forced_generic_native_deal_count_error_does_not_duplicate_prior_effects() {
     runmat_gc::gc_test_context(|| {
         let mut session = RunMatSession::with_options(false, false).expect("session init");

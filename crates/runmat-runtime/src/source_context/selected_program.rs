@@ -257,6 +257,16 @@ impl SelectedProgramSourceOwner {
         self.is_live() && Weak::ptr_eq(&self.facts.session, &runtime.session_lease())
     }
 
+    /// This exact source table, not merely this session, is active for the
+    /// invocation. Dynamic foreign admission must not borrow a sibling
+    /// selected unit's source provenance.
+    pub fn is_bound_in(&self, runtime: &crate::context::RuntimeContext) -> bool {
+        self.is_issued_in(runtime)
+            && runtime
+                .selected_program_source_binding()
+                .is_some_and(|binding| Rc::ptr_eq(&binding, &self.facts.binding))
+    }
+
     /// Re-enter this already-issued portable source table in its original
     /// session. A retained executable/foreign product may use the resulting
     /// short-lived context for callbacks or orderly shutdown. The owner

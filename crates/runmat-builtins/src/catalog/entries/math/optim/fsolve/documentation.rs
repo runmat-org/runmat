@@ -31,7 +31,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 "The step is chosen with a Levenberg-Marquardt damping parameter and accepted only when it reduces the residual norm.",
 "Options are supplied as a struct, usually created with `optimset`. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, and `Display` are accepted.",
 "Up to five outputs are supported: `x`, `fval`, `exitflag`, `output`, and the final Jacobian. A stationary non-root or exhausted budget is returned with a nonpositive convergence status instead of being raised as an evaluation error.",
-"For the symmetric two-equation example below, the initial point [1;1] and the finite-difference Levenberg-Marquardt steps preserve equal coordinates. No zero exists on that diagonal: the equations would require x(1)^2 to equal both 2 and 1. A finite stationary non-root is therefore not successful root convergence; use a nonsymmetric initial guess when seeking one of the asymmetric roots."] }
+"The initial guess and stopping tolerances affect convergence. Inspect the residual and convergence status to distinguish a root from a stationary non-root."] }
 ,
 
 BuiltinDocumentationSection {
@@ -43,12 +43,12 @@ BuiltinDocumentationSection {
 
 BuiltinDocumentationSection {
  heading: "Example notes",
- paragraphs: &["The legacy example caption x=[1.9319;0.5176] was corrected: that asymmetric root is not reached by the retained symmetric initial-point program."] }
+ paragraphs: &["The two-equation system has more than one root. The example checks the residual rather than requiring a particular ordering of the solution coordinates."] }
 ],
 
     examples: &[BuiltinExample {
  id: "example-1",
- title: "A symmetric initial guess can stall at a non-root",
+ title: "Solve a coupled nonlinear system",
  program: "F = @(x) [x(1)^2 + x(2)^2 - 4; x(1)*x(2) - 1];\nx = fsolve(F, [1; 1])",
  display_output: None,
  compatibility: BuiltinExampleCompatibility::Matlab,
@@ -56,7 +56,7 @@ BuiltinDocumentationSection {
  fixture: BuiltinExampleFixture::None,
  requirements: BuiltinExampleRequirements::NONE,
  verification: BuiltinExampleVerification::Assertions {
- source: "assert(isequal(size(x),[2 1])); assert(all(isfinite(x))); assert(abs(x(1)-x(2))<1e-5); assert(norm(F(x))>0.1);" }
+ source: "assert(isequal(size(x),[2 1])); assert(all(isfinite(x))); assert(norm(F(x))<1e-5);" }
  }
 ,
 

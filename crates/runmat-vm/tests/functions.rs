@@ -3645,6 +3645,30 @@ fn anonymous_function_handle_feval_executes() {
 }
 
 #[test]
+fn anonymous_call_body_forwards_requested_outputs_and_captures() {
+    let source = r#"
+        bias = 4;
+        f = @(x) deal(x + bias, x + bias + 1);
+        [first, second] = feval(f, 7);
+        difference = second - first;
+    "#;
+    let vars = execute_source(source);
+    assert!(has_num(&vars, 11.0), "first forwarded output: {vars:?}");
+    assert!(has_num(&vars, 12.0), "second forwarded output: {vars:?}");
+    assert!(has_num(&vars, 1.0), "captured result difference: {vars:?}");
+}
+
+#[test]
+fn anonymous_noncall_body_rejects_multiple_outputs() {
+    let error = execute_source_result("f = @(x) x + 1; [a,b] = feval(f, 2);")
+        .expect_err("a scalar anonymous body cannot supply two outputs");
+    assert_eq!(
+        error.identifier(),
+        Some("RunMat:CommaSeparatedListOutputShortage")
+    );
+}
+
+#[test]
 fn function_handle_index_call_executes() {
     let bytecode =
         compile_source("h = @inc; y = h(2);\nfunction z = inc(x)\n  z = x + 1;\nend").unwrap();

@@ -59,7 +59,7 @@ pub fn detect_reduction_signature(
         }
         if let Some(info) = graph.value(vid) {
             // constants resolved by callers; here we only pass the ValueId through
-            if matches!(info.origin, crate::graph::ValueOrigin::Constant) {
+            if graph.source_literal_constant(vid).is_some() {
                 // allow numeric or integer constants (type system may already have Num/Int)
                 if matches!(info.ty, Type::Num | Type::Int) {
                     dim_arg = Some(vid);
@@ -82,10 +82,10 @@ pub fn detect_reduction_signature(
     let mut axes = ReductionAxes::Unspecified;
     // Inspect the dimension argument (if constant) first
     if let Some(dim_vid) = dim_arg {
-        if let Some(value) = graph.value(dim_vid).and_then(|info| info.constant.clone()) {
-            if value_is_all_keyword(&value) {
+        if let Some(value) = graph.source_literal_constant(dim_vid) {
+            if value_is_all_keyword(value) {
                 axes = ReductionAxes::All;
-            } else if let Some(dims) = parse_dims_from_value(&value) {
+            } else if let Some(dims) = parse_dims_from_value(value) {
                 axes = ReductionAxes::Explicit(dims);
             }
         }
@@ -96,11 +96,11 @@ pub fn detect_reduction_signature(
             if vid == data_input {
                 continue;
             }
-            if let Some(value) = graph.value(vid).and_then(|info| info.constant.clone()) {
-                if value_is_all_keyword(&value) {
+            if let Some(value) = graph.source_literal_constant(vid) {
+                if value_is_all_keyword(value) {
                     axes = ReductionAxes::All;
                     break;
-                } else if let Some(dims) = parse_dims_from_value(&value) {
+                } else if let Some(dims) = parse_dims_from_value(value) {
                     axes = ReductionAxes::Explicit(dims);
                     break;
                 }
@@ -257,6 +257,18 @@ mod tests {
         let selected = detect_reduction_signature(&graph, &graph.nodes[0]).expect("sum signature");
         assert_eq!(selected.data_input, 0);
         assert_eq!(selected.axes, ReductionAxes::Explicit(vec![2]));
+
+        graph.var_bindings.insert(
+            2,
+            crate::graph::VarBinding {
+                kind: VarKind::Global,
+                index: 2,
+            },
+        );
+        let selected =
+            detect_reduction_signature(&graph, &graph.nodes[0]).expect("bound axis signature");
+        assert_eq!(selected.dim_arg, None);
+        assert_eq!(selected.axes, ReductionAxes::Unspecified);
     }
 
     #[test]

@@ -37,6 +37,20 @@ impl AccelGraph {
         self.node_bindings.get(&id)
     }
 
+    /// A value fact on a live binding is not a frozen source literal. Fusion
+    /// planning and reduction signatures share this provenance boundary.
+    pub fn source_literal_constant(&self, id: ValueId) -> Option<&BuiltinValue> {
+        if self.var_binding(id).is_some() {
+            return None;
+        }
+        let info = self.value(id)?;
+        if matches!(info.origin, ValueOrigin::Constant) {
+            info.constant.as_ref()
+        } else {
+            None
+        }
+    }
+
     pub fn detect_fusion_groups(&self) -> Vec<crate::fusion::FusionGroup> {
         crate::fusion::detect_fusion_groups(self)
     }

@@ -32,7 +32,8 @@ pub(in crate::session) async fn load_dynamic_function(
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
         use runmat_runtime::user_functions::NativeResolutionScope;
         let native = match runtime.native_resolution_scope() {
-            NativeResolutionScope::Selected(route) => {
+            NativeResolutionScope::Selected(route)
+            | NativeResolutionScope::SelectedOrdinary { route, .. } => {
                 route
                     .invoke(
                         runtime.clone(),
@@ -61,6 +62,22 @@ pub(in crate::session) async fn load_dynamic_function(
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
         return None;
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    let ordinary_mex = match runtime.native_resolution_scope() {
+        runmat_runtime::user_functions::NativeResolutionScope::SelectedOrdinary {
+            mex,
+            source_owner,
+            ..
+        } if source_owner.is_bound_in(&runtime) => Some(Rc::clone(mex)),
+        runmat_runtime::user_functions::NativeResolutionScope::SelectedOrdinary { .. } => {
+            return Some(Err(build_runtime_error(
+                "ordinary MEX source authority differs from the current source binding",
+            )
+            .with_identifier("RunMat:MEX:SourceAuthority")
+            .build()));
+        }
+        _ => None,
+    };
     let resolve_span = info_span!(
         "runtime.callable.resolve",
         call_kind = "runtime-name",
@@ -344,6 +361,66 @@ pub(in crate::session) async fn load_dynamic_function(
                 admitted_unit,
                 metadata_units,
             ) = invocation;
+            #[cfg(not(target_arch = "wasm32"))]
+            let selected_runtime = if let Some(mex) = ordinary_mex {
+                let selected = source_evaluator
+                    .selected_binding_view(&binding)?
+                    .ok_or_else(|| {
+                        build_runtime_error("dynamic function lacks its exact selected body")
+                            .with_identifier("RunMat:MEX:SourceAuthority")
+                            .build()
+                    })?;
+                let lease = binding.authority.local_lease(binding.function).ok_or_else(|| {
+                    build_runtime_error("dynamic function lacks its exact definition lease")
+                        .with_identifier("RunMat:MEX:SourceAuthority")
+                        .build()
+                })?;
+                let body = selected
+                    .get_owned(runmat_hir::FunctionId(binding.function), lease)
+                    .ok_or_else(|| {
+                        build_runtime_error("dynamic function lost its exact selected body")
+                            .with_identifier("RunMat:MEX:SourceAuthority")
+                            .build()
+                    })?;
+                let source_owner = body.selected_source_owner.as_ref().ok_or_else(|| {
+                    build_runtime_error("dynamic function lacks an issued source owner")
+                        .with_identifier("RunMat:MEX:SourceAuthority")
+                        .build()
+                })?;
+                if !source_owner.is_issued_in(&selected_runtime)
+                    || body
+                        .source_id
+                        .and_then(runmat_vm::BytecodeSourceRef::runtime)
+                        .is_none_or(|source| !source_owner.owns_source(source))
+                {
+                    return Err(build_runtime_error(
+                        "dynamic function differs from its exact issued source",
+                    )
+                    .with_identifier("RunMat:MEX:SourceAuthority")
+                    .build());
+                }
+                // Cached definitions retain their exact child source table
+                // but the caller's context still carries its parent binding.
+                // Rebind that table before issuing any child native route.
+                let selected_runtime = source_owner
+                    .bind_runtime(selected_runtime)
+                    .map_err(|error| {
+                        build_runtime_error(error.to_string())
+                            .with_identifier("RunMat:MEX:SourceAuthority")
+                            .build()
+                    })?;
+                selected_runtime.with_ordinary_selected_native_route(
+                    super::super::source_evaluation::ordinary_native_route(
+                        None,
+                        Rc::clone(&mex),
+                        source_owner.clone(),
+                    ),
+                    mex,
+                    source_owner.clone(),
+                )
+            } else {
+                selected_runtime
+            };
             if matches!(phase, runmat_runtime::user_functions::DynamicFunctionLoadPhase::Handle { .. }) {
                 let function = runmat_hir::FunctionId(binding.function);
                 let selected = source_evaluator

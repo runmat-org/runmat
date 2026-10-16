@@ -80,6 +80,7 @@ pub enum MetadataPredicate {
     Numeric,
     Real,
     Sparse,
+    Struct,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

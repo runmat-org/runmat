@@ -1213,6 +1213,7 @@ impl RunMatSession {
                     Rc::clone(&selected_graph),
                     None,
                     selected_graph.selected_interop_receipt().cloned(),
+                    Some(Rc::clone(&self.mex_runtime)),
                 )
                 .map_err(RunError::Runtime)?
         } else if let Some(declaration) = selected_declaration {

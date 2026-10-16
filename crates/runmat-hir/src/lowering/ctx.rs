@@ -2959,22 +2959,48 @@ impl LoweringCtx {
                                 )
                             })
                             .collect::<Vec<_>>();
+                        // `$` is not a source identifier character, so a
+                        // parameter or captured lexical binding cannot shadow
+                        // either compiler-owned result slot.
+                        let output_name = format!("__runmat$anon_outputs_{}", function_id.0);
+                        let nargout_name = format!("__runmat$anon_nargout_{}", function_id.0);
                         let output_id = ctx.define_binding(
-                            "__anon_out",
+                            &output_name,
                             BindingRole::Output,
                             BindingStorage::Lexical,
                             *span,
                         );
-                        let body_expr = ctx.lower_expr_semantic(body)?;
-                        let stmt = HirStmtNode {
-                            id: ctx.alloc_stmt_id(),
-                            kind: HirStmtKind::Assign(
-                                HirPlace::Binding(output_id),
-                                body_expr,
-                                true,
-                            ),
-                            span: *span,
-                        };
+                        let nargout_id = ctx.define_binding(
+                            &nargout_name,
+                            BindingRole::Local,
+                            BindingStorage::Lexical,
+                            *span,
+                        );
+                        // The existing typed varargout destination determines
+                        // the callback's requested count before its body call.
+                        // It also publishes each result through the same
+                        // prepared sequence and rooted function ABI as named
+                        // `[varargout{1:nargout}] = ...` forwarding.
+                        let body_span = body.span();
+                        let destination = AstStmt::MultiAssign(
+                            vec![runmat_parser::MultiAssignTarget::LValue(
+                                runmat_parser::LValue::IndexCell(
+                                    Box::new(AstExpr::Ident(output_name, body_span)),
+                                    vec![AstExpr::Range(
+                                        Box::new(AstExpr::Number("1".into(), body_span)),
+                                        None,
+                                        Box::new(AstExpr::Ident(nargout_name, body_span)),
+                                        body_span,
+                                    )],
+                                ),
+                            )],
+                            *body.clone(),
+                            true,
+                            body_span,
+                        );
+                        let stmt = ctx.lower_stmt_hir(&destination)?.ok_or_else(|| {
+                            HirError::new("anonymous result forwarding produced no statement")
+                        })?;
                         let locals = ctx.binding_ids_for_owner(function_id);
                         Ok(HirFunction {
                             id: function_id,
@@ -2992,9 +3018,9 @@ impl LoweringCtx {
                                 fixed_inputs: param_ids,
                                 varargin: None,
                                 fixed_outputs: vec![output_id],
-                                varargout: None,
+                                varargout: Some(output_id),
                                 implicit_nargin: None,
-                                implicit_nargout: None,
+                                implicit_nargout: Some(nargout_id),
                             },
                             argument_validations: vec![],
                             locals,

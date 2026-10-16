@@ -62,6 +62,50 @@ fn unquoted_dispatcher_call_observes_only_after_exact_full_call_publication() {
 
 #[test]
 fn scalar_provider_preparation_fallback_keeps_original_host_body_without_feedback() {
+    struct ScalarFallbackAdapter {
+        provider: &'static dyn AccelProvider,
+        selected_fallbacks: Rc<Cell<usize>>,
+    }
+    impl RuntimeAccelerationService for ScalarFallbackAdapter {
+        fn supports_operation(&self, _: &str) -> bool {
+            true
+        }
+        fn prepare_admitted(
+            &self,
+            context: RuntimeContext,
+            request: AdmittedBuiltinPreparation,
+        ) -> RuntimeServiceFuture<Result<PreparedBuiltinOperands, RuntimeError>> {
+            let provider = self.provider;
+            let selected_fallbacks = self.selected_fallbacks.clone();
+            Box::pin(async move {
+                let auto = NativeAutoOffload::new(
+                    provider,
+                    ThresholdConfig {
+                        // The tiny scalar's actual host work is made more
+                        // expensive than this fixture's provider quote. This
+                        // selects the legal provider candidate through the
+                        // real whole-work owner before preparation falls back.
+                        cpu_elem_per_elem: 1.0,
+                        ..ThresholdConfig::default()
+                    },
+                );
+                let prepared = super::super::admitted::prepare_async(&auto, &context, request)
+                    .await
+                    .map_err(|error| *error)?;
+                assert!(
+                    prepared
+                        .observation
+                        .as_ref()
+                        .is_some_and(BuiltinCallObservation::shared_fallback_selected),
+                    "provider selection must become the typed shared fallback route"
+                );
+                selected_fallbacks.set(selected_fallbacks.get() + 1);
+                let (operands, guard) = prepared.into_execution();
+                PreparedBuiltinOperands::new(operands, Some(Box::new(guard)))
+            })
+        }
+    }
+
     let provider = super::admitted_owners::owner();
     let _provider = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     for (name, args, expected) in [
@@ -81,26 +125,32 @@ fn scalar_provider_preparation_fallback_keeps_original_host_body_without_feedbac
             Value::Num(21.0),
         ),
     ] {
-        let probe = Rc::new(Probe::default());
-        probe.provider.set(true);
-        let context = runtime(&probe);
-        let context = context.clone().with_service_ports(
-            context
-                .service_ports()
-                .clone()
-                .with_acceleration(Rc::new(Adapter(provider, 0))),
+        let session = Rc::new(crate::placement::PlacementSession::default());
+        let selected_fallbacks = Rc::new(Cell::new(0));
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_placement(session.clone())
+                .with_acceleration(Rc::new(ScalarFallbackAdapter {
+                    provider,
+                    selected_fallbacks: selected_fallbacks.clone(),
+                })),
         );
         let output = futures::executor::block_on(context.scope(
             runmat_runtime::dispatcher::call_builtin_async_in_context(&context, name, &args),
         ))
         .unwrap();
         assert_eq!(output.value(), &expected, "{name}");
-        assert!(
-            !probe.requests.borrow().is_empty(),
-            "{name} reached placement"
+        assert_eq!(
+            selected_fallbacks.get(),
+            1,
+            "{name} selected provider fallback"
         );
         assert!(
-            probe.feedback.borrow().is_empty(),
+            session.ordinary_feedback_for_test().is_empty()
+                && session.profile_snapshot().feedback.is_empty(),
             "{name} must not publish a successful provider or private-host sample"
         );
     }

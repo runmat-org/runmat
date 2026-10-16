@@ -2,8 +2,56 @@
 
 use super::{runtime_error, InstalledMexArtifact};
 use crate::RuntimeError;
+use runmat_mex::MexArtifactManifest;
 use std::collections::HashMap;
+use std::io::Read as _;
 use std::path::Path;
+
+// The same single-object and manifest byte ceilings used for immutable
+// executable archive capture. MEX bytes are retained twice while a private
+// copy is verified, so admission must happen before allocating either Vec.
+const MAX_MEX_MODULE_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_MEX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
+
+fn read_bounded(path: &Path, limit: u64, label: &str) -> Result<Vec<u8>, RuntimeError> {
+    let file = std::fs::File::open(path).map_err(|error| {
+        runtime_error(
+            "MEX:Artifact",
+            format!("could not open {label} '{}': {error}", path.display()),
+        )
+    })?;
+    let size = file
+        .metadata()
+        .map_err(|error| {
+            runtime_error(
+                "MEX:Artifact",
+                format!("could not inspect {label} '{}': {error}", path.display()),
+            )
+        })?
+        .len();
+    if size > limit {
+        return Err(runtime_error(
+            "MEX:Artifact",
+            format!("{label} exceeds its {limit}-byte admission limit"),
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            runtime_error(
+                "MEX:Artifact",
+                format!("could not read {label} '{}': {error}", path.display()),
+            )
+        })?;
+    if u64::try_from(bytes.len()).ok() != Some(size) || size > limit {
+        return Err(runtime_error(
+            "MEX:Artifact",
+            format!("{label} changed size during bounded capture"),
+        ));
+    }
+    Ok(bytes)
+}
 
 /// Exact host-frozen declaration, checked against the same bytes used for admission.
 pub struct MexArtifactExpectation<'a> {
@@ -69,20 +117,27 @@ pub(super) fn prepare_artifact(
     module: &Path,
     expected: Option<&MexArtifactExpectation<'_>>,
 ) -> Result<(String, InstalledMexArtifact), RuntimeError> {
+    let captured = capture_artifact(module, expected)?;
+    Ok((captured.name, captured.installed))
+}
+
+pub(super) struct CapturedMexArtifact {
+    pub name: String,
+    pub installed: InstalledMexArtifact,
+    pub module_bytes: Vec<u8>,
+    pub manifest_bytes: Vec<u8>,
+    pub manifest: MexArtifactManifest,
+}
+
+pub(super) fn capture_artifact(
+    module: &Path,
+    expected: Option<&MexArtifactExpectation<'_>>,
+) -> Result<CapturedMexArtifact, RuntimeError> {
     let module = std::fs::canonicalize(module).map_err(|error| {
         runtime_error(
             "MEX:Artifact",
             format!(
                 "could not resolve MEX artifact '{}': {error}",
-                module.display()
-            ),
-        )
-    })?;
-    let bytes = std::fs::read(&module).map_err(|error| {
-        runtime_error(
-            "MEX:Artifact",
-            format!(
-                "could not read MEX artifact '{}': {error}",
                 module.display()
             ),
         )
@@ -101,22 +156,8 @@ pub(super) fn prepare_artifact(
                 "declared MEX manifest differs from the module sidecar",
             ));
         }
-        if runmat_execution::Digest::sha256(&bytes) != expected.module_digest {
-            return Err(runtime_error(
-                "MEX:Artifact",
-                "MEX module changed after project resolution",
-            ));
-        }
     }
-    let manifest_bytes = std::fs::read(&manifest_path).map_err(|error| {
-        runtime_error(
-            "MEX:Artifact",
-            format!(
-                "could not read MEX artifact manifest '{}': {error}",
-                manifest_path.display()
-            ),
-        )
-    })?;
+    let manifest_bytes = read_bounded(&manifest_path, MAX_MEX_MANIFEST_BYTES, "MEX manifest")?;
     if let Some(expected) = expected {
         if runmat_execution::Digest::sha256(&manifest_bytes) != expected.manifest_digest {
             return Err(runtime_error(
@@ -126,16 +167,28 @@ pub(super) fn prepare_artifact(
         }
     }
     let manifest = runmat_mex::MexArtifactManifest::from_canonical_bytes(&manifest_bytes)
-        .and_then(|manifest| {
-            manifest.validate_current_module(&bytes)?;
-            Ok(manifest)
-        })
-        .map_err(|error| {
-            runtime_error(
+        .map_err(|error| runtime_error("MEX:Artifact", error.to_string()))?;
+    if manifest.module_bytes > MAX_MEX_MODULE_BYTES {
+        return Err(runtime_error(
+            "MEX:Artifact",
+            "MEX module exceeds its byte admission limit",
+        ));
+    }
+    let bytes = read_bounded(&module, MAX_MEX_MODULE_BYTES, "MEX module")?;
+    if let Some(expected) = expected {
+        if runmat_execution::Digest::sha256(&bytes) != expected.module_digest {
+            return Err(runtime_error(
                 "MEX:Artifact",
-                format!("MEX artifact '{}' is invalid: {error}", module.display()),
-            )
-        })?;
+                "MEX module changed after project resolution",
+            ));
+        }
+    }
+    manifest.validate_current_module(&bytes).map_err(|error| {
+        runtime_error(
+            "MEX:Artifact",
+            format!("MEX artifact '{}' is invalid: {error}", module.display()),
+        )
+    })?;
     if module.file_stem().and_then(|stem| stem.to_str()) != Some(&manifest.module_name) {
         return Err(runtime_error(
             "MEX:Artifact",
@@ -152,5 +205,11 @@ pub(super) fn prepare_artifact(
             .map_err(|error| runtime_error("MEX:Artifact", error.to_string()))?,
         interop: manifest.interop_manifest(),
     };
-    Ok((manifest.module_name, installed))
+    Ok(CapturedMexArtifact {
+        name: manifest.module_name.clone(),
+        installed,
+        module_bytes: bytes,
+        manifest_bytes,
+        manifest,
+    })
 }

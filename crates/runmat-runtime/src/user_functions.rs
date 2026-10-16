@@ -119,6 +119,14 @@ pub enum NativeResolutionScope {
     Session,
     SelectedClosed,
     Selected(Rc<SelectedNativeRoute>),
+    /// Issued only for an ordinary source invocation. A dynamic `.m` child
+    /// must bind its own source owner before this authority can be reissued.
+    #[cfg(not(target_arch = "wasm32"))]
+    SelectedOrdinary {
+        route: Rc<SelectedNativeRoute>,
+        mex: Rc<crate::foreign::MexRuntimeSession>,
+        source_owner: crate::source_context::SelectedProgramSourceOwner,
+    },
 }
 
 /// Invocation-local native name owner. Both callbacks are supplied by the

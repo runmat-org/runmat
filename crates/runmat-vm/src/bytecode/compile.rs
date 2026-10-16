@@ -1018,10 +1018,15 @@ fn compile_semantic_functions(
                     .collect::<Result<Vec<_>, CompileError>>()?,
                 creates_lexical_environment: lexical_projection.creates_activation,
                 var_names: function_layout_var_names(hir, function_layout)?,
-                initially_unassigned_slots: function_layout_initially_unassigned_slots(
-                    hir,
-                    function_layout,
-                ),
+                // A fresh function activation has storage for its bindings,
+                // not assigned language values. Invocation installs actual
+                // inputs, captures and implicit values before entering it.
+                // Workspace entrypoints retain their separate import policy.
+                initially_unassigned_slots: function_layout
+                    .binding_slots
+                    .values()
+                    .map(|slot| slot.0)
+                    .collect(),
                 argument_validations: function
                     .argument_validations
                     .iter()

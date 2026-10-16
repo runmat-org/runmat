@@ -42,7 +42,9 @@ impl MetadataBoundary {
             MetadataPredicate::GpuArray => {
                 return Ok(runmat_accelerate_api::handle_is_explicit(handle));
             }
-            MetadataPredicate::Cell | MetadataPredicate::CellString => return Ok(false),
+            MetadataPredicate::Cell | MetadataPredicate::CellString | MetadataPredicate::Struct => {
+                return Ok(false)
+            }
             MetadataPredicate::Logical
             | MetadataPredicate::Numeric
             | MetadataPredicate::Real
@@ -53,7 +55,7 @@ impl MetadataBoundary {
         let logical = runmat_accelerate_api::handle_is_logical(handle);
         Ok(match self.predicate {
             MetadataPredicate::GpuArray => unreachable!("handled before metadata validation"),
-            MetadataPredicate::Cell | MetadataPredicate::CellString => {
+            MetadataPredicate::Cell | MetadataPredicate::CellString | MetadataPredicate::Struct => {
                 unreachable!("handled before metadata validation")
             }
             MetadataPredicate::Logical => logical,
@@ -75,6 +77,11 @@ impl MetadataBoundary {
                     .data
                     .iter()
                     .all(|element| matches!(element, Value::CharArray(_))),
+                _ => false,
+            },
+            MetadataPredicate::Struct => match value {
+                Value::Struct(_) | Value::StructArray(_) => true,
+                Value::Distributed(handle) => fact_is_struct(&handle.value),
                 _ => false,
             },
             MetadataPredicate::GpuArray => false,
@@ -197,6 +204,10 @@ fn fact_is_logical(value: &ValueFact) -> bool {
 
 fn fact_is_cell(value: &ValueFact) -> bool {
     matches!(value.kind, ValueKindFact::Cell(_))
+}
+
+fn fact_is_struct(value: &ValueFact) -> bool {
+    matches!(value.kind, ValueKindFact::Struct(_))
 }
 
 fn fact_is_numeric(value: &ValueFact) -> bool {

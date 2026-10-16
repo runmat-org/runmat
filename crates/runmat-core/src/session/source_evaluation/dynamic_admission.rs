@@ -408,7 +408,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
             .collect();
         #[cfg(not(target_arch = "wasm32"))]
         let selected_runtime =
-            evaluator.bind_selected_foreign(selected_runtime, primary, None, receipt)?;
+            evaluator.bind_selected_foreign(selected_runtime, primary, None, receipt, None)?;
         #[cfg(target_arch = "wasm32")]
         let selected_runtime = {
             let ports = selected_runtime.service_ports().clone().without_foreign();

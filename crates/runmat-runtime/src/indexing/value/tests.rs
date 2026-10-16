@@ -2,7 +2,33 @@ use super::*;
 use crate::indexing::plan::{build_assignment_plan, build_index_plan};
 use crate::indexing::selectors::SliceSelector;
 use futures::executor::block_on;
-use runmat_value::CharArray;
+use runmat_value::{CharArray, StringArray};
+
+#[test]
+fn bounded_three_subscript_string_store_uses_full_selector_rank() {
+    let plan = build_index_plan(
+        &[
+            SliceSelector::Scalar(1),
+            SliceSelector::Scalar(1),
+            SliceSelector::Scalar(2),
+        ],
+        3,
+        &[1, 1, 3],
+    )
+    .unwrap();
+    let source =
+        Value::StringArray(StringArray::new(vec![String::new(); 3], vec![1, 1, 3]).unwrap());
+    let Value::StringArray(updated) =
+        block_on(assign_with_plan(source, &plan, Value::String("mat".into()))).unwrap()
+    else {
+        panic!("string store must preserve its array carrier")
+    };
+    assert_eq!(updated.shape, vec![1, 1, 3]);
+    assert_eq!(
+        updated.data,
+        vec![String::new(), "mat".into(), String::new()]
+    );
+}
 
 #[test]
 fn scalar_numeric_indexed_store_bridge_preserves_class_for_bounded_growth_and_deletion() {

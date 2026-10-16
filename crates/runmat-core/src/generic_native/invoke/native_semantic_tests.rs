@@ -170,13 +170,13 @@ fn absent_brace_root_completes_in_forced_native_with_vm_parity() {
     let source = ExecutableSource::new(
         "native-absent-brace-root@1",
         "nativeAbsentBraceRoot.m",
-        "function [direct, prepared, y] = nativeAbsentBraceRoot()\nc{2} = 9;\n[d{2}, y] = deal(4, 5);\ndirect = c;\nprepared = d;\nend\n",
+        "function [direct, prepared, y] = nativeAbsentBraceRoot(value)\nc{2} = value;\n[d{2}, y] = deal(4, 5);\ndirect = c;\nprepared = d;\nend\n",
     );
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let unit = block_on(session.compile_executable_unit(source, None)).expect("compile unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeAbsentBraceRoot".into()),
-        arguments: Vec::new(),
+        arguments: vec![Value::Num(9.0)],
         requested_outputs: 3,
     };
     let vm = block_on(session.invoke_executable(

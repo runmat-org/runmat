@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_runtime::context::{RuntimeContext, RuntimeForeignService, RuntimeLocalTaskSupervisor};
+use runmat_runtime::foreign::MexRuntimeSession;
 use runmat_runtime::user_functions::{
     NativeNameObserver, SelectedNativeInvoker, SelectedNativeRoute,
 };
@@ -182,6 +183,54 @@ fn selected_native_route(
         Box::pin(async move {
             let _bytes = bytes;
             mex.load_installed_and_call(&name, arguments, outputs, runtime)
+                .await
+        })
+    });
+    Rc::new(SelectedNativeRoute::new(observer, invoker))
+}
+
+/// A trusted ordinary session source may admit a path MEX at the call site.
+/// A sealed imported/worker product never receives this route. Its existing
+/// selected artifact names still precede ordinary path discovery.
+pub(in crate::session) fn ordinary_native_route(
+    installed: Option<Rc<SelectedNativeRoute>>,
+    mex: Rc<MexRuntimeSession>,
+    source_owner: runmat_runtime::source_context::SelectedProgramSourceOwner,
+) -> Rc<SelectedNativeRoute> {
+    let ordinary_observer = mex.ordinary_name_observer();
+    let observed_installed = installed.clone();
+    let observer: Rc<NativeNameObserver> = Rc::new(move |name| {
+        let installed = observed_installed.clone();
+        let ordinary = Rc::clone(&ordinary_observer);
+        Box::pin(async move {
+            if let Some(installed) = installed {
+                if let Some(fact) = installed.observe(name.clone()).await? {
+                    return Ok(Some(fact));
+                }
+            }
+            ordinary(name).await
+        })
+    });
+    let invoker: Rc<SelectedNativeInvoker> = Rc::new(move |runtime, name, arguments, outputs| {
+        let installed = installed.clone();
+        let mex = Rc::clone(&mex);
+        let source_owner = source_owner.clone();
+        Box::pin(async move {
+            if !source_owner.is_bound_in(&runtime) {
+                return Some(Err(selected_error(
+                    "ordinary MEX route differs from its issued source",
+                )));
+            }
+            if let Some(installed) = installed {
+                match installed.observe(name.clone()).await {
+                    Ok(Some(_)) => {
+                        return installed.invoke(runtime, name, arguments, outputs).await;
+                    }
+                    Ok(None) => {}
+                    Err(error) => return Some(Err(selected_error(error))),
+                }
+            }
+            mex.load_ordinary_admitted_and_call(&name, arguments, outputs, runtime, &source_owner)
                 .await
         })
     });
@@ -375,6 +424,7 @@ impl SessionSourceEvaluator {
         primary: Rc<SelectedGraphPrimary>,
         body: Option<&FunctionBytecode>,
         receipt: Option<std::rc::Rc<SelectedUnitInteropReceipt>>,
+        ordinary_mex: Option<Rc<MexRuntimeSession>>,
     ) -> Result<RuntimeContext, RuntimeError> {
         if !primary.source_owner().is_issued_in(&runtime) {
             return Err(selected_error(
@@ -451,12 +501,18 @@ impl SessionSourceEvaluator {
         let route = installed
             .as_ref()
             .map(|entry| Rc::clone(&entry.native_route));
-        Ok(runtime
-            .with_selected_native_route(route)
-            .with_service_ports(match installed {
-                Some(entry) => ports.with_foreign(entry.foreign_service()),
-                None => ports,
-            }))
+        let runtime = match ordinary_mex {
+            Some(mex) => runtime.with_ordinary_selected_native_route(
+                ordinary_native_route(route, Rc::clone(&mex), primary.source_owner().clone()),
+                mex,
+                primary.source_owner().clone(),
+            ),
+            None => runtime.with_selected_native_route(route),
+        };
+        Ok(runtime.with_service_ports(match installed {
+            Some(entry) => ports.with_foreign(entry.foreign_service()),
+            None => ports,
+        }))
     }
 
     /// A declaration-only class has source/foreign authority but no callable

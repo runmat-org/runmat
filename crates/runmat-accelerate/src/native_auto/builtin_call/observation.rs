@@ -130,6 +130,11 @@ impl BuiltinCallObservation {
     pub(super) fn provider_selected(&self) -> bool {
         self.route == PreparationRoute::Provider
     }
+
+    #[cfg(test)]
+    pub(super) fn shared_fallback_selected(&self) -> bool {
+        self.route == PreparationRoute::SharedFallback
+    }
     pub(super) fn new(
         feedback: Option<Box<LocalPlacementFeedback>>,
         trace: PlacementTraceContext,

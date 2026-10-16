@@ -342,6 +342,22 @@ impl RuntimeContext {
         &self.native_resolution_scope
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn with_ordinary_selected_native_route(
+        mut self,
+        route: Rc<crate::user_functions::SelectedNativeRoute>,
+        mex: Rc<crate::foreign::MexRuntimeSession>,
+        source_owner: crate::source_context::SelectedProgramSourceOwner,
+    ) -> Self {
+        self.native_resolution_scope =
+            crate::user_functions::NativeResolutionScope::SelectedOrdinary {
+                route,
+                mex,
+                source_owner,
+            };
+        self
+    }
+
     /// Install a short-lived, already-admitted site resolver for one selected
     /// V3 unit. It is carried by this invocation context, never by bytecode or
     /// a durable definition product.

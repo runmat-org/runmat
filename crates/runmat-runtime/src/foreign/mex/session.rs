@@ -23,6 +23,7 @@ use crate::user_functions::DynamicFunctionClearRequest;
 use crate::{build_runtime_error, RuntimeError};
 mod isolated_client_slot;
 mod artifact_catalog;
+mod ordinary_admission;
 mod retained;
 mod token_root;
 
@@ -80,6 +81,7 @@ pub struct MexRuntimeSession {
     isolated_ready: Arc<tokio::sync::Notify>,
     isolation_policy: RefCell<MexIsolationPolicy>,
     installed_byte_lease: RefCell<Option<runmat_process_host::private_bytes::PrivateByteLease>>,
+    ordinary_modules: RefCell<Vec<ordinary_admission::AdmittedOrdinaryMexArtifact>>,
     shutdown_in_progress: Rc<Cell<bool>>,
     abandoned: Cell<bool>,
     inflight_operations: RefCell<Vec<crate::context::RuntimeLocalTaskLease>>,
@@ -170,6 +172,11 @@ impl MexRuntimeSession {
         self.native_modules.borrow_mut().clear();
         let registrations = std::mem::take(&mut *self.native_values.borrow_mut());
         drop(registrations);
+        for artifact in self.ordinary_modules.borrow().iter() {
+            if let Err(error) = artifact.persist_unverified() {
+                eprintln!("ordinary MEX private bytes retained without recovery marker: {error}");
+            }
+        }
     }
     pub fn new() -> Self {
         Self::default()
@@ -255,6 +262,13 @@ impl MexRuntimeSession {
         if let Some(installed) = self.observe_installed_name(name) {
             return Ok(Some(installed));
         }
+        self.observe_search_path_name(name).await
+    }
+
+    async fn observe_search_path_name(
+        &self,
+        name: &str,
+    ) -> Result<Option<MexNameSelection>, String> {
         let Some(suffix) = runmat_mex::mex_suffix() else {
             return Ok(None);
         };
@@ -486,6 +500,24 @@ impl MexRuntimeSession {
         let canonical = runmat_filesystem::canonicalize_async(&path)
             .await
             .unwrap_or(path);
+        self.dispatch_admitted_path(
+            canonical,
+            arguments,
+            requested_outputs,
+            runtime,
+            input_roots,
+        )
+        .await
+    }
+
+    async fn dispatch_admitted_path(
+        self: &Rc<Self>,
+        canonical: PathBuf,
+        arguments: Vec<Value>,
+        requested_outputs: usize,
+        runtime: RuntimeContext,
+        input_roots: crate::execution::RootedValueLease,
+    ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         let Some(tasks) = runtime.service_ports().local_tasks().cloned() else {
             return Some(Err(runtime_error(
                 "MEX:LifecycleHostUnavailable",
@@ -507,14 +539,21 @@ impl MexRuntimeSession {
                 let scoped_runtime = task_runtime.clone();
                 Box::pin(scoped_runtime.scope(async move {
                     let _input_roots = input_roots;
-                    let result = owner
-                        .load_selected_and_call(
-                            canonical,
-                            arguments,
-                            requested_outputs,
-                            task_runtime,
-                        )
-                        .await;
+                    let result = if task_runtime.is_cancelled() {
+                        Some(Err(runtime_error(
+                            "Cancelled",
+                            "MEX invocation was cancelled before its host task started",
+                        )))
+                    } else {
+                        owner
+                            .load_selected_and_call(
+                                canonical,
+                                arguments,
+                                requested_outputs,
+                                task_runtime,
+                            )
+                            .await
+                    };
                     let _ = sender.send(result);
                 }))
             },
@@ -525,8 +564,19 @@ impl MexRuntimeSession {
         self.inflight_operations
             .borrow_mut()
             .retain(|pending| pending.outcome().is_none());
-        self.inflight_operations.borrow_mut().push(lease);
-        match receiver.await {
+        self.inflight_operations.borrow_mut().push(lease.clone());
+        let reply = receiver.await;
+        // The reply is sent just before the scoped task retires. Wait for its
+        // actual completion so a following clear cannot mistake the module
+        // for still in flight and retain its private bytes after unloading it.
+        let outcome = lease.join().await;
+        if outcome == crate::context::RuntimeLocalTaskOutcome::Cancelled {
+            return Some(Err(runtime_error(
+                "MEX:Lifecycle",
+                "host cancelled an admitted MEX invocation before retirement",
+            )));
+        }
+        match reply {
             Ok(result) => result,
             Err(_) => Some(Err(runtime_error(
                 "MEX:Lifecycle",
@@ -542,6 +592,12 @@ impl MexRuntimeSession {
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+        if runtime.is_cancelled() {
+            return Some(Err(runtime_error(
+                "Cancelled",
+                "MEX invocation was cancelled before native admission",
+            )));
+        }
         if !runmat_mex::MexArtifactManifest::path_for_module(&canonical).is_file() {
             let policy = *self.isolation_policy.borrow();
             if policy.unmanifested == UnmanifestedMexPolicy::Deny {
@@ -576,9 +632,21 @@ impl MexRuntimeSession {
             Ok(lane) => lane,
             Err(error) => return Some(Err(error)),
         };
+        if runtime.is_cancelled() {
+            return Some(Err(runtime_error(
+                "Cancelled",
+                "MEX invocation was cancelled before native load",
+            )));
+        }
         let metadata = match lane.load(&canonical).await {
             Ok(metadata) => metadata,
             Err(NativeModuleLoadError::IsolatedHostRequired) => {
+                if runtime.is_cancelled() {
+                    return Some(Err(runtime_error(
+                        "Cancelled",
+                        "MEX invocation was cancelled before isolated call",
+                    )));
+                }
                 let policy = *self.isolation_policy.borrow();
                 return Some(
                     self.invoke_isolated(
@@ -603,12 +671,14 @@ impl MexRuntimeSession {
                 )))
             }
         };
+        // Native load itself takes ownership of this private path. Keep it
+        // tracked even if token registration or input conversion later fails.
+        self.native_modules.borrow_mut().insert(canonical.clone());
         let registration = match self.native_value_registration(&canonical) {
             Ok(registration) => registration,
             Err(error) => return Some(Err(error)),
         };
         let values = registration.context();
-        self.native_modules.borrow_mut().insert(canonical.clone());
         let mut inputs = Vec::with_capacity(arguments.len());
         for argument in &arguments {
             let argument = match crate::gather_if_needed_async(argument).await {
@@ -619,6 +689,12 @@ impl MexRuntimeSession {
                 Ok(argument) => inputs.push(argument),
                 Err(error) => return Some(Err(runtime_error("MEX:Conversion", error.to_string()))),
             }
+        }
+        if runtime.is_cancelled() {
+            return Some(Err(runtime_error(
+                "Cancelled",
+                "MEX invocation was cancelled before native call",
+            )));
         }
         let host = Rc::new(RuntimeMexHostServices::new(runtime));
         let codec = Rc::new(MxBoundaryCodec::new_with_origin_lease(
@@ -648,18 +724,21 @@ impl MexRuntimeSession {
         request: &DynamicFunctionClearRequest,
         runtime: RuntimeContext,
     ) -> Result<(), RuntimeError> {
+        let ordinary_selected = self.ordinary_selected_private_paths(request);
         if self
             .isolated
             .borrow()
             .keys()
-            .any(|path| selected_by_request(path, request))
+            .any(|path| selected_by_request(path, request) || ordinary_selected.contains(path))
         {
             return Err(runtime_error(
                 "MEX:Lifecycle",
                 "isolated MEX modules require clear_gracefully while their host is active",
             ));
         }
-        self.clear_in_process(request, runtime).await
+        let result = self.clear_in_process(request, runtime).await;
+        self.prune_retired_ordinary(request);
+        result
     }
 
     /// Clear selected modules after completing isolated-host lifecycle RPC.
@@ -723,11 +802,12 @@ impl MexRuntimeSession {
         runtime: RuntimeContext,
     ) -> Result<(), RuntimeError> {
         let policy = *self.isolation_policy.borrow();
+        let ordinary_selected = self.ordinary_selected_private_paths(request);
         let selected = self
             .isolated
             .borrow()
             .keys()
-            .filter(|path| selected_by_request(path, request))
+            .filter(|path| selected_by_request(path, request) || ordinary_selected.contains(*path))
             .cloned()
             .collect::<Vec<_>>();
         let mut first_error = None;
@@ -802,6 +882,7 @@ impl MexRuntimeSession {
             }
         }
         if isolated_retained {
+            self.prune_retired_ordinary(request);
             return Err(first_error.unwrap_or_else(|| {
                 runtime_error("MEX:Lifecycle", "an isolated MEX host remains active")
             }));
@@ -812,6 +893,7 @@ impl MexRuntimeSession {
         if let Err(error) = self.settle_native_commands().await {
             first_error.get_or_insert(error);
         }
+        self.prune_retired_ordinary(request);
         first_error.map_or(Ok(()), Err)
     }
 
@@ -1030,6 +1112,7 @@ impl MexRuntimeSession {
                 runtime_error("MEX:Lifecycle", "MEX shutdown has live native work")
             }))
         } else {
+            self.ordinary_modules.borrow_mut().clear();
             MexSessionRetirement::Retired(first_error.map_or(Ok(()), Err))
         }
     }
@@ -1188,16 +1271,26 @@ impl MexRuntimeSession {
         let Some(lane) = self.native_lane.borrow().as_ref().cloned() else {
             return Ok(());
         };
+        let ordinary_selected = self.ordinary_selected_private_paths(request);
         let paths = self
             .native_modules
             .borrow()
             .iter()
-            .filter(|path| selected_by_request(path, request))
+            .filter(|path| selected_by_request(path, request) || ordinary_selected.contains(*path))
             .cloned()
             .collect::<Vec<_>>();
         let mut first_error = None;
         for path in paths {
             let Some(registration) = self.native_values.borrow().get(&path).cloned() else {
+                first_error.get_or_insert_with(|| {
+                    runtime_error(
+                        "MEX:Lifecycle",
+                        format!(
+                            "loaded MEX module '{}' has no registered token context",
+                            path.display()
+                        ),
+                    )
+                });
                 continue;
             };
             let metadata = match lane.load(&path).await {
@@ -1595,6 +1688,37 @@ mod tests {
         assert_eq!(observed.path(), module.as_path());
         assert!(owner.native_modules.borrow().is_empty());
         assert!(owner.installed_modules.borrow().is_empty());
+    }
+
+    #[test]
+    fn selected_closed_source_cannot_observe_an_ambient_mex_candidate() {
+        let Some(suffix) = runmat_mex::mex_suffix() else {
+            return;
+        };
+        let temporary = tempfile::tempdir().expect("temporary MEX search root");
+        let module = temporary
+            .path()
+            .join(format!("closed_mex_fixture.{suffix}"));
+        std::fs::write(&module, b"candidate only").expect("candidate bytes");
+        let search = Arc::new(crate::builtins::common::path_state::SearchPath::new(
+            temporary.path().to_string_lossy().into_owned(),
+        ));
+        let owner = Rc::new(MexRuntimeSession::new());
+        let runtime =
+            RuntimeContext::new(Rc::new(RuntimeExecutionService::new())).with_search_path(search);
+        runtime.set_native_name_observer(Some(owner.name_observer()));
+        let closed = runtime.with_selected_native_route(None);
+        let _scope = crate::context::RuntimeContextGuard::enter(closed);
+        let observed = futures::executor::block_on(crate::user_functions::observe_runtime_name(
+            "closed_mex_fixture",
+            crate::user_functions::RuntimeNameQuery {
+                route: crate::user_functions::RuntimeNameRoute::DynamicCall,
+                filter: crate::user_functions::RuntimeNameFilter::File,
+                all: false,
+            },
+        ))
+        .expect("selected name observation");
+        assert!(observed.selected().is_none());
     }
 
     #[test]

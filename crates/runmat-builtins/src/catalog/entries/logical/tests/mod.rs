@@ -9,6 +9,7 @@ mod isnan;
 mod isnumeric;
 mod isreal;
 mod issparse;
+mod isstruct;
 mod support;
 
 pub use allfinite::*;
@@ -22,6 +23,7 @@ pub use isnan::*;
 pub use isnumeric::*;
 pub use isreal::*;
 pub use issparse::*;
+pub use isstruct::*;
 
 pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     allfinite::ENTRIES,
@@ -35,4 +37,5 @@ pub(super) const ENTRY_GROUPS: &[&[&crate::BuiltinCatalogEntry]] = &[
     isnumeric::ENTRIES,
     isreal::ENTRIES,
     issparse::ENTRIES,
+    isstruct::ENTRIES,
 ];
