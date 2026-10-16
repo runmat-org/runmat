@@ -500,7 +500,9 @@ pub fn build_assignment_plan(
 
 fn linear_growth_shape(base_shape: &[usize], target_len: usize) -> VmResult<Vec<usize>> {
     let mut shape = base_shape.to_vec();
-    shape.resize(2, 1);
+    if shape.len() < 2 {
+        shape.resize(2, 1);
+    }
     let current_len = checked_total_len_from_shape(&shape)?;
     if target_len <= current_len {
         return Ok(shape);
@@ -508,7 +510,7 @@ fn linear_growth_shape(base_shape: &[usize], target_len: usize) -> VmResult<Vec<
     if current_len == 0 {
         return Ok(vec![1, target_len]);
     }
-    if shape[0] == 1 {
+    if shape.iter().skip(2).all(|extent| *extent == 1) && shape[0] == 1 {
         shape[1] = target_len;
         shape.truncate(2);
         return Ok(shape);
@@ -1003,7 +1005,9 @@ fn assignment_result_shape(
         return Ok(base_shape.to_vec());
     }
     let mut result = planned_shape.to_vec();
-    result.resize(2, 1);
+    if result.len() < 2 {
+        result.resize(2, 1);
+    }
     Ok(result)
 }
 
@@ -1127,6 +1131,50 @@ mod tests {
         .unwrap();
         assert_eq!(subscripts.indices, vec![5]);
         assert_eq!(subscripts.base_shape, vec![3, 2]);
+
+        let nd_shape = [2, 1, 3];
+        let bounded_linear = build_assignment_plan(&[SliceSelector::Scalar(4)], 1, &nd_shape)
+            .expect("in-bounds N-D linear assignment");
+        assert_eq!(bounded_linear.base_shape, nd_shape.to_vec());
+        let growing_linear = build_assignment_plan(&[SliceSelector::Scalar(7)], 1, &nd_shape)
+            .expect("N-D linear assignment grows the final axis");
+        assert_eq!(growing_linear.base_shape, vec![2, 1, 4]);
+        let nd_with_leading_singleton = [1, 2, 3];
+        let growing_leading_singleton =
+            build_assignment_plan(&[SliceSelector::Scalar(7)], 1, &nd_with_leading_singleton)
+                .expect("N-D linear growth retains nonsingleton trailing axes");
+        assert_eq!(growing_leading_singleton.base_shape, vec![1, 2, 4]);
+
+        let bounded_nd = build_assignment_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(2),
+            ],
+            3,
+            &nd_shape,
+        )
+        .expect("in-bounds three-subscript assignment");
+        assert_eq!(bounded_nd.base_shape, nd_shape.to_vec());
+        let growing_nd = build_assignment_plan(
+            &[
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(1),
+                SliceSelector::Scalar(4),
+            ],
+            3,
+            &nd_shape,
+        )
+        .expect("three-subscript assignment grows the third axis");
+        assert_eq!(growing_nd.base_shape, vec![2, 1, 4]);
+
+        let collapsed_growth = build_assignment_plan(
+            &[SliceSelector::Scalar(2), SliceSelector::Scalar(4)],
+            2,
+            &nd_shape,
+        )
+        .expect("fewer subscripts intentionally collapse trailing axes");
+        assert_eq!(collapsed_growth.base_shape, vec![2, 4]);
     }
 
     #[test]

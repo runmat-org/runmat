@@ -1193,7 +1193,7 @@ impl FusionGroupPlan {
         for node_id in &plan.group.nodes {
             if let Some(node) = graph.node(*node_id) {
                 for &inp in &node.inputs {
-                    if let Some(cv) = source_literal_constant(graph, *inp) {
+                    if let Some(cv) = source_literal_constant(graph, inp) {
                         plan.const_values.insert(inp, cv.clone());
                     }
                 }

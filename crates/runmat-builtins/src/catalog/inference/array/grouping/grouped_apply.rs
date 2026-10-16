@@ -72,7 +72,9 @@ fn grouped_shape(shape: &ShapeFact) -> ShapeFact {
             .rank()
             .map_or(ShapeFact::Unknown, |rank| ShapeFact::Ranked { rank });
     };
-    dimensions.resize(2, Some(1));
+    if dimensions.len() < 2 {
+        dimensions.resize(2, Some(1));
+    }
     dimensions[0] = None;
     ShapeFact::from(dimensions)
 }

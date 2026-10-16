@@ -252,7 +252,9 @@ fn index_shape(base: &ShapeFact, selectors: &[IndexSelectorFact]) -> ShapeFact {
             IndexSelectorFact::Unknown => output.push(crate::DimensionFact::Unknown),
         }
     }
-    output.resize(2, crate::DimensionFact::Known(1));
+    if output.len() < 2 {
+        output.resize(2, crate::DimensionFact::Known(1));
+    }
     ShapeFact::Shaped { dims: output }
 }
 
@@ -275,7 +277,21 @@ fn dimensions(shape: &ShapeFact, rank: usize) -> Vec<crate::DimensionFact> {
         ShapeFact::Ranked { rank } => vec![crate::DimensionFact::Unknown; *rank],
         ShapeFact::Shaped { dims } => dims.clone(),
     };
-    dimensions.resize(rank, crate::DimensionFact::Known(1));
+    if dimensions.len() > rank && rank > 0 {
+        let collapsed = dimensions[rank - 1..]
+            .iter()
+            .try_fold(1usize, |product, dim| {
+                let crate::DimensionFact::Known(extent) = dim else {
+                    return None;
+                };
+                product.checked_mul(*extent)
+            });
+        dimensions.truncate(rank);
+        dimensions[rank - 1] =
+            collapsed.map_or(crate::DimensionFact::Unknown, crate::DimensionFact::Known);
+    } else if dimensions.len() < rank {
+        dimensions.resize(rank, crate::DimensionFact::Known(1));
+    }
     dimensions
 }
 

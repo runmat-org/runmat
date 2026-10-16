@@ -215,6 +215,46 @@ fn indexing_preserves_subscript_dimensions_and_reports_proven_bounds() {
         IndexResultContext::ReadSingle,
     );
     assert_eq!(out_of_bounds.diagnostics[0].code, "RM-TYPE-INDEX-BOUNDS");
+
+    let nd = numeric(
+        NumericClass::Double,
+        ShapeFact::from(vec![Some(2), Some(1), Some(3)]),
+    );
+    let nd_slice = infer_index(
+        &nd,
+        IndexKind::Paren,
+        &[
+            IndexSelectorFact::Colon,
+            IndexSelectorFact::Colon,
+            IndexSelectorFact::Colon,
+        ],
+        IndexResultContext::ReadSingle,
+    );
+    assert!(nd_slice.diagnostics.is_empty());
+    assert_eq!(nd_slice.fact.shape, nd.shape);
+    let collapsed_read = infer_index(
+        &nd,
+        IndexKind::Paren,
+        &[
+            IndexSelectorFact::KnownOneBasedIndex(2),
+            IndexSelectorFact::KnownOneBasedIndex(3),
+        ],
+        IndexResultContext::ReadSingle,
+    );
+    assert!(collapsed_read.diagnostics.is_empty());
+    let bad_collapsed_read = infer_index(
+        &nd,
+        IndexKind::Paren,
+        &[
+            IndexSelectorFact::KnownOneBasedIndex(2),
+            IndexSelectorFact::KnownOneBasedIndex(4),
+        ],
+        IndexResultContext::ReadSingle,
+    );
+    assert_eq!(
+        bad_collapsed_read.diagnostics[0].code,
+        "RM-TYPE-INDEX-BOUNDS"
+    );
 }
 
 #[test]
@@ -531,6 +571,18 @@ fn indexed_mutation_follows_collapsed_nd_growth_and_complex_promotion() {
         creation: AssignmentCreationPolicy::CreateArrayByIndex,
         shape: AssignmentShapePolicy::MatlabCompatible,
     };
+    let retained_nd = infer_index_mutation(
+        &base,
+        &[
+            IndexSelectorFact::KnownOneBasedIndex(1),
+            IndexSelectorFact::KnownOneBasedIndex(1),
+            IndexSelectorFact::KnownOneBasedIndex(2),
+        ],
+        &real,
+        contract,
+    )
+    .fact;
+    assert_eq!(retained_nd.shape, base.shape);
     let collapsed = infer_index_mutation(
         &base,
         &[
@@ -552,6 +604,21 @@ fn indexed_mutation_follows_collapsed_nd_growth_and_complex_promotion() {
     assert_eq!(
         linear.shape,
         ShapeFact::from(vec![Some(2), Some(2), Some(3)])
+    );
+    let leading_singleton_nd = numeric(
+        NumericClass::Single,
+        ShapeFact::from(vec![Some(1), Some(2), Some(3)]),
+    );
+    let grown_leading_singleton = infer_index_mutation(
+        &leading_singleton_nd,
+        &[IndexSelectorFact::KnownOneBasedIndex(7)],
+        &real,
+        contract,
+    )
+    .fact;
+    assert_eq!(
+        grown_leading_singleton.shape,
+        ShapeFact::from(vec![Some(1), Some(2), Some(4)])
     );
     let unchanged = infer_index_mutation(
         &base,

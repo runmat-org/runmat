@@ -84,7 +84,7 @@ fn indexed_array_shape_survives_source_calls_and_structural_transforms() {
             }
         }
         for (name, dimensions) in expected {
-            let shape = ShapeFact::from(dimensions.into_iter().map(Some).collect());
+            let shape = ShapeFact::from(dimensions.into_iter().map(Some).collect::<Vec<_>>());
             assert!(
                 observed
                     .iter()

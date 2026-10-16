@@ -333,7 +333,9 @@ fn normalize_dimensions(dimensions: &mut Vec<DimensionFact>) {
     while dimensions.len() > 2 && dimensions.last() == Some(&DimensionFact::Known(1)) {
         dimensions.pop();
     }
-    dimensions.resize(2, DimensionFact::Known(1));
+    if dimensions.len() < 2 {
+        dimensions.resize(2, DimensionFact::Known(1));
+    }
 }
 
 #[cfg(test)]
@@ -367,6 +369,14 @@ mod tests {
         expected.kind = ValueKindFact::Logical;
         expected.residency = ResidencyFact::Device { provider: None };
         assert!(!actual.satisfies(&expected));
+
+        let mut nd_actual = ValueFact::scalar(ValueKindFact::Logical);
+        nd_actual.shape = ShapeFact::from(vec![Some(2), Some(1), Some(3)]);
+        let mut matrix_expected = nd_actual.clone();
+        matrix_expected.shape = ShapeFact::from(vec![Some(2), Some(1)]);
+        assert!(!nd_actual.satisfies(&matrix_expected));
+        matrix_expected.shape = ShapeFact::from(vec![Some(2), Some(1), Some(3), Some(1)]);
+        assert!(nd_actual.satisfies(&matrix_expected));
     }
 
     #[test]

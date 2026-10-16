@@ -77,7 +77,9 @@ fn trim_trailing_singletons(dimensions: &mut Vec<Option<usize>>) {
     while dimensions.len() > 2 && dimensions.last() == Some(&Some(1)) {
         dimensions.pop();
     }
-    dimensions.resize(2, Some(1));
+    if dimensions.len() < 2 {
+        dimensions.resize(2, Some(1));
+    }
 }
 
 impl From<Vec<Option<usize>>> for ShapeFact {
@@ -127,5 +129,14 @@ mod tests {
         ] {
             assert!(!shape.is_definitely_nonscalar(), "{shape:?}");
         }
+    }
+
+    #[test]
+    fn shape_equivalence_discards_only_trailing_singletons() {
+        let matrix = ShapeFact::from(vec![Some(2), Some(1)]);
+        let nd = ShapeFact::from(vec![Some(2), Some(1), Some(3)]);
+        let trailing = ShapeFact::from(vec![Some(2), Some(1), Some(3), Some(1)]);
+        assert!(!matrix.is_proven_equivalent(&nd));
+        assert!(nd.is_proven_equivalent(&trailing));
     }
 }

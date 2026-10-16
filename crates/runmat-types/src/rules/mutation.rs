@@ -215,7 +215,9 @@ fn written_shape(shape: &ShapeFact, selectors: &[IndexSelectorFact]) -> (ShapeFa
             (ShapeFact::Unknown, true)
         };
     };
-    original.resize(2, 1);
+    if original.len() < 2 {
+        original.resize(2, 1);
+    }
     let Some(effective) = effective_dimensions(&original, selectors.len()) else {
         return (ShapeFact::Unknown, true);
     };
@@ -249,7 +251,7 @@ fn written_shape(shape: &ShapeFact, selectors: &[IndexSelectorFact]) -> (ShapeFa
         let current = effective[0];
         if current == 0 {
             result = vec![1, target];
-        } else if result[0] == 1 {
+        } else if result.iter().skip(2).all(|extent| *extent == 1) && result[0] == 1 {
             result[1] = target;
             result.truncate(2);
         } else if result.iter().skip(1).all(|extent| *extent == 1) {
@@ -266,7 +268,9 @@ fn written_shape(shape: &ShapeFact, selectors: &[IndexSelectorFact]) -> (ShapeFa
         }
         return (known_shape(result), true);
     }
-    planned.resize(2, 1);
+    if planned.len() < 2 {
+        planned.resize(2, 1);
+    }
     (known_shape(planned), true)
 }
 
@@ -321,7 +325,9 @@ fn selectors_guarantee_nonempty(shape: &ShapeFact, selectors: &[IndexSelectorFac
     let Some(mut dims) = exact_dimensions(shape) else {
         return false;
     };
-    dims.resize(2, 1);
+    if dims.len() < 2 {
+        dims.resize(2, 1);
+    }
     let Some(effective) = effective_dimensions(&dims, selectors.len()) else {
         return false;
     };

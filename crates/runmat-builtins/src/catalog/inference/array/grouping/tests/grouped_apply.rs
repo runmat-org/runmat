@@ -57,6 +57,25 @@ fn callback_outputs_keep_kind_and_trailing_shape_while_group_height_is_dynamic()
         ShapeFact::from(vec![None, Some(3)])
     );
     assert!(matches!(inferred.outputs[1].kind, ValueKindFact::String));
+
+    let nd_output = ValueFact::proven(
+        ValueKindFact::String,
+        ShapeFact::from(vec![Some(4), Some(2), Some(3)]),
+        StorageFact::Dense,
+    );
+    let inferred = infer(
+        "splitapply",
+        vec![
+            callable(vec![nd_output]),
+            ValueFact::scalar(ValueKindFact::Logical),
+            ValueFact::scalar(ValueKindFact::Logical),
+        ],
+        RequestedOutputCount::One,
+    );
+    assert_eq!(
+        inferred.outputs[0].shape,
+        ShapeFact::from(vec![None, Some(2), Some(3)])
+    );
 }
 
 #[test]
