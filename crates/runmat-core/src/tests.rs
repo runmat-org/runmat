@@ -15764,6 +15764,36 @@ fn testing_diagnostic_log_resolves_function_and_instance_method_calls() {
 }
 
 #[test]
+fn overlapping_companion_fetch_next_compile_error_keeps_its_source() {
+    let _cwd_lock = cwd_lock();
+    let temp = tempfile::TempDir::new().expect("companion directory");
+    let primary = "function y = entry_a(); y = fetchNext(1); end";
+    let companion = "function y = entry_b(); y = fetchNext(); end";
+    assert_eq!(primary.find("fetchNext"), companion.find("fetchNext"));
+    std::fs::write(temp.path().join("entry_a.m"), primary).expect("write primary source");
+    std::fs::write(temp.path().join("entry_b.m"), companion).expect("write companion source");
+    let _cwd = push_cwd(temp.path());
+
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    let error = block_on(session.compile_executable_unit(
+        ExecutableSource::new("core-companion-compile@1", "entry_a.m", primary),
+        None,
+    ))
+    .expect_err("invalid companion fetchNext call must fail compilation");
+    let RunError::SourceCompile(bound) = error else {
+        panic!("companion VM error must retain its distinct source: {error}");
+    };
+    assert_eq!(
+        bound.error.identifier.as_deref(),
+        Some("RunMat:fetchNext:InvalidInput")
+    );
+    assert_eq!(bound.source.relative_path, "entry_b.m");
+    assert_eq!(bound.source.text, companion);
+    let span = bound.error.span.expect("companion call source span");
+    assert!(companion[span.start..span.end].contains("fetchNext"));
+}
+
+#[test]
 fn fetch_outputs_preserves_multiple_requested_outputs() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     execute_text_request(
