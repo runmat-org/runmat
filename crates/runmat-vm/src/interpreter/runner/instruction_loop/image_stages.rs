@@ -87,12 +87,14 @@ pub(super) async fn execute(
             .store_at(ordinal)
             .is_none_or(|entry| matches!(entry.destination, ImageStoreDestination::Intermediate)),
     }) {
+        log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: live-out source");
         return Ok(ImageStageOutcome::Declined);
     }
     if join.ordered_stores().iter().any(|entry| {
         matches!(entry.destination, ImageStoreDestination::Checkpoint(_))
             && selected_stage_pc(selected.graph, entry).is_none()
     }) {
+        log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: stage PC");
         return Ok(ImageStageOutcome::Declined);
     }
     let Some(captured) = installation
@@ -108,6 +110,7 @@ pub(super) async fn execute(
             )
         })?
     else {
+        log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: input capture");
         return Ok(ImageStageOutcome::Declined);
     };
     let prepared = ImageVmStages::prepare(ImageVmPreparation {
@@ -136,8 +139,14 @@ pub(super) async fn execute(
                 route,
             });
         }
-        Ok(ImageVmSelectedRoute::Declined) => return Ok(ImageStageOutcome::Declined),
-        Err(error) if error.is_unsupported() => return Ok(ImageStageOutcome::Declined),
+        Ok(ImageVmSelectedRoute::Declined) => {
+            log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: preparation");
+            return Ok(ImageStageOutcome::Declined);
+        }
+        Err(error) if error.is_unsupported() => {
+            log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: unsupported preparation {error:?}");
+            return Ok(ImageStageOutcome::Declined);
+        }
         Err(error) => return Err(accel_fusion::fusion_execution_error(error)),
     };
     let checkpoint = |role| {

@@ -25,6 +25,8 @@ use super::{ImageMeanAndPowerSource, ImageSourceLeaf, ImageSourceTranscript};
 mod moment_bindings;
 #[path = "source_invocation/binary_operations.rs"]
 mod binary_operations;
+#[path = "source_invocation/coverage.rs"]
+mod coverage;
 #[path = "source_invocation/real_output_operations.rs"]
 mod real_output_operations;
 #[path = "source_invocation/power_program.rs"]
@@ -150,15 +152,6 @@ fn source_value_ids(
     ids.sort_unstable();
     ids.dedup();
     Ok(ids)
-}
-
-fn moment_source_outputs(
-    calls: &[runmat_accelerate_api::ProviderImageMomentPublication],
-) -> impl Iterator<Item = u64> + '_ {
-    calls.iter().flat_map(|call| {
-        std::iter::once(call.raw_output)
-            .chain(call.conversions.iter().map(|cast| cast.source_output))
-    })
 }
 
 /// Fixed-capacity request lookup. The selected input IDs are sorted once;
@@ -733,75 +726,6 @@ impl ImageSourceInvocation {
             Value::Tensor(tensor) => self.selected_staged_mean_power_host(tensor),
             _ => None,
         }
-    }
-
-    /// Every selected graph operation must have exactly one staged owner, in
-    /// source order. A matching pattern and final value alone do not prove
-    /// that intermediate casts or a source-visible output were preserved.
-    pub(crate) fn selected_stage_covers_source(&self) -> bool {
-        let Some(moments) = self.moment_program.as_ref() else {
-            return false;
-        };
-        let Some(binary) = self.selected_binary_calls() else {
-            return false;
-        };
-        let Some(sigma) = self.selected_sigma_operations() else {
-            return false;
-        };
-        let Some(real) = self.selected_real_output_calls() else {
-            return false;
-        };
-        let Some(powers) = self
-            .requested_staged_workload()
-            .and_then(|workload| workload.selected_powers.as_ref())
-        else {
-            return false;
-        };
-        let Some(output_program) = self.output_program.as_ref() else {
-            return false;
-        };
-        if output_program.calls.len() != real.calls().len() + 3
-            || output_program.calls.first().map(|call| call.source_output)
-                != Some(binary.output_sub().output())
-            || output_program.calls.get(1).map(|call| call.source_output)
-                != Some(binary.output_div().output())
-            || output_program
-                .calls
-                .iter()
-                .filter(|call| {
-                    matches!(
-                        call.hook,
-                        runmat_accelerate_api::ProviderImageOutputHook::ElemPow
-                    )
-                })
-                .map(|call| call.source_output)
-                .ne([u64::from(powers.final_power.output)])
-            || output_program
-                .calls
-                .iter()
-                .filter(|call| {
-                    matches!(
-                        call.hook,
-                        runmat_accelerate_api::ProviderImageOutputHook::ScalarMul
-                            | runmat_accelerate_api::ProviderImageOutputHook::ScalarAdd
-                            | runmat_accelerate_api::ProviderImageOutputHook::ScalarMax
-                            | runmat_accelerate_api::ProviderImageOutputHook::CastSingle
-                            | runmat_accelerate_api::ProviderImageOutputHook::CastDouble
-                    )
-                })
-                .map(|call| call.source_output)
-                .ne(real.calls().iter().map(ImageSelectedRealCall::output))
-        {
-            return false;
-        }
-        moment_source_outputs(&moments.mu)
-            .chain(std::iter::once(binary.sigma_center().output()))
-            .chain(std::iter::once(u64::from(powers.square.output)))
-            .chain(moment_source_outputs(&moments.variance))
-            .chain(std::iter::once(sigma.source_ids().2))
-            .chain(moment_source_outputs(std::slice::from_ref(&moments.sigma)))
-            .chain(output_program.calls.iter().map(|call| call.source_output))
-            .eq(self.source.steps.iter().map(|step| u64::from(step.output)))
     }
 }
 

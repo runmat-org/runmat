@@ -17,7 +17,7 @@ pub(super) fn require_unmanaged_metadata(
 }
 
 #[path = "staged_image/real_binary.rs"]
-mod real_binary;
+pub(super) mod real_binary;
 #[path = "staged_image/real_elementwise.rs"]
 mod real_elementwise;
 #[path = "staged_image/ordered_mean.rs"]

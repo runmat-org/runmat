@@ -128,14 +128,17 @@ impl PreparedImageStages {
         invocation: &ImageSourceInvocation,
     ) -> ProviderExecutionResult<Option<Self>> {
         let Some(proof) = ImageArithmeticProof::for_selected(invocation) else {
+            log::debug!("selected image physical preparation declined: source arithmetic proof");
             return Ok(None);
         };
         let Some(session) =
             ImageNormalizeStageSession::begin_selected(provider, input, invocation, proof)?
         else {
+            log::debug!("selected image physical preparation declined: stage session");
             return Ok(None);
         };
         let Some(resources) = session.selected_physical_upper_bound() else {
+            log::debug!("selected image physical preparation declined: physical upper bound");
             return Ok(None);
         };
         let provider_snapshot = provider.placement_resources();
@@ -143,6 +146,7 @@ impl PreparedImageStages {
             .validate_typed()
             .map_err(ProviderExecutionError::from_source)?;
         if provider_snapshot.device_id != provider.device_id() || provider_snapshot.lost {
+            log::debug!("selected image physical preparation declined: provider snapshot");
             return Ok(None);
         }
         Ok(Some(Self {

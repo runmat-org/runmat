@@ -7,8 +7,7 @@ use crate::fusion::image_reduction::{ImageSelectedRealCall, ImageSelectedRealCal
 use runmat_accelerate_api::ProviderRealElementwiseObserved;
 use runmat_accelerate_api::{
     scalar_program::ScalarLiteral, ProviderElementType, ProviderImageOutputCall,
-    ProviderImageOutputOperand, ProviderRealElementwiseOperation as Operation,
-    ProviderRealElementwiseOutputRoute, ProviderRealElementwiseRecipe,
+    ProviderImageOutputOperand, ProviderRealElementwiseOutputRoute, ProviderRealElementwiseRecipe,
     ProviderRealElementwiseRequest, ProviderRepresentation,
 };
 #[cfg(test)]
@@ -177,10 +176,13 @@ pub(super) fn plan(
         if call.input() != current_source || !matches_fact(&representation, call) {
             return Ok(None);
         }
+        let Some(operation) = call.operation_for(&representation) else {
+            return Ok(None);
+        };
         let Some(recipe) = ProviderRealElementwiseRecipe::plan(
             provider,
             ProviderRealElementwiseRequest {
-                operation: call.operation(),
+                operation,
                 source: representation,
                 source_buffer_bytes: bytes,
             },
@@ -232,17 +234,12 @@ impl SelectedRealPlans {
         let Some(source) = self.calls.get(index).map(|call| &call.source) else {
             return false;
         };
-        let control = match source.operation() {
-            Operation::ScalarAdd { control, .. }
-            | Operation::ScalarMul { control }
-            | Operation::ScalarMax { control } => Some(match control {
+        let control = match source.control() {
+            Some(control) => Some(match control {
                 ScalarLiteral::F32Bits(bits) => ProviderImageOutputOperand::ScalarF32Bits(bits),
                 ScalarLiteral::F64Bits(bits) => ProviderImageOutputOperand::ScalarF64Bits(bits),
             }),
-            Operation::FloatingCast { .. } => None,
-            Operation::Sqrt | Operation::UnaryMath(_) | Operation::ExactSingleBasePower { .. } => {
-                return false
-            }
+            None => None,
         };
         wire.hook == source.hook()
             && wire.source_output == source.output()

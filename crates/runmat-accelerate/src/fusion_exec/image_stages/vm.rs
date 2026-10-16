@@ -56,6 +56,7 @@ impl ImageVmStages {
         observed: bool,
         reason: &'static str,
     ) -> ProviderExecutionResult<ImageVmSelectedRoute> {
+        log::debug!("selected image declined after binding: {reason}; probe_observed={observed}");
         if observed {
             Err(ProviderExecutionError::from(anyhow!(reason)).with_unproven_effects())
         } else {
@@ -81,12 +82,15 @@ impl ImageVmStages {
             started,
         } = request;
         let Some(FusionPattern::ImageNormalize(pattern)) = plan.group.pattern.as_ref() else {
+            log::debug!("selected image declined: no image pattern");
             return Ok(ImageVmSelectedRoute::Declined);
         };
         let Some(position) = plan.inputs.iter().position(|id| *id == pattern.input) else {
+            log::debug!("selected image declined: no input position");
             return Ok(ImageVmSelectedRoute::Declined);
         };
         let Some(input_value) = inputs.get(position) else {
+            log::debug!("selected image declined: no input value");
             return Ok(ImageVmSelectedRoute::Declined);
         };
         let finite = runtime.service_ports().parallel().is_some_and(|parallel| {
@@ -111,19 +115,25 @@ impl ImageVmStages {
                     runmat_accelerate_api::provider()
                 };
                 let Some(provider) = selected else {
+                    log::debug!("selected image declined: no host provider");
                     return Ok(ImageVmSelectedRoute::Declined);
                 };
                 provider
             }
-            _ => return Ok(ImageVmSelectedRoute::Declined),
+            _ => {
+                log::debug!("selected image declined: unsupported input carrier");
+                return Ok(ImageVmSelectedRoute::Declined);
+            }
         };
         if finite && provider.capability_snapshot_ref().is_none() {
+            log::debug!("selected image declined: no finite capability snapshot");
             return Ok(ImageVmSelectedRoute::Declined);
         }
         let (source_preparation, stage_preparation) = if finite {
             let geometry = match ImageSourceGeometry::admit(plan, inputs, &source) {
                 Ok(geometry) => geometry,
                 Err(PreparationBoundError::UnsupportedDeclarationOrCarrier) => {
+                    log::debug!("selected image declined: finite source geometry");
                     return Ok(ImageVmSelectedRoute::Declined);
                 }
                 Err(error) => return Err(ProviderExecutionError::from_source(error)),
@@ -180,7 +190,10 @@ impl ImageVmStages {
                     error,
                 ),
             ) => return Err(error),
-            Err(_) => return Ok(ImageVmSelectedRoute::Declined),
+            Err(reason) => {
+                log::debug!("selected image declined: source binding {reason:?}");
+                return Ok(ImageVmSelectedRoute::Declined);
+            }
         };
         let probe_observed = invocation.observed_provider_probe();
         let Some(invocation) = invocation.bind_publications(graph, publications) else {

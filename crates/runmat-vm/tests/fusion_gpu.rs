@@ -445,6 +445,7 @@ impl AccelProvider for TestProvider {
             ("transfer.download", ProviderOperationFamily::Download),
             ("sin", ProviderOperationFamily::Elementwise),
             ("minus", ProviderOperationFamily::Elementwise),
+            ("times", ProviderOperationFamily::Elementwise),
             ("rdivide", ProviderOperationFamily::Elementwise),
             ("single", ProviderOperationFamily::Elementwise),
             ("double", ProviderOperationFamily::Elementwise),
@@ -699,7 +700,7 @@ impl AccelProvider for TestProvider {
             query.family,
             query.inputs.as_slice(),
         ) {
-            ("minus" | "rdivide", ProviderOperationFamily::Elementwise, [lhs, rhs])
+            ("minus" | "times" | "rdivide", ProviderOperationFamily::Elementwise, [lhs, rhs])
                 if query.outputs.is_empty()
                     && lhs.element_type == rhs.element_type
                     && matches!(
@@ -710,7 +711,14 @@ impl AccelProvider for TestProvider {
                         input.storage == ProviderStorage::DenseReal
                             && input.layout
                                 == runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
-                            && input.residency == runmat_accelerate_api::ProviderResidency::Device
+                            && matches!(
+                                input.residency,
+                                runmat_accelerate_api::ProviderResidency::Device
+                                    | runmat_accelerate_api::ProviderResidency::Host
+                            )
+                    })
+                    && [lhs, rhs].iter().any(|input| {
+                        input.residency == runmat_accelerate_api::ProviderResidency::Device
                     }) =>
             {
                 let shapes = lhs
@@ -748,9 +756,23 @@ impl AccelProvider for TestProvider {
                                     )
                                 })
                                 .and_then(|output| {
+                                    let uploads = [lhs, rhs]
+                                        .iter()
+                                        .filter(|input| {
+                                            input.residency
+                                                == runmat_accelerate_api::ProviderResidency::Host
+                                        })
+                                        .try_fold(0_u64, |bytes, input| {
+                                            bytes.checked_add(input.checked_byte_len()?)
+                                        })?;
+                                    let dispatches = u32::try_from(expansions)
+                                        .ok()?
+                                        .checked_add(u32::from(uploads > 0))?
+                                        .checked_add(1)?;
                                     output
                                         .checked_mul(expansions)
-                                        .map(|scratch| (output, scratch))
+                                        .and_then(|scratch| scratch.checked_add(uploads))
+                                        .map(|scratch| (output, scratch, dispatches))
                                 })
                         })
                 })
@@ -760,7 +782,7 @@ impl AccelProvider for TestProvider {
                     && input.storage == ProviderStorage::DenseReal
                     && query.outputs.is_empty() =>
             {
-                input.checked_byte_len().map(|bytes| (bytes, bytes))
+                input.checked_byte_len().map(|bytes| (bytes, bytes, 1))
             }
             ("single", ProviderOperationFamily::Elementwise, [input])
                 if matches!(
@@ -772,7 +794,22 @@ impl AccelProvider for TestProvider {
                 input
                     .checked_element_count()
                     .and_then(|count| count.checked_mul(4))
-                    .map(|bytes| (bytes, bytes))
+                    .map(|bytes| (bytes, bytes, 1))
+            }
+            ("double", ProviderOperationFamily::Elementwise, [input])
+                if matches!(
+                    input.element_type,
+                    ProviderElementType::F32 | ProviderElementType::F64
+                ) && input.storage == ProviderStorage::DenseReal
+                    && input.layout
+                        == runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous
+                    && input.residency == runmat_accelerate_api::ProviderResidency::Device
+                    && query.outputs.is_empty() =>
+            {
+                input
+                    .checked_element_count()
+                    .and_then(|count| count.checked_mul(8))
+                    .map(|bytes| (bytes, bytes, 1))
             }
             ("sum", ProviderOperationFamily::Reduction, [input])
                 if input.element_type == ProviderElementType::F64
@@ -791,16 +828,16 @@ impl AccelProvider for TestProvider {
                     shape
                         .into_iter()
                         .try_fold(8_u64, |bytes, extent| bytes.checked_mul(extent))
-                        .map(|bytes| (bytes, bytes))
+                        .map(|bytes| (bytes, bytes, 1))
                 })
             }
             _ => None,
         };
-        if let Some((bytes, scratch)) = ordinary {
+        if let Some((bytes, scratch, dispatches)) = ordinary {
             return ProviderFeasibility::supported(ProviderResourceEstimate {
                 transient_bytes: Some(scratch),
                 output_bytes: Some(bytes),
-                dispatches: Some(1),
+                dispatches: Some(dispatches),
             });
         }
         let supported = capability.supports_operation(&query.operation, query.family)
@@ -1804,6 +1841,56 @@ impl AccelProvider for TestProvider {
         })
     }
 
+    fn unary_double<'a>(
+        &'a self,
+        input: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            if input.physical().storage() != runmat_accelerate_api::GpuTensorStorage::Real {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "test Double cast admits only real floating operands",
+                )
+                .into());
+            }
+            if input.physical().element_type() == runmat_accelerate_api::NumericElementType::F64 {
+                let owned_real_double = self
+                    .buffers
+                    .lock()
+                    .unwrap()
+                    .get(&input.buffer_id())
+                    .is_some_and(|record| {
+                        record.owns(input)
+                            && record.shape == input.shape()
+                            && matches!(&record.data, BufferPayload::F64(_))
+                    });
+                if !owned_real_double {
+                    return Err(runmat_accelerate_api::ProviderExecutionError::from(
+                        anyhow!("same-class Double source is not owned and live"),
+                    ));
+                }
+                input
+                    .allocation_lease()
+                    .validate_live()
+                    .map_err(runmat_accelerate_api::ProviderExecutionError::from_source)?;
+                return Ok(input.clone());
+            }
+            if input.physical().element_type() != runmat_accelerate_api::NumericElementType::F32 {
+                return Err(runmat_accelerate_api::unsupported_provider_operation(
+                    "test Double cast admits only Single or Double operands",
+                )
+                .into());
+            }
+            let (values, shape) = self
+                .pull(input)
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
+            Ok(self.push_typed(
+                values,
+                shape,
+                runmat_accelerate_api::NumericElementType::F64,
+            ))
+        })
+    }
+
     fn elem_sub<'a>(
         &'a self,
         lhs: &'a GpuTensorHandle,
@@ -1814,6 +1901,20 @@ impl AccelProvider for TestProvider {
                 lhs,
                 rhs,
                 runmat_accelerate_api::ProviderRealBinaryOperation::Sub,
+            )
+        })
+    }
+
+    fn elem_mul<'a>(
+        &'a self,
+        lhs: &'a GpuTensorHandle,
+        rhs: &'a GpuTensorHandle,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.ordinary_real_arithmetic(
+                lhs,
+                rhs,
+                staged_image::real_binary::RealBinaryArithmetic::Mul,
             )
         })
     }

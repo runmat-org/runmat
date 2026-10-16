@@ -221,6 +221,23 @@ fn real_floating_product_kind(left: &ValueFact, right: &ValueFact) -> Option<Val
 }
 
 impl RealFloatingAddMode {
+    /// Project a canonical represented Add recipe onto the provider ABI.
+    /// The caller must separately establish that the operands have a real
+    /// scalar/dense physical representation before using this mode.
+    pub fn from_recipe(recipe: super::RealFloatingRecipe) -> Option<Self> {
+        if recipe.operator() != OperatorKind::Add {
+            return None;
+        }
+        match (recipe.computation_class(), recipe.result_class()) {
+            (crate::NumericClass::Single, crate::NumericClass::Single) => Some(Self::Single),
+            (crate::NumericClass::Double, crate::NumericClass::Double) => Some(Self::Double),
+            (crate::NumericClass::Double, crate::NumericClass::Single) => {
+                Some(Self::MixedDoubleThenSingle)
+            }
+            _ => None,
+        }
+    }
+
     pub const fn result_class(self) -> crate::NumericClass {
         match self {
             Self::Single | Self::MixedDoubleThenSingle => crate::NumericClass::Single,
@@ -247,18 +264,7 @@ pub fn real_floating_add_mode(left: &ValueFact, right: &ValueFact) -> Option<Rea
     // Retain the established provider ABI modes only as a projection of the
     // canonical represented arithmetic owner, never a second classifier.
     let recipe = super::RealFloatingRecipe::for_facts(OperatorKind::Add, left, right)?;
-    match (recipe.computation_class(), recipe.result_class()) {
-        (crate::NumericClass::Single, crate::NumericClass::Single) => {
-            Some(RealFloatingAddMode::Single)
-        }
-        (crate::NumericClass::Double, crate::NumericClass::Double) => {
-            Some(RealFloatingAddMode::Double)
-        }
-        (crate::NumericClass::Double, crate::NumericClass::Single) => {
-            Some(RealFloatingAddMode::MixedDoubleThenSingle)
-        }
-        _ => None,
-    }
+    RealFloatingAddMode::from_recipe(recipe)
 }
 
 fn binary_storage(

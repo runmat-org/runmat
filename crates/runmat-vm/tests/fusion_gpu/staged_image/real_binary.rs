@@ -24,6 +24,22 @@ fn element_type(class: ProviderElementType) -> Option<NumericElementType> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(in super::super) enum RealBinaryArithmetic {
+    Sub,
+    Div,
+    Mul,
+}
+
+impl From<ProviderRealBinaryOperation> for RealBinaryArithmetic {
+    fn from(operation: ProviderRealBinaryOperation) -> Self {
+        match operation {
+            ProviderRealBinaryOperation::Sub => Self::Sub,
+            ProviderRealBinaryOperation::Div => Self::Div,
+        }
+    }
+}
+
 fn binary_values(
     left: &[f64],
     left_shape: &[usize],
@@ -31,7 +47,7 @@ fn binary_values(
     right_shape: &[usize],
     output_shape: &[usize],
     class: NumericElementType,
-    operation: ProviderRealBinaryOperation,
+    operation: RealBinaryArithmetic,
 ) -> ProviderExecutionResult<Vec<f64>> {
     let count = output_shape
         .iter()
@@ -47,14 +63,18 @@ fn binary_values(
         let l = left[broadcast_index(index, output_shape, left_shape, &left_stride)];
         let r = right[broadcast_index(index, output_shape, right_shape, &right_stride)];
         let value = match (class, operation) {
-            (NumericElementType::F32, ProviderRealBinaryOperation::Sub) => {
+            (NumericElementType::F32, RealBinaryArithmetic::Sub) => {
                 f64::from((l as f32) - (r as f32))
             }
-            (NumericElementType::F32, ProviderRealBinaryOperation::Div) => {
+            (NumericElementType::F32, RealBinaryArithmetic::Div) => {
                 f64::from((l as f32) / (r as f32))
             }
-            (NumericElementType::F64, ProviderRealBinaryOperation::Sub) => l - r,
-            (NumericElementType::F64, ProviderRealBinaryOperation::Div) => l / r,
+            (NumericElementType::F32, RealBinaryArithmetic::Mul) => {
+                f64::from((l as f32) * (r as f32))
+            }
+            (NumericElementType::F64, RealBinaryArithmetic::Sub) => l - r,
+            (NumericElementType::F64, RealBinaryArithmetic::Div) => l / r,
+            (NumericElementType::F64, RealBinaryArithmetic::Mul) => l * r,
             _ => {
                 return Err(ProviderExecutionError::from(anyhow!(
                     "unsupported real binary class"
@@ -123,6 +143,15 @@ impl TestProvider {
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         operation: ProviderRealBinaryOperation,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        self.ordinary_real_arithmetic(lhs, rhs, operation.into())
+    }
+
+    pub(in super::super) fn ordinary_real_arithmetic(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        operation: RealBinaryArithmetic,
     ) -> ProviderExecutionResult<GpuTensorHandle> {
         let class = lhs.physical().element_type();
         if class != rhs.physical().element_type()
@@ -236,7 +265,7 @@ impl TestProvider {
             &right_shape,
             &output_shape,
             class,
-            recipe.request().operation,
+            recipe.request().operation.into(),
         )?;
         let output = self.push_typed(values, output_shape, class);
         Ok(ProviderExecutedRealBinary {

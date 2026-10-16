@@ -3,7 +3,8 @@
 
 use super::*;
 use runmat_accelerate_api::{
-    scalar_program::ScalarLiteral, ProviderImageOutputHook, ProviderRealElementwiseOperation,
+    scalar_program::ScalarLiteral, ProviderElementType, ProviderImageOutputHook,
+    ProviderRealElementwiseOperation, ProviderRepresentation, ProviderStorage,
 };
 #[cfg(test)]
 use runmat_builtins::BuiltinBindingIdentity;
@@ -12,6 +13,30 @@ use runmat_builtins::MAX_CATALOG_ENTRY;
 use std::sync::Arc;
 
 use super::binary_operations::CanonicalRealValue;
+use runmat_types::{
+    NumericClass, OperatorKind, RealFloatingAddMode, RealFloatingRecipe, StorageFact,
+};
+
+#[derive(Clone, Copy, Debug)]
+enum SelectedRealOperation {
+    /// Source identity and classes are sealed here. The Add computation mode
+    /// is selected only after the preceding physical recipe supplies DenseReal.
+    ScalarAdd(ScalarLiteral),
+    ScalarMul(ScalarLiteral),
+    ScalarMax(ScalarLiteral),
+    FloatingCast(ProviderPrecision),
+}
+
+impl SelectedRealOperation {
+    fn control(self) -> Option<ScalarLiteral> {
+        match self {
+            Self::ScalarAdd(control) | Self::ScalarMul(control) | Self::ScalarMax(control) => {
+                Some(control)
+            }
+            Self::FloatingCast(_) => None,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) struct ImageSelectedRealCall {
@@ -22,7 +47,7 @@ pub(crate) struct ImageSelectedRealCall {
     #[cfg(test)]
     binding: Option<BuiltinBindingIdentity>,
     hook: ProviderImageOutputHook,
-    operation: ProviderRealElementwiseOperation,
+    operation: SelectedRealOperation,
     input_fact: CanonicalRealValue,
     output_fact: CanonicalRealValue,
     output_shape: [u64; 3],
@@ -32,6 +57,29 @@ pub(crate) struct ImageSelectedRealCall {
 pub(crate) struct ImageSelectedRealCalls {
     semantic_identity: Digest,
     calls: Vec<ImageSelectedRealCall>,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum RealSourceFailure {
+    MissingStep,
+    SourceIdentity,
+    SourceOperation,
+    MissingInput,
+    InputFact,
+    OutputFact,
+    OutputGeometry,
+    ScalarInputs,
+    ScalarControl,
+    ControlFact,
+    ControlGeometry,
+    ControlPrecision,
+    ArithmeticPrecision,
+    AddMode,
+    MaxBinding,
+    CastSource,
+    CastTarget,
+    UnsupportedOperation,
+    OperationParity,
 }
 
 fn typed_scalar(operand: ProviderImageOutputOperand) -> Option<ScalarLiteral> {
@@ -53,14 +101,15 @@ fn matching_class(control: ScalarLiteral, class: ProviderPrecision) -> bool {
 fn source_call(
     invocation: &ImageSourceInvocation,
     step: &super::super::source_output_hooks::SelectedRealStep,
-) -> Option<ImageSelectedRealCall> {
+) -> Result<ImageSelectedRealCall, RealSourceFailure> {
     let selected = invocation
         .source
         .steps
         .iter()
-        .find(|selected| selected.output == step.output)?;
+        .find(|selected| selected.output == step.output)
+        .ok_or(RealSourceFailure::MissingStep)?;
     if selected.inputs != step.inputs || selected.selected_binding != step.binding {
-        return None;
+        return Err(RealSourceFailure::SourceIdentity);
     }
     let same_operation = match step.hook {
         ProviderImageOutputHook::ScalarMul => matches!(
@@ -79,60 +128,103 @@ fn source_call(
         _ => false,
     };
     if !same_operation {
-        return None;
+        return Err(RealSourceFailure::SourceOperation);
     }
-    let input = *step.inputs.first()?;
-    let input_fact = CanonicalRealValue::from_fact(invocation.source_fact(input)?)?;
-    let output_fact = CanonicalRealValue::from_fact(invocation.source_fact(step.output)?)?;
+    let input = *step.inputs.first().ok_or(RealSourceFailure::MissingInput)?;
+    let input_source = invocation
+        .source_fact(input)
+        .ok_or(RealSourceFailure::InputFact)?;
+    let output_source = invocation
+        .source_fact(step.output)
+        .ok_or(RealSourceFailure::OutputFact)?;
+    let represented_storage = |storage| {
+        matches!(
+            storage,
+            StorageFact::Scalar | StorageFact::Dense | StorageFact::Unknown
+        )
+    };
+    if !represented_storage(input_source.storage) {
+        return Err(RealSourceFailure::InputFact);
+    }
+    if !represented_storage(output_source.storage) {
+        return Err(RealSourceFailure::OutputFact);
+    }
+    let input_fact =
+        CanonicalRealValue::from_fact(input_source).ok_or(RealSourceFailure::InputFact)?;
+    let output_fact =
+        CanonicalRealValue::from_fact(output_source).ok_or(RealSourceFailure::OutputFact)?;
     if output_fact.shape() != step.output_shape
         || output_fact.precision() != step.output_precision
         || input_fact.shape() != step.output_shape
     {
-        return None;
+        return Err(RealSourceFailure::OutputGeometry);
     }
     let (operation, control_source) = match step.hook {
         ProviderImageOutputHook::ScalarMul
         | ProviderImageOutputHook::ScalarAdd
         | ProviderImageOutputHook::ScalarMax => {
-            let [source, control_id]: [ValueId; 2] = step.inputs.as_slice().try_into().ok()?;
+            let [source, control_id]: [ValueId; 2] = step
+                .inputs
+                .as_slice()
+                .try_into()
+                .map_err(|_| RealSourceFailure::ScalarInputs)?;
             if source != input || step.operands.len() != 2 {
-                return None;
+                return Err(RealSourceFailure::ScalarInputs);
             }
-            let control = typed_scalar(step.operands[1])?;
-            let control_fact = CanonicalRealValue::from_fact(invocation.source_fact(control_id)?)?;
+            let control = typed_scalar(step.operands[1]).ok_or(RealSourceFailure::ScalarControl)?;
+            let control_source = invocation
+                .source_fact(control_id)
+                .ok_or(RealSourceFailure::ControlFact)?;
+            if matches!(
+                control_source.storage,
+                StorageFact::Sparse | StorageFact::Opaque
+            ) {
+                return Err(RealSourceFailure::ControlFact);
+            }
+            if step.hook == ProviderImageOutputHook::ScalarAdd
+                && !matches!(
+                    control_source.storage,
+                    StorageFact::Scalar | StorageFact::Dense
+                )
+            {
+                return Err(RealSourceFailure::AddMode);
+            }
+            let control_fact = CanonicalRealValue::from_fact(control_source)
+                .ok_or(RealSourceFailure::ControlFact)?;
             if control_fact
                 .shape()
                 .iter()
-                .try_fold(1_u64, |a, b| a.checked_mul(*b))?
+                .try_fold(1_u64, |a, b| a.checked_mul(*b))
+                .ok_or(RealSourceFailure::ControlGeometry)?
                 != 1
-                || !matching_class(control, control_fact.precision())
-                || input_fact.precision() != output_fact.precision()
             {
-                return None;
+                return Err(RealSourceFailure::ControlGeometry);
+            }
+            if !matching_class(control, control_fact.precision()) {
+                return Err(RealSourceFailure::ControlPrecision);
+            }
+            if input_fact.precision() != output_fact.precision() {
+                return Err(RealSourceFailure::ArithmeticPrecision);
             }
             let operation = match step.hook {
                 ProviderImageOutputHook::ScalarMul if step.binding.is_none() => {
-                    ProviderRealElementwiseOperation::ScalarMul { control }
+                    SelectedRealOperation::ScalarMul(control)
                 }
                 ProviderImageOutputHook::ScalarAdd if step.binding.is_none() => {
-                    let mode = runmat_types::real_floating_add_mode(
-                        invocation.source_fact(input)?,
-                        invocation.source_fact(control_id)?,
-                    )?;
-                    ProviderRealElementwiseOperation::ScalarAdd { control, mode }
+                    SelectedRealOperation::ScalarAdd(control)
                 }
                 ProviderImageOutputHook::ScalarMax => {
-                    let binding = step.binding?;
+                    let binding = step.binding.ok_or(RealSourceFailure::MaxBinding)?;
                     if !MAX_CATALOG_ENTRY
                         .bindings
                         .iter()
                         .any(|variant| MAX_CATALOG_ENTRY.binding_identity(variant) == binding)
                     {
-                        return None;
+                        return Err(RealSourceFailure::MaxBinding);
                     }
-                    ProviderRealElementwiseOperation::ScalarMax { control }
+                    SelectedRealOperation::ScalarMax(control)
                 }
-                _ => return None,
+                _ => return Err(RealSourceFailure::UnsupportedOperation),
             };
             (operation, Some(u64::from(control_id)))
         }
@@ -141,31 +233,24 @@ fn source_call(
                 || step.operands.len() != 1
                 || super::super::source_moment_publications::conversion_entry(selected).is_none()
             {
-                return None;
+                return Err(RealSourceFailure::CastSource);
             }
             let target = match step.hook {
                 ProviderImageOutputHook::CastSingle => ProviderPrecision::F32,
                 ProviderImageOutputHook::CastDouble => ProviderPrecision::F64,
-                _ => return None,
+                _ => return Err(RealSourceFailure::UnsupportedOperation),
             };
             if target != output_fact.precision() {
-                return None;
+                return Err(RealSourceFailure::CastTarget);
             }
-            (
-                ProviderRealElementwiseOperation::FloatingCast { target },
-                None,
-            )
+            (SelectedRealOperation::FloatingCast(target), None)
         }
-        _ => return None,
+        _ => return Err(RealSourceFailure::UnsupportedOperation),
     };
-    if matches!(
-        operation,
-        ProviderRealElementwiseOperation::FloatingCast { .. }
-    ) != control_source.is_none()
-    {
-        return None;
+    if matches!(operation, SelectedRealOperation::FloatingCast(_)) != control_source.is_none() {
+        return Err(RealSourceFailure::OperationParity);
     }
-    Some(ImageSelectedRealCall {
+    Ok(ImageSelectedRealCall {
         output: u64::from(step.output),
         input: u64::from(input),
         #[cfg(test)]
@@ -188,7 +273,25 @@ impl ImageSourceInvocation {
         let calls: Vec<ImageSelectedRealCall> = stage
             .output_real
             .iter()
-            .map(|step| source_call(self, step))
+            .map(|step| match source_call(self, step) {
+                Ok(call) => Some(call),
+                Err(reason) => {
+                    log::debug!(
+                        target: "runmat_accelerate::fusion_exec",
+                        "selected image real output declined: source output={} hook={:?} reason={reason:?}; inputs={:?} operands={:?} output_shape={:?} output_precision={:?}; input_fact={:?} control_fact={:?} output_fact={:?}",
+                        step.output,
+                        step.hook,
+                        step.inputs,
+                        step.operands,
+                        step.output_shape,
+                        step.output_precision,
+                        step.inputs.first().and_then(|id| self.source_fact(*id)),
+                        step.inputs.get(1).and_then(|id| self.source_fact(*id)),
+                        self.source_fact(step.output)
+                    );
+                    None
+                }
+            })
             .collect::<Option<Vec<_>>>()?;
         let final_power = self
             .requested_staged_workload()?
@@ -205,6 +308,10 @@ impl ImageSourceInvocation {
                 && !(pair[0].output == u64::from(final_power.base)
                     && pair[1].input == u64::from(final_power.output))
         }) {
+            log::debug!(
+                target: "runmat_accelerate::fusion_exec",
+                "selected image real output declined: producer chain, calls={calls:?}, final power={final_power:?}"
+            );
             return None;
         }
         let wire = program
@@ -230,28 +337,23 @@ impl ImageSourceInvocation {
                     || wire.operands.first().copied()
                         != Some(ProviderImageOutputOperand::Produced(source.input))
                     || wire.operands.get(1).copied()
-                        != match source.operation {
-                            ProviderRealElementwiseOperation::ScalarAdd { control, .. }
-                            | ProviderRealElementwiseOperation::ScalarMul { control }
-                            | ProviderRealElementwiseOperation::ScalarMax { control } => {
-                                Some(match control {
-                                    ScalarLiteral::F32Bits(bits) => {
-                                        ProviderImageOutputOperand::ScalarF32Bits(bits)
-                                    }
-                                    ScalarLiteral::F64Bits(bits) => {
-                                        ProviderImageOutputOperand::ScalarF64Bits(bits)
-                                    }
-                                })
-                            }
-                            ProviderRealElementwiseOperation::FloatingCast { .. } => None,
-                            ProviderRealElementwiseOperation::Sqrt
-                            | ProviderRealElementwiseOperation::UnaryMath(_)
-                            | ProviderRealElementwiseOperation::ExactSingleBasePower { .. } => {
-                                return true
-                            }
+                        != match source.operation.control() {
+                            Some(control) => Some(match control {
+                                ScalarLiteral::F32Bits(bits) => {
+                                    ProviderImageOutputOperand::ScalarF32Bits(bits)
+                                }
+                                ScalarLiteral::F64Bits(bits) => {
+                                    ProviderImageOutputOperand::ScalarF64Bits(bits)
+                                }
+                            }),
+                            None => None,
                         }
             })
         {
+            log::debug!(
+                target: "runmat_accelerate::fusion_exec",
+                "selected image real output declined: wire projection, wire={wire:?}, calls={calls:?}"
+            );
             return None;
         }
         Some(ImageSelectedRealCalls {
@@ -310,6 +412,21 @@ impl ImageSourceInvocation {
         *wire.operands.get_mut(1).expect("selected scalar control") = control;
         changed
     }
+
+    #[cfg(test)]
+    pub(crate) fn with_real_output_storage_for_test(
+        &self,
+        output: ValueId,
+        storage: StorageFact,
+    ) -> Self {
+        let mut changed = self.clone();
+        let index = changed
+            .facts
+            .binary_search_by_key(&output, |(id, _)| *id)
+            .expect("selected real source output fact");
+        changed.facts[index].1.storage = storage;
+        changed
+    }
 }
 
 impl ImageSelectedRealCall {
@@ -330,8 +447,48 @@ impl ImageSelectedRealCall {
     pub(crate) fn hook(&self) -> ProviderImageOutputHook {
         self.hook
     }
-    pub(crate) fn operation(&self) -> ProviderRealElementwiseOperation {
-        self.operation
+    pub(crate) fn operation_for(
+        &self,
+        representation: &ProviderRepresentation,
+    ) -> Option<ProviderRealElementwiseOperation> {
+        match self.operation {
+            SelectedRealOperation::ScalarMul(control) => {
+                Some(ProviderRealElementwiseOperation::ScalarMul { control })
+            }
+            SelectedRealOperation::ScalarMax(control) => {
+                Some(ProviderRealElementwiseOperation::ScalarMax { control })
+            }
+            SelectedRealOperation::FloatingCast(target) => {
+                Some(ProviderRealElementwiseOperation::FloatingCast { target })
+            }
+            SelectedRealOperation::ScalarAdd(control) => {
+                if representation.storage != ProviderStorage::DenseReal
+                    || representation.element_type
+                        != match self.input_fact.precision() {
+                            ProviderPrecision::F32 => ProviderElementType::F32,
+                            ProviderPrecision::F64 => ProviderElementType::F64,
+                        }
+                    || representation.shape.as_slice() != self.input_fact.shape()
+                {
+                    return None;
+                }
+                let left = match self.input_fact.precision() {
+                    ProviderPrecision::F32 => NumericClass::Single,
+                    ProviderPrecision::F64 => NumericClass::Double,
+                };
+                let right = match control {
+                    ScalarLiteral::F32Bits(_) => NumericClass::Single,
+                    ScalarLiteral::F64Bits(_) => NumericClass::Double,
+                };
+                let recipe = RealFloatingRecipe::for_classes(OperatorKind::Add, left, right)?;
+                let mode = RealFloatingAddMode::from_recipe(recipe)?;
+                Some(ProviderRealElementwiseOperation::ScalarAdd { control, mode })
+            }
+        }
+    }
+
+    pub(crate) fn control(&self) -> Option<ScalarLiteral> {
+        self.operation.control()
     }
     pub(crate) fn input_fact(&self) -> &CanonicalRealValue {
         &self.input_fact

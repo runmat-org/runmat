@@ -165,6 +165,39 @@ async fn selected_scalar_cast_source_control_binding_and_wire_mutations_fail_clo
 
 #[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
+async fn scalar_add_uses_selected_dense_predecessor_without_promoting_unknown_static_storage() {
+    let provider = provider_with_precision(None, None, ProviderPrecision::F64);
+    let _selected = ThreadProviderGuard::set(Some(provider));
+    let (session, _input, _probe, invocation) = bound([2, 4, 5], provider).await;
+    let mul =
+        ValueId::try_from(invocation.selected_real_output_calls().unwrap().calls()[0].output())
+            .unwrap();
+    let unknown =
+        invocation.with_real_output_storage_for_test(mul, runmat_types::StorageFact::Unknown);
+    let calls = unknown.selected_real_output_calls().unwrap();
+    assert!(selected_real_output::plan(
+        provider,
+        &calls,
+        session.selected_binary_plans.as_ref().unwrap(),
+        session.selected_power_plans.as_ref().unwrap(),
+        &session.program,
+    )
+    .unwrap()
+    .is_some());
+    for storage in [
+        runmat_types::StorageFact::Sparse,
+        runmat_types::StorageFact::Opaque,
+    ] {
+        assert!(invocation
+            .with_real_output_storage_for_test(mul, storage)
+            .selected_real_output_calls()
+            .is_none());
+    }
+    assert_eq!(provider.calls.load(Ordering::SeqCst), 0);
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), tokio::test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test(async))]
 async fn selected_scalar_observation_failure_is_terminal_and_keeps_public_borrows() {
     let provider = provider_with_precision(None, None, ProviderPrecision::F64);
     let _selected = ThreadProviderGuard::set(Some(provider));
