@@ -7,8 +7,7 @@ use runmat_runtime::indexing::plan::{
 use runmat_runtime::indexing::read_linear as idx_read_linear;
 use runmat_runtime::indexing::read_slice as idx_read_slice;
 use runmat_runtime::indexing::selectors::{
-    build_assignment_selectors, build_scalar_selectors, build_slice_selectors,
-    index_scalar_from_value, SliceSelector,
+    build_scalar_selectors, build_slice_selectors, index_scalar_from_value, SliceSelector,
 };
 use runmat_runtime::indexing::write_linear as idx_write_linear;
 use runmat_runtime::indexing::write_slice as idx_write_slice;

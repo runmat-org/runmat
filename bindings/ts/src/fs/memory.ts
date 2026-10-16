@@ -28,6 +28,7 @@ interface DirEntry {
 }
 
 export interface InMemoryFsProviderOptions {
+  /** Bootstrap files; missing parent directories are created only while seeding. */
   initialFiles?: Record<string, Uint8Array | ArrayBuffer | ArrayBufferView | string>;
   now?: () => number;
 }
@@ -51,6 +52,9 @@ export class MemoryVolume {
     this.entries.set("/", this.makeDirEntry());
     if (opts.initialFiles) {
       for (const [path, value] of Object.entries(opts.initialFiles)) {
+        // Seed paths describe a ready-to-use tree; ordinary writeFile still
+        // requires its parent directory to exist.
+        this.createDirAll(dirname(normalizeAbsolute(path)));
         this.writeFile(path, this.coerceBuffer(value));
       }
     }
