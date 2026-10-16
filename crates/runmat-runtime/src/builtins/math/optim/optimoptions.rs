@@ -858,6 +858,8 @@ mod tests {
                 Value::Num(1.0e-9),
                 Value::from("StepTolerance"),
                 Value::Num(1.0e-8),
+                Value::from("MaxFunctionEvaluations"),
+                Value::Num(7.0),
                 Value::from("Algorithm"),
                 Value::from("trust-region-reflective"),
             ])
@@ -865,6 +867,8 @@ mod tests {
         );
         assert_eq!(num_field(&options, "TolFun"), 1.0e-9);
         assert_eq!(num_field(&options, "TolX"), 1.0e-8);
+        assert_eq!(num_field(&options, "MaxFunEvals"), 7.0);
+        assert!(!options.fields.contains_key("MaxFunctionEvaluations"));
         assert_eq!(
             string_field(&options, "Algorithm"),
             "trust-region-reflective"

@@ -874,6 +874,61 @@ fn whitespace_separated_matrix_allowed() {
 }
 
 #[test]
+fn spaced_parenthesis_starts_next_matrix_element_after_computed_value() {
+    let ast = parse("A = [ones(4,1) (1:4)']; B = [x(1)(2)];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].len(), 2);
+    assert!(
+        matches!(&rows[0][0], Expr::FuncCall(name, args, _) if name == "ones" && args.len() == 2)
+    );
+    assert!(
+        matches!(&rows[0][1], Expr::Unary(UnOp::Transpose, inner, _) if matches!(&**inner, Expr::Range(_, None, _, _)))
+    );
+
+    // Adjacent parentheses remain postfix indexing, not a separator.
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[1] else {
+        panic!("expected adjacent-postfix matrix assignment");
+    };
+    assert_eq!(rows[0].len(), 1);
+    assert!(matches!(&rows[0][0], Expr::Index(_, _, _)));
+}
+
+#[test]
+fn matrix_separator_rule_does_not_escape_into_call_arguments() {
+    let ast = parse("A = [plus(ones (4,1), 2) (1:4)']; B = ones (4,1);").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows[0].len(), 2);
+    assert!(
+        matches!(&rows[0][0], Expr::FuncCall(name, args, _) if name == "plus" && matches!(&args[0], Expr::FuncCall(inner, _, _) if inner == "ones"))
+    );
+    assert!(
+        matches!(&ast.body[1], Stmt::Assign(_, Expr::FuncCall(name, _, _), _, _) if name == "ones")
+    );
+}
+
+#[test]
+fn spaced_nested_aggregate_starts_matrix_column_not_postfix_index() {
+    let ast = parse("A = [x [1 2] {3,4}]; B = [x[1]];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows[0].len(), 3);
+    assert!(matches!(&rows[0][0], Expr::Ident(name, _) if name == "x"));
+    assert!(matches!(&rows[0][1], Expr::Tensor(_, _)));
+    assert!(matches!(&rows[0][2], Expr::Cell(_, _)));
+
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[1] else {
+        panic!("expected adjacent index assignment");
+    };
+    assert!(matches!(&rows[0][0], Expr::Index(_, _, _)));
+}
+
+#[test]
 fn nested_tensor_literals_and_rows() {
     let ast = parse("A=[1 2 3; 4 5 6]; B=[7 8; 9 10];").unwrap();
     if let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &ast.body[0] {

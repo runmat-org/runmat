@@ -9,7 +9,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     related: &["fminbnd", "fminunc", "fzero", "fsolve"],
     sections: &[
         BuiltinDocumentationSection { heading: "Names and forms", paragraphs: &[
-            "`optimset()` returns an empty struct. Name/value pairs create fields, and `optimset(oldopts,...)` copies existing fields before applying the pairs. Known names are case-insensitive: TolX, TolFun, MaxIter, MaxFunEvals, Display, Algorithm, and SpecifyObjectiveGradient. StepTolerance, FunctionTolerance, OptimalityTolerance, and GradObj are accepted aliases. Unknown names are retained so a later solver can read them.",
+            "`optimset()` returns an empty struct. Name/value pairs create fields, and `optimset(oldopts,...)` copies existing fields before applying the pairs. Known names are case-insensitive: TolX, TolFun, MaxIter, MaxFunEvals, Display, Algorithm, and SpecifyObjectiveGradient. StepTolerance, FunctionTolerance, OptimalityTolerance, MaxFunctionEvaluations, and GradObj are accepted aliases. Unknown names are retained so a later solver can read them.",
             "Option consumers interpret known names case-insensitively. Constructing an options struct does not execute an objective callback or guarantee that every field is supported by every solver.",
         ]},
         BuiltinDocumentationSection { heading: "Typed and resident payloads", paragraphs: &[

@@ -3,7 +3,10 @@ use crate::builtins::common::test_support;
 use futures::executor::block_on;
 use runmat_accelerate_api::HostTensorView;
 use runmat_value::IntegerStorage;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 #[test]
 fn one_output_does_not_publish_unused_gradient_or_jacobian() {
@@ -415,6 +418,74 @@ fn lsqcurvefit_multi_output_includes_diagnostics_lambda_and_jacobian() {
         }
         other => panic!("unexpected value {other:?}"),
     }
+}
+
+#[test]
+fn optimoptions_long_evaluation_name_limits_lsqcurvefit_callbacks() {
+    let (runtime, model, _bound) = selected_model(162, "budgeted_line");
+    let _entry = runtime.enter();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let callback_calls = calls.clone();
+    let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
+        move |function, args, requested_outputs| {
+            assert_eq!(function, 162);
+            assert_eq!(requested_outputs, 1);
+            callback_calls.fetch_add(1, Ordering::SeqCst);
+            let Value::Num(parameter) = &args[0] else {
+                panic!("expected scalar parameter, got {:?}", args[0]);
+            };
+            let parameter = *parameter;
+            Box::pin(async move {
+                crate::user_functions::test_support::rooted_single_value_sequence(tensor(
+                    vec![parameter, parameter * 2.0],
+                    vec![1, 2],
+                ))
+            })
+        },
+    )));
+    let option_arguments = vec![
+        Value::from("lsqcurvefit"),
+        Value::from("MaxFunctionEvaluations"),
+        Value::Num(1.0),
+    ];
+    let admitted =
+        block_on(runtime.scope(crate::call_builtin_async("optimoptions", &option_arguments)))
+            .expect("long option name is admitted");
+    let options = admitted.value().clone();
+    let Value::Struct(fields) = &options else {
+        panic!("optimoptions must return a struct");
+    };
+    assert!(matches!(
+        fields.fields.get("MaxFunEvals"),
+        Some(Value::Num(1.0))
+    ));
+    assert!(!fields.fields.contains_key("MaxFunctionEvaluations"));
+
+    let _outputs = crate::output_count::push_output_count(Some(5));
+    let result = block_on(runtime.scope(lsqcurvefit_builtin(
+        model,
+        Value::Num(0.0),
+        tensor(vec![1.0, 2.0], vec![1, 2]),
+        tensor(vec![2.0, 4.0], vec![1, 2]),
+        vec![
+            Value::Tensor(Tensor::zeros(vec![0, 0])),
+            Value::Tensor(Tensor::zeros(vec![0, 0])),
+            options,
+        ],
+    )))
+    .expect("budgeted lsqcurvefit completes with a diagnostic");
+    let Value::OutputList(outputs) = result else {
+        panic!("expected five lsqcurvefit outputs, got {result:?}");
+    };
+    assert!(matches!(outputs.get(3), Some(Value::Num(0.0))));
+    let Some(Value::Struct(report)) = outputs.get(4) else {
+        panic!("expected output diagnostics");
+    };
+    assert!(matches!(
+        report.fields.get("funcCount"),
+        Some(Value::Num(1.0))
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[test]

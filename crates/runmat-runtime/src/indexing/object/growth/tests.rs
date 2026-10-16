@@ -31,11 +31,7 @@ fn ids(value: Value, expected_shape: &[usize]) -> Vec<f64> {
 
 #[test]
 fn scalar_and_planned_assignment_share_growth_and_deletion() {
-    for (shape, indices) in [
-        (vec![1, 2], vec![3]),
-        (vec![2, 1], vec![3, 1]),
-        (vec![1, 2, 2], vec![5]),
-    ] {
+    for (shape, indices) in [(vec![1, 2], vec![3]), (vec![2, 1], vec![3, 1])] {
         let len = shape.iter().product::<usize>();
         let base = Value::ObjectArray(
             ObjectArray::new(
@@ -83,6 +79,29 @@ fn scalar_and_planned_assignment_share_growth_and_deletion() {
         error.identifier(),
         Some("RunMat:ObjectArrayDefaultConstructionRequired")
     );
+
+    // A single linear write beyond a genuine N-D array extends the final axis,
+    // not a flattened row. Slot 6 remains uncovered and needs a constructor.
+    let shape = [1, 2, 2];
+    let base = Value::ObjectArray(
+        ObjectArray::new(
+            "AssignmentFixture",
+            (1..=4).map(object).collect(),
+            shape.to_vec(),
+        )
+        .unwrap(),
+    );
+    let plan = build_assignment_plan(&[SliceSelector::Scalar(5)], 1, &shape).unwrap();
+    assert_eq!(plan.base_shape, [1, 2, 3]);
+    for result in [
+        assign_scalar_indices(base.clone(), &[5], object(9), false),
+        assign_with_plan(base, &plan, object(9), false),
+    ] {
+        assert_eq!(
+            result.unwrap_err().identifier(),
+            Some("RunMat:ObjectArrayDefaultConstructionRequired")
+        );
+    }
 }
 
 #[test]
@@ -128,22 +147,35 @@ fn dimensional_growth_remaps_existing_column_major_coordinates() {
 
 #[test]
 fn linear_growth_preserves_element_order_when_plan_collapses_rank() {
-    for (shape, expected) in [(vec![1, 2, 2], vec![1, 5]), (vec![2, 1, 1], vec![3, 1])] {
-        let len = shape.iter().product::<usize>();
-        let array = ObjectArray::new(
-            "AssignmentFixture",
-            (1..=len).map(object).collect(),
-            shape.clone(),
-        )
-        .unwrap();
-        let plan = build_assignment_plan(&[SliceSelector::Scalar(len + 1)], 1, &shape).unwrap();
-        let result =
-            assign_with_plan(Value::ObjectArray(array), &plan, object(len + 1), false).unwrap();
-        assert_eq!(
-            ids(result, &expected),
-            (1..=len + 1).map(|value| value as f64).collect::<Vec<_>>()
-        );
-    }
+    let column = ObjectArray::new(
+        "AssignmentFixture",
+        (1..=2).map(object).collect(),
+        vec![2, 1, 1],
+    )
+    .unwrap();
+    let plan = build_assignment_plan(&[SliceSelector::Scalar(3)], 1, &[2, 1, 1]).unwrap();
+    let result = assign_with_plan(Value::ObjectArray(column), &plan, object(3), false).unwrap();
+    assert_eq!(ids(result, &[3, 1]), [1.0, 2.0, 3.0]);
+
+    // Cover the entire new final-axis slab, so growth needs no invented objects.
+    let shape = [1, 2, 2];
+    let array = ObjectArray::new(
+        "AssignmentFixture",
+        (1..=4).map(object).collect(),
+        shape.to_vec(),
+    )
+    .unwrap();
+    let plan = build_assignment_plan(&[SliceSelector::Indices(vec![5, 6])], 1, &shape).unwrap();
+    assert_eq!(plan.base_shape, [1, 2, 3]);
+    let rhs = ObjectArray::row("AssignmentFixture", vec![object(5), object(6)]).unwrap();
+    let result = assign_with_plan(
+        Value::ObjectArray(array),
+        &plan,
+        Value::ObjectArray(rhs),
+        false,
+    )
+    .unwrap();
+    assert_eq!(ids(result, &[1, 2, 3]), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
 }
 
 #[test]

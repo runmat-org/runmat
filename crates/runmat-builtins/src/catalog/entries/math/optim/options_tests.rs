@@ -9,6 +9,7 @@ fn option_spellings_decode_once_to_shared_identities() {
         ("OptimalityTolerance", OptimOptionField::TolFun),
         ("MAXITER", OptimOptionField::MaxIter),
         ("MaxFunEvals", OptimOptionField::MaxFunEvals),
+        ("maxFunctionEvaluations", OptimOptionField::MaxFunEvals),
         ("Display", OptimOptionField::Display),
         ("Algorithm", OptimOptionField::Algorithm),
         ("GradObj", OptimOptionField::SpecifyObjectiveGradient),

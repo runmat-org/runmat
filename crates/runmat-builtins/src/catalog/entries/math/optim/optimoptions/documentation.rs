@@ -8,7 +8,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
  keywords: &["optimoptions", "options", "TolX", "TolFun", "MaxIter", "MaxFunEvals", "Display", "Algorithm", "coneprog", "StepTolerance", "FunctionTolerance", "OptimalityTolerance", "optimization", "fminunc", "SpecifyObjectiveGradient", "GradObj", "quasi-newton", "bfgs"],
  related: &["coneprog", "optimset", "fminbnd", "fzero", "fsolve", "lsqcurvefit", "lsqnonlin"],
  sections: &[BuiltinDocumentationSection { heading: "Behavior",
-         paragraphs: &["Modern aliases are accepted: `StepTolerance` maps to `TolX`, and `FunctionTolerance` and `OptimalityTolerance` map to `TolFun`.",
+         paragraphs: &["Modern aliases are accepted: `StepTolerance` maps to `TolX`; `FunctionTolerance` and `OptimalityTolerance` map to `TolFun`; `MaxFunctionEvaluations` maps to the canonical `MaxFunEvals` field.",
          "`TolX` and `TolFun` must be finite positive numeric scalars. `MaxIter` and `MaxFunEvals` must be finite positive integer scalars.",
          "Unknown options are rejected so solver configuration mistakes fail before the solver starts.",
          "RunMat implements a compatibility subset for its optimization solvers and currently returns a struct rather than MATLAB's solver-options object class.",

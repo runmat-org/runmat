@@ -28,7 +28,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 "Unbounded problems use finite-difference Levenberg-Marquardt iterations.",
 "Bounded problems project trial points into `[lb, ub]` and estimate finite-difference Jacobians without stepping outside finite bounds.",
 "`lb` and `ub` may be empty, scalar, or arrays with the same number of elements as `x0`; scalar bounds are broadcast to every parameter.",
-"`optimset` and `optimoptions` option structs are accepted. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals`, `Display`, and `Algorithm` are recognized.",
+"`optimset` and `optimoptions` option structs are accepted. `TolX`, `TolFun`, `MaxIter`, `MaxFunEvals` (also `MaxFunctionEvaluations` when constructing options), `Display`, and `Algorithm` are recognized.",
 "The documented numeric solver domain is floating point. Native integer x0, xdata, ydata, bounds, numeric options, and callback results are independently gated RunMat extensions.",
 "Integer x0, ydata, bounds, floating options, and callback results must be exactly representable at the double solver boundary. Integer xdata remains an exact callback payload and is not eagerly converted.",
 "`Algorithm` accepts `levenberg-marquardt` and `trust-region-reflective`; both currently use RunMat's projected Levenberg-Marquardt implementation.",

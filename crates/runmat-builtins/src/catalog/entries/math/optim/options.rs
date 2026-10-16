@@ -33,7 +33,7 @@ impl OptimOptionField {
             "tolx" | "steptolerance" => Some(Self::TolX),
             "tolfun" | "functiontolerance" | "optimalitytolerance" => Some(Self::TolFun),
             "maxiter" => Some(Self::MaxIter),
-            "maxfunevals" => Some(Self::MaxFunEvals),
+            "maxfunevals" | "maxfunctionevaluations" => Some(Self::MaxFunEvals),
             "display" => Some(Self::Display),
             "algorithm" => Some(Self::Algorithm),
             "specifyobjectivegradient" | "gradobj" => Some(Self::SpecifyObjectiveGradient),

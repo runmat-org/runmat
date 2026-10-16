@@ -23,6 +23,7 @@ struct Parser {
     input: String,
     options: ParserOptions,
     in_matrix_expr: bool,
+    at_matrix_element_boundary: bool,
     current_classdef_name: Option<String>,
     sections: Vec<ScriptSection>,
 }
@@ -77,6 +78,7 @@ pub fn parse_with_options(input: &str, options: ParserOptions) -> Result<Program
         input: input.to_string(),
         options,
         in_matrix_expr: false,
+        at_matrix_element_boundary: false,
         current_classdef_name: None,
         sections,
     };

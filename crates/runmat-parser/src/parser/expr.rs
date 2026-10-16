@@ -10,11 +10,11 @@ impl Parser {
         {
             let name = self.next().expect("peeked identifier");
             self.pos += 1; // consume '='
-            let value = self.parse_expr()?;
+            let value = self.parse_nested_expr()?;
             let span = self.span_from(name.position, value.span().end);
             return Ok(Expr::NameValueArg(name.lexeme, Box::new(value), span));
         }
-        self.parse_expr()
+        self.parse_nested_expr()
     }
 
     pub(super) fn parse_call_arguments_until(
@@ -39,6 +39,14 @@ impl Parser {
 
     pub(super) fn parse_expr(&mut self) -> Result<Expr, SyntaxError> {
         self.parse_logical_or()
+    }
+
+    fn parse_nested_expr(&mut self) -> Result<Expr, SyntaxError> {
+        let prior = self.at_matrix_element_boundary;
+        self.at_matrix_element_boundary = false;
+        let expr = self.parse_expr();
+        self.at_matrix_element_boundary = prior;
+        expr
     }
 
     fn parse_logical_or(&mut self) -> Result<Expr, SyntaxError> {
@@ -205,6 +213,20 @@ impl Parser {
 
     fn parse_postfix_with_base(&mut self, mut expr: Expr) -> Result<Expr, SyntaxError> {
         loop {
+            // At the outer level of a matrix element, a space before an
+            // opening delimiter starts the next column, rather than indexing
+            // or calling the prior column.
+            // Calls and grouping inside the element parse with this boundary off.
+            if self.at_matrix_element_boundary
+                && matches!(
+                    self.peek_token(),
+                    Some(Token::LParen | Token::LBracket | Token::LBrace)
+                )
+                && self.pos > 0
+                && !self.tokens_adjacent(self.pos - 1, self.pos)
+            {
+                break;
+            }
             if self.consume(&Token::LParen) {
                 let start = expr.span().start;
                 let args = self.parse_call_arguments_until(
@@ -225,9 +247,9 @@ impl Parser {
             } else if self.consume(&Token::LBracket) {
                 let start = expr.span().start;
                 let mut indices = Vec::new();
-                indices.push(self.parse_expr()?);
+                indices.push(self.parse_nested_expr()?);
                 while self.consume(&Token::Comma) {
-                    indices.push(self.parse_expr()?);
+                    indices.push(self.parse_nested_expr()?);
                 }
                 if !self.consume(&Token::RBracket) {
                     return Err(self.error_with_expected("expected ']'", "']'"));
@@ -242,9 +264,9 @@ impl Parser {
                 }
                 let start = expr.span().start;
                 let mut indices = Vec::new();
-                indices.push(self.parse_expr()?);
+                indices.push(self.parse_nested_expr()?);
                 while self.consume(&Token::Comma) {
-                    indices.push(self.parse_expr()?);
+                    indices.push(self.parse_nested_expr()?);
                 }
                 if !self.consume(&Token::RBrace) {
                     return Err(self.error_with_expected("expected '}'", "'}'"));
@@ -267,7 +289,7 @@ impl Parser {
                 }
                 self.pos += 1;
                 if self.consume(&Token::LParen) {
-                    let name_expr = self.parse_expr()?;
+                    let name_expr = self.parse_nested_expr()?;
                     if !self.consume(&Token::RParen) {
                         return Err(self.error_with_expected(
                             "expected ')' after dynamic member expression",
@@ -509,7 +531,7 @@ impl Parser {
                                 ));
                             }
                         }
-                        let body = self.parse_expr()?;
+                        let body = self.parse_nested_expr()?;
                         let span = self.span_from(start, body.span().end);
                         Ok(Expr::AnonFunc {
                             params,
@@ -532,7 +554,7 @@ impl Parser {
                 }
                 Token::LParen => {
                     let start = info.position;
-                    let expr = self.parse_expr()?;
+                    let expr = self.parse_nested_expr()?;
                     if !self.consume(&Token::RParen) {
                         return Err(
                             self.error_with_expected("expected ')' to close parentheses", "')'")
@@ -646,9 +668,12 @@ impl Parser {
 
     fn parse_matrix_expr(&mut self) -> Result<Expr, SyntaxError> {
         let prior = self.in_matrix_expr;
+        let prior_boundary = self.at_matrix_element_boundary;
         self.in_matrix_expr = true;
+        self.at_matrix_element_boundary = true;
         let expr = self.parse_expr();
         self.in_matrix_expr = prior;
+        self.at_matrix_element_boundary = prior_boundary;
         expr
     }
 
@@ -664,9 +689,9 @@ impl Parser {
                 break;
             }
             let mut row = Vec::new();
-            row.push(self.parse_expr()?);
+            row.push(self.parse_nested_expr()?);
             while self.consume(&Token::Comma) {
-                row.push(self.parse_expr()?);
+                row.push(self.parse_nested_expr()?);
             }
             rows.push(row);
             if self.consume(&Token::Semicolon) {
@@ -720,7 +745,7 @@ impl Parser {
                 self.pos = checkpoint;
                 return Ok(None);
             }
-            let value = match self.parse_expr() {
+            let value = match self.parse_nested_expr() {
                 Ok(value) => value,
                 Err(_) => {
                     self.pos = checkpoint;
