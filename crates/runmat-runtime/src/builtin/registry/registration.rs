@@ -36,6 +36,14 @@ impl RuntimeBindingRegistration {
     pub fn certifies(self, selected: RuntimeBuiltinBinding) -> bool {
         self.binding.identity == selected.identity
             && std::ptr::fn_addr_eq(self.binding.implementation, selected.implementation)
+            && match (
+                self.binding.continuation_layout,
+                selected.continuation_layout,
+            ) {
+                (Some(installed), Some(candidate)) => std::ptr::fn_addr_eq(installed, candidate),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// Input to a session-owned RuntimeBindingSession revision. This is not
@@ -203,6 +211,9 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn witness_rejects_foreign_identity_and_implementation() {
+        fn other_layout() -> Result<u64, crate::context::host_allocation::HostAllocationError> {
+            Ok(1)
+        }
         let binding = selected();
         let row = registered_runtime_builtin_bindings_by_name("strcmp")
             .into_iter()
@@ -215,6 +226,9 @@ mod tests {
         let mut foreign_code = binding;
         foreign_code.implementation = other_implementation.implementation;
         assert!(!row.registration().certifies(foreign_code));
+        let mut foreign_layout = binding;
+        foreign_layout.continuation_layout = Some(other_layout);
+        assert!(!row.registration().certifies(foreign_layout));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

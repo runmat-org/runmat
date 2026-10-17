@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::random::{
-    advance_state, enter_parallel_random_stream, next_uniform_state,
-    reserve_parallel_random_streams, set_seed, test_guard, with_rng_state_in,
+    enter_parallel_random_stream, next_uniform_state, reserve_parallel_random_streams, set_seed,
+    test_guard, with_rng_state_in, RandomState,
 };
 use crate::execution::{CpuCooperationPolicy, ExecutionServiceError, RuntimeExecutionService};
 use futures::executor::block_on;
@@ -22,25 +22,37 @@ fn budget(context: &RuntimeContext) -> CpuCooperationBudget {
     CpuCooperationBudget::new(context.execution().clone(), context.cancellation())
 }
 
-fn state(context: &RuntimeContext) -> u64 {
-    with_rng_state_in(Some(context), "rng test", |rng| rng.state).unwrap()
+fn generate_normal(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
+    let mut turn = super::super::turn::try_acquire(None, label)?;
+    super::generate_normal(&mut turn, len, label)
 }
 
-fn expected(len: usize, start: u64) -> (Vec<f64>, u64) {
+async fn generate_normal_cooperative(
+    len: usize,
+    label: &str,
+    context: Option<&RuntimeContext>,
+    budget: &mut CpuCooperationBudget,
+) -> BuiltinResult<Vec<f64>> {
+    let mut turn = super::super::turn::acquire(context, label).await?;
+    super::generate_normal_cooperative(&mut turn, len, label, context, budget).await
+}
+
+fn state(context: &RuntimeContext) -> RandomState {
+    with_rng_state_in(Some(context), "rng test", |rng| rng.state.clone()).unwrap()
+}
+
+fn expected(len: usize, start: RandomState) -> (Vec<f64>, RandomState) {
     let mut local = start;
+    local.prepare_mutation(None).unwrap();
     let mut values = Vec::with_capacity(len);
     while values.len() < len {
-        let (first, second) = next_normal_pair(&mut local);
-        values.push(first);
-        if values.len() < len {
-            values.push(second);
-        }
+        push_pair(&mut values, len, &mut local);
     }
     (values, local)
 }
 
 #[test]
-fn seeded_even_odd_zero_and_next_word_match_serial_box_muller() {
+fn seeded_even_odd_zero_and_next_word_match_serial_transform() {
     for len in [0, 1, 2, 3, 17, 65_537] {
         let context = context();
         {
@@ -48,11 +60,7 @@ fn seeded_even_odd_zero_and_next_word_match_serial_box_muller() {
             set_seed(41).unwrap();
         }
         let before = state(&context);
-        let (oracle, after) = expected(len, before);
-        assert_eq!(
-            after,
-            advance_state(before, (2 * (len / 2 + len % 2)) as u64)
-        );
+        let (oracle, after) = expected(len, before.clone());
         let actual = block_on(generate_normal_cooperative(
             len,
             "rng test",
@@ -62,10 +70,12 @@ fn seeded_even_odd_zero_and_next_word_match_serial_box_muller() {
         .unwrap();
         assert_eq!(actual, oracle);
         assert_eq!(state(&context), after);
-        let mut next_state = after;
+        let mut next_state = after.clone();
+        next_state.prepare_mutation(None).unwrap();
         let next = next_uniform_state(&mut next_state);
         assert_eq!(
             with_rng_state_in(Some(&context), "rng test", |rng| {
+                rng.state.prepare_mutation(Some(&context)).unwrap();
                 next_uniform_state(&mut rng.state)
             })
             .unwrap(),
@@ -91,6 +101,38 @@ fn sync_and_cooperative_normal_draws_share_sequence_and_state() {
         .unwrap();
         assert_eq!(cooperative, sync);
         assert_eq!(super::super::snapshot().unwrap().state, sync_state);
+    }
+}
+
+#[test]
+fn exact_output_fill_keeps_mt_and_legacy_pair_consumption() {
+    for legacy in [false, true] {
+        let context = context();
+        let _legacy = legacy.then(|| {
+            enter_parallel_random_stream(
+                &context,
+                runmat_execution::ParallelRandomStream::RunMatLcgV1 { state: 41 },
+            )
+            .unwrap()
+        });
+        let before = state(&context);
+        let (expected, following) = expected(5, before);
+        let mut actual = vec![0.0; 5];
+        let mut turn = block_on(super::super::turn::acquire(Some(&context), "rng test")).unwrap();
+        block_on(super::fill_normal_cooperative(
+            &mut turn,
+            actual.len(),
+            "rng test",
+            &context,
+            &mut budget(&context),
+            |index, value| {
+                actual[index] = value;
+                Ok(())
+            },
+        ))
+        .unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(state(&context), following);
     }
 }
 
@@ -151,7 +193,7 @@ impl Drop for PendingTurn {
 }
 
 #[test]
-fn pending_drop_and_post_reservation_failures_consume_exact_reserved_range() {
+fn pending_drop_and_later_failures_preserve_the_consumed_prefix() {
     let pending_context = context();
     let start = state(&pending_context);
     let dropped = Rc::new(Cell::new(false));
@@ -171,7 +213,7 @@ fn pending_drop_and_post_reservation_failures_consume_exact_reserved_range() {
     let waker = futures::task::noop_waker();
     let mut task = Context::from_waker(&waker);
     assert!(matches!(future.as_mut().poll(&mut task), Poll::Pending));
-    assert_eq!(state(&pending_context), advance_state(start, 6));
+    assert_eq!(state(&pending_context), expected(1, start).1);
     drop(future);
     assert!(dropped.get());
 
@@ -201,7 +243,7 @@ fn pending_drop_and_post_reservation_failures_consume_exact_reserved_range() {
             &mut failing_budget,
         ))
         .unwrap_err();
-        assert_eq!(state(&context), advance_state(start, 8));
+        assert_eq!(state(&context), expected(1, start).1);
         if cancel {
             assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         } else {
@@ -219,7 +261,7 @@ fn iteration_owned_parallel_stream_preserves_parent_and_pair_state() {
     let streams = reserve_parallel_random_streams(&parent, 1).unwrap();
     let parent_state = state(&parent);
     {
-        let _scope = enter_parallel_random_stream(&parent, streams[0]).unwrap();
+        let _scope = enter_parallel_random_stream(&parent, streams[0].clone()).unwrap();
         let start = state(&parent);
         let (oracle, after) = expected(5, start);
         let actual = block_on(generate_normal_cooperative(

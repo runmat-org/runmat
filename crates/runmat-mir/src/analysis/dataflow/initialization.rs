@@ -64,7 +64,11 @@ pub(super) fn compute_init_dataflow(
                 || body.abi.implicit_nargout == Some(binding)
                 || body.abi.varargout == Some(binding)
         });
-        if matches!(local.kind, MirLocalKind::Parameter | MirLocalKind::Capture) || implicit_input {
+        if matches!(
+            local.kind,
+            MirLocalKind::Parameter | MirLocalKind::Capture | MirLocalKind::IncomingWorkspace
+        ) || implicit_input
+        {
             initial[local.id.0] = InitFact::DefinitelyAssigned;
         }
     }

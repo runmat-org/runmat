@@ -32,6 +32,7 @@ pub enum MirLocalKind {
     Parameter,
     Output,
     Binding,
+    IncomingWorkspace,
     Temporary,
     Capture,
 }

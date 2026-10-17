@@ -1,9 +1,11 @@
 //! MATLAB-compatible `randn` builtin with GPU-aware semantics for RunMat.
 use runmat_builtins::{RANDN_COLUMN_SIZE_VECTOR_EXTENSION, RANDN_RESIDENT_SIZE_EXTENSION};
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
+#[cfg(test)]
+use runmat_accelerate_api::HostTensorView;
+use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_macros::runtime_builtin;
-use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::build_runtime_error;
 #[cfg(test)]
@@ -11,13 +13,14 @@ use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_constructor_dimensions, keyword_of,
-    validate_constructor_gpu_output,
 };
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+#[path = "randn/host_output.rs"]
+mod host_output;
 #[cfg(test)]
 use runmat_builtins::ResolveContext;
 #[cfg(test)]
@@ -29,17 +32,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("generator"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[
-        ProviderHook::Custom("random_normal"),
-        ProviderHook::Custom("random_normal_like"),
-    ],
+    provider_hooks: &[ProviderHook::Custom("random.gpu_child")],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Leverages provider normal RNG hooks when available; otherwise falls back to host sampling followed by a single upload to preserve GPU residency.",
+    notes: "Ordinary output consumes the CPU session stream; explicit resident output uses the independent request-bound GPU child and never replays an unproven provider attempt on host.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -208,10 +208,18 @@ impl ParsedRandn {
 }
 
 async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
+    match &parsed.template {
+        RandnTemplate::GpuArray => return randn_gpu(&parsed.shape).await,
+        RandnTemplate::Like(Value::GpuTensor(handle)) => {
+            return randn_like_gpu(handle, &parsed.shape).await;
+        }
+        _ => {}
+    }
+    let mut turn = random::acquire_turn(None, "randn").await?;
     match parsed.template {
         RandnTemplate::Double => match parsed.dtype {
-            NumericDType::F64 => randn_double(&parsed.shape),
-            NumericDType::F32 => randn_single(&parsed.shape),
+            NumericDType::F64 => randn_double(&mut turn, &parsed.shape).await,
+            NumericDType::F32 => randn_single(&mut turn, &parsed.shape).await,
             NumericDType::I8
             | NumericDType::I16
             | NumericDType::I32
@@ -219,14 +227,14 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
             | NumericDType::U8
             | NumericDType::U16
             | NumericDType::U32
-            | NumericDType::U64 => randn_double(&parsed.shape),
+            | NumericDType::U64 => randn_double(&mut turn, &parsed.shape).await,
         },
-        RandnTemplate::GpuArray => randn_gpu(&parsed.shape),
-        RandnTemplate::Like(proto) => randn_like(&proto, &parsed.shape).await,
+        RandnTemplate::GpuArray => unreachable!("GPU output handled before host turn"),
+        RandnTemplate::Like(proto) => randn_like(&mut turn, &proto, &parsed.shape).await,
     }
 }
 
-fn randn_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
+async fn randn_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
     let Some(provider) = runmat_accelerate_api::provider() else {
         return Err(builtin_error(
             "randn: gpuArray output requires an active double-precision provider",
@@ -237,84 +245,83 @@ fn randn_gpu(shape: &[usize]) -> crate::BuiltinResult<Value> {
             "randn: gpuArray output requires an active double-precision provider",
         ));
     }
-    let output = provider
-        .random_normal(shape)
-        .map_err(|error| builtin_error(format!("randn: provider random_normal failed: {error}")))?;
-    validate_constructor_gpu_output(
+    crate::builtins::common::random::gpu_execution::explicit_real(
         "randn",
         provider,
-        output,
         shape,
-        runmat_accelerate_api::GpuTensorStorage::Real,
-        Some(ProviderPrecision::F64),
+        ProviderPrecision::F64,
+        runmat_accelerate_api::random::GpuRandomDistribution::StandardNormal,
         None,
-        false,
     )
     .map(Value::GpuTensor)
 }
 
-fn try_gpu_normal(shape: &[usize]) -> crate::BuiltinResult<Option<Value>> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(None);
-    };
-    if provider.precision() != ProviderPrecision::F64 {
-        return Ok(None);
-    }
-    match provider.random_normal(shape) {
-        Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
-        Err(err) => {
-            log::warn!(
-                "randn: provider random_normal failed ({err}); falling back to host tensor path"
-            );
-            Ok(None)
-        }
-    }
-}
-
-fn randn_double(shape: &[usize]) -> crate::BuiltinResult<Value> {
-    if let Some(value) = try_gpu_normal(shape)? {
-        return Ok(value);
-    }
-    let len = tensor::element_count(shape);
-    let data = random::generate_normal(len, "randn")?;
-    let tensor =
-        Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randn: {e}")))?;
+async fn randn_double(
+    turn: &mut random::RandomTurn,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
+    let tensor = host_normal_tensor(turn, shape, NumericDType::F64).await?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn randn_single(shape: &[usize]) -> crate::BuiltinResult<Value> {
+async fn draw_normal(turn: &mut random::RandomTurn, len: usize) -> crate::BuiltinResult<Vec<f64>> {
+    if let Some(runtime) = turn.owner().cloned() {
+        let mut budget = crate::execution::CpuCooperationBudget::new(
+            runtime.execution().clone(),
+            runtime.cancellation(),
+        );
+        random::generate_normal_cooperative(turn, len, "randn", Some(&runtime), &mut budget).await
+    } else {
+        random::generate_normal(turn, len, "randn")
+    }
+}
+
+async fn host_normal_tensor(
+    turn: &mut random::RandomTurn,
+    shape: &[usize],
+    dtype: NumericDType,
+) -> crate::BuiltinResult<Tensor> {
+    if let Some(output) = host_output::real(turn, shape, dtype).await? {
+        return Ok(output);
+    }
     let len = tensor::element_count(shape);
-    let data = random::generate_normal(len, "randn")?
-        .into_iter()
-        .map(|v| {
-            let f32_val = v as f32;
-            f32_val as f64
-        })
-        .collect::<Vec<f64>>();
-    let tensor = Tensor::new_with_dtype(data, shape.to_vec(), NumericDType::F32)
-        .map_err(|e| builtin_error(format!("randn: {e}")))?;
-    Ok(Value::Tensor(tensor))
+    let data = draw_normal(turn, len).await?;
+    Tensor::new_with_dtype(data, shape.to_vec(), dtype)
+        .map_err(|error| builtin_error(format!("randn: {error}")))
+}
+
+async fn randn_single(
+    turn: &mut random::RandomTurn,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
+    host_normal_tensor(turn, shape, NumericDType::F32)
+        .await
+        .map(Value::Tensor)
 }
 
 #[async_recursion::async_recursion(?Send)]
-async fn randn_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
+async fn randn_like(
+    turn: &mut random::RandomTurn,
+    proto: &Value,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
     match proto {
-        Value::GpuTensor(handle) => randn_like_gpu(handle, shape).await,
+        Value::GpuTensor(_) => unreachable!("GPU prototype handled before host turn"),
         Value::ComplexTensor(tensor) => {
             crate::builtins::common::validation::reject_typed_complex_integer_tensor(
                 tensor, "randn",
             )?;
-            randn_complex(shape)
+            randn_complex(turn, shape, tensor.numeric_dtype()).await
         }
-        Value::Complex(_, _) => randn_complex(shape),
+        Value::Complex(_, _) => randn_complex(turn, shape, NumericDType::F64).await,
         Value::Tensor(tensor) => match tensor.numeric_dtype() {
-            NumericDType::F32 => randn_single(shape),
-            NumericDType::F64 => randn_double(shape),
+            NumericDType::F32 => randn_single(turn, shape).await,
+            NumericDType::F64 => randn_double(turn, shape).await,
             _ => Err(builtin_error(
                 "randn: 'like' prototype must be single or double",
             )),
         },
-        Value::Num(_) => randn_double(shape),
+        Value::Num(_) => randn_double(turn, shape).await,
         Value::Int(_)
         | Value::Bool(_)
         | Value::LogicalArray(_)
@@ -328,15 +335,16 @@ async fn randn_like(proto: &Value, shape: &[usize]) -> crate::BuiltinResult<Valu
     }
 }
 
-fn randn_complex(shape: &[usize]) -> crate::BuiltinResult<Value> {
-    let len = tensor::element_count(shape);
-    let data = random::generate_normal_complex(len, "randn")?;
-    let tensor = ComplexTensor::new(data, shape.to_vec())
-        .map_err(|e| builtin_error(format!("randn: {e}")))?;
-    Ok(complex_tensor_into_value(tensor))
+async fn randn_complex(
+    turn: &mut random::RandomTurn,
+    shape: &[usize],
+    dtype: NumericDType,
+) -> crate::BuiltinResult<Value> {
+    host_output::complex(turn, shape, dtype)
+        .await
+        .map(complex_tensor_into_value)
 }
 
-#[async_recursion::async_recursion(?Send)]
 async fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::BuiltinResult<Value> {
     if runmat_accelerate_api::handle_integer_type(handle).is_some()
         || runmat_accelerate_api::handle_is_logical(handle)
@@ -345,38 +353,32 @@ async fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
             "randn: 'like' prototype must have single or double underlying type",
         ));
     }
-    if let Some(provider) =
-        runmat_accelerate_api::provider_for_handle(handle).or_else(runmat_accelerate_api::provider)
+    let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(handle)
+        .ok_or_else(|| builtin_error("randn: no live provider owns the gpuArray prototype"))?;
+    let precision = runmat_accelerate_api::handle_precision(handle)
+        .ok_or_else(|| builtin_error("randn: unsupported gpuArray prototype precision"))?;
+    if runmat_accelerate_api::handle_storage(handle)
+        == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
     {
-        let attempt = if handle.shape() == shape {
-            provider.random_normal_like(handle)
-        } else {
-            provider.random_normal(shape)
-        };
-        if let Ok(gpu) = attempt {
-            return Ok(Value::GpuTensor(gpu));
-        }
-
-        let len = tensor::element_count(shape);
-        let data = random::generate_normal(len, "randn")?;
-
-        let tensor =
-            Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randn: {e}")))?;
-        let view = HostTensorView {
-            data: tensor
-                .as_f64_slice()
-                .expect("randn fallback constructs double storage"),
-            shape: tensor.shape(),
-        };
-        if let Ok(gpu) = provider.upload(&view) {
-            return Ok(Value::GpuTensor(gpu));
-        }
+        return crate::builtins::common::random::gpu_execution::explicit_complex(
+            "randn",
+            provider,
+            shape,
+            precision,
+            runmat_accelerate_api::random::GpuRandomDistribution::StandardNormal,
+            handle,
+        )
+        .map(Value::GpuTensor);
     }
-
-    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
-        .await
-        .map_err(|e| builtin_error(format!("randn: {e}")))?;
-    randn_like(&gathered, shape).await
+    crate::builtins::common::random::gpu_execution::explicit_real(
+        "randn",
+        provider,
+        shape,
+        precision,
+        runmat_accelerate_api::random::GpuRandomDistribution::StandardNormal,
+        Some(handle),
+    )
+    .map(Value::GpuTensor)
 }
 
 #[cfg(test)]
@@ -386,7 +388,7 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
     use runmat_accelerate_api::AccelProvider;
-    use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage};
+    use runmat_value::{ComplexTensor, IntValue, IntegerComplexStorage, IntegerStorage};
     use std::sync::Mutex;
 
     struct InvalidExplicitRandnProvider {
@@ -417,12 +419,37 @@ pub(crate) mod tests {
             self.owner.device_id()
         }
 
-        fn random_normal(&self, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
-            let allocation = self.owner.allocate_zeroed(
-                vec![1, 1],
-                runmat_accelerate_api::NumericElementType::F64,
-                runmat_accelerate_api::GpuTensorStorage::Real,
-            )?;
+        fn propose_gpu_random(
+            &self,
+            request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+        ) -> runmat_accelerate_api::ProviderExecutionResult<
+            Option<runmat_accelerate_api::random::GpuRandomPhysicalProposal>,
+        > {
+            let count = request.element_count().expect("test request geometry");
+            Ok(Some(
+                runmat_accelerate_api::random::GpuRandomPhysicalProposal {
+                    output_buffer_bytes: u64::try_from(count).unwrap() * 8,
+                    uniform_buffer_bytes: 0,
+                    uniform_allocations: 0,
+                    dispatches: 1,
+                    queue_submissions: 0,
+                },
+            ))
+        }
+
+        fn execute_gpu_random(
+            &self,
+            _request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+            _metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+            let allocation = self
+                .owner
+                .allocate_zeroed(
+                    vec![1, 1],
+                    runmat_accelerate_api::NumericElementType::F64,
+                    runmat_accelerate_api::GpuTensorStorage::Real,
+                )
+                .map_err(runmat_accelerate_api::ProviderExecutionError::from)?;
             *self.result.lock().unwrap() = Some(allocation.probe);
             Ok(allocation.handle)
         }
@@ -655,24 +682,50 @@ pub(crate) mod tests {
     #[test]
     fn randn_like_complex_produces_complex_tensor() {
         let _guard = random::test_guard();
-        let _guard = reset_rng_clean();
-        let args = vec![
-            Value::Num(2.0),
-            Value::Num(1.0),
-            Value::from("like"),
-            Value::Complex(0.0, 1.0),
-        ];
-        let result = block_on(randn_builtin(args)).expect("randn");
-        match result {
-            Value::ComplexTensor(t) => {
-                assert_eq!(t.shape(), &[2, 1]);
-                let expected = random::expected_complex_normal_sequence(2);
-                for ((re, im), (eref, eim)) in t.materialize_f64().iter().zip(expected.iter()) {
-                    assert!((*re - *eref).abs() < 1e-12);
-                    assert!((*im - *eim).abs() < 1e-12);
+        for (prototype, dtype) in [
+            (Value::Complex(0.0, 1.0), NumericDType::F64),
+            (
+                Value::ComplexTensor(ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap()),
+                NumericDType::F64,
+            ),
+            (
+                Value::ComplexTensor(
+                    ComplexTensor::from_f32(vec![(0.0, 1.0)], vec![1, 1]).unwrap(),
+                ),
+                NumericDType::F32,
+            ),
+        ] {
+            let _rng = reset_rng_clean();
+            let result = block_on(randn_builtin(vec![
+                Value::Num(2.0),
+                Value::Num(1.0),
+                Value::from("like"),
+                prototype,
+            ]))
+            .expect("randn");
+            let Value::ComplexTensor(tensor) = result else {
+                panic!("expected complex tensor, got {result:?}")
+            };
+            assert_eq!(tensor.shape(), &[2, 1]);
+            assert_eq!(tensor.numeric_dtype(), dtype);
+            let component = |normal: f64| {
+                let scaled = normal * std::f64::consts::FRAC_1_SQRT_2;
+                if dtype == NumericDType::F32 {
+                    f64::from(scaled as f32)
+                } else {
+                    scaled
                 }
+            };
+            // Complex samples consume the same real draws in pairs, with
+            // variance one half per component and native output precision.
+            for ((real, imaginary), expected) in tensor
+                .materialize_f64()
+                .iter()
+                .zip(random::expected_normal_sequence(4).chunks_exact(2))
+            {
+                assert_eq!(*real, component(expected[0]));
+                assert_eq!(*imaginary, component(expected[1]));
             }
-            other => panic!("expected complex tensor, got {other:?}"),
         }
     }
 
@@ -726,7 +779,8 @@ pub(crate) mod tests {
         }));
         let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
 
-        let error = randn_gpu(&[2, 2]).expect_err("invalid provider output must be terminal");
+        let error =
+            block_on(randn_gpu(&[2, 2])).expect_err("invalid provider output must be terminal");
         assert!(error.message().contains("invalid constructor result"));
         assert_eq!(
             provider
@@ -810,8 +864,7 @@ pub(crate) mod tests {
         };
         let provider = runmat_accelerate_api::provider().unwrap();
         let handle = provider.upload(&view).expect("upload");
-        let result =
-            block_on(randn_like(&Value::GpuTensor(handle), &[2, 2])).expect("randn like gpu");
+        let result = block_on(randn_like_gpu(&handle, &[2, 2])).expect("randn like gpu");
         match result {
             Value::GpuTensor(h) => {
                 let gathered = test_support::gather(Value::GpuTensor(h)).expect("gather to host");

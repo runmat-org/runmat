@@ -1,4 +1,7 @@
 use crate::*;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/executable_roots.rs"]
+mod executable_roots;
 #[path = "tests/portable_entrypoint.rs"]
 mod portable_entrypoint;
 #[cfg(not(target_arch = "wasm32"))]
@@ -15537,6 +15540,40 @@ fn distributed_numeric_limit_like_preserves_class_without_materializing_the_prot
             )
             .unwrap()
         ))
+    );
+}
+
+#[test]
+fn distributed_eps_maps_values_and_retains_scalar_like_owner() {
+    let mut session = RunMatSession::with_options(false, false).expect("session init");
+    execute_text_request(
+        &mut session,
+        "source = distributed(single([0, 1, 2])); mapped = eps(source); scalar = eps(like=source); mappedValues = gather(mapped); scalarValue = gather(scalar);",
+    )
+    .expect("execute both distributed eps forms");
+    let variables = session.get_variables().unwrap();
+    let Some(runmat_value::Value::Distributed(mapped)) = variables.get("mapped") else {
+        panic!("eps(source) must retain a distributed handle");
+    };
+    let Some(runmat_value::Value::Distributed(scalar)) = variables.get("scalar") else {
+        panic!("eps(like=source) must retain a distributed handle");
+    };
+    assert_eq!(mapped.global_shape, vec![1, 3]);
+    assert_eq!(scalar.global_shape, vec![1, 1]);
+    assert_eq!(mapped.owner, scalar.owner);
+    assert_eq!(
+        variables.get("mappedValues").and_then(|value| match value {
+            runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+            _ => None,
+        }),
+        Some(&[f32::from_bits(1), f32::EPSILON, 2.0 * f32::EPSILON][..])
+    );
+    assert_eq!(
+        variables.get("scalarValue").and_then(|value| match value {
+            runmat_value::Value::Tensor(tensor) => tensor.as_f32_slice(),
+            _ => None,
+        }),
+        Some(&[f32::EPSILON][..])
     );
 }
 

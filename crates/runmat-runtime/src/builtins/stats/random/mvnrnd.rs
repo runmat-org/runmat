@@ -228,7 +228,8 @@ async fn mvnrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if output_len > MAX_OUTPUT_CELLS {
         return Err(invalid("mvnrnd: requested output is too large"));
     }
-    let normals = random::generate_normal_scaled(0.0, 1.0, output_len, NAME)?;
+    let mut turn = random::acquire_turn(None, NAME).await?;
+    let normals = random::generate_normal_scaled(&mut turn, 0.0, 1.0, output_len, NAME)?;
     let mut out = vec![0.0; output_len];
     for sample in 0..parsed.sample_count {
         let mean = &parsed.means[parsed.mean_index(sample)];

@@ -4,7 +4,23 @@ use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
 use crate::builtins::common::{gpu_helpers, test_support};
 
-use super::{flintmax, intmax, realmax};
+use super::{eps, flintmax, intmax, realmax};
+
+#[test]
+fn unsupported_resident_spacing_never_downloads_explicit_input() {
+    test_support::with_f32_test_provider(|provider| {
+        let input = Tensor::from_f32(vec![0.0, 1.0], vec![2, 1]).unwrap();
+        let handle = gpu_helpers::upload_tensor(provider, &input)
+            .unwrap()
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .unwrap();
+        provider.reset_telemetry();
+        assert!(eps(vec![Value::GpuTensor(handle.clone())]).is_err());
+        assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        handle.allocation_lease().validate_live().unwrap();
+        handle.release().unwrap();
+    });
+}
 
 #[test]
 fn integer_like_preserves_class_and_wide_value() {

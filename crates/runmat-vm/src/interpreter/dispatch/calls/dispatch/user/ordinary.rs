@@ -1,11 +1,5 @@
 use super::*;
 
-#[derive(Clone, Copy)]
-enum OutputPublication {
-    Fixed(usize),
-    Sequence,
-}
-
 pub(super) async fn dispatch(
     ctx: CallDispatchContext<'_>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {

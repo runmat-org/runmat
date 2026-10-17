@@ -24,6 +24,7 @@ pub(super) fn execute(
             let class = parse_class(&text, builtin)?;
             host::value(class, false, false, kind, builtin)
         }
+        [_value] if kind == FloatingLimitKind::SpacingAtOne => Err(super::eps::invalid_value()),
         [keyword, prototype]
             if super::syntax::text(keyword)
                 .is_some_and(|text| text.eq_ignore_ascii_case("like")) =>

@@ -41,6 +41,7 @@ pub(crate) mod power;
 pub(crate) mod exact_power;
 pub(crate) mod real_max;
 pub mod qr_power_iter;
+pub(crate) mod random_threefry;
 pub mod reduction;
 pub(crate) mod remainder;
 pub mod repmat;

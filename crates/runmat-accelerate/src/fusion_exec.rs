@@ -660,6 +660,7 @@ fn select_fusion_provider_with_implementation(
             inputs: &input_refs,
             outputs,
             workload: ProviderWorkload {
+                gpu_random: None,
                 fused_elementwise: elementwise_abi,
                 real_power_mode: None,
                 real_power_scalar: None,

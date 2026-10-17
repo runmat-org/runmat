@@ -81,6 +81,7 @@ fn is_output_slot_call(instruction: &Instr) -> bool {
         Instr::CallFevalMultiUsingOutputSlot(..)
             | Instr::CallFevalExpandMultiOutputUsingOutputSlot(..)
             | Instr::CallBuiltinMultiUsingOutputSlot(..)
+            | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(..)
             | Instr::CallFunctionMultiUsingOutputSlot { .. }
             | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. }
             | Instr::CallSemanticFunctionMultiUsingOutputSlot(..)

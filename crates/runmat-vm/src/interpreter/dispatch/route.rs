@@ -84,6 +84,7 @@ pub(super) fn family(instruction: &Instr) -> InstructionDispatchFamily {
         | Instr::CallSemanticFunctionExpandMultiOutput(..)
         | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
         | Instr::CallBuiltinExpandMultiOutput(..)
+        | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(..)
         | Instr::CallSuperConstructorExpandMultiOutput { .. }
         | Instr::CallSuperMethodExpandMultiOutput { .. }
         | Instr::CallFevalMulti(..)

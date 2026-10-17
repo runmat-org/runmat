@@ -7,6 +7,9 @@ use super::{
     NumericPrecision, WgpuProvider, MAX_SAFE_INTEGER,
 };
 
+#[path = "random/child.rs"]
+mod child;
+
 impl WgpuProvider {
     pub(crate) fn set_rng_state_exec(&self, state: u64) -> Result<()> {
         let mut guard = rng_state()
@@ -38,8 +41,10 @@ impl WgpuProvider {
             "exprnd: tensor length too large"
         );
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("GPU RNG frozen launch extent overflow"))?;
 
         let mut rng_guard = rng_state()
             .lock()
@@ -101,10 +106,10 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self
+                    .pipelines
+                    .random_exprnd
+                    .linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
@@ -146,8 +151,10 @@ impl WgpuProvider {
             "normrnd: tensor length too large"
         );
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("GPU RNG frozen launch extent overflow"))?;
 
         let mut rng_guard = rng_state()
             .lock()
@@ -209,10 +216,10 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self
+                    .pipelines
+                    .random_normrnd
+                    .linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
@@ -256,8 +263,10 @@ impl WgpuProvider {
             "unifrnd: tensor length too large"
         );
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("GPU RNG frozen launch extent overflow"))?;
 
         let mut rng_guard = rng_state()
             .lock()
@@ -319,10 +328,10 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self
+                    .pipelines
+                    .random_unifrnd
+                    .linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
@@ -371,8 +380,10 @@ impl WgpuProvider {
             "rand: tensor length too large"
         );
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("GPU RNG frozen launch extent overflow"))?;
 
         let mut rng_guard = rng_state()
             .lock()
@@ -416,10 +427,10 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self
+                    .pipelines
+                    .random_uniform
+                    .linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
@@ -483,8 +494,10 @@ impl WgpuProvider {
             "randn: tensor length too large"
         );
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("GPU RNG frozen launch extent overflow"))?;
 
         let mut rng_guard = rng_state()
             .lock()
@@ -528,10 +541,10 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self
+                    .pipelines
+                    .random_normal
+                    .linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
@@ -581,8 +594,10 @@ impl WgpuProvider {
             "stochastic_evolution: tensor length too large"
         );
 
-        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("GPU RNG frozen launch extent overflow"))?;
 
         let mut rng_guard = rng_state()
             .lock()
@@ -666,10 +681,10 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self
+                    .pipelines
+                    .stochastic_evolution
+                    .linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,

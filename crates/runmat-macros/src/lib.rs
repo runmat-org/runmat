@@ -373,6 +373,8 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Generate wrapper ident
     let wrapper_ident = format_ident!("__rt_wrap_{}", ident);
+    let body_ident = format_ident!("__rt_owned_body_{}", ident);
+    let layout_ident = format_ident!("__rt_owned_layout_{}", ident);
 
     let conv_stmts: Vec<proc_macro2::TokenStream> = if is_last_variadic && param_len > 0 {
         let mut stmts = Vec::new();
@@ -424,11 +426,20 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     let context_binding = context_param.as_ref().map(|(ident, ty)| {
         quote! { let #ident: #ty = invocation.context; }
     });
+    let owned_context_binding = context_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = input.context; }
+    });
     let requested_outputs_binding = requested_outputs_param.as_ref().map(|(ident, ty)| {
         quote! { let #ident: #ty = invocation.requested_outputs; }
     });
+    let owned_requested_outputs_binding = requested_outputs_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = input.requested_outputs; }
+    });
     let call_observation_binding = call_observation_param.as_ref().map(|(ident, ty)| {
         quote! { let #ident: #ty = invocation.call_observation; }
+    });
+    let owned_call_observation_binding = call_observation_param.as_ref().map(|(ident, ty)| {
+        quote! { let #ident: #ty = input.call_observation; }
     });
 
     let wrapper_input = if binding_variant_lit.is_some() {
@@ -458,46 +469,97 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! { Ok(runmat_value::Value::from(value)) }
     };
-    let invocation_body = quote! {
-        if #is_last_variadic {
-            if args.len() < #param_len - 1 {
-                return Err(std::convert::From::from(format!(
-                    "expected at least {} args, got {}",
-                    #param_len - 1,
-                    args.len()
-                )));
-            }
-        } else if args.len() != #param_len {
-            return Err(std::convert::From::from(format!(
+    let arity_check = quote! {
+        let arity_error = if #is_last_variadic {
+            (args.len() < #param_len - 1).then(|| format!(
+                "expected at least {} args, got {}",
+                #param_len - 1,
+                args.len()
+            ))
+        } else {
+            (args.len() != #param_len).then(|| format!(
                 "expected {} args, got {}",
                 #param_len,
                 args.len()
-            )));
-        }
+            ))
+        };
+    };
+    let body_after_arity = quote! {
         #(#conv_stmts)*
         let value = #call_expr;
         #result_adaptation
     };
-    let wrapper_body = if binding_variant_lit.is_some() {
+    let invocation_body = quote! {
+        #arity_check
+        if let Some(message) = arity_error {
+            return Err(std::convert::From::from(message));
+        }
+        #body_after_arity
+    };
+    let owned_args_binding = if param_len == 0 {
+        quote! { let _args = input.args; }
+    } else {
+        quote! { let args = input.args; }
+    };
+    let owned_helpers = if binding_variant_lit.is_some() {
         quote! {
-            let args = args.map_err(|error| error.into_runtime_error())?;
-            args.with_owned_values_async(|args| async move {
-                #invocation_body
-            }).await
+            async fn #body_ident(
+                input: crate::builtin::BuiltinContinuationInput,
+            ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+                #owned_args_binding
+                #owned_context_binding
+                #owned_requested_outputs_binding
+                #owned_call_observation_binding
+                #body_after_arity
+            }
+
+            fn #layout_ident() -> Result<u64, crate::context::host_allocation::HostAllocationError> {
+                crate::builtin::continuation_layout_for(#body_ident)
+            }
         }
     } else {
-        invocation_body
+        quote! {}
     };
-    let wrapper = quote! {
-        fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
-            #![allow(unused_variables)]
-            #wrapper_args
-            #context_binding
-            #requested_outputs_binding
-            #call_observation_binding
-            Box::pin(async move {
-                #wrapper_body
-            })
+    let wrapper = if binding_variant_lit.is_some() {
+        quote! {
+            fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
+                #wrapper_args
+                let args = match args {
+                    Ok(args) => args,
+                    Err(error) => {
+                        return Box::pin(std::future::ready(Err(error.into_runtime_error())));
+                    }
+                };
+                #arity_check
+                if let Some(message) = arity_error {
+                    return Box::pin(std::future::ready(Err(std::convert::From::from(message))));
+                }
+                // The allocation issuer is used only before the returned
+                // continuation is polled. The same session context moves
+                // into the builtin body below.
+                let input = crate::builtin::BuiltinContinuationInput::new(args, invocation);
+                let allocation_context = input.context.clone();
+                // The named body is the same future type measured by the
+                // worker-target layout query below.
+                let continuation = #body_ident(input);
+                crate::builtin::admitted_builtin_future(
+                    allocation_context.as_ref(),
+                    #name_lit,
+                    continuation,
+                )
+            }
+        }
+    } else {
+        quote! {
+            fn #wrapper_ident(#wrapper_input) -> #wrapper_return {
+                #wrapper_args
+                #context_binding
+                #requested_outputs_binding
+                #call_observation_binding
+                Box::pin(async move {
+                    #invocation_body
+                })
+            }
         }
     };
 
@@ -720,7 +782,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
                     variant: #variant,
                 },
                 #wrapper_ident,
-            )
+            ).with_continuation_layout(#layout_ident)
         };
         (
             quote! {
@@ -782,6 +844,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
     TokenStream::from(quote! {
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #func
+        #owned_helpers
         #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
         #wrapper
         #wasm_helper

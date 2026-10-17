@@ -23,6 +23,7 @@ fn class_names_determine_scalar_output_class() {
         ("realmin", "single", NumericClass::Single),
         ("realmax", "single", NumericClass::Single),
         ("flintmax", "single", NumericClass::Single),
+        ("eps", "single", NumericClass::Single),
     ] {
         let inference = infer_catalog_call(
             builtin_catalog_entry_by_name(builtin).expect("numeric limit entry"),
@@ -46,6 +47,37 @@ fn class_names_determine_scalar_output_class() {
             }
         );
     }
+}
+
+#[test]
+fn eps_array_fact_is_fresh_real_and_shape_preserving() {
+    let input = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(2), Some(1), Some(3)]),
+        StorageFact::Dense,
+    );
+    let result = infer_catalog_call(
+        builtin_catalog_entry_by_name("eps").unwrap(),
+        &CallRequest {
+            arguments: vec![input.clone()],
+            literals: LiteralContext::default(),
+            outputs: OutputSelection::new(RequestedOutputCount::One),
+        },
+    );
+    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+    assert_eq!(result.outputs[0].shape, input.shape);
+    assert_eq!(result.outputs[0].storage, StorageFact::Dense);
+    assert_eq!(
+        result.outputs[0].kind,
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        })
+    );
+    assert_eq!(result.outputs[0].alias, runmat_types::AliasFact::Unique);
 }
 
 #[test]
@@ -101,4 +133,71 @@ fn like_preserves_distributed_placement_and_value_representation() {
             domain: NumericDomain::Complex,
         })
     );
+}
+
+#[test]
+fn eps_distributed_value_maps_locally_and_like_constructs_a_scalar() {
+    let local = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Complex,
+        }),
+        ShapeFact::from(vec![Some(8), Some(2)]),
+        StorageFact::Dense,
+    );
+    let source = DistributedFact {
+        id: DistributedValueId {
+            function: ProgramFunctionId(12),
+            ordinal: 1,
+        },
+        owner: DistributedOwner::Client(ProgramFunctionId(12)),
+        scheme: Some(DistributionScheme::Replicated),
+        value: Box::new(local),
+        materializable: true,
+    };
+    let entry = builtin_catalog_entry_by_name("eps").unwrap();
+    for (arguments, literals, expected_shape, expected_domain) in [
+        (
+            vec![ValueFact::scalar(ValueKindFact::Distributed(
+                source.clone(),
+            ))],
+            LiteralContext::default(),
+            ShapeFact::from(vec![Some(8), Some(2)]),
+            NumericDomain::Real,
+        ),
+        (
+            vec![
+                ValueFact::scalar(ValueKindFact::String),
+                ValueFact::scalar(ValueKindFact::Distributed(source.clone())),
+            ],
+            LiteralContext::new(vec![
+                LiteralValue::Keyword("like".into()),
+                LiteralValue::Unknown,
+            ]),
+            ShapeFact::Scalar,
+            NumericDomain::Complex,
+        ),
+    ] {
+        let result = infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments,
+                literals,
+                outputs: OutputSelection::new(RequestedOutputCount::One),
+            },
+        );
+        assert!(result.diagnostics.is_empty(), "{:#?}", result.diagnostics);
+        let ValueKindFact::Distributed(output) = &result.outputs[0].kind else {
+            panic!("eps must retain distributed placement");
+        };
+        assert_eq!(output.id, source.id);
+        assert_eq!(output.value.shape, expected_shape);
+        assert_eq!(
+            output.value.kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Single,
+                domain: expected_domain,
+            })
+        );
+    }
 }

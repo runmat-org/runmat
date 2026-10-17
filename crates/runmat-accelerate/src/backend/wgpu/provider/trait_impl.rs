@@ -668,6 +668,33 @@ impl AccelProvider for WgpuProvider {
         {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
         }
+        if query.workload.gpu_random.is_some() {
+            use runmat_accelerate_api::observation::{
+                ProviderObservationCapability, ProviderObservationOverhead,
+            };
+            let Some(runmat_accelerate_api::ProviderFeasibility::Supported { estimate }) =
+                self.random_child_feasibility(query)
+            else {
+                return ProviderObservationCapability::Unsupported;
+            };
+            let Some(submissions) = estimate.dispatches else {
+                return ProviderObservationCapability::Unsupported;
+            };
+            let Some(requested_peak_buffer_bytes) = u64::from(submissions)
+                .checked_mul(crate::backend::wgpu::dispatch::observation::FENCE_REQUESTED_BYTES)
+            else {
+                return ProviderObservationCapability::Unsupported;
+            };
+            return with_device_query(ProviderObservationCapability::Supported(
+                ProviderObservationOverhead {
+                    submissions,
+                    requested_peak_buffer_bytes,
+                    clear_commands: submissions,
+                    map_callbacks: submissions,
+                    wgpu_compute_query: None,
+                },
+            ));
+        }
         if query.workload.typed_reduction.is_some() {
             return with_device_query(crate::placement::typed_reduction_observation_capability(
                 query,
@@ -1067,6 +1094,9 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
+        if let Some(random) = self.random_child_feasibility(query) {
+            return random;
+        }
         if let Some(native_integer) = super::integer::integer_division_feasibility(self, query) {
             return native_integer;
         }
@@ -1289,6 +1319,23 @@ impl AccelProvider for WgpuProvider {
 
     fn random_normal(&self, shape: &[usize]) -> Result<GpuTensorHandle> {
         self.random_normal_exec(shape)
+    }
+
+    fn execute_gpu_random(
+        &self,
+        request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+        metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.random_child_exec(request, metadata)
+    }
+
+    fn propose_gpu_random(
+        &self,
+        request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::random::GpuRandomPhysicalProposal>,
+    > {
+        Ok(self.propose_random_child_exec(request))
     }
 
     fn random_exponential(&self, mu: f64, shape: &[usize]) -> Result<GpuTensorHandle> {

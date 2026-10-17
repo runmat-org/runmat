@@ -321,6 +321,26 @@ pub(crate) fn real_unary_shader(op: UnaryOpCode, precision: NumericPrecision) ->
     } else if let Some(body) = logarithm_body {
         helpers = super::logarithms::helpers(precision);
         body.to_owned()
+    } else if matches!(op, UnaryOpCode::Spacing) {
+        match precision {
+            NumericPrecision::F32 => r#"
+let exponent = (bitcast<u32>(a) >> 23u) & 0xffu;
+if exponent == 0xffu { return bitcast<f32>(0x7fc00000u); }
+if exponent == 0u { return bitcast<f32>(1u); }
+if exponent <= 23u { return bitcast<f32>(1u << (exponent - 1u)); }
+return bitcast<f32>((exponent - 23u) << 23u);
+"#
+            .to_owned(),
+            NumericPrecision::F64 => r#"
+let exponent = (runmat_f64_high(a) >> 20u) & 0x7ffu;
+if exponent == 0x7ffu { return runmat_f64_from_words(0u, 0x7ff80000u); }
+if exponent == 0u { return runmat_f64_from_words(1u, 0u); }
+if exponent <= 32u { return runmat_f64_from_words(1u << (exponent - 1u), 0u); }
+if exponent <= 52u { return runmat_f64_from_words(0u, 1u << (exponent - 33u)); }
+return runmat_f64_from_words(0u, (exponent - 52u) << 20u);
+"#
+            .to_owned(),
+        }
     } else if matches!(op, UnaryOpCode::Gammaln) {
         inline_gammaln_body(precision)
     } else if matches!(op, UnaryOpCode::Erfcinv) {
@@ -367,6 +387,7 @@ pub(crate) fn real_unary_requires_ieee_words(op: UnaryOpCode) -> bool {
             | UnaryOpCode::Gammaln
             | UnaryOpCode::Round
             | UnaryOpCode::Erfcinv
+            | UnaryOpCode::Spacing
     )
 }
 
@@ -374,7 +395,7 @@ pub(crate) fn real_unary_requires_ieee_words(op: UnaryOpCode) -> bool {
 mod real_unary_tests {
     use super::*;
 
-    const OPS: [UnaryOpCode; 39] = [
+    const OPS: [UnaryOpCode; 40] = [
         UnaryOpCode::Sin,
         UnaryOpCode::Cos,
         UnaryOpCode::Abs,
@@ -414,6 +435,7 @@ mod real_unary_tests {
         UnaryOpCode::Gammaln,
         UnaryOpCode::Round,
         UnaryOpCode::Erfcinv,
+        UnaryOpCode::Spacing,
     ];
 
     #[test]
@@ -428,6 +450,17 @@ mod real_unary_tests {
                 assert!(!shader.contains("a != a"));
             }
         }
+    }
+
+    #[test]
+    fn spacing_shader_uses_exact_ieee_exponents_in_both_precisions() {
+        let single = real_unary_shader(UnaryOpCode::Spacing, NumericPrecision::F32);
+        assert!(single.contains("bitcast<f32>(1u)"));
+        assert!(single.contains("(exponent - 23u) << 23u"));
+        let double = real_unary_shader(UnaryOpCode::Spacing, NumericPrecision::F64);
+        assert!(double.contains("runmat_f64_high(a)"));
+        assert!(double.contains("runmat_f64_from_words(1u, 0u)"));
+        assert!(double.contains("(exponent - 52u) << 20u"));
     }
 
     #[test]

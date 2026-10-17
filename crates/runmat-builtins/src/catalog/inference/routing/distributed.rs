@@ -16,6 +16,17 @@ pub(super) fn infer(entry: &BuiltinCatalogEntry, request: &CallRequest) -> CallI
         BuiltinDistributedPolicy::MapUnary | BuiltinDistributedPolicy::MapUnaryConstrained(_) => {
             super::super::distributed::infer_distributed_map(entry, request, distributed)
         }
+        BuiltinDistributedPolicy::MapUnaryOrScalarLikePrototype => {
+            if request.arguments.len() == 2 {
+                super::super::distributed::infer_distributed_scalar_like(
+                    entry,
+                    request,
+                    distributed,
+                )
+            } else {
+                super::super::distributed::infer_distributed_map(entry, request, distributed)
+            }
+        }
         BuiltinDistributedPolicy::ScalarLikePrototype => {
             super::super::distributed::infer_distributed_scalar_like(entry, request, distributed)
         }

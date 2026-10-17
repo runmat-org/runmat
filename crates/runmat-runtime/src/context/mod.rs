@@ -5,6 +5,8 @@
 //! migrated through [`legacy`] and must not become new semantic dependencies.
 
 mod capability;
+mod cancellation_context;
+pub(crate) use cancellation_context::RuntimeCancellationContext;
 mod cleanup_lifecycle;
 mod callable_artifacts;
 mod graphics_presentation;

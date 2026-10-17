@@ -117,7 +117,11 @@ impl MirLoweringContext {
             .find_map(|(binding, candidate)| (*candidate == local).then_some(*binding))
     }
 
-    pub(crate) fn locals_for_function(&mut self, function: &HirFunction) -> Vec<MirLocal> {
+    pub(crate) fn locals_for_function(
+        &mut self,
+        function: &HirFunction,
+        incoming_workspace: &HashSet<BindingId>,
+    ) -> Vec<MirLocal> {
         let mut locals: Vec<_> = function
             .locals
             .iter()
@@ -129,6 +133,8 @@ impl MirLoweringContext {
                     MirLocalKind::Parameter
                 } else if function.outputs.contains(binding) {
                     MirLocalKind::Output
+                } else if incoming_workspace.contains(binding) {
+                    MirLocalKind::IncomingWorkspace
                 } else {
                     MirLocalKind::Binding
                 };

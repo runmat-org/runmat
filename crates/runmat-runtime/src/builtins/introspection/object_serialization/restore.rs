@@ -21,7 +21,15 @@ enum Step {
     },
 }
 
+#[cfg(test)]
 pub(super) async fn restore_value_after_load(value: Value) -> crate::BuiltinResult<RootedValue> {
+    restore_value_after_load_in_context(value, None).await
+}
+
+pub(super) async fn restore_value_after_load_in_context(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<RootedValue> {
     // The canonical Value tracer is iterative, so even an over-depth input
     // can be retained safely before the first effectful restoration step.
     let _input_root =
@@ -115,7 +123,8 @@ pub(super) async fn restore_value_after_load(value: Value) -> crate::BuiltinResu
                 had_saveobj,
             } => {
                 let payload = results.pop().expect("restored envelope payload");
-                results.push(restore_envelope(payload, class_name, kind, had_saveobj).await?);
+                results
+                    .push(restore_envelope(payload, class_name, kind, had_saveobj, runtime).await?);
             }
         }
     }

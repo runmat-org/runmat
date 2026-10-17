@@ -5,10 +5,11 @@ pub(super) async fn restore_envelope(
     class_name: String,
     kind: String,
     had_saveobj: bool,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<RootedValue> {
     if had_saveobj {
         if let Some(restored) =
-            call_loadobj_if_available(&class_name, payload.value().clone()).await?
+            call_loadobj_if_available(&class_name, payload.value().clone(), runtime).await?
         {
             return Ok(restored);
         }

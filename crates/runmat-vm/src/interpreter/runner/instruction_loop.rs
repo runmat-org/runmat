@@ -927,6 +927,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::CallSemanticFunctionExpandMultiOutput(_, _, _)
             | Instr::CallSemanticNestedFunctionExpandMultiOutput { .. }
             | Instr::CallBuiltinExpandMultiOutput(_, _, _)
+            | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(_, _, _)
             | Instr::CallSuperConstructorExpandMultiOutput { .. }
             | Instr::CallSuperMethodExpandMultiOutput { .. }
             | Instr::ExitScope(_)

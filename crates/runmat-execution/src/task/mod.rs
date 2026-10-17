@@ -18,8 +18,8 @@ pub use owned_builtin::{
     OWNED_BUILTIN_WORK_SCHEMA_VERSION,
 };
 pub use parallel::{
-    ParallelChunk, ParallelRandomStream, ParallelRandomnessContext, ParallelTaskContext,
-    ParallelTaskGraph, ProgramInvocationContext,
+    deterministic_iteration_seed, ParallelChunk, ParallelRandomStream, ParallelRandomnessContext,
+    ParallelTaskContext, ParallelTaskGraph, ProgramInvocationContext, RUNMAT_MT_DEFAULT_SEED,
 };
 
 pub const TASK_REQUEST_SCHEMA_VERSION: u16 = crate::schema::EXECUTION_SCHEMA_V2;

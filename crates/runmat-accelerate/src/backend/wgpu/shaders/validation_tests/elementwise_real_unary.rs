@@ -6,7 +6,7 @@ use crate::backend::wgpu::shaders::elementwise::{
 };
 use crate::backend::wgpu::types::{NumericPrecision, UnaryOpCode};
 
-const OPS: [UnaryOpCode; 39] = [
+const OPS: [UnaryOpCode; 40] = [
     UnaryOpCode::Sin,
     UnaryOpCode::Cos,
     UnaryOpCode::Abs,
@@ -46,12 +46,13 @@ const OPS: [UnaryOpCode; 39] = [
     UnaryOpCode::Gammaln,
     UnaryOpCode::Round,
     UnaryOpCode::Erfcinv,
+    UnaryOpCode::Spacing,
 ];
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn specialized_real_unary_sources_validate_for_all_opcodes_and_precisions() {
-    assert_eq!(OPS.len(), UnaryOpCode::Erfcinv as usize + 1);
+    assert_eq!(OPS.len(), UnaryOpCode::Spacing as usize + 1);
     for precision in [NumericPrecision::F32, NumericPrecision::F64] {
         for op in OPS {
             let caps = match precision {

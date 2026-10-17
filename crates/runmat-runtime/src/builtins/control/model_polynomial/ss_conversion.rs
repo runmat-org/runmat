@@ -4,10 +4,120 @@ use crate::builtins::control::tf_model::{
     control_error, gather_ss_properties, internal_identifier, invalid_model_identifier, scalar_f64,
     unsupported_model_identifier, TfModel,
 };
+use crate::context::host_allocation::{HostAllocationError, HostAllocationReceipt};
+use crate::context::RuntimeContext;
+use crate::execution::CpuCooperationBudget;
 use crate::{BuiltinResult, RuntimeError};
 use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_value::{ObjectInstance, Value};
+
+#[path = "ss_conversion/workspace.rs"]
+mod workspace;
+#[path = "ss_conversion/allocation.rs"]
+mod allocation;
+pub(crate) use allocation::SsPolynomialGeometry;
+use workspace::{CharacteristicWorkspace, ComplexMatrixRead, ComplexScratch, NumeratorWorkspace};
+
+struct HostMatrixView<'a> {
+    value: &'a Value,
+    rows: usize,
+    cols: usize,
+}
+
+impl HostMatrixView<'_> {
+    fn new<'a>(value: &'a Value, name: &str) -> ConversionResult<HostMatrixView<'a>> {
+        let shape = match value {
+            Value::Tensor(tensor) => tensor.shape(),
+            Value::ComplexTensor(tensor) => tensor.shape(),
+            Value::LogicalArray(array) => &array.shape,
+            Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => &[1, 1],
+            _ => {
+                return Err(conversion_error(
+                    format!("ss {name} must be a numeric host matrix"),
+                    ConversionErrorKind::InvalidModel,
+                ));
+            }
+        };
+        ensure_matrix_shape(name, shape)?;
+        let (rows, cols) = rows_cols(shape);
+        Ok(HostMatrixView { value, rows, cols })
+    }
+}
+
+impl ComplexMatrixRead for HostMatrixView<'_> {
+    fn nrows(&self) -> usize {
+        self.rows
+    }
+    fn ncols(&self) -> usize {
+        self.cols
+    }
+    fn at(&self, row: usize, col: usize) -> Complex64 {
+        let index = row + col * self.rows;
+        match self.value {
+            Value::Tensor(tensor) => Complex64::new(
+                tensor
+                    .numeric_value_at(index)
+                    .expect("matrix index")
+                    .materialize_f64(),
+                0.0,
+            ),
+            Value::ComplexTensor(tensor) => {
+                let (re, im) = tensor.numeric_value_at(index).expect("matrix index");
+                Complex64::new(re.materialize_f64(), im.materialize_f64())
+            }
+            Value::LogicalArray(array) => {
+                Complex64::new(if array.data[index] == 0 { 0.0 } else { 1.0 }, 0.0)
+            }
+            Value::Num(value) => Complex64::new(*value, 0.0),
+            Value::Int(value) => Complex64::new(value.to_f64(), 0.0),
+            Value::Bool(value) => Complex64::new(if *value { 1.0 } else { 0.0 }, 0.0),
+            Value::Complex(re, im) => Complex64::new(*re, *im),
+            _ => unreachable!("validated matrix carrier"),
+        }
+    }
+}
+
+pub(crate) fn allocation_error(
+    builtin: &'static str,
+    runtime: Option<&RuntimeContext>,
+    source: HostAllocationError,
+) -> RuntimeError {
+    let cancellation = runtime.map(RuntimeContext::cancellation_context);
+    crate::builtin::builtin_control_error(cancellation.as_ref(), builtin, source)
+}
+
+pub(crate) struct SsPolynomialBuffers {
+    first: Option<ComplexScratch>,
+    second: Option<ComplexScratch>,
+}
+
+pub(crate) fn preallocate_polynomial_buffers(
+    receipt: Option<&HostAllocationReceipt>,
+    runtime: Option<&RuntimeContext>,
+    states: usize,
+    builtin: &'static str,
+) -> BuiltinResult<Option<SsPolynomialBuffers>> {
+    let Some((receipt, runtime)) = receipt.zip(runtime) else {
+        return Ok(None);
+    };
+    if states == 0 {
+        return Ok(None);
+    }
+    let square = states
+        .checked_mul(states)
+        .ok_or_else(|| allocation_error(builtin, Some(runtime), HostAllocationError::Overflow))?;
+    let first = receipt
+        .temporary_complex(runtime, square)
+        .map_err(|error| allocation_error(builtin, Some(runtime), error))?;
+    let second = receipt
+        .temporary_complex(runtime, square)
+        .map_err(|error| allocation_error(builtin, Some(runtime), error))?;
+    Ok(Some(SsPolynomialBuffers {
+        first: Some(ComplexScratch::Managed(first)),
+        second: Some(ComplexScratch::Managed(second)),
+    }))
+}
 
 #[derive(Debug, Clone, Copy)]
 enum ConversionErrorKind {
@@ -106,6 +216,127 @@ fn ss_object_to_tf(object: &ObjectInstance, builtin: &'static str) -> Conversion
     })
 }
 
+/// MIMO coefficient grid in column-major (output, input) order. This uses
+/// the same characteristic and Markov coefficient algorithm as the SISO path.
+pub(crate) async fn ss_object_coefficient_grid_async(
+    object: ObjectInstance,
+    builtin: &'static str,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<(Vec<Vec<Complex64>>, Vec<Complex64>, usize, usize, f64)> {
+    const REQUIRED: [&str; 7] = ["A", "B", "C", "D", "Ts", "InputDelay", "OutputDelay"];
+    for name in REQUIRED {
+        if !object.properties.contains_key(name) {
+            return Err(conversion_error(
+                format!("model object is missing {name} property"),
+                ConversionErrorKind::InvalidModel,
+            )
+            .into_runtime(builtin));
+        }
+    }
+    for name in ["InputDelay", "OutputDelay"] {
+        if let Some(value) = object.properties.get(name) {
+            if !matches!(value, Value::GpuTensor(_)) {
+                ensure_zero_delay_value(value, name)
+                    .map_err(|error| error.into_runtime(builtin))?;
+            }
+        }
+    }
+    let geometry = SsPolynomialGeometry::from_values(
+        [
+            property(&object, "A").map_err(|error| error.into_runtime(builtin))?,
+            property(&object, "B").map_err(|error| error.into_runtime(builtin))?,
+            property(&object, "C").map_err(|error| error.into_runtime(builtin))?,
+            property(&object, "D").map_err(|error| error.into_runtime(builtin))?,
+        ],
+        builtin,
+    )?;
+    let plan = geometry
+        .coefficient_grid_plan()
+        .map_err(|error| allocation_error(builtin, runtime, error))?;
+    let receipt = HostAllocationReceipt::admit(runtime, plan)
+        .map_err(|error| allocation_error(builtin, runtime, error))?;
+    let mut buffers =
+        preallocate_polynomial_buffers(receipt.as_ref(), runtime, geometry.states, builtin)?;
+    let object = gather_ss_properties(object, &REQUIRED, builtin).await?;
+    let result = (|| -> ConversionResult<_> {
+        ensure_zero_delay_property(&object, "InputDelay")?;
+        ensure_zero_delay_property(&object, "OutputDelay")?;
+        let a = HostMatrixView::new(property(&object, "A")?, "A")?;
+        let b = HostMatrixView::new(property(&object, "B")?, "B")?;
+        let c = HostMatrixView::new(property(&object, "C")?, "C")?;
+        let d = HostMatrixView::new(property(&object, "D")?, "D")?;
+        validate_general_dimensions(&a, &b, &c, &d)?;
+        let sample_time = scalar_property(&object, "Ts", builtin)?;
+        if sample_time < 0.0 {
+            return Err(conversion_error(
+                "ss sample time must be nonnegative",
+                ConversionErrorKind::InvalidModel,
+            ));
+        }
+        Ok((a, b, c, d, sample_time))
+    })();
+    let (a, b, c, d, sample_time) = result.map_err(|error| error.into_runtime(builtin))?;
+    let mut cooperation = PolynomialCooperation::new(runtime);
+    validate_host_matrices(
+        [("A", &a), ("B", &b), ("C", &c), ("D", &d)],
+        &mut cooperation,
+        builtin,
+    )
+    .await?;
+    let denominator =
+        characteristic_polynomial_cooperative(&a, &mut cooperation, builtin, buffers.as_mut())
+            .await?;
+    let count = c.nrows().checked_mul(b.ncols()).ok_or_else(|| {
+        conversion_error(
+            "coefficient grid size overflows",
+            ConversionErrorKind::InvalidModel,
+        )
+        .into_runtime(builtin)
+    })?;
+    let mut numerators = Vec::new();
+    numerators.try_reserve_exact(count).map_err(|_| {
+        conversion_error(
+            "coefficient grid exceeds available host memory",
+            ConversionErrorKind::Internal,
+        )
+        .into_runtime(builtin)
+    })?;
+    for input in 0..b.ncols() {
+        for output in 0..c.nrows() {
+            let coefficients = state_space_numerator_cooperative(
+                &a,
+                &b,
+                input,
+                &c,
+                output,
+                d.at(output, input),
+                &denominator,
+                &mut cooperation,
+                builtin,
+                buffers.as_mut(),
+            )
+            .await?;
+            numerators.push(
+                if coefficients
+                    .iter()
+                    .all(|value| *value == Complex64::new(0.0, 0.0))
+                {
+                    vec![Complex64::new(0.0, 0.0)]
+                } else {
+                    trim_leading_complex_zeros(coefficients)
+                },
+            );
+        }
+    }
+    Ok((
+        numerators,
+        trim_leading_complex_zeros(denominator),
+        c.nrows(),
+        b.ncols(),
+        sample_time,
+    ))
+}
+
 fn property<'a>(object: &'a ObjectInstance, name: &str) -> ConversionResult<&'a Value> {
     object.properties.get(name).ok_or_else(|| {
         conversion_error(
@@ -116,7 +347,10 @@ fn property<'a>(object: &'a ObjectInstance, name: &str) -> ConversionResult<&'a 
 }
 
 fn matrix_property(object: &ObjectInstance, name: &str) -> ConversionResult<DMatrix<Complex64>> {
-    let value = property(object, name)?;
+    matrix_value(property(object, name)?, name)
+}
+
+fn matrix_value(value: &Value, name: &str) -> ConversionResult<DMatrix<Complex64>> {
     match value {
         Value::Tensor(tensor) => {
             ensure_matrix_shape(name, tensor.shape())?;
@@ -126,17 +360,13 @@ fn matrix_property(object: &ObjectInstance, name: &str) -> ConversionResult<DMat
                 .collect::<Vec<_>>();
             ensure_finite_coefficients(name, &data)?;
             let (rows, cols) = rows_cols(tensor.shape());
-            Ok(DMatrix::from_column_slice(rows, cols, &data))
+            Ok(DMatrix::from_vec(rows, cols, data))
         }
         Value::ComplexTensor(tensor) => {
             ensure_matrix_shape(name, tensor.shape())?;
             let data = tensor::complex_tensor_values_complex64(tensor);
             ensure_finite_coefficients(name, &data)?;
-            Ok(DMatrix::from_column_slice(
-                tensor.rows(),
-                tensor.cols(),
-                &data,
-            ))
+            Ok(DMatrix::from_vec(tensor.rows(), tensor.cols(), data))
         }
         Value::LogicalArray(logical) => {
             ensure_matrix_shape(name, &logical.shape)?;
@@ -146,7 +376,7 @@ fn matrix_property(object: &ObjectInstance, name: &str) -> ConversionResult<DMat
                 .iter()
                 .map(|&value| Complex64::new(if value == 0 { 0.0 } else { 1.0 }, 0.0))
                 .collect::<Vec<_>>();
-            Ok(DMatrix::from_column_slice(rows, cols, &data))
+            Ok(DMatrix::from_vec(rows, cols, data))
         }
         Value::Num(n) => scalar_matrix(*n, 0.0, name),
         Value::Int(i) => scalar_matrix(i.to_f64(), 0.0, name),
@@ -254,6 +484,22 @@ fn validate_ss_dimensions(
     c: &DMatrix<Complex64>,
     d: &DMatrix<Complex64>,
 ) -> ConversionResult<()> {
+    validate_general_dimensions(a, b, c, d)?;
+    if b.ncols() != 1 || c.nrows() != 1 || d.nrows() != 1 || d.ncols() != 1 {
+        return Err(conversion_error(
+            "only SISO ss models are supported",
+            ConversionErrorKind::UnsupportedModel,
+        ));
+    }
+    Ok(())
+}
+
+fn validate_general_dimensions<M: ComplexMatrixRead>(
+    a: &M,
+    b: &M,
+    c: &M,
+    d: &M,
+) -> ConversionResult<()> {
     if a.nrows() != a.ncols() {
         return Err(conversion_error(
             format!("ss A must be square, got {}x{}", a.nrows(), a.ncols()),
@@ -293,38 +539,309 @@ fn validate_ss_dimensions(
             ConversionErrorKind::InvalidModel,
         ));
     }
-    if b.ncols() != 1 || c.nrows() != 1 || d.nrows() != 1 || d.ncols() != 1 {
+    Ok(())
+}
+
+/// One selected input and every output, retaining the full denominator order.
+/// `ss2tf` uses this same characteristic/Markov owner as SISO model analysis.
+pub(crate) async fn selected_input_polynomials(
+    matrices: [&Value; 4],
+    input: usize,
+    builtin: &'static str,
+    runtime: Option<&RuntimeContext>,
+    mut buffers: Option<SsPolynomialBuffers>,
+) -> BuiltinResult<(Vec<Vec<Complex64>>, Vec<Complex64>)> {
+    let [a, b, c, d] = matrices;
+    let a = HostMatrixView::new(a, "A").map_err(|error| error.into_runtime(builtin))?;
+    let b = HostMatrixView::new(b, "B").map_err(|error| error.into_runtime(builtin))?;
+    let c = HostMatrixView::new(c, "C").map_err(|error| error.into_runtime(builtin))?;
+    let d = HostMatrixView::new(d, "D").map_err(|error| error.into_runtime(builtin))?;
+    validate_general_dimensions(&a, &b, &c, &d).map_err(|error| error.into_runtime(builtin))?;
+    if input >= b.ncols() {
         return Err(conversion_error(
-            "only SISO ss models are supported",
-            ConversionErrorKind::UnsupportedModel,
-        ));
+            "selected input index is outside the system input range",
+            ConversionErrorKind::InvalidModel,
+        )
+        .into_runtime(builtin));
+    }
+    let mut cooperation = PolynomialCooperation::new(runtime);
+    validate_host_matrices(
+        [("A", &a), ("B", &b), ("C", &c), ("D", &d)],
+        &mut cooperation,
+        builtin,
+    )
+    .await?;
+    let denominator =
+        characteristic_polynomial_cooperative(&a, &mut cooperation, builtin, buffers.as_mut())
+            .await?;
+    let mut numerators = Vec::new();
+    numerators.try_reserve_exact(c.nrows()).map_err(|_| {
+        conversion_error(
+            "numerator grid exceeds available host memory",
+            ConversionErrorKind::Internal,
+        )
+        .into_runtime(builtin)
+    })?;
+    for output in 0..c.nrows() {
+        numerators.push(
+            state_space_numerator_cooperative(
+                &a,
+                &b,
+                input,
+                &c,
+                output,
+                d.at(output, input),
+                &denominator,
+                &mut cooperation,
+                builtin,
+                buffers.as_mut(),
+            )
+            .await?,
+        );
+    }
+    Ok((numerators, denominator))
+}
+
+struct PolynomialCooperation<'runtime> {
+    runtime: Option<&'runtime RuntimeContext>,
+    budget: Option<CpuCooperationBudget>,
+}
+
+impl<'runtime> PolynomialCooperation<'runtime> {
+    fn new(runtime: Option<&'runtime RuntimeContext>) -> Self {
+        Self {
+            runtime,
+            budget: runtime.map(RuntimeContext::cpu_cooperation),
+        }
+    }
+}
+
+async fn completed_polynomial_work(
+    cooperation: &mut PolynomialCooperation<'_>,
+    units: usize,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let Some(budget) = cooperation.budget.as_mut() else {
+        return Ok(());
+    };
+    let units = u64::try_from(units).map_err(|_| {
+        conversion_error(
+            "state polynomial work count overflows",
+            ConversionErrorKind::InvalidModel,
+        )
+        .into_runtime(builtin)
+    })?;
+    budget.checkpoint(units).await.map_err(|source| {
+        let mut error = source.into_runtime_error_in_context(cooperation.runtime);
+        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+        crate::builtins::common::map_control_flow_with_builtin(error, builtin)
+    })
+}
+
+fn count_polynomial_work(
+    pending: usize,
+    units: usize,
+    builtin: &'static str,
+) -> BuiltinResult<usize> {
+    pending.checked_add(units).ok_or_else(|| {
+        conversion_error(
+            "state polynomial work count overflows",
+            ConversionErrorKind::InvalidModel,
+        )
+        .into_runtime(builtin)
+    })
+}
+
+async fn validate_host_matrices(
+    matrices: [(&'static str, &HostMatrixView<'_>); 4],
+    cooperation: &mut PolynomialCooperation<'_>,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    for (name, matrix) in matrices {
+        let count = matrix.nrows().checked_mul(matrix.ncols()).ok_or_else(|| {
+            conversion_error(
+                "state matrix size overflows",
+                ConversionErrorKind::InvalidModel,
+            )
+            .into_runtime(builtin)
+        })?;
+        for start in (0..count).step_by(4096) {
+            let end = start.saturating_add(4096).min(count);
+            for index in start..end {
+                let value = matrix.at(index % matrix.nrows(), index / matrix.nrows());
+                if !value.re.is_finite() || !value.im.is_finite() {
+                    return Err(conversion_error(
+                        format!("ss {name} contains non-finite values"),
+                        ConversionErrorKind::InvalidModel,
+                    )
+                    .into_runtime(builtin));
+                }
+            }
+            completed_polynomial_work(cooperation, end - start, builtin).await?;
+        }
     }
     Ok(())
+}
+
+async fn characteristic_polynomial_cooperative<M: ComplexMatrixRead>(
+    a: &M,
+    cooperation: &mut PolynomialCooperation<'_>,
+    builtin: &'static str,
+    mut buffers: Option<&mut SsPolynomialBuffers>,
+) -> BuiltinResult<Vec<Complex64>> {
+    let order = a.nrows();
+    let mut work = if let Some(holder) = buffers.as_deref_mut() {
+        let current = holder
+            .first
+            .take()
+            .expect("preallocated characteristic buffer");
+        let next = holder
+            .second
+            .take()
+            .expect("preallocated characteristic buffer");
+        CharacteristicWorkspace::with_scratch(order, current, next)
+    } else {
+        CharacteristicWorkspace::new(order)
+    }
+    .map_err(|error| error.into_runtime(builtin))?;
+    let mut pending = 0usize;
+    for degree in 1..=order {
+        for column in 0..order {
+            for row in 0..order {
+                for start in (0..order).step_by(4096) {
+                    let end = start.saturating_add(4096).min(order);
+                    work.advance_cell_fragment(a, row, column, start, end);
+                    pending = count_polynomial_work(pending, end - start, builtin)?;
+                    if pending >= 4096 {
+                        completed_polynomial_work(cooperation, pending, builtin).await?;
+                        pending = 0;
+                    }
+                }
+            }
+        }
+        let mut trace = Complex64::new(0.0, 0.0);
+        for start in (0..order).step_by(4096) {
+            let end = start.saturating_add(4096).min(order);
+            trace = work.trace_fragment(start, end, trace);
+            pending = count_polynomial_work(pending, end - start, builtin)?;
+            if pending >= 4096 {
+                completed_polynomial_work(cooperation, pending, builtin).await?;
+                pending = 0;
+            }
+        }
+        let coefficient = work.append_coefficient(degree, trace);
+        for start in (0..order).step_by(4096) {
+            let end = start.saturating_add(4096).min(order);
+            work.diagonal_fragment(start, end, coefficient);
+            pending = count_polynomial_work(pending, end - start, builtin)?;
+            if pending >= 4096 {
+                completed_polynomial_work(cooperation, pending, builtin).await?;
+                pending = 0;
+            }
+        }
+        work.swap_degree();
+    }
+    completed_polynomial_work(cooperation, pending, builtin).await?;
+    ensure_finite_coefficients("ss characteristic polynomial", &work.coefficients)
+        .map_err(|error| error.into_runtime(builtin))?;
+    if let Some(holder) = buffers {
+        let (coefficients, first, second) = work.into_parts();
+        holder.first = Some(first);
+        holder.second = Some(second);
+        Ok(coefficients)
+    } else {
+        Ok(work.coefficients)
+    }
+}
+
+async fn state_space_numerator_cooperative<M: ComplexMatrixRead>(
+    a: &M,
+    b: &M,
+    input: usize,
+    c: &M,
+    output: usize,
+    direct: Complex64,
+    denominator: &[Complex64],
+    cooperation: &mut PolynomialCooperation<'_>,
+    builtin: &'static str,
+    mut buffers: Option<&mut SsPolynomialBuffers>,
+) -> BuiltinResult<Vec<Complex64>> {
+    let order = a.nrows();
+    if order == 0 {
+        return Ok(vec![direct]);
+    }
+    let mut work = if let Some(holder) = buffers.as_deref_mut() {
+        let state = holder.first.take().expect("preallocated numerator buffer");
+        let next = holder.second.take().expect("preallocated numerator buffer");
+        NumeratorWorkspace::with_scratch(b, input, direct, denominator, state, next)
+    } else {
+        NumeratorWorkspace::new(b, input, direct, denominator)
+    }
+    .map_err(|error| error.into_runtime(builtin))?;
+    let mut pending = 0usize;
+    for degree in 1..=order {
+        let mut markov = Complex64::new(0.0, 0.0);
+        for start in (0..work.state_len()).step_by(4096) {
+            let end = start.saturating_add(4096).min(work.state_len());
+            markov = work.markov_fragment(c, output, start, end, markov);
+            pending = count_polynomial_work(pending, end - start, builtin)?;
+            if pending >= 4096 {
+                completed_polynomial_work(cooperation, pending, builtin).await?;
+                pending = 0;
+            }
+        }
+        for start in (degree..work.coefficient_len()).step_by(4096) {
+            let end = start.saturating_add(4096).min(work.coefficient_len());
+            work.apply_markov_fragment(denominator, degree, start, end, markov);
+            pending = count_polynomial_work(pending, end - start, builtin)?;
+            if pending >= 4096 {
+                completed_polynomial_work(cooperation, pending, builtin).await?;
+                pending = 0;
+            }
+        }
+        if degree < order {
+            for row in 0..order {
+                for start in (0..order).step_by(4096) {
+                    let end = start.saturating_add(4096).min(order);
+                    work.advance_row_fragment(a, row, start, end);
+                    pending = count_polynomial_work(pending, end - start, builtin)?;
+                    if pending >= 4096 {
+                        completed_polynomial_work(cooperation, pending, builtin).await?;
+                        pending = 0;
+                    }
+                }
+            }
+            work.finish_state();
+        }
+    }
+    completed_polynomial_work(cooperation, pending, builtin).await?;
+    ensure_finite_coefficients("ss numerator polynomial", &work.coefficients)
+        .map_err(|error| error.into_runtime(builtin))?;
+    if let Some(holder) = buffers {
+        let (coefficients, first, second) = work.into_parts();
+        holder.first = Some(first);
+        holder.second = Some(second);
+        Ok(coefficients)
+    } else {
+        Ok(work.coefficients)
+    }
 }
 
 fn characteristic_polynomial_from_matrix(
     a: &DMatrix<Complex64>,
 ) -> ConversionResult<Vec<Complex64>> {
     let n = a.nrows();
-    if n == 0 {
-        return Ok(vec![Complex64::new(1.0, 0.0)]);
-    }
-    let mut coeffs = Vec::with_capacity(n + 1);
-    coeffs.push(Complex64::new(1.0, 0.0));
-    let mut b = DMatrix::<Complex64>::identity(n, n);
-    for k in 1..=n {
-        let ab = a * &b;
-        let trace = (0..n).fold(Complex64::new(0.0, 0.0), |acc, idx| acc + ab[(idx, idx)]);
-        let coeff = -trace / Complex64::new(k as f64, 0.0);
-        coeffs.push(coeff);
-        let mut next = ab;
-        for idx in 0..n {
-            next[(idx, idx)] += coeff;
+    let mut work = CharacteristicWorkspace::new(n)?;
+    for degree in 1..=n {
+        for column in 0..n {
+            for row in 0..n {
+                work.advance_cell(a, row, column);
+            }
         }
-        b = next;
+        work.finish_degree(degree);
     }
-    ensure_finite_coefficients("ss characteristic polynomial", &coeffs)?;
-    Ok(coeffs)
+    ensure_finite_coefficients("ss characteristic polynomial", &work.coefficients)?;
+    Ok(work.coefficients)
 }
 
 fn state_space_numerator(
@@ -344,29 +861,26 @@ fn state_space_numerator(
     // the convolution of d0..d(i-1) with the Markov parameters C*A^(k-1)*B.
     // This avoids interpolating at arbitrary points and, crucially, does not
     // erase a small but genuine B/C gain with an absolute cleanup threshold.
-    let mut coeffs = denominator
-        .iter()
-        .map(|coefficient| d * *coefficient)
-        .collect::<Vec<_>>();
-    let mut state = b.clone();
+    let mut work = NumeratorWorkspace::new(b, 0, d, denominator)?;
     for k in 1..=degree {
-        let markov = (c * &state)[(0, 0)];
-        for i in k..=degree {
-            coeffs[i] += denominator[i - k] * markov;
-        }
+        work.finish_markov(c, 0, denominator, k);
         if k < degree {
-            state = a * state;
+            for row in 0..degree {
+                work.advance_row(a, row);
+            }
+            work.finish_state();
         }
     }
-    ensure_finite_coefficients("ss numerator polynomial", &coeffs)?;
-    Ok(coeffs)
+    ensure_finite_coefficients("ss numerator polynomial", &work.coefficients)?;
+    Ok(work.coefficients)
 }
-fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
+fn trim_leading_complex_zeros(mut coeffs: Vec<Complex64>) -> Vec<Complex64> {
     let first_nonzero = coeffs
         .iter()
         .position(|value| *value != Complex64::new(0.0, 0.0))
         .unwrap_or(coeffs.len());
-    coeffs[first_nonzero..].to_vec()
+    coeffs.drain(..first_nonzero);
+    coeffs
 }
 
 fn ensure_finite_coefficients(label: &str, coeffs: &[Complex64]) -> ConversionResult<()> {
@@ -383,203 +897,5 @@ fn ensure_finite_coefficients(label: &str, coeffs: &[Complex64]) -> ConversionRe
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use futures::executor::block_on;
-    use runmat_value::{ComplexTensor, IntegerComplexStorage, IntegerStorage, Tensor};
-
-    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-    #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn state_matrix_property_preserves_rank_one_row_geometry() {
-        let mut object = ObjectInstance::new("ss".to_string());
-        for value in [
-            Value::Tensor(Tensor::new(vec![2.0, 3.0], vec![2]).unwrap()),
-            Value::ComplexTensor(
-                ComplexTensor::new(vec![(2.0, 1.0), (3.0, 4.0)], vec![2]).unwrap(),
-            ),
-        ] {
-            object.properties.insert("B".into(), value);
-            let matrix = matrix_property(&object, "B").unwrap();
-            assert_eq!(matrix.shape(), (1, 2));
-            assert_eq!(matrix[(0, 0)].re, 2.0);
-            assert_eq!(matrix[(0, 1)].re, 3.0);
-        }
-    }
-
-    #[test]
-    fn ss_conversion_preflights_then_selectively_downloads_nested_properties() {
-        crate::builtins::common::test_support::with_test_provider(|provider| {
-            let state = Tensor::new(vec![-2.0], vec![1, 1]).unwrap();
-            let unrelated = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
-            let resident_state =
-                crate::builtins::common::gpu_helpers::upload_tensor(provider, &state).unwrap();
-            let resident_unrelated =
-                crate::builtins::common::gpu_helpers::upload_tensor(provider, &unrelated).unwrap();
-
-            for builtin in ["pzmap", "rlocus"] {
-                let mut incomplete = ObjectInstance::new("ss".to_string());
-                incomplete
-                    .properties
-                    .insert("A".into(), Value::GpuTensor(resident_state.clone()));
-                provider.reset_telemetry();
-                let error = block_on(ss_object_to_tf_async(incomplete, builtin))
-                    .expect_err("missing properties must fail before download");
-                assert_eq!(
-                    error.identifier(),
-                    Some(if builtin == "pzmap" {
-                        "RunMat:pzmap:InvalidModel"
-                    } else {
-                        "RunMat:rlocus:InvalidModel"
-                    })
-                );
-                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-
-                let mut complete = ObjectInstance::new("ss".to_string());
-                complete
-                    .properties
-                    .insert("A".into(), Value::GpuTensor(resident_state.clone()));
-                for (name, value) in [
-                    ("B", 1.0),
-                    ("C", 1.0),
-                    ("D", 0.0),
-                    ("Ts", 0.0),
-                    ("InputDelay", 0.0),
-                    ("OutputDelay", 0.0),
-                ] {
-                    complete.properties.insert(name.into(), Value::Num(value));
-                }
-                complete.properties.insert(
-                    "Unrelated".into(),
-                    Value::GpuTensor(resident_unrelated.clone()),
-                );
-                provider.reset_telemetry();
-                let model = block_on(ss_object_to_tf_async(complete, builtin))
-                    .expect("resident state-space conversion");
-                assert_eq!(
-                    model.denominator,
-                    vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)]
-                );
-                assert_eq!(provider.telemetry_snapshot().download_bytes, 8);
-
-                let mut delayed = ObjectInstance::new("ss".to_string());
-                delayed
-                    .properties
-                    .insert("A".into(), Value::GpuTensor(resident_state.clone()));
-                for (name, value) in [
-                    ("B", 1.0),
-                    ("C", 1.0),
-                    ("D", 0.0),
-                    ("Ts", 0.0),
-                    ("InputDelay", 1.0e-14),
-                    ("OutputDelay", 0.0),
-                ] {
-                    delayed.properties.insert(name.into(), Value::Num(value));
-                }
-                provider.reset_telemetry();
-                let error = block_on(ss_object_to_tf_async(delayed, builtin))
-                    .expect_err("any nonzero delay is unsupported");
-                assert_eq!(
-                    error.identifier(),
-                    Some(if builtin == "pzmap" {
-                        "RunMat:pzmap:UnsupportedModel"
-                    } else {
-                        "RunMat:rlocus:UnsupportedModel"
-                    })
-                );
-                assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
-            }
-        });
-    }
-
-    #[test]
-    fn state_space_numerator_retains_small_real_and_complex_gains() {
-        let mut object = ObjectInstance::new("ss".to_string());
-        for (name, value) in [
-            ("A", Value::Num(-1.0)),
-            ("B", Value::Num(1.0e-7)),
-            ("C", Value::Complex(0.0, 1.0e-7)),
-            ("D", Value::Num(0.0)),
-            ("Ts", Value::Num(0.0)),
-            ("InputDelay", Value::Num(0.0)),
-            ("OutputDelay", Value::Num(0.0)),
-        ] {
-            object.properties.insert(name.into(), value);
-        }
-        let model = ss_object_to_tf(&object, "pzmap").expect("small nonzero gain");
-        assert_eq!(
-            model.denominator,
-            vec![Complex64::new(1.0, 0.0), Complex64::new(1.0, 0.0)]
-        );
-        assert_eq!(model.numerator.len(), 1);
-        assert_eq!(model.numerator[0].re, 0.0);
-        assert!((model.numerator[0].im - 1.0e-14).abs() < 1.0e-28);
-    }
-
-    #[test]
-    fn numeric_values_reads_typed_integer_storage_exactly() {
-        let tensor = Tensor::new_integer(IntegerStorage::I16(vec![-1, 0, 2]), vec![1, 3])
-            .expect("typed integer tensor");
-
-        assert_eq!(
-            numeric_values(&Value::Tensor(tensor), "A").expect("numeric values"),
-            vec![
-                Complex64::new(-1.0, 0.0),
-                Complex64::new(0.0, 0.0),
-                Complex64::new(2.0, 0.0),
-            ]
-        );
-    }
-
-    #[test]
-    fn numeric_values_reads_complex_integer_storage_exactly() {
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::I16(vec![1, -2]),
-            IntegerStorage::I16(vec![3, -4]),
-        )
-        .expect("complex integer storage");
-        let tensor = ComplexTensor::new_integer(storage, vec![1, 2]).unwrap();
-
-        assert_eq!(
-            numeric_values(&Value::ComplexTensor(tensor), "A").expect("numeric values"),
-            vec![Complex64::new(1.0, 3.0), Complex64::new(-2.0, -4.0)]
-        );
-    }
-
-    #[test]
-    fn matrix_property_reads_typed_integer_storage_exactly() {
-        let matrix = Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2])
-            .expect("typed integer matrix");
-        let mut object = ObjectInstance::new("ss".to_string());
-        object
-            .properties
-            .insert("A".to_string(), Value::Tensor(matrix));
-
-        let parsed = matrix_property(&object, "A").expect("matrix property");
-
-        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, 0.0));
-        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, 0.0));
-        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, 0.0));
-        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, 0.0));
-    }
-
-    #[test]
-    fn matrix_property_reads_complex_integer_storage_exactly() {
-        let storage = IntegerComplexStorage::new(
-            IntegerStorage::I16(vec![1, 3, 2, 4]),
-            IntegerStorage::I16(vec![-1, -3, -2, -4]),
-        )
-        .expect("complex integer storage");
-        let matrix = ComplexTensor::new_integer(storage, vec![2, 2]).unwrap();
-        let mut object = ObjectInstance::new("ss".to_string());
-        object
-            .properties
-            .insert("A".to_string(), Value::ComplexTensor(matrix));
-
-        let parsed = matrix_property(&object, "A").expect("matrix property");
-
-        assert_eq!(parsed[(0, 0)], Complex64::new(1.0, -1.0));
-        assert_eq!(parsed[(1, 0)], Complex64::new(3.0, -3.0));
-        assert_eq!(parsed[(0, 1)], Complex64::new(2.0, -2.0));
-        assert_eq!(parsed[(1, 1)], Complex64::new(4.0, -4.0));
-    }
-}
+#[path = "ss_conversion/tests.rs"]
+mod tests;

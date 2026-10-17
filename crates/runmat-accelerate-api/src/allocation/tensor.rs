@@ -3,7 +3,8 @@ use super::shared::{Shared, WeakShared};
 use super::*;
 use crate::{GpuHandleProvenance, GpuTensorDescriptor};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Serializable diagnostic identity only; it cannot reconstruct a live view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize)]
 pub struct TensorViewIdentity {
     allocation: AllocationIdentity,
     view: u64,

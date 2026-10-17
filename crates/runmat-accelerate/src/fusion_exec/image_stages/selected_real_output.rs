@@ -234,13 +234,10 @@ impl SelectedRealPlans {
         let Some(source) = self.calls.get(index).map(|call| &call.source) else {
             return false;
         };
-        let control = match source.control() {
-            Some(control) => Some(match control {
-                ScalarLiteral::F32Bits(bits) => ProviderImageOutputOperand::ScalarF32Bits(bits),
-                ScalarLiteral::F64Bits(bits) => ProviderImageOutputOperand::ScalarF64Bits(bits),
-            }),
-            None => None,
-        };
+        let control = source.control().map(|control| match control {
+            ScalarLiteral::F32Bits(bits) => ProviderImageOutputOperand::ScalarF32Bits(bits),
+            ScalarLiteral::F64Bits(bits) => ProviderImageOutputOperand::ScalarF64Bits(bits),
+        });
         wire.hook == source.hook()
             && wire.source_output == source.output()
             && wire.output_shape == source.output_shape()

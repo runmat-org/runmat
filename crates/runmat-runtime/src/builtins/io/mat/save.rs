@@ -15,7 +15,7 @@ use crate::context::host_effect::{
     HostEffectWorkload, MatEncodeMode, MatEncodeOutput, MatStructSelection,
 };
 
-use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save;
+use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save_in_context;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use workspace_io::WorkspaceReadSet;
 
@@ -129,98 +129,13 @@ async fn save_builtin(
         .with_workspace_liveness(workspace_read.liveness_service());
         cooperation.completed(0).await?;
 
-        let mut workspace_entries: Option<Vec<(String, Value)>> = None;
-        let mut entries: Vec<(String, Value)> = Vec::new();
-
-        if request.variables.is_empty()
-            && request.structs.is_empty()
-            && request.regex_patterns.is_empty()
-        {
-            let snapshot = ensure_workspace_entries(
-                &mut workspace_entries,
-                &mut workspace_read,
-                &mut cooperation,
-            )
-            .await?;
-            entries.extend(snapshot.iter().cloned());
-        } else {
-            for name in &request.variables {
-                if let Some(snapshot) = workspace_entries.as_ref() {
-                    if let Some(value) = find_in_entries(snapshot, name) {
-                        entries.push((name.clone(), value));
-                        continue;
-                    }
-                }
-                let value = cooperation
-                    .await_io(lookup_workspace(&mut workspace_read, name))
-                    .await??;
-                entries.push((name.clone(), value));
-            }
-
-            for struct_req in &request.structs {
-                let value = if let Some(snapshot) = workspace_entries.as_ref() {
-                    find_in_entries(snapshot, &struct_req.source)
-                } else {
-                    None
-                };
-                let value = match value {
-                    Some(val) => val,
-                    None => {
-                        cooperation
-                            .await_io(lookup_workspace(&mut workspace_read, &struct_req.source))
-                            .await??
-                    }
-                };
-
-                let struct_value = match value {
-                    Value::Struct(s) => s,
-                    _ => {
-                        return Err(save_error_with(
-                            &SAVE_ERROR_SELECTION,
-                            format!("save: variable '{}' is not a struct", struct_req.source),
-                        ))
-                    }
-                };
-                append_struct_fields(
-                    &struct_req.source,
-                    &struct_value,
-                    &struct_req.fields,
-                    &mut entries,
-                    &mut cooperation,
-                )
-                .await?;
-            }
-
-            if !request.regex_patterns.is_empty() {
-                let snapshot = ensure_workspace_entries(
-                    &mut workspace_entries,
-                    &mut workspace_read,
-                    &mut cooperation,
-                )
-                .await?;
-                let mut matched = 0usize;
-                for (name, value) in snapshot.iter() {
-                    if regex_patterns.iter().any(|regex| regex.is_match(name)) {
-                        entries.push((name.clone(), value.clone()));
-                        matched += 1;
-                    }
-                }
-                if matched == 0 {
-                    return Err(save_error_with(
-                        &SAVE_ERROR_SELECTION,
-                        "save: no variables matched '-regexp' patterns",
-                    ));
-                }
-            }
-        }
-
-        if entries.is_empty() {
-            return Err(save_error_with(
-                &SAVE_ERROR_SELECTION,
-                "save: no variables selected",
-            ));
-        }
-
+        let entries = collect_selected_entries(
+            &request,
+            &regex_patterns,
+            &mut workspace_read,
+            &mut cooperation,
+        )
+        .await?;
         workspace_read.retain_values(entries.iter().map(|(_, value)| value))?;
         let mut unique_entries = deduplicate_entries(entries);
         if request.append {
@@ -235,40 +150,144 @@ async fn save_builtin(
             workspace_read.retain_values(unique_entries.iter().map(|(_, value)| value))?;
         }
 
-        let mut mat_vars = Vec::with_capacity(unique_entries.len());
-        for (name, value) in unique_entries {
-            cooperation.completed(0).await?;
-            let value = cooperation
-                .await_io(prepare_value_for_mat_save(value))
-                .await??;
-            workspace_read.retain_values(std::iter::once(value.value()))?;
-            cooperation.completed(0).await?;
-            let array = value
-                .with_owned_async(|value| {
-                    convert_value_with_cooperation(
-                        value,
-                        MatEncodingOwner::Save,
-                        Some(&mut cooperation),
-                    )
-                })
-                .await?;
-            mat_vars.push(MatVar { name, array });
-            cooperation.completed(0).await?;
-        }
-
-        write_mat_file(
+        encode_selected_entries(
+            unique_entries,
             &destination,
-            &mat_vars,
-            MatEncodingOwner::Save,
+            &mut workspace_read,
             &mut cooperation,
         )
         .await?;
-
         Ok(Value::Num(0.0))
     }
     .await;
     super::admission::finish(receipt, &result);
     result
+}
+
+// Keep selection and encoding in separate poll frames. Both phases borrow the
+// same rooted workspace and cooperation owner; no extra value snapshot is
+// introduced by either phase.
+async fn collect_selected_entries(
+    request: &controls::SaveRequest,
+    regex_patterns: &[Regex],
+    workspace_read: &mut WorkspaceReadSet,
+    cooperation: &mut MatCodecCooperation<'_>,
+) -> BuiltinResult<Vec<(String, Value)>> {
+    let mut workspace_entries: Option<Vec<(String, Value)>> = None;
+    let mut entries: Vec<(String, Value)> = Vec::new();
+
+    if request.variables.is_empty()
+        && request.structs.is_empty()
+        && request.regex_patterns.is_empty()
+    {
+        let snapshot =
+            ensure_workspace_entries(&mut workspace_entries, workspace_read, cooperation).await?;
+        entries.extend(snapshot.iter().cloned());
+    } else {
+        for name in &request.variables {
+            if let Some(snapshot) = workspace_entries.as_ref() {
+                if let Some(value) = find_in_entries(snapshot, name) {
+                    entries.push((name.clone(), value));
+                    continue;
+                }
+            }
+            let value = cooperation
+                .await_io(lookup_workspace(workspace_read, name))
+                .await??;
+            entries.push((name.clone(), value));
+        }
+
+        for struct_req in &request.structs {
+            let value = if let Some(snapshot) = workspace_entries.as_ref() {
+                find_in_entries(snapshot, &struct_req.source)
+            } else {
+                None
+            };
+            let value = match value {
+                Some(val) => val,
+                None => {
+                    cooperation
+                        .await_io(lookup_workspace(workspace_read, &struct_req.source))
+                        .await??
+                }
+            };
+
+            let struct_value = match value {
+                Value::Struct(s) => s,
+                _ => {
+                    return Err(save_error_with(
+                        &SAVE_ERROR_SELECTION,
+                        format!("save: variable '{}' is not a struct", struct_req.source),
+                    ))
+                }
+            };
+            append_struct_fields(
+                &struct_req.source,
+                &struct_value,
+                &struct_req.fields,
+                &mut entries,
+                cooperation,
+            )
+            .await?;
+        }
+
+        if !request.regex_patterns.is_empty() {
+            let snapshot =
+                ensure_workspace_entries(&mut workspace_entries, workspace_read, cooperation)
+                    .await?;
+            let mut matched = 0usize;
+            for (name, value) in snapshot.iter() {
+                if regex_patterns.iter().any(|regex| regex.is_match(name)) {
+                    entries.push((name.clone(), value.clone()));
+                    matched += 1;
+                }
+            }
+            if matched == 0 {
+                return Err(save_error_with(
+                    &SAVE_ERROR_SELECTION,
+                    "save: no variables matched '-regexp' patterns",
+                ));
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        return Err(save_error_with(
+            &SAVE_ERROR_SELECTION,
+            "save: no variables selected",
+        ));
+    }
+    Ok(entries)
+}
+
+async fn encode_selected_entries(
+    entries: Vec<(String, Value)>,
+    destination: &MatFsPath,
+    workspace_read: &mut WorkspaceReadSet,
+    cooperation: &mut MatCodecCooperation<'_>,
+) -> BuiltinResult<()> {
+    let mut mat_vars = Vec::with_capacity(entries.len());
+    for (name, value) in entries {
+        cooperation.completed(0).await?;
+        let runtime = cooperation.runtime();
+        let value = cooperation
+            .await_io(prepare_value_for_mat_save_in_context(value, runtime))
+            .await??;
+        workspace_read.retain_values(std::iter::once(value.value()))?;
+        cooperation.completed(0).await?;
+        let array = value
+            .with_owned_async(|value| {
+                convert_value_with_cooperation(
+                    value,
+                    MatEncodingOwner::Save,
+                    Some(&mut *cooperation),
+                )
+            })
+            .await?;
+        mat_vars.push(MatVar { name, array });
+        cooperation.completed(0).await?;
+    }
+    write_mat_file(destination, &mat_vars, MatEncodingOwner::Save, cooperation).await
 }
 
 mod controls;

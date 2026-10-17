@@ -360,6 +360,13 @@ impl TfModel {
         Ok(Value::Object(object))
     }
 
+    pub fn coefficient_values(&self, builtin: &'static str) -> BuiltinResult<(Value, Value)> {
+        Ok((
+            coefficient_value(&self.numerator, builtin)?,
+            coefficient_value(&self.denominator, builtin)?,
+        ))
+    }
+
     pub fn to_real(&self, builtin: &'static str) -> BuiltinResult<RealTfModel> {
         let numerator = real_coefficients(&self.numerator, "Numerator", builtin)?;
         let denominator = real_coefficients(&self.denominator, "Denominator", builtin)?;
@@ -1265,7 +1272,10 @@ fn coefficients_from_property(
     }
 }
 
-fn coefficient_value(coeffs: &[Complex64], builtin: &'static str) -> BuiltinResult<Value> {
+pub(crate) fn coefficient_value(
+    coeffs: &[Complex64],
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
     let len = coeffs.len();
     if coeffs.iter().all(|coeff| coeff.im == 0.0) {
         let data = coeffs.iter().map(|coeff| coeff.re).collect::<Vec<_>>();
@@ -1466,6 +1476,9 @@ fn invalid_coefficients_identifier(builtin: &str) -> &'static str {
         "rlocus" => "RunMat:rlocus:InvalidModel",
         "pzmap" => "RunMat:pzmap:InvalidModel",
         "isstable" => "RunMat:isstable:InvalidModel",
+        "tfdata" => "RunMat:tfdata:InvalidModel",
+        "series" => "RunMat:series:InvalidModel",
+        "ss2tf" => "RunMat:ss2tf:InvalidModel",
         _ => "RunMat:tf:InvalidCoefficients",
     }
 }
@@ -1532,6 +1545,9 @@ pub(crate) fn unsupported_model_identifier(builtin: &str) -> &'static str {
         "rlocus" => "RunMat:rlocus:UnsupportedModel",
         "pzmap" => "RunMat:pzmap:UnsupportedModel",
         "isstable" => "RunMat:isstable:UnsupportedModel",
+        "tfdata" => "RunMat:tfdata:UnsupportedModel",
+        "series" => "RunMat:series:UnsupportedModel",
+        "ss2tf" => "RunMat:ss2tf:UnsupportedModel",
         _ => "RunMat:tf:UnsupportedModel",
     }
 }
@@ -1550,6 +1566,9 @@ pub(crate) fn internal_identifier(builtin: &str) -> &'static str {
         "rlocus" => "RunMat:rlocus:Internal",
         "pzmap" => "RunMat:pzmap:Internal",
         "isstable" => "RunMat:isstable:Internal",
+        "tfdata" => "RunMat:tfdata:Internal",
+        "series" => "RunMat:series:Internal",
+        "ss2tf" => "RunMat:ss2tf:Internal",
         _ => "RunMat:tf:Internal",
     }
 }

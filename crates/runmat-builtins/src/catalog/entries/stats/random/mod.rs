@@ -4,16 +4,19 @@
 mod binornd;
 mod exprnd;
 mod gamrnd;
+mod gpurng;
 mod wblrnd;
 
-pub use binornd::*;
-pub use exprnd::*;
-pub use gamrnd::*;
-pub use wblrnd::*;
+pub use self::binornd::*;
+pub use self::exprnd::*;
+pub use self::gamrnd::*;
+pub use self::gpurng::*;
+pub use self::wblrnd::*;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
     values.extend(binornd::ENTRIES.iter().copied());
     values.extend(exprnd::ENTRIES.iter().copied());
     values.extend(gamrnd::ENTRIES.iter().copied());
+    values.extend(gpurng::ENTRIES.iter().copied());
     values.extend(wblrnd::ENTRIES.iter().copied());
 }

@@ -15,7 +15,8 @@ pub(in crate::builtins::stats::summary) async fn sample_distribution(
         DistributionSelection::Named(kind) => parse_named_random_args(kind, rest).await?,
     };
     let len = checked_output_len(&shape)?;
-    let data = random_samples(&fit, len, || {
+    let mut turn = crate::builtins::common::random::acquire_turn(runtime, RANDOM_NAME).await?;
+    let data = random_samples(&mut turn, &fit, len, || {
         check_fitted_cancellation(runtime, FittedOperation::Sampling)
     })?;
     finish_random(shape, data, gpu_source)

@@ -113,6 +113,7 @@ fn unary_opcode(operation: Operation) -> Option<crate::backend::wgpu::types::Una
     use runmat_types::ScalarUnaryMath as Math;
     Some(match operation {
         Operation::Sqrt => Code::Sqrt,
+        Operation::Spacing => Code::Spacing,
         Operation::UnaryMath(operation) => match operation {
             Math::Exp => Code::Exp,
             Math::Sin => Code::Sin,
@@ -161,6 +162,7 @@ fn native_scalar_control(operation: Operation, precision: NumericPrecision) -> b
                 | (NumericPrecision::F64, ScalarLiteral::F64Bits(_))
         ),
         Operation::Sqrt
+        | Operation::Spacing
         | Operation::UnaryMath(_)
         | Operation::FloatingCast { .. }
         | Operation::ExactSingleBasePower { .. } => false,
@@ -257,6 +259,7 @@ impl WgpuProvider {
                             crate::backend::wgpu::types::ScalarOpCode::Max
                         }
                         Operation::Sqrt
+                        | Operation::Spacing
                         | Operation::UnaryMath(_)
                         | Operation::FloatingCast { .. }
                         | Operation::ExactSingleBasePower { .. } => {
@@ -282,6 +285,7 @@ impl WgpuProvider {
                     )
                 }
                 Operation::Sqrt
+                | Operation::Spacing
                 | Operation::UnaryMath(_)
                 | Operation::ExactSingleBasePower { .. } => {
                     if !scalar_uniform_available(&self.adapter_limits) {
@@ -360,7 +364,10 @@ impl WgpuProvider {
         };
         let uniform_allocations = if matches!(
             request.operation,
-            Operation::Sqrt | Operation::UnaryMath(_) | Operation::ExactSingleBasePower { .. }
+            Operation::Sqrt
+                | Operation::Spacing
+                | Operation::UnaryMath(_)
+                | Operation::ExactSingleBasePower { .. }
         ) {
             1
         } else {
@@ -445,6 +452,7 @@ impl WgpuProvider {
                     Operation::ScalarMul { .. } => crate::backend::wgpu::types::ScalarOpCode::Mul,
                     Operation::ScalarMax { .. } => crate::backend::wgpu::types::ScalarOpCode::Max,
                     Operation::Sqrt
+                    | Operation::Spacing
                     | Operation::UnaryMath(_)
                     | Operation::FloatingCast { .. }
                     | Operation::ExactSingleBasePower { .. } => {
@@ -533,7 +541,7 @@ impl WgpuProvider {
                     })
                 }
             }
-            Operation::Sqrt | Operation::UnaryMath(_) => self
+            Operation::Sqrt | Operation::Spacing | Operation::UnaryMath(_) => self
                 .unary_op_exec_recorded(
                     unary_opcode(recipe.request().operation)
                         .expect("matched ordinary unary operation"),

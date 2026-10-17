@@ -44,7 +44,7 @@ pub(super) async fn execute(
         executable.contract.randomness,
         &context.runtime,
         iteration_values.len(),
-    )?;
+    ).await?;
     let inputs = executable
         .input_variables()
         .map(|variable| {
@@ -442,7 +442,7 @@ fn cancel_parallel_tasks(
     }
 }
 
-fn parallel_randomness_context(
+async fn parallel_randomness_context(
     policy: runmat_types::ParallelRandomnessPolicy,
     runtime: &runmat_runtime::context::RuntimeContext,
     iteration_count: usize,
@@ -452,12 +452,11 @@ fn parallel_randomness_context(
             Ok(runmat_execution::ParallelRandomnessContext::Inherit)
         }
         runmat_types::ParallelRandomnessPolicy::DeterministicSubstreams => {
-            let streams =
-                runmat_runtime::builtins::common::random::reserve_parallel_random_streams(
-                    runtime,
-                    iteration_count,
-                )?;
-            Ok(runmat_execution::ParallelRandomnessContext::Deterministic { streams })
+            runmat_runtime::builtins::common::random::reserve_parallel_randomness_context_async(
+                runtime,
+                iteration_count,
+            )
+            .await
         }
         runmat_types::ParallelRandomnessPolicy::Nondeterministic => {
             Ok(runmat_execution::ParallelRandomnessContext::Nondeterministic)
@@ -486,6 +485,64 @@ fn slice_randomness(
             Ok(runmat_execution::ParallelRandomnessContext::Deterministic {
                 streams: streams.to_vec(),
             })
+        }
+        runmat_execution::ParallelRandomnessContext::Mt19937InitialSeedRangeV1 {
+            root,
+            start,
+            len,
+        } => {
+            let end = chunk.start.checked_add(chunk.len).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "ParallelRandomness",
+                    "parallel random-stream extent overflowed",
+                )
+            })?;
+            if end > *len {
+                return Err(crate::interpreter::errors::mex(
+                    "ParallelRandomness",
+                    "parallel random-stream assignment does not cover the task chunk",
+                ));
+            }
+            let start = start.checked_add(chunk.start).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "ParallelRandomness",
+                    "parallel random-stream ordinal overflowed",
+                )
+            })?;
+            Ok(
+                runmat_execution::ParallelRandomnessContext::Mt19937InitialSeedRangeV1 {
+                    root: *root,
+                    start,
+                    len: chunk.len,
+                },
+            )
+        }
+        runmat_execution::ParallelRandomnessContext::RunMatLcgStateRangeV1 { root, start, len } => {
+            let end = chunk.start.checked_add(chunk.len).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "ParallelRandomness",
+                    "parallel random-stream extent overflowed",
+                )
+            })?;
+            if end > *len {
+                return Err(crate::interpreter::errors::mex(
+                    "ParallelRandomness",
+                    "parallel random-stream assignment does not cover the task chunk",
+                ));
+            }
+            let start = start.checked_add(chunk.start).ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "ParallelRandomness",
+                    "parallel random-stream ordinal overflowed",
+                )
+            })?;
+            Ok(
+                runmat_execution::ParallelRandomnessContext::RunMatLcgStateRangeV1 {
+                    root: *root,
+                    start,
+                    len: chunk.len,
+                },
+            )
         }
         runmat_execution::ParallelRandomnessContext::Inherit => {
             Ok(runmat_execution::ParallelRandomnessContext::Inherit)

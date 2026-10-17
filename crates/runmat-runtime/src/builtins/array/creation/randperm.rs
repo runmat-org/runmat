@@ -1,9 +1,10 @@
 //! MATLAB-compatible `randperm` builtin with GPU-aware semantics for RunMat.
 use runmat_builtins::{RANDPERM_EXPLICIT_DOUBLE_EXTENSION, RANDPERM_LIKE_EXTENSION};
 
-use runmat_accelerate_api::{GpuTensorHandle, GpuTensorStorage, ProviderPrecision};
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
+
+mod gpu_child;
 
 #[cfg(test)]
 #[path = "randperm/owning_tests.rs"]
@@ -16,9 +17,9 @@ use crate::builtins::common::random;
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 #[cfg(test)]
 use runmat_builtins::ResolveContext;
 #[cfg(test)]
@@ -32,17 +33,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("permutation"),
     supported_precisions: &[ScalarType::F64],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[
-        ProviderHook::Custom("random_permutation"),
-        ProviderHook::Custom("random_permutation_like"),
-    ],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Uses the prototype's exact owner for a validated Double permutation; only certified pre-effect unsupported hooks permit host generation and class-preserving restoration.",
+    notes: "The GPU Like route uses an independent request-bound child stream, unbiased reservoir/shuffle indices and an exact-owner Double upload. The older process-global permutation hooks are not semantic authority.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -80,7 +78,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandPerm::parse(args).await?;
-    build_output(parsed)
+    if let OutputTemplate::Like(Value::GpuTensor(handle)) = &parsed.template {
+        return gpu_child::like(handle, parsed.n, parsed.k).await;
+    }
+    let mut turn = random::acquire_turn(None, "randperm").await?;
+    build_output(&mut turn, parsed)
 }
 
 struct ParsedRandPerm {
@@ -194,22 +196,34 @@ impl ParsedRandPerm {
     }
 }
 
-fn build_output(parsed: ParsedRandPerm) -> crate::BuiltinResult<Value> {
+fn build_output(
+    turn: &mut random::RandomTurn,
+    parsed: ParsedRandPerm,
+) -> crate::BuiltinResult<Value> {
     match parsed.template {
-        OutputTemplate::Double => randperm_double(parsed.n, parsed.k),
-        OutputTemplate::Like(proto) => randperm_like(&proto, parsed.n, parsed.k),
+        OutputTemplate::Double => randperm_double(turn, parsed.n, parsed.k),
+        OutputTemplate::Like(proto) => randperm_like(turn, &proto, parsed.n, parsed.k),
     }
 }
 
-fn randperm_double(n: usize, k: usize) -> crate::BuiltinResult<Value> {
-    let tensor = randperm_tensor(n, k)?;
+fn randperm_double(
+    turn: &mut random::RandomTurn,
+    n: usize,
+    k: usize,
+) -> crate::BuiltinResult<Value> {
+    let tensor = randperm_tensor(turn, n, k)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn randperm_like(proto: &Value, n: usize, k: usize) -> crate::BuiltinResult<Value> {
+fn randperm_like(
+    turn: &mut random::RandomTurn,
+    proto: &Value,
+    n: usize,
+    k: usize,
+) -> crate::BuiltinResult<Value> {
     match proto {
-        Value::GpuTensor(handle) => randperm_gpu(handle, n, k),
-        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => randperm_double(n, k),
+        Value::GpuTensor(_) => unreachable!("GPU prototype handled before host turn"),
+        Value::Tensor(_) | Value::Num(_) | Value::Int(_) => randperm_double(turn, n, k),
         Value::LogicalArray(_) => Err(builtin_error(
             "randperm: logical prototypes cannot represent permutation values (requires numeric output)",
         )),
@@ -225,88 +239,11 @@ fn randperm_like(proto: &Value, n: usize, k: usize) -> crate::BuiltinResult<Valu
     }
 }
 
-fn randperm_gpu(handle: &GpuTensorHandle, n: usize, k: usize) -> crate::BuiltinResult<Value> {
-    use gpu_helpers::{GpuOutputAliasPolicy, UnaryGpuOutputContract};
-
-    let terminal = |detail: String| {
-        let mut error = builtin_error(format!("randperm: {detail}"));
-        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-        error
-    };
-    handle.allocation_lease().validate_live().map_err(|cause| {
-        crate::runtime_error::with_provider_execution_source(
-            terminal(format!("prototype allocation is not live: {cause}")),
-            runmat_accelerate_api::ProviderExecutionError::from_source(cause)
-                .with_unproven_effects(),
-        )
-    })?;
-    if runmat_accelerate_api::handle_is_logical(handle) {
-        return Err(terminal(
-            "logical prototypes cannot represent permutation values".into(),
-        ));
-    }
-    if runmat_accelerate_api::handle_storage(handle) != GpuTensorStorage::Real {
-        return Err(terminal("complex prototypes are not supported".into()));
-    }
-    let provider = gpu_helpers::exact_provider_for_handle(handle)
-        .ok_or_else(|| terminal("no provider owns the resident prototype".into()))?;
-    let output = match provider.random_permutation_like(handle, n, k) {
-        Ok(output) => Some(output),
-        Err(cause) if cause.is_unsupported() => None,
-        Err(cause) => {
-            return Err(crate::runtime_error::with_provider_execution_source(
-                terminal(format!("provider permutation failed: {cause}")),
-                cause,
-            ))
-        }
-    };
-    if let Some(mut output) = output {
-        let contract = UnaryGpuOutputContract {
-            storage: GpuTensorStorage::Real,
-            precision: Some(ProviderPrecision::F64),
-            integer: None,
-            logical: false,
-            alias: GpuOutputAliasPolicy::RequireDistinctAllocation,
-        };
-        if !gpu_helpers::unary_gpu_output_matches_shape(
-            &output,
-            handle,
-            provider,
-            &[1, k],
-            contract,
-        ) {
-            return Err(gpu_helpers::reject_gpu_output(
-                output,
-                terminal("provider returned a malformed, aliased, or foreign result".into()),
-            ));
-        }
-        if let Err(cause) = handle.allocation_lease().validate_live() {
-            return Err(gpu_helpers::reject_gpu_output(
-                output,
-                terminal(format!(
-                    "prototype allocation retired during permutation: {cause}"
-                )),
-            ));
-        }
-        if let Err(cause) = gpu_helpers::propagate_output_provenance(&mut output, [handle]) {
-            return Err(gpu_helpers::reject_gpu_output(output, cause));
-        }
-        return gpu_helpers::resident_gpu_value(output).map_err(|mut cause| {
-            cause.gpu_gather_retry = crate::GpuGatherRetry::Never;
-            cause
-        });
-    }
-
-    let tensor = randperm_tensor(n, k)?;
-    gpu_helpers::restore_class_preserving_value_protecting(
-        handle,
-        Value::Tensor(tensor),
-        "randperm",
-        &[],
-    )
-}
-
-fn randperm_tensor(n: usize, k: usize) -> crate::BuiltinResult<Tensor> {
+fn randperm_tensor(
+    turn: &mut random::RandomTurn,
+    n: usize,
+    k: usize,
+) -> crate::BuiltinResult<Tensor> {
     let mut values: Vec<f64> = if n == 0 {
         Vec::new()
     } else {
@@ -314,19 +251,8 @@ fn randperm_tensor(n: usize, k: usize) -> crate::BuiltinResult<Tensor> {
     };
 
     if k > 0 {
-        let uniforms = random::generate_uniform(k, "randperm")?;
-        for (i, u) in uniforms.into_iter().enumerate() {
-            if i >= k || i >= n {
-                break;
-            }
-            let span = n - i;
-            if span == 0 {
-                break;
-            }
-            let mut offset = (u * span as f64).floor() as usize;
-            if offset >= span {
-                offset = span - 1;
-            }
+        let offsets = random::generate_permutation_offsets(turn, n, k)?;
+        for (i, offset) in offsets.into_iter().enumerate() {
             let j = i + offset;
             values.swap(i, j);
         }
@@ -422,19 +348,10 @@ pub(crate) mod tests {
             (1..=n).map(|v| v as f64).collect()
         };
         if k > 0 {
-            let uniforms = random::expected_uniform_sequence(k);
-            for (i, u) in uniforms.iter().copied().enumerate() {
-                if i >= k || i >= n {
-                    break;
-                }
-                let span = n - i;
-                if span == 0 {
-                    break;
-                }
-                let mut offset = (u * span as f64).floor() as usize;
-                if offset >= span {
-                    offset = span - 1;
-                }
+            for (i, offset) in random::expected_permutation_offsets(n, k)
+                .into_iter()
+                .enumerate()
+            {
                 let j = i + offset;
                 values.swap(i, j);
             }
@@ -641,7 +558,10 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = random::test_guard();
         random::reset_rng();
+        random::gpu::replace(random::gpu::GpuRandomSnapshot::default())
+            .expect("reset independent GPU child");
         test_support::with_test_provider(|provider| {
+            let cpu_before = random::snapshot().expect("CPU stream before GPU permutation");
             let proto_tensor = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
             let view = HostTensorView {
                 data: &proto_tensor.materialize_f64(),
@@ -661,8 +581,22 @@ pub(crate) mod tests {
             }
             let gathered = test_support::gather(result).expect("gather");
             assert_eq!(gathered.shape(), vec![1, 3]);
-            let expected = expected_randperm(6, 3);
-            assert_eq!(gathered.materialize_f64(), expected);
+            let values = gathered.materialize_f64();
+            assert!(values.iter().all(|value| (1.0..=6.0).contains(value)));
+            let mut unique = values.clone();
+            unique.sort_by(f64::total_cmp);
+            unique.dedup();
+            assert_eq!(unique.len(), 3);
+            assert_eq!(
+                random::snapshot().expect("CPU after GPU permutation").state,
+                cpu_before.state
+            );
+            assert_eq!(
+                random::gpu::snapshot()
+                    .expect("GPU child after permutation")
+                    .position,
+                6
+            );
         });
     }
 

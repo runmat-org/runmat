@@ -9,7 +9,8 @@ use runmat_builtins::{
     builtin_catalog_entry_by_name, builtin_catalog_fingerprint, BuiltinOwnedWorkerPolicy,
 };
 use runmat_execution::{
-    OwnedBuiltinWorkRequest, OwnedBuiltinWorkResponse, OWNED_BUILTIN_VALUE_LIMITS,
+    OwnedBuiltinBinding, OwnedBuiltinWorkRequest, OwnedBuiltinWorkResponse,
+    OWNED_BUILTIN_VALUE_LIMITS,
 };
 
 use crate::builtin::{registration, RuntimeBuiltinBinding, RuntimeBuiltinInvocation};
@@ -24,6 +25,13 @@ use crate::context::{
 /// service until the worker's response or physical termination acknowledgment,
 /// independently of whether the caller continues awaiting it.
 pub trait RuntimeOwnedBuiltinWorkService {
+    /// Exact continuation layout issued by the installed worker target. A
+    /// different host architecture must not quote its own Rust future size.
+    fn continuation_control_bytes(
+        &self,
+        binding: &OwnedBuiltinBinding,
+    ) -> Result<Option<u64>, super::ExecutionServiceError>;
+
     fn submit(
         &self,
         request: OwnedBuiltinWorkRequest,
@@ -57,35 +65,59 @@ impl RuntimeParallelService for OwnedJobParallel {
     }
 }
 
-fn exact_binding(request: &OwnedBuiltinWorkRequest) -> Result<RuntimeBuiltinBinding, String> {
-    request.validate_wire().map_err(|error| error.to_string())?;
-    if request.binding.catalog.bytes() != &builtin_catalog_fingerprint() {
+fn exact_binding_identity(
+    requested: &OwnedBuiltinBinding,
+) -> Result<RuntimeBuiltinBinding, String> {
+    requested.validate().map_err(|error| error.to_string())?;
+    if requested.catalog.bytes() != &builtin_catalog_fingerprint() {
         return Err("owned builtin catalog revision differs from this worker".into());
     }
-    let entry = builtin_catalog_entry_by_name(&request.binding.name)
-        .filter(|entry| entry.identity.name == request.binding.name)
+    let entry = builtin_catalog_entry_by_name(&requested.name)
+        .filter(|entry| entry.identity.name == requested.name)
         .ok_or_else(|| "owned builtin has no exact canonical catalog identity".to_string())?;
     let declared = entry.bindings.iter().find(|declaration| {
-        declaration.variant == request.binding.variant
+        declaration.variant == requested.variant
             && declaration.owned_worker == BuiltinOwnedWorkerPolicy::PortableHostCpu
     });
     if declared.is_none() {
         return Err("canonical binding does not admit owned host CPU work".into());
     }
-    let registrations =
-        registration::registered_runtime_builtin_bindings_by_name(&request.binding.name);
+    let registrations = registration::registered_runtime_builtin_bindings_by_name(&requested.name);
     if registrations.len() != 1 {
         return Err("owned builtin has no unique compiled binding".into());
     }
     let selected = registrations[0];
     let binding = selected.binding();
-    if binding.identity.builtin.name != request.binding.name
-        || binding.identity.variant != request.binding.variant
+    if binding.identity.builtin.name != requested.name
+        || binding.identity.variant != requested.variant
         || !selected.registration().is_current()
     {
         return Err("owned builtin binding revision changed".into());
     }
     Ok(binding)
+}
+
+pub fn quote_owned_builtin_continuation(
+    binding: &OwnedBuiltinBinding,
+) -> Result<Option<u64>, String> {
+    let selected = exact_binding_identity(binding)?;
+    selected
+        .continuation_layout
+        .map(|layout| layout().map_err(|error| error.to_string()))
+        .transpose()
+}
+
+fn exact_binding(request: &OwnedBuiltinWorkRequest) -> Result<RuntimeBuiltinBinding, String> {
+    request.validate_wire().map_err(|error| error.to_string())?;
+    let selected = exact_binding_identity(&request.binding)?;
+    let layout = selected
+        .continuation_layout
+        .ok_or_else(|| "owned builtin has no compiled continuation quote".to_string())?;
+    let bytes = layout().map_err(|error| error.to_string())?;
+    if bytes == 0 || bytes != request.control_scratch_bytes {
+        return Err("owned builtin continuation quote differs from selected worker".into());
+    }
+    Ok(selected)
 }
 
 pub fn admit_owned_builtin_work(request: &OwnedBuiltinWorkRequest) -> Result<(), String> {
@@ -187,6 +219,66 @@ pub async fn execute_owned_builtin_work(
 mod tests {
     use super::*;
     use crate::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
+
+    #[test]
+    fn compiled_owned_binding_quotes_the_worker_continuation() {
+        use runmat_execution::resource::{Capability, ResourceRequest};
+        use runmat_execution::value::{ElementType, InlineValue, ValuePayload};
+        use runmat_execution::{
+            Digest, OwnedBuiltinDenseOutputContract, OwnedBuiltinResponseContract,
+            OWNED_BUILTIN_FAILURE_WIRE_BYTES, OWNED_BUILTIN_WORK_SCHEMA_VERSION,
+        };
+        use std::collections::BTreeSet;
+
+        let binding = OwnedBuiltinBinding {
+            name: "qz".into(),
+            variant: "default".into(),
+            catalog: Digest::from_bytes(builtin_catalog_fingerprint()),
+        };
+        let control = quote_owned_builtin_continuation(&binding)
+            .expect("exact compiled binding")
+            .expect("compiled continuation quote");
+        assert!(control > 0);
+        let transport = OWNED_BUILTIN_FAILURE_WIRE_BYTES;
+        let scratch = transport.checked_add(control).expect("finite quote");
+        let request = OwnedBuiltinWorkRequest {
+            schema_version: OWNED_BUILTIN_WORK_SCHEMA_VERSION,
+            binding,
+            arguments: vec![
+                ValuePayload::Inline(Box::new(InlineValue::F64Bits(1.0f64.to_bits()))),
+                ValuePayload::Inline(Box::new(InlineValue::F64Bits(1.0f64.to_bits()))),
+            ],
+            requested_outputs: 1,
+            response: OwnedBuiltinResponseContract {
+                dense: vec![OwnedBuiltinDenseOutputContract {
+                    shape: vec![1, 1],
+                    allowed_element_types: vec![ElementType::F64],
+                }],
+                max_wire_bytes: transport,
+            },
+            resources: ResourceRequest {
+                cpu_millicores: 1000,
+                memory_bytes: scratch + 64,
+                scratch_bytes: scratch,
+                max_wall_millis: 1000,
+                max_artifact_bytes: 0,
+                max_egress_bytes: 0,
+                max_relay_bytes: 0,
+                accelerators: Vec::new(),
+                required_capabilities: BTreeSet::from([Capability::BrowserWorker]),
+            },
+            transport_scratch_bytes: transport,
+            control_scratch_bytes: control,
+            assignment: None,
+        };
+        admit_owned_builtin_work(&request).expect("real compiled quote admits ordinary work");
+
+        let mut mismatched = request;
+        mismatched.control_scratch_bytes += 1;
+        mismatched.resources.scratch_bytes += 1;
+        mismatched.resources.memory_bytes += 1;
+        assert!(admit_owned_builtin_work(&mismatched).is_err());
+    }
 
     #[test]
     fn owned_worker_numerical_receipts_share_its_finite_job_ledger() {

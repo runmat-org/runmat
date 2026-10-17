@@ -87,6 +87,7 @@ fn captured_argument_specs(instruction: &Instr) -> Option<&[ArgumentSpec]> {
         | Instr::CreateSemanticFutureExpandMultiOutput(_, specs, _)
         | Instr::CallSemanticFunctionExpandMultiOutput(_, specs, _)
         | Instr::CallBuiltinExpandMultiOutput(_, specs, _)
+        | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(_, specs, _)
         | Instr::CallFunctionExpandMultiOutput { specs, .. }
         | Instr::CallWorkspaceFirstExpandMultiOutput { specs, .. }
         | Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { specs, .. }

@@ -23,8 +23,11 @@ impl KmeansCooperation {
     }
 
     pub(super) async fn uniform(&mut self, len: usize) -> BuiltinResult<Vec<f64>> {
+        let mut turn =
+            crate::builtins::common::random::acquire_turn(self.runtime.as_ref(), NAME).await?;
         match self.budget.as_mut() {
             Some(budget) => crate::builtins::common::random::generate_uniform_cooperative(
+                &mut turn,
                 len,
                 NAME,
                 self.runtime.as_ref(),
@@ -32,7 +35,7 @@ impl KmeansCooperation {
             )
             .await
             .map_err(with_kmeans_context),
-            None => crate::builtins::common::random::generate_uniform(len, NAME),
+            None => crate::builtins::common::random::generate_uniform(&mut turn, len, NAME),
         }
     }
 

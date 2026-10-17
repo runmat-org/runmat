@@ -439,6 +439,12 @@ pub struct WgpuPipelines {
     pub window: PipelineBundle,
     pub random_uniform: PipelineBundle,
     pub random_normal: PipelineBundle,
+    pub random_child_uniform_f32: PipelineBundle,
+    pub random_child_normal_f32: PipelineBundle,
+    pub random_child_complex_normal_f32: PipelineBundle,
+    pub random_child_uniform_f64: PipelineBundle,
+    pub random_child_normal_f64: PipelineBundle,
+    pub random_child_complex_normal_f64: PipelineBundle,
     pub random_exprnd: PipelineBundle,
     pub random_normrnd: PipelineBundle,
     pub random_unifrnd: PipelineBundle,
@@ -1533,7 +1539,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => RANDOM_UNIFORM_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_UNIFORM_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let random_normal = create_pipeline(
             access,
@@ -1545,7 +1552,63 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => RANDOM_NORMAL_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_NORMAL_SHADER_F32,
             },
+        )
+        .with_linear_launch(linear_tokens);
+
+        let random_child_pipeline = |precision, distribution, label| {
+            create_pipeline(
+                access,
+                label,
+                label,
+                label,
+                vec![storage_read_write_entry(0), uniform_entry(1)],
+                crate::backend::wgpu::shaders::random_threefry::shader(precision, distribution),
+            )
+            .with_linear_launch(linear_tokens)
+        };
+        use runmat_accelerate_api::random::GpuRandomDistribution as RandomDistribution;
+        let random_child_uniform_f32 = random_child_pipeline(
+            NumericPrecision::F32,
+            RandomDistribution::Uniform,
+            "runmat-random-child-uniform-f32",
         );
+        let random_child_normal_f32 = random_child_pipeline(
+            NumericPrecision::F32,
+            RandomDistribution::StandardNormal,
+            "runmat-random-child-normal-f32",
+        );
+        let random_child_complex_normal_f32 = create_pipeline(
+            access,
+            "runmat-random-child-complex-normal-f32",
+            "runmat-random-child-complex-normal-f32",
+            "runmat-random-child-complex-normal-f32",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            crate::backend::wgpu::shaders::random_threefry::complex_normal_shader(
+                NumericPrecision::F32,
+            ),
+        )
+        .with_linear_launch(linear_tokens);
+        let random_child_uniform_f64 = random_child_pipeline(
+            NumericPrecision::F64,
+            RandomDistribution::Uniform,
+            "runmat-random-child-uniform-f64",
+        );
+        let random_child_normal_f64 = random_child_pipeline(
+            NumericPrecision::F64,
+            RandomDistribution::StandardNormal,
+            "runmat-random-child-normal-f64",
+        );
+        let random_child_complex_normal_f64 = create_pipeline(
+            access,
+            "runmat-random-child-complex-normal-f64",
+            "runmat-random-child-complex-normal-f64",
+            "runmat-random-child-complex-normal-f64",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            crate::backend::wgpu::shaders::random_threefry::complex_normal_shader(
+                NumericPrecision::F64,
+            ),
+        )
+        .with_linear_launch(linear_tokens);
 
         let random_exprnd = create_pipeline(
             access,
@@ -1557,7 +1620,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => RANDOM_EXPRND_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_EXPRND_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let random_normrnd = create_pipeline(
             access,
@@ -1569,7 +1633,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => RANDOM_NORMRND_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_NORMRND_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let random_unifrnd = create_pipeline(
             access,
@@ -1581,7 +1646,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => RANDOM_UNIFRND_SHADER_F64,
                 NumericPrecision::F32 => RANDOM_UNIFRND_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let stochastic_evolution = create_pipeline(
             access,
@@ -1597,7 +1663,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => STOCHASTIC_EVOLUTION_SHADER_F64,
                 NumericPrecision::F32 => STOCHASTIC_EVOLUTION_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let randperm = create_pipeline(
             access,
@@ -1633,7 +1700,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => PEAKS_SHADER_F64,
                 NumericPrecision::F32 => PEAKS_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let peaks_xy = create_pipeline(
             access,
@@ -1650,7 +1718,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => PEAKS_XY_SHADER_F64,
                 NumericPrecision::F32 => PEAKS_XY_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let imfilter = |source: Cow<'static, str>, label: &'static str| {
             create_pipeline(
@@ -2152,6 +2221,12 @@ impl WgpuPipelines {
             window,
             random_uniform,
             random_normal,
+            random_child_uniform_f32,
+            random_child_normal_f32,
+            random_child_complex_normal_f32,
+            random_child_uniform_f64,
+            random_child_normal_f64,
+            random_child_complex_normal_f64,
             random_exprnd,
             random_normrnd,
             random_unifrnd,

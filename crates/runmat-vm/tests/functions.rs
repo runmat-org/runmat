@@ -5947,6 +5947,43 @@ fn feval_expand_multi_forwards_expanded_cell_args() {
 }
 
 #[test]
+fn feval_cell_expansion_can_supply_callable_and_arguments() {
+    let vars =
+        execute_source("C = {@plus, 2, 3}; y = feval(C{:}); D = {@sin}; z = feval(D{1}, 0);");
+    assert!(has_num(&vars, 5.0));
+    assert!(has_num(&vars, 0.0));
+
+    // The expanded first value must still satisfy the callable contract.
+    assert!(execute_source_result("C = {2, 3}; y = feval(C{:});").is_err());
+}
+
+#[test]
+fn feval_cell_expansion_forwards_dynamic_output_count() {
+    let source = r#"
+        C = {@deal, 15, 25};
+        [a,b] = forward(C);
+        function varargout = forward(C)
+            [varargout{1:nargout}] = feval(C{:});
+        end
+    "#;
+    let bytecode = compile_source(source).expect("compile expanded callable forwarding");
+    let function = bytecode
+        .function_registry
+        .functions
+        .values()
+        .find(|function| function.display_name == "forward")
+        .expect("forward bytecode present");
+    assert!(function.instructions.iter().any(|instruction| matches!(
+        instruction,
+        runmat_vm::Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(name, _, _)
+            if name == "feval"
+    )));
+    let vars = interpret(&bytecode).expect("execute expanded callable forwarding");
+    assert!(has_num(&vars, 15.0));
+    assert!(has_num(&vars, 25.0));
+}
+
+#[test]
 fn feval_expand_cell_indices_support_end_offsets() {
     let program = r#"
         function y = f(a,b)
@@ -6288,7 +6325,7 @@ fn globals_basic_and_shadowing() {
 
 #[test]
 fn persistents_init_once_across_calls() {
-    let prog = "function y = counter(); persistent C; if C==0; C = 0; end; C = C + 1; y = C; end; a = counter(); b = counter(); c = counter();";
+    let prog = "function y = counter(); persistent C; if isempty(C); C = 0; end; C = C + 1; y = C; end; a = counter(); b = counter(); c = counter();";
     let vars = execute_source(prog);
     // Expect last value 3 somewhere in vars
     assert!(vars
@@ -6491,7 +6528,6 @@ fn string_array_literal_concat_index_and_compare() {
     for v in vars.values() {
         match v {
             runmat_value::Value::StringArray(sa) => {
-                println!("SA shape={:?} data={:?}", sa.shape, sa.data);
                 if sa.shape == vec![2, 2] {
                     saw_a = true;
                 }
@@ -6506,7 +6542,6 @@ fn string_array_literal_concat_index_and_compare() {
                 }
             }
             runmat_value::Value::String(s) => {
-                println!("S {s}");
                 if s == "ccc" {
                     saw_x = true;
                 }
@@ -6517,11 +6552,10 @@ fn string_array_literal_concat_index_and_compare() {
                     saw_x = true;
                 }
             }
-            runmat_value::Value::Tensor(t) => {
-                println!("T shape={:?} data={:?}", t.shape(), t.materialize_f64());
-                if t.shape() == vec![2, 2] {
-                    saw_e1 = true;
-                    saw_e2 = true;
+            runmat_value::Value::LogicalArray(mask) => {
+                if mask.shape == [2, 2] {
+                    saw_e1 |= mask.data.as_slice() == [1, 0, 0, 0];
+                    saw_e2 |= mask.data.as_slice() == [1, 1, 0, 1];
                 }
             }
             _ => {}

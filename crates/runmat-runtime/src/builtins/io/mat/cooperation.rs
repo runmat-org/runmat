@@ -12,6 +12,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 pub(in crate::builtins::io::mat) struct MatCodecCooperation<'a> {
+    runtime: Option<&'a RuntimeContext>,
     budget: Option<CpuCooperationBudget>,
     source: Option<&'a MatFsPath>,
     resource_liveness: Option<Arc<dyn HostEffectResourceLivenessLease>>,
@@ -22,12 +23,13 @@ pub(in crate::builtins::io::mat) struct MatCodecCooperation<'a> {
 
 impl<'a> MatCodecCooperation<'a> {
     pub(in crate::builtins::io::mat) fn new(
-        runtime: Option<&RuntimeContext>,
+        runtime: Option<&'a RuntimeContext>,
         source: Option<&'a MatFsPath>,
         builtin: &'static str,
         io_error: &'static BuiltinErrorDescriptor,
     ) -> Self {
         Self {
+            runtime,
             budget: runtime.map(RuntimeContext::cpu_cooperation),
             source,
             resource_liveness: None,
@@ -44,6 +46,7 @@ impl<'a> MatCodecCooperation<'a> {
         io_error: &'static BuiltinErrorDescriptor,
     ) -> Self {
         Self {
+            runtime: None,
             budget: Some(budget),
             source: None,
             resource_liveness: None,
@@ -51,6 +54,10 @@ impl<'a> MatCodecCooperation<'a> {
             builtin,
             io_error,
         }
+    }
+
+    pub(in crate::builtins::io::mat) fn runtime(&self) -> Option<&'a RuntimeContext> {
+        self.runtime
     }
 
     pub(in crate::builtins::io::mat) fn with_resource_liveness(

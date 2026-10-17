@@ -125,11 +125,14 @@ impl FlowState {
                     capture += 1;
                     value
                 }
+                crate::MirLocalKind::IncomingWorkspace => None,
                 _ => None,
             };
             if matches!(
                 local.kind,
-                crate::MirLocalKind::Parameter | crate::MirLocalKind::Capture
+                crate::MirLocalKind::Parameter
+                    | crate::MirLocalKind::Capture
+                    | crate::MirLocalKind::IncomingWorkspace
             ) {
                 state.locals[local.id.0] = LocalState::assigned(
                     fact.unwrap_or_else(|| {

@@ -21,7 +21,15 @@ fn compiled_numeric_limits_preserve_selected_classes_and_like_representations() 
          sparse_limit = realmin('like', sparse_prototype); \
          if ~isa(sparse_limit, 'single'); error('sparse floating class'); end; \
          if ~issparse(sparse_limit); error('sparse floating storage'); end; \
-         if isreal(sparse_limit); error('sparse floating complexity'); end;",
+         if isreal(sparse_limit); error('sparse floating complexity'); end; \
+         spacing = eps(single([0 1 2])); \
+         assert(isa(spacing,'single') && isequal(size(spacing),[1 3])); \
+         assert(spacing(2)==single(2^-23) && spacing(3)==single(2^-22)); \
+         complex_spacing = eps(complex(single(3),single(4))); \
+         assert(isa(complex_spacing,'single') && isreal(complex_spacing)); \
+         assert(complex_spacing==eps(single(5))); \
+         sparse_spacing = eps(sparse([0 1;2 0])); \
+         assert(isequal(full(sparse_spacing),eps([0 1;2 0])));",
     )
     .expect("compiled numeric-limit contracts");
 }

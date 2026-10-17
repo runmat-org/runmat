@@ -10,7 +10,7 @@ use crate::resource::ResourceRequest;
 use crate::value::{ElementType, InlineValue, ValueLimits, ValuePayload};
 use crate::{ContractError, ProgramExecutionAssignment, ProgramRuntimeFailure};
 
-pub const OWNED_BUILTIN_WORK_SCHEMA_VERSION: u16 = 3;
+pub const OWNED_BUILTIN_WORK_SCHEMA_VERSION: u16 = 4;
 pub const MAX_OWNED_BUILTIN_ARGUMENTS: usize = 16;
 pub const MAX_OWNED_BUILTIN_OUTPUTS: u16 = 16;
 pub const OWNED_BUILTIN_VALUE_LIMITS: ValueLimits = ValueLimits {
@@ -222,6 +222,9 @@ pub struct OwnedBuiltinWorkRequest {
     pub resources: ResourceRequest,
     /// Conservative transport/decode/encode peak held throughout worker work.
     pub transport_scratch_bytes: u64,
+    /// Exact target-compiled continuation allocation; the worker recomputes
+    /// this from its selected binding before decoding or executing inputs.
+    pub control_scratch_bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assignment: Option<ProgramExecutionAssignment>,
 }
@@ -256,10 +259,15 @@ impl OwnedBuiltinWorkRequest {
         ValuePayload::validate_all(&self.arguments, OWNED_BUILTIN_VALUE_LIMITS)?;
         self.response.validate(self.requested_outputs)?;
         self.resources.validate()?;
+        let required_scratch = self
+            .transport_scratch_bytes
+            .checked_add(self.control_scratch_bytes)
+            .ok_or_else(|| ContractError::invalid("owned builtin work", "scratch overflow"))?;
         if self.transport_scratch_bytes == 0
+            || self.control_scratch_bytes == 0
             || self.transport_scratch_bytes < self.response.max_wire_bytes
-            || self.transport_scratch_bytes > self.resources.scratch_bytes
-            || self.transport_scratch_bytes > self.resources.memory_bytes
+            || required_scratch > self.resources.scratch_bytes
+            || required_scratch > self.resources.memory_bytes
         {
             return Err(ContractError::invalid(
                 "owned builtin work",
@@ -385,8 +393,8 @@ mod tests {
             },
             resources: ResourceRequest {
                 cpu_millicores: 1000,
-                memory_bytes: 8 * 1024 * 1024,
-                scratch_bytes: 8 * 1024 * 1024,
+                memory_bytes: 8 * 1024 * 1024 + 1,
+                scratch_bytes: 8 * 1024 * 1024 + 1,
                 max_wall_millis: 1000,
                 max_artifact_bytes: 0,
                 max_egress_bytes: 0,
@@ -395,6 +403,7 @@ mod tests {
                 required_capabilities: BTreeSet::from([Capability::BrowserWorker]),
             },
             transport_scratch_bytes: 8 * 1024 * 1024,
+            control_scratch_bytes: 1,
             assignment: None,
         }
     }

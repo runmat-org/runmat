@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 mod platform;
 mod provider_registry;
+pub mod random;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub use platform::AcceleratorThreadBound;
@@ -108,6 +109,7 @@ pub use residency::{clear_residency_checked, ResidencyCleanupError, ResidencyRes
 type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(GpuHandleIdentity) -> Result<(), ResidencyCleanupError>;
 type SequenceThresholdFn = fn() -> Option<usize>;
+type AutomaticOffloadEnabledFn = fn() -> bool;
 type WorkgroupSizeHintFn = fn() -> Option<u32>;
 type ExecutionProviderAuthorizer =
     for<'a> fn(ExecutionProviderAdmission<'a>) -> ExecutionProviderAuthorization;
@@ -115,6 +117,7 @@ type ExecutionProviderAuthorizer =
 static RESIDENCY_MARK: OnceCell<ResidencyMarkFn> = OnceCell::new();
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
+static AUTOMATIC_OFFLOAD_ENABLED_PROVIDER: OnceCell<AutomaticOffloadEnabledFn> = OnceCell::new();
 static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
 static EXECUTION_PROVIDER_AUTHORIZER: OnceCell<ExecutionProviderAuthorizer> = OnceCell::new();
 
@@ -226,6 +229,20 @@ pub fn sequence_threshold_hint() -> Option<usize> {
     SEQUENCE_THRESHOLD_PROVIDER
         .get()
         .and_then(|provider| provider())
+}
+
+/// Register the configured automatic-offload policy for implicit array
+/// construction. Explicit resident inputs do not consult this policy.
+pub fn register_automatic_offload_enabled_provider(provider: AutomaticOffloadEnabledFn) {
+    let _ = AUTOMATIC_OFFLOAD_ENABLED_PROVIDER.set(provider);
+}
+
+/// Whether implicit array constructors may prefer a provider. An absent
+/// policy hook preserves the legacy behavior for standalone providers.
+pub fn automatic_offload_enabled() -> bool {
+    AUTOMATIC_OFFLOAD_ENABLED_PROVIDER
+        .get()
+        .is_none_or(|provider| provider())
 }
 
 /// Register a callback that reports the calibrated workgroup size selected by
@@ -2948,6 +2965,24 @@ pub trait AccelProvider: AcceleratorThreadBound {
     /// Allocate a tensor of standard normal values matching a prototype's shape.
     fn random_normal_like(&self, prototype: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         self.random_normal(prototype.shape())
+    }
+
+    /// Execute one explicitly reserved GPU child-stream range. This hook is
+    /// separate from legacy process-global RNG methods: they cannot prove the
+    /// session counter, effect phase, or finite metadata admission.
+    fn propose_gpu_random(
+        &self,
+        _request: &random::GpuRandomRequest<'_>,
+    ) -> ProviderExecutionResult<Option<random::GpuRandomPhysicalProposal>> {
+        Ok(None)
+    }
+
+    fn execute_gpu_random(
+        &self,
+        _request: &random::GpuRandomRequest<'_>,
+        _metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(unsupported_provider_operation("request-bound GPU random is not supported").into())
     }
 
     /// Exponentially-distributed random values with mean `mu`.

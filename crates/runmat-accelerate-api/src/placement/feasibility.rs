@@ -59,6 +59,10 @@ impl ProviderOperationIdentity {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderWorkload {
+    /// One session-issued GPU child-stream range for a typed random output.
+    /// Ordinary host RNG calls never set this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_random: Option<crate::random::GpuRandomWorkload>,
     /// Explicit physical ABI for the existing ordinary typed fusion owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fused_elementwise: Option<crate::ProviderFusedElementwiseWorkload>,

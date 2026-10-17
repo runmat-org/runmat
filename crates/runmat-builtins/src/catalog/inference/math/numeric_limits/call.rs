@@ -1,4 +1,4 @@
-use crate::{BuiltinCatalogEntry, NumericLimitRule};
+use crate::{BuiltinCatalogEntry, FloatingLimitKind, NumericLimitRule};
 use runmat_types::{
     CallInference, CallRequest, DynamicReason, NumericClass, ValueFact, ValueKindFact,
 };
@@ -10,6 +10,9 @@ pub(in crate::catalog::inference) fn infer(
     entry: &BuiltinCatalogEntry,
     rule: NumericLimitRule,
 ) -> CallInference {
+    if rule == NumericLimitRule::Floating(FloatingLimitKind::SpacingAtOne) {
+        return super::spacing::infer(request, entry);
+    }
     let mut diagnostics = Vec::new();
     let mut output = super::output::default(rule);
     let builtin = entry.identity.name;

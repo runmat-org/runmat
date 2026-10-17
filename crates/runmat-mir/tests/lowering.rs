@@ -1504,7 +1504,34 @@ fn analyze_assembly_collects_structured_diagnostics() {
 }
 
 #[test]
-fn analyze_assembly_collects_semantic_marker_diagnostics() {
+fn zero_output_call_accepts_expanded_input_arguments() {
+    let source = "function y = f(C); fprintf('%g', C{1}); y = 1; end";
+    let lowered = lower_mir(source);
+    let body = lowered.bodies.values().next().unwrap();
+    assert!(matches!(
+        first_call(body).requested_outputs,
+        RequestedOutputCount::Zero
+    ));
+    assert!(body
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .any(|stmt| {
+            matches!(
+                stmt.kind,
+                MirStmtKind::CaptureSequence {
+                    source: MirExpansionSource::CellContents { .. },
+                    ..
+                }
+            )
+        }));
+    let diagnostics = analyze_assembly(&lowered).diagnostics;
+    assert!(diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code != "RM-MIR0004"));
+
+    // A direct MIR expansion has the same argument/output distinction as a
+    // captured source sequence. Output count describes the call result only.
     let mut mir = lower_mir("function y = f(x); y = x; end");
     let body = mir.bodies.values_mut().next().unwrap();
     let local = first_local_of_kind(body, MirLocalKind::Parameter);
@@ -1531,9 +1558,20 @@ fn analyze_assembly_collects_semantic_marker_diagnostics() {
 
     let store = analyze_assembly(&mir);
 
-    assert!(store.diagnostics.iter().any(|diagnostic| {
-        diagnostic.code == "RM-MIR0004" && diagnostic.category.as_deref() == Some("comma-list")
-    }));
+    assert!(store
+        .diagnostics
+        .iter()
+        .all(|diagnostic| diagnostic.code != "RM-MIR0004"));
+}
+
+#[test]
+fn callable_position_keeps_captured_sequence_for_runtime_cardinality() {
+    let ast = runmat_parser::parse("function y = f(C); y = feval(C{1}, 2); end").unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap();
+    let mir = lower_assembly(&hir.assembly).unwrap();
+    let call = first_call(mir.bodies.values().next().unwrap());
+    assert!(matches!(call.args[0], MirCallArg::CapturedSequence(_)));
+    assert_eq!(call.args.len(), 2);
 }
 
 #[test]

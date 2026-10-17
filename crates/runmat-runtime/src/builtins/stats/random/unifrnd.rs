@@ -8,12 +8,16 @@ use runmat_builtins::{
     ResolveContext, Type,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{Tensor, Value};
+#[cfg(test)]
+use runmat_value::Tensor;
+use runmat_value::Value;
 
 use crate::build_runtime_error;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::extract_dims;
 use crate::builtins::common::tensor;
+#[path = "unifrnd/output.rs"]
+mod output;
 
 const BUILTIN_NAME: &str = "unifrnd";
 
@@ -258,14 +262,8 @@ async fn unifrnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             &UNIFRND_ERROR_LOWER_BOUND_MUST_BE_LESS_THAN_UPPER_BOUND,
         ));
     }
-    if let Some(value) = try_gpu_unifrnd(a, b, &shape)? {
-        return Ok(value);
-    }
-    let len = tensor::element_count(&shape);
-    let data = random::generate_uniform_scaled(a, b, len, "unifrnd")?;
-    let t =
-        Tensor::new(data, shape).map_err(|e| unifrnd_internal_error(format!("unifrnd: {e}")))?;
-    Ok(tensor::tensor_into_value(t))
+    let mut turn = random::acquire_turn(None, "unifrnd").await?;
+    output::generate(&mut turn, a, b, &shape).await
 }
 
 async fn enforce_integer_extensions(args: &[Value]) -> crate::BuiltinResult<()> {
@@ -356,23 +354,6 @@ fn normalize_dims(dims: Vec<usize>) -> Vec<usize> {
     }
 }
 
-fn try_gpu_unifrnd(a: f64, b: f64, shape: &[usize]) -> crate::BuiltinResult<Option<Value>> {
-    let Some(provider) = runmat_accelerate_api::provider() else {
-        return Ok(None);
-    };
-    if provider.precision() != runmat_accelerate_api::ProviderPrecision::F64 {
-        return Ok(None);
-    }
-    match provider.random_unifrnd(a, b, shape) {
-        Ok(handle) => {
-            let len = tensor::element_count(shape);
-            random::skip_uniform(len, "unifrnd")?;
-            Ok(Some(Value::GpuTensor(handle)))
-        }
-        Err(_) => Ok(None),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -452,6 +433,10 @@ mod tests {
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape(), &[3, 4]);
+                assert_eq!(
+                    t.materialize_f64(),
+                    random::expected_uniform_scaled_sequence(0.0, 10.0, 12)
+                );
                 assert!(t
                     .materialize_f64()
                     .iter()

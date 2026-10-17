@@ -52,6 +52,7 @@ pub(super) fn value(
 
 pub(super) fn f64_value(kind: FloatingLimitKind) -> f64 {
     match kind {
+        FloatingLimitKind::SpacingAtOne => f64::EPSILON,
         FloatingLimitKind::SmallestNormal => f64::MIN_POSITIVE,
         FloatingLimitKind::LargestFinite => f64::MAX,
         FloatingLimitKind::LargestConsecutiveInteger => 2f64.powi(53),
@@ -60,6 +61,7 @@ pub(super) fn f64_value(kind: FloatingLimitKind) -> f64 {
 
 pub(super) fn f32_value(kind: FloatingLimitKind) -> f32 {
     match kind {
+        FloatingLimitKind::SpacingAtOne => f32::EPSILON,
         FloatingLimitKind::SmallestNormal => f32::MIN_POSITIVE,
         FloatingLimitKind::LargestFinite => f32::MAX,
         FloatingLimitKind::LargestConsecutiveInteger => 2f32.powi(24),

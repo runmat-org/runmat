@@ -208,7 +208,8 @@ pub(in crate::execute) fn begin_branch_truth(
         identity,
         Box::pin(async move {
             let truth = runtime
-                .scope(runmat_runtime::condition::logical_truth_from_value(
+                .scope(runmat_runtime::condition::control_flow_truth_from_value(
+                    &runtime,
                     condition.value(),
                     "branch condition",
                 ))

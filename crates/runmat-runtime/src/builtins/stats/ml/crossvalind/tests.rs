@@ -282,7 +282,10 @@ fn typed_integer_partition_counts_are_exact_and_lossy_f64_is_rejected() {
         int_tensor(IntegerStorage::U8(vec![3]), 1, 1),
     ];
     let admitted = admit_host_controls(&fold_args).unwrap();
-    let folds = crossvalind_compute(fold_args, admitted).unwrap();
+    let folds = {
+        let mut turn = random::try_acquire_turn(None, "crossvalind").unwrap();
+        crossvalind_compute(fold_args, admitted, Some(&mut turn)).unwrap()
+    };
     let PartitionOutput::Folds(Value::Tensor(folds)) = folds else {
         panic!("expected fold tensor");
     };

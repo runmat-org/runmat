@@ -1,16 +1,40 @@
 use std::collections::{HashMap, VecDeque};
-use std::f64::consts::PI;
 use std::sync::{Mutex, OnceLock};
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+mod mt19937;
+mod distributions;
 mod normal;
+mod parallel;
+pub(crate) mod gpu;
+pub(crate) mod gpu_execution;
+pub(crate) mod gpu_upload;
 mod reservation;
+mod state;
+mod turn;
 mod uniform;
-pub(crate) use normal::{generate_normal, generate_normal_cooperative};
-pub(crate) use uniform::{generate_uniform, generate_uniform_cooperative};
+pub(crate) use distributions::{
+    fill_exponential_array, generate_binomial, generate_exponential, generate_gamma_shape_scale,
+    generate_normal_scaled, generate_student_t, generate_weibull,
+};
+pub(crate) use normal::{
+    fill_normal, fill_normal_cooperative, generate_normal, generate_normal_cooperative,
+};
+use normal::{next_normal, next_normal_pair};
+pub(crate) use parallel::ParallelRandomScope;
+pub use parallel::{
+    enter_parallel_random_stream, enter_parallel_random_stream_async,
+    reserve_parallel_random_streams, reserve_parallel_random_streams_async,
+    reserve_parallel_randomness_context_async, ParallelRandomStreamGuard,
+};
+pub(crate) use state::{RandomState, RngAlgorithm, RngSnapshot, RuntimeRng};
+pub(crate) use turn::RandomTurn;
+pub(crate) use turn::RandomTurnGate;
+pub(crate) use turn::{acquire as acquire_turn, try_acquire as try_acquire_turn};
+pub(crate) use uniform::{fill_uniform_scaled, generate_uniform, generate_uniform_cooperative};
 
-pub(crate) const DEFAULT_RNG_SEED: u64 = 0x9e3779b97f4a7c15;
+pub(crate) const DEFAULT_RNG_SEED: u64 = runmat_execution::task::RUNMAT_MT_DEFAULT_SEED;
 pub(crate) const DEFAULT_USER_SEED: u64 = 0;
 const RNG_MULTIPLIER: u64 = 6364136223846793005;
 const RNG_INCREMENT: u64 = 1;
@@ -20,71 +44,6 @@ const MIN_UNIFORM: f64 = f64::MIN_POSITIVE;
 
 fn random_error(label: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(label).build()
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum RngAlgorithm {
-    RunMatLcg,
-}
-
-impl RngAlgorithm {
-    pub(crate) fn as_str(&self) -> &'static str {
-        match self {
-            RngAlgorithm::RunMatLcg => "twister",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct RngSnapshot {
-    pub state: u64,
-    pub seed: Option<u64>,
-    pub algorithm: RngAlgorithm,
-}
-
-impl RngSnapshot {
-    pub(crate) fn new(state: u64, seed: Option<u64>, algorithm: RngAlgorithm) -> Self {
-        Self {
-            state,
-            seed,
-            algorithm,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct RuntimeRng {
-    state: u64,
-    seed: Option<u64>,
-    algorithm: RngAlgorithm,
-}
-
-impl RuntimeRng {
-    pub(crate) fn new() -> Self {
-        Self {
-            state: DEFAULT_RNG_SEED,
-            seed: Some(DEFAULT_USER_SEED),
-            algorithm: RngAlgorithm::RunMatLcg,
-        }
-    }
-
-    fn snapshot(&self) -> RngSnapshot {
-        RngSnapshot {
-            state: self.state,
-            seed: self.seed,
-            algorithm: self.algorithm,
-        }
-    }
-}
-
-impl From<RngSnapshot> for RuntimeRng {
-    fn from(snapshot: RngSnapshot) -> Self {
-        Self {
-            state: snapshot.state,
-            seed: snapshot.seed,
-            algorithm: snapshot.algorithm,
-        }
-    }
 }
 
 static RNG_STATE: OnceLock<Mutex<RuntimeRng>> = OnceLock::new();
@@ -127,12 +86,15 @@ fn fallback_rng_state() -> &'static Mutex<RuntimeRng> {
     RNG_STATE.get_or_init(|| Mutex::new(RuntimeRng::new()))
 }
 
-fn with_rng_state<T>(
+fn with_rng_state_in<T>(
+    context: Option<&crate::context::RuntimeContext>,
     label: &str,
     operation: impl FnOnce(&mut RuntimeRng) -> T,
 ) -> BuiltinResult<T> {
-    if let Some(context) = crate::context::legacy::active() {
-        let mut state = context.state().random.try_borrow_mut().map_err(|_| {
+    if let Some(context) = context {
+        let scope = context.parallel_random_scope();
+        let state = scope.map_or(&context.state().random, |scope| &scope.state);
+        let mut state = state.try_borrow_mut().map_err(|_| {
             random_error(label, format!("{label}: random stream is already in use"))
         })?;
         return Ok(operation(&mut state));
@@ -143,62 +105,70 @@ fn with_rng_state<T>(
     Ok(operation(&mut state))
 }
 
-fn with_rng_state_in<T>(
-    context: Option<&crate::context::RuntimeContext>,
+fn with_rng_state_mut<T>(
+    turn: &mut RandomTurn,
     label: &str,
+    may_draw: bool,
     operation: impl FnOnce(&mut RuntimeRng) -> T,
 ) -> BuiltinResult<T> {
-    if let Some(context) = context {
-        let mut state = context.state().random.try_borrow_mut().map_err(|_| {
-            random_error(label, format!("{label}: random stream is already in use"))
-        })?;
-        return Ok(operation(&mut state));
-    }
-    with_rng_state(label, operation)
+    let context = turn.owner().cloned();
+    turn.with_state(label, |state| {
+        if may_draw {
+            state.state.prepare_mutation(context.as_ref())?;
+        }
+        Ok(operation(state))
+    })?
 }
 
 fn legacy_tokens() -> &'static Mutex<LegacyTokenState> {
     LEGACY_TOKENS.get_or_init(|| Mutex::new(LegacyTokenState::new()))
 }
 
-fn mix_seed(seed: u64) -> u64 {
-    if seed == 0 {
-        return DEFAULT_RNG_SEED;
-    }
-    let mut z = seed.wrapping_add(0x9e3779b97f4a7c15);
-    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
-    let mixed = z ^ (z >> 31);
-    if mixed == 0 {
-        DEFAULT_RNG_SEED
-    } else {
-        mixed
-    }
-}
-
+#[cfg(test)]
 pub(crate) fn snapshot() -> BuiltinResult<RngSnapshot> {
-    with_rng_state("rng", |state| state.snapshot())
+    let mut turn = try_acquire_turn(None, "rng")?;
+    snapshot_in_turn(&mut turn)
 }
 
-pub(crate) fn apply_snapshot(snapshot: RngSnapshot) -> BuiltinResult<RngSnapshot> {
-    with_rng_state("rng", |state| {
+pub(crate) fn snapshot_in_turn(turn: &mut RandomTurn) -> BuiltinResult<RngSnapshot> {
+    turn.with_state("rng", |state| state.snapshot())
+}
+
+pub(crate) fn apply_snapshot_in_turn(
+    turn: &mut RandomTurn,
+    mut snapshot: RngSnapshot,
+) -> BuiltinResult<RngSnapshot> {
+    let owner = turn.owner().cloned();
+    turn.with_state("rng", |state| {
+        // A parsed full-state value may have been retained before this
+        // turn began. Rehome its exact bytes before publishing it.
+        if matches!(snapshot.state, RandomState::Mt(_)) {
+            snapshot.state.prepare_mutation(owner.as_ref())?;
+        }
         let previous = state.snapshot();
         state.state = snapshot.state;
         state.seed = snapshot.seed;
-        state.algorithm = snapshot.algorithm;
-        previous
-    })
+        Ok(previous)
+    })?
 }
 
+#[cfg(test)]
 pub(crate) fn set_seed(seed: u64) -> BuiltinResult<RngSnapshot> {
-    let state = mix_seed(seed);
-    apply_snapshot(RngSnapshot::new(state, Some(seed), RngAlgorithm::RunMatLcg))
+    let mut turn = try_acquire_turn(None, "rng")?;
+    set_seed_in_turn(&mut turn, seed)
 }
 
-pub(crate) fn legacy_seed_value() -> BuiltinResult<u64> {
-    let snapshot = snapshot()?;
+pub(crate) fn set_seed_in_turn(turn: &mut RandomTurn, seed: u64) -> BuiltinResult<RngSnapshot> {
+    apply_snapshot_in_turn(
+        turn,
+        RngSnapshot::new(RandomState::seeded(seed), Some(seed)),
+    )
+}
+
+pub(crate) fn legacy_seed_value_in_turn(turn: &mut RandomTurn) -> BuiltinResult<u64> {
+    let snapshot = snapshot_in_turn(turn)?;
     if let Some(seed) = snapshot.seed {
-        if snapshot.state == mix_seed(seed) {
+        if snapshot.state == RandomState::seeded(seed) {
             return Ok(seed);
         }
     }
@@ -208,100 +178,32 @@ pub(crate) fn legacy_seed_value() -> BuiltinResult<u64> {
     Ok(tokens.insert(snapshot))
 }
 
-pub(crate) fn set_legacy_seed(seed_or_token: u64) -> BuiltinResult<RngSnapshot> {
+pub(crate) fn set_legacy_seed_in_turn(
+    turn: &mut RandomTurn,
+    seed_or_token: u64,
+) -> BuiltinResult<RngSnapshot> {
     if let Some(snapshot) = legacy_tokens()
         .lock()
         .map_err(|_| random_error("rand", "rand: failed to acquire legacy RNG token lock"))?
         .entries
         .get(&seed_or_token)
-        .copied()
+        .cloned()
     {
-        apply_snapshot(snapshot)
+        apply_snapshot_in_turn(turn, snapshot)
     } else {
-        set_seed(seed_or_token)
+        set_seed_in_turn(turn, seed_or_token)
     }
 }
 
-pub(crate) fn set_default() -> BuiltinResult<RngSnapshot> {
-    apply_snapshot(default_snapshot())
+pub(crate) fn set_default_in_turn(turn: &mut RandomTurn) -> BuiltinResult<RngSnapshot> {
+    apply_snapshot_in_turn(turn, default_snapshot())
 }
 
 pub(crate) fn default_snapshot() -> RngSnapshot {
     RngSnapshot::new(
-        DEFAULT_RNG_SEED,
+        RandomState::seeded(DEFAULT_USER_SEED),
         Some(DEFAULT_USER_SEED),
-        RngAlgorithm::RunMatLcg,
     )
-}
-
-/// Reserves one stable random stream per logical `parfor` iteration. Stream
-/// identity depends on the coordinator's current session stream and logical
-/// iteration ordinal, never on worker count, chunking, completion order, or
-/// retry attempts.
-pub fn reserve_parallel_random_streams(
-    context: &crate::context::RuntimeContext,
-    count: usize,
-) -> BuiltinResult<Vec<runmat_execution::ParallelRandomStream>> {
-    if count == 0 {
-        return Ok(Vec::new());
-    }
-    let stream_count = u64::try_from(count).map_err(|_| {
-        random_error(
-            "parfor",
-            "parfor: logical iteration count exceeds the supported random-stream range",
-        )
-    })?;
-    let mut random = context.state().random.try_borrow_mut().map_err(|_| {
-        random_error(
-            "parfor",
-            "parfor: coordinator random stream is already in use",
-        )
-    })?;
-    let root = next_u64_state(&mut random.state);
-    Ok((0..stream_count)
-        .map(
-            |ordinal| runmat_execution::ParallelRandomStream::RunMatLcgV1 {
-                state: mix_seed(root ^ ordinal.wrapping_mul(0x9e37_79b9_7f4a_7c15)),
-            },
-        )
-        .collect())
-}
-
-/// Temporarily installs an iteration-owned stream in one runtime context.
-/// Restoring the coordinator/worker stream on drop keeps random effects scoped
-/// to the exact logical iteration, including error and cancellation exits.
-pub struct ParallelRandomStreamGuard {
-    context: crate::context::RuntimeContext,
-    previous: RngSnapshot,
-}
-
-impl Drop for ParallelRandomStreamGuard {
-    fn drop(&mut self) {
-        let mut state = self.context.state().random.borrow_mut();
-        *state = RuntimeRng::from(self.previous);
-    }
-}
-
-pub fn enter_parallel_random_stream(
-    context: &crate::context::RuntimeContext,
-    stream: runmat_execution::ParallelRandomStream,
-) -> BuiltinResult<ParallelRandomStreamGuard> {
-    let state = match stream {
-        runmat_execution::ParallelRandomStream::RunMatLcgV1 { state } => state,
-    };
-    let mut random = context.state().random.try_borrow_mut().map_err(|_| {
-        random_error(
-            "parfor",
-            "parfor: iteration random stream is already in use",
-        )
-    })?;
-    let previous = random.snapshot();
-    *random = RuntimeRng::from(RngSnapshot::new(state, None, RngAlgorithm::RunMatLcg));
-    drop(random);
-    Ok(ParallelRandomStreamGuard {
-        context: context.clone(),
-        previous,
-    })
 }
 
 /// Generate unbiased offsets in `0..span` from the authoritative 64-bit RNG stream.
@@ -310,6 +212,7 @@ pub fn enter_parallel_random_stream(
 /// rejection before the modulo operation, so no destination value receives an
 /// extra source word when the span does not divide `2^64`.
 pub(crate) fn generate_integer_offsets(
+    turn: &mut RandomTurn,
     span: u128,
     len: usize,
     label: &str,
@@ -320,12 +223,49 @@ pub(crate) fn generate_integer_offsets(
             format!("{label}: integer sampling span must be in 1..=2^64"),
         ));
     }
-    with_rng_state(label, |state| {
+    with_rng_state_mut(turn, label, len != 0, |state| {
         generate_integer_offsets_from_state(&mut state.state, span, len)
     })
 }
 
-fn generate_integer_offsets_from_state(state: &mut u64, span: u128, len: usize) -> Vec<u64> {
+/// Draw one unbiased offset per shrinking Fisher–Yates span under one stream
+/// lock. Rejection consumes additional source words but never biases a span.
+pub(crate) fn generate_permutation_offsets(
+    turn: &mut RandomTurn,
+    n: usize,
+    k: usize,
+) -> BuiltinResult<Vec<usize>> {
+    let mut offsets = Vec::new();
+    offsets.try_reserve_exact(k).map_err(|source| {
+        build_runtime_error("randperm: cannot reserve permutation offsets")
+            .with_builtin("randperm")
+            .with_source(source)
+            .build()
+    })?;
+    with_rng_state_mut(turn, "randperm", k != 0 && n > 1, |state| {
+        for i in 0..k {
+            let span = (n - i) as u64;
+            if span == 1 {
+                offsets.push(0);
+                continue;
+            }
+            let offset = loop {
+                let word = next_u64_state(&mut state.state);
+                if let Some(offset) = unbiased_offset_from_word(word, span) {
+                    break offset;
+                }
+            };
+            offsets.push(offset as usize);
+        }
+    })?;
+    Ok(offsets)
+}
+
+fn generate_integer_offsets_from_state(
+    state: &mut RandomState,
+    span: u128,
+    len: usize,
+) -> Vec<u64> {
     if span == 1 {
         return vec![0; len];
     }
@@ -350,24 +290,17 @@ fn unbiased_offset_from_word(word: u64, span: u64) -> Option<u64> {
     (word >= rejection_floor).then(|| word % span)
 }
 
-pub(crate) fn generate_uniform_single(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
-    generate_uniform(len, label).map(|data| {
-        data.into_iter()
-            .map(|v| {
-                let value = v as f32;
-                value as f64
-            })
-            .collect()
-    })
+pub(crate) fn generate_uniform_single(
+    turn: &mut RandomTurn,
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<f64>> {
+    generate_uniform(turn, len, label).map(|data| data.into_iter().map(single_open_unit).collect())
 }
 
-pub(crate) fn skip_uniform(len: usize, label: &str) -> BuiltinResult<()> {
-    if len == 0 {
-        return Ok(());
-    }
-    with_rng_state(label, |state| {
-        state.state = advance_state(state.state, len as u64);
-    })
+fn single_open_unit(value: f64) -> f64 {
+    // Rounding the largest binary64 values to Single can produce exactly 1.0.
+    (value as f32).min(f32::from_bits(0x3f7f_ffff)) as f64
 }
 
 fn advance_state(state: u64, mut delta: u64) -> u64 {
@@ -390,8 +323,12 @@ fn advance_state(state: u64, mut delta: u64) -> u64 {
     acc_mult.wrapping_mul(state).wrapping_add(acc_plus)
 }
 
-pub(crate) fn generate_complex(len: usize, label: &str) -> BuiltinResult<Vec<(f64, f64)>> {
-    with_rng_state(label, |state| {
+pub(crate) fn generate_complex(
+    turn: &mut RandomTurn,
+    len: usize,
+    label: &str,
+) -> BuiltinResult<Vec<(f64, f64)>> {
+    with_rng_state_mut(turn, label, len != 0, |state| {
         (0..len)
             .map(|_| {
                 let re = next_uniform_state(&mut state.state);
@@ -402,286 +339,39 @@ pub(crate) fn generate_complex(len: usize, label: &str) -> BuiltinResult<Vec<(f6
     })
 }
 
-pub(crate) fn next_uniform_state(state: &mut u64) -> f64 {
-    let word = next_u64_state(state);
-    let bits = word >> RNG_SHIFT;
-    (bits as f64) * RNG_SCALE
+pub(crate) fn next_uniform_state(state: &mut RandomState) -> f64 {
+    match state {
+        RandomState::Mt(_) => state
+            .mt_mut()
+            .expect("MT draw must have a unique admitted state")
+            .next_f64(),
+        RandomState::MtSeed(_) => panic!("MT draw requires admitted materialization"),
+        RandomState::Lcg(value) => {
+            let word = next_lcg_word(value);
+            let bits = word >> RNG_SHIFT;
+            (bits as f64) * RNG_SCALE
+        }
+    }
 }
 
-fn next_u64_state(state: &mut u64) -> u64 {
+fn next_u64_state(state: &mut RandomState) -> u64 {
+    match state {
+        RandomState::Mt(_) => {
+            let engine = state
+                .mt_mut()
+                .expect("MT draw must have a unique admitted state");
+            (u64::from(engine.next_u32()) << 32) | u64::from(engine.next_u32())
+        }
+        RandomState::MtSeed(_) => panic!("MT draw requires admitted materialization"),
+        RandomState::Lcg(value) => next_lcg_word(value),
+    }
+}
+
+fn next_lcg_word(state: &mut u64) -> u64 {
     *state = state
         .wrapping_mul(RNG_MULTIPLIER)
         .wrapping_add(RNG_INCREMENT);
     *state
-}
-
-fn next_normal_pair(state: &mut u64) -> (f64, f64) {
-    let mut u1 = next_uniform_state(state);
-    if u1 <= 0.0 {
-        u1 = MIN_UNIFORM;
-    }
-    let u2 = next_uniform_state(state);
-    let radius = (-2.0 * u1.ln()).sqrt();
-    let angle = 2.0 * PI * u2;
-    (radius * angle.cos(), radius * angle.sin())
-}
-
-pub(crate) fn generate_exponential(mu: f64, len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        (0..len)
-            .map(|_| {
-                let u = next_uniform_state(&mut state.state).max(MIN_UNIFORM);
-                -mu * u.ln()
-            })
-            .collect()
-    })
-}
-
-/// Generate one exponential variate per output element, expanding a scalar mean
-/// or pairing an array of means elementwise with the shared host stream.
-pub(crate) fn generate_exponential_array(
-    mu: &[f64],
-    len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    debug_assert!(mu.len() == 1 || mu.len() == len);
-    with_rng_state(label, |state| {
-        (0..len)
-            .map(|index| {
-                let u = next_uniform_state(&mut state.state).max(MIN_UNIFORM);
-                let mean = if mu.len() == 1 { mu[0] } else { mu[index] };
-                -mean * u.ln()
-            })
-            .collect()
-    })
-}
-
-pub(crate) fn generate_normal_scaled(
-    mu: f64,
-    sigma: f64,
-    len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        let mut out = Vec::with_capacity(len);
-        while out.len() < len {
-            let (z0, z1) = next_normal_pair(&mut state.state);
-            out.push(mu + sigma * z0);
-            if out.len() < len {
-                out.push(mu + sigma * z1);
-            }
-        }
-        out
-    })
-}
-
-pub(crate) fn generate_student_t(nu: &[f64], len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        let mut out = Vec::with_capacity(len);
-        let mut spare_normal = None;
-        for idx in 0..len {
-            let df = if nu.len() == 1 { nu[0] } else { nu[idx] };
-            let z = if let Some(value) = spare_normal.take() {
-                value
-            } else {
-                let (z0, z1) = next_normal_pair(&mut state.state);
-                spare_normal = Some(z1);
-                z0
-            };
-            if df == f64::INFINITY {
-                out.push(z);
-            } else {
-                let chi_square = sample_gamma_shape_scale(&mut state.state, df / 2.0, 2.0);
-                out.push(z / (chi_square / df).sqrt());
-            }
-        }
-        out
-    })
-}
-
-pub(crate) fn generate_gamma_shape_scale(
-    shape: &[f64],
-    scale: &[f64],
-    len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        let mut out = Vec::with_capacity(len);
-        for idx in 0..len {
-            let a = if shape.len() == 1 {
-                shape[0]
-            } else {
-                shape[idx]
-            };
-            let b = if scale.len() == 1 {
-                scale[0]
-            } else {
-                scale[idx]
-            };
-            out.push(if a == 0.0 {
-                0.0
-            } else {
-                sample_gamma_shape_scale(&mut state.state, a, b)
-            });
-        }
-        out
-    })
-}
-
-pub(crate) fn generate_binomial(
-    trials: &[f64],
-    probability: &[f64],
-    len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        let mut out = Vec::with_capacity(len);
-        for idx in 0..len {
-            let n = if trials.len() == 1 {
-                trials[0]
-            } else {
-                trials[idx]
-            };
-            let p = if probability.len() == 1 {
-                probability[0]
-            } else {
-                probability[idx]
-            };
-            out.push(sample_binomial(&mut state.state, n, p));
-        }
-        out
-    })
-}
-
-pub(crate) fn generate_weibull(
-    scale: &[f64],
-    shape: &[f64],
-    len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        let mut out = Vec::with_capacity(len);
-        for idx in 0..len {
-            let a = if scale.len() == 1 {
-                scale[0]
-            } else {
-                scale[idx]
-            };
-            let b = if shape.len() == 1 {
-                shape[0]
-            } else {
-                shape[idx]
-            };
-            let u = next_uniform_state(&mut state.state).max(MIN_UNIFORM);
-            out.push(a * (-u.ln()).powf(1.0 / b));
-        }
-        out
-    })
-}
-
-fn sample_gamma_shape_scale(state: &mut u64, shape: f64, scale: f64) -> f64 {
-    if shape < 1.0 {
-        let u = next_uniform_state(state).max(MIN_UNIFORM);
-        return sample_gamma_shape_scale(state, shape + 1.0, scale) * u.powf(1.0 / shape);
-    }
-
-    let d = shape - 1.0 / 3.0;
-    let c = (1.0 / (9.0 * d)).sqrt();
-    loop {
-        let (x, _) = next_normal_pair(state);
-        let v_base = 1.0 + c * x;
-        if v_base <= 0.0 {
-            continue;
-        }
-        let v = v_base * v_base * v_base;
-        let u = next_uniform_state(state);
-        let x2 = x * x;
-        if u < 1.0 - 0.0331 * x2 * x2 || u.ln() < 0.5 * x2 + d * (1.0 - v + v.ln()) {
-            return scale * d * v;
-        }
-    }
-}
-
-fn sample_binomial(state: &mut u64, trials: f64, probability: f64) -> f64 {
-    if trials == 0.0 || probability == 0.0 {
-        return 0.0;
-    }
-    if probability == 1.0 {
-        return trials;
-    }
-
-    let effective_p = probability.min(1.0 - probability);
-    let mean = trials * effective_p;
-    let sampled = if trials <= 10_000.0 {
-        sample_binomial_direct(state, trials as u64, effective_p)
-    } else if mean < 30.0 {
-        sample_poisson_knuth(state, mean).min(trials)
-    } else {
-        sample_binomial_normal_approx(state, trials, effective_p)
-    };
-
-    if probability <= 0.5 {
-        sampled
-    } else {
-        trials - sampled
-    }
-}
-
-fn sample_binomial_direct(state: &mut u64, trials: u64, probability: f64) -> f64 {
-    let mut successes = 0_u64;
-    for _ in 0..trials {
-        if next_uniform_state(state) < probability {
-            successes += 1;
-        }
-    }
-    successes as f64
-}
-
-fn sample_poisson_knuth(state: &mut u64, lambda: f64) -> f64 {
-    if lambda <= 0.0 {
-        return 0.0;
-    }
-    let threshold = (-lambda).exp();
-    let mut product = 1.0;
-    let mut count = 0_u64;
-    loop {
-        count += 1;
-        product *= next_uniform_state(state).max(MIN_UNIFORM);
-        if product <= threshold {
-            return (count - 1) as f64;
-        }
-    }
-}
-
-fn sample_binomial_normal_approx(state: &mut u64, trials: f64, probability: f64) -> f64 {
-    let mean = trials * probability;
-    let variance = mean * (1.0 - probability);
-    if variance <= 0.0 {
-        return mean.round().clamp(0.0, trials);
-    }
-    let (z, _) = next_normal_pair(state);
-    (mean + variance.sqrt() * z).round().clamp(0.0, trials)
-}
-
-pub(crate) fn generate_uniform_scaled(
-    a: f64,
-    b: f64,
-    len: usize,
-    label: &str,
-) -> BuiltinResult<Vec<f64>> {
-    with_rng_state(label, |state| {
-        (0..len)
-            .map(|_| a + (b - a) * next_uniform_state(&mut state.state))
-            .collect()
-    })
-}
-
-pub(crate) fn generate_normal_complex(len: usize, label: &str) -> BuiltinResult<Vec<(f64, f64)>> {
-    with_rng_state(label, |state| {
-        (0..len)
-            .map(|_| next_normal_pair(&mut state.state))
-            .collect()
-    })
 }
 
 #[cfg(test)]
@@ -702,7 +392,7 @@ pub(crate) fn reset_rng() {
 
 #[cfg(test)]
 pub(crate) fn expected_exponential_sequence(mu: f64, count: usize) -> Vec<f64> {
-    let mut seed = DEFAULT_RNG_SEED;
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
     let mut seq = Vec::with_capacity(count);
     for _ in 0..count {
         let u = next_uniform_state(&mut seed).max(MIN_UNIFORM);
@@ -713,9 +403,13 @@ pub(crate) fn expected_exponential_sequence(mu: f64, count: usize) -> Vec<f64> {
 
 #[cfg(test)]
 pub(crate) fn expected_normal_scaled_sequence(mu: f64, sigma: f64, count: usize) -> Vec<f64> {
-    let mut seed = DEFAULT_RNG_SEED;
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
     let mut seq = Vec::with_capacity(count);
     while seq.len() < count {
+        if matches!(&seed, RandomState::Mt(_)) {
+            seq.push(mu + sigma * next_normal(&mut seed));
+            continue;
+        }
         let (z0, z1) = next_normal_pair(&mut seed);
         seq.push(mu + sigma * z0);
         if seq.len() < count {
@@ -727,7 +421,7 @@ pub(crate) fn expected_normal_scaled_sequence(mu: f64, sigma: f64, count: usize)
 
 #[cfg(test)]
 pub(crate) fn expected_uniform_scaled_sequence(a: f64, b: f64, count: usize) -> Vec<f64> {
-    let mut seed = DEFAULT_RNG_SEED;
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
     let mut seq = Vec::with_capacity(count);
     for _ in 0..count {
         seq.push(a + (b - a) * next_uniform_state(&mut seed));
@@ -737,7 +431,7 @@ pub(crate) fn expected_uniform_scaled_sequence(a: f64, b: f64, count: usize) -> 
 
 #[cfg(test)]
 pub(crate) fn expected_uniform_sequence(count: usize) -> Vec<f64> {
-    let mut seed = DEFAULT_RNG_SEED;
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
     let mut seq = Vec::with_capacity(count);
     for _ in 0..count {
         seq.push(next_uniform_state(&mut seed));
@@ -747,13 +441,31 @@ pub(crate) fn expected_uniform_sequence(count: usize) -> Vec<f64> {
 
 #[cfg(test)]
 pub(crate) fn expected_integer_offset_sequence(span: u128, count: usize) -> Vec<u64> {
-    let mut seed = DEFAULT_RNG_SEED;
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
     generate_integer_offsets_from_state(&mut seed, span, count)
 }
 
 #[cfg(test)]
+pub(crate) fn expected_permutation_offsets(n: usize, k: usize) -> Vec<usize> {
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
+    (0..k)
+        .map(|i| {
+            let span = (n - i) as u64;
+            if span == 1 {
+                return 0;
+            }
+            loop {
+                if let Some(offset) = unbiased_offset_from_word(next_u64_state(&mut seed), span) {
+                    break offset as usize;
+                }
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
 pub(crate) fn expected_complex_sequence(count: usize) -> Vec<(f64, f64)> {
-    let mut seed = DEFAULT_RNG_SEED;
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
     let mut seq = Vec::with_capacity(count);
     for _ in 0..count {
         let re = next_uniform_state(&mut seed);
@@ -765,24 +477,18 @@ pub(crate) fn expected_complex_sequence(count: usize) -> Vec<(f64, f64)> {
 
 #[cfg(test)]
 pub(crate) fn expected_normal_sequence(count: usize) -> Vec<f64> {
-    let mut seed = DEFAULT_RNG_SEED;
+    let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
     let mut seq = Vec::with_capacity(count);
     while seq.len() < count {
+        if matches!(&seed, RandomState::Mt(_)) {
+            seq.push(next_normal(&mut seed));
+            continue;
+        }
         let (z0, z1) = next_normal_pair(&mut seed);
         seq.push(z0);
         if seq.len() < count {
             seq.push(z1);
         }
-    }
-    seq
-}
-
-#[cfg(test)]
-pub(crate) fn expected_complex_normal_sequence(count: usize) -> Vec<(f64, f64)> {
-    let mut seed = DEFAULT_RNG_SEED;
-    let mut seq = Vec::with_capacity(count);
-    for _ in 0..count {
-        seq.push(next_normal_pair(&mut seed));
     }
     seq
 }
@@ -814,10 +520,17 @@ mod integer_offset_tests {
     }
 
     #[test]
+    fn single_rounding_keeps_half_open_uniform_range() {
+        let near_one = f64::from_bits(1.0_f64.to_bits() - 1);
+        assert!(single_open_unit(near_one) < 1.0);
+        assert_eq!(single_open_unit(0.0), 0.0);
+    }
+
+    #[test]
     fn full_width_offsets_preserve_every_rng_word() {
-        let mut state = DEFAULT_RNG_SEED;
+        let mut state = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
         let expected: Vec<u64> = (0..32).map(|_| next_u64_state(&mut state)).collect();
-        let mut state = DEFAULT_RNG_SEED;
+        let mut state = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
         assert_eq!(
             generate_integer_offsets_from_state(&mut state, 1_u128 << 64, 32),
             expected
@@ -842,6 +555,11 @@ mod parallel_stream_tests {
     use super::*;
     use crate::execution::RuntimeExecutionService;
 
+    fn generate_uniform(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
+        let mut turn = try_acquire_turn(None, label)?;
+        super::generate_uniform(&mut turn, len, label)
+    }
+
     fn context() -> crate::context::RuntimeContext {
         crate::context::RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
     }
@@ -854,7 +572,7 @@ mod parallel_stream_tests {
             .iter()
             .map(|stream| {
                 let _scope = context.enter();
-                let _stream = enter_parallel_random_stream(context, *stream).unwrap();
+                let _stream = enter_parallel_random_stream(context, stream.clone()).unwrap();
                 generate_uniform(3, "test").unwrap()
             })
             .collect()
@@ -875,6 +593,10 @@ mod parallel_stream_tests {
         let first_streams = reserve_parallel_random_streams(&first, 4).unwrap();
         let second_streams = reserve_parallel_random_streams(&second, 4).unwrap();
         assert_eq!(first_streams, second_streams);
+        assert!(first_streams.iter().all(|stream| matches!(
+            stream,
+            runmat_execution::ParallelRandomStream::Mt19937InitialSeedV1 { .. }
+        )));
 
         let in_order = iteration_values(&first, &first_streams);
         let mut reverse_streams = second_streams.clone();
@@ -892,5 +614,80 @@ mod parallel_stream_tests {
             generate_uniform(2, "test").unwrap()
         };
         assert_eq!(first_parent, second_parent);
+    }
+
+    #[test]
+    fn versioned_lcg_parallel_replay_preserves_old_word_conversion() {
+        let context = context();
+        let parent = with_rng_state_in(Some(&context), "test", |rng| rng.snapshot()).unwrap();
+        let stream = runmat_execution::ParallelRandomStream::RunMatLcgV1 { state: 41 };
+        {
+            let _context = context.enter();
+            let _scope = enter_parallel_random_stream(&context, stream).unwrap();
+            let mut word_state = 41_u64;
+            let expected = (next_lcg_word(&mut word_state) >> RNG_SHIFT) as f64 * RNG_SCALE;
+            assert_eq!(generate_uniform(1, "test").unwrap(), vec![expected]);
+        }
+        assert_eq!(
+            with_rng_state_in(Some(&context), "test", |rng| rng.snapshot()).unwrap(),
+            parent
+        );
+    }
+
+    #[test]
+    fn new_lcg_parallel_range_replays_the_existing_iteration_states() {
+        let compact_context = context();
+        let vector_context = context();
+        let compact_guard = enter_parallel_random_stream(
+            &compact_context,
+            runmat_execution::ParallelRandomStream::RunMatLcgV1 { state: 41 },
+        )
+        .unwrap();
+        let vector_guard = enter_parallel_random_stream(
+            &vector_context,
+            runmat_execution::ParallelRandomStream::RunMatLcgV1 { state: 41 },
+        )
+        .unwrap();
+        let compact = futures::executor::block_on(reserve_parallel_randomness_context_async(
+            &compact_context,
+            5,
+        ))
+        .unwrap();
+        let vector = reserve_parallel_random_streams(&vector_context, 5).unwrap();
+        assert!(matches!(
+            &compact,
+            runmat_execution::ParallelRandomnessContext::RunMatLcgStateRangeV1 { .. }
+        ));
+        for (index, expected) in vector.into_iter().enumerate() {
+            assert_eq!(compact.deterministic_stream(index), Some(expected));
+        }
+        assert_eq!(
+            with_rng_state_in(Some(&compact_context), "test", |rng| rng.snapshot()).unwrap(),
+            with_rng_state_in(Some(&vector_context), "test", |rng| rng.snapshot()).unwrap()
+        );
+        drop((compact_guard, vector_guard));
+    }
+
+    #[test]
+    fn scoped_parallel_draws_never_replace_coordinator_state() {
+        let coordinator = context();
+        let streams = reserve_parallel_random_streams(&coordinator, 1).unwrap();
+        let parent_after_reservation =
+            with_rng_state_in(Some(&coordinator), "test", |rng| rng.snapshot()).unwrap();
+        let task = coordinator.clone().with_parallel_random_scope().unwrap();
+        {
+            let _scope = task.enter();
+            let _stream = enter_parallel_random_stream(&task, streams[0].clone()).unwrap();
+            let first = generate_uniform(3, "test").unwrap();
+            assert_eq!(first.len(), 3);
+            assert_eq!(
+                with_rng_state_in(Some(&coordinator), "test", |rng| rng.snapshot()).unwrap(),
+                parent_after_reservation
+            );
+        }
+        assert_eq!(
+            with_rng_state_in(Some(&coordinator), "test", |rng| rng.snapshot()).unwrap(),
+            parent_after_reservation
+        );
     }
 }

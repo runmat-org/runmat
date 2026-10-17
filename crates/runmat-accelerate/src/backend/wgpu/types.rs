@@ -63,6 +63,7 @@ pub enum UnaryOpCode {
     Gammaln = 36,
     Round = 37,
     Erfcinv = 38,
+    Spacing = 39,
 }
 
 #[derive(Clone, Copy)]

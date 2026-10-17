@@ -171,6 +171,10 @@ impl Instr {
                 visit(*index, VmSlotAccess::Other);
                 visit_specs(specs, &mut visit);
             }
+            Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(_, specs, index) => {
+                visit(*index, VmSlotAccess::Other);
+                visit_specs(specs, &mut visit);
+            }
             Instr::LoadConst(..)
             | Instr::LoadInt(..)
             | Instr::LoadComplex(..)

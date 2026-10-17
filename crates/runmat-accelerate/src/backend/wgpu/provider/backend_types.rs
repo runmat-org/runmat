@@ -154,6 +154,7 @@ impl BufferEntry {
 
 pub(super) struct NumericBufferRegistration {
     pub(super) shape: Vec<usize>,
+    /// Physical scalar components; complex interleaved values use two each.
     pub(super) len: usize,
     pub(super) physical_element_type: runmat_accelerate_api::NumericElementType,
     pub(super) storage: GpuTensorStorage,

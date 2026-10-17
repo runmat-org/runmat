@@ -247,7 +247,8 @@ pub(crate) async fn lhsdesign_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
     ensure_extensions(&args)?;
     let args = gather_args(args).await?;
     let options = parse_args(args)?;
-    let design = compute_lhsdesign(options)?;
+    let mut turn = random::acquire_turn(None, NAME).await?;
+    let design = compute_lhsdesign(&mut turn, options)?;
     Tensor::new(design, vec![options.n, options.p])
         .map(tensor::tensor_into_value)
         .map_err(|err| internal(format!("lhsdesign: {err}")))
@@ -465,7 +466,10 @@ fn parse_criterion(value: &Value) -> BuiltinResult<Criterion> {
     }
 }
 
-fn compute_lhsdesign(options: LhsOptions) -> BuiltinResult<Vec<f64>> {
+fn compute_lhsdesign(
+    turn: &mut random::RandomTurn,
+    options: LhsOptions,
+) -> BuiltinResult<Vec<f64>> {
     let len = options
         .n
         .checked_mul(options.p)
@@ -483,7 +487,7 @@ fn compute_lhsdesign(options: LhsOptions) -> BuiltinResult<Vec<f64>> {
     let mut best = Vec::new();
     let mut best_score = f64::NEG_INFINITY;
     for _ in 0..candidates {
-        let candidate = candidate_design(options.n, options.p, len, smooth)?;
+        let candidate = candidate_design(turn, options.n, options.p, len, smooth)?;
         let score = design_score(&candidate, options.n, options.p, options.criterion);
         if best.is_empty() || score > best_score {
             best_score = score;
@@ -521,15 +525,21 @@ fn validate_score_budget(
     Ok(())
 }
 
-fn candidate_design(n: usize, p: usize, len: usize, smooth: bool) -> BuiltinResult<Vec<f64>> {
+fn candidate_design(
+    turn: &mut random::RandomTurn,
+    n: usize,
+    p: usize,
+    len: usize,
+    smooth: bool,
+) -> BuiltinResult<Vec<f64>> {
     let mut data = Vec::new();
     data.try_reserve_exact(len)
         .map_err(|_| invalid("lhsdesign: requested design is too large"))?;
     data.resize(len, 0.0);
     for col in 0..p {
-        let permutation = random_permutation(n)?;
+        let permutation = random_permutation(turn, n)?;
         let jitter = if smooth {
-            Some(random::generate_uniform(n, NAME)?)
+            Some(random::generate_uniform(turn, n, NAME)?)
         } else {
             None
         };
@@ -541,8 +551,8 @@ fn candidate_design(n: usize, p: usize, len: usize, smooth: bool) -> BuiltinResu
     Ok(data)
 }
 
-fn random_permutation(n: usize) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(n.saturating_sub(1), NAME)?;
+fn random_permutation(turn: &mut random::RandomTurn, n: usize) -> BuiltinResult<Vec<usize>> {
+    let uniforms = random::generate_uniform(turn, n.saturating_sub(1), NAME)?;
     let mut indices = Vec::new();
     indices
         .try_reserve_exact(n)

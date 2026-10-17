@@ -47,7 +47,9 @@ fn fitted_poisson_sampling_polls_between_draws_and_within_inverse_search() {
         observations: f64::NAN,
     };
     let calls = Cell::new(0);
-    let error = random_samples(&fit, 4, || {
+    let mut turn =
+        crate::builtins::common::random::try_acquire_turn(None, RANDOM_NAME).expect("random turn");
+    let error = random_samples(&mut turn, &fit, 4, || {
         calls.set(calls.get() + 1);
         if calls.get() > 2 {
             Err(invalid_for(RANDOM_NAME, "cancelled by fixture"))

@@ -49,6 +49,7 @@ pub(crate) use constant_identity::exact_constant_digest;
 #[path = "semantics/invocation_leaves.rs"]
 pub(super) mod invocation_leaves;
 use invocation_leaves::FusionInvocationLeaves;
+pub(crate) use invocation_leaves::{authenticate_resident_input, FloatingFusionEligibility};
 #[path = "semantics/fact_index.rs"]
 pub(super) mod fact_index;
 use fact_index::FactIndex;

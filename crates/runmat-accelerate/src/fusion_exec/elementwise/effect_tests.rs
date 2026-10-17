@@ -250,6 +250,108 @@ fn unavailable_fused_shader_defers_explicit_source_to_original_provider_operatio
     });
 }
 
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn valid_ineligible_inputs_decline_only_after_all_resident_authority_is_validated() {
+    runmat_gc::gc_test_context(|| {
+        let provider = FailingProvider::with_precision(usize::MAX, ProviderPrecision::F32);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let logical = provider
+            .allocations
+            .allocate_logical_zeroed(vec![2], ProviderPrecision::F32)
+            .unwrap();
+        let complex = provider
+            .allocations
+            .allocate_zeroed(
+                vec![2],
+                runmat_accelerate_api::NumericElementType::F32,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            )
+            .unwrap();
+        let stale = provider
+            .allocations
+            .allocate_zeroed(
+                vec![2],
+                runmat_accelerate_api::NumericElementType::F32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        stale.probe.mark_unavailable();
+        let source = plan();
+        for input in [logical.handle.clone(), complex.handle] {
+            let request = FusionExecutionRequest {
+                plan: &source,
+                inputs: vec![Value::GpuTensor(input), Value::Num(2.0)],
+                placement: None,
+                runtime: None,
+            };
+            assert!(matches!(
+                futures::executor::block_on(execute_elementwise_placed(request)),
+                Ok(FusionExecutionOutcome::SharedRuntime(_))
+            ));
+        }
+        for first in [
+            Value::GpuTensor(logical.handle),
+            Value::String("host-only".into()),
+        ] {
+            let request = FusionExecutionRequest {
+                plan: &source,
+                inputs: vec![first, Value::GpuTensor(stale.handle.clone())],
+                placement: None,
+                runtime: None,
+            };
+            let error = match futures::executor::block_on(execute_elementwise_placed(request)) {
+                Err(error) => error,
+                Ok(_) => panic!("a prior ineligible input must not mask a stale resident input"),
+            };
+            assert!(error
+                .to_string()
+                .contains("invalid floating metadata or provider ownership"));
+        }
+        let foreign_provider = FailingProvider::with_precision(usize::MAX, ProviderPrecision::F32);
+        // SAFETY: both providers are leaked fixtures with privately minted,
+        // distinct device identities. Registration does not select the foreign
+        // provider for this invocation.
+        unsafe { runmat_accelerate_api::register_device_provider(foreign_provider) };
+        let foreign = foreign_provider
+            .allocations
+            .allocate_zeroed(
+                vec![2],
+                runmat_accelerate_api::NumericElementType::F32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        for first in [
+            Value::GpuTensor(
+                provider
+                    .allocations
+                    .allocate_logical_zeroed(vec![2], ProviderPrecision::F32)
+                    .unwrap()
+                    .handle,
+            ),
+            Value::String("host-only".into()),
+        ] {
+            let request = FusionExecutionRequest {
+                plan: &source,
+                inputs: vec![first, Value::GpuTensor(foreign.handle.clone())],
+                placement: None,
+                runtime: None,
+            };
+            let error = match futures::executor::block_on(execute_elementwise_placed(request)) {
+                Err(error) => error,
+                Ok(_) => panic!("a prior ineligible input must not mask a foreign resident input"),
+            };
+            assert!(error
+                .to_string()
+                .contains("invalid floating metadata or provider ownership"));
+        }
+        assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+        assert_eq!(foreign_provider.uploads.load(Ordering::SeqCst), 0);
+        assert_eq!(foreign_provider.dispatches.load(Ordering::SeqCst), 0);
+    });
+}
+
 fn invoke(provider: &'static FailingProvider) -> ProviderExecutionError {
     runmat_gc::gc_test_context(|| {
         let _selected = ThreadProviderGuard::set(Some(provider));

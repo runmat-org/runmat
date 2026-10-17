@@ -278,7 +278,10 @@ fn explicit_single_weights_select_single_for_missing_bias_and_default_state() {
 
 #[test]
 fn orthogonal_initializer_uses_unit_columns_for_tall_recurrent_matrix() {
+    let mut turn = crate::builtins::common::random::try_acquire_turn(None, "test")
+        .expect("ordered random turn");
     let Value::Tensor(matrix) = generate::builtin(
+        &mut turn,
         plan::BuiltinInitializer::Orthogonal,
         K::Lstm,
         &[8, 2],

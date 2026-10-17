@@ -1,10 +1,12 @@
+use num_complex::Complex64;
 use std::alloc::{alloc, Layout};
 use std::fmt;
 use std::sync::Arc;
 
+use runmat_accelerate_api::HostNumericDataView;
 use runmat_value::{
     ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostAllocationReservation,
-    ExactHostNumericAllocation, ExactHostNumericAllocationError, NumericDType,
+    ExactHostNumericAllocation, ExactHostNumericAllocationError, NumericDType, NumericScalar,
 };
 
 use super::receipt::AllocationFence;
@@ -92,6 +94,52 @@ impl ExactHostAllocationPermit for ScratchPermit {
 /// exposed, so retained Values must use the receipt's output permit instead.
 pub struct HostNumericWorkspace {
     allocation: ExactHostNumericAllocation,
+    dtype: NumericDType,
+}
+
+/// Safe complex64 view of one exactly claimed interleaved F64 workspace.
+/// No alternate complex vector or byte reinterpretation is created.
+pub struct HostComplexWorkspace {
+    numeric: HostNumericWorkspace,
+    len: usize,
+}
+
+impl HostComplexWorkspace {
+    pub(super) fn new(
+        len: usize,
+        stage: Arc<ManagedHostEffectStageReservation>,
+        fence: AllocationFence,
+    ) -> Result<Self, HostAllocationError> {
+        let lanes = len.checked_mul(2).ok_or(HostAllocationError::Overflow)?;
+        Ok(Self {
+            numeric: HostNumericWorkspace::new(NumericDType::F64, lanes, stage, fence)?,
+            len,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    pub fn get(&self, index: usize) -> Option<Complex64> {
+        let lanes = self.numeric.as_f64_slice()?;
+        let start = index.checked_mul(2)?;
+        Some(Complex64::new(*lanes.get(start)?, *lanes.get(start + 1)?))
+    }
+
+    pub fn set(&mut self, index: usize, value: Complex64) -> Option<()> {
+        let lanes = self.numeric.as_f64_slice_mut()?;
+        let start = index.checked_mul(2)?;
+        let end = start.checked_add(2)?;
+        let pair = lanes.get_mut(start..end)?;
+        pair[0] = value.re;
+        pair[1] = value.im;
+        Some(())
+    }
 }
 
 impl HostNumericWorkspace {
@@ -103,7 +151,26 @@ impl HostNumericWorkspace {
     ) -> Result<Self, HostAllocationError> {
         let permit = ScratchPermit { stage, fence };
         let allocation = ExactHostNumericAllocation::new(dtype, len, &permit)?;
-        Ok(Self { allocation })
+        Ok(Self { allocation, dtype })
+    }
+
+    pub fn set_value(&mut self, index: usize, value: NumericScalar) -> Result<(), String> {
+        self.allocation.set_value(index, value)
+    }
+
+    pub fn data_view(&self) -> HostNumericDataView<'_> {
+        match self.dtype {
+            NumericDType::F64 => HostNumericDataView::F64(self.allocation.as_f64_slice().unwrap()),
+            NumericDType::F32 => HostNumericDataView::F32(self.allocation.as_f32_slice().unwrap()),
+            NumericDType::I8 => HostNumericDataView::I8(self.allocation.as_i8_slice().unwrap()),
+            NumericDType::I16 => HostNumericDataView::I16(self.allocation.as_i16_slice().unwrap()),
+            NumericDType::I32 => HostNumericDataView::I32(self.allocation.as_i32_slice().unwrap()),
+            NumericDType::I64 => HostNumericDataView::I64(self.allocation.as_i64_slice().unwrap()),
+            NumericDType::U8 => HostNumericDataView::U8(self.allocation.as_u8_slice().unwrap()),
+            NumericDType::U16 => HostNumericDataView::U16(self.allocation.as_u16_slice().unwrap()),
+            NumericDType::U32 => HostNumericDataView::U32(self.allocation.as_u32_slice().unwrap()),
+            NumericDType::U64 => HostNumericDataView::U64(self.allocation.as_u64_slice().unwrap()),
+        }
     }
 
     pub fn as_f64_slice_mut(&mut self) -> Option<&mut [f64]> {

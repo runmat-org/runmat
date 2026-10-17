@@ -7,8 +7,8 @@ use crate::fusion::semantics::preparation_resources::{
     ImageStageCardinality, PreparationBoundError,
 };
 use runmat_accelerate_api::{
-    power_service::PowerTypedScalarProjection, AccelProvider, GpuTensorHandle,
-    ProviderImageOutputCall, ProviderOrderedRealMeanStep, ProviderRepresentation,
+    power_service::PowerTypedScalarProjection, GpuTensorHandle, ProviderImageOutputCall,
+    ProviderOrderedRealMeanStep, ProviderRepresentation,
 };
 use runmat_runtime::context::host_allocation::HostAllocationPlan;
 
@@ -70,55 +70,6 @@ pub(super) fn cold_cache_retained_bytes(
         .and_then(|bytes| bytes.checked_add(HostAllocationPlan::retained_view_issuer_bytes().ok()?))
         .and_then(|bytes| bytes.checked_add(metadata))
         .ok_or(PreparationBoundError::Overflow)
-}
-
-pub(super) fn selected_registration_retained_bytes(
-    provider: &dyn AccelProvider,
-    rank: usize,
-    registrations: usize,
-    derived_views: usize,
-) -> Result<Option<u64>, PreparationBoundError> {
-    let Some(payload) = provider.registered_output_host_metadata(rank) else {
-        return Ok(None);
-    };
-    let Some(table_backing) = provider.output_registration_table_upper_bytes(registrations) else {
-        return Ok(None);
-    };
-    let record = HostAllocationPlan::retained_metadata_bytes(payload.record_payload_bytes)
-        .map_err(|_| PreparationBoundError::Overflow)?;
-    let lease = HostAllocationPlan::retained_metadata_bytes(payload.lease_payload_bytes)
-        .map_err(|_| PreparationBoundError::Overflow)?;
-    let view = HostAllocationPlan::retained_view_bytes(payload.view_payload_bytes)
-        .map_err(|_| PreparationBoundError::Overflow)?;
-    let registrations =
-        u64::try_from(registrations).map_err(|_| PreparationBoundError::Overflow)?;
-    let derived_views =
-        u64::try_from(derived_views).map_err(|_| PreparationBoundError::Overflow)?;
-    let table_backing = if table_backing == 0 {
-        0
-    } else {
-        HostAllocationPlan::retained_metadata_bytes(table_backing)
-            .map_err(|_| PreparationBoundError::Overflow)?
-    };
-    let bytes = record
-        .checked_add(view)
-        .and_then(|per| per.checked_add(lease))
-        .and_then(|per| per.checked_mul(registrations))
-        .and_then(|base| base.checked_add(view.checked_mul(derived_views)?))
-        .and_then(|base| base.checked_add(table_backing))
-        .and_then(|base| base.checked_add(HostAllocationPlan::retained_view_issuer_bytes().ok()?))
-        .ok_or(PreparationBoundError::Overflow)?;
-    Ok(Some(bytes))
-}
-
-pub(super) fn selected_registration_preparation_bytes(provider: &dyn AccelProvider) -> Option<u64> {
-    let provider_bytes = provider.output_registration_preparation_host_bytes()?;
-    let permit =
-        std::mem::size_of::<runmat_runtime::context::host_allocation::HostRetainedViewPermit>()
-            .checked_add(std::mem::align_of::<
-                runmat_runtime::context::host_allocation::HostRetainedViewPermit,
-            >())?;
-    provider_bytes.checked_add(u64::try_from(permit).ok()?)
 }
 
 pub(super) fn requested_bytes(

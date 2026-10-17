@@ -13,7 +13,8 @@ use runmat_value::{CharArray, StructValue, Value};
 
 use super::authority::MatFsPath;
 use crate::builtins::introspection::object_serialization::{
-    classify_mat_load_restoration, restore_value_from_mat_load, MatLoadRestoration,
+    classify_mat_load_restoration, restore_value_from_mat_load,
+    restore_value_from_mat_load_in_context, MatLoadRestoration,
 };
 use crate::context::host_effect::HostEffectResourceLivenessLease;
 use crate::execution::{RootedResult, RootedValue};

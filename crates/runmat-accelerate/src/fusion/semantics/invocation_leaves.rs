@@ -14,6 +14,7 @@ use super::{FusionGroupPlan, FusionOp};
 #[path = "resident_input.rs"]
 mod resident_input;
 use resident_input::FusionResidentInput;
+pub(crate) use resident_input::{authenticate_resident_input, FloatingFusionEligibility};
 
 pub(super) fn resident_slot_bytes(
     count: usize,

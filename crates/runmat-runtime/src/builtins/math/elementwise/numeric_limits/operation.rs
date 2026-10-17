@@ -13,6 +13,10 @@ pub(super) enum LimitOperation {
 }
 
 impl LimitOperation {
+    pub(super) const EPS: Self = Self::Floating {
+        name: "eps",
+        kind: FloatingLimitKind::SpacingAtOne,
+    };
     pub(super) const INTMAX: Self = Self::Integer {
         name: "intmax",
         kind: IntegerLimitKind::Maximum,

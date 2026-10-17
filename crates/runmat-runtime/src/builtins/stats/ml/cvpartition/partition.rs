@@ -5,6 +5,7 @@ pub(super) fn cvpartition_compute(
     second: Value,
     rest: Vec<Value>,
     admitted: AdmittedPartition,
+    turn: Option<&mut random::RandomTurn>,
 ) -> BuiltinResult<PartitionSpec> {
     if admitted.custom_first {
         return custom_partition(second);
@@ -55,11 +56,21 @@ pub(super) fn cvpartition_compute(
     match kind {
         PartitionKind::KFold => {
             let k = positive_integer(value.as_ref().expect("kfold value"), "KFold")?;
-            kfold_partition(n, k, labels)
+            kfold_partition(
+                n,
+                k,
+                labels,
+                turn.expect("random method has an ordered turn"),
+            )
         }
         PartitionKind::Holdout => {
             let test_count = holdout_count(value.as_ref().expect("holdout value"), n)?;
-            holdout_partition(n, test_count, labels)
+            holdout_partition(
+                n,
+                test_count,
+                labels,
+                turn.expect("random method has an ordered turn"),
+            )
         }
         PartitionKind::Leaveout => leaveout_partition(n),
         PartitionKind::Resubstitution => resubstitution_partition(n),
@@ -71,6 +82,7 @@ pub(super) fn kfold_partition(
     n: usize,
     k: usize,
     labels: Option<&[Option<PartitionLabel>]>,
+    turn: &mut random::RandomTurn,
 ) -> BuiltinResult<PartitionSpec> {
     if n == 0 {
         return Err(invalid_argument("cvpartition: n must be positive"));
@@ -90,12 +102,12 @@ pub(super) fn kfold_partition(
             ));
         }
         for indices in grouped_indices(labels).values() {
-            for (offset, row) in shuffled_indices(indices)?.iter().enumerate() {
+            for (offset, row) in shuffled_indices(indices, turn)?.iter().enumerate() {
                 test_sets[row + n * (offset % k)] = 1;
             }
         }
     } else {
-        for (offset, row) in shuffled_indices(&(0..n).collect::<Vec<_>>())?
+        for (offset, row) in shuffled_indices(&(0..n).collect::<Vec<_>>(), turn)?
             .iter()
             .enumerate()
         {
@@ -117,6 +129,7 @@ pub(super) fn holdout_partition(
     n: usize,
     test_count: usize,
     labels: Option<&[Option<PartitionLabel>]>,
+    turn: &mut random::RandomTurn,
 ) -> BuiltinResult<PartitionSpec> {
     if n == 0 {
         return Err(invalid_argument("cvpartition: n must be positive"));
@@ -134,14 +147,14 @@ pub(super) fn holdout_partition(
         for indices in groups.values() {
             let group_target = ((indices.len() * test_count) + (n / 2)) / n;
             let group_target = group_target.min(indices.len());
-            for row in shuffled_indices(indices)?.iter().take(group_target) {
+            for row in shuffled_indices(indices, turn)?.iter().take(group_target) {
                 if selected < test_count {
                     test_sets[*row] = 1;
                     selected += 1;
                 }
             }
         }
-        for row in shuffled_indices(&(0..n).collect::<Vec<_>>())? {
+        for row in shuffled_indices(&(0..n).collect::<Vec<_>>(), turn)? {
             if selected >= test_count {
                 break;
             }
@@ -151,7 +164,7 @@ pub(super) fn holdout_partition(
             }
         }
     } else {
-        for row in shuffled_indices(&(0..n).collect::<Vec<_>>())?
+        for row in shuffled_indices(&(0..n).collect::<Vec<_>>(), turn)?
             .into_iter()
             .take(test_count)
         {
@@ -169,12 +182,15 @@ pub(super) fn holdout_partition(
     })
 }
 
-pub(super) fn shuffled_indices(indices: &[usize]) -> BuiltinResult<Vec<usize>> {
+pub(super) fn shuffled_indices(
+    indices: &[usize],
+    turn: &mut random::RandomTurn,
+) -> BuiltinResult<Vec<usize>> {
     let mut output = indices.to_vec();
     if output.len() <= 1 {
         return Ok(output);
     }
-    let uniforms = random::generate_uniform(output.len() - 1, CVPARTITION_NAME)?;
+    let uniforms = random::generate_uniform(turn, output.len() - 1, CVPARTITION_NAME)?;
     for (index, uniform) in uniforms.into_iter().enumerate() {
         let span = output.len() - index;
         let offset = ((uniform * span as f64).floor() as usize).min(span - 1);

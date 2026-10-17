@@ -1035,6 +1035,21 @@ pub struct RandomScalarParams {
     pub key1: u32,
 }
 
+/// Exact request-local counter and key for Threefry4x64_20. Four low-to-high
+/// words encode the 128-bit logical item position; no provider RNG mutex.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomChildParams {
+    pub offset: u32,
+    pub chunk: u32,
+    pub first0: u32,
+    pub first1: u32,
+    pub first2: u32,
+    pub first3: u32,
+    pub seed0: u32,
+    pub seed1: u32,
+}
+
 /// Params for parameterized distribution samplers (exprnd, normrnd, unifrnd).
 /// param1/param2 carry distribution-specific scalars (mu, sigma, a, b, etc.).
 #[repr(C)]

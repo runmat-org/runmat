@@ -2201,7 +2201,7 @@ fn builtin_policy(name: &str) -> Option<BuiltinPolicy> {
     map.get(&name.to_ascii_lowercase()).copied()
 }
 
-fn auto_enabled() -> bool {
+pub(crate) fn auto_enabled() -> bool {
     if let Some(flag) = env_bool("RUNMAT_ACCEL_AUTO_OFFLOAD") {
         return flag;
     }

@@ -4,14 +4,14 @@
 //! advances the stream once, then numerical work runs without its borrow or
 //! mutex. Abandoning that work does not rewind draws another call may use.
 
-use super::{advance_state, with_rng_state_in, RngAlgorithm};
+use super::{turn::RandomTurn, RandomState};
 use crate::context::RuntimeContext;
 use crate::execution::ExecutionServiceError;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(super) struct DrawReservation {
-    pub(super) first_state: u64,
-    pub(super) following_state: u64,
+    pub(super) first_state: RandomState,
+    pub(super) following_state: RandomState,
 }
 
 pub(super) fn checked_length(len: usize, label: &str) -> BuiltinResult<u64> {
@@ -37,21 +37,27 @@ pub(super) fn output_storage(len: usize, label: &str) -> BuiltinResult<Vec<f64>>
 }
 
 pub(super) fn reserve(
+    turn: &mut RandomTurn,
     draws: u64,
     label: &str,
-    context: Option<&RuntimeContext>,
 ) -> BuiltinResult<DrawReservation> {
-    with_rng_state_in(context, label, |state| {
-        let first_state = state.state;
-        let following_state = match state.algorithm {
-            RngAlgorithm::RunMatLcg => advance_state(first_state, draws),
-        };
-        state.state = following_state;
-        DrawReservation {
-            first_state,
-            following_state,
+    let owner = turn.owner().cloned();
+    turn.with_state(label, |state| {
+        if draws == 0 {
+            return Ok(DrawReservation {
+                first_state: state.state.clone(),
+                following_state: state.state.clone(),
+            });
         }
-    })
+        state.state.prepare_mutation(owner.as_ref())?;
+        let mut first_state = state.state.clone();
+        first_state.prepare_mutation(owner.as_ref())?;
+        state.state.advance_uniforms(draws, owner.as_ref())?;
+        Ok(DrawReservation {
+            first_state,
+            following_state: state.state.clone(),
+        })
+    })?
 }
 
 pub(super) fn service_error(

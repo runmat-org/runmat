@@ -156,7 +156,9 @@ async fn sprand_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     for arg in args {
         gathered.push(gpu_helpers::gather_value_async(&arg).await?);
     }
-    Ok(Value::SparseTensor(sprand_sparse(gathered)?))
+    let mut turn =
+        random::acquire_turn(crate::context::legacy::active().as_ref(), "sprand").await?;
+    Ok(Value::SparseTensor(sprand_sparse(&mut turn, gathered)?))
 }
 
 #[runtime_builtin(
@@ -604,12 +606,15 @@ fn sparse_pattern_from_value(value: Value) -> BuiltinResult<SparseTensor> {
     sparse_from_value(value)
 }
 
-fn sprand_sparse(mut args: Vec<Value>) -> BuiltinResult<SparseTensor> {
+fn sprand_sparse(
+    turn: &mut random::RandomTurn,
+    mut args: Vec<Value>,
+) -> BuiltinResult<SparseTensor> {
     let dtype = take_optional_sparse_float_typename(&mut args, "sprand")?;
     let sparse = match args.len() {
         1 => {
             let pattern = sparse_pattern_from_value(args.into_iter().next().expect("pattern"))?;
-            let values = random::generate_uniform(pattern.nnz(), "sprand")?;
+            let values = random::generate_uniform(turn, pattern.nnz(), "sprand")?;
             SparseTensor::new(
                 pattern.rows,
                 pattern.cols,
@@ -625,9 +630,9 @@ fn sprand_sparse(mut args: Vec<Value>) -> BuiltinResult<SparseTensor> {
             let density = parse_density_arg(&args[2])?;
             if args.len() == 4 {
                 let profile = parse_sprand_condition_profile(&args[3], rows, cols)?;
-                sprand_from_condition_profile(rows, cols, density, &profile)?
+                sprand_from_condition_profile(turn, rows, cols, density, &profile)?
             } else {
-                sprand_from_density(rows, cols, density)?
+                sprand_from_density(turn, rows, cols, density)?
             }
         }
         _ => {
@@ -688,7 +693,12 @@ fn parse_density_arg(value: &Value) -> BuiltinResult<f64> {
     Ok(density)
 }
 
-fn sprand_from_density(rows: usize, cols: usize, density: f64) -> BuiltinResult<SparseTensor> {
+fn sprand_from_density(
+    turn: &mut random::RandomTurn,
+    rows: usize,
+    cols: usize,
+    density: f64,
+) -> BuiltinResult<SparseTensor> {
     let total = rows.checked_mul(cols).ok_or_else(|| {
         sparse_error(
             &SPARSE_ERROR_INVALID_INPUT,
@@ -711,8 +721,8 @@ fn sprand_from_density(rows: usize, cols: usize, density: f64) -> BuiltinResult<
         ));
     }
 
-    let positions = sample_unique_positions(total, target)?;
-    let values = random::generate_uniform(target, "sprand")?;
+    let positions = sample_unique_positions(turn, total, target)?;
+    let values = random::generate_uniform(turn, target, "sprand")?;
     let mut entries = BTreeMap::new();
     for (linear, value) in positions.into_iter().zip(values) {
         let row = linear % rows;
@@ -785,6 +795,7 @@ fn scalar_rcond_singular_profile(rank_limit: usize, rcond: f64) -> Vec<f64> {
 }
 
 fn sprand_from_condition_profile(
+    turn: &mut random::RandomTurn,
     rows: usize,
     cols: usize,
     density: f64,
@@ -800,7 +811,7 @@ fn sprand_from_condition_profile(
         return Ok(SparseTensor::zeros(rows, cols));
     }
     if rows == 1 || cols == 1 {
-        return sprand_condition_vector(rows, cols, density, singular_values);
+        return sprand_condition_vector(turn, rows, cols, density, singular_values);
     }
     if total > SPRAND_CONDITION_DENSE_INPUT_LIMIT {
         return Err(sparse_error(
@@ -824,7 +835,8 @@ fn sprand_from_condition_profile(
         ));
     }
 
-    let dense = condition_profile_sparse_rotation_matrix(rows, cols, singular_values, target)?;
+    let dense =
+        condition_profile_sparse_rotation_matrix(turn, rows, cols, singular_values, target)?;
     let mut entries = BTreeMap::new();
     for (linear, value) in dense.into_iter().enumerate() {
         if is_stored_value(value) {
@@ -837,6 +849,7 @@ fn sprand_from_condition_profile(
 }
 
 fn sprand_condition_vector(
+    turn: &mut random::RandomTurn,
     rows: usize,
     cols: usize,
     density: f64,
@@ -865,8 +878,8 @@ fn sprand_condition_vector(
         ));
     }
 
-    let positions = sample_unique_positions(total, target)?;
-    let draws = random::generate_uniform(target, "sprand")?;
+    let positions = sample_unique_positions(turn, total, target)?;
+    let draws = random::generate_uniform(turn, target, "sprand")?;
     let norm = draws.iter().map(|value| value * value).sum::<f64>().sqrt();
     let scale = if norm > 0.0 { sigma / norm } else { sigma };
     let mut entries = BTreeMap::new();
@@ -879,6 +892,7 @@ fn sprand_condition_vector(
 }
 
 fn condition_profile_sparse_rotation_matrix(
+    turn: &mut random::RandomTurn,
     rows: usize,
     cols: usize,
     singular_values: &[f64],
@@ -917,7 +931,7 @@ fn condition_profile_sparse_rotation_matrix(
             ));
         }
 
-        let (c, s) = random_plane_rotation("sprand")?;
+        let (c, s) = random_plane_rotation(turn, "sprand")?;
         if prefer_rows {
             let first = attempts % rows;
             let second = (first + 1 + stale_attempts.min(rows.saturating_sub(2))) % rows;
@@ -951,8 +965,8 @@ fn condition_profile_sparse_rotation_matrix(
     Ok(dense)
 }
 
-fn random_plane_rotation(label: &str) -> BuiltinResult<(f64, f64)> {
-    let draw = random::generate_uniform(1, label)?[0];
+fn random_plane_rotation(turn: &mut random::RandomTurn, label: &str) -> BuiltinResult<(f64, f64)> {
+    let draw = random::generate_uniform(turn, 1, label)?[0];
     let theta = (0.1 + 0.8 * draw) * std::f64::consts::FRAC_PI_2;
     Ok((theta.cos(), theta.sin()))
 }
@@ -1003,13 +1017,17 @@ fn apply_col_rotation(
     }
 }
 
-fn sample_unique_positions(total: usize, target: usize) -> BuiltinResult<Vec<usize>> {
+fn sample_unique_positions(
+    turn: &mut random::RandomTurn,
+    total: usize,
+    target: usize,
+) -> BuiltinResult<Vec<usize>> {
     if target == total {
         return Ok((0..total).collect());
     }
 
     if target > total / 2 {
-        let omitted = sample_unique_positions_floyd(total, total - target)?;
+        let omitted = sample_unique_positions_floyd(turn, total, total - target)?;
         let mut positions = Vec::with_capacity(target);
         for position in 0..total {
             if !omitted.contains(&position) {
@@ -1019,18 +1037,22 @@ fn sample_unique_positions(total: usize, target: usize) -> BuiltinResult<Vec<usi
         return Ok(positions);
     }
 
-    Ok(sample_unique_positions_floyd(total, target)?
+    Ok(sample_unique_positions_floyd(turn, total, target)?
         .into_iter()
         .collect())
 }
 
-fn sample_unique_positions_floyd(total: usize, target: usize) -> BuiltinResult<BTreeSet<usize>> {
+fn sample_unique_positions_floyd(
+    turn: &mut random::RandomTurn,
+    total: usize,
+    target: usize,
+) -> BuiltinResult<BTreeSet<usize>> {
     let mut positions = BTreeSet::new();
     if target == 0 {
         return Ok(positions);
     }
 
-    let draws = random::generate_uniform(target, "sprand")?;
+    let draws = random::generate_uniform(turn, target, "sprand")?;
     for (offset, draw) in draws.into_iter().enumerate() {
         let upper = total - target + offset;
         let candidate = ((draw * (upper + 1) as f64).floor() as usize).min(upper);

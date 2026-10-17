@@ -536,18 +536,23 @@ impl WgpuProvider {
         {
             self.require_ieee_words(entry.precision)?;
         }
-        let shader = complex_unary_shader(op, self.precision);
+        let shader = complex_unary_shader(op, entry.precision);
         let output_storage = if output_complex {
             runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved
         } else {
             runmat_accelerate_api::GpuTensorStorage::Real
         };
-        let out = self.fused_elementwise_with_telemetry_and_storage_exec(
+        let out = self.fused_elementwise_with_representation_telemetry_exec(
             &shader,
             std::slice::from_ref(a),
             &entry.shape,
             len,
-            output_storage,
+            FusedElementwiseRepresentation {
+                input_precision: entry.precision,
+                output_precision: entry.precision,
+                output_storage,
+                logical_output: false,
+            },
         )?;
         self.inherit_elementwise_layout(out, a)
     }

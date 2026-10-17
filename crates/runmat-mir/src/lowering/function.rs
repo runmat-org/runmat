@@ -1,7 +1,7 @@
 use crate::{
     MirAssembly, MirBody, MirFunctionMetadata, MirOperand, MirTerminator, MirTerminatorKind,
 };
-use runmat_hir::{HirAssembly, HirError, HirFunction};
+use runmat_hir::{BindingRole, HirAssembly, HirError, HirFunction};
 use std::collections::HashSet;
 
 use super::{control_flow::ControlFlowBuilder, expr::lower_simple_operand, MirLoweringContext};
@@ -29,6 +29,12 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         .iter()
         .filter(|function| function.modifiers.is_async)
         .map(|function| function.id)
+        .collect();
+    let incoming_workspace: HashSet<_> = hir
+        .bindings
+        .iter()
+        .filter(|binding| binding.role == BindingRole::IncomingWorkspace)
+        .map(|binding| binding.id)
         .collect();
     for function in &hir.functions {
         let module = hir
@@ -59,6 +65,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
             lower_function_with_context(
                 function,
                 MirLoweringContext::with_async_functions(async_functions.clone(), function.id),
+                &incoming_workspace,
             )?,
         );
     }
@@ -105,8 +112,9 @@ fn class_method_owner(
 fn lower_function_with_context(
     function: &HirFunction,
     mut ctx: MirLoweringContext,
+    incoming_workspace: &HashSet<runmat_hir::BindingId>,
 ) -> Result<MirBody, HirError> {
-    let mut locals = ctx.locals_for_function(function);
+    let mut locals = ctx.locals_for_function(function, incoming_workspace);
     let returns: Vec<MirOperand> = function
         .outputs
         .iter()

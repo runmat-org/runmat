@@ -181,6 +181,9 @@ pub enum BindingRole {
     Parameter,
     Output,
     Local,
+    /// A top-level binding with a value supplied by the admitted incoming
+    /// workspace snapshot, not a newly declared or unresolved local.
+    IncomingWorkspace,
     ExternalWorkspace,
     ModuleBinding,
     ImplicitAns,

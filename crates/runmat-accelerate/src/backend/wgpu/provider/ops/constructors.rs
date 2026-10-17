@@ -846,6 +846,10 @@ impl WgpuProvider {
             total_len <= u32::MAX as usize,
             "peaks: tensor length exceeds GPU dispatch limits"
         );
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("peaks: launch extent overflow"))?;
         let shape_vec = vec![n, n];
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer =
@@ -856,8 +860,6 @@ impl WgpuProvider {
 
             let n_u32 = n as u32;
             let total_u32 = total_len as u32;
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
 
             while offset < total_len {
@@ -891,10 +893,7 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self.pipelines.peaks.linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
@@ -929,6 +928,10 @@ impl WgpuProvider {
             total_len <= u32::MAX as usize,
             "peaks: tensor length exceeds GPU dispatch limits"
         );
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("peaks: launch extent overflow"))?;
         let shape_vec = x.shape().to_vec();
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer =
@@ -940,8 +943,6 @@ impl WgpuProvider {
             let x_entry = self.get_entry(x)?;
             let y_entry = self.get_entry(y)?;
             let total_u32 = total_len as u32;
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
 
             while offset < total_len {
@@ -984,10 +985,7 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self.pipelines.peaks_xy.linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,

@@ -7,31 +7,110 @@ use crate::ContractError;
 /// logical parallel-loop iteration. The state is execution metadata, not a
 /// program argument, and therefore cannot be observed or mistaken for a
 /// captured workspace value.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "algorithm", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParallelRandomStream {
-    RunMatLcgV1 { state: u64 },
+    RunMatLcgV1 {
+        state: u64,
+    },
+    /// Compact RunMat-owned seed initialization. A worker derives the MT
+    /// state only when its logical iteration begins.
+    Mt19937InitialSeedV1 {
+        seed: u64,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "policy", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ParallelRandomnessContext {
     Inherit,
-    Deterministic { streams: Vec<ParallelRandomStream> },
+    Deterministic {
+        streams: Vec<ParallelRandomStream>,
+    },
+    /// Compact range for newly issued legacy-LCG tasks. The historical
+    /// `Deterministic` vector remains accepted for replay.
+    RunMatLcgStateRangeV1 {
+        root: u64,
+        start: usize,
+        len: usize,
+    },
+    /// One MT initialization root for a contiguous logical-iteration span.
+    /// Chunking only changes `start` and `len`, never the derived stream.
+    Mt19937InitialSeedRangeV1 {
+        root: u64,
+        start: usize,
+        len: usize,
+    },
     Nondeterministic,
 }
 
 impl ParallelRandomnessContext {
     pub fn validate_for_iterations(&self, iterations: usize) -> Result<(), ContractError> {
-        if let Self::Deterministic { streams } = self {
-            if streams.len() != iterations {
-                return Err(ContractError::invalid(
-                    "parallel randomness context",
-                    "deterministic stream count must match the logical iteration count",
-                ));
+        let valid = match self {
+            Self::Deterministic { streams } => streams.len() == iterations,
+            Self::RunMatLcgStateRangeV1 { start, len, .. }
+            | Self::Mt19937InitialSeedRangeV1 { start, len, .. } => {
+                *len == iterations
+                    && start
+                        .checked_add(*len)
+                        .is_some_and(|end| u64::try_from(end).is_ok())
             }
+            Self::Inherit | Self::Nondeterministic => true,
+        };
+        if !valid {
+            return Err(ContractError::invalid(
+                "parallel randomness context",
+                "deterministic stream extent must match the logical iteration count",
+            ));
         }
         Ok(())
+    }
+
+    pub fn deterministic_stream(&self, index: usize) -> Option<ParallelRandomStream> {
+        match self {
+            Self::Deterministic { streams } => streams.get(index).cloned(),
+            Self::RunMatLcgStateRangeV1 { root, start, len } if index < *len => {
+                let ordinal = u64::try_from(start.checked_add(index)?).ok()?;
+                Some(ParallelRandomStream::RunMatLcgV1 {
+                    state: deterministic_iteration_seed(*root, ordinal),
+                })
+            }
+            Self::Mt19937InitialSeedRangeV1 { root, start, len } if index < *len => {
+                let ordinal = u64::try_from(start.checked_add(index)?).ok()?;
+                Some(ParallelRandomStream::Mt19937InitialSeedV1 {
+                    seed: deterministic_iteration_seed(*root, ordinal),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    pub fn is_deterministic(&self) -> bool {
+        matches!(
+            self,
+            Self::Deterministic { .. }
+                | Self::RunMatLcgStateRangeV1 { .. }
+                | Self::Mt19937InitialSeedRangeV1 { .. }
+        )
+    }
+}
+
+/// Stable RunMat stream derivation, independent of worker or chunk ordering.
+pub const RUNMAT_MT_DEFAULT_SEED: u64 = 5489;
+
+pub fn deterministic_iteration_seed(root: u64, ordinal: u64) -> u64 {
+    let seed = root ^ ordinal.wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    if seed == 0 {
+        return RUNMAT_MT_DEFAULT_SEED;
+    }
+    let mut mixed = seed.wrapping_add(0x9e3779b97f4a7c15);
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d049bb133111eb);
+    let mixed = mixed ^ (mixed >> 31);
+    if mixed == 0 {
+        RUNMAT_MT_DEFAULT_SEED
+    } else {
+        mixed
     }
 }
 
@@ -272,5 +351,69 @@ mod tests {
         ProgramInvocationContext::ParallelTask { task }
             .validate_for(&crate::ProgramCallable::parallel_region(region))
             .unwrap();
+    }
+
+    #[test]
+    fn compact_mt_initial_seed_wire_roundtrips() {
+        let stream = ParallelRandomStream::Mt19937InitialSeedV1 { seed: u64::MAX };
+        let encoded = serde_json::to_string(&stream).unwrap();
+        assert!(encoded.len() < 96);
+        assert_eq!(
+            serde_json::from_str::<ParallelRandomStream>(&encoded).unwrap(),
+            stream
+        );
+    }
+
+    #[test]
+    fn mt_seed_range_wire_and_chunking_preserve_logical_streams() {
+        let whole = ParallelRandomnessContext::Mt19937InitialSeedRangeV1 {
+            root: 0x1234_5678,
+            start: 0,
+            len: 1_000_000,
+        };
+        let encoded = serde_json::to_string(&whole).unwrap();
+        assert!(
+            encoded.len() < 128,
+            "wire size must not grow with iterations"
+        );
+        assert_eq!(
+            serde_json::from_str::<ParallelRandomnessContext>(&encoded).unwrap(),
+            whole
+        );
+        let chunk = ParallelRandomnessContext::Mt19937InitialSeedRangeV1 {
+            root: 0x1234_5678,
+            start: 713,
+            len: 4,
+        };
+        chunk.validate_for_iterations(4).unwrap();
+        for index in 0..4 {
+            assert_eq!(
+                chunk.deterministic_stream(index),
+                whole.deterministic_stream(713 + index)
+            );
+        }
+        assert!(chunk.deterministic_stream(4).is_none());
+        let overflowing = ParallelRandomnessContext::Mt19937InitialSeedRangeV1 {
+            root: 1,
+            start: usize::MAX,
+            len: 1,
+        };
+        assert!(overflowing.validate_for_iterations(1).is_err());
+
+        let legacy = ParallelRandomnessContext::RunMatLcgStateRangeV1 {
+            root: 0x1234_5678,
+            start: 713,
+            len: 4,
+        };
+        legacy.validate_for_iterations(4).unwrap();
+        assert!(serde_json::to_string(&legacy).unwrap().len() < 128);
+        for index in 0..4 {
+            assert_eq!(
+                legacy.deterministic_stream(index),
+                Some(ParallelRandomStream::RunMatLcgV1 {
+                    state: deterministic_iteration_seed(0x1234_5678, (713 + index) as u64),
+                })
+            );
+        }
     }
 }

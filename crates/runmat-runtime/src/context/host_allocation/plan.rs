@@ -71,6 +71,13 @@ impl HostAllocationPlan {
             .checked_add(claim)
             .ok_or(HostAllocationError::Overflow)
     }
+
+    /// One interleaved complex64 scratch buffer backed by a managed F64
+    /// allocation. The checked factor of two is the real/imaginary lane count.
+    pub fn complex_workspace_bytes(len: usize) -> Result<u64, HostAllocationError> {
+        let lanes = len.checked_mul(2).ok_or(HostAllocationError::Overflow)?;
+        Self::numeric_workspace_bytes(NumericDType::F64, lanes)
+    }
 }
 
 impl From<ExactHostNumericAllocationError> for HostAllocationError {

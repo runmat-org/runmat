@@ -185,6 +185,7 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::CallSuperConstructorMulti { .. }
             | crate::bytecode::Instr::CallSuperMethodMulti { .. }
             | crate::bytecode::Instr::CallBuiltinExpandMultiOutput(..)
+            | crate::bytecode::Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(..)
             | crate::bytecode::Instr::CallSuperConstructorExpandMultiOutput { .. }
             | crate::bytecode::Instr::CallSuperMethodExpandMultiOutput { .. }
             | crate::bytecode::Instr::PackToRow(..)

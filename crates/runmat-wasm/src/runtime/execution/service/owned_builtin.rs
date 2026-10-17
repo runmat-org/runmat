@@ -437,6 +437,16 @@ fn decode_owned_outputs(
 }
 
 impl RuntimeOwnedBuiltinWorkService for BrowserExecutionService {
+    fn continuation_control_bytes(
+        &self,
+        binding: &runmat_execution::OwnedBuiltinBinding,
+    ) -> Result<Option<u64>, ExecutionServiceError> {
+        // This service and its browser worker load the same compiled WASM
+        // runtime/catalog. The worker rechecks the selected local layout.
+        runmat_runtime::execution::quote_owned_builtin_continuation(binding)
+            .map_err(ExecutionServiceError::Infrastructure)
+    }
+
     fn submit(
         &self,
         request: runmat_execution::OwnedBuiltinWorkRequest,

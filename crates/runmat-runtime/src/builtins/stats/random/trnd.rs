@@ -192,7 +192,8 @@ pub(crate) async fn trnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         )?;
     }
     let len = tensor::element_count(&shape);
-    let data = random::generate_student_t(&nu, len, BUILTIN_NAME)?;
+    let mut turn = random::acquire_turn(None, BUILTIN_NAME).await?;
+    let data = random::generate_student_t(&mut turn, &nu, len, BUILTIN_NAME)?;
     build_output(data, shape, output_precision, gpu_source)
 }
 

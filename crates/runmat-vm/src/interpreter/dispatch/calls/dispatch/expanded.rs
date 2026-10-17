@@ -21,19 +21,44 @@ pub(super) async fn dispatch(
         ..
     } = ctx;
     match instr {
-        Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => {
+        Instr::CallBuiltinExpandMultiOutput(..)
+        | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(..) => {
+            // Resolve a dynamic output count before consuming captured inputs
+            // or performing the builtin call.
+            let (name, specs, out_count, publication) = match instr {
+                Instr::CallBuiltinExpandMultiOutput(name, specs, out_count) => (
+                    name,
+                    specs,
+                    *out_count,
+                    OutputPublication::Fixed(*out_count),
+                ),
+                Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(name, specs, slot) => (
+                    name,
+                    specs,
+                    requested_outputs_from_slot(vars.as_slice(), *slot)?,
+                    OutputPublication::Sequence,
+                ),
+                _ => unreachable!(),
+            };
             let args =
                 build_builtin_expand_multi_args(stack, specs, sequence_register, &context.runtime)
                     .await?;
-            let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
+            let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
             let result = crate::call::call_builtin_async_with_outputs(
                 &context.runtime,
                 name,
                 args.values(),
-                *out_count,
+                out_count,
             )
             .await?;
-            calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
+            match publication {
+                OutputPublication::Fixed(count) => {
+                    calls::publish_rooted_fixed_outputs(stack, result, count)?
+                }
+                OutputPublication::Sequence => {
+                    sequence_register.stage_rooted_call_output_sequence(stack, result)?;
+                }
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

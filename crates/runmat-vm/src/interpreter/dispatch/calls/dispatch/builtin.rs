@@ -13,12 +13,6 @@ mod superclass;
 #[path = "builtin/feval.rs"]
 mod feval;
 
-#[derive(Clone, Copy)]
-enum OutputPublication {
-    Fixed(usize),
-    Sequence,
-}
-
 pub(super) fn dispatch<'a>(ctx: CallDispatchContext<'a>) -> CallFuture<'a> {
     match ctx.instr {
         Instr::CallBuiltinMulti(..) | Instr::CallBuiltinMultiUsingOutputSlot(..) => {

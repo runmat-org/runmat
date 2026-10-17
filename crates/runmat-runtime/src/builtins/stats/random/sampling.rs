@@ -921,6 +921,7 @@ fn parse_weights(name: &str, value: Value, expected: usize) -> BuiltinResult<Vec
 }
 
 fn sample_indices(
+    turn: &mut random::RandomTurn,
     name: &str,
     population_len: usize,
     k: usize,
@@ -937,25 +938,26 @@ fn sample_indices(
         ));
     }
     match (replacement, weights) {
-        (true, Some(weights)) => weighted_with_replacement(name, k, weights),
-        (false, Some(weights)) => weighted_without_replacement(name, k, weights),
+        (true, Some(weights)) => weighted_with_replacement(turn, name, k, weights),
+        (false, Some(weights)) => weighted_without_replacement(turn, name, k, weights),
         (true, None) => {
-            let uniforms = random::generate_uniform(k, name)?;
+            let uniforms = random::generate_uniform(turn, k, name)?;
             Ok(uniforms
                 .into_iter()
                 .map(|u| ((u * population_len as f64).floor() as usize).min(population_len - 1))
                 .collect())
         }
-        (false, None) => unweighted_without_replacement(name, population_len, k),
+        (false, None) => unweighted_without_replacement(turn, name, population_len, k),
     }
 }
 
 fn unweighted_without_replacement(
+    turn: &mut random::RandomTurn,
     name: &str,
     population_len: usize,
     k: usize,
 ) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     let mut pool = (0..population_len).collect::<Vec<_>>();
     let mut out = Vec::with_capacity(k);
     for (draw, u) in uniforms.into_iter().enumerate() {
@@ -966,9 +968,14 @@ fn unweighted_without_replacement(
     Ok(out)
 }
 
-fn weighted_with_replacement(name: &str, k: usize, weights: &[f64]) -> BuiltinResult<Vec<usize>> {
+fn weighted_with_replacement(
+    turn: &mut random::RandomTurn,
+    name: &str,
+    k: usize,
+    weights: &[f64],
+) -> BuiltinResult<Vec<usize>> {
     let total = weights.iter().sum::<f64>();
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     Ok(uniforms
         .into_iter()
         .map(|u| choose_weighted(weights, total, u))
@@ -976,11 +983,12 @@ fn weighted_with_replacement(name: &str, k: usize, weights: &[f64]) -> BuiltinRe
 }
 
 fn weighted_without_replacement(
+    turn: &mut random::RandomTurn,
     name: &str,
     k: usize,
     weights: &[f64],
 ) -> BuiltinResult<Vec<usize>> {
-    let uniforms = random::generate_uniform(k, name)?;
+    let uniforms = random::generate_uniform(turn, k, name)?;
     let mut weights = weights.to_vec();
     let mut out = Vec::with_capacity(k);
     for u in uniforms {
@@ -1419,10 +1427,14 @@ async fn parse_datasample_args(data: Value, rest: Vec<Value>) -> BuiltinResult<D
     })
 }
 
-fn datasample_compute(args: DatasampleArgs) -> BuiltinResult<(Value, Value)> {
+fn datasample_compute(
+    turn: &mut random::RandomTurn,
+    args: DatasampleArgs,
+) -> BuiltinResult<(Value, Value)> {
     let shape = shape_of_sampled_value(&args.data)?;
     let axis = args.dim.unwrap_or_else(|| first_non_singleton(&shape));
     let indices = sample_indices(
+        turn,
         "datasample",
         shape[axis],
         args.k,
@@ -1461,7 +1473,8 @@ pub mod datasample {
             gathered_rest.push(super::gathered(argument, "datasample").await?);
         }
         let args = super::parse_datasample_args(value, gathered_rest).await?;
-        let (sample, idx) = super::datasample_compute(args)?;
+        let mut turn = random::acquire_turn(None, "datasample").await?;
+        let (sample, idx) = super::datasample_compute(&mut turn, args)?;
         match crate::output_count::current_output_count() {
             Some(0) => Ok(Value::OutputList(Vec::new())),
             Some(1) => Ok(Value::OutputList(vec![sample])),
@@ -1556,10 +1569,11 @@ async fn parse_randsample_args(args: Vec<Value>) -> BuiltinResult<RandsampleArgs
     })
 }
 
-fn randsample_compute(args: RandsampleArgs) -> BuiltinResult<Value> {
+fn randsample_compute(turn: &mut random::RandomTurn, args: RandsampleArgs) -> BuiltinResult<Value> {
     match args.population {
         RandsamplePopulation::Range(n) => {
             let indices = sample_indices(
+                turn,
                 "randsample",
                 n,
                 args.k,
@@ -1579,6 +1593,7 @@ fn randsample_compute(args: RandsampleArgs) -> BuiltinResult<Value> {
         }
         RandsamplePopulation::Values(value, shape, axis) => {
             let indices = sample_indices(
+                turn,
                 "randsample",
                 shape[axis],
                 args.k,
@@ -1618,7 +1633,8 @@ pub mod randsample {
             _ => None,
         });
         let args = super::parse_randsample_args(args).await?;
-        let output = super::randsample_compute(args)?;
+        let mut turn = random::acquire_turn(None, "randsample").await?;
+        let output = super::randsample_compute(&mut turn, args)?;
         if let Some(source) = resident_population {
             let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(&source)
                 .ok_or_else(|| {
@@ -1782,7 +1798,8 @@ pub mod unidrnd {
         }
         let (n, shape) = super::parse_unidrnd_args(args).await?;
         let len = tensor::element_count(&shape);
-        let uniforms = random::generate_uniform(len, "unidrnd")?;
+        let mut turn = random::acquire_turn(None, "unidrnd").await?;
+        let uniforms = random::generate_uniform(&mut turn, len, "unidrnd")?;
         let data = uniforms
             .into_iter()
             .enumerate()
@@ -1925,14 +1942,14 @@ fn dividerand_counts(q: usize, ratios: [f64; 3]) -> [usize; 3] {
     counts
 }
 
-fn dividerand_permutation(q: usize) -> BuiltinResult<Vec<usize>> {
+fn dividerand_permutation(turn: &mut random::RandomTurn, q: usize) -> BuiltinResult<Vec<usize>> {
     if q > MAX_DIVIDERAND_Q {
         return Err(sampling_error(
             "dividerand",
             format!("dividerand: Q exceeds the maximum supported value of {MAX_DIVIDERAND_Q}"),
         ));
     }
-    let uniforms = random::generate_uniform(q, "dividerand")?;
+    let uniforms = random::generate_uniform(turn, q, "dividerand")?;
     let mut pool = Vec::new();
     pool.try_reserve_exact(q)
         .map_err(|_| sampling_error("dividerand", "dividerand: requested output is too large"))?;
@@ -1955,12 +1972,15 @@ fn row_index_value(indices: &[usize]) -> BuiltinResult<Value> {
         .map_err(|err| sampling_error("dividerand", format!("dividerand: {err}")))
 }
 
-fn dividerand_compute(args: DividerandArgs) -> BuiltinResult<[Value; 3]> {
+fn dividerand_compute(
+    turn: &mut random::RandomTurn,
+    args: DividerandArgs,
+) -> BuiltinResult<[Value; 3]> {
     let counts = dividerand_counts(args.q, args.ratios);
     let permutation = if args.q == 0 {
         Vec::new()
     } else {
-        dividerand_permutation(args.q)?
+        dividerand_permutation(turn, args.q)?
     };
     let train_end = counts[0];
     let val_end = train_end + counts[1];
@@ -2001,7 +2021,8 @@ pub mod dividerand {
             )?;
         }
         let parsed = super::parse_dividerand_args(args).await?;
-        let [train, val, test] = super::dividerand_compute(parsed)?;
+        let mut turn = random::acquire_turn(None, "dividerand").await?;
+        let [train, val, test] = super::dividerand_compute(&mut turn, parsed)?;
         match crate::output_count::current_output_count() {
             Some(0) => Ok(Value::OutputList(Vec::new())),
             Some(1) => Ok(Value::OutputList(vec![train])),
@@ -2407,13 +2428,16 @@ async fn bootstrp_compute(
     };
     let mut rows = Vec::with_capacity(args.nboot);
     for _ in 0..args.nboot {
+        let mut turn = random::acquire_turn(None, "bootstrp").await?;
         let indices = sample_indices(
+            &mut turn,
             "bootstrp",
             args.sample_len,
             args.sample_len,
             true,
             args.weights.as_deref(),
         )?;
+        drop(turn);
         if !is_empty_function(&args.bootfun) {
             let mut callback_args = Vec::with_capacity(args.data.len());
             for value in args.data.iter().cloned() {

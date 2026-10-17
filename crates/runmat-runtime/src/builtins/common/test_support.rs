@@ -227,6 +227,33 @@ impl runmat_accelerate_api::AccelProvider for F32TestProvider {
     fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
         runmat_accelerate_api::ProviderPrecision::F32
     }
+
+    fn propose_gpu_random(
+        &self,
+        request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::random::GpuRandomPhysicalProposal>,
+    > {
+        if request.precision != self.precision() {
+            return Ok(None);
+        }
+        self.inner.propose_gpu_random(request)
+    }
+
+    fn execute_gpu_random(
+        &self,
+        request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+    {
+        if request.precision != self.precision() {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "f32 test provider cannot produce native double random values",
+            )
+            .into());
+        }
+        self.inner.execute_gpu_random(request, admission)
+    }
 }
 
 pub fn with_f32_test_provider<F, R>(f: F) -> R

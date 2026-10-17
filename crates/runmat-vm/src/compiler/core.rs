@@ -3097,10 +3097,10 @@ impl Compiler {
         }
         self.compile_mir_operand(right)?;
         let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::LoadBool(true));
         let end = self.emit(Instr::Jump(usize::MAX));
         let false_pc = self.instructions.len();
-        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::LoadBool(false));
         let end_pc = self.instructions.len();
         self.patch(lhs_false, Instr::JumpIfFalse(false_pc));
         self.patch(rhs_false, Instr::JumpIfFalse(false_pc));
@@ -3116,7 +3116,7 @@ impl Compiler {
     ) -> Result<(), CompileError> {
         self.compile_mir_operand(left)?;
         let lhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::LoadBool(true));
         let end = self.emit(Instr::Jump(usize::MAX));
         let right_pc = self.instructions.len();
         self.patch(lhs_false, Instr::JumpIfFalse(right_pc));
@@ -3126,10 +3126,10 @@ impl Compiler {
         }
         self.compile_mir_operand(right)?;
         let rhs_false = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::LoadBool(true));
         let rhs_end = self.emit(Instr::Jump(usize::MAX));
         let rhs_false_pc = self.instructions.len();
-        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::LoadBool(false));
         let end_pc = self.instructions.len();
         self.patch(rhs_false, Instr::JumpIfFalse(rhs_false_pc));
         self.patch(rhs_end, Instr::Jump(end_pc));
@@ -3507,14 +3507,20 @@ impl Compiler {
                     self.compile_mir_call_arg(arg)?;
                 }
                 if has_expansion {
-                    let requested_outputs = requested_outputs.require_fixed(
-                        self,
-                        "dynamic output count is not supported for expanded builtin calls",
-                    )?;
-                    self.emit_call(
-                        Instr::CallBuiltinExpandMultiOutput(name, specs, requested_outputs),
-                        call,
-                    );
+                    match requested_outputs {
+                        ResolvedCallOutputCount::Fixed(out_count) => self.emit_call(
+                            Instr::CallBuiltinExpandMultiOutput(name, specs, out_count),
+                            call,
+                        ),
+                        ResolvedCallOutputCount::FromSlot(out_count_slot) => self.emit_call(
+                            Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(
+                                name,
+                                specs,
+                                out_count_slot,
+                            ),
+                            call,
+                        ),
+                    };
                 } else {
                     match requested_outputs {
                         ResolvedCallOutputCount::Fixed(out_count) => {

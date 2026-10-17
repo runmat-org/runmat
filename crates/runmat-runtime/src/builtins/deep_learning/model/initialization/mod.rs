@@ -44,14 +44,19 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
     for task in tasks {
         let generated = matches!(&task.initializer, plan::Initializer::Builtin(_));
         let value = match task.initializer {
-            plan::Initializer::Builtin(kind) => RootedValue::new(generate::builtin(
-                kind,
-                task.kind,
-                &task.shape,
-                task.precision.unwrap_or(NumericDType::F64),
-                function,
-            )?)
-            .map_err(|error| error.into_runtime_error())?,
+            plan::Initializer::Builtin(kind) => {
+                let mut turn =
+                    crate::builtins::common::random::acquire_turn(runtime, function).await?;
+                RootedValue::new(generate::builtin(
+                    &mut turn,
+                    kind,
+                    task.kind,
+                    &task.shape,
+                    task.precision.unwrap_or(NumericDType::F64),
+                    function,
+                )?)
+                .map_err(|error| error.into_runtime_error())?
+            }
             plan::Initializer::Callback(callback) => {
                 let size = tensor_value(
                     task.shape.iter().map(|size| *size as f64).collect(),

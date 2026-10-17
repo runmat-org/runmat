@@ -48,11 +48,11 @@ pub struct ManagedHostEffectLedger {
 }
 
 impl ManagedHostEffectLedger {
-    /// Exact metadata created by a previously published view after its
-    /// invocation headroom has retired. This competes with every other live
-    /// stage/output reservation on the same ledger; it never reuses the old
-    /// view's claim or mints capacity from a completed invocation.
-    pub(crate) fn reserve_retained_view(
+    /// Exact retained metadata outside a live invocation headroom, including
+    /// a session-owned state or a view derived from an already published value.
+    /// It competes with every stage/output reservation on the same ledger;
+    /// neither a previous claim nor a completed invocation mints capacity.
+    pub(crate) fn reserve_retained_allocation(
         &self,
         bytes: u64,
         epoch: u64,
@@ -110,6 +110,11 @@ impl ManagedHostEffectLedger {
 
     pub fn snapshot(&self) -> ManagedHostEffectLedgerSnapshot {
         self.state.lock().expect("host ledger lock").snapshot
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_epoch_for_test(&self, epoch: u64) {
+        self.state.lock().expect("host ledger lock").snapshot.epoch = epoch;
     }
 
     pub fn same_owner(&self, other: &Self) -> bool {

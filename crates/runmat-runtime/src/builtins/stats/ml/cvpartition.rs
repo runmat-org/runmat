@@ -87,7 +87,12 @@ async fn cvpartition_builtin(
     let first = gather_value(first).await?;
     let second = gather_value(second).await?;
     let rest = gather_values(rest).await?;
-    let spec = cvpartition_compute(first, second, rest, admitted)?;
+    let mut turn = if matches!(admitted.kind, PartitionKind::KFold | PartitionKind::Holdout) {
+        Some(random::acquire_turn(None, CVPARTITION_NAME).await?)
+    } else {
+        None
+    };
+    let spec = cvpartition_compute(first, second, rest, admitted, turn.as_mut())?;
     partition_object(spec).map(Value::Object)
 }
 

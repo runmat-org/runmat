@@ -2,6 +2,7 @@ use runmat_builtins::BuiltinBindingIdentity;
 use runmat_value::Value;
 use std::{future::Future, pin::Pin};
 
+use crate::context::host_allocation::HostAllocationError;
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
 
@@ -51,11 +52,39 @@ impl<'a> RuntimeBuiltinInvocation<'a> {
 pub type RuntimeBuiltinImplementation =
     for<'a> fn(RuntimeBuiltinInvocation<'a>) -> RuntimeBuiltinFuture;
 
+/// The already-rooted inputs and typed invocation controls captured by one
+/// generated canonical continuation. This is not a second value transport.
+#[doc(hidden)]
+pub struct BuiltinContinuationInput {
+    pub args: crate::execution::RootedValues,
+    pub context: Option<RuntimeContext>,
+    pub requested_outputs: Option<usize>,
+    pub(crate) call_observation:
+        Option<crate::dispatcher::direct_call_observation::CallAdmissionSink>,
+}
+
+impl BuiltinContinuationInput {
+    pub fn new(
+        args: crate::execution::RootedValues,
+        invocation: RuntimeBuiltinInvocation<'_>,
+    ) -> Self {
+        Self {
+            args,
+            context: invocation.context,
+            requested_outputs: invocation.requested_outputs,
+            call_observation: invocation.call_observation,
+        }
+    }
+}
+
+pub type RuntimeBuiltinContinuationLayout = fn() -> Result<u64, HostAllocationError>;
+
 #[derive(Clone, Copy)]
 #[repr(C)]
 pub struct RuntimeBuiltinBinding {
     pub identity: BuiltinBindingIdentity,
     pub implementation: RuntimeBuiltinImplementation,
+    pub continuation_layout: Option<RuntimeBuiltinContinuationLayout>,
 }
 
 impl RuntimeBuiltinBinding {
@@ -66,7 +95,16 @@ impl RuntimeBuiltinBinding {
         Self {
             identity,
             implementation,
+            continuation_layout: None,
         }
+    }
+
+    pub const fn with_continuation_layout(
+        mut self,
+        layout: RuntimeBuiltinContinuationLayout,
+    ) -> Self {
+        self.continuation_layout = Some(layout);
+        self
     }
 }
 

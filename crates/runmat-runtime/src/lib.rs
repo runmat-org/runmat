@@ -418,7 +418,19 @@ pub(crate) async fn dispatch_object_external_member(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    dispatch_callable_with_policy(
+    dispatch_object_external_member_in_context(None, class_name, member, args, requested_outputs)
+        .await
+}
+
+pub(crate) async fn dispatch_object_external_member_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    class_name: runmat_types::ClassIdentity,
+    member: &str,
+    args: Vec<Value>,
+    requested_outputs: usize,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    dispatch_callable_with_policy_in_context(
+        runtime,
         class_member_identity(&class_name, member),
         runmat_types::CallableFallbackPolicy::ExternalBoundary,
         args,
@@ -463,8 +475,25 @@ pub(crate) async fn dispatch_callable_with_policy(
     args: Vec<Value>,
     requested_outputs: usize,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    dispatch_callable_with_policy_in_runtime(
+    dispatch_callable_with_policy_in_context(
         None,
+        identity,
+        fallback_policy,
+        args,
+        requested_outputs,
+    )
+    .await
+}
+
+pub(crate) async fn dispatch_callable_with_policy_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    identity: runmat_types::CallableIdentity,
+    fallback_policy: runmat_types::CallableFallbackPolicy,
+    args: Vec<Value>,
+    requested_outputs: usize,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    dispatch_callable_with_policy_in_runtime(
+        runtime,
         identity,
         fallback_policy,
         args,

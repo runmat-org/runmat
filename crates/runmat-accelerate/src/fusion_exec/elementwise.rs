@@ -227,45 +227,63 @@ async fn execute_elementwise_outputs(
         .into());
     }
     reject_native_integer_fusion_inputs(request)?;
+    use crate::fusion::semantics::{authenticate_resident_input, FloatingFusionEligibility};
+    let invalid = || anyhow!("fusion input has invalid floating metadata or provider ownership");
+    // Authenticate the complete resident set before classifying this floating
+    // route. An earlier valid logical/complex or host-only input must not hide
+    // a later stale, malformed, or foreign resident handle.
+    for value in &request.inputs {
+        if matches!(value, Value::GpuTensor(_)) {
+            authenticate_resident_input(value)
+                .map_err(|_| invalid())?
+                .ok_or_else(invalid)?;
+        }
+    }
     let provider = match admit_provider_availability(request, provider())? {
         FusionExecutionOutcome::Executed(provider) => provider,
         FusionExecutionOutcome::SharedRuntime(observation) => {
             return Ok(FusionExecutionOutcome::SharedRuntime(observation));
         }
     };
+    let mut floating_route_ineligible = false;
     for value in &request.inputs {
         match value {
-            Value::GpuTensor(handle) => {
-                use runmat_runtime::builtins::common::gpu_helpers::{
-                    exact_provider_for_handle, gpu_class_metadata_matches,
+            Value::GpuTensor(_) => {
+                use runmat_runtime::builtins::common::gpu_helpers::gpu_class_metadata_matches;
+                let authenticated = authenticate_resident_input(value)
+                    .map_err(|_| invalid())?
+                    .ok_or_else(invalid)?;
+                if !authenticated.belongs_to(provider) {
+                    return Err(invalid().into());
+                }
+                let precision = match authenticated.floating_eligibility() {
+                    FloatingFusionEligibility::Eligible(precision) => precision,
+                    FloatingFusionEligibility::Ineligible => {
+                        floating_route_ineligible = true;
+                        continue;
+                    }
                 };
-                let precision = runmat_accelerate_api::handle_precision(handle);
-                let element = precision.map(|precision| match precision {
+                let handle = authenticated.handle();
+                let element = Some(match precision {
                     ProviderPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
                     ProviderPrecision::F64 => runmat_accelerate_api::NumericElementType::F64,
                 });
-                if precision.is_none()
-                    || handle.descriptor().storage
-                        != Some(runmat_accelerate_api::GpuTensorStorage::Real)
+                if handle.descriptor().storage
+                    != Some(runmat_accelerate_api::GpuTensorStorage::Real)
                     || handle.descriptor().element_type != element
-                    || !gpu_class_metadata_matches(handle, precision, None, false)
-                    || !exact_provider_for_handle(handle).is_some_and(|owner| {
-                        runmat_accelerate_api::same_provider_instance(owner, provider)
-                    })
+                    || !gpu_class_metadata_matches(handle, Some(precision), None, false)
                 {
-                    return Err(anyhow!(
-                        "fusion input has invalid floating metadata or provider ownership"
-                    )
-                    .into());
+                    return Err(invalid().into());
                 }
             }
             Value::Num(_) | Value::Tensor(_) => {}
-            _ => {
-                return Ok(FusionExecutionOutcome::SharedRuntime(
-                    FusionCpuObservation::new(None),
-                ))
-            }
+            _ => floating_route_ineligible = true,
         }
+    }
+    if floating_route_ineligible {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
     }
     let typed = async {
         let program = crate::fusion::semantics::ResolvedProgram::resolve(

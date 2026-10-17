@@ -1,19 +1,23 @@
 //! MATLAB-compatible `randi` builtin with GPU-aware semantics for RunMat.
 use runmat_builtins::{RANDI_IMPLICIT_PROTOTYPE_EXTENSION, RANDI_WIDE_INTEGER_EXTENSION};
 
-use runmat_accelerate_api::{GpuTensorHandle, HostIntegerDataView, HostIntegerTensorView};
+use runmat_accelerate_api::{HostIntegerDataView, HostIntegerTensorView};
 use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
+
+mod gpu;
 
 use crate::build_runtime_error;
 #[cfg(test)]
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
+#[cfg(test)]
+use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::integer_conversion::{IntegerClass, IntegerClassExt};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, random, tensor};
+use crate::builtins::common::{random, tensor};
 #[cfg(test)]
 use runmat_builtins::{ResolveContext, Type};
 
@@ -30,7 +34,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Host generation uses unbiased full-width integer rejection sampling. gpuArray prototypes stay provider-resident through exact native upload, without a floating provider RNG intermediate.",
+    notes: "GPU prototypes select an exact owner and the independent GPU child stream. The admitted host-mediated candidate samples unbiased full-width integers before class-preserving native upload; a device-native candidate is separate.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
@@ -343,12 +347,20 @@ async fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
             "randi: floating output range width exceeds RNG precision (2^53)",
         ));
     }
+    if let OutputTemplate::Like(Value::GpuTensor(handle)) = &parsed.template {
+        return gpu::like(handle, &parsed.bounds, &parsed.shape).await;
+    }
+    let mut turn = random::acquire_turn(None, "randi").await?;
     match parsed.template {
-        OutputTemplate::Double => randi_double(&parsed.bounds, &parsed.shape),
-        OutputTemplate::Single => randi_single(&parsed.bounds, &parsed.shape),
-        OutputTemplate::Logical => randi_logical(&parsed.bounds, &parsed.shape),
-        OutputTemplate::Integer(target) => randi_integer(&parsed.bounds, &parsed.shape, target),
-        OutputTemplate::Like(proto) => randi_like(&proto, &parsed.bounds, &parsed.shape).await,
+        OutputTemplate::Double => randi_double(&mut turn, &parsed.bounds, &parsed.shape),
+        OutputTemplate::Single => randi_single(&mut turn, &parsed.bounds, &parsed.shape),
+        OutputTemplate::Logical => randi_logical(&mut turn, &parsed.bounds, &parsed.shape),
+        OutputTemplate::Integer(target) => {
+            randi_integer(&mut turn, &parsed.bounds, &parsed.shape, target)
+        }
+        OutputTemplate::Like(proto) => {
+            randi_like(&mut turn, &proto, &parsed.bounds, &parsed.shape).await
+        }
     }
 }
 
@@ -367,13 +379,21 @@ fn output_template_uses_floating_storage(template: &OutputTemplate) -> bool {
     }
 }
 
-fn randi_double(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    let tensor = integer_tensor(bounds, shape)?;
+fn randi_double(
+    turn: &mut random::RandomTurn,
+    bounds: &Bounds,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
+    let tensor = integer_tensor(turn, bounds, shape)?;
     Ok(tensor::tensor_into_value(tensor))
 }
 
-fn randi_single(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
-    let data = generate_integer_values(bounds, tensor::element_count(shape))?
+fn randi_single(
+    turn: &mut random::RandomTurn,
+    bounds: &Bounds,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
+    let data = generate_integer_values(turn, bounds, tensor::element_count(shape))?
         .into_iter()
         .map(|value| value as f64)
         .collect();
@@ -383,18 +403,23 @@ fn randi_single(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value>
 }
 
 fn randi_integer(
+    turn: &mut random::RandomTurn,
     bounds: &Bounds,
     shape: &[usize],
     target: IntegerClass,
 ) -> crate::BuiltinResult<Value> {
-    let values = generate_integer_values(bounds, tensor::element_count(shape))?;
+    let values = generate_integer_values(turn, bounds, tensor::element_count(shape))?;
     let storage = integer_storage_from_values(target, values)?;
     Tensor::new_integer(storage, shape.to_vec())
         .map(tensor::tensor_into_value)
         .map_err(|error| builtin_error(format!("randi: {error}")))
 }
 
-fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value> {
+fn randi_logical(
+    turn: &mut random::RandomTurn,
+    bounds: &Bounds,
+    shape: &[usize],
+) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
     let mut data: Vec<u8> = Vec::with_capacity(len);
     if len == 0 {
@@ -407,7 +432,7 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value
         let byte = if bounds.lower > 0 { 1u8 } else { 0u8 };
         data.resize(len, byte);
     } else {
-        let samples = generate_integer_values(bounds, len)?;
+        let samples = generate_integer_values(turn, bounds, len)?;
         data = samples
             .into_iter()
             .map(|value| if value > 0 { 1u8 } else { 0u8 })
@@ -421,27 +446,30 @@ fn randi_logical(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Value
 
 #[async_recursion::async_recursion(?Send)]
 async fn randi_like(
+    turn: &mut random::RandomTurn,
     proto: &Value,
     bounds: &Bounds,
     shape: &[usize],
 ) -> crate::BuiltinResult<Value> {
     match proto {
-        Value::GpuTensor(handle) => randi_like_gpu(handle, bounds, shape).await,
-        Value::LogicalArray(_) | Value::Bool(_) => randi_logical(bounds, shape),
+        Value::GpuTensor(_) => unreachable!("GPU prototype handled before host turn"),
+        Value::LogicalArray(_) | Value::Bool(_) => randi_logical(turn, bounds, shape),
         Value::Tensor(tensor) => match tensor.numeric_dtype() {
-            runmat_value::NumericDType::F32 => randi_single(bounds, shape),
-            runmat_value::NumericDType::F64 => randi_double(bounds, shape),
+            runmat_value::NumericDType::F32 => randi_single(turn, bounds, shape),
+            runmat_value::NumericDType::F64 => randi_double(turn, bounds, shape),
             dtype => {
                 let Some(class) = dtype.integer_class() else {
                     return Err(builtin_error("randi: unsupported numeric prototype class"));
                 };
-                randi_integer(bounds, shape, class)
+                randi_integer(turn, bounds, shape, class)
             }
         },
-        Value::Int(value) => randi_integer(bounds, shape, IntegerClass::from_int_value(value)),
-        Value::Num(_) => randi_double(bounds, shape),
+        Value::Int(value) => {
+            randi_integer(turn, bounds, shape, IntegerClass::from_int_value(value))
+        }
+        Value::Num(_) => randi_double(turn, bounds, shape),
         Value::CharArray(_) | Value::String(_) | Value::StringArray(_) => {
-            randi_double(bounds, shape)
+            randi_double(turn, bounds, shape)
         }
         Value::Complex(_, _) | Value::ComplexTensor(_) => Err(builtin_error(
             "randi: complex prototypes are not supported; expected real-valued arrays",
@@ -453,51 +481,24 @@ async fn randi_like(
     }
 }
 
-#[async_recursion::async_recursion(?Send)]
-async fn randi_like_gpu(
-    handle: &GpuTensorHandle,
+fn integer_tensor(
+    turn: &mut random::RandomTurn,
     bounds: &Bounds,
     shape: &[usize],
-) -> crate::BuiltinResult<Value> {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Some(integer_type) = runmat_accelerate_api::handle_integer_type(handle) {
-            let target = IntegerClass::from(integer_type);
-            let values = generate_integer_values(bounds, tensor::element_count(shape))?;
-            let storage = integer_storage_from_values(target, values)?;
-            let view = integer_tensor_view(&storage, shape);
-            return provider
-                .upload_integer(&view)
-                .map(Value::GpuTensor)
-                .map_err(|e| {
-                    builtin_error(format!(
-                        "randi: provider cannot preserve native integer gpuArray output: {e}"
-                    ))
-                });
-        }
-
-        let tensor = integer_tensor(bounds, shape)?;
-        if let Ok(gpu) = gpu_helpers::upload_tensor(provider, &tensor) {
-            return Ok(Value::GpuTensor(gpu));
-        }
-        return Ok(tensor::tensor_into_value(tensor));
-    }
-
-    let gathered = crate::dispatcher::gather_if_needed_async(&Value::GpuTensor(handle.clone()))
-        .await
-        .map_err(|e| builtin_error(format!("randi: {e}")))?;
-    randi_like(&gathered, bounds, shape).await
-}
-
-fn integer_tensor(bounds: &Bounds, shape: &[usize]) -> crate::BuiltinResult<Tensor> {
+) -> crate::BuiltinResult<Tensor> {
     let len = tensor::element_count(shape);
-    let data = generate_integer_values(bounds, len)?
+    let data = generate_integer_values(turn, bounds, len)?
         .into_iter()
         .map(|value| value as f64)
         .collect();
     Tensor::new(data, shape.to_vec()).map_err(|e| builtin_error(format!("randi: {e}")))
 }
 
-fn generate_integer_values(bounds: &Bounds, len: usize) -> crate::BuiltinResult<Vec<i128>> {
+fn generate_integer_values(
+    turn: &mut random::RandomTurn,
+    bounds: &Bounds,
+    len: usize,
+) -> crate::BuiltinResult<Vec<i128>> {
     if len == 0 {
         return Ok(Vec::new());
     }
@@ -505,7 +506,7 @@ fn generate_integer_values(bounds: &Bounds, len: usize) -> crate::BuiltinResult<
         return Ok(vec![bounds.lower; len]);
     }
 
-    let offsets = random::generate_integer_offsets(bounds.span, len, "randi")?;
+    let offsets = random::generate_integer_offsets(turn, bounds.span, len, "randi")?;
     let mut out = Vec::with_capacity(len);
     for offset in offsets {
         let value = bounds
@@ -1345,7 +1346,10 @@ pub(crate) mod tests {
     fn randi_gpu_like_roundtrip() {
         let _guard = random::test_guard();
         random::reset_rng();
+        random::gpu::replace(random::gpu::GpuRandomSnapshot::default())
+            .expect("reset independent GPU child");
         test_support::with_test_provider(|provider| {
+            let cpu_before = random::snapshot().expect("CPU stream before GPU randi");
             let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
             let args = vec![
@@ -1354,6 +1358,15 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle),
             ];
             let result = block_on(randi_builtin(args)).expect("randi");
+            let cpu_after = random::snapshot().expect("CPU stream after GPU randi");
+            assert_eq!(cpu_before.state, cpu_after.state);
+            assert_eq!(cpu_before.seed, cpu_after.seed);
+            assert_eq!(
+                random::gpu::snapshot()
+                    .expect("GPU child after randi")
+                    .position,
+                1
+            );
             match result {
                 Value::GpuTensor(gpu) => {
                     let gathered =

@@ -1747,10 +1747,11 @@ pub(crate) async fn interpret_parfor_task_in_context(
     randomness
         .validate_for_iterations(iterations.len())
         .map_err(|error| mex("ParallelRandomness", &error.to_string()))?;
-    let deterministic_streams = match randomness {
-        runmat_execution::ParallelRandomnessContext::Deterministic { streams } => Some(streams),
-        runmat_execution::ParallelRandomnessContext::Inherit
-        | runmat_execution::ParallelRandomnessContext::Nondeterministic => None,
+    let deterministic = randomness.is_deterministic();
+    let runtime = if deterministic {
+        runtime.with_parallel_random_scope()?
+    } else {
+        runtime
     };
     let input_variables = region.input_variables().collect::<Vec<_>>();
     if inputs.len() != input_variables.len() {
@@ -1834,15 +1835,17 @@ pub(crate) async fn interpret_parfor_task_in_context(
             }
         }
         frame[region.loop_slot] = Some(iteration);
-        let _random_stream = deterministic_streams
-            .as_ref()
-            .and_then(|streams| streams.get(iteration_index).copied())
-            .map(|stream| {
-                runmat_runtime::builtins::common::random::enter_parallel_random_stream(
+        let _random_stream = if let Some(stream) = randomness.deterministic_stream(iteration_index)
+        {
+            Some(
+                runmat_runtime::builtins::common::random::enter_parallel_random_stream_async(
                     &runtime, stream,
                 )
-            })
-            .transpose()?;
+                .await?,
+            )
+        } else {
+            None
+        };
         let resume = InterpreterResumeState {
             pc: region.body.pc,
             completion_boundary: Some(

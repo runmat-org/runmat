@@ -1945,6 +1945,7 @@ fn remap_instr_slots(instr: &mut Instr, slot_remap: &HashMap<usize, usize>) {
         Instr::CallFevalMultiUsingOutputSlot(_, slot)
         | Instr::CallFevalExpandMultiOutputUsingOutputSlot(_, slot)
         | Instr::CallBuiltinMultiUsingOutputSlot(_, _, slot)
+        | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(_, _, slot)
         | Instr::CallSemanticFunctionMultiUsingOutputSlot(_, _, slot) => {
             remap_slot(slot, slot_remap);
         }

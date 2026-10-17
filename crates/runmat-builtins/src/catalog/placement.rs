@@ -47,6 +47,9 @@ pub enum BuiltinDistributedPolicy {
     InspectHandles,
     MaterializeArguments,
     MapUnary,
+    /// Unary partition mapping for a value input, plus the existing
+    /// distributed scalar-like construction for a `like` prototype.
+    MapUnaryOrScalarLikePrototype,
     /// Apply an elementwise unary builtin to each partition after validating
     /// placement-specific limits that are narrower than its host contract.
     MapUnaryConstrained(BuiltinDistributedMapContract),

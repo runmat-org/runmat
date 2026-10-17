@@ -17,9 +17,9 @@ mod source_ref;
 mod statement_pc;
 mod subscript;
 
-/// Portable schema for serialized [`Bytecode`] payloads. Version 22 adds the
-/// compiler-selected function-local layout to the fusion stage projection.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 22;
+/// Portable schema for serialized [`Bytecode`] payloads. Version 23 adds
+/// expanded builtin calls whose output count comes from a VM slot.
+pub const BYTECODE_SCHEMA_VERSION: u16 = 23;
 /// Portable schema for serialized [`FunctionRegistry`] payloads. Version 17
 /// carries the same selected function-local layout in retained bodies.
 pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 17;

@@ -63,6 +63,7 @@ fn limit_uploads_reject_borrowed_aliases_without_freeing_prototypes() {
         (realmax, NumericElementType::F64),
         (realmin, NumericElementType::F32),
         (flintmax, NumericElementType::F64),
+        (eps, NumericElementType::F64),
     ] {
         let allocation = provider
             .owner
@@ -84,5 +85,5 @@ fn limit_uploads_reject_borrowed_aliases_without_freeing_prototypes() {
         drop(prototype);
         assert_eq!(allocation.probe.retirements(), 1);
     }
-    assert_eq!(provider.uploads.load(Ordering::Relaxed), 5);
+    assert_eq!(provider.uploads.load(Ordering::Relaxed), 6);
 }

@@ -194,7 +194,11 @@ fn resident_carrier_is_request_bound_and_preserves_public_alias_facets() {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-fn resident_carrier_rejects_unowned_transposed_logical_and_nonreal_inputs() {
+fn resident_authority_distinguishes_valid_ineligible_inputs_from_invalid_owners() {
+    use crate::fusion::semantics::invocation_leaves::{
+        authenticate_resident_input, FloatingFusionEligibility,
+    };
+
     let provider = owner();
     let source = plan(vec![cast("single", 0, 2)], 2);
     let epsilon = Value::Num(1.0);
@@ -235,6 +239,45 @@ fn resident_carrier_rejects_unowned_transposed_logical_and_nonreal_inputs() {
         .0
         .allocate_zeroed(vec![2, 3], NumericElementType::I32, GpuTensorStorage::Real)
         .unwrap();
+    let dense_value = Value::GpuTensor(dense.handle.clone());
+    let dense_authority = authenticate_resident_input(&dense_value)
+        .unwrap()
+        .expect("resident input");
+    assert!(dense_authority.belongs_to(provider));
+    assert_eq!(
+        dense_authority.floating_eligibility(),
+        FloatingFusionEligibility::Eligible(ProviderPrecision::F32)
+    );
+    for handle in [
+        &transpose,
+        &logical.handle,
+        &complex.handle,
+        &integer.handle,
+    ] {
+        let value = Value::GpuTensor(handle.clone());
+        let authority = authenticate_resident_input(&value)
+            .unwrap()
+            .expect("valid resident input");
+        assert!(authority.belongs_to(provider));
+        assert_eq!(
+            authority.floating_eligibility(),
+            FloatingFusionEligibility::Ineligible
+        );
+    }
+    let unregistered_value = Value::GpuTensor(unregistered.handle.clone());
+    assert!(authenticate_resident_input(&unregistered_value).is_err());
+
+    let other = owner();
+    let foreign = other
+        .0
+        .allocate_zeroed(vec![2, 3], NumericElementType::F32, GpuTensorStorage::Real)
+        .unwrap();
+    let foreign_value = Value::GpuTensor(foreign.handle);
+    let foreign_authority = authenticate_resident_input(&foreign_value)
+        .unwrap()
+        .expect("registered resident input");
+    assert!(!foreign_authority.belongs_to(provider));
+
     for handle in [
         transpose,
         unregistered.handle,
@@ -252,6 +295,7 @@ fn resident_carrier_rejects_unowned_transposed_logical_and_nonreal_inputs() {
         .unwrap();
     dead.probe.mark_unavailable();
     let input = Value::GpuTensor(dead.handle);
+    assert!(authenticate_resident_input(&input).is_err());
     let leaves = FusionInvocationLeaves::new(&source, &[&input, &epsilon]).unwrap();
     assert_eq!(storage(&leaves, 0, &input), value_fact(&input));
 }

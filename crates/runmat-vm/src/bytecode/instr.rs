@@ -682,6 +682,7 @@ pub enum Instr {
         out_count: usize,
     },
     CallBuiltinExpandMultiOutput(String, Vec<ArgumentSpec>, usize),
+    CallBuiltinExpandMultiOutputUsingOutputSlot(String, Vec<ArgumentSpec>, usize),
     CallSuperConstructorExpandMultiOutput {
         current_class: ClassIdentity,
         super_class: ClassIdentity,
@@ -1017,6 +1018,10 @@ impl Instr {
                 effect(operands, *out_count)
             }
             Instr::CallWorkspaceFirstExpandMultiOutputUsingOutputSlot { specs, .. } => {
+                let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
+                effect(operands, 0)
+            }
+            Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(_, specs, _) => {
                 let operands: usize = specs.iter().map(ArgumentSpec::stack_operand_count).sum();
                 effect(operands, 0)
             }

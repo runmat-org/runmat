@@ -32,6 +32,18 @@ macro_rules! integer_slice_mut {
     };
 }
 
+macro_rules! integer_slice {
+    ($self:expr, $variant:ident) => {
+        match &$self.allocation {
+            ExactAllocation::Integer(allocation) => match &allocation.values {
+                IntegerStorage::$variant(values) => Some(values.as_slice()),
+                _ => None,
+            },
+            ExactAllocation::Floating(_) => None,
+        }
+    };
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum ExactHostNumericAllocationError {
     UnsupportedClass,
@@ -517,6 +529,40 @@ impl ExactHostNumericAllocation {
             };
             unsafe { std::slice::from_raw_parts(allocation.pointer().as_ptr().cast(), self.len) }
         })
+    }
+
+    pub fn as_f32_slice(&self) -> Option<&[f32]> {
+        (self.dtype == NumericDType::F32).then(|| {
+            let ExactAllocation::Floating(allocation) = &self.allocation else {
+                unreachable!("floating dtype has floating allocation")
+            };
+            unsafe { std::slice::from_raw_parts(allocation.pointer().as_ptr().cast(), self.len) }
+        })
+    }
+
+    pub fn as_i8_slice(&self) -> Option<&[i8]> {
+        integer_slice!(self, I8)
+    }
+    pub fn as_i16_slice(&self) -> Option<&[i16]> {
+        integer_slice!(self, I16)
+    }
+    pub fn as_i32_slice(&self) -> Option<&[i32]> {
+        integer_slice!(self, I32)
+    }
+    pub fn as_i64_slice(&self) -> Option<&[i64]> {
+        integer_slice!(self, I64)
+    }
+    pub fn as_u8_slice(&self) -> Option<&[u8]> {
+        integer_slice!(self, U8)
+    }
+    pub fn as_u16_slice(&self) -> Option<&[u16]> {
+        integer_slice!(self, U16)
+    }
+    pub fn as_u32_slice(&self) -> Option<&[u32]> {
+        integer_slice!(self, U32)
+    }
+    pub fn as_u64_slice(&self) -> Option<&[u64]> {
+        integer_slice!(self, U64)
     }
 
     pub fn as_i8_slice_mut(&mut self) -> Option<&mut [i8]> {

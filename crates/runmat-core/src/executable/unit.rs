@@ -258,7 +258,12 @@ impl ExecutableUnit {
         let names = self.binding_names();
         body.locals
             .iter()
-            .filter(|local| local.kind == runmat_mir::MirLocalKind::Binding)
+            .filter(|local| {
+                matches!(
+                    local.kind,
+                    runmat_mir::MirLocalKind::Binding | runmat_mir::MirLocalKind::IncomingWorkspace
+                )
+            })
             .filter_map(|local| {
                 let binding = local.binding?;
                 names.get(&binding).cloned().map(|name| (binding, name))

@@ -3,15 +3,59 @@ use runmat_value::{Value, ValueSequence};
 use std::future::Future;
 use std::pin::Pin;
 
+type RuntimeError = String;
+
+mod context {
+    pub mod host_allocation {
+        pub type HostAllocationError = String;
+    }
+}
+
 mod builtin {
     use super::*;
 
     pub struct RuntimeBuiltinInvocation<'a> {
         pub args: &'a [Value],
+        pub context: Option<()>,
+    }
+
+    pub struct BuiltinContinuationInput {
+        pub args: crate::execution::RootedValues,
+        pub context: Option<()>,
+    }
+
+    impl BuiltinContinuationInput {
+        pub fn new(
+            args: crate::execution::RootedValues,
+            invocation: RuntimeBuiltinInvocation<'_>,
+        ) -> Self {
+            Self {
+                args,
+                context: invocation.context,
+            }
+        }
     }
 
     pub type RuntimeBuiltinFuture =
         Pin<Box<dyn Future<Output = Result<ValueSequence, String>> + 'static>>;
+
+    pub fn admitted_builtin_future<F>(
+        _context: Option<&()>,
+        _name: &'static str,
+        future: F,
+    ) -> RuntimeBuiltinFuture
+    where
+        F: Future<Output = Result<ValueSequence, String>> + 'static,
+    {
+        Box::pin(future)
+    }
+
+    pub fn continuation_layout_for<F>(_: fn(BuiltinContinuationInput) -> F) -> Result<u64, String>
+    where
+        F: Future<Output = Result<ValueSequence, String>>,
+    {
+        Ok(std::mem::size_of::<F>() as u64)
+    }
 
     pub trait CanonicalBuiltinOutput {
         fn into_rooted_sequence(self) -> Result<ValueSequence, String>;
@@ -28,6 +72,7 @@ mod builtin {
     pub struct RuntimeBuiltinBinding {
         pub identity: runmat_builtins::BuiltinBindingIdentity,
         pub implementation: for<'a> fn(RuntimeBuiltinInvocation<'a>) -> RuntimeBuiltinFuture,
+        pub continuation_layout: Option<fn() -> Result<u64, String>>,
     }
 
     impl RuntimeBuiltinBinding {
@@ -38,7 +83,16 @@ mod builtin {
             Self {
                 identity,
                 implementation,
+                continuation_layout: None,
             }
+        }
+
+        pub const fn with_continuation_layout(
+            mut self,
+            layout: fn() -> Result<u64, String>,
+        ) -> Self {
+            self.continuation_layout = Some(layout);
+            self
         }
     }
 
@@ -50,6 +104,7 @@ mod execution {
     use std::future::Future;
 
     pub struct RootedValues(Vec<Value>);
+    pub type RootedValueSequence = runmat_value::ValueSequence;
 
     pub struct RootError;
 
@@ -69,6 +124,14 @@ mod execution {
             F: Future<Output = R>,
         {
             consume(self.0).await
+        }
+    }
+
+    impl std::ops::Deref for RootedValues {
+        type Target = [Value];
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
         }
     }
 }

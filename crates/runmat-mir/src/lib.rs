@@ -46,6 +46,6 @@ pub use stmt::*;
 pub use terminator::*;
 
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
-/// Version 13 forwards anonymous call-body results through the destination-
-/// cardinality sequence and variadic function-output ABI.
-pub const MIR_SCHEMA_VERSION: u16 = 13;
+/// Version 14 identifies admitted incoming-workspace locals separately from
+/// newly declared locals so their entry initialization survives serialization.
+pub const MIR_SCHEMA_VERSION: u16 = 14;

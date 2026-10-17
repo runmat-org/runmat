@@ -57,7 +57,12 @@ enum PartitionOutput {
 async fn crossvalind_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let admitted = admit_host_controls(&args)?;
     let args = gather_values(args).await?;
-    let output = crossvalind_compute(args, admitted)?;
+    let mut turn = if matches!(admitted.method, Method::Resubstitution) {
+        None
+    } else {
+        Some(random::acquire_turn(None, NAME).await?)
+    };
+    let output = crossvalind_compute(args, admitted, turn.as_mut())?;
     output_value(output)
 }
 
@@ -185,6 +190,7 @@ async fn gather_values(values: Vec<Value>) -> BuiltinResult<Vec<Value>> {
 fn crossvalind_compute(
     args: Vec<Value>,
     admitted: AdmittedControls,
+    turn: Option<&mut random::RandomTurn>,
 ) -> BuiltinResult<PartitionOutput> {
     let method = admitted.method;
     let n = observation_count(&args[1])?;
@@ -207,12 +213,24 @@ fn crossvalind_compute(
     match method {
         Method::KFold => {
             let k = positive_integer(value.expect("KFold value"), "KFold")?;
-            let folds = kfold_indices(n, k, options.classes.as_deref(), options.min)?;
+            let folds = kfold_indices(
+                n,
+                k,
+                options.classes.as_deref(),
+                options.min,
+                turn.expect("random method has an ordered turn"),
+            )?;
             Ok(PartitionOutput::Folds(tensor_value(folds, vec![n, 1])?))
         }
         Method::HoldOut => {
             let test_count = holdout_count(value.expect("HoldOut value"), n)?;
-            let test = random_test_mask(n, test_count, options.classes.as_deref(), options.min)?;
+            let test = random_test_mask(
+                n,
+                test_count,
+                options.classes.as_deref(),
+                options.min,
+                turn.expect("random method has an ordered turn"),
+            )?;
             train_test_from_test_mask(test)
         }
         Method::LeaveMOut => {
@@ -222,7 +240,13 @@ fn crossvalind_compute(
                     "crossvalind: LeaveMOut must leave between 1 and n-1 observations out",
                 ));
             }
-            let test = random_test_mask(n, m, options.classes.as_deref(), options.min)?;
+            let test = random_test_mask(
+                n,
+                m,
+                options.classes.as_deref(),
+                options.min,
+                turn.expect("random method has an ordered turn"),
+            )?;
             train_test_from_test_mask(test)
         }
         Method::Resubstitution => {
@@ -303,6 +327,7 @@ fn kfold_indices(
     k: usize,
     classes: Option<&[Option<PartitionLabel>]>,
     min: Option<usize>,
+    turn: &mut random::RandomTurn,
 ) -> BuiltinResult<Vec<f64>> {
     if k < 2 || k > n {
         return Err(invalid_argument(
@@ -313,7 +338,7 @@ fn kfold_indices(
     if let Some(classes) = classes {
         validate_class_min(classes, min.unwrap_or(1), k)?;
         for indices in grouped_indices(classes).values() {
-            let shuffled = shuffled_indices(indices)?;
+            let shuffled = shuffled_indices(indices, turn)?;
             for (offset, row) in shuffled.into_iter().enumerate() {
                 folds[row] = (offset % k + 1) as f64;
             }
@@ -325,7 +350,7 @@ fn kfold_indices(
         }
     } else {
         let indices: Vec<usize> = (0..n).collect();
-        for (offset, row) in shuffled_indices(&indices)?.into_iter().enumerate() {
+        for (offset, row) in shuffled_indices(&indices, turn)?.into_iter().enumerate() {
             folds[row] = (offset % k + 1) as f64;
         }
     }
@@ -337,6 +362,7 @@ fn random_test_mask(
     test_count: usize,
     classes: Option<&[Option<PartitionLabel>]>,
     min: Option<usize>,
+    turn: &mut random::RandomTurn,
 ) -> BuiltinResult<Vec<u8>> {
     if test_count == 0 || test_count >= n {
         return Err(invalid_argument(
@@ -352,7 +378,7 @@ fn random_test_mask(
         for indices in groups.values() {
             let target = ((indices.len() * test_count) + (n / 2)) / n;
             let target = target.clamp(min.min(indices.len()), indices.len().saturating_sub(min));
-            for row in shuffled_indices(indices)?.into_iter().take(target) {
+            for row in shuffled_indices(indices, turn)?.into_iter().take(target) {
                 if selected < test_count {
                     test[row] = 1;
                     selected += 1;
@@ -361,7 +387,7 @@ fn random_test_mask(
         }
         if selected < test_count {
             let candidates: Vec<usize> = (0..n).filter(|row| test[*row] == 0).collect();
-            for row in shuffled_indices(&candidates)? {
+            for row in shuffled_indices(&candidates, turn)? {
                 if selected >= test_count {
                     break;
                 }
@@ -371,7 +397,10 @@ fn random_test_mask(
         }
     } else {
         let indices: Vec<usize> = (0..n).collect();
-        for row in shuffled_indices(&indices)?.into_iter().take(test_count) {
+        for row in shuffled_indices(&indices, turn)?
+            .into_iter()
+            .take(test_count)
+        {
             test[row] = 1;
         }
     }
@@ -390,12 +419,12 @@ fn train_test_from_test_mask(test: Vec<u8>) -> BuiltinResult<PartitionOutput> {
     })
 }
 
-fn shuffled_indices(indices: &[usize]) -> BuiltinResult<Vec<usize>> {
+fn shuffled_indices(indices: &[usize], turn: &mut random::RandomTurn) -> BuiltinResult<Vec<usize>> {
     let mut out = indices.to_vec();
     if out.len() <= 1 {
         return Ok(out);
     }
-    let uniforms = random::generate_uniform(out.len() - 1, NAME)?;
+    let uniforms = random::generate_uniform(turn, out.len() - 1, NAME)?;
     for (i, u) in uniforms.into_iter().enumerate() {
         let span = out.len() - i;
         let mut offset = (u * span as f64).floor() as usize;

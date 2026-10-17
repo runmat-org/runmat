@@ -1050,7 +1050,7 @@ impl LoweringCtx {
                 id,
                 owner: BindingOwner::Function(owner),
                 name: BindingName(name.clone()),
-                role: BindingRole::Local,
+                role: BindingRole::IncomingWorkspace,
                 storage: BindingStorage::Lexical,
                 workspace_visibility: WorkspaceVisibility::TopLevel,
                 declared_span: Span { start: 0, end: 0 },

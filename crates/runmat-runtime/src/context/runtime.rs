@@ -164,6 +164,9 @@ pub struct RuntimeContext {
     search_path: Option<Arc<crate::builtins::common::path_state::SearchPath>>,
     services: RuntimeServicePorts,
     state: Rc<RuntimeContextState>,
+    /// Deterministic parfor task RNG only; all other mutable language state
+    /// remains on the original session owner.
+    parallel_random_scope: Option<Rc<crate::builtins::common::random::ParallelRandomScope>>,
     invocation_language_policy: Option<Rc<Cell<RuntimeLanguagePolicy>>>,
     invocation_arity: Option<RuntimeInvocationArity>,
     // Captured at semantic-call admission before a child executor can be
@@ -274,6 +277,7 @@ impl RuntimeContext {
             search_path: None,
             services: RuntimeServicePorts::default(),
             state,
+            parallel_random_scope: None,
             invocation_language_policy: None,
             invocation_arity: None,
             constructor_receiver: None,
@@ -304,6 +308,19 @@ impl RuntimeContext {
 
     pub fn execution(&self) -> &Rc<dyn RuntimeExecutionServices> {
         &self.execution
+    }
+
+    pub fn with_parallel_random_scope(mut self) -> crate::BuiltinResult<Self> {
+        self.parallel_random_scope = Some(
+            crate::builtins::common::random::ParallelRandomScope::new(&self)?,
+        );
+        Ok(self)
+    }
+
+    pub(crate) fn parallel_random_scope(
+        &self,
+    ) -> Option<&Rc<crate::builtins::common::random::ParallelRandomScope>> {
+        self.parallel_random_scope.as_ref()
     }
 
     pub fn with_selected_graph_program(
@@ -872,6 +889,10 @@ impl RuntimeContext {
 
     pub fn cancellation(&self) -> CancellationToken {
         self.cancellation.borrow().clone()
+    }
+
+    pub(crate) fn cancellation_context(&self) -> super::RuntimeCancellationContext {
+        super::RuntimeCancellationContext::new(self.cancellation(), self.state.clone())
     }
 
     /// Project the selected call's arity without changing sibling futures or

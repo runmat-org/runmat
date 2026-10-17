@@ -74,12 +74,13 @@ pub async fn execute_stochastic_evolution(
     };
     let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
     let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
-    runmat_runtime::builtins::stats::random::stochastic_evolution::stochastic_evolution_host(
+    runmat_runtime::builtins::stats::random::stochastic_evolution::stochastic_evolution_host_async(
         &mut tensor_value,
         drift_scalar,
         scale_scalar,
         steps_u32,
-    )?;
+    )
+    .await?;
     Ok(Value::Tensor(tensor_value))
 }
 

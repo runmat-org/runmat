@@ -50,8 +50,11 @@ impl TsneCooperation {
     }
 
     pub(super) async fn normals(&mut self, len: usize) -> BuiltinResult<Vec<f64>> {
+        let mut turn =
+            crate::builtins::common::random::acquire_turn(self.runtime.as_ref(), NAME).await?;
         match self.budget.as_mut() {
             Some(budget) => crate::builtins::common::random::generate_normal_cooperative(
+                &mut turn,
                 len,
                 NAME,
                 self.runtime.as_ref(),
@@ -59,7 +62,7 @@ impl TsneCooperation {
             )
             .await
             .map_err(with_tsne_context),
-            None => crate::builtins::common::random::generate_normal(len, NAME),
+            None => crate::builtins::common::random::generate_normal(&mut turn, len, NAME),
         }
     }
 

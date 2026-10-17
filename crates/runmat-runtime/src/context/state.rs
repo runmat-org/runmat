@@ -77,6 +77,10 @@ pub struct RuntimeContextState {
     pub(crate) callstack_limit: Cell<usize>,
     pub(crate) error_namespace: RefCell<String>,
     pub(crate) random: RefCell<crate::builtins::common::random::RuntimeRng>,
+    pub(crate) random_turn: Arc<crate::builtins::common::random::RandomTurnGate>,
+    /// The explicit GPU random stream is independent of the ordinary CPU
+    /// stream even when placement later selects a device for CPU semantics.
+    pub(crate) gpu_random: RefCell<crate::builtins::common::random::gpu::GpuRandomStream>,
 }
 
 impl RuntimeContextState {
@@ -117,6 +121,8 @@ impl RuntimeContextState {
             callstack_limit: Cell::new(super::DEFAULT_CALLSTACK_LIMIT),
             error_namespace: RefCell::new(super::DEFAULT_ERROR_NAMESPACE.to_string()),
             random: RefCell::new(crate::builtins::common::random::RuntimeRng::new()),
+            random_turn: Arc::new(crate::builtins::common::random::RandomTurnGate::default()),
+            gpu_random: RefCell::new(crate::builtins::common::random::gpu::GpuRandomStream::new()),
         }
     }
 }

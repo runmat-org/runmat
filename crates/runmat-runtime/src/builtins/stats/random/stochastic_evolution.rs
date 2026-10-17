@@ -17,11 +17,38 @@ pub fn stochastic_evolution_host(
         return Ok(());
     }
 
+    let mut turn = random::try_acquire_turn(None, NAME)?;
+    evolve_with_turn(&mut turn, tensor, drift, scale, steps)
+}
+
+/// Async execution owns one FIFO draw turn across the complete evolution.
+/// The synchronous compatibility entry above reports a busy stream instead
+/// of bypassing the turn; production VM callers await this entry.
+pub async fn stochastic_evolution_host_async(
+    tensor: &mut Tensor,
+    drift: f64,
+    scale: f64,
+    steps: u32,
+) -> BuiltinResult<()> {
+    if tensor.is_empty() || steps == 0 {
+        return Ok(());
+    }
+    let mut turn = random::acquire_turn(None, NAME).await?;
+    evolve_with_turn(&mut turn, tensor, drift, scale, steps)
+}
+
+fn evolve_with_turn(
+    turn: &mut random::RandomTurn,
+    tensor: &mut Tensor,
+    drift: f64,
+    scale: f64,
+    steps: u32,
+) -> BuiltinResult<()> {
     let len = tensor.len();
     match tensor.numeric_dtype() {
         NumericDType::F64 => {
             for _ in 0..steps {
-                let samples = random::generate_normal(len, NAME)?;
+                let samples = random::generate_normal(turn, len, NAME)?;
                 for (index, noise) in samples.into_iter().enumerate() {
                     let NumericScalar::F64(value) = tensor
                         .numeric_value_at(index)
@@ -39,7 +66,7 @@ pub fn stochastic_evolution_host(
             let drift = drift as f32;
             let scale = scale as f32;
             for _ in 0..steps {
-                let samples = random::generate_normal(len, NAME)?;
+                let samples = random::generate_normal(turn, len, NAME)?;
                 for (index, noise) in samples.into_iter().enumerate() {
                     let NumericScalar::F32(value) = tensor
                         .numeric_value_at(index)

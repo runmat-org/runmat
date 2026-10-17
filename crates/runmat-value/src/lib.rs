@@ -5,6 +5,7 @@ mod display;
 mod exception;
 mod foreign;
 mod numeric;
+mod numeric_spacing;
 mod object;
 mod sequence;
 pub mod symbolic;
@@ -44,6 +45,7 @@ pub use numeric::{
     IntValue, IntegerStorage, NumericDType, NumericScalar, NumericStorage, NumericStorageView,
     NumericStorageViewMut,
 };
+pub use numeric_spacing::{spacing_f32, spacing_f64};
 pub use object::{
     ContainersMapEntry, ContainersMapKey, ContainersMapKeyType, ContainersMapStorage,
     ContainersMapValueClass, ContainersMapValueType, DynamicPropertyDef,

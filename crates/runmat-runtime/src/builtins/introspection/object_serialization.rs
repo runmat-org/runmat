@@ -42,71 +42,109 @@ fn object_class_name(value: &Value) -> Option<runmat_types::ClassIdentity> {
     crate::object_receiver_class_name(value)
 }
 
-async fn dispatch_registered_method(
-    class_name: &runmat_types::ClassIdentity,
+fn dispatch_registered_method<'a>(
+    class_name: &'a runmat_types::ClassIdentity,
     method_name: runmat_types::StaticMethodName,
     args: Vec<Value>,
     builtin: &'static str,
-) -> crate::BuiltinResult<Option<RootedValue>> {
-    let _args_root =
-        RootedValueLease::for_values(args.iter()).map_err(|error| error.into_runtime_error())?;
-    if let Some((method, owner)) =
-        crate::class_registry::lookup_method(class_name, &method_name.owned())
-    {
-        let owner_member = format!("{owner}.{method_name}");
-        let mut candidates = Vec::with_capacity(2);
-        if !method.function_name.trim().is_empty() {
-            candidates.push(method.function_name);
-        }
-        if !candidates
-            .iter()
-            .any(|candidate| candidate == &owner_member)
-        {
-            candidates.push(owner_member);
-        }
-
-        let mut undefined = None;
-        for candidate in candidates {
-            let (identity, fallback_policy) = crate::callable_identity_for_handle_name(&candidate);
-            match crate::dispatch_callable_with_policy(identity, fallback_policy, args.clone(), 1)
-                .await
-            {
-                Ok(value) => return Ok(Some(value)),
-                Err(err) if crate::is_undefined_function_error(&err) => undefined = Some(err),
-                Err(err) => return Err(err),
-            }
-        }
-        return Err(undefined.unwrap_or_else(|| {
-            serialization_error(
+    selected_runtime: Option<&crate::context::RuntimeContext>,
+) -> std::pin::Pin<
+    Box<dyn std::future::Future<Output = crate::BuiltinResult<Option<RootedValue>>> + 'a>,
+> {
+    // The callback's inputs must remain rooted even if the admitted future is
+    // retained unpolled, cancelled, or dropped by its caller.
+    let runtime = selected_runtime
+        .cloned()
+        .or_else(crate::context::legacy::active);
+    let args_root = match RootedValueLease::for_values(args.iter()) {
+        Ok(root) => root,
+        Err(error) => {
+            return crate::execution::rooted_continuation::admit_rooted_future(
+                runtime.as_ref(),
                 builtin,
-                &SERIALIZATION_ERROR_DISPATCH,
-                format!("{class_name}.{method_name} did not resolve to a callable"),
-            )
-        }));
-    }
-
-    if args
-        .first()
-        .is_some_and(|arg| matches!(arg, Value::Object(_) | Value::HandleObject(_)))
-    {
-        match crate::dispatch_object_external_member(
-            class_name.clone(),
-            method_name.display_name(),
-            args,
-            1,
-        )
-        .await
-        {
-            Ok(value) => Ok(Some(value)),
-            Err(err) if crate::is_undefined_function_error(&err) => Ok(None),
-            Err(err) => Err(err),
+                crate::builtin::builtin_control_error,
+                std::future::ready(Err(error.into_runtime_error())),
+            );
         }
-    } else {
-        Ok(None)
-    }
+    };
+    crate::execution::rooted_continuation::admit_rooted_future_with(
+        runtime,
+        builtin,
+        crate::builtin::builtin_control_error,
+        move |runtime| async move {
+            let _args_root = args_root;
+            if let Some((method, owner)) =
+                crate::class_registry::lookup_method(class_name, &method_name.owned())
+            {
+                let owner_member = format!("{owner}.{method_name}");
+                let mut candidates = Vec::with_capacity(2);
+                if !method.function_name.trim().is_empty() {
+                    candidates.push(method.function_name);
+                }
+                if !candidates
+                    .iter()
+                    .any(|candidate| candidate == &owner_member)
+                {
+                    candidates.push(owner_member);
+                }
+
+                let mut undefined = None;
+                for candidate in candidates {
+                    let (identity, fallback_policy) =
+                        crate::callable_identity_for_handle_name(&candidate);
+                    match crate::dispatch_callable_with_policy_in_context(
+                        runtime.as_ref(),
+                        identity,
+                        fallback_policy,
+                        args.clone(),
+                        1,
+                    )
+                    .await
+                    {
+                        Ok(value) => return Ok(Some(value)),
+                        Err(err) if crate::is_undefined_function_error(&err) => {
+                            undefined = Some(err)
+                        }
+                        Err(err) => return Err(err),
+                    }
+                }
+                return Err(undefined.unwrap_or_else(|| {
+                    serialization_error(
+                        builtin,
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        format!("{class_name}.{method_name} did not resolve to a callable"),
+                    )
+                }));
+            }
+
+            if args
+                .first()
+                .is_some_and(|arg| matches!(arg, Value::Object(_) | Value::HandleObject(_)))
+            {
+                match crate::dispatch_object_external_member_in_context(
+                    runtime.as_ref(),
+                    class_name.clone(),
+                    method_name.display_name(),
+                    args,
+                    1,
+                )
+                .await
+                {
+                    Ok(value) => Ok(Some(value)),
+                    Err(err) if crate::is_undefined_function_error(&err) => Ok(None),
+                    Err(err) => Err(err),
+                }
+            } else {
+                Ok(None)
+            }
+        },
+    )
 }
 
-async fn call_saveobj_if_available(value: Value) -> crate::BuiltinResult<Option<RootedValue>> {
+async fn call_saveobj_if_available(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<Option<RootedValue>> {
     let Some(class_name) = object_class_name(&value) else {
         return Ok(None);
     };
@@ -115,6 +153,7 @@ async fn call_saveobj_if_available(value: Value) -> crate::BuiltinResult<Option<
         SAVEOBJ_METHOD,
         vec![value],
         SAVEOBJ_METHOD.display_name(),
+        runtime,
     )
     .await
 }
@@ -122,6 +161,7 @@ async fn call_saveobj_if_available(value: Value) -> crate::BuiltinResult<Option<
 async fn call_loadobj_if_available(
     class_name: &str,
     payload: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<Option<RootedValue>> {
     let identity = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
         serialization_error(
@@ -135,6 +175,7 @@ async fn call_loadobj_if_available(
         LOADOBJ_METHOD,
         vec![payload],
         LOADOBJ_METHOD.display_name(),
+        runtime,
     )
     .await
 }
@@ -282,11 +323,25 @@ fn root_value(value: Value) -> crate::BuiltinResult<RootedValue> {
 }
 
 pub(crate) async fn prepare_value_for_mat_save(value: Value) -> crate::BuiltinResult<RootedValue> {
-    prepare::prepare_value_for_save(value).await
+    prepare_value_for_mat_save_in_context(value, None).await
+}
+
+pub(crate) async fn prepare_value_for_mat_save_in_context(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<RootedValue> {
+    prepare::prepare_value_for_save_in_context(value, runtime).await
 }
 
 pub(crate) async fn restore_value_from_mat_load(value: Value) -> crate::BuiltinResult<RootedValue> {
-    restore::restore_value_after_load(value).await
+    restore_value_from_mat_load_in_context(value, None).await
+}
+
+pub(crate) async fn restore_value_from_mat_load_in_context(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<RootedValue> {
+    restore::restore_value_after_load_in_context(value, runtime).await
 }
 
 #[runtime_builtin(
@@ -299,7 +354,7 @@ pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<RootedValue> 
         RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     match value {
         receiver @ (Value::Object(_) | Value::HandleObject(_)) => {
-            if let Some(saved) = call_saveobj_if_available(receiver.clone()).await? {
+            if let Some(saved) = call_saveobj_if_available(receiver.clone(), None).await? {
                 Ok(saved)
             } else {
                 root_value(Value::Struct(object_properties_payload(&receiver)?))

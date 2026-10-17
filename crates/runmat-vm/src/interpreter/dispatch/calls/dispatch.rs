@@ -9,6 +9,12 @@ use std::pin::Pin;
 type CallFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Option<DispatchHandled>, RuntimeError>> + 'a>>;
 
+#[derive(Clone, Copy)]
+enum OutputPublication {
+    Fixed(usize),
+    Sequence,
+}
+
 #[path = "dispatch/builtin.rs"]
 mod builtin;
 #[path = "dispatch/expanded.rs"]
@@ -59,6 +65,7 @@ pub(in crate::interpreter::dispatch) fn dispatch_call<'a>(
         Instr::CallWorkspaceFirstMulti { .. }
         | Instr::CallWorkspaceFirstMultiUsingOutputSlot { .. } => suspend_workspace(ctx),
         Instr::CallBuiltinExpandMultiOutput(..)
+        | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(..)
         | Instr::CallSuperConstructorExpandMultiOutput { .. }
         | Instr::CallSuperMethodExpandMultiOutput { .. }
         | Instr::CallFunctionExpandMultiOutput { .. }

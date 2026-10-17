@@ -35,7 +35,11 @@ pub(super) fn fans(shape: &[usize], function: &'static str) -> BuiltinResult<(us
     }
 }
 
-fn orthogonal(shape: &[usize], function: &'static str) -> BuiltinResult<Vec<f64>> {
+fn orthogonal(
+    turn: &mut crate::builtins::common::random::RandomTurn,
+    shape: &[usize],
+    function: &'static str,
+) -> BuiltinResult<Vec<f64>> {
     let [rows, columns] = shape else {
         return Err(deep_learning_error(
             function,
@@ -48,7 +52,7 @@ fn orthogonal(shape: &[usize], function: &'static str) -> BuiltinResult<Vec<f64>
             format!("{function}: orthogonal initializer shape overflows"),
         )
     })?;
-    let mut data = crate::builtins::common::random::generate_normal(count, function)?;
+    let mut data = crate::builtins::common::random::generate_normal(turn, count, function)?;
     // Orthogonalize the shorter axis. For tall matrices columns are unit
     // vectors; for wide matrices rows are unit vectors. The payload stays in
     // the canonical column-major layout throughout.
@@ -92,6 +96,7 @@ fn orthogonal(shape: &[usize], function: &'static str) -> BuiltinResult<Vec<f64>
 }
 
 pub(super) fn builtin(
+    turn: &mut crate::builtins::common::random::RandomTurn,
     initializer: I,
     kind: DeepLearningLayerKind,
     shape: &[usize],
@@ -143,6 +148,7 @@ pub(super) fn builtin(
             })?;
             let standard_deviation = (2.0 / denominator as f64).sqrt();
             crate::builtins::common::random::generate_normal_scaled(
+                turn,
                 0.0,
                 standard_deviation,
                 count,
@@ -153,16 +159,17 @@ pub(super) fn builtin(
             let (input, _) = fans(shape, function)?;
             let standard_deviation = (2.0 / input as f64).sqrt();
             crate::builtins::common::random::generate_normal_scaled(
+                turn,
                 0.0,
                 standard_deviation,
                 count,
                 function,
             )?
         }
-        I::NarrowNormal => {
-            crate::builtins::common::random::generate_normal_scaled(0.0, 0.01, count, function)?
-        }
-        I::Orthogonal => orthogonal(shape, function)?,
+        I::NarrowNormal => crate::builtins::common::random::generate_normal_scaled(
+            turn, 0.0, 0.01, count, function,
+        )?,
+        I::Orthogonal => orthogonal(turn, shape, function)?,
     };
     Tensor::new_with_dtype(values, shape.to_vec(), precision)
         .map(Value::Tensor)

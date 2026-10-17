@@ -1,6 +1,7 @@
 //! Catalog-owned definitions for numeric-limit builtins.
 
 mod contract;
+mod eps;
 mod evidence;
 mod flintmax;
 mod intmax;
@@ -12,6 +13,7 @@ pub use contract::{
     NUMERIC_LIMIT_ERROR_INTERNAL, NUMERIC_LIMIT_ERROR_INVALID_CLASS,
     NUMERIC_LIMIT_ERROR_INVALID_SYNTAX,
 };
+pub use eps::EPS_CATALOG_ENTRY;
 pub use flintmax::FLINTMAX_CATALOG_ENTRY;
 pub use intmax::INTMAX_CATALOG_ENTRY;
 pub use intmin::INTMIN_CATALOG_ENTRY;
@@ -21,6 +23,7 @@ pub use realmin::REALMIN_CATALOG_ENTRY;
 use crate::BuiltinCatalogEntry;
 
 pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &EPS_CATALOG_ENTRY,
     &INTMIN_CATALOG_ENTRY,
     &INTMAX_CATALOG_ENTRY,
     &REALMIN_CATALOG_ENTRY,

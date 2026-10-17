@@ -27,6 +27,7 @@ pub(crate) mod logarithm_roots;
 mod logical;
 pub(crate) mod matmul;
 pub(crate) mod power;
+mod random_child;
 pub(crate) mod real_unary;
 pub(crate) mod remainder;
 pub(crate) mod resident_select;
@@ -35,6 +36,10 @@ pub(crate) mod sum;
 pub(crate) mod trigonometry;
 
 const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
+    (
+        runmat_accelerate_api::random::PROVIDER_GPU_RANDOM_OPERATION,
+        ProviderOperationFamily::Library,
+    ),
     (
         runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION,
         ProviderOperationFamily::Library,
@@ -80,6 +85,10 @@ const IN_PROCESS_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
 
 #[cfg(feature = "wgpu")]
 const WGPU_OPERATIONS: &[(&str, ProviderOperationFamily)] = &[
+    (
+        runmat_accelerate_api::random::PROVIDER_GPU_RANDOM_OPERATION,
+        ProviderOperationFamily::Library,
+    ),
     (
         runmat_accelerate_api::PROVIDER_IIR_CAUSAL_PASS_OPERATION,
         ProviderOperationFamily::Library,
@@ -272,7 +281,10 @@ pub(crate) fn wgpu_capability_snapshot(
     provider: &(impl AccelProvider + ?Sized),
     max_buffer_bytes: u64,
 ) -> ProviderCapabilitySnapshot {
-    let mut snapshot = dense_capability_snapshot(provider, 18, WGPU_OPERATIONS);
+    let mut snapshot = dense_capability_snapshot(provider, 20, WGPU_OPERATIONS);
+    // This operation has its own typed F32/F64 feasibility. Do not widen the
+    // general element-type inventory: unrelated hooks retain their preferred
+    // precision contracts.
     // A selected F64 reduction emits IEEE word helpers. Keep the provider's
     // advertised operation and revision aligned with its enabled device
     // features; ordinary F64 arithmetic and integer reductions stay present.
@@ -292,7 +304,7 @@ pub(crate) fn wgpu_capability_snapshot(
                 operation.identity != ProviderOperationIdentity::new(fusion_operation_token(kind))
             })
         });
-        snapshot.revision = 19;
+        snapshot.revision = 21;
     }
     // WebGPU's adapter limit is a maximum for one buffer. It does not
     // establish a total device-memory capacity.
@@ -341,6 +353,9 @@ pub(crate) fn in_process_feasibility(
     provider: &(impl AccelProvider + ?Sized),
     query: &ProviderFeasibilityQuery,
 ) -> ProviderFeasibility {
+    if let Some(result) = random_child::validate(query) {
+        return result;
+    }
     if let Some(result) = image_stages::validate(query) {
         return result;
     }

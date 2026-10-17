@@ -95,6 +95,7 @@ impl From<&runmat_mir::MirLocalKind> for NativeLocalKind {
             runmat_mir::MirLocalKind::Parameter => Self::Parameter,
             runmat_mir::MirLocalKind::Output => Self::Output,
             runmat_mir::MirLocalKind::Binding => Self::Binding,
+            runmat_mir::MirLocalKind::IncomingWorkspace => Self::Binding,
             runmat_mir::MirLocalKind::Temporary => Self::Temporary,
             runmat_mir::MirLocalKind::Capture => Self::Capture,
         }

@@ -59,6 +59,24 @@ impl PartialEq for ExecutionServiceError {
 impl Eq for ExecutionServiceError {}
 
 impl ExecutionServiceError {
+    /// Present invocation-local service failures in their owning session's
+    /// namespace instead of the parallel service API's default namespace.
+    pub(crate) fn into_runtime_error_in_context(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> RuntimeError {
+        let cancelled = matches!(self, Self::Cancelled);
+        let mut error = self.into_runtime_error();
+        if cancelled {
+            let namespace = runtime.map_or_else(
+                || "RunMat".to_owned(),
+                crate::context::RuntimeContext::error_namespace,
+            );
+            error.identifier = Some(format!("{namespace}:Cancelled"));
+        }
+        error
+    }
+
     /// Convert an execution-domain failure into its stable language-level
     /// diagnostic. This is the sole boundary between scheduler/service
     /// outcomes and user-visible runtime errors.
@@ -73,32 +91,40 @@ impl ExecutionServiceError {
                     )
                 })
             }
-            Self::ForeignScope => crate::runtime_error::semantic_error(
+            Self::ForeignScope => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:ForeignScope",
-                self.to_string(),
+                Self::ForeignScope.to_string(),
+                Self::ForeignScope,
             ),
-            Self::UnknownHandle => crate::runtime_error::semantic_error(
+            Self::UnknownHandle => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:UnknownHandle",
-                self.to_string(),
+                Self::UnknownHandle.to_string(),
+                Self::UnknownHandle,
             ),
-            Self::Cancelled => {
-                crate::runtime_error::semantic_error("RunMat:parallel:Cancelled", self.to_string())
-            }
-            Self::WorkerLost(message) => crate::runtime_error::semantic_error(
+            Self::Cancelled => crate::runtime_error::semantic_error_with_source(
+                "RunMat:parallel:Cancelled",
+                Self::Cancelled.to_string(),
+                Self::Cancelled,
+            ),
+            Self::WorkerLost(message) => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:WorkerLost",
                 format!("execution worker was lost: {message}"),
+                Self::WorkerLost(message),
             ),
-            Self::Infrastructure(message) => crate::runtime_error::semantic_error(
+            Self::Infrastructure(message) => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:InfrastructureFailure",
                 format!("execution infrastructure failed: {message}"),
+                Self::Infrastructure(message),
             ),
-            Self::Failed(message) => crate::runtime_error::semantic_error(
+            Self::Failed(message) => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:ExecutionFailed",
                 format!("execution failed: {message}"),
+                Self::Failed(message),
             ),
-            Self::InvalidOutputContract => crate::runtime_error::semantic_error(
+            Self::InvalidOutputContract => crate::runtime_error::semantic_error_with_source(
                 "RunMat:parallel:InvalidOutputContract",
-                self.to_string(),
+                Self::InvalidOutputContract.to_string(),
+                Self::InvalidOutputContract,
             ),
         }
     }
@@ -550,7 +576,13 @@ mod tests {
             ),
         ];
         for (failure, identifier) in cases {
-            assert_eq!(failure.into_runtime_error().identifier(), Some(identifier),);
+            let visible = failure.clone().into_runtime_error();
+            assert_eq!(visible.identifier(), Some(identifier));
+            let cause = visible
+                .source
+                .as_deref()
+                .and_then(|source| source.downcast_ref::<ExecutionServiceError>());
+            assert_eq!(cause, Some(&failure));
         }
     }
 

@@ -29,7 +29,9 @@ pub(crate) async fn gamrnd_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let prepared = parse_args(&args).await?;
     validate_parameters(&prepared.random)?;
     let len = BOUNDARY.checked_element_count(&prepared.random.shape)?;
+    let mut turn = random::acquire_turn(None, BOUNDARY.name()).await?;
     let data = random::generate_gamma_shape_scale(
+        &mut turn,
         &prepared.random.first,
         &prepared.random.second,
         len,

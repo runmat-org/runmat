@@ -1,7 +1,7 @@
 use super::*;
 use crate::builtins::common::random::{
-    advance_state, enter_parallel_random_stream, reserve_parallel_random_streams, set_seed,
-    snapshot, test_guard, with_rng_state_in, DEFAULT_RNG_SEED,
+    enter_parallel_random_stream, reserve_parallel_random_streams, set_seed, snapshot, test_guard,
+    with_rng_state_in, RandomState, DEFAULT_USER_SEED,
 };
 use crate::execution::{CpuCooperationPolicy, ExecutionServiceError, RuntimeExecutionService};
 use futures::executor::block_on;
@@ -22,8 +22,28 @@ fn serial_budget(context: &RuntimeContext) -> CpuCooperationBudget {
     CpuCooperationBudget::new(context.execution().clone(), context.cancellation())
 }
 
-fn state(context: &RuntimeContext) -> u64 {
-    with_rng_state_in(Some(context), "rng test", |rng| rng.state).unwrap()
+fn generate_uniform(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
+    let mut turn = super::super::turn::try_acquire(None, label)?;
+    super::generate_uniform(&mut turn, len, label)
+}
+
+async fn generate_uniform_cooperative(
+    len: usize,
+    label: &str,
+    context: Option<&RuntimeContext>,
+    budget: &mut CpuCooperationBudget,
+) -> BuiltinResult<Vec<f64>> {
+    let mut turn = super::super::turn::acquire(context, label).await?;
+    super::generate_uniform_cooperative(&mut turn, len, label, context, budget).await
+}
+
+fn state(context: &RuntimeContext) -> RandomState {
+    with_rng_state_in(Some(context), "rng test", |rng| rng.state.clone()).unwrap()
+}
+
+fn advanced(mut state: RandomState, count: u64) -> RandomState {
+    state.advance_uniforms(count, None).unwrap();
+    state
 }
 
 #[test]
@@ -34,11 +54,12 @@ fn jump_ahead_matches_exact_serial_draws_and_snapshot() {
         set_seed(41).unwrap();
     }
     let start = state(&context);
-    let mut expected_state = start;
+    let mut expected_state = start.clone();
+    expected_state.prepare_mutation(None).unwrap();
     let expected: Vec<f64> = (0..131_071)
         .map(|_| next_uniform_state(&mut expected_state))
         .collect();
-    assert_eq!(advance_state(start, 131_071), expected_state);
+    assert_eq!(advanced(start, 131_071), expected_state);
     let actual = block_on(generate_uniform_cooperative(
         expected.len(),
         "rng test",
@@ -154,21 +175,26 @@ fn pending_drop_consumes_whole_reserved_range_without_holding_rng_borrow() {
     let waker = futures::task::noop_waker();
     let mut task = Context::from_waker(&waker);
     assert!(matches!(future.as_mut().poll(&mut task), Poll::Pending));
-    assert_eq!(state(&context), advance_state(first, 17));
+    assert_eq!(state(&context), advanced(first.clone(), 17));
+    assert!(super::super::turn::try_acquire(Some(&context), "rng test").is_err());
     let expected_next = {
-        let mut state = advance_state(first, 17);
+        let mut state = advanced(first.clone(), 17);
+        state.prepare_mutation(None).unwrap();
         next_uniform_state(&mut state)
     };
+    drop(future);
+    let mut turn = super::super::turn::try_acquire(Some(&context), "rng test").unwrap();
     assert_eq!(
-        with_rng_state_in(Some(&context), "rng test", |rng| {
+        turn.with_state("rng test", |rng| {
+            rng.state.prepare_mutation(Some(&context)).unwrap();
             next_uniform_state(&mut rng.state)
         })
         .unwrap(),
         expected_next
     );
-    drop(future);
+    drop(turn);
     assert!(dropped_turn.get());
-    assert_eq!(state(&context), advance_state(first, 18));
+    assert_eq!(state(&context), advanced(first, 18));
 }
 
 #[test]
@@ -199,7 +225,7 @@ fn post_reservation_cancel_and_service_failure_keep_typed_causes_and_range() {
             &mut budget,
         ))
         .expect_err("turn failure after reservation");
-        assert_eq!(state(&context), advance_state(first, 9));
+        assert_eq!(state(&context), advanced(first, 9));
         if cancel {
             assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
         } else {
@@ -220,14 +246,14 @@ fn fallback_and_parallel_iteration_streams_use_same_reservation_authority() {
     assert_eq!(generate_uniform(7, "rng test").unwrap(), expected);
     assert_eq!(
         snapshot().unwrap().state,
-        advance_state(DEFAULT_RNG_SEED, 7)
+        advanced(RandomState::seeded(DEFAULT_USER_SEED), 7)
     );
 
     let parent = context();
     let streams = reserve_parallel_random_streams(&parent, 1).unwrap();
     let original_parent = state(&parent);
     let actual = {
-        let _scope = enter_parallel_random_stream(&parent, streams[0]).unwrap();
+        let _scope = enter_parallel_random_stream(&parent, streams[0].clone()).unwrap();
         let start = state(&parent);
         let draws = block_on(generate_uniform_cooperative(
             5,
@@ -237,6 +263,7 @@ fn fallback_and_parallel_iteration_streams_use_same_reservation_authority() {
         ))
         .unwrap();
         let mut manual = start;
+        manual.prepare_mutation(None).unwrap();
         assert_eq!(
             draws,
             (0..5)

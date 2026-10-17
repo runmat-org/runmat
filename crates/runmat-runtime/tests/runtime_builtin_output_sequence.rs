@@ -5,10 +5,15 @@ use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity};
 use runmat_macros::runtime_builtin;
 use runmat_runtime::builtin::{runtime_builtin_bindings_by_name, RuntimeBuiltinInvocation};
 use runmat_runtime::execution::RootedValueSequence;
+pub use runmat_runtime::RuntimeError;
 
 // The attribute expansion refers to the receiving crate's execution owner.
 pub mod execution {
-    pub use runmat_runtime::execution::RootedValues;
+    pub use runmat_runtime::execution::{RootedValueSequence, RootedValues};
+}
+
+pub mod context {
+    pub use runmat_runtime::context::*;
 }
 use runmat_value::{Value, ValueSequence, ValueSequenceKind};
 

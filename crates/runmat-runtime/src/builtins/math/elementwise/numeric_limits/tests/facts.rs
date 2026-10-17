@@ -43,6 +43,11 @@ fn numeric_limit_static_representation_matches_actual_host_carriers() {
         Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
     );
     check(
+        "eps",
+        eps,
+        Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
+    );
+    check(
         "realmin",
         realmin,
         Value::ComplexTensor(ComplexTensor::new(vec![(0.0, 1.0)], vec![1, 1]).unwrap()),

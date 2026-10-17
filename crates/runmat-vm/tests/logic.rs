@@ -8,7 +8,6 @@ use runmat_value::{IntValue, IntegerStorage, NumericDType, Value};
 fn logical_truth(value: &Value) -> bool {
     match value {
         Value::Bool(value) => *value,
-        Value::Num(value) => *value != 0.0,
         other => panic!("expected logical value, got {other:?}"),
     }
 }
@@ -27,12 +26,23 @@ fn logical_operators_and_short_circuit() {
     let vars =
         execute_source("a = 0 && (1/0); b = 1 || (1/0); c = 0 & 5; d = 0 | 5; e = ~0; f = ~5;")
             .unwrap();
-    assert!(!logical_truth(&vars[0]));
-    assert!(logical_truth(&vars[1]));
+    assert_eq!(vars[0], Value::Bool(false));
+    assert_eq!(vars[1], Value::Bool(true));
     assert!(!logical_truth(&vars[2]));
     assert!(logical_truth(&vars[3]));
     assert!(logical_truth(&vars[4]));
     assert!(!logical_truth(&vars[5]));
+    for (expression, expected) in [
+        ("1 && 2", true),
+        ("1 && 0", false),
+        ("0 || 3", true),
+        ("0 || 0", false),
+        ("true && 2", true),
+        ("false || 3", true),
+    ] {
+        let values = execute_source(&format!("result = {expression};")).unwrap();
+        assert_eq!(values[0], Value::Bool(expected), "{expression}");
+    }
 }
 
 #[test]
@@ -54,12 +64,12 @@ fn scalar_equality_operators_use_canonical_logical_and_complex_semantics() {
         for (lhs, rhs) in [(left, right), (right, left)] {
             let source = format!("a = {lhs}; b = {rhs}; operator_eq = a == b; builtin_eq = eq(a,b); operator_ne = a ~= b; builtin_ne = ne(a,b);");
             let vars = execute_source(&source).unwrap_or_else(|error| panic!("{source}: {error}"));
-            assert_eq!(logical_truth(&vars[2]), expected, "{source}");
+            assert_eq!(vars[2], Value::Bool(expected), "{source}");
             assert_eq!(
                 vars[2], vars[3],
                 "eq operator/builtin representation parity: {source}"
             );
-            assert_eq!(logical_truth(&vars[4]), !expected, "{source}");
+            assert_eq!(vars[4], Value::Bool(!expected), "{source}");
             assert_eq!(
                 vars[4], vars[5],
                 "ne operator/builtin representation parity: {source}"
@@ -70,18 +80,49 @@ fn scalar_equality_operators_use_canonical_logical_and_complex_semantics() {
 
 #[test]
 fn equality_array_operator_values_match_builtin_without_losing_integer_precision() {
-    for (left, right) in [
-        ("[0 1]", "true"),
-        ("logical([0 1])", "true"),
-        ("complex([1 2],[0 1])", "1"),
+    for (left, right, scalar_result, expected) in [
+        ("ones(1,1)", "ones(1,1)", true, &[1][..]),
+        ("[0 1]", "true", false, &[0, 1][..]),
+        ("logical([0 1])", "true", false, &[0, 1][..]),
+        ("complex([1 2],[0 1])", "1", false, &[1, 0][..]),
         (
             "uint64([9007199254740993 18446744073709551615])",
             "uint64([9007199254740992 18446744073709551615])",
+            false,
+            &[0, 1][..],
         ),
+        (
+            "uint64([9007199254740993 18446744073709551615])",
+            "[9007199254740992 18446744073709551616]",
+            false,
+            &[0, 0][..],
+        ),
+        ("single(0.1)", "double(0.1)", true, &[0][..]),
+        ("single(0.1)", "double(single(0.1))", true, &[1][..]),
     ] {
         for (lhs, rhs) in [(left, right), (right, left)] {
             let source = format!("a = {lhs}; b = {rhs}; operator_eq = a == b; builtin_eq = eq(a,b); operator_ne = a ~= b; builtin_ne = ne(a,b); eq_agrees = isequal(operator_eq,builtin_eq); ne_agrees = isequal(operator_ne,builtin_ne);");
             let vars = execute_source(&source).unwrap_or_else(|error| panic!("{source}: {error}"));
+            for index in 2..=5 {
+                if scalar_result {
+                    assert!(
+                        matches!(&vars[index], Value::Bool(_)),
+                        "expected scalar logical result at {index}: {source}: {:?}",
+                        vars[index]
+                    );
+                } else {
+                    assert!(
+                        matches!(&vars[index], Value::LogicalArray(_)),
+                        "expected logical array result at {index}: {source}: {:?}",
+                        vars[index]
+                    );
+                }
+            }
+            match &vars[2] {
+                Value::Bool(value) => assert_eq!(u8::from(*value), expected[0], "{source}"),
+                Value::LogicalArray(array) => assert_eq!(array.data, expected, "{source}"),
+                other => panic!("expected logical comparison: {source}: {other:?}"),
+            }
             assert!(logical_truth(&vars[6]), "eq value parity: {source}");
             assert!(logical_truth(&vars[7]), "ne value parity: {source}");
         }
@@ -673,21 +714,40 @@ fn typed_complex_integer_signal_operations_are_rejected_before_f64_coercion() {
         ("sinc", "sinc(z(1, :))"),
         ("fir1 cutoff", "fir1(4, z(1, 1))"),
         ("buttord passband edge", "buttord(z(1, 1), 0.5, 3, 40)"),
-        ("zplane coefficients", "zplane(z(1, :), [1])"),
-        ("zplane SOS", "zplane(z)"),
     ];
 
-    for (name, operation) in operations {
+    let zplane_contract = &runmat_builtins::ZPLANE_ERROR_INVALID_ARGUMENT;
+    for (name, operation, contract) in operations
+        .into_iter()
+        .map(|(name, operation)| (name, operation, None))
+        .chain([
+            (
+                "zplane coefficients",
+                "zplane(z(1, :), [1])",
+                Some(zplane_contract),
+            ),
+            ("zplane SOS", "zplane([z z z])", Some(zplane_contract)),
+        ])
+    {
         let source = format!(
             "z = complex(uint64([9223372036854775808 2; 3 4]), uint64([1 2; 3 4])); out = {operation};"
         );
         let err = execute_source(&source).expect_err(name);
-        assert!(
-            err.to_string().contains(
-                "operations involving complex numbers with integer types are not supported"
-            ),
-            "{name} returned an unexpected error: {err}"
-        );
+        if let Some(contract) = contract {
+            assert_eq!(err.identifier(), contract.identifier, "{name}: {err}");
+            assert!(
+                err.message()
+                    .contains("typed complex integer input is not supported"),
+                "{name}: {err}"
+            );
+        } else {
+            assert!(
+                err.to_string().contains(
+                    "operations involving complex numbers with integer types are not supported"
+                ),
+                "{name} returned an unexpected error: {err}"
+            );
+        }
     }
 }
 
@@ -976,20 +1036,11 @@ fn typed_complex_integer_relational_equality_preserves_exact_storage() {
     )
     .expect("typed complex integer equality should execute exactly");
 
-    assert!(matches!(
-        &vars[4],
-        Value::Tensor(tensor) if tensor.materialize_f64() == vec![1.0] && tensor.shape() == vec![1, 1]
-    ));
-    assert!(matches!(
-        &vars[5],
-        Value::Tensor(tensor) if tensor.materialize_f64() == vec![0.0] && tensor.shape() == vec![1, 1]
-    ));
+    assert_eq!(vars[4], Value::Bool(true));
+    assert_eq!(vars[5], Value::Bool(false));
     assert_eq!(vars[6], Value::Bool(true));
     assert_eq!(vars[7], Value::Bool(false));
-    assert!(matches!(
-        &vars[8],
-        Value::Tensor(tensor) if tensor.materialize_f64() == vec![0.0] && tensor.shape() == vec![1, 1]
-    ));
+    assert_eq!(vars[8], Value::Bool(false));
     assert_eq!(vars[9], Value::Bool(true));
 }
 
@@ -2525,14 +2576,24 @@ fn sparse_assignment_updates_scalar_and_selector_entries() {
 
 #[test]
 fn numeric_indexed_growth_uses_assignment_shape_for_loop_range_and_typed_matrix() {
+    let execute_output = |source: &str| {
+        let bytecode = test_helpers::compile_source(source).expect("compile indexed growth");
+        let output_slot = bytecode
+            .var_names
+            .iter()
+            .find_map(|(slot, name)| (name == "out").then_some(*slot))
+            .expect("named output binding");
+        let values = test_helpers::interpret(&bytecode).expect("execute indexed growth");
+        (values, output_slot)
+    };
     for (source, shape) in [
         ("x = 1; x(1,2) = 7; out = x;", [1, 2]),
         ("x = 1; x(2,1) = 7; out = x;", [2, 1]),
     ] {
-        let vars = execute_source(source).expect("scalar two-subscript growth");
+        let (vars, output_slot) = execute_output(source);
         assert!(
-            matches!(vars.last(),
-            Some(Value::Tensor(tensor)) if tensor.shape() == shape && tensor.materialize_f64() == [1.0, 7.0]),
+            matches!(&vars[output_slot],
+            Value::Tensor(tensor) if tensor.shape() == shape && tensor.materialize_f64() == [1.0, 7.0]),
             "{source}"
         );
     }
@@ -2548,23 +2609,21 @@ fn numeric_indexed_growth_uses_assignment_shape_for_loop_range_and_typed_matrix(
         .expect_err("two-subscript scalar deletion stays unsupported");
     assert_eq!(deletion.identifier(), Some("RunMat:UnsupportedDeletion"));
 
-    let looped = execute_source("for k = 1:3; g(k) = k^2; end; out = g;")
-        .expect("undefined numeric indexed growth in a loop");
-    assert!(matches!(looped.last(),
-        Some(Value::Tensor(tensor)) if tensor.shape() == [1, 3]
+    let (looped, output_slot) = execute_output("for k = 1:3; g(k) = k^2; end; out = g;");
+    assert!(matches!(&looped[output_slot],
+        Value::Tensor(tensor) if tensor.shape() == [1, 3]
+            && tensor.numeric_dtype() == NumericDType::F64
             && tensor.materialize_f64() == [1.0, 4.0, 9.0]));
 
-    let ranged = execute_source("a = [1 2]; a(4:6) = [4 5 6]; out = a;")
-        .expect("numeric range indexed growth");
-    assert!(matches!(ranged.last(),
-        Some(Value::Tensor(tensor)) if tensor.shape() == [1, 6]
+    let (ranged, output_slot) = execute_output("a = [1 2]; a(4:6) = [4 5 6]; out = a;");
+    assert!(matches!(&ranged[output_slot],
+        Value::Tensor(tensor) if tensor.shape() == [1, 6]
             && tensor.materialize_f64() == [1.0, 2.0, 0.0, 4.0, 5.0, 6.0]));
 
-    let matrix =
-        execute_source("a = uint64([1 9223372036854775808; 2 4]); a(3,2) = uint64(9); out = a;")
-            .expect("typed numeric matrix indexed growth");
-    assert!(matches!(matrix.last(),
-        Some(Value::Tensor(tensor)) if tensor.shape() == [3, 2]
+    let (matrix, output_slot) =
+        execute_output("a = uint64([1 9223372036854775808; 2 4]); a(3,2) = uint64(9); out = a;");
+    assert!(matches!(&matrix[output_slot],
+        Value::Tensor(tensor) if tensor.shape() == [3, 2]
             && tensor.integer_storage() == Some(&IntegerStorage::U64(vec![1, 2, 0, 9_223_372_036_854_775_808, 4, 9]))));
 }
 

@@ -187,6 +187,42 @@ fn numeric_scalar_base_store_slice_preserves_growth_alias_and_empty_selection() 
 }
 
 #[test]
+fn computed_bounded_store_detaches_alias_before_read_modify_write() {
+    use runmat_value::NumericDType;
+
+    for (constructor, dtype) in [
+        ("double", NumericDType::F64),
+        ("single", NumericDType::F32),
+        ("int32", NumericDType::I32),
+    ] {
+        let source = format!(
+            "A={constructor}(zeros(10)); A(3,3)=1; B=A; d=[2 25]; \
+             for j=1:1, \
+             B(2*d(j,1)-1,2*d(j,1)-1)=B(2*d(j,1)-1,2*d(j,1)-1)+d(j,2); \
+             end;"
+        );
+        let bytecode = compile_source(&source).expect("compile computed bounded store");
+        assert!(bytecode
+            .instructions
+            .iter()
+            .any(|instruction| matches!(instruction, runmat_vm::Instr::StoreSlice(..))));
+        let a = binding_slot(&bytecode, "A");
+        let b = binding_slot(&bytecode, "B");
+        let values = interpret(&bytecode).expect("execute computed bounded store");
+        for (slot, expected) in [(a, 1.0), (b, 26.0)] {
+            let Some(Value::Tensor(tensor)) = values.get(slot) else {
+                panic!("missing {constructor} matrix at {slot}");
+            };
+            assert_eq!(tensor.numeric_dtype(), dtype);
+            assert_eq!(tensor.shape(), &[10, 10]);
+            let mut expected_values = vec![0.0; 100];
+            expected_values[22] = expected;
+            assert_eq!(tensor.materialize_f64(), expected_values, "{constructor}");
+        }
+    }
+}
+
+#[test]
 fn integer_scalar_base_store_slice_keeps_exact_native_classes() {
     let cases: &[(&str, IntegerStorage)] = &[
         ("int8(-8)", IntegerStorage::I8(vec![-8, 3])),

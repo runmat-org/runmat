@@ -67,6 +67,7 @@ nalgebra = "0.32"
 faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg"] }
 rustfft = "6.2"
 futures = "0.3"
+pin-project-lite = "0.2.17"
 async-recursion = "1.1"
 flate2 = "1.1"
 compression-codecs = { version = "0.4.38", default-features = false, features = ["gzip"] }

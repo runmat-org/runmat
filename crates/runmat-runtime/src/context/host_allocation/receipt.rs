@@ -11,10 +11,10 @@ use runmat_execution::resource::{
 };
 use runmat_value::{
     ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
-    NumericDType,
+    ExactHostTensorAllocation, NumericDType,
 };
 
-use super::{HostAllocationPlan, HostNumericWorkspace};
+use super::{HostAllocationPlan, HostComplexWorkspace, HostNumericWorkspace};
 use crate::context::host_effect::{
     HostEffectAllocationError, HostEffectOutputHeadroom, ManagedHostEffectLedger,
     ManagedHostEffectStageReservation,
@@ -159,7 +159,7 @@ impl RetainedHostViewIssuer for ManagedViewIssuer {
             .map_err(|_| RetainedHostViewError::Overflow)?;
         let claim = self
             .ledger
-            .reserve_retained_view(bytes, self.epoch)
+            .reserve_retained_allocation(bytes, self.epoch)
             .map_err(|error| match error {
                 HostEffectAllocationError::Overflow => RetainedHostViewError::Overflow,
                 HostEffectAllocationError::ExceedsCapacity => {
@@ -347,6 +347,12 @@ impl HostAllocationReceipt {
         self.fence.check()
     }
 
+    /// Revalidate a held continuation against the exact context captured at
+    /// admission. No caller-supplied context can substitute a newer session.
+    pub fn checkpoint_captured(&self) -> Result<(), HostAllocationError> {
+        self.checkpoint(&self.runtime)
+    }
+
     /// Allocates one aligned, zero-initialized workspace inside the precharged
     /// scratch peak. It cannot be published as an output by this API.
     pub fn temporary_numeric(
@@ -361,6 +367,17 @@ impl HostAllocationReceipt {
         // A concurrent cancellation or authority rebind takes precedence over
         // its ExceedsPermit result; a successful allocation is dropped if the
         // second checkpoint fails.
+        self.checkpoint(runtime)?;
+        result
+    }
+
+    pub fn temporary_complex(
+        &self,
+        runtime: &RuntimeContext,
+        len: usize,
+    ) -> Result<HostComplexWorkspace, HostAllocationError> {
+        self.checkpoint(runtime)?;
+        let result = HostComplexWorkspace::new(len, self.stage.clone(), self.fence.clone());
         self.checkpoint(runtime)?;
         result
     }
@@ -380,6 +397,19 @@ impl HostAllocationReceipt {
         let result = construct(&self.output);
         self.checkpoint(runtime)?;
         result.map_err(HostAllocationError::Numeric)
+    }
+
+    /// Retain an exact output while its owner performs cooperative host work.
+    /// The caller must checkpoint again before publishing after any awaits.
+    pub fn exact_output_tensor(
+        &self,
+        runtime: &RuntimeContext,
+        dtype: NumericDType,
+        shape: &[usize],
+    ) -> Result<ExactHostTensorAllocation, HostAllocationError> {
+        self.with_output_allocation(runtime, |permit| {
+            ExactHostTensorAllocation::new(dtype, shape, permit)
+        })
     }
 }
 

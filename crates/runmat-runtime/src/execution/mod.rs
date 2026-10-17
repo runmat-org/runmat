@@ -7,6 +7,7 @@ mod errors;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native_task;
 mod running_future;
+pub(crate) mod rooted_continuation;
 mod services;
 mod storable;
 pub(crate) mod staged_file;
@@ -29,7 +30,11 @@ pub use errors::{
     render_source_call_stack_in_context, ExecutionServiceError,
 };
 pub use owned_builtin::{
-    admit_owned_builtin_work, execute_owned_builtin_work, RuntimeOwnedBuiltinWorkService,
+    admit_owned_builtin_work, execute_owned_builtin_work, quote_owned_builtin_continuation,
+    RuntimeOwnedBuiltinWorkService,
+};
+pub use rooted_continuation::{
+    admit_executable_sequence, admit_stack_mutation, RuntimeContinuationFuture,
 };
 pub use running_future::RunningFutureLease;
 pub use services::{

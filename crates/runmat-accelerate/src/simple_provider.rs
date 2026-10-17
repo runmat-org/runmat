@@ -22,6 +22,7 @@ mod numeric_download;
 #[cfg(test)]
 mod owning_routes;
 mod power;
+mod random_child;
 mod remainder;
 mod select;
 mod structural_move;
@@ -3899,6 +3900,56 @@ impl AccelProvider for InProcessProvider {
         crate::placement::in_process_feasibility(self, query)
     }
 
+    fn upload_physical_evidence(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderUploadPhysicalEvidence> {
+        use runmat_accelerate_api::{
+            ProviderFeasibility, ProviderOperationFamily, ProviderResidency, ProviderStorage,
+            ProviderWorkload,
+        };
+        use runmat_execution::ResourceByteBound;
+        if query.operation.0 != "transfer.upload"
+            || query.family != ProviderOperationFamily::Upload
+            || query.inputs.len() != 1
+            || query.outputs.len() != 1
+            || query.workload
+                != (ProviderWorkload {
+                    requested_outputs: Some(1),
+                    ..ProviderWorkload::default()
+                })
+        {
+            return None;
+        }
+        let input = &query.inputs[0];
+        let output = &query.outputs[0];
+        if input.residency != ProviderResidency::Host
+            || output.residency != ProviderResidency::Device
+            || input.element_type != output.element_type
+            || input.storage != output.storage
+            || input.layout != output.layout
+            || input.shape != output.shape
+            || output.storage != ProviderStorage::DenseReal
+        {
+            return None;
+        }
+        let ProviderFeasibility::Supported { estimate } = self.query_feasibility(query) else {
+            return None;
+        };
+        let output_requested_bytes = output.checked_byte_len()?;
+        if estimate.output_bytes != Some(output_requested_bytes) {
+            return None;
+        }
+        // This provider copies directly into one native output allocation.
+        // There is no staging buffer or device command queue.
+        Some(runmat_accelerate_api::ProviderUploadPhysicalEvidence {
+            output_requested_bytes,
+            host_workspace_bytes: ResourceByteBound::Known(0),
+            provider_scratch_bytes: ResourceByteBound::Known(0),
+            completion_queue_slots: 0,
+        })
+    }
+
     fn operation_observation_capability(
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
@@ -3908,7 +3959,10 @@ impl AccelProvider for InProcessProvider {
         };
         if !matches!(
             query.operation.0.as_str(),
-            "conv" | "conv2" | "transfer.upload"
+            "conv"
+                | "conv2"
+                | "transfer.upload"
+                | runmat_accelerate_api::random::PROVIDER_GPU_RANDOM_OPERATION
         ) || !self.query_feasibility(query).is_supported()
         {
             return ProviderObservationCapability::Unsupported;
@@ -5427,6 +5481,23 @@ impl AccelProvider for InProcessProvider {
         request: &runmat_accelerate_api::ProviderSequenceRequest,
     ) -> runmat_accelerate_api::ProviderExecutionResult<Option<GpuTensorHandle>> {
         self.sequence_constructor(request)
+    }
+
+    fn propose_gpu_random(
+        &self,
+        request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::random::GpuRandomPhysicalProposal>,
+    > {
+        Ok(self.propose_child_random(request))
+    }
+
+    fn execute_gpu_random(
+        &self,
+        request: &runmat_accelerate_api::random::GpuRandomRequest<'_>,
+        metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.execute_child_random(request, metadata)
     }
 
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {

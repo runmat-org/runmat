@@ -600,6 +600,7 @@ async fn try_distributed_builtin(
         }
         runmat_builtins::BuiltinDistributedPolicy::MapUnary
         | runmat_builtins::BuiltinDistributedPolicy::MapUnaryConstrained(_)
+        | runmat_builtins::BuiltinDistributedPolicy::MapUnaryOrScalarLikePrototype
         | runmat_builtins::BuiltinDistributedPolicy::ScalarLikePrototype => {
             let (context, service) = distributed_service(name, runtime)?;
             for argument in args {

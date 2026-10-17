@@ -135,13 +135,19 @@ pub(crate) fn lower_expr_with_replacements(
                 if args.is_empty() {
                     return Err(HirError::new("feval: missing function argument"));
                 }
-                let MirCallArg::Single(callee) = args.remove(0) else {
-                    return Err(HirError::new(
-                        "feval: function argument cannot be a comma-list expansion",
-                    ));
-                };
-                arg_spans.remove(0);
-                dynamic_call_rvalue(call, callee, args, arg_spans)?
+                if matches!(args.first(), Some(MirCallArg::Single(_))) {
+                    let MirCallArg::Single(callee) = args.remove(0) else {
+                        unreachable!()
+                    };
+                    arg_spans.remove(0);
+                    dynamic_call_rvalue(call, callee, args, arg_spans)?
+                } else {
+                    // A captured comma list may supply the callable and later
+                    // arguments. Its width is only known after expansion, so
+                    // retain the whole argument sequence for the registered
+                    // callable dispatcher to split at the first value.
+                    call_rvalue(call, args, arg_spans)?
+                }
             } else if let HirCallableRef::Function(function) = call.callee {
                 if ctx.is_async_function(function) {
                     MirRvalue::Future {

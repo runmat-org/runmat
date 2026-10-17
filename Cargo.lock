@@ -7718,6 +7718,7 @@ dependencies = [
  "once_cell",
  "openblas-src",
  "parquet",
+ "pin-project-lite",
  "pollster 0.3.0",
  "quick-xml",
  "regex",

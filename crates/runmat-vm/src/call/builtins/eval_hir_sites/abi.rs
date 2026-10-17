@@ -65,8 +65,14 @@ fn binding_shape(hir: &HirAssembly, id: BindingId) -> Option<HirBinding> {
         .find(|binding| binding.id == id)?
         .clone();
     // Local IDs are an assembly implementation detail; all remaining fields
-    // describe the typed lexical declaration and must still agree.
+    // describe the typed lexical declaration and must still agree. An
+    // incoming workspace value uses the same lexical slot and capture ABI as
+    // a local that the earlier invocation assigned; its different role only
+    // records the MIR entry-initialization fact.
     binding.id = BindingId(0);
+    if binding.role == runmat_hir::BindingRole::IncomingWorkspace {
+        binding.role = runmat_hir::BindingRole::Local;
+    }
     Some(binding)
 }
 
@@ -244,7 +250,10 @@ impl ClosureIssuanceAbi {
                 let slot = *assigned_slots.get(&name)?;
                 (binding.owner == runmat_hir::BindingOwner::Function(capture.from_function)
                     && Some(capture.from_function) == self.parent
-                    && binding.role == runmat_hir::BindingRole::Local
+                    && matches!(
+                        binding.role,
+                        runmat_hir::BindingRole::Local | runmat_hir::BindingRole::IncomingWorkspace
+                    )
                     && binding.storage == runmat_hir::BindingStorage::Lexical
                     && binding.workspace_visibility == runmat_hir::WorkspaceVisibility::TopLevel
                     && binding.declared_span == Span { start: 0, end: 0 }

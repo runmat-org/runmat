@@ -168,6 +168,12 @@ fn exprnd_array_mu_preserves_shape_and_native_single() {
     };
     assert_eq!(tensor.shape(), &[2, 2]);
     assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
+    let expected: Vec<f64> = random::expected_uniform_sequence(4)
+        .into_iter()
+        .zip([1.0, 2.0, 3.0, 4.0])
+        .map(|(uniform, mean)| ((-mean * uniform.max(f64::MIN_POSITIVE).ln()) as f32) as f64)
+        .collect();
+    assert_eq!(tensor.materialize_f64(), expected);
     assert!(tensor.materialize_f64().iter().all(|value| *value > 0.0));
 }
 
@@ -263,7 +269,7 @@ fn exprnd_zero_output_evaluation_still_advances_rng_once() {
 }
 
 #[test]
-fn exprnd_rejects_malformed_provider_output_before_advancing_rng() {
+fn exprnd_uses_host_stream_even_when_provider_has_random_hook() {
     let _guard = random::test_guard();
     reset();
     let _accel_guard = crate::builtins::common::test_support::accel_test_lock();
@@ -274,14 +280,14 @@ fn exprnd_rejects_malformed_provider_output_before_advancing_rng() {
         }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let before = random::snapshot().expect("rng snapshot").state;
-    let error = block_on(exprnd_builtin(vec![
+    let value = block_on(exprnd_builtin(vec![
         Value::Num(1.0),
         Value::Num(2.0),
         Value::Num(2.0),
     ]))
-    .expect_err("malformed provider result");
-    assert!(error.message().contains("malformed output"));
-    assert_eq!(before, random::snapshot().expect("rng snapshot").state);
+    .expect("host stream result");
+    assert!(matches!(value, Value::Tensor(_)));
+    assert_ne!(before, random::snapshot().expect("rng snapshot").state);
 }
 
 #[test]
@@ -306,7 +312,7 @@ fn resident_size_controls_are_protected_without_selecting_output_owner() {
 }
 
 #[test]
-fn random_hook_cannot_adopt_or_free_a_borrowed_size_alias() {
+fn borrowed_size_handle_does_not_select_provider_random_stream() {
     use runmat_accelerate_api::AccelProvider;
     let _guard = reset();
     let inner = runmat_accelerate::simple_provider::InProcessProvider::new();
@@ -322,9 +328,13 @@ fn random_hook_cannot_adopt_or_free_a_borrowed_size_alias() {
     }));
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let before = random::snapshot().unwrap().state;
-    let error = try_gpu_exponential(1.0, &[1, 2], std::slice::from_ref(&handle)).unwrap_err();
-    assert!(error.message().contains("malformed output"));
-    assert_eq!(before, random::snapshot().unwrap().state);
+    let output = block_on(exprnd_builtin(vec![
+        Value::Num(1.0),
+        Value::GpuTensor(handle.clone()),
+    ]))
+    .expect("host session random draw");
+    assert!(matches!(output, Value::Tensor(_)));
+    assert_ne!(before, random::snapshot().unwrap().state);
     let original = block_on(provider.download(&handle)).unwrap();
     assert_eq!(original.data, vec![1.0, 2.0]);
 }

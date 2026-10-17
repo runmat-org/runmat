@@ -28,3 +28,7 @@ fn realmin(arguments: Vec<Value>) -> BuiltinResult<Value> {
 fn flintmax(arguments: Vec<Value>) -> BuiltinResult<Value> {
     super::flintmax::flintmax_builtin(arguments)
 }
+
+fn eps(arguments: Vec<Value>) -> BuiltinResult<Value> {
+    futures::executor::block_on(super::eps::eps_builtin(None, arguments))
+}

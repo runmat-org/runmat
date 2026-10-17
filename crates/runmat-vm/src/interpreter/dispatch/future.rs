@@ -12,12 +12,13 @@ type DispatchResult = Result<Option<DispatchHandled>, RuntimeError>;
 type SuspendedDispatchFuture<'a> = Pin<Box<dyn Future<Output = DispatchResult> + 'a>>;
 
 pub(super) struct InstructionDispatchFuture<'a> {
-    immediate: Option<ImmediateInstruction<'a>>,
     state: InstructionDispatchFutureState<'a>,
 }
 
 enum InstructionDispatchFutureState<'a> {
-    Immediate,
+    Immediate(Option<ImmediateInstruction<'a>>),
+    Ready(Option<DispatchResult>),
+    Arithmetic(arithmetic::ArithmeticDispatchFuture<'a>),
     Suspended(SuspendedDispatchFuture<'a>),
 }
 
@@ -33,9 +34,8 @@ impl Future for InstructionDispatchFuture<'_> {
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.as_mut().get_mut();
         match &mut this.state {
-            InstructionDispatchFutureState::Immediate => {
-                let instruction = this
-                    .immediate
+            InstructionDispatchFutureState::Immediate(instruction) => {
+                let instruction = instruction
                     .take()
                     .expect("completed instruction future was polled again");
                 Poll::Ready(dispatch_immediate(
@@ -43,6 +43,20 @@ impl Future for InstructionDispatchFuture<'_> {
                     instruction.state,
                     instruction.hooks,
                 ))
+            }
+            InstructionDispatchFutureState::Ready(result) => Poll::Ready(
+                result
+                    .take()
+                    .expect("completed instruction future was polled again"),
+            ),
+            InstructionDispatchFutureState::Arithmetic(future) => {
+                match future.as_mut().poll(context) {
+                    Poll::Ready(Ok(())) => Poll::Ready(Ok(Some(DispatchHandled::Generic(
+                        DispatchDecision::FallThrough,
+                    )))),
+                    Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+                    Poll::Pending => Poll::Pending,
+                }
             }
             InstructionDispatchFutureState::Suspended(future) => future.as_mut().poll(context),
         }
@@ -56,15 +70,29 @@ impl<'a> InstructionDispatchFuture<'a> {
         hooks: DispatchHooks<'a>,
     ) -> Self {
         Self {
-            immediate: Some(ImmediateInstruction { meta, state, hooks }),
-            state: InstructionDispatchFutureState::Immediate,
+            state: InstructionDispatchFutureState::Immediate(Some(ImmediateInstruction {
+                meta,
+                state,
+                hooks,
+            })),
         }
     }
 
     fn suspended(future: SuspendedDispatchFuture<'a>) -> Self {
         Self {
-            immediate: None,
             state: InstructionDispatchFutureState::Suspended(future),
+        }
+    }
+
+    fn ready(result: DispatchResult) -> Self {
+        Self {
+            state: InstructionDispatchFutureState::Ready(Some(result)),
+        }
+    }
+
+    fn arithmetic(future: arithmetic::ArithmeticDispatchFuture<'a>) -> Self {
+        Self {
+            state: InstructionDispatchFutureState::Arithmetic(future),
         }
     }
 }
@@ -111,9 +139,10 @@ pub(super) fn dispatch_instruction<'a>(
         InstructionDispatchFamily::Object => {
             InstructionDispatchFuture::suspended(suspend_object(meta, state))
         }
-        InstructionDispatchFamily::Arithmetic => {
-            InstructionDispatchFuture::suspended(suspend_arithmetic(meta, state))
-        }
+        InstructionDispatchFamily::Arithmetic => match suspend_arithmetic(meta, state) {
+            Ok(future) => InstructionDispatchFuture::arithmetic(future),
+            Err(error) => InstructionDispatchFuture::ready(Err(error)),
+        },
         InstructionDispatchFamily::Output => {
             InstructionDispatchFuture::suspended(suspend_output(meta, state))
         }
@@ -469,8 +498,8 @@ fn suspend_object<'a>(
 fn suspend_arithmetic<'a>(
     meta: DispatchMeta<'a>,
     state: DispatchState<'a>,
-) -> SuspendedDispatchFuture<'a> {
-    Box::pin(dispatch_arithmetic_family(meta, state))
+) -> Result<arithmetic::ArithmeticDispatchFuture<'a>, RuntimeError> {
+    arithmetic::suspend_arithmetic(meta.instr, state.stack, &state.context.runtime)
 }
 
 #[inline(never)]
@@ -614,18 +643,6 @@ async fn dispatch_object_family(
     )))
 }
 
-async fn dispatch_arithmetic_family(
-    meta: DispatchMeta<'_>,
-    state: DispatchState<'_>,
-) -> DispatchResult {
-    let handled =
-        arithmetic::dispatch_arithmetic(meta.instr, state.stack, &state.context.runtime).await?;
-    debug_assert!(handled, "arithmetic route must handle its instruction");
-    Ok(Some(DispatchHandled::Generic(
-        DispatchDecision::FallThrough,
-    )))
-}
-
 async fn dispatch_output(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> DispatchResult {
     match meta.instr {
         Instr::EmitStackTop { label } => {
@@ -662,7 +679,12 @@ async fn dispatch_logical(meta: DispatchMeta<'_>, state: DispatchState<'_>) -> D
         Instr::JumpIfFalse(target) => {
             let condition = crate::interpreter::stack::pop_value(state.stack)?;
             crate::ops::control_flow::jump_if_false(
-                logical_truth_from_value(&condition, "if condition").await?,
+                runmat_runtime::condition::control_flow_truth_from_value(
+                    &state.context.runtime,
+                    &condition,
+                    "if condition",
+                )
+                .await?,
                 *target,
             )
         }

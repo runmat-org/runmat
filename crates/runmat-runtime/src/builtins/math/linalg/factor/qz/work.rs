@@ -161,6 +161,22 @@ impl<'a> QzWork<'a> {
             return Ok(None);
         };
         self.checkpoint(0).await?;
+        let binding = OwnedBuiltinBinding {
+            name: self.name.into(),
+            variant: "default".into(),
+            catalog: Digest::from_bytes(runmat_builtins::builtin_catalog_fingerprint()),
+        };
+        let Some(control_scratch_bytes) = service
+            .continuation_control_bytes(&binding)
+            .map_err(ExecutionServiceError::into_runtime_error)?
+        else {
+            // An optional worker without a target-compiled continuation quote
+            // cannot admit finite work; serial execution remains available.
+            return Ok(None);
+        };
+        if control_scratch_bytes == 0 {
+            return Err(ExecutionServiceError::InvalidOutputContract.into_runtime_error());
+        }
         let requested_outputs = u16::try_from(requested_outputs)
             .map_err(|_| ExecutionServiceError::InvalidOutputContract.into_runtime_error())?;
         let output_contracts = if requested_outputs == 0 {
@@ -216,17 +232,15 @@ impl<'a> QzWork<'a> {
         let memory_bytes = scratch
             .checked_add(output)
             .and_then(|bytes| bytes.checked_add(worker_transport))
+            .and_then(|bytes| bytes.checked_add(control_scratch_bytes))
             .ok_or_else(|| ExecutionServiceError::InvalidOutputContract.into_runtime_error())?;
         let scratch_bytes = scratch
             .checked_add(worker_transport)
+            .and_then(|bytes| bytes.checked_add(control_scratch_bytes))
             .ok_or_else(|| ExecutionServiceError::InvalidOutputContract.into_runtime_error())?;
         let request = OwnedBuiltinWorkRequest {
             schema_version: OWNED_BUILTIN_WORK_SCHEMA_VERSION,
-            binding: OwnedBuiltinBinding {
-                name: self.name.into(),
-                variant: "default".into(),
-                catalog: Digest::from_bytes(runmat_builtins::builtin_catalog_fingerprint()),
-            },
+            binding,
             arguments: payloads,
             requested_outputs,
             response: runmat_execution::OwnedBuiltinResponseContract {
@@ -245,6 +259,7 @@ impl<'a> QzWork<'a> {
                 required_capabilities: BTreeSet::from([Capability::BrowserWorker]),
             },
             transport_scratch_bytes: worker_transport,
+            control_scratch_bytes,
             assignment: None,
         };
         let mut wire = WireLength::default();

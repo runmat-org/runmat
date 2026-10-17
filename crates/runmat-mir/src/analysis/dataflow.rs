@@ -1,7 +1,7 @@
 use crate::{
-    BasicBlock, MirAggregateKind, MirAssembly, MirBody, MirCallArg, MirDiagnostic,
-    MirDiagnosticSeverity, MirIndexComponent, MirIndexing, MirLocalId, MirOperand, MirPlace,
-    MirRvalue, MirStmt, MirStmtKind, MirTerminatorKind,
+    BasicBlock, MirAggregateKind, MirAssembly, MirBody, MirDiagnostic, MirDiagnosticSeverity,
+    MirIndexComponent, MirIndexing, MirLocalId, MirOperand, MirPlace, MirRvalue, MirStmt,
+    MirStmtKind, MirTerminatorKind,
 };
 use runmat_hir::Span;
 use runmat_types::{
@@ -611,22 +611,6 @@ fn diagnose_rvalue_semantics(value: &MirRvalue, span: Span, diagnostics: &mut Ve
                     "use function-call syntax when outputs are required",
                     span,
                     "command-syntax",
-                ));
-            }
-            if matches!(
-                call.requested_outputs,
-                runmat_hir::RequestedOutputCount::Zero
-            ) && call
-                .args
-                .iter()
-                .any(|arg| matches!(arg, MirCallArg::Expansion(_)))
-            {
-                diagnostics.push(hir_diagnostic(
-                    "RM-MIR0004",
-                    "comma-list expansion is not valid for a zero-output call",
-                    "consume comma-list expansions in value-producing call contexts",
-                    span,
-                    "comma-list",
                 ));
             }
         }

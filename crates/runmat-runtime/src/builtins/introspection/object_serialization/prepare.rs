@@ -15,7 +15,15 @@ enum Step {
     },
 }
 
+#[cfg(test)]
 pub(super) async fn prepare_value_for_save(value: Value) -> crate::BuiltinResult<RootedValue> {
+    prepare_value_for_save_in_context(value, None).await
+}
+
+pub(super) async fn prepare_value_for_save_in_context(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<RootedValue> {
     let _input_root =
         RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     let mut work = vec![Step::Enter(value, 0)];
@@ -45,7 +53,7 @@ pub(super) async fn prepare_value_for_save(value: Value) -> crate::BuiltinResult
                         } else {
                             SERIALIZED_KIND_VALUE
                         };
-                        let saved = call_saveobj_if_available(receiver.clone()).await?;
+                        let saved = call_saveobj_if_available(receiver.clone(), runtime).await?;
                         let had_saveobj = saved.is_some();
                         let (payload, payload_lease) = match saved {
                             Some(saved) => {

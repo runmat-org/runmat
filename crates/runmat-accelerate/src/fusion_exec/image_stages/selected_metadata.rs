@@ -3,7 +3,9 @@
 //! route reserves headroom before its first provider effect.
 
 use super::*;
-use runmat_runtime::context::host_allocation::{HostAllocationPlan, HostAllocationReceipt};
+use runmat_runtime::context::host_allocation::{
+    provider_registration_host_quote, HostAllocationPlan, HostAllocationReceipt,
+};
 
 pub(super) enum PreparedInput {
     Resident(Box<PreparedImageStages>),
@@ -63,28 +65,20 @@ pub(super) fn quote(
     else {
         return Ok(None);
     };
-    let Some(registration_preparation) =
-        host_memory::selected_registration_preparation_bytes(provider)
+    let Some(registration) =
+        provider_registration_host_quote(provider, 3, registrations, derived_views)
+            .map_err(ProviderExecutionError::from_source)?
     else {
         return Ok(None);
     };
     let workspace_bytes = power_workspace
-        .checked_add(registration_preparation)
+        .checked_add(registration.preparation_bytes)
         .ok_or_else(|| {
             ProviderExecutionError::from(anyhow!(
                 "selected image provider host workspace extent overflow"
             ))
         })?;
-    let Some(retained_bytes) = host_memory::selected_registration_retained_bytes(
-        provider,
-        3,
-        registrations,
-        derived_views,
-    )
-    .map_err(ProviderExecutionError::from_source)?
-    else {
-        return Ok(None);
-    };
+    let retained_bytes = registration.retained_bytes;
     match prepared {
         PreparedInput::Resident(stages) => {
             stages.set_provider_metadata_bytes(retained_bytes);

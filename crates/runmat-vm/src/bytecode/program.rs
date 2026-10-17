@@ -1595,7 +1595,10 @@ impl FunctionRegistry {
         match instruction {
             Instr::CallBuiltinMulti(name, ..)
             | Instr::CallBuiltinMultiUsingOutputSlot(name, ..)
-            | Instr::CallBuiltinExpandMultiOutput(name, ..) => builtin_execution_stack(name),
+            | Instr::CallBuiltinExpandMultiOutput(name, ..)
+            | Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(name, ..) => {
+                builtin_execution_stack(name)
+            }
             Instr::CallFunctionMulti { identity, .. }
             | Instr::CallFunctionMultiUsingOutputSlot { identity, .. }
             | Instr::CallWorkspaceFirstMulti { identity, .. }

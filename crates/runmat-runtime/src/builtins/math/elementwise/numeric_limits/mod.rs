@@ -1,6 +1,7 @@
 //! MATLAB-compatible numeric-limit query builtins.
 
 mod errors;
+pub(crate) mod eps;
 mod execute;
 pub(crate) mod flintmax;
 mod floating;

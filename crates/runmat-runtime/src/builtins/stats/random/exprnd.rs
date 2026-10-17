@@ -11,6 +11,8 @@ use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::random;
 use crate::builtins::common::tensor;
 use crate::{gather_if_needed_async, BuiltinResult};
+#[path = "exprnd/output.rs"]
+mod output;
 
 const BUILTIN_NAME: &str = "exprnd";
 
@@ -61,17 +63,9 @@ async fn exprnd_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
     let len = checked_element_count(&parsed.shape)?;
     validate_explicit_restoration(&parsed)?;
-    if parsed.mu.len() == 1
-        && parsed.output_precision == OutputPrecision::Double
-        && parsed.gpu_source.is_none()
-    {
-        if let Some(value) = try_gpu_exponential(parsed.mu[0], &parsed.shape, &parsed.borrowed_gpu)?
-        {
-            return Ok(value);
-        }
-    }
-    let data = random::generate_exponential_array(&parsed.mu, len, BUILTIN_NAME)?;
-    build_output(data, parsed)
+    let mut turn = random::acquire_turn(None, BUILTIN_NAME).await?;
+    let host = output::generate(&mut turn, &parsed, len).await?;
+    build_output(host, parsed)
 }
 
 fn checked_element_count(shape: &[usize]) -> BuiltinResult<usize> {
@@ -152,15 +146,7 @@ fn output_precision(value: &Value) -> OutputPrecision {
     }
 }
 
-fn build_output(data: Vec<f64>, parsed: ParsedExprnd) -> BuiltinResult<Value> {
-    let output = match parsed.output_precision {
-        OutputPrecision::Double => Tensor::new(data, parsed.shape),
-        OutputPrecision::Single => Tensor::from_f32(
-            data.into_iter().map(|value| value as f32).collect(),
-            parsed.shape,
-        ),
-    }
-    .map_err(|e| exprnd_internal_error(format!("exprnd: {e}")))?;
+fn build_output(output: Tensor, parsed: ParsedExprnd) -> BuiltinResult<Value> {
     if let Some(source) = parsed.gpu_source {
         let Some(provider) = runmat_accelerate_api::provider_for_handle(&source)
             .filter(|owner| owner.device_id() == source.device_id())

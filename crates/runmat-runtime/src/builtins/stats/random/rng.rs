@@ -1,16 +1,13 @@
-//! MATLAB-compatible `rng` builtin for seeding and querying RunMat's global random generator.
+//! `rng` builtin for seeding and querying RunMat's host random generator.
 
-use crate::builtins::common::random::{
-    self, set_default, set_seed, RngAlgorithm, RngSnapshot, DEFAULT_USER_SEED,
-};
+use crate::builtins::common::random::{self, RngAlgorithm, RngSnapshot, DEFAULT_USER_SEED};
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 
-use log::debug;
 use runmat_builtins::{
     BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
     BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
@@ -21,7 +18,7 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 use runmat_time::unix_timestamp_ns;
-use runmat_value::{IntValue, StructValue, Tensor, Value};
+use runmat_value::{IntValue, IntegerStorage, StructValue, Tensor, Value};
 
 use crate::builtins::stats::type_resolvers::rng_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -39,7 +36,7 @@ const RNG_WIDE_SEED_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDesc
 const RNG_TYPED_STATE_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
     id: "rng-typed-state-fields",
     mode: BuiltinExtensionMode::RunMatOnly,
-    description: "rng state structures with native integer fields are a RunMat extension",
+    description: "independently supplied native-integer Seed fields or legacy LCG State fields are a RunMat extension",
     error_identifier: Some("RunMat:compatibility:RngTypedStateFieldsExtension"),
 };
 
@@ -66,14 +63,23 @@ const RNG_WIDE_INTEGER_SEED_INPUT: [BuiltinIntegerInputCapability; 1] =
 
 const RNG_INTEGER_STATE_INPUT: [BuiltinIntegerInputCapability; 1] =
     [BuiltinIntegerInputCapability {
-        name: "Seed/State fields",
+        name: "State field",
+        classes: &[runmat_builtins::BuiltinIntegerClass::Uint32],
+        availability: BuiltinIntegerInputAvailability::Documented,
+        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
+        notes: "A structure returned by RunMat rng carries a 625-by-1 uint32 MT19937 state; its final word is RunMat's next-word index, not a claim of MATLAB byte-wire parity.",
+    }];
+
+const RNG_EXTENDED_STATE_INPUT: [BuiltinIntegerInputCapability; 1] =
+    [BuiltinIntegerInputCapability {
+        name: "independently typed Seed or legacy LCG State field",
         classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
         availability: BuiltinIntegerInputAvailability::RunMatOnly,
         scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "MATLAB-compatible restoration consumes a structure returned by rng; accepting independently constructed native-integer state fields is a separately gated RunMat extension.",
+        notes: "Independently supplied native-integer Seed fields and legacy LCG State fields require RunMat compatibility mode.",
     }];
 
-pub const RNG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
+pub const RNG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 4] = [
     BuiltinIntegerCapabilityDescriptor {
         form: "s = rng(integer_seed[, generator]) where seed < 2^32",
         inputs: &RNG_INTEGER_SEED_INPUT,
@@ -82,7 +88,7 @@ pub const RNG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The exact seed configures the shared host stream and provider state hook; generator sequence/state parity is a general RNG-engine conformance gap, not an implicit integer conversion boundary.",
+        notes: "The exact seed configures RunMat's host MT19937 stream; the explicit device RNG is independent. MATLAB state-wire and normal-transform parity remain separate conformance obligations.",
     },
     BuiltinIntegerCapabilityDescriptor {
         form: "s = rng(wide_integer_seed[, generator])",
@@ -95,14 +101,24 @@ pub const RNG_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
         notes: "This RunMat-only form is gated before stream mutation and retains an exact typed Seed field when a binary64 field would round.",
     },
     BuiltinIntegerCapabilityDescriptor {
-        form: "s = rng(state_with_integer_fields)",
+        form: "s = rng(twister_state_returned_by_rng)",
         inputs: &RNG_INTEGER_STATE_INPUT,
         computation_domain: BuiltinIntegerComputationDomain::Structural,
         output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
         overflow: BuiltinIntegerOverflowRule::Error,
         backend: BuiltinIntegerBackendRule::HostOnly,
         overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The independently gated extension validates Seed and State words exactly in their native integer classes.",
+        notes: "The RunMat MT state is a 625-by-1 uint32 array with its final word storing the next-word index; restore validates all words before mutation.",
+    },
+    BuiltinIntegerCapabilityDescriptor {
+        form: "s = rng(state_with_extended_integer_fields)",
+        inputs: &RNG_EXTENDED_STATE_INPUT,
+        computation_domain: BuiltinIntegerComputationDomain::Structural,
+        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
+        overflow: BuiltinIntegerOverflowRule::Error,
+        backend: BuiltinIntegerBackendRule::HostOnly,
+        overload: BuiltinIntegerOverloadKind::StructuralParameter,
+        notes: "The independently gated extension validates native-integer Seed or legacy LCG State fields exactly.",
     },
 ];
 
@@ -153,7 +169,7 @@ const RNG_INPUTS_SEED_GENERATOR: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: Some("\"twister\""),
-        description: "Generator token (currently only 'twister'/'default'/'runmat-lcg').",
+        description: "Generator token: 'twister'/'default'; 'runmat-lcg-v1' is accepted only in a saved legacy state.",
     },
 ];
 
@@ -170,7 +186,7 @@ const RNG_INPUTS_OPTION_GENERATOR: [BuiltinParamDescriptor; 2] = [
         ty: BuiltinParamType::StringScalar,
         arity: BuiltinParamArity::Required,
         default: Some("\"twister\""),
-        description: "Generator token (currently only 'twister'/'default'/'runmat-lcg').",
+        description: "Generator token: 'twister'/'default'; 'runmat-lcg-v1' is accepted only in a saved legacy state.",
     },
 ];
 
@@ -282,7 +298,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("state-control"),
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("set_rng_state")],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::GatherImmediately,
     nan_mode: ReductionNaN::Include,
@@ -290,7 +306,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     workgroup_size: None,
     accepts_nan_mode: false,
     notes:
-        "Not a numeric kernel; synchronises provider RNG state via set_rng_state when available.",
+        "Not a numeric kernel; mutates the session host stream. Explicit device RNG state is independent.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::stats::random::rng")]
@@ -317,17 +333,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn rng_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.is_empty() {
-        let current = random::snapshot()?;
+        let mut turn =
+            random::acquire_turn(crate::context::legacy::active().as_ref(), NAME).await?;
+        let current = random::snapshot_in_turn(&mut turn)?;
         return snapshot_to_value(current);
     }
 
     ensure_rng_state_extensions(&args)?;
-
-    let previous = random::snapshot()?;
     let command = parse_command(&args)?;
-    apply_command(command)?;
-    let current = random::snapshot()?;
-    sync_provider_state(current.state);
+    let mut turn = random::acquire_turn(crate::context::legacy::active().as_ref(), NAME).await?;
+    let previous = random::snapshot_in_turn(&mut turn)?;
+    apply_command(&mut turn, command)?;
+    // The explicit GPU stream is independent. A provider's Philox state is
+    // not the host MT19937 state and must not be relabeled or reseeded here.
     snapshot_to_value(previous)
 }
 
@@ -371,13 +389,22 @@ fn parse_double_args(first: &Value, second: &Value) -> BuiltinResult<ParsedComma
     }
     let seed = parse_seed_scalar(first, "rng: seed")?;
     ensure_direct_seed_range(seed)?;
-    let _ = parse_generator(second)?;
+    let generator = parse_generator(second)?;
+    if generator != RngAlgorithm::Twister {
+        return Err(rng_error_with(
+            &RNG_ERROR_GENERATOR_UNSUPPORTED,
+            format!(
+                "rng: generator '{}' is not supported for new seeds",
+                generator.as_str()
+            ),
+        ));
+    }
     Ok(ParsedCommand::Seed(seed))
 }
 
 fn parse_keyword(keyword: &str, generator: Option<RngAlgorithm>) -> BuiltinResult<ParsedCommand> {
-    let algo = generator.unwrap_or(RngAlgorithm::RunMatLcg);
-    if algo != RngAlgorithm::RunMatLcg {
+    let algo = generator.unwrap_or(RngAlgorithm::Twister);
+    if algo != RngAlgorithm::Twister {
         return Err(rng_error_with(
             &RNG_ERROR_GENERATOR_UNSUPPORTED,
             format!(
@@ -387,7 +414,7 @@ fn parse_keyword(keyword: &str, generator: Option<RngAlgorithm>) -> BuiltinResul
         ));
     }
     match keyword {
-        "default" | "twister" | "runmat-lcg" => Ok(ParsedCommand::Default),
+        "default" | "twister" => Ok(ParsedCommand::Default),
         "shuffle" => Ok(ParsedCommand::Shuffle),
         other => Err(rng_error_with(
             &RNG_ERROR_INVALID_ARGUMENT,
@@ -396,23 +423,23 @@ fn parse_keyword(keyword: &str, generator: Option<RngAlgorithm>) -> BuiltinResul
     }
 }
 
-fn apply_command(command: ParsedCommand) -> BuiltinResult<()> {
+fn apply_command(turn: &mut random::RandomTurn, command: ParsedCommand) -> BuiltinResult<()> {
     match command {
         ParsedCommand::Default => {
-            set_default()?;
+            random::set_default_in_turn(turn)?;
             Ok(())
         }
         ParsedCommand::Seed(seed) => {
-            set_seed(seed)?;
+            random::set_seed_in_turn(turn, seed)?;
             Ok(())
         }
         ParsedCommand::Shuffle => {
             let seed = shuffle_seed();
-            set_seed(seed)?;
+            random::set_seed_in_turn(turn, seed)?;
             Ok(())
         }
         ParsedCommand::Restore(snapshot) => {
-            random::apply_snapshot(snapshot)?;
+            random::apply_snapshot_in_turn(turn, snapshot)?;
             Ok(())
         }
     }
@@ -429,13 +456,23 @@ fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
         };
     struct_value.fields.insert(
         "Type".to_string(),
-        Value::String(snapshot.algorithm.as_str().to_string()),
+        Value::String(snapshot.algorithm().as_str().to_string()),
     );
     struct_value.fields.insert("Seed".to_string(), seed_value);
-    let lo = (snapshot.state & 0xFFFF_FFFF) as f64;
-    let hi = (snapshot.state >> 32) as f64;
-    let tensor = Tensor::new(vec![lo, hi], vec![1, 2])
-        .map_err(|e| rng_internal_error(format!("rng: {e}")))?;
+    let tensor = match &snapshot.state {
+        random::RandomState::MtSeed(_) | random::RandomState::Mt(_) => {
+            let state = snapshot.state.mt_snapshot().expect("twister state");
+            let mut words = Vec::with_capacity(625);
+            words.extend_from_slice(state.words());
+            words.push(state.index() as u32);
+            Tensor::new_integer(IntegerStorage::U32(words), vec![625, 1])
+        }
+        random::RandomState::Lcg(state) => {
+            let words = vec![*state as u32, (*state >> 32) as u32];
+            Tensor::new_integer(IntegerStorage::U32(words), vec![2, 1])
+        }
+    }
+    .map_err(|e| rng_internal_error(format!("rng: {e}")))?;
     struct_value
         .fields
         .insert("State".to_string(), Value::Tensor(tensor));
@@ -480,11 +517,13 @@ fn snapshot_from_value(value: &Value) -> BuiltinResult<RngSnapshot> {
                 "rng: state struct is missing the 'State' field",
             )
         })?;
-    let state = parse_state_scalar(state_value)?;
+    let state = match generator {
+        RngAlgorithm::Twister => parse_mt_state(state_value)?,
+        RngAlgorithm::RunMatLcgV1 => random::RandomState::Lcg(parse_state_scalar(state_value)?),
+    };
     Ok(RngSnapshot {
         state,
         seed: seed_opt,
-        algorithm: generator,
     })
 }
 
@@ -500,7 +539,8 @@ fn parse_generator(value: &Value) -> BuiltinResult<RngAlgorithm> {
 
 fn parse_generator_keyword(keyword: &str) -> BuiltinResult<RngAlgorithm> {
     match keyword {
-        "twister" | "default" | "runmat-lcg" => Ok(RngAlgorithm::RunMatLcg),
+        "twister" | "default" => Ok(RngAlgorithm::Twister),
+        "runmat-lcg-v1" => Ok(RngAlgorithm::RunMatLcgV1),
         other => Err(rng_error_with(
             &RNG_ERROR_GENERATOR_UNSUPPORTED,
             format!("rng: generator '{other}' is not supported"),
@@ -576,8 +616,21 @@ fn ensure_direct_seed_range(seed: u64) -> BuiltinResult<()> {
 
 fn ensure_rng_state_extensions(args: &[Value]) -> BuiltinResult<()> {
     if let [Value::Struct(state)] = args {
-        let has_native_integer_field = ["Seed", "seed", "State", "state"]
-            .into_iter()
+        let legacy_state = state
+            .fields
+            .get("Type")
+            .or_else(|| state.fields.get("type"))
+            .and_then(keyword_of)
+            .as_deref()
+            == Some("runmat-lcg-v1");
+        let fields: &[&str] = if legacy_state {
+            &["Seed", "seed", "State", "state"]
+        } else {
+            &["Seed", "seed"]
+        };
+        let has_native_integer_field = fields
+            .iter()
+            .copied()
             .filter_map(|name| state.fields.get(name))
             .any(crate::builtins::common::validation::value_has_native_integer_class);
         if has_native_integer_field {
@@ -588,6 +641,39 @@ fn ensure_rng_state_extensions(args: &[Value]) -> BuiltinResult<()> {
         }
     }
     Ok(())
+}
+
+fn parse_mt_state(value: &Value) -> BuiltinResult<random::RandomState> {
+    let Value::Tensor(tensor) = value else {
+        return Err(rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            "rng: twister State must be a 625-by-1 uint32 array",
+        ));
+    };
+    if tensor.shape() != [625, 1] {
+        return Err(rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            "rng: twister State must be a 625-by-1 uint32 array",
+        ));
+    }
+    let Some(IntegerStorage::U32(values)) = tensor.integer_storage() else {
+        return Err(rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            "rng: twister State must have uint32 storage",
+        ));
+    };
+    let words: [u32; 624] = values[..624].try_into().map_err(|_| {
+        rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            "rng: invalid twister state length",
+        )
+    })?;
+    random::RandomState::from_mt_words(words, values[624] as usize).map_err(|error| {
+        rng_error_with(
+            &RNG_ERROR_INVALID_ARGUMENT,
+            format!("rng: invalid twister state: {error}"),
+        )
+    })?
 }
 
 fn parse_state_scalar(value: &Value) -> BuiltinResult<u64> {
@@ -733,14 +819,6 @@ fn shuffle_seed() -> u64 {
     }
 }
 
-fn sync_provider_state(state: u64) {
-    if let Some(provider) = runmat_accelerate_api::provider() {
-        if let Err(err) = provider.set_rng_state(state) {
-            debug!("rng: provider seed sync failed: {err}");
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
@@ -748,6 +826,11 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
     use runmat_value::{IntValue, IntegerStorage, Tensor};
+
+    fn draw_uniform(len: usize, label: &str) -> BuiltinResult<Vec<f64>> {
+        let mut turn = random::try_acquire_turn(None, label)?;
+        random::generate_uniform(&mut turn, len, label)
+    }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
@@ -758,7 +841,7 @@ pub(crate) mod tests {
         let snapshot = snapshot_from_value(&value).expect("snapshot");
         assert_eq!(snapshot.state, random::default_snapshot().state);
         assert_eq!(snapshot.seed, Some(DEFAULT_USER_SEED));
-        assert_eq!(snapshot.algorithm, RngAlgorithm::RunMatLcg);
+        assert_eq!(snapshot.algorithm(), RngAlgorithm::Twister);
     }
 
     #[test]
@@ -782,9 +865,9 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         random::reset_rng();
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
-        let seq1 = random::generate_uniform(5, "rng test").expect("uniform");
+        let seq1 = draw_uniform(5, "rng test").expect("uniform");
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(42))])).expect("rng");
-        let seq2 = random::generate_uniform(5, "rng test").expect("uniform");
+        let seq2 = draw_uniform(5, "rng test").expect("uniform");
         assert_eq!(seq1, seq2);
     }
 
@@ -832,20 +915,14 @@ pub(crate) mod tests {
 
     #[test]
     fn rng_typed_state_fields_are_an_independent_extension() {
-        let mut state = StructValue::new();
-        state
-            .fields
-            .insert("Type".to_string(), Value::from("twister"));
+        let Value::Struct(mut state) =
+            snapshot_to_value(random::default_snapshot()).expect("state snapshot")
+        else {
+            panic!("expected state struct");
+        };
         state
             .fields
             .insert("Seed".to_string(), Value::Int(IntValue::U32(7)));
-        state.fields.insert(
-            "State".to_string(),
-            Value::Tensor(
-                Tensor::new_integer(IntegerStorage::U32(vec![1, 2]), vec![1, 2])
-                    .expect("state words"),
-            ),
-        );
         let value = || Value::Struct(state.clone());
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
@@ -863,14 +940,23 @@ pub(crate) mod tests {
 
     #[test]
     fn rng_integer_capabilities_cover_public_and_extended_seed_domains() {
-        assert_eq!(RNG_INTEGER_CAPABILITIES.len(), 3);
+        assert_eq!(RNG_INTEGER_CAPABILITIES.len(), 4);
         assert_eq!(
             RNG_INTEGER_CAPABILITIES[0].inputs[0].availability,
             BuiltinIntegerInputAvailability::Documented
         );
-        assert!(RNG_INTEGER_CAPABILITIES[1..].iter().all(|capability| {
-            capability.inputs[0].availability == BuiltinIntegerInputAvailability::RunMatOnly
-        }));
+        assert_eq!(
+            RNG_INTEGER_CAPABILITIES[1].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
+        assert_eq!(
+            RNG_INTEGER_CAPABILITIES[2].inputs[0].availability,
+            BuiltinIntegerInputAvailability::Documented
+        );
+        assert_eq!(
+            RNG_INTEGER_CAPABILITIES[3].inputs[0].availability,
+            BuiltinIntegerInputAvailability::RunMatOnly
+        );
     }
 
     #[test]
@@ -913,7 +999,7 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
-    fn rng_restores_rank_zero_and_rank_one_state_tensors() {
+    fn rng_restores_legacy_lcg_rank_zero_and_rank_one_state_tensors() {
         let _guard = random::test_guard();
         random::reset_rng();
 
@@ -932,8 +1018,15 @@ pub(crate) mod tests {
             snapshot
                 .fields
                 .insert("State".to_string(), Value::Tensor(state));
+            snapshot.fields.insert(
+                "Type".to_string(),
+                Value::String(RngAlgorithm::RunMatLcgV1.as_str().to_string()),
+            );
             block_on(rng_builtin(vec![Value::Struct(snapshot)])).expect("restore state");
-            assert_eq!(random::snapshot().unwrap().state, expected);
+            assert_eq!(
+                random::snapshot().unwrap().state,
+                random::RandomState::Lcg(expected)
+            );
         }
     }
 
@@ -948,6 +1041,29 @@ pub(crate) mod tests {
         let current = random::snapshot().expect("snapshot");
         assert_eq!(current.state, random::default_snapshot().state);
         assert_eq!(current.seed, Some(DEFAULT_USER_SEED));
+    }
+
+    #[test]
+    fn rng_twister_state_has_runmat_625_word_wire_and_restores_midstream() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+        random::set_seed(41).expect("seed");
+        let _ = draw_uniform(319, "rng test").expect("advance across twist");
+        let saved = block_on(rng_builtin(Vec::new())).expect("query");
+        let Value::Struct(fields) = &saved else {
+            panic!("expected state struct");
+        };
+        let Value::Tensor(state) = fields.fields.get("State").expect("State") else {
+            panic!("expected state tensor");
+        };
+        assert_eq!(state.shape(), &[625, 1]);
+        let Some(IntegerStorage::U32(words)) = state.integer_storage() else {
+            panic!("expected uint32 state");
+        };
+        assert_eq!(words[624], 14);
+        let expected = draw_uniform(8, "rng test").expect("continuation");
+        block_on(rng_builtin(vec![saved])).expect("restore");
+        assert_eq!(draw_uniform(8, "rng test").expect("replay"), expected);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -971,14 +1087,14 @@ pub(crate) mod tests {
         let _guard = random::test_guard();
         random::reset_rng();
         block_on(rng_builtin(vec![Value::Int(IntValue::U32(123))])).expect("rng seed first");
-        let host_seq = random::generate_uniform(4, "twister alias host").expect("uniform");
+        let host_seq = draw_uniform(4, "twister alias host").expect("uniform");
         random::reset_rng();
         block_on(rng_builtin(vec![
             Value::Int(IntValue::U32(123)),
             Value::from("twister"),
         ]))
         .expect("rng seed twister");
-        let alias_seq = random::generate_uniform(4, "twister alias verify").expect("uniform");
+        let alias_seq = draw_uniform(4, "twister alias verify").expect("uniform");
         assert_eq!(host_seq, alias_seq);
     }
 
@@ -1002,6 +1118,15 @@ pub(crate) mod tests {
         ]))
         .unwrap_err();
         assert_eq!(err.identifier(), RNG_ERROR_GENERATOR_UNSUPPORTED.identifier);
+        let legacy = block_on(rng_builtin(vec![
+            Value::Int(IntValue::U32(41)),
+            Value::from("runmat-lcg-v1"),
+        ]))
+        .expect_err("legacy replay type must not silently select MT for a new seed");
+        assert_eq!(
+            legacy.identifier(),
+            RNG_ERROR_GENERATOR_UNSUPPORTED.identifier
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1022,23 +1147,46 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rng_syncs_provider_state() {
+    fn rng_does_not_consume_or_reseed_explicit_provider_stream() {
         let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             block_on(rng_builtin(vec![Value::Int(IntValue::U32(9))])).expect("rng");
-            let handle = provider.random_uniform(&[4, 1]).expect("gpu uniform");
-            let host_after_gpu = random::generate_uniform(4, "rng provider sync").expect("uniform");
-            let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
-            assert_eq!(gpu.materialize_f64(), host_after_gpu);
+            let before_provider = random::snapshot().expect("host snapshot");
+            let handle = provider
+                .random_uniform(&[4, 1])
+                .expect("explicit gpu uniform");
+            let _gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("gather");
+            assert_eq!(random::snapshot().expect("host snapshot"), before_provider);
             drop(handle);
         });
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn rng_seed_does_not_reseed_the_independent_gpu_child() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+        let gpu = crate::builtins::common::random::gpu::GpuRandomSnapshot::default();
+        crate::builtins::common::random::gpu::replace(gpu).expect("GPU default");
+        block_on(rng_builtin(vec![Value::Int(IntValue::U32(9))])).expect("CPU seed");
+        assert_eq!(
+            crate::builtins::common::random::gpu::snapshot().expect("GPU snapshot"),
+            gpu
+        );
+        let cpu_after_seed = random::snapshot().expect("CPU snapshot");
+        crate::builtins::common::random::gpu::reserve(4, "test GPU child")
+            .expect("GPU child range");
+        let cpu_after_gpu = random::snapshot().expect("CPU unchanged");
+        assert_eq!(cpu_after_gpu.state, cpu_after_seed.state);
+        assert_eq!(cpu_after_gpu.seed, cpu_after_seed.seed);
+        assert_eq!(cpu_after_gpu.algorithm(), cpu_after_seed.algorithm());
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
-    fn rng_wgpu_uniform_matches_cpu() {
+    fn legacy_wgpu_uniform_values_stay_in_range() {
         let _guard = random::test_guard();
         random::reset_rng();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
@@ -1050,7 +1198,7 @@ pub(crate) mod tests {
             .random_uniform(&[1, 6])
             .expect("wgpu random uniform");
         let gpu = test_support::gather(Value::GpuTensor(handle.clone())).expect("wgpu gather");
-        let host = random::generate_uniform(6, "rng wgpu parity").expect("host uniform sequence");
+        let host = draw_uniform(6, "rng wgpu parity").expect("host uniform sequence");
         assert_eq!(gpu.len(), host.len());
         for (idx, value) in gpu.materialize_f64().iter().enumerate() {
             assert!(value.is_finite(), "gpu value at {idx} not finite: {value}");

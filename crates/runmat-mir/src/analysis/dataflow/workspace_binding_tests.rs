@@ -44,6 +44,41 @@ fn ordinary_local_still_requires_assignment() {
 }
 
 #[test]
+fn admitted_incoming_workspace_is_initialized_without_seeding_new_locals() {
+    let variables = std::collections::HashMap::from([("committed".to_string(), 0usize)]);
+    let parsed = runmat_parser::parse("seen = committed; committed = seen + 1;")
+        .expect("parse workspace continuation");
+    let hir = runmat_hir::lower(&parsed, &runmat_hir::LoweringContext::new(&variables))
+        .expect("lower workspace continuation HIR");
+    let binding = hir
+        .assembly
+        .bindings
+        .iter()
+        .find(|binding| binding.name.0 == "committed")
+        .expect("incoming binding");
+    assert_eq!(binding.role, runmat_hir::BindingRole::IncomingWorkspace);
+    let mir =
+        crate::lowering::lower_assembly(&hir.assembly).expect("lower workspace continuation MIR");
+    assert!(mir
+        .bodies
+        .values()
+        .any(|body| body.locals.iter().any(|local| {
+            local.binding == Some(binding.id)
+                && local.kind == crate::MirLocalKind::IncomingWorkspace
+        })));
+    let found = crate::analysis::analyze_assembly(&mir).diagnostics;
+    assert!(
+        found.iter().all(|item| item.code != "RM-MIR0001"),
+        "incoming workspace value must be assigned on entry: {found:#?}"
+    );
+    assert!(hir
+        .assembly
+        .bindings
+        .iter()
+        .any(|binding| binding.name.0 == "seen" && binding.role == runmat_hir::BindingRole::Local));
+}
+
+#[test]
 fn declared_storage_does_not_infer_a_new_cell_from_brace_output() {
     use runmat_types::{ProgramFunctionId, ProgramPointId, RegionValueId, ValueKindFact};
 

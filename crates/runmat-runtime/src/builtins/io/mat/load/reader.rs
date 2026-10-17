@@ -122,8 +122,9 @@ pub(super) async fn restore_loaded_entries(
             }
             MatLoadRestoration::Recursive(value) => match cooperation.as_deref_mut() {
                 Some(cooperation) => {
+                    let runtime = cooperation.runtime();
                     cooperation
-                        .await_io(restore_value_from_mat_load(value))
+                        .await_io(restore_value_from_mat_load_in_context(value, runtime))
                         .await??
                 }
                 None => restore_value_from_mat_load(value).await?,

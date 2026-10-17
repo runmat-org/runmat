@@ -254,6 +254,9 @@ impl RuntimeDistributedService for CoreDistributedService {
         };
         if entry.placement.distributed
             == runmat_builtins::BuiltinDistributedPolicy::ScalarLikePrototype
+            || (entry.placement.distributed
+                == runmat_builtins::BuiltinDistributedPolicy::MapUnaryOrScalarLikePrototype
+                && request.arguments.len() == 2)
         {
             let result = invoke_scalar_like_prototype(Rc::clone(&self.store), request, entry);
             return Box::pin(async move {
@@ -265,6 +268,7 @@ impl RuntimeDistributedService for CoreDistributedService {
             entry.placement.distributed,
             runmat_builtins::BuiltinDistributedPolicy::MapUnary
                 | runmat_builtins::BuiltinDistributedPolicy::MapUnaryConstrained(_)
+                | runmat_builtins::BuiltinDistributedPolicy::MapUnaryOrScalarLikePrototype
         ) {
             return Box::pin(async {
                 Err(error(
