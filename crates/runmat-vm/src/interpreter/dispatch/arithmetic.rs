@@ -19,9 +19,9 @@ async fn call_operator_method_in_context(
     obj: Value,
     method: &str,
     arg: Value,
-) -> Result<RootedValue, RuntimeError> {
+) -> Result<runmat_runtime::object::dispatch::OperatorMethodDispatch, RuntimeError> {
     let _roots = crate::call::root_values([&obj, &arg])?;
-    runmat_runtime::object::dispatch::call_object_operator_method_in_context(
+    runmat_runtime::object::dispatch::try_call_object_operator_method_in_context(
         runtime, obj, method, arg,
     )
     .await
@@ -32,9 +32,9 @@ async fn call_right_operator_method_ordered_in_context(
     lhs: Value,
     rhs: Value,
     method: &str,
-) -> Result<RootedValue, RuntimeError> {
+) -> Result<runmat_runtime::object::dispatch::OperatorMethodDispatch, RuntimeError> {
     let _roots = crate::call::root_values([&lhs, &rhs])?;
-    runmat_runtime::object::dispatch::call_rhs_object_operator_method_ordered_in_context(
+    runmat_runtime::object::dispatch::try_call_rhs_object_operator_method_ordered_in_context(
         runtime, lhs, rhs, method,
     )
     .await
@@ -144,9 +144,7 @@ pub(super) fn suspend_arithmetic<'a>(
             runmat_runtime::execution::admit_stack_mutation(runtime, async move {
                 arithmetic_ops::power(
                     stack,
-                    |obj, _method, arg| async move {
-                        crate::call::call_builtin_async(runtime, "power", &[obj, arg]).await
-                    },
+                    call_operator_method,
                     call_right_operator_method_ordered,
                     |a, b| async move {
                         let (a_acc, b_acc) =

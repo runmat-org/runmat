@@ -96,10 +96,10 @@ pub(crate) use aggregate::{
 #[path = "property_mutation/plot_data.rs"]
 mod plot_data;
 pub(crate) use plot_data::{
-    update_area_plot_for_property, update_errorbar_plot_for_property,
-    update_histogram_plot_data_for_property, update_image_plot_for_property,
-    update_plot_element_for_property, update_quiver_plot_for_property,
-    update_stem_plot_for_property,
+    try_update_plot_element_for_property, update_area_plot_for_property,
+    update_errorbar_plot_for_property, update_histogram_plot_data_for_property,
+    update_image_plot_for_property, update_plot_element_for_property,
+    update_quiver_plot_for_property, update_stem_plot_for_property,
 };
 #[path = "property_mutation/transactions.rs"]
 mod transactions;

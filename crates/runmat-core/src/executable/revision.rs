@@ -8,16 +8,39 @@ pub struct ExecutableRevision {
     pub source_digest: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ExecutableSourceSelection {
+    ScriptSection { start_byte: u32, end_byte: u32 },
+}
+
 impl ExecutableRevision {
     pub fn derive(
         source: &ExecutableSource,
         program_revision: Option<runmat_execution::ProgramRevision>,
         environment: runmat_execution::ProgramEnvironment,
     ) -> Self {
+        Self::derive_with_selection(source, program_revision, environment, None)
+    }
+
+    pub(crate) fn derive_with_selection(
+        source: &ExecutableSource,
+        program_revision: Option<runmat_execution::ProgramRevision>,
+        environment: runmat_execution::ProgramEnvironment,
+        selection: Option<ExecutableSourceSelection>,
+    ) -> Self {
         let mut digest = Sha256::new();
         frame(&mut digest, source.owner_identity.as_bytes());
         frame(&mut digest, source.relative_path.as_bytes());
         frame(&mut digest, source.text.as_bytes());
+        if let Some(ExecutableSourceSelection::ScriptSection {
+            start_byte,
+            end_byte,
+        }) = selection
+        {
+            frame(&mut digest, b"runmat-test-script-section-v1");
+            frame(&mut digest, &start_byte.to_be_bytes());
+            frame(&mut digest, &end_byte.to_be_bytes());
+        }
         let source_digest = runmat_execution::Digest::from_bytes(digest.finalize().into());
         let program_revision = program_revision.unwrap_or_else(|| {
             let mut graph = Sha256::new();
@@ -40,4 +63,46 @@ impl ExecutableRevision {
 fn frame(digest: &mut Sha256, bytes: &[u8]) {
     digest.update((bytes.len() as u64).to_be_bytes());
     digest.update(bytes);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_sections_of_one_frozen_file_have_distinct_executable_products() {
+        let source = ExecutableSource::new(
+            "path:workspace",
+            "tests/sectionTest.m",
+            "%% one\na=1\n%% two\na=2\n",
+        );
+        let environment = crate::program_environment(crate::CompatMode::Matlab);
+        let frozen = runmat_execution::ProgramRevision::new(
+            runmat_execution::Digest::sha256(b"graph"),
+            runmat_execution::Digest::sha256(b"snapshot"),
+            environment.clone(),
+        )
+        .unwrap();
+        let first = ExecutableRevision::derive_with_selection(
+            &source,
+            Some(frozen.clone()),
+            environment.clone(),
+            Some(ExecutableSourceSelection::ScriptSection {
+                start_byte: 7,
+                end_byte: 11,
+            }),
+        );
+        let second = ExecutableRevision::derive_with_selection(
+            &source,
+            Some(frozen.clone()),
+            environment,
+            Some(ExecutableSourceSelection::ScriptSection {
+                start_byte: 18,
+                end_byte: 22,
+            }),
+        );
+        assert_ne!(first.source_digest, second.source_digest);
+        assert_eq!(first.program_revision, frozen);
+        assert_eq!(second.program_revision, frozen);
+    }
 }

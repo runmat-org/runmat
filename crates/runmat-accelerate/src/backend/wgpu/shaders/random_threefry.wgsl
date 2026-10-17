@@ -10,6 +10,11 @@ struct Params {
     first3: u32,
     seed0: u32,
     seed1: u32,
+    integer_lower: u32,
+    integer_mask: u32,
+    _pad0: u32,
+    _pad1: u32,
+    @BATCH_FIELDS@
 };
 struct Pair { a: vec2<u32>, b: vec2<u32>, };
 
@@ -41,7 +46,7 @@ fn mix64(a: vec2<u32>, b: vec2<u32>, rotation: u32) -> Pair {
     return Pair(sum, rotl64(b, rotation) ^ sum);
 }
 
-fn counter_for_item(index: u32) -> array<vec2<u32>, 4> {
+fn counter_for_item_attempt(index: u32, attempt: vec2<u32>) -> array<vec2<u32>, 4> {
     let first0 = params.first0 + index;
     let carry0 = select(0u, 1u, first0 < params.first0);
     let first1 = params.first1 + carry0;
@@ -51,9 +56,13 @@ fn counter_for_item(index: u32) -> array<vec2<u32>, 4> {
     return array<vec2<u32>, 4>(
         vec2<u32>(first0, first1),
         vec2<u32>(first2, params.first3 + carry2),
-        vec2<u32>(0u, 0u),
+        attempt,
         vec2<u32>(0u, 0u)
     );
+}
+
+fn counter_for_item(index: u32) -> array<vec2<u32>, 4> {
+    return counter_for_item_attempt(index, vec2<u32>(0u, 0u));
 }
 
 fn threefry(counter: array<vec2<u32>, 4>) -> array<vec2<u32>, 4> {
@@ -99,9 +108,7 @@ fn threefry(counter: array<vec2<u32>, 4>) -> array<vec2<u32>, 4> {
     return words;
 }
 
-fn uniform_from_word(word: vec2<u32>) -> @DTYPE@ {
-    @CONVERSION@
-}
+@UNIFORM_FUNCTION@
 
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {

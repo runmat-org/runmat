@@ -33,6 +33,8 @@ pub struct SurfacePlot {
     source_x: Option<NumericPlotData>,
     source_y: Option<NumericPlotData>,
     source_z: Option<NumericPlotData>,
+    source_c: Option<NumericPlotData>,
+    source_c_rgb: bool,
     /// Grid resolution for rendering/index generation (kept even for GPU-backed plots).
     x_len: usize,
     y_len: usize,
@@ -51,6 +53,7 @@ pub struct SurfacePlot {
     /// Optional color limits override for mapping Z -> color (caxis)
     pub color_limits: Option<(f64, f64)>,
     pub color_mapping: SurfaceColorMapping,
+    pub colormap_length: usize,
     scalar_color_extent: Option<(f64, f64)>,
 
     /// Optional per-vertex color grid (for RGB images); if set, overrides colormap mapping
@@ -350,6 +353,62 @@ impl SurfacePlot {
         self.source_z = z;
     }
 
+    pub fn color_source(&self) -> Option<&NumericPlotData> {
+        self.source_c.as_ref()
+    }
+
+    pub fn set_color_source(&mut self, source: NumericPlotData) -> Result<(), String> {
+        if source.is_empty() {
+            self.source_c = None;
+            self.source_c_rgb = false;
+            self.vertices = None;
+            self.dirty = true;
+            return Ok(());
+        }
+        if self.z_data.is_none() {
+            return Err("surface: changing CData requires a host-renderable surface".into());
+        }
+        let rows = self.y_len;
+        let columns = self.x_len;
+        let rgb = match source.shape() {
+            [m, n] if *m == rows && *n == columns => false,
+            [m, n, 3] if *m == rows && *n == columns => true,
+            _ => {
+                return Err(
+                    "surface: CData must be m-by-n or m-by-n-by-3 with [m,n]=size(ZData)".into(),
+                )
+            }
+        };
+        for index in 0..source.len() {
+            let component = source
+                .storage()
+                .value_at(index)
+                .expect("validated CData extent");
+            if (rgb && !crate::plots::color_data::rgb_component_valid(component))
+                || (!rgb && component.materialize_f64().is_infinite())
+            {
+                return Err(
+                    "surface: CData color values are infinite or outside their class range".into(),
+                );
+            }
+        }
+        self.source_c = Some(source);
+        self.source_c_rgb = rgb;
+        self.vertices = None;
+        self.dirty = true;
+        self.drop_gpu_if_possible();
+        Ok(())
+    }
+
+    pub fn set_color_mapping(&mut self, mapping: SurfaceColorMapping) {
+        if self.color_mapping != mapping {
+            self.color_mapping = mapping;
+            self.vertices = None;
+            self.dirty = true;
+            self.drop_gpu_if_possible();
+        }
+    }
+
     pub async fn export_scene_grid_data(
         &self,
     ) -> Result<(Vec<f64>, Vec<f64>, Vec<Vec<f64>>), String> {
@@ -480,6 +539,8 @@ impl SurfacePlot {
             source_x: Some(x_source),
             source_y: Some(y_source),
             source_z: Some(z_source),
+            source_c: None,
+            source_c_rgb: false,
             colormap: ColorMap::default(),
             shading_mode: ShadingMode::default(),
             wireframe: false,
@@ -488,6 +549,7 @@ impl SurfacePlot {
             image_mode: false,
             color_limits: None,
             color_mapping: SurfaceColorMapping::Scaled,
+            colormap_length: 256,
             scalar_color_extent: None,
             color_grid: None,
             lighting_enabled: true,
@@ -549,6 +611,8 @@ impl SurfacePlot {
             source_x: Some(x_source),
             source_y: Some(y_source),
             source_z: Some(z_source),
+            source_c: None,
+            source_c_rgb: false,
             x_len,
             y_len,
             colormap: ColorMap::default(),
@@ -559,6 +623,7 @@ impl SurfacePlot {
             image_mode: false,
             color_limits: None,
             color_mapping: SurfaceColorMapping::Scaled,
+            colormap_length: 256,
             scalar_color_extent: None,
             color_grid: None,
             lighting_enabled: true,
@@ -597,6 +662,8 @@ impl SurfacePlot {
             source_x: None,
             source_y: None,
             source_z: None,
+            source_c: None,
+            source_c_rgb: false,
             x_len,
             y_len,
             colormap: ColorMap::default(),
@@ -607,6 +674,7 @@ impl SurfacePlot {
             image_mode: false,
             color_limits: None,
             color_mapping: SurfaceColorMapping::Scaled,
+            colormap_length: 256,
             scalar_color_extent: None,
             color_grid: None,
             lighting_enabled: true,
@@ -752,6 +820,15 @@ impl SurfacePlot {
         self.bounds = None;
         self.gpu_color_grid_source = None;
         self.invalidate_gpu_data();
+        if self.source_c.as_ref().is_some_and(|source| {
+            !matches!(
+                source.shape(),
+                [rows, cols] | [rows, cols, 3] if *rows == self.y_len && *cols == self.x_len
+            )
+        }) {
+            self.source_c = None;
+            self.source_c_rgb = false;
+        }
         if self.color_grid.as_ref().is_some_and(|grid| {
             grid.len() != self.x_len || grid.iter().any(|row| row.len() != self.y_len)
         }) {
@@ -1054,6 +1131,43 @@ impl SurfacePlot {
                     let color = if let Some(grid) = &self.color_grid {
                         let c = grid[i][j];
                         Vec4::new(c.x, c.y, c.z, c.w)
+                    } else if let Some(source) = &self.source_c {
+                        let index = j + i * self.y_len;
+                        if self.source_c_rgb {
+                            let count = self.x_len * self.y_len;
+                            let samples = [0, 1, 2].map(|offset| {
+                                source
+                                    .storage()
+                                    .value_at(index + offset * count)
+                                    .expect("validated surface RGB extent")
+                            });
+                            if samples
+                                .iter()
+                                .any(|sample| sample.materialize_f64().is_nan())
+                            {
+                                Vec4::ZERO
+                            } else {
+                                Vec4::new(
+                                    crate::plots::color_data::rgb_component(samples[0]),
+                                    crate::plots::color_data::rgb_component(samples[1]),
+                                    crate::plots::color_data::rgb_component(samples[2]),
+                                    self.alpha,
+                                )
+                            }
+                        } else {
+                            let value = source
+                                .storage()
+                                .value_at(index)
+                                .expect("validated surface color extent");
+                            crate::plots::color_data::indexed_color(
+                                value,
+                                &self.colormap,
+                                self.colormap_length,
+                                (self.color_mapping == SurfaceColorMapping::Scaled)
+                                    .then_some((min_z, max_z)),
+                                self.alpha,
+                            )
+                        }
                     } else {
                         let t = ((z - min_z) / z_range) as f32;
                         let color_rgb = self.colormap.map_value(t.clamp(0.0, 1.0));
@@ -1340,9 +1454,14 @@ impl SurfacePlot {
                 crate::plots::clone_budget::nested_vec(grid)?,
             )?;
         }
-        for source in [&self.source_x, &self.source_y, &self.source_z]
-            .into_iter()
-            .flatten()
+        for source in [
+            &self.source_x,
+            &self.source_y,
+            &self.source_z,
+            &self.source_c,
+        ]
+        .into_iter()
+        .flatten()
         {
             crate::plots::clone_budget::add(&mut total, source.retained_snapshot_bytes()?)?;
         }
@@ -1715,6 +1834,27 @@ pub mod matlab_compat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn surface_color_source_is_independent_of_height_and_retains_rgb_shape() {
+        let mut surface = SurfacePlot::new(
+            vec![1.0, 2.0],
+            vec![1.0, 2.0],
+            vec![vec![100.0, 100.0], vec![100.0, 100.0]],
+        )
+        .unwrap()
+        .with_colormap(ColorMap::Gray);
+        surface
+            .set_color_source(
+                NumericPlotData::from_f64(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2]).unwrap(),
+            )
+            .unwrap();
+        surface.set_color_limits(Some((0.0, 1.0)));
+        let render = surface.render_data();
+        assert_eq!(render.vertices[0].color, [0.0, 0.0, 0.0, 1.0]);
+        assert_eq!(render.vertices[1].color, [1.0, 1.0, 1.0, 1.0]);
+        assert_eq!(surface.color_source().unwrap().shape(), &[2, 2]);
+    }
 
     #[test]
     fn test_surface_plot_creation() {

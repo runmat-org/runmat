@@ -464,6 +464,8 @@ pub enum ScenePlot {
         y_source: Option<SceneNumericData>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         z_source: Option<SceneNumericData>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        c_source: Option<SceneNumericData>,
         #[serde(default)]
         x_grid: Option<Vec<Vec<f64>>>,
         #[serde(default)]
@@ -501,6 +503,10 @@ pub enum ScenePlot {
         visible: bool,
         #[serde(default)]
         force_3d: bool,
+        #[serde(default)]
+        color_mapping: crate::plots::surface::SurfaceColorMapping,
+        #[serde(default)]
+        color_source_kind: crate::plots::PatchColorSourceKind,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x_source: Option<SceneNumericData>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2305,6 +2311,7 @@ impl ScenePlot {
                     x_source: source_x.map(Into::into),
                     y_source: source_y.map(Into::into),
                     z_source: source_z.map(Into::into),
+                    c_source: surface.color_source().map(Into::into),
                     x_grid: surface.x_grid.clone(),
                     y_grid: surface.y_grid.clone(),
                     colormap: surface.colormap.to_serialized_token(),
@@ -2845,6 +2852,7 @@ impl ScenePlot {
                 x_source: surface.source_data().0.map(Into::into),
                 y_source: surface.source_data().1.map(Into::into),
                 z_source: surface.source_data().2.map(Into::into),
+                c_source: surface.color_source().map(Into::into),
                 x_grid: surface.x_grid.clone(),
                 y_grid: surface.y_grid.clone(),
                 colormap: surface.colormap.to_serialized_token(),
@@ -2889,6 +2897,8 @@ impl ScenePlot {
                     label: patch.label().map(str::to_string),
                     visible: patch.is_visible(),
                     force_3d: patch.force_3d(),
+                    color_mapping: patch.color_mapping(),
+                    color_source_kind: patch.color_source_kind(),
                     x_source: source_x.map(Into::into),
                     y_source: source_y.map(Into::into),
                     z_source: source_z.map(Into::into),
@@ -3342,6 +3352,7 @@ impl ScenePlot {
                 x_source,
                 y_source,
                 z_source,
+                c_source,
                 x_grid,
                 y_grid,
                 colormap,
@@ -3380,6 +3391,9 @@ impl ScenePlot {
                         z_source.map(TryInto::try_into).transpose()?.or(fallback_z),
                     );
                 }
+                if let Some(source) = c_source {
+                    surface.set_color_source(source.try_into()?)?;
+                }
                 surface.colormap = parse_colormap(&colormap);
                 surface.shading_mode = parse_shading_mode(&shading_mode);
                 surface.wireframe = wireframe;
@@ -3411,6 +3425,8 @@ impl ScenePlot {
                 label,
                 visible,
                 force_3d,
+                color_mapping,
+                color_source_kind,
                 x_source,
                 y_source,
                 z_source,
@@ -3434,14 +3450,17 @@ impl ScenePlot {
                 patch.set_label(label);
                 patch.set_visible(visible);
                 patch.set_force_3d(force_3d);
-                patch.set_source_data(
-                    x_source.map(TryInto::try_into).transpose()?,
-                    y_source.map(TryInto::try_into).transpose()?,
-                    z_source.map(TryInto::try_into).transpose()?,
-                    c_source.map(TryInto::try_into).transpose()?,
-                    faces_source.map(TryInto::try_into).transpose()?,
-                    vertices_source.map(TryInto::try_into).transpose()?,
-                );
+                patch.set_color_mapping(color_mapping);
+                patch.set_source_data(crate::plots::PatchSourceDataOwned {
+                    x: x_source.map(TryInto::try_into).transpose()?,
+                    y: y_source.map(TryInto::try_into).transpose()?,
+                    z: z_source.map(TryInto::try_into).transpose()?,
+                    colors: c_source.map(TryInto::try_into).transpose()?,
+                    color_kind: color_source_kind,
+                    faces: faces_source.map(TryInto::try_into).transpose()?,
+                    vertices: vertices_source.map(TryInto::try_into).transpose()?,
+                })?;
+                patch.validate_color_mode()?;
                 figure.add_patch_plot_on_axes(patch, axes_index as usize);
             }
             ScenePlot::Mesh {
@@ -3705,6 +3724,7 @@ fn parse_patch_face_color_mode(value: &str) -> PatchFaceColorMode {
     match value {
         "None" => PatchFaceColorMode::None,
         "Flat" => PatchFaceColorMode::Flat,
+        "Interp" => PatchFaceColorMode::Interp,
         _ => PatchFaceColorMode::Color,
     }
 }
@@ -4190,6 +4210,7 @@ mod tests {
             x_source: None,
             y_source: None,
             z_source: None,
+            c_source: None,
             x_grid: None,
             y_grid: None,
             colormap: "Parula".to_string(),
@@ -4218,6 +4239,7 @@ mod tests {
             x_source: None,
             y_source: None,
             z_source: None,
+            c_source: None,
             x_grid: None,
             y_grid: None,
             colormap: "Parula".to_string(),
@@ -4253,6 +4275,7 @@ mod tests {
                 x_source: None,
                 y_source: None,
                 z_source: None,
+                c_source: None,
                 x_grid: None,
                 y_grid: None,
                 colormap: "Parula".to_string(),
@@ -5192,6 +5215,13 @@ mod tests {
                     .expect("native surface data"),
             ),
         );
+        let colors = vec![1_u8, 2, 3, 4];
+        surface
+            .set_color_source(
+                NumericPlotData::new(NumericStorage::U8(colors.clone()), vec![2, 2])
+                    .expect("native surface colors"),
+            )
+            .expect("matching CData");
         let mut figure = Figure::new();
         figure.add_surface_plot(surface);
 
@@ -5205,6 +5235,10 @@ mod tests {
         assert_eq!(
             source_z.map(NumericPlotData::storage),
             Some(&NumericStorage::U64(wide))
+        );
+        assert_eq!(
+            surface.color_source().map(NumericPlotData::storage),
+            Some(&NumericStorage::U8(colors))
         );
     }
 
@@ -5221,20 +5255,24 @@ mod tests {
             vec![vec![0, 1, 2]],
         )
         .unwrap();
-        patch.set_source_data(
-            None,
-            None,
-            None,
-            None,
-            Some(
-                NumericPlotData::new(NumericStorage::I16(faces.clone()), vec![1, 3])
-                    .expect("native faces"),
-            ),
-            Some(
-                NumericPlotData::new(NumericStorage::U64(vertices.clone()), vec![3, 2])
-                    .expect("native vertices"),
-            ),
-        );
+        patch
+            .set_source_data(crate::plots::PatchSourceDataOwned {
+                colors: Some(
+                    NumericPlotData::new(NumericStorage::U8(vec![1, 2, 3]), vec![3, 1])
+                        .expect("native patch colors"),
+                ),
+                color_kind: crate::plots::PatchColorSourceKind::FaceVertex,
+                faces: Some(
+                    NumericPlotData::new(NumericStorage::I16(faces.clone()), vec![1, 3])
+                        .expect("native faces"),
+                ),
+                vertices: Some(
+                    NumericPlotData::new(NumericStorage::U64(vertices.clone()), vec![3, 2])
+                        .expect("native vertices"),
+                ),
+                ..Default::default()
+            })
+            .expect("valid native patch data");
         let mut figure = Figure::new();
         figure.add_patch_plot(patch);
 
@@ -5244,7 +5282,11 @@ mod tests {
         let PlotElement::Patch(patch) = rebuilt.plots().next().unwrap() else {
             panic!("expected patch")
         };
-        let (_, _, _, _, source_faces, source_vertices) = patch.source_data();
+        let (_, _, _, source_c, source_faces, source_vertices) = patch.source_data();
+        assert_eq!(
+            source_c.map(NumericPlotData::storage),
+            Some(&NumericStorage::U8(vec![1, 2, 3]))
+        );
         assert_eq!(
             source_faces.map(NumericPlotData::storage),
             Some(&NumericStorage::I16(faces))
@@ -5269,6 +5311,7 @@ mod tests {
                 x_source: None,
                 y_source: None,
                 z_source: None,
+                c_source: None,
                 x_grid: None,
                 y_grid: None,
                 colormap: "Parula".into(),

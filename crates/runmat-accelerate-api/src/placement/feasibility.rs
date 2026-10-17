@@ -63,6 +63,14 @@ pub struct ProviderWorkload {
     /// Ordinary host RNG calls never set this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_random: Option<crate::random::GpuRandomWorkload>,
+    /// Native integer child-stream generation; absence never authorizes
+    /// replacing an exact host rejection-sampling route with device modulo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_integer: Option<crate::random::GpuIntegerWorkload>,
+    /// One acknowledged rejection batch, distinct from a complete fixed-work
+    /// integer operation. Each batch has two authenticated API outputs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_integer_batch: Option<crate::random::GpuIntegerBatchWorkload>,
     /// Explicit physical ABI for the existing ordinary typed fusion owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fused_elementwise: Option<crate::ProviderFusedElementwiseWorkload>,

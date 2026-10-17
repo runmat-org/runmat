@@ -6,6 +6,7 @@
 pub mod area;
 pub mod bar;
 mod clone_budget;
+mod color_data;
 pub mod contour;
 pub mod contour_fill;
 pub mod errorbar;
@@ -46,7 +47,9 @@ pub use mesh::{
     MeshTriangleRange, MeshVectorField,
 };
 pub use numeric_data::NumericPlotData;
-pub use patch::{PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
+pub use patch::{
+    PatchColorSourceKind, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot, PatchSourceDataOwned,
+};
 pub use pie::PieChart;
 pub use quiver::{QuiverGpuSource, QuiverPlot};
 pub use reference_line::{ReferenceLine, ReferenceLineOrientation};

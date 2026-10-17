@@ -4,10 +4,11 @@ use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
-    execute_centered_gram_placed, execute_elementwise_placed, execute_explained_variance_placed,
-    execute_matmul_epilogue_placed, execute_power_step_normalize_placed,
-    execute_reduction_with_shape_placed_async, execute_reduction_with_shape_placed_async_vm,
-    CpuReadbackFailure, FusionExecutionOutcome, FusionExecutionRequest, FusionProviderCompletion,
+    elementwise_floating_admission, execute_centered_gram_placed, execute_elementwise_placed,
+    execute_explained_variance_placed, execute_matmul_epilogue_placed,
+    execute_power_step_normalize_placed, execute_reduction_with_shape_placed_async,
+    execute_reduction_with_shape_placed_async_vm, CpuReadbackFailure, ElementwiseFloatingAdmission,
+    FusionExecutionOutcome, FusionExecutionRequest, FusionProviderCompletion,
 };
 use runmat_accelerate::placement::{
     record_event, PlacementCorrelationId, PlacementEventKind, PlacementVariant,
@@ -604,32 +605,53 @@ async fn execute_fusion_elementwise_vm(
     decline: Option<runmat_runtime::context::VmFusionDeclineRight>,
     input_uses: Option<&runmat_accelerate::fusion_exec::VmHostInputUses>,
 ) -> Result<FusionExecutionOutcome<FusionVmResult>, FusionAttemptError> {
-    let execution = if let Some(right) = right {
-        if let Some(uses) = input_uses {
-            runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_inputs(
-                request, right, uses,
+    let admission = decline
+        .as_ref()
+        .map(|_| elementwise_floating_admission(&request))
+        .transpose();
+    let execution = match admission {
+        Err(error) => Err(error),
+        Ok(Some(ElementwiseFloatingAdmission::NativeIntegerIneligible)) => {
+            runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_decline(
+                request,
+                decline.expect("integer admission requires the inspected VM decline right"),
             )
             .await
-        } else {
-            runmat_accelerate::fusion_exec::execute_elementwise_placed_vm(request, right).await
         }
-    } else if let Some(decline) = decline {
-        runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_decline(request, decline)
-            .await
-    } else {
-        execute_elementwise_placed(request)
-            .await
-            .map(|outcome| match outcome {
-                FusionExecutionOutcome::Executed(result) => FusionExecutionOutcome::Executed(
-                    runmat_accelerate::fusion_exec::ElementwiseVmExecutionResult {
-                        result,
-                        completion: None,
-                    },
-                ),
-                FusionExecutionOutcome::SharedRuntime(observation) => {
-                    FusionExecutionOutcome::SharedRuntime(observation)
+        Ok(_) => {
+            if let Some(right) = right {
+                if let Some(uses) = input_uses {
+                    runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_inputs(
+                        request, right, uses,
+                    )
+                    .await
+                } else {
+                    runmat_accelerate::fusion_exec::execute_elementwise_placed_vm(request, right)
+                        .await
                 }
-            })
+            } else if let Some(decline) = decline {
+                runmat_accelerate::fusion_exec::execute_elementwise_placed_vm_decline(
+                    request, decline,
+                )
+                .await
+            } else {
+                execute_elementwise_placed(request)
+                    .await
+                    .map(|outcome| match outcome {
+                        FusionExecutionOutcome::Executed(result) => {
+                            FusionExecutionOutcome::Executed(
+                                runmat_accelerate::fusion_exec::ElementwiseVmExecutionResult {
+                                    result,
+                                    completion: None,
+                                },
+                            )
+                        }
+                        FusionExecutionOutcome::SharedRuntime(observation) => {
+                            FusionExecutionOutcome::SharedRuntime(observation)
+                        }
+                    })
+            }
+        }
     };
     match execution {
         Ok(FusionExecutionOutcome::Executed(result)) => {

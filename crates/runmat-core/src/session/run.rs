@@ -218,6 +218,7 @@ impl RunMatSession {
                 source_lookup_name,
                 self.compat_mode,
                 handoff,
+                None,
             )
             .await
         } else {

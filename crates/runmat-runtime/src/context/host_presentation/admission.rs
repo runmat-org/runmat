@@ -4,6 +4,9 @@
 //! whole-work candidate to policy.
 
 use super::{AdmittedHostUploadOutputs, HostPresentationReceipt};
+use crate::context::host_allocation::{
+    HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+};
 use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::observation::{
@@ -11,8 +14,9 @@ use runmat_accelerate_api::observation::{
 };
 use runmat_accelerate_api::{
     class_preserving_upload_query, provider_for_handle, GpuTensorHandle, ProviderFeasibility,
-    ProviderRepresentation, ProviderResidency,
+    ProviderOperationIdentity, ProviderRepresentation, ProviderResidency,
 };
+use runmat_execution::resource::RetainedHostAllocationClaim;
 use runmat_execution::{
     CandidateCostEvidence, CandidateCostUnavailable, CandidateExecutionLocation,
     CandidateOutputPresentation, CandidateOutputResidency, CandidatePreparationState,
@@ -20,6 +24,93 @@ use runmat_execution::{
     PlacementSignature, ProviderReadbackDemand, ProviderReadbackDemands, ResourceBoundUnavailable,
     ResourceByteBound, WholeWorkCandidate, WholeWorkConstraint, WholeWorkPlacementRequest,
 };
+use std::sync::Arc;
+
+/// Pre-admit the dynamic payload cloned for a selected upload publication.
+/// The operation name remains in the provider observation after the caller's
+/// temporary query receipt and the presentation frame have retired. A single
+/// retained claim follows that longest-lived owner; it is not a second grant
+/// to execute or upload the operation.
+pub(crate) fn selected_upload_metadata_bytes(
+    outputs: &[ProviderRepresentation],
+    operation: &ProviderOperationIdentity,
+    semantic_operation: &str,
+) -> BuiltinResult<u64> {
+    HostAllocationPlan::retained_metadata_bytes(selected_upload_payload_bytes(
+        outputs,
+        operation,
+        semantic_operation,
+    )?)
+    .map_err(|cause| {
+        build_runtime_error("selected upload publication metadata bound overflows")
+            .with_identifier("RunMat:Placement:ResourceOverflow")
+            .with_source(cause)
+            .build()
+    })
+}
+
+fn selected_upload_payload_bytes(
+    outputs: &[ProviderRepresentation],
+    operation: &ProviderOperationIdentity,
+    semantic_operation: &str,
+) -> BuiltinResult<u64> {
+    let shapes = outputs.iter().try_fold(0_u64, |total, output| {
+        total.checked_add(
+            u64::try_from(output.shape.len())
+                .ok()?
+                .checked_mul(std::mem::size_of::<u64>() as u64)?,
+        )
+    });
+    let payload = shapes
+        .and_then(|bytes| {
+            bytes.checked_add(
+                u64::try_from(outputs.len())
+                    .ok()?
+                    .checked_mul(std::mem::size_of::<ProviderRepresentation>() as u64)?,
+            )
+        })
+        .and_then(|bytes| bytes.checked_add(u64::try_from(operation.0.len()).ok()?))
+        .and_then(|bytes| bytes.checked_add(u64::try_from(semantic_operation.len()).ok()?))
+        .ok_or_else(|| {
+            build_runtime_error("selected upload publication metadata bound overflows")
+                .with_identifier("RunMat:Placement:ResourceOverflow")
+                .build()
+        })?;
+    Ok(payload)
+}
+
+pub(crate) fn selected_upload_metadata_claim(
+    runtime: &RuntimeContext,
+    outputs: &[ProviderRepresentation],
+    operation: &ProviderOperationIdentity,
+    semantic_operation: &str,
+) -> BuiltinResult<Option<Arc<dyn RetainedHostAllocationClaim>>> {
+    let retained = selected_upload_metadata_bytes(outputs, operation, semantic_operation)?;
+    let payload = selected_upload_payload_bytes(outputs, operation, semantic_operation)?;
+    let plan = HostAllocationPlan::new(0, retained)
+        .map_err(|cause| selected_upload_metadata_error(runtime, cause))?;
+    let Some(receipt) = HostAllocationReceipt::admit(Some(runtime), plan)
+        .map_err(|cause| selected_upload_metadata_error(runtime, cause))?
+    else {
+        return Ok(None);
+    };
+    let claim = receipt
+        .claim_retained_metadata(runtime, payload)
+        .map_err(|cause| selected_upload_metadata_error(runtime, cause))?;
+    Ok(Some(claim))
+}
+
+fn selected_upload_metadata_error(
+    runtime: &RuntimeContext,
+    cause: HostAllocationError,
+) -> crate::RuntimeError {
+    let suffix = cause.runtime_identifier_suffix();
+    build_runtime_error("selected upload publication metadata admission failed")
+        .with_identifier(format!("{}:{suffix}", runtime.error_namespace()))
+        .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+        .with_source(cause)
+        .build()
+}
 
 pub(crate) struct ExactHostUpload<'a> {
     pub(crate) operation: &'static str,
@@ -33,6 +124,103 @@ pub(crate) struct ExactHostUpload<'a> {
     /// payload and provider-internal readback workspace. Shared admission
     /// queries the owner for those before submitting a host-memory bound.
     pub(crate) host_compute_scratch: ResourceByteBound,
+}
+
+/// A host-compute/upload route already quoted by the shared upload candidate
+/// owner. This is the one-candidate form when no native provider operation is
+/// legal; the paired form is selected by `provider_operation` with the same
+/// candidate and publication contract.
+pub(crate) fn select_prepared_host_upload(
+    runtime: Option<&RuntimeContext>,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    semantic_operation: &'static str,
+    variant: &'static str,
+    domain_facts: Digest,
+    candidate: WholeWorkCandidate,
+    query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    output: ProviderRepresentation,
+    requested_bytes: u64,
+) -> BuiltinResult<Option<HostPresentationReceipt>> {
+    let Some(runtime) = runtime else {
+        return Ok(None);
+    };
+    let Some(service) = runtime.service_ports().placement() else {
+        return Ok(None);
+    };
+    let Some(revision) = service.whole_work_revision(
+        runtime.program_revision().cloned(),
+        Digest::sha256_serialized(&provider.capability_snapshot())
+            .expect("typed provider snapshot serializes"),
+    ) else {
+        return Ok(None);
+    };
+    let parallel = runtime
+        .service_ports()
+        .parallel()
+        .map(|port| port.placement_resources())
+        .unwrap_or_default();
+    let signature = PlacementSignature {
+        region: None,
+        operation: semantic_operation.into(),
+        runtime_facts: Digest::sha256_serialized(&(
+            variant,
+            domain_facts,
+            query,
+            candidate.route_facts,
+            &output,
+            requested_bytes,
+            provider.device_id(),
+        ))
+        .expect("typed host candidate serializes"),
+        provider_provenance: None,
+        graph_output_authority: None,
+        revision,
+    };
+    let resources = PlacementResourceSnapshot {
+        cpu_millicores_available: parallel.cpu_millicores_available,
+        memory_available_bytes: parallel.memory_available_bytes,
+        cancellation_requested: runtime.is_cancelled(),
+        providers: vec![provider.placement_resources()],
+        epoch: parallel.epoch,
+    };
+    let selected = service.select_whole_work(WholeWorkPlacementRequest {
+        signature: signature.clone(),
+        constraint: WholeWorkConstraint::AnyLegal,
+        candidates: vec![candidate.clone()],
+        resources,
+        deterministic: true,
+        require_transactional_results: false,
+    })?;
+    if selected.decision.signature != signature
+        || selected.decision.selected != candidate.selected(semantic_operation)
+    {
+        return Err(
+            build_runtime_error("host upload selection disagrees with admitted route")
+                .with_identifier("RunMat:Placement:InvalidDecision")
+                .build(),
+        );
+    }
+    let metadata_claim = selected_upload_metadata_claim(
+        runtime,
+        std::slice::from_ref(&output),
+        &query.operation,
+        semantic_operation,
+    )?;
+    let ProviderObservationSupport::Observed(mut receipt) =
+        provider.begin_operation_observation(query)
+    else {
+        return Ok(None);
+    };
+    receipt.require_provider_execution(provider.device_id(), query.operation.clone());
+    Ok(Some(
+        HostPresentationReceipt::new(runtime.clone(), selected, receipt)
+            .with_publication_metadata_claim(metadata_claim)
+            .with_admitted_upload_outputs(AdmittedHostUploadOutputs {
+                provider,
+                outputs: vec![output],
+                one_output_requested_bytes: Some(requested_bytes),
+            }),
+    ))
 }
 
 pub(crate) fn select_exact_host_upload(
@@ -327,14 +515,14 @@ pub(crate) fn combine_host_scratch(
 }
 
 #[derive(Clone, Copy)]
-struct UploadStageResources {
-    physical_retained_bytes: Option<u64>,
-    host_workspace: ResourceByteBound,
-    provider_scratch: ResourceByteBound,
-    queue_slots: u32,
+pub(crate) struct UploadStageResources {
+    pub(crate) physical_retained_bytes: Option<u64>,
+    pub(crate) host_workspace: ResourceByteBound,
+    pub(crate) provider_scratch: ResourceByteBound,
+    pub(crate) queue_slots: u32,
 }
 
-fn upload_candidate(
+pub(crate) fn upload_candidate(
     device_id: u32,
     transfer_bytes: u64,
     upload: UploadStageResources,

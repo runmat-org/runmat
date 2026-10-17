@@ -86,13 +86,13 @@ fn equality_array_operator_values_match_builtin_without_losing_integer_precision
         ("logical([0 1])", "true", false, &[0, 1][..]),
         ("complex([1 2],[0 1])", "1", false, &[1, 0][..]),
         (
-            "uint64([9007199254740993 18446744073709551615])",
-            "uint64([9007199254740992 18446744073709551615])",
+            "[0x0020000000000001u64 0xFFFFFFFFFFFFFFFFu64]",
+            "[0x0020000000000000u64 0xFFFFFFFFFFFFFFFFu64]",
             false,
             &[0, 1][..],
         ),
         (
-            "uint64([9007199254740993 18446744073709551615])",
+            "[0x0020000000000001u64 0xFFFFFFFFFFFFFFFFu64]",
             "[9007199254740992 18446744073709551616]",
             false,
             &[0, 0][..],

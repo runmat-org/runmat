@@ -125,11 +125,16 @@ impl<'a> CoreTestExecutor<'a> {
         }
         let source = self
             .catalog
-            .executable_source(&procedure.source, span_only)
+            .executable_source(&procedure.source)
             .map_err(uncaught)?;
         let unit = self
             .session
-            .compile_executable_unit(source, Some(self.catalog.revision()))
+            .compile_test_executable_unit(
+                source,
+                &procedure.source,
+                self.catalog.snapshot(),
+                span_only,
+            )
             .await
             .map_err(run_error_failure)?;
         self.units.insert(key, unit.clone());

@@ -187,6 +187,7 @@ pub(super) fn select(
             },
             variant: "extrema.dimensional.native.v1",
             domain_facts,
+            calibration_facts: None,
             host_scratch: ResourceByteBound::Known(0),
             provider_host_scratch: ResourceByteBound::Known(0),
             host_cpu_millicores: 1_000,

@@ -6,7 +6,8 @@ use runmat_test::event::TestEventPayload;
 use runmat_test::identity::TestId;
 use runmat_test::plan::TestPlan;
 use runmat_test::result::{
-    aggregate_run_state, merge_attempts, AttemptResult, RunResult, TerminalDisposition, TestResult,
+    aggregate_run_state, merge_attempts, AttemptResult, RunResult, TerminalDisposition,
+    TestReportIdentity, TestResult,
 };
 
 use crate::host::{CancellationPort, Clock, IsolationMode};
@@ -211,7 +212,7 @@ impl Coordinator {
                 }
             }
         }
-        let result = run_result(&submission.plan, tests);
+        let result = run_result(&submission.plan, tests)?;
         state.emit(TestEventPayload::RunFinished {
             result: result.clone(),
         })?;
@@ -459,7 +460,7 @@ impl Coordinator {
             }
         }
 
-        let result = run_result(plan, results);
+        let result = run_result(plan, results)?;
         state.emit(TestEventPayload::RunFinished {
             result: result.clone(),
         })?;
@@ -538,10 +539,37 @@ fn emit_attempt(state: &mut EventState<'_>, attempt: &AttemptResult) -> RunnerRe
     })
 }
 
-fn run_result(plan: &TestPlan, tests: Vec<TestResult>) -> RunResult {
-    RunResult {
+fn run_result(plan: &TestPlan, mut tests: Vec<TestResult>) -> RunnerResult<RunResult> {
+    let identities = plan
+        .suites
+        .iter()
+        .flat_map(|suite| {
+            suite.fixture_groups.iter().flat_map(move |group| {
+                group.tests.iter().map(move |test| {
+                    (
+                        test.id.clone(),
+                        TestReportIdentity::from_plan(&suite.display_name, test),
+                    )
+                })
+            })
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    for test in &mut tests {
+        test.report_identity = Some(
+            identities
+                .get(&test.test_id)
+                .ok_or_else(|| {
+                    RunnerError::Protocol(format!(
+                        "test result '{}' has no planned display identity",
+                        test.test_id.as_str()
+                    ))
+                })?
+                .clone(),
+        );
+    }
+    Ok(RunResult {
         run_id: plan.run_id.clone(),
         state: aggregate_run_state(tests.iter().map(|result| &result.state)),
         tests,
-    }
+    })
 }

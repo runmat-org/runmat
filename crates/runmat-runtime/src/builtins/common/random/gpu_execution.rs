@@ -3,11 +3,14 @@
 //! whole-work and host-allocation services own finite admission.
 
 use crate::builtins::common::random::gpu;
+use crate::builtins::common::random::gpu_query;
 use crate::builtins::common::random_args::validate_constructor_gpu_output_protecting;
 use crate::context::host_allocation::{
     provider_registration_host_quote, HostAllocationPlan, HostAllocationReceipt,
 };
-use crate::context::provider_operation::{select_exact_provider_operation, ExactProviderOperation};
+use crate::context::provider_operation::{
+    select_exact_provider_operation, ExactProviderOperation, ProviderPhysicalCalibration,
+};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::observation::ProviderObservationFailure;
 use runmat_accelerate_api::random::{
@@ -16,8 +19,8 @@ use runmat_accelerate_api::random::{
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, ProviderElementType,
     ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily, ProviderOperationIdentity,
-    ProviderPrecision, ProviderRepresentation, ProviderResidency, ProviderStorage,
-    ProviderWorkload,
+    ProviderPrecision, ProviderQueryMetadataFootprint, ProviderRepresentation, ProviderResidency,
+    ProviderStorage, ProviderWorkload,
 };
 use runmat_execution::{Digest, ResourceByteBound};
 
@@ -170,6 +173,19 @@ fn explicit(
                         format!("{label}: provider has no exact GPU random route"),
                     )
                 })?;
+            let footprint = ProviderQueryMetadataFootprint {
+                operation: PROVIDER_GPU_RANDOM_OPERATION,
+                input_ranks: &[],
+                output_ranks: &[shape.len()],
+                preparation_shape_ranks: &[],
+                preparation_representation_slots: 0,
+            };
+            let query_bytes = gpu_query::requested_bytes(label, &footprint)?;
+            // This claim precedes every owned Vec/String in the feasibility
+            // query and remains live through selection, then retires before
+            // the separately admitted output-publication metadata.
+            let _query_receipt = gpu_query::admit(runtime.as_ref(), query_bytes)
+                .map_err(|source| gpu_query::admission_error(label, runtime.as_ref(), source))?;
             let output_shape = shape
                 .iter()
                 .map(|extent| u64::try_from(*extent))
@@ -204,6 +220,9 @@ fn explicit(
                     ..ProviderWorkload::default()
                 },
             };
+            if !footprint.matches(&query) {
+                return Err(fail(label, format!("{label}: query metadata plan changed")));
+            }
             let derived_views = if prototype
                 .is_some_and(|input| !runmat_accelerate_api::handle_is_explicit(input))
             {
@@ -229,21 +248,33 @@ fn explicit(
             let host_bytes = registration
                 .map(|quote| quote.preparation_bytes.checked_add(quote.retained_bytes))
                 .unwrap_or(Some(0))
+                .map(|bytes| bytes.max(query_bytes))
                 .ok_or_else(|| fail(label, format!("{label}: host metadata extent overflow")))?;
-            let facts = Digest::sha256(
-                serde_json::to_vec(&(
-                    &query,
-                    prototype.map(GpuTensorHandle::view_identity),
-                    (
-                        physical.output_buffer_bytes,
-                        physical.uniform_buffer_bytes,
-                        physical.uniform_allocations,
-                        physical.dispatches,
-                        physical.queue_submissions,
-                    ),
-                ))
-                .expect("typed GPU random facts serialize"),
-            );
+            let facts = Digest::sha256_serialized(&(
+                &query,
+                prototype.map(GpuTensorHandle::view_identity),
+                (
+                    physical.output_buffer_bytes,
+                    physical.uniform_buffer_bytes,
+                    physical.uniform_allocations,
+                    physical.dispatches,
+                    physical.queue_submissions,
+                ),
+            ))
+            .expect("typed GPU random facts serialize");
+            let calibration = ProviderPhysicalCalibration::from_typed(&(
+                &query.outputs,
+                distribution,
+                reservation.algorithm,
+                reservation.normal_transform,
+                (
+                    physical.output_buffer_bytes,
+                    physical.uniform_buffer_bytes,
+                    physical.uniform_allocations,
+                    physical.dispatches,
+                    physical.queue_submissions,
+                ),
+            ));
             // Direct builtin unit tests intentionally have no RuntimeContext;
             // their genuine in-process provider still executes the exact
             // request, but this is not a production finite-admission route.
@@ -276,6 +307,7 @@ fn explicit(
                     semantic_operation: label,
                     variant: "random.gpu_child.explicit.v1",
                     domain_facts: facts,
+                    calibration_facts: Some(calibration),
                     host_scratch: ResourceByteBound::Known(host_bytes),
                     provider_host_scratch: ResourceByteBound::Known(0),
                     host_cpu_millicores: 1_000,
@@ -291,6 +323,11 @@ fn explicit(
                 },
             )?
             .ok_or_else(|| fail(label, format!("{label}: no admitted provider random route")))?;
+            // The selected receipt now owns the exact operation identity;
+            // the request-local feasibility metadata is not needed during
+            // output registration or provider execution.
+            drop(query);
+            drop(_query_receipt);
             let receipt =
                 if let (Some(runtime), Some(registration)) = (runtime.as_ref(), registration) {
                     let admitted = HostAllocationPlan::new(

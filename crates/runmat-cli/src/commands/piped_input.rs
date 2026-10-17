@@ -23,7 +23,7 @@ impl StdinLease {
         STDIN_OWNED
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .map(|_| Self)
-            .map_err(|_| io::Error::other("REPL stdin already has a reader"))
+            .map_err(|_| io::Error::other("CLI stdin already has a reader"))
     }
 }
 impl Drop for StdinLease {
@@ -32,7 +32,7 @@ impl Drop for StdinLease {
     }
 }
 
-pub(super) struct PipedInput {
+pub(crate) struct PipedInput {
     receiver: oneshot::Receiver<io::Result<String>>,
     worker: Option<std::thread::JoinHandle<()>>,
     cancel: platform::Cancel,
@@ -40,7 +40,7 @@ pub(super) struct PipedInput {
 
 impl PipedInput {
     /// CLI-only exclusive stdin ownership; not a generic Runtime stream policy.
-    pub(super) fn stdin() -> io::Result<Self> {
+    pub(crate) fn stdin() -> io::Result<Self> {
         let lease = StdinLease::acquire()?;
         let (reader, cancel) = platform::Reader::stdin()?;
         Self::start(reader, cancel, Some(lease))
@@ -53,7 +53,7 @@ impl PipedInput {
     ) -> io::Result<Self> {
         let (sender, receiver) = oneshot::channel();
         let worker = std::thread::Builder::new()
-            .name("runmat-repl-input".into())
+            .name("runmat-stdin-input".into())
             .spawn(move || {
                 let _lease = lease;
                 let result = reader.read();
@@ -73,7 +73,7 @@ impl PipedInput {
         if let Some(worker) = self.worker.take() {
             worker
                 .join()
-                .map_err(|_| io::Error::other("REPL stdin reader panicked"))?;
+                .map_err(|_| io::Error::other("CLI stdin reader panicked"))?;
         }
         Ok(())
     }
@@ -136,12 +136,12 @@ impl Future for PipedInput {
         let result = match Pin::new(&mut self.receiver).poll(context) {
             Poll::Pending => return Poll::Pending,
             Poll::Ready(Ok(result)) => result,
-            Poll::Ready(Err(_)) => Err(io::Error::other("REPL stdin reader returned no result")),
+            Poll::Ready(Err(_)) => Err(io::Error::other("CLI stdin reader returned no result")),
         };
         let retired = self.retire();
         Poll::Ready(match (result, retired) {
             (Err(primary), Err(cleanup)) => {
-                eprintln!("REPL stdin retirement failed: {cleanup}");
+                eprintln!("CLI stdin retirement failed: {cleanup}");
                 Err(primary)
             }
             (Err(primary), _) => Err(primary),
@@ -154,7 +154,7 @@ impl Future for PipedInput {
 impl Drop for PipedInput {
     fn drop(&mut self) {
         if let Err(error) = self.retire() {
-            eprintln!("REPL stdin retirement failed: {error}");
+            eprintln!("CLI stdin retirement failed: {error}");
         }
     }
 }

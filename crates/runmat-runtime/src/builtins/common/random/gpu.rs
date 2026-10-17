@@ -144,6 +144,31 @@ pub(crate) fn reserve(items: usize, label: &str) -> BuiltinResult<GpuRandomReser
     })
 }
 
+/// Commit an asynchronously executed request only after its selected route
+/// has been admitted against this exact snapshot. Once committed, all later
+/// provider/resource/cancellation failures retain this consumed range and
+/// cannot replay the request through a different candidate.
+pub(crate) fn reserve_if_snapshot(
+    expected: GpuRandomSnapshot,
+    items: usize,
+    label: &str,
+) -> BuiltinResult<GpuRandomReservation> {
+    with_stream(label, |stream| {
+        if stream.snapshot() != expected {
+            return Err(build_runtime_error(format!(
+                "{label}: GPU random stream changed after route selection"
+            ))
+            .with_builtin(label)
+            .build());
+        }
+        stream.reserve(items).ok_or_else(|| {
+            build_runtime_error(format!("{label}: GPU random counter range overflow"))
+                .with_builtin(label)
+                .build()
+        })
+    })
+}
+
 /// A synchronous provider attempt holds the child-stream turn throughout
 /// admission and execution. A certified pre-effect refusal leaves the range
 /// available; any emitted or unproven attempt consumes it, including failure,

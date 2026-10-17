@@ -1,4 +1,8 @@
+use std::collections::HashSet;
 use std::rc::Rc;
+
+use runmat_execution::executable::ExecutableStaticImport;
+use runmat_hir::FunctionId;
 
 use super::{CoveragePlan, ExecutableRevision, ExecutableSource, ExecutableSourceMap};
 
@@ -26,11 +30,72 @@ pub struct ExecutableUnit {
     bytecode: Rc<runmat_vm::Bytecode>,
     layout: Rc<runmat_vm::VmAssemblyLayout>,
     functions: Rc<runmat_vm::FunctionRegistry>,
+    portable_selection: Option<Rc<PortableSelection>>,
     #[cfg(not(target_arch = "wasm32"))]
     native_compilation_digest: Rc<std::cell::OnceCell<runmat_execution::Digest>>,
 }
 
+/// Compiler-selected bodies and their exact outbound product references.
+/// Only immutable wire facts live here; selected target products and definition
+/// leases remain with the separate graph owner.
+#[derive(Debug)]
+struct PortableSelection {
+    current: HashSet<FunctionId>,
+    imports: Vec<ExecutableStaticImport>,
+}
+
 impl ExecutableUnit {
+    pub(crate) fn with_portable_selection(
+        mut self,
+        current: HashSet<FunctionId>,
+        imports: Vec<ExecutableStaticImport>,
+    ) -> Result<Self, String> {
+        let compiled = self.compiled_product_owners()?;
+        if !current
+            .iter()
+            .all(|id| compiled.registered_bodies.contains(id))
+        {
+            return Err("selected portable body is not owned by this compiled product".into());
+        }
+        self.portable_selection = Some(Rc::new(PortableSelection { current, imports }));
+        Ok(self)
+    }
+
+    pub(crate) fn compiled_current_body_ids(&self) -> Result<HashSet<FunctionId>, String> {
+        Ok(self
+            .compiled_product_owners()?
+            .registered_bodies
+            .into_iter()
+            .collect())
+    }
+
+    pub(super) fn compiled_script_owner_ids(
+        &self,
+    ) -> Result<std::collections::BTreeSet<FunctionId>, String> {
+        let owners = self.compiled_product_owners()?;
+        Ok(owners
+            .assembly
+            .difference(&owners.registered_bodies)
+            .copied()
+            .collect())
+    }
+
+    fn compiled_product_owners(&self) -> Result<compiled_owners::CompiledProductOwners, String> {
+        let program = self
+            .revision
+            .program_revision
+            .identity_digest()
+            .map_err(|error| error.to_string())?;
+        compiled_function_owners(program, &self.mir, &self.bytecode)
+    }
+
+    pub(super) fn portable_selection(
+        &self,
+    ) -> Option<(&HashSet<FunctionId>, &[ExecutableStaticImport])> {
+        self.portable_selection
+            .as_deref()
+            .map(|selection| (&selection.current, selection.imports.as_slice()))
+    }
     /// Retain the canonical frame layout before installing executable regions.
     pub(crate) fn retain_vm_layout(
         bytecode: &mut runmat_vm::Bytecode,

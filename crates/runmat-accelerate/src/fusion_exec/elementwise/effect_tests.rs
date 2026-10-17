@@ -211,6 +211,65 @@ fn plan() -> FusionGroupPlan {
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+fn integer_ineligibility_is_typed_and_never_masks_invalid_resident_authority() {
+    runmat_gc::gc_test_context(|| {
+        let provider = FailingProvider::with_precision(usize::MAX, ProviderPrecision::F32);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let source = plan();
+        let integer = || {
+            Value::Tensor(
+                runmat_value::Tensor::from_numeric_storage(
+                    runmat_value::NumericStorage::I32(vec![1, 2]),
+                    vec![2],
+                )
+                .unwrap(),
+            )
+        };
+        let request = FusionExecutionRequest {
+            plan: &source,
+            inputs: vec![integer(), Value::Num(2.0)],
+            placement: None,
+            runtime: None,
+        };
+        assert_eq!(
+            elementwise_floating_admission(&request).unwrap(),
+            ElementwiseFloatingAdmission::NativeIntegerIneligible
+        );
+        let error = match futures::executor::block_on(execute_elementwise_placed(request)) {
+            Err(error) => error,
+            Ok(_) => panic!("direct floating fusion must still reject native integer values"),
+        };
+        assert!(error
+            .to_string()
+            .contains("dedicated typed integer fusion kernel"));
+
+        let stale = provider
+            .allocations
+            .allocate_zeroed(
+                vec![2],
+                runmat_accelerate_api::NumericElementType::F32,
+                runmat_accelerate_api::GpuTensorStorage::Real,
+            )
+            .unwrap();
+        stale.probe.mark_unavailable();
+        let request = FusionExecutionRequest {
+            plan: &source,
+            inputs: vec![integer(), Value::GpuTensor(stale.handle)],
+            placement: None,
+            runtime: None,
+        };
+        let error = elementwise_floating_admission(&request)
+            .expect_err("integer ineligibility cannot mask a later stale resident input");
+        assert!(error
+            .to_string()
+            .contains("invalid floating metadata or provider ownership"));
+        assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+    });
+}
+
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 fn unavailable_fused_shader_defers_explicit_source_to_original_provider_operations() {
     runmat_gc::gc_test_context(|| {
         let provider = FailingProvider::with_precision(usize::MAX, ProviderPrecision::F32);

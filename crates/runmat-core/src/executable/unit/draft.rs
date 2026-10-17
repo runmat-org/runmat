@@ -111,6 +111,7 @@ impl ExecutableUnitDraft {
             bytecode: Rc::new(self.bytecode),
             layout: Rc::new(layout),
             functions,
+            portable_selection: None,
             #[cfg(not(target_arch = "wasm32"))]
             native_compilation_digest: Rc::new(std::cell::OnceCell::new()),
         }

@@ -1134,6 +1134,39 @@ fn parse_function_definition() {
 }
 
 #[test]
+fn parse_zero_input_function_without_parentheses() {
+    for header in [
+        "function tests = testClearance",
+        "function tests = testClearance()",
+    ] {
+        let source = format!("{header}\n tests = 1;\nend");
+        let program = parse(&source).expect("zero-input function signature");
+        let Stmt::Function {
+            name,
+            params,
+            outputs,
+            ..
+        } = &program.body[0]
+        else {
+            panic!("expected function definition");
+        };
+        assert_eq!(name, "testClearance");
+        assert!(params.is_empty());
+        assert_eq!(outputs, &["tests"]);
+    }
+    for separator in [';', ','] {
+        let source = format!("function tests = testClearance{separator} tests = 1; end");
+        let program = parse(&source).expect("same-line signature separator");
+        let Stmt::Function { params, body, .. } = &program.body[0] else {
+            panic!("expected function definition");
+        };
+        assert!(params.is_empty());
+        assert_eq!(body.len(), 1);
+    }
+    assert!(parse("function tests = testClearance extra\n tests = 1;\nend").is_err());
+}
+
+#[test]
 fn parse_function_definition_with_arguments_block() {
     let source = r#"
         function y = typed(x)

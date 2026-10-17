@@ -69,8 +69,9 @@ pub use image_stages::{
 #[cfg(test)]
 mod ownership_tests;
 pub use elementwise::{
-    execute_elementwise, execute_elementwise_placed, execute_elementwise_placed_vm,
-    execute_elementwise_placed_vm_decline, execute_elementwise_placed_vm_inputs,
+    elementwise_floating_admission, execute_elementwise, execute_elementwise_placed,
+    execute_elementwise_placed_vm, execute_elementwise_placed_vm_decline,
+    execute_elementwise_placed_vm_inputs, ElementwiseFloatingAdmission,
 };
 pub use observation::{FusionCpuObservation, FusionExecutionOutcome, FusionProviderCompletion};
 
@@ -431,16 +432,8 @@ fn select_fusion_provider_with_implementation(
         Some(VmFusionSelectionRight::Decline(right)) => (None, Some(right)),
         None => (None, None),
     };
-    let vm_decline = vm_decline.filter(|right| {
-        request.runtime.as_ref().is_some_and(|runtime| {
-            right.is_current(runtime)
-                && right.matches_group(
-                    request.plan.group.id,
-                    request.plan.group.span.start,
-                    request.plan.group.span.end,
-                )
-        })
-    });
+    let vm_decline = vm_decline
+        .and_then(|right| VmFusionSelectionRight::Decline(right).certified_decline(request));
     let FusionProviderContract {
         elementwise_abi,
         input_indices,
@@ -661,6 +654,8 @@ fn select_fusion_provider_with_implementation(
             outputs,
             workload: ProviderWorkload {
                 gpu_random: None,
+                gpu_integer: None,
+                gpu_integer_batch: None,
                 fused_elementwise: elementwise_abi,
                 real_power_mode: None,
                 real_power_scalar: None,
@@ -804,14 +799,33 @@ fn value_to_f64(value: &Value) -> Option<f64> {
     }
 }
 
-fn native_integer_fusion_value_kind(value: &Value) -> Option<&'static str> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NativeIntegerFusionValueKind {
+    Scalar,
+    Tensor,
+    ResidentTensor,
+}
+
+impl std::fmt::Display for NativeIntegerFusionValueKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Scalar => "integer scalar",
+            Self::Tensor => "integer tensor",
+            Self::ResidentTensor => "native integer gpuArray",
+        })
+    }
+}
+
+fn native_integer_fusion_value_kind(value: &Value) -> Option<NativeIntegerFusionValueKind> {
     match value {
-        Value::Int(_) => Some("integer scalar"),
-        Value::Tensor(t) if t.integer_storage().is_some() => Some("integer tensor"),
+        Value::Int(_) => Some(NativeIntegerFusionValueKind::Scalar),
+        Value::Tensor(t) if t.integer_storage().is_some() => {
+            Some(NativeIntegerFusionValueKind::Tensor)
+        }
         Value::GpuTensor(handle)
             if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
         {
-            Some("native integer gpuArray")
+            Some(NativeIntegerFusionValueKind::ResidentTensor)
         }
         _ => None,
     }

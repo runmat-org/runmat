@@ -57,11 +57,28 @@ fn list_uses_static_discovery_without_starting_workers() {
 fn process_worker_returns_stable_success_and_failure_exits() {
     let passing_reports = tempfile::tempdir().unwrap();
     let passing = run(
-        &["--name", "testPasses", "--report", "json"],
+        &[
+            "--name",
+            "testPasses",
+            "--report",
+            "json",
+            "--report",
+            "junit",
+        ],
         passing_reports.path(),
     );
     assert!(passing.status.success(), "{passing:#?}");
-    assert!(find_named(passing_reports.path(), "test-results.json").is_some());
+    let json_path = find_named(passing_reports.path(), "test-results.json").unwrap();
+    let json: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(json_path).unwrap()).unwrap();
+    assert_eq!(
+        json["result"]["tests"][0]["report_identity"]["display_name"],
+        "arithmeticTest/testPasses"
+    );
+    let junit_path = find_named(passing_reports.path(), "test-results.xml").unwrap();
+    let junit = std::fs::read_to_string(junit_path).unwrap();
+    assert!(junit.contains("classname=\"arithmeticTest\""), "{junit}");
+    assert!(junit.contains("name=\"testPasses\""), "{junit}");
 
     let failing_reports = tempfile::tempdir().unwrap();
     let failing = run(&["--name", "testFails"], failing_reports.path());

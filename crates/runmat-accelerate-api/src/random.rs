@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 pub const PROVIDER_GPU_RANDOM_OPERATION: &str = "random.gpu_child";
+pub const PROVIDER_GPU_INTEGER_OPERATION: &str = "random.gpu_child.integer";
+pub const PROVIDER_GPU_INTEGER_BATCH_OPERATION: &str = "random.gpu_child.integer.batch";
 
 /// The exact generator selected by a session GPU stream. Additional public
 /// algorithms require their own real state/round function, not an alias of
@@ -32,6 +34,204 @@ pub enum GpuRandomDistribution {
 pub struct GpuBoundedIntegerDomain {
     pub lower: i128,
     pub span: u128,
+}
+
+/// One native bounded-integer generation candidate. Its output class is
+/// native, not inferred from the provider's preferred floating precision.
+#[derive(Clone, Copy, Debug)]
+pub struct GpuIntegerRequest<'a> {
+    pub shape: &'a [usize],
+    pub class: crate::NumericElementType,
+    pub domain: GpuBoundedIntegerDomain,
+    pub reservation: GpuRandomReservation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GpuIntegerWorkload {
+    pub domain: GpuBoundedIntegerDomain,
+    pub reservation: GpuRandomReservation,
+}
+
+/// An unpublished device result and its per-item completion mask. The runtime
+/// retains this state across bounded provider batches; only `Complete` may be
+/// validated and published as a language value. Clones share authenticated
+/// allocation leases and do not create new views or copy payload bytes.
+#[derive(Clone)]
+pub struct GpuIntegerPending {
+    pub output: crate::GpuTensorHandle,
+    pub accepted: crate::GpuTensorHandle,
+    pub remaining: u64,
+}
+
+/// A finite batch of independent Threefry attempt lanes for each unresolved
+/// item. A batch never hides an unbounded shader loop. The provider must
+/// physically settle its submissions and count readback before returning.
+#[derive(Clone, Copy)]
+pub struct GpuIntegerBatchRequest<'a> {
+    pub integer: GpuIntegerRequest<'a>,
+    pub first_attempt: u64,
+    pub attempts_per_item: u32,
+    pub pending: Option<&'a GpuIntegerPending>,
+}
+
+pub enum GpuIntegerBatchProgress {
+    Pending(GpuIntegerPending),
+    Complete(GpuIntegerPending),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GpuIntegerBatchWorkload {
+    pub first_attempt: u64,
+    pub attempts_per_item: u32,
+    /// Existing authenticated output/mask remain live during a continuation.
+    pub pending: bool,
+}
+
+/// Peak physical inventory for one acknowledged batch, not a fabricated
+/// bound on the unbounded number of rejection batches. The coordinator must
+/// re-admit each later batch against its then-live output and mask.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GpuIntegerBatchPhysicalProposal {
+    pub output_buffer_bytes: u64,
+    pub accepted_buffer_bytes: u64,
+    pub count_buffer_bytes: u64,
+    pub uniform_buffer_bytes: u64,
+    pub staging_buffer_bytes: u64,
+    /// Shared WGPU map-completion control allocation retained through its
+    /// physical callback, including caller cancellation.
+    pub readback_control_host_bytes: u64,
+    /// Transient logical-view snapshots while two pending buffers are
+    /// authenticated. The first batch has no pending buffers and quotes zero.
+    pub pending_view_workspace_bytes: u64,
+    pub uniform_allocations: u32,
+    pub queue_submissions: u32,
+}
+
+impl GpuIntegerBatchPhysicalProposal {
+    pub fn peak_bytes(self) -> Option<u64> {
+        self.output_buffer_bytes
+            .checked_add(self.accepted_buffer_bytes)?
+            .checked_add(self.count_buffer_bytes)?
+            .checked_add(self.uniform_buffer_bytes)?
+            .checked_add(self.staging_buffer_bytes)
+    }
+
+    /// Bytes newly retained by this batch. A continuation returns the same
+    /// authenticated output and acceptance allocations it received, so their
+    /// ownership transition has no incremental retained allocation.
+    pub fn newly_retained_output_bytes(self, batch: GpuIntegerBatchWorkload) -> Option<u64> {
+        if batch.pending {
+            Some(0)
+        } else {
+            self.output_buffer_bytes
+                .checked_add(self.accepted_buffer_bytes)
+        }
+    }
+}
+
+impl GpuIntegerBatchRequest<'_> {
+    pub fn validate(self) -> Option<usize> {
+        let count = self.integer.element_count()?;
+        if self.attempts_per_item == 0
+            || self.attempts_per_item > 8
+            || self
+                .first_attempt
+                .checked_add(u64::from(self.attempts_per_item))
+                .is_none()
+            || self
+                .pending
+                .is_some_and(|pending| pending.remaining == 0 || pending.remaining > count as u64)
+        {
+            return None;
+        }
+        Some(count)
+    }
+}
+
+impl GpuIntegerRequest<'_> {
+    pub fn element_count(self) -> Option<usize> {
+        let count = if self.shape.contains(&0) {
+            0
+        } else {
+            self.shape
+                .iter()
+                .try_fold(1usize, |count, extent| count.checked_mul(*extent))?
+        };
+        (u64::try_from(count).ok()? == self.reservation.count).then_some(count)?;
+        self.reservation
+            .first
+            .checked_add(u128::from(self.reservation.count))?;
+        GpuBoundedIntegerDomain::new(self.domain.lower, self.domain.span)?;
+        Some(count)
+    }
+
+    /// The first native shader candidate has no rejection path: modulo by a
+    /// power-of-two span is exact, including the full 2^32 domain. General
+    /// spans require bounded, acknowledged retry batches before admission.
+    pub fn fixed_work_32(self) -> Option<(u32, u32)> {
+        self.element_count()?;
+        if !self.domain.span.is_power_of_two() || self.domain.span > (1_u128 << 32) {
+            return None;
+        }
+        let upper = self
+            .domain
+            .lower
+            .checked_add(self.domain.span as i128 - 1)?;
+        let supported = match self.class {
+            crate::NumericElementType::F32
+            | crate::NumericElementType::F64
+            | crate::NumericElementType::I32 => {
+                self.domain.lower >= i32::MIN as i128 && upper <= i32::MAX as i128
+            }
+            crate::NumericElementType::U32 => self.domain.lower >= 0 && upper <= u32::MAX as i128,
+            _ => false,
+        };
+        if !supported || self.reservation.algorithm != GpuRandomAlgorithm::Threefry4x64_20 {
+            return None;
+        }
+        let mask = (self.domain.span - 1) as u32;
+        Some((self.domain.lower as i32 as u32, mask))
+    }
+
+    /// All non-power-of-two domains representable by the currently selected
+    /// native 32-bit output classes. The acceptance limit is
+    /// `floor(2^64 / span) * span`, exactly the shared scalar attempt owner:
+    /// words at or above it are rejected, and the remainder is unbiased.
+    pub fn rejection_domain_32(self) -> Option<(u32, u64, u64)> {
+        self.element_count()?;
+        if self.domain.span <= 1
+            || self.domain.span.is_power_of_two()
+            || self.domain.span > u64::MAX as u128
+            || self.reservation.algorithm != GpuRandomAlgorithm::Threefry4x64_20
+        {
+            return None;
+        }
+        let upper = self
+            .domain
+            .lower
+            .checked_add(self.domain.span as i128 - 1)?;
+        let lower = match self.class {
+            crate::NumericElementType::F32
+            | crate::NumericElementType::F64
+            | crate::NumericElementType::I32
+                if self.domain.lower >= i32::MIN as i128 && upper <= i32::MAX as i128 =>
+            {
+                self.domain.lower as i32 as u32
+            }
+            crate::NumericElementType::U32
+                if self.domain.lower >= 0 && upper <= u32::MAX as i128 =>
+            {
+                self.domain.lower as u32
+            }
+            _ => return None,
+        };
+        let span = self.domain.span as u64;
+        let accept_limit = ((1_u128 << 64) / self.domain.span * self.domain.span) as u64;
+        Some((lower, span, accept_limit))
+    }
 }
 
 /// A nonempty permutation uses exactly `n` disjoint child-stream item lanes:
@@ -340,9 +540,105 @@ fn mix(words: &mut [u64; 4], first: usize, second: usize, rotation: u32) {
 #[cfg(test)]
 mod tests {
     use super::{
-        threefry4x64_20, GpuBoundedIntegerDomain, GpuNormalTransform, GpuPermutationRequest,
+        threefry4x64_20, GpuBoundedIntegerDomain, GpuIntegerBatchPhysicalProposal,
+        GpuIntegerBatchWorkload, GpuIntegerRequest, GpuNormalTransform, GpuPermutationRequest,
         GpuRandomAlgorithm, GpuRandomDistribution, GpuRandomRequest, GpuRandomReservation,
     };
+
+    #[test]
+    fn integer_batch_continuation_reuses_its_retained_outputs() {
+        let physical = GpuIntegerBatchPhysicalProposal {
+            output_buffer_bytes: 16,
+            accepted_buffer_bytes: 16,
+            count_buffer_bytes: 4,
+            uniform_buffer_bytes: 8,
+            staging_buffer_bytes: 4,
+            readback_control_host_bytes: 0,
+            pending_view_workspace_bytes: 0,
+            uniform_allocations: 1,
+            queue_submissions: 2,
+        };
+        let initial = GpuIntegerBatchWorkload {
+            first_attempt: 0,
+            attempts_per_item: 8,
+            pending: false,
+        };
+        let continuation = GpuIntegerBatchWorkload {
+            first_attempt: 8,
+            pending: true,
+            ..initial
+        };
+        assert_eq!(physical.peak_bytes(), Some(48));
+        assert_eq!(physical.newly_retained_output_bytes(initial), Some(32));
+        assert_eq!(physical.newly_retained_output_bytes(continuation), Some(0));
+    }
+
+    #[test]
+    fn fixed_native_integer_work_is_only_exact_power_of_two_domain() {
+        let reservation = GpuRandomReservation {
+            algorithm: GpuRandomAlgorithm::Threefry4x64_20,
+            seed: 3,
+            first: 0,
+            count: 4,
+            normal_transform: GpuNormalTransform::BoxMuller,
+        };
+        let shape = [2, 2];
+        let request = GpuIntegerRequest {
+            shape: &shape,
+            class: crate::NumericElementType::I32,
+            domain: GpuBoundedIntegerDomain::new(-4, 8).unwrap(),
+            reservation,
+        };
+        assert_eq!(request.fixed_work_32(), Some(((-4_i32) as u32, 7)));
+        assert_eq!(
+            GpuIntegerRequest {
+                domain: GpuBoundedIntegerDomain::new(-4, 7).unwrap(),
+                ..request
+            }
+            .fixed_work_32(),
+            None
+        );
+        assert_eq!(
+            GpuIntegerRequest {
+                class: crate::NumericElementType::U64,
+                ..request
+            }
+            .fixed_work_32(),
+            None
+        );
+    }
+
+    #[test]
+    fn batched_native_acceptance_limit_matches_scalar_attempts() {
+        let reservation = GpuRandomReservation {
+            algorithm: GpuRandomAlgorithm::Threefry4x64_20,
+            seed: 31,
+            first: 9,
+            count: 3,
+            normal_transform: GpuNormalTransform::BoxMuller,
+        };
+        for span in [3_u128, 7, 257, u32::MAX as u128] {
+            let domain = GpuBoundedIntegerDomain::new(0, span).unwrap();
+            let request = GpuIntegerRequest {
+                shape: &[1, 3],
+                class: crate::NumericElementType::U32,
+                domain,
+                reservation,
+            };
+            let (_, actual_span, accept_limit) = request.rejection_domain_32().unwrap();
+            assert_eq!(actual_span as u128, span);
+            for item in 0..3 {
+                for attempt in 0..32 {
+                    let word = reservation.word(item, attempt).unwrap();
+                    let from_kernel_rule = (word < accept_limit).then_some(word % actual_span);
+                    assert_eq!(
+                        reservation.bounded_word_attempt(item, span, attempt),
+                        Some(from_kernel_rule),
+                    );
+                }
+            }
+        }
+    }
     use crate::ProviderPrecision;
 
     #[test]

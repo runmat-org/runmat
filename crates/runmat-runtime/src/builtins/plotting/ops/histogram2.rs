@@ -886,7 +886,7 @@ fn bin_centers(edges: &[f64]) -> Vec<f64> {
 }
 
 fn value_as_string(value: &Value) -> Option<String> {
-    tensor::value_to_string(value)
+    crate::builtins::plotting::style::value_as_string(value)
 }
 
 #[cfg(test)]
@@ -922,6 +922,17 @@ mod tests {
             option_scalar(&Value::Tensor(tensor), "FaceAlpha").unwrap(),
             1.0
         );
+
+        for bins in [Value::Num(4.0), Value::Int(runmat_value::IntValue::U8(4))] {
+            let parsed = parse_options(vec![
+                bins.clone(),
+                Value::String("ShowEmptyBins".into()),
+                Value::Bool(true),
+            ])
+            .expect("numeric bin count remains positional");
+            assert_eq!(parsed.histcounts_args, vec![bins]);
+            assert!(parsed.show_empty_bins);
+        }
     }
 
     #[test]

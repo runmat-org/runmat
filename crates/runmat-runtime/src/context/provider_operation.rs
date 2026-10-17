@@ -2,7 +2,10 @@
 //! service. Domain owners supply typed query and physical host workspace;
 //! children authenticate readbacks, build candidate demands, and own feedback.
 
-use super::{host_presentation::HostPresentationReceipt, RuntimeContext};
+use super::{
+    host_presentation::{AdmittedHostUploadOutputs, HostPresentationReceipt},
+    RuntimeContext,
+};
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::observation::{
     ProviderObservationCapability, ProviderObservationSupport,
@@ -60,16 +63,70 @@ mod readbacks;
 mod types;
 use candidate::{operation_signature, resource_candidate};
 use readbacks::prepare_readbacks;
-use types::{ConditionalUploadPublication, DirectProviderPublication};
+use types::{
+    ConditionalUploadPublication, DirectProviderOutputContract, DirectProviderPublication,
+};
 pub(crate) use types::{
-    ExactConditionalProviderUpload, ExactProducedProviderReadback, ExactProviderOperation,
-    ExactProviderReadback, ExactProviderReadbackPhase, SelectedProviderOperation,
+    ExactConditionalProviderUpload, ExactHostUploadAlternative, ExactProducedProviderReadback,
+    ExactProviderOperation, ExactProviderOrHostSelection, ExactProviderReadback,
+    ExactProviderReadbackPhase, ProviderPhysicalCalibration, SelectedProviderOperation,
 };
 
 pub(crate) fn select_exact_provider_operation(
     runtime: Option<&RuntimeContext>,
     request: ExactProviderOperation<'_>,
 ) -> BuiltinResult<Option<SelectedProviderOperation>> {
+    match select_exact_provider_or_host_operation_with_output_contract(
+        runtime,
+        request,
+        None,
+        DirectProviderOutputContract::Fresh,
+    )? {
+        Some(ExactProviderOrHostSelection::Provider(selected)) => Ok(Some(selected)),
+        Some(ExactProviderOrHostSelection::HostUpload(_)) => {
+            unreachable!("no host candidate supplied")
+        }
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn select_exact_provider_reused_output_operation(
+    runtime: Option<&RuntimeContext>,
+    request: ExactProviderOperation<'_>,
+) -> BuiltinResult<Option<SelectedProviderOperation>> {
+    match select_exact_provider_or_host_operation_with_output_contract(
+        runtime,
+        request,
+        None,
+        DirectProviderOutputContract::ReusedInputs,
+    )? {
+        Some(ExactProviderOrHostSelection::Provider(selected)) => Ok(Some(selected)),
+        Some(ExactProviderOrHostSelection::HostUpload(_)) => {
+            unreachable!("no host candidate supplied")
+        }
+        None => Ok(None),
+    }
+}
+
+pub(crate) fn select_exact_provider_or_host_operation(
+    runtime: Option<&RuntimeContext>,
+    request: ExactProviderOperation<'_>,
+    host: Option<ExactHostUploadAlternative<'_>>,
+) -> BuiltinResult<Option<ExactProviderOrHostSelection>> {
+    select_exact_provider_or_host_operation_with_output_contract(
+        runtime,
+        request,
+        host,
+        DirectProviderOutputContract::Fresh,
+    )
+}
+
+fn select_exact_provider_or_host_operation_with_output_contract(
+    runtime: Option<&RuntimeContext>,
+    request: ExactProviderOperation<'_>,
+    host: Option<ExactHostUploadAlternative<'_>>,
+    output_contract: DirectProviderOutputContract,
+) -> BuiltinResult<Option<ExactProviderOrHostSelection>> {
     check_cancelled(runtime)?;
     let provider = request.provider;
     let query = request.query;
@@ -110,13 +167,11 @@ pub(crate) fn select_exact_provider_operation(
         return Ok(None);
     };
     // Observation metadata does not grant physical resource admission.
-    let provider_digest = Digest::sha256(
-        serde_json::to_vec(&(
-            provider.capability_snapshot(),
-            &prepared.source_capabilities,
-        ))
-        .expect("capability snapshot serializes"),
-    );
+    let provider_digest = Digest::sha256_serialized(&(
+        provider.capability_snapshot(),
+        &prepared.source_capabilities,
+    ))
+    .expect("capability snapshot serializes");
     let observation = runtime.and_then(|runtime| {
         let service = runtime.service_ports().placement()?;
         let revision =
@@ -137,10 +192,17 @@ pub(crate) fn select_exact_provider_operation(
         parallel,
     );
     if let Some(snapshot) = resources.provider(provider.device_id()) {
-        admission::require_queue_bound(
+        let queue = admission::require_queue_bound(
             snapshot,
             request.output_queue_slots.or(estimate.dispatches),
-        )?;
+        );
+        if host.is_some() && queue.is_err() {
+            // Only the native candidate lacks a finite queue certificate.
+            // The caller can still select its independently admitted host
+            // route without treating this pure preflight as an effect.
+            return Ok(None);
+        }
+        queue?;
     }
     if resources.cancellation_requested {
         return Err(
@@ -150,23 +212,31 @@ pub(crate) fn select_exact_provider_operation(
                 .build(),
         );
     }
-    runmat_execution::single_candidate_resources_admitted(
-        runmat_execution::CandidateResourceFacts {
-            location: candidate.execution_location,
-            output_residency: candidate.output_residency,
-            presentation: &candidate.presentation,
-            kind: candidate.kind,
-            demand: candidate.resources,
-            transactional_results: candidate.transactional_results,
-        },
-        &resources,
-        false,
-    )
-    .map_err(resource_error)?;
-    let Some(direct_output) =
-        DirectProviderPublication::new(query.outputs.len(), estimate.output_bytes)
-    else {
+    if host.is_none() {
+        runmat_execution::single_candidate_resources_admitted(
+            runmat_execution::CandidateResourceFacts {
+                location: candidate.execution_location,
+                output_residency: candidate.output_residency,
+                presentation: &candidate.presentation,
+                kind: candidate.kind,
+                demand: candidate.resources,
+                transactional_results: candidate.transactional_results,
+            },
+            &resources,
+            false,
+        )
+        .map_err(resource_error)?;
+    }
+    let Some(direct_output) = DirectProviderPublication::from_query(
+        query,
+        estimate.output_bytes,
+        request.already_live_bytes,
+        output_contract,
+    ) else {
         // A resource-only route is not a validated output-publication receipt.
+        if host.is_some() {
+            return Ok(None);
+        }
         let provider_resources = provider.placement_resources();
         if parallel.memory_available_bytes.is_some()
             || provider_resources.capacity_bytes.is_some()
@@ -183,20 +253,69 @@ pub(crate) fn select_exact_provider_operation(
     let Some((runtime, service, revision, _)) = observation else {
         return Ok(None);
     };
-    let signature = operation_signature(&request, &prepared, revision);
+    let mut signature = operation_signature(&request, &prepared, revision);
+    if let Some(host) = host.as_ref() {
+        signature.runtime_facts = Digest::sha256_serialized(&(
+            signature.runtime_facts,
+            host.candidate.route_facts,
+            Some(host.query),
+            Some(&host.output),
+            Some(host.requested_bytes),
+        ))
+        .expect("typed paired operation serializes");
+    }
+    let mut candidates = vec![candidate.clone()];
+    if let Some(host) = host.as_ref() {
+        candidates.push(host.candidate.clone());
+    }
     let selected = service.select_whole_work(WholeWorkPlacementRequest {
         signature: signature.clone(),
-        constraint: WholeWorkConstraint::ProviderRequired {
-            device_id: provider.device_id(),
+        constraint: if host.is_some() {
+            WholeWorkConstraint::AnyLegal
+        } else {
+            WholeWorkConstraint::ProviderRequired {
+                device_id: provider.device_id(),
+            }
         },
-        candidates: vec![candidate.clone()],
+        candidates,
         resources,
         deterministic: true,
         require_transactional_results: false,
     })?;
-    if selected.decision.signature != signature
-        || selected.decision.selected != candidate.selected(request.semantic_operation)
-    {
+    if selected.decision.signature != signature {
+        return Err(
+            build_runtime_error("placement selected an unadmitted operation")
+                .with_identifier("RunMat:Placement:InvalidDecision")
+                .build(),
+        );
+    }
+    if let Some(host) = host.as_ref() {
+        if selected.decision.selected == host.candidate.selected(request.semantic_operation) {
+            let upload = host;
+            let metadata_claim = super::host_presentation::selected_upload_metadata_claim(
+                runtime,
+                std::slice::from_ref(&upload.output),
+                &upload.query.operation,
+                request.semantic_operation,
+            )?;
+            let ProviderObservationSupport::Observed(mut receipt) =
+                provider.begin_operation_observation(upload.query)
+            else {
+                return Ok(None);
+            };
+            receipt
+                .require_provider_execution(provider.device_id(), upload.query.operation.clone());
+            let presentation = HostPresentationReceipt::new(runtime.clone(), selected, receipt)
+                .with_publication_metadata_claim(metadata_claim)
+                .with_admitted_upload_outputs(AdmittedHostUploadOutputs {
+                    provider,
+                    outputs: vec![upload.output.clone()],
+                    one_output_requested_bytes: Some(upload.requested_bytes),
+                });
+            return Ok(Some(ExactProviderOrHostSelection::HostUpload(presentation)));
+        }
+    }
+    if selected.decision.selected != candidate.selected(request.semantic_operation) {
         return Err(
             build_runtime_error("placement selected an unadmitted provider operation")
                 .with_identifier("RunMat:Placement:InvalidDecision")
@@ -218,17 +337,19 @@ pub(crate) fn select_exact_provider_operation(
     if request.provider_host_mediated {
         receipt.allow_provider_host_mediated();
     }
-    Ok(Some(SelectedProviderOperation {
-        provider,
-        receipt: HostPresentationReceipt::new(runtime.clone(), selected, receipt),
-        direct_output,
-        conditional_upload: ConditionalUploadPublication::new(
-            prepared
-                .conditional_provider_upload
-                .map(|upload| upload.provider_output_requested_bytes),
-        ),
-        produced_readback: prepared.produced_readback,
-    }))
+    Ok(Some(ExactProviderOrHostSelection::Provider(
+        SelectedProviderOperation {
+            provider,
+            receipt: HostPresentationReceipt::new(runtime.clone(), selected, receipt),
+            direct_output,
+            conditional_upload: ConditionalUploadPublication::new(
+                prepared
+                    .conditional_provider_upload
+                    .map(|upload| upload.provider_output_requested_bytes),
+            ),
+            produced_readback: prepared.produced_readback,
+        },
+    )))
 }
 
 fn check_cancelled(runtime: Option<&RuntimeContext>) -> BuiltinResult<()> {

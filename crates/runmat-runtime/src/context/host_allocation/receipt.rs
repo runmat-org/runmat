@@ -31,6 +31,25 @@ pub enum HostAllocationError {
     Numeric(ExactHostNumericAllocationError),
 }
 
+impl HostAllocationError {
+    /// Preserve cancellation and revoked service authority as typed runtime
+    /// causes at every host-allocation admission boundary.
+    pub fn runtime_identifier_suffix(self) -> &'static str {
+        match self {
+            Self::Cancelled | Self::Resource(HostEffectAllocationError::Cancelled) => "Cancelled",
+            Self::StaleAuthority
+            | Self::MissingManagedOwner
+            | Self::Resource(
+                HostEffectAllocationError::Revoked | HostEffectAllocationError::InvalidInvocation,
+            ) => "parallel:InfrastructureFailure",
+            Self::Overflow | Self::Resource(HostEffectAllocationError::Overflow) => {
+                "Placement:ResourceOverflow"
+            }
+            _ => "Placement:ResourceLimit",
+        }
+    }
+}
+
 impl fmt::Display for HostAllocationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{self:?}")
@@ -244,6 +263,22 @@ fn provider_metadata_error(error: HostAllocationError) -> ProviderHostMetadataEr
 }
 
 impl HostAllocationReceipt {
+    /// A selected provider callback may outlive the invocation frame after
+    /// cancellation. Move this exact retained metadata claim into that
+    /// callback owner; no view issuer is needed for non-view control state.
+    pub fn claim_retained_metadata(
+        &self,
+        runtime: &RuntimeContext,
+        payload_bytes: u64,
+    ) -> Result<Arc<dyn RetainedHostAllocationClaim>, HostAllocationError> {
+        self.checkpoint(runtime)?;
+        let bytes = HostAllocationPlan::retained_metadata_bytes(payload_bytes)?;
+        let bytes = usize::try_from(bytes).map_err(|_| HostAllocationError::Overflow)?;
+        let claim = self.output.reserve_exact(bytes)?;
+        self.checkpoint(runtime)?;
+        Ok(claim)
+    }
+
     pub fn retained_view_permit(
         &self,
         runtime: &RuntimeContext,

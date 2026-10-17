@@ -1,10 +1,96 @@
 //! Staging ownership across asynchronous mapping. No emission permit survives
 //! a poll/await; cancellation performs only a fresh restricted cleanup phase.
 use anyhow::{anyhow, Result};
-use futures::channel::oneshot;
 use runmat_accelerate_api::allocation::catch_allocation_cleanup_unwind;
 use runmat_accelerate_api::{WgpuAccessError, WgpuDeviceAccess};
-use std::{borrow::Borrow, error::Error, fmt};
+use runmat_execution::resource::RetainedHostAllocationClaim;
+use std::{
+    borrow::Borrow,
+    error::Error,
+    fmt,
+    future::poll_fn,
+    sync::{Arc, Mutex},
+    task::{Poll, Waker},
+};
+
+/// Upper bound for the request-owned Arc map-completion allocation. The two
+/// atomic reference counters and alignment are included just as for the
+/// canonical retained-view issuer quote; scheduler-owned Wakers are not
+/// charged as a second copy of this request's completion state.
+pub(crate) fn map_completion_host_upper_bytes() -> Option<u64> {
+    std::mem::size_of::<MapCompletion>()
+        .checked_add(2 * std::mem::size_of::<usize>())?
+        .checked_add(std::mem::align_of::<MapCompletion>())?
+        .try_into()
+        .ok()
+}
+
+struct MapCompletion {
+    state: Mutex<MapCompletionState>,
+    // The callback can outlive a dropped readback future. The resource claim
+    // therefore follows this shared control allocation, not the caller frame.
+    _claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
+}
+
+#[derive(Default)]
+struct MapCompletionState {
+    result: Option<Result<()>>,
+    waker: Option<Waker>,
+}
+
+impl MapCompletion {
+    fn complete(&self, result: Result<()>) {
+        let wake = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            state.result = Some(result);
+            state.waker.take()
+        };
+        if let Some(wake) = wake {
+            wake.wake();
+        }
+    }
+
+    async fn wait(&self) -> Result<()> {
+        poll_fn(|cx| {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            if let Some(result) = state.result.take() {
+                Poll::Ready(result)
+            } else {
+                state.waker = Some(cx.waker().clone());
+                Poll::Pending
+            }
+        })
+        .await
+    }
+}
+
+struct MapCallback {
+    completion: Arc<MapCompletion>,
+    invoked: bool,
+}
+
+impl MapCallback {
+    fn complete(&mut self, result: std::result::Result<(), wgpu::BufferAsyncError>) {
+        self.invoked = true;
+        self.completion
+            .complete(result.map_err(anyhow::Error::from));
+    }
+}
+
+impl Drop for MapCallback {
+    fn drop(&mut self) {
+        if !self.invoked {
+            self.completion
+                .complete(Err(anyhow!("map_async callback dropped")));
+        }
+    }
+}
 
 pub(crate) trait ReadbackResourceOwner: Borrow<wgpu::Buffer> {
     fn cleanup_failed(&self) {}
@@ -144,8 +230,30 @@ pub(super) fn read_with<'a, T: 'a>(
     context: &'a str,
     decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
 ) -> impl std::future::Future<Output = Result<T>> + 'a {
-    // Establish ownership before constructing the future. Unpolled teardown
-    // needs only ordinary Buffer Drop; active mapping needs explicit unmap.
+    read_with_optional_claim(access, buffer, context, decode, None)
+}
+
+/// The selected finite route supplies the retained control claim before its
+/// first provider effect. A dropped future cannot refund the callback's Arc.
+pub(super) fn read_with_admitted<'a, T: 'a>(
+    access: WgpuDeviceAccess,
+    buffer: impl ReadbackResourceOwner + 'a,
+    context: &'a str,
+    decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+    claim: Arc<dyn RetainedHostAllocationClaim>,
+) -> impl std::future::Future<Output = Result<T>> + 'a {
+    read_with_optional_claim(access, buffer, context, decode, Some(claim))
+}
+
+fn read_with_optional_claim<'a, T: 'a>(
+    access: WgpuDeviceAccess,
+    buffer: impl ReadbackResourceOwner + 'a,
+    context: &'a str,
+    decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+    claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
+) -> impl std::future::Future<Output = Result<T>> + 'a {
+    // Establish staging ownership before construction, including unpolled
+    // teardown. The one callback state persists independently after polling.
     let mut staging = Readback {
         access,
         buffer: Some(buffer),
@@ -153,7 +261,14 @@ pub(super) fn read_with<'a, T: 'a>(
     };
     async move {
         let result = async {
-            let (send, receive) = oneshot::channel();
+            let completion = Arc::new(MapCompletion {
+                state: Mutex::new(MapCompletionState::default()),
+                _claim: claim,
+            });
+            let mut callback = MapCallback {
+                completion: completion.clone(),
+                invoked: false,
+            };
             staging.access.with_shared(|_| {
                 staging.map_registered = true;
                 staging
@@ -163,14 +278,15 @@ pub(super) fn read_with<'a, T: 'a>(
                     .borrow()
                     .slice(..)
                     .map_async(wgpu::MapMode::Read, move |result| {
-                        let _ = send.send(result);
+                        callback.complete(result);
                     });
             })?;
             #[cfg(not(target_arch = "wasm32"))]
             staging.access.poll(wgpu::Maintain::Wait);
-            receive
+            completion
+                .wait()
                 .await
-                .map_err(|_| anyhow!("{context}: map_async callback dropped"))??;
+                .map_err(|source| anyhow!("{context}: {source}"))?;
             let output = staging.access.with_shared(|_| {
                 let data = staging
                     .buffer
@@ -186,8 +302,6 @@ pub(super) fn read_with<'a, T: 'a>(
             Ok(output)
         }
         .await;
-        // All views/permits have ended, including error paths. Cancellation and
-        // panic use Drop instead; neither path retries a failed unmap.
         complete(result, staging.cleanup())
     }
 }

@@ -154,12 +154,20 @@ fn retained_definition_content_not_session_allocation_order_decides_portable_ide
             .result
             .expect("retained definition publication");
         assert!(outcome.diagnostics.is_empty(), "{outcome:?}");
-        let helper_origin = session
+        let helper = session
             .function_registry
             .resolve_name("retainedHelper")
             .and_then(|function| session.function_registry.get(function))
-            .and_then(|function| function.binding_origin)
-            .expect("published helper origin");
+            .expect("published helper");
+        let helper_origin = helper.binding_origin.expect("published helper origin");
+        let helper_product = helper
+            .selected_executable_product
+            .as_ref()
+            .expect("published helper product");
+        let helper_content = helper_product.content_digest();
+        let helper_body = helper_product
+            .body_digest(helper_origin)
+            .expect("published helper body");
         let unit = futures::executor::block_on(session.compile_executable_unit(
             crate::ExecutableSource::new(
                 "fixture",
@@ -169,12 +177,16 @@ fn retained_definition_content_not_session_allocation_order_decides_portable_ide
             None,
         ))
         .expect("unit with retained semantic dependency");
+        assert!(unit.portable_envelope_for(Some("retainedHelper")).is_err());
         let envelope = unit.portable_envelope().expect("envelope");
         let bytes = envelope.canonical_bytes().expect("canonical bytes");
         let admitted = runmat_vm::admit_executable_unit(&bytes).expect("admitted envelope");
-        assert!(admitted.registry().functions.values().any(|function| {
-            function.display_name == "retainedHelper"
-                && function.binding_origin == Some(helper_origin)
+        assert!(admitted.static_imports().iter().any(|import| {
+            import.target == helper_origin
+                && import.target_content == helper_content
+                && import.target_body == helper_body
+                && import.kind
+                    == runmat_execution::executable::ExecutableStaticImportKind::ExplicitExternal
         }));
         admitted
             .retained_callable_origin_fingerprints()

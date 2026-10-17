@@ -42,19 +42,12 @@ impl WgpuProvider {
         }
         let total_len = product_checked(&normalized)
             .ok_or_else(|| anyhow!("eye: tensor size exceeds GPU limits"))?;
-        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
-            let out_buffer =
-                self.create_storage_buffer_checked(emission, total_len, "runmat-eye-out")?;
-            if total_len == 0 {
-                return Ok(out_buffer);
-            }
-
+        let dispatch = if total_len == 0 {
+            None
+        } else {
             let rows = normalized[0];
             let cols = normalized[1];
             let diag_len = rows.min(cols);
-            if diag_len == 0 {
-                return Ok(out_buffer);
-            }
             let slice_stride = rows
                 .checked_mul(cols)
                 .ok_or_else(|| anyhow!("eye: matrix slice exceeds GPU limits"))?;
@@ -67,9 +60,6 @@ impl WgpuProvider {
             let diag_total = diag_len
                 .checked_mul(slices)
                 .ok_or_else(|| anyhow!("eye: diagonal count exceeds GPU limits"))?;
-            if diag_total == 0 {
-                return Ok(out_buffer);
-            }
             if rows > (u32::MAX as usize)
                 || cols > (u32::MAX as usize)
                 || slice_stride > (u32::MAX as usize)
@@ -77,6 +67,25 @@ impl WgpuProvider {
             {
                 return Err(anyhow!("eye: dimensions exceed GPU dispatch limits"));
             }
+            let workgroups = self.pipelines.eye.linear_dispatch_groups(diag_total)?;
+            Some((
+                rows,
+                cols,
+                diag_len,
+                slice_stride,
+                slices,
+                diag_total,
+                workgroups,
+            ))
+        };
+        let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
+            let out_buffer =
+                self.create_storage_buffer_checked(emission, total_len, "runmat-eye-out")?;
+            let Some((rows, cols, diag_len, slice_stride, slices, diag_total, workgroups)) =
+                dispatch
+            else {
+                return Ok(out_buffer);
+            };
 
             let pipeline = self.pipelines.eye.get(emission)?;
             {
@@ -122,10 +131,6 @@ impl WgpuProvider {
                         },
                     ],
                 });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                diag_total as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
             crate::backend::wgpu::dispatch::creation::run(
                 emission,
                 pending,
@@ -745,16 +750,19 @@ impl WgpuProvider {
         let shape_vec = vec![rows, cols];
         let total_len = product_checked(&shape_vec)
             .ok_or_else(|| anyhow!("fspecial: tensor size exceeds GPU limits"))?;
+        ensure!(
+            total_len <= u32::MAX as usize,
+            "fspecial: tensor length exceeds GPU dispatch limits"
+        );
+        let workgroups = self.pipelines.fspecial.linear_dispatch_groups(total_len)?;
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer =
                 self.create_storage_buffer_checked(emission, total_len, "runmat-fspecial-out")?;
             if total_len == 0 {
                 return Ok(out_buffer);
             }
-            ensure!(
-                total_len <= u32::MAX as usize,
-                "fspecial: tensor length exceeds GPU dispatch limits"
-            );
+
+            let pipeline = self.pipelines.fspecial.get(emission)?;
 
             let params_buffer = match self.precision {
                 NumericPrecision::F64 => {
@@ -794,7 +802,7 @@ impl WgpuProvider {
                 .device()
                 .create_bind_group(&wgpu::BindGroupDescriptor {
                     label: Some("runmat-fspecial-bind"),
-                    layout: &self.pipelines.fspecial.get(emission)?.layout,
+                    layout: &pipeline.layout,
                     entries: &[
                         wgpu::BindGroupEntry {
                             binding: 0,
@@ -807,14 +815,10 @@ impl WgpuProvider {
                     ],
                 });
 
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                total_len as u32,
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
-            );
             crate::backend::wgpu::dispatch::creation::run(
                 emission,
                 pending,
-                &self.pipelines.fspecial.get(emission)?.pipeline,
+                &pipeline.pipeline,
                 &bind_group,
                 workgroups,
                 "runmat-fspecial-encoder",
@@ -1033,6 +1037,11 @@ impl WgpuProvider {
         if count > u32::MAX as usize {
             return Err(anyhow!("linspace: sequence length exceeds GPU limits"));
         }
+        let chunk_capacity = if count == 0 {
+            0
+        } else {
+            self.pipelines.linspace.linear_chunk_capacity()?
+        };
 
         let shape = vec![1, count];
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
@@ -1064,8 +1073,6 @@ impl WgpuProvider {
                 (stop - start) / ((count - 1) as f64)
             };
             let total_u32 = count as u32;
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut offset = 0usize;
 
             while offset < count {
@@ -1129,10 +1136,7 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_u32,
-                    crate::backend::wgpu::config::WORKGROUP_SIZE,
-                );
+                let workgroups = self.pipelines.linspace.linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,

@@ -28,6 +28,43 @@ struct TypedProducerPreparation {
     fallback: abi::ShaderBodyPreparation,
 }
 
+/// Typed admission for the floating elementwise implementation.
+///
+/// Native integer values are valid runtime inputs, but this implementation
+/// cannot execute them without changing their representation. VM callers with
+/// a certified decline right may retain the original typed operations instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElementwiseFloatingAdmission {
+    Eligible,
+    NativeIntegerIneligible,
+}
+
+pub fn elementwise_floating_admission(
+    request: &FusionExecutionRequest<'_>,
+) -> ExecutionResult<ElementwiseFloatingAdmission> {
+    use crate::fusion::semantics::authenticate_resident_input;
+    crate::ensure_residency_hooks();
+    let invalid = || anyhow!("fusion input has invalid floating metadata or provider ownership");
+    let mut native_integer = false;
+    for value in request
+        .inputs
+        .iter()
+        .chain(unbound_constant_values(request.plan))
+    {
+        if matches!(value, Value::GpuTensor(_)) {
+            authenticate_resident_input(value)
+                .map_err(|_| invalid())?
+                .ok_or_else(invalid)?;
+        }
+        native_integer |= native_integer_fusion_value_kind(value).is_some();
+    }
+    Ok(if native_integer {
+        ElementwiseFloatingAdmission::NativeIntegerIneligible
+    } else {
+        ElementwiseFloatingAdmission::Eligible
+    })
+}
+
 /// The semantic receipt stays live while this additive producer reservation
 /// is admitted. A retained multi-output shader can overlap one single-output
 /// producer if the provider rejects multi-output dispatch after preparation.
@@ -174,43 +211,6 @@ async fn execute_elementwise_outputs(
     host_continuation: &mut Option<ElementwiseHostContinuation>,
 ) -> ExecutionResult<FusionExecutionOutcome<(HashMap<ValueId, Value>, FusionPlacementSelection)>> {
     let vm_right = vm_selection.and_then(super::VmFusionSelectionRight::completion);
-    let finite_host_preparation = request
-        .runtime
-        .as_ref()
-        .and_then(|runtime| runtime.service_ports().parallel())
-        .is_some_and(|parallel| {
-            parallel
-                .placement_resources()
-                .memory_available_bytes
-                .is_some()
-        });
-    let preparation_receipt = if finite_host_preparation {
-        let geometry = crate::fusion::semantics::preparation_resources::PureSourceGeometry::admit(
-            request.plan,
-            &request.inputs,
-        )
-        .map_err(ProviderExecutionError::from_source)?;
-        let host_uses = vm_right
-            .zip(input_uses)
-            .map(|(_, uses)| (uses.entry.len(), uses.loads.len()));
-        let bytes = geometry
-            .overlapping_preparation_bytes(host_uses)
-            .map_err(ProviderExecutionError::from_source)?;
-        let plan = runmat_runtime::context::host_allocation::HostAllocationPlan::new(bytes, 0)
-            .map_err(ProviderExecutionError::from_source)?;
-        runmat_runtime::context::host_allocation::HostAllocationReceipt::admit(
-            request.runtime.as_ref(),
-            plan,
-        )
-        .map_err(ProviderExecutionError::from_source)?
-    } else {
-        None
-    };
-    let Some(bindings) = AdmittedBindings::new(request) else {
-        return Ok(FusionExecutionOutcome::SharedRuntime(
-            FusionCpuObservation::new(None),
-        ));
-    };
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_elementwise() {
         return Err(anyhow!("unsupported fusion kind").into());
@@ -226,27 +226,48 @@ async fn execute_elementwise_outputs(
         )
         .into());
     }
-    reject_native_integer_fusion_inputs(request)?;
+    let floating_admission = elementwise_floating_admission(request)?;
+    let may_decline = vm_selection
+        .and_then(|selection| selection.certified_decline(request))
+        .is_some();
+    let finite_host_preparation = request
+        .runtime
+        .as_ref()
+        .and_then(|runtime| runtime.service_ports().parallel())
+        .is_some_and(|parallel| {
+            parallel
+                .placement_resources()
+                .memory_available_bytes
+                .is_some()
+        });
     use crate::fusion::semantics::{authenticate_resident_input, FloatingFusionEligibility};
     let invalid = || anyhow!("fusion input has invalid floating metadata or provider ownership");
-    // Authenticate the complete resident set before classifying this floating
-    // route. An earlier valid logical/complex or host-only input must not hide
-    // a later stale, malformed, or foreign resident handle.
-    for value in &request.inputs {
-        if matches!(value, Value::GpuTensor(_)) {
-            authenticate_resident_input(value)
-                .map_err(|_| invalid())?
-                .ok_or_else(invalid)?;
-        }
+    let selected_provider = provider();
+    if floating_admission == ElementwiseFloatingAdmission::NativeIntegerIneligible
+        && !may_decline
+        && selected_provider.is_none()
+    {
+        reject_native_integer_fusion_inputs(request)?;
+        unreachable!("native integer rejection always returns an error");
     }
-    let provider = match admit_provider_availability(request, provider())? {
+    let provider = match admit_provider_availability(request, selected_provider)? {
         FusionExecutionOutcome::Executed(provider) => provider,
         FusionExecutionOutcome::SharedRuntime(observation) => {
+            if floating_admission == ElementwiseFloatingAdmission::NativeIntegerIneligible
+                && !may_decline
+            {
+                reject_native_integer_fusion_inputs(request)?;
+                unreachable!("native integer rejection always returns an error");
+            }
             return Ok(FusionExecutionOutcome::SharedRuntime(observation));
         }
     };
     let mut floating_route_ineligible = false;
-    for value in &request.inputs {
+    for value in request
+        .inputs
+        .iter()
+        .chain(unbound_constant_values(request.plan))
+    {
         match value {
             Value::GpuTensor(_) => {
                 use runmat_runtime::builtins::common::gpu_helpers::gpu_class_metadata_matches;
@@ -280,11 +301,47 @@ async fn execute_elementwise_outputs(
             _ => floating_route_ineligible = true,
         }
     }
+    if floating_admission == ElementwiseFloatingAdmission::NativeIntegerIneligible {
+        if may_decline {
+            return Ok(FusionExecutionOutcome::SharedRuntime(
+                FusionCpuObservation::new(None),
+            ));
+        }
+        reject_native_integer_fusion_inputs(request)?;
+        unreachable!("native integer rejection always returns an error");
+    }
     if floating_route_ineligible {
         return Ok(FusionExecutionOutcome::SharedRuntime(
             FusionCpuObservation::new(None),
         ));
     }
+    let preparation_receipt = if finite_host_preparation {
+        let geometry = crate::fusion::semantics::preparation_resources::PureSourceGeometry::admit(
+            request.plan,
+            &request.inputs,
+        )
+        .map_err(ProviderExecutionError::from_source)?;
+        let host_uses = vm_right
+            .zip(input_uses)
+            .map(|(_, uses)| (uses.entry.len(), uses.loads.len()));
+        let bytes = geometry
+            .overlapping_preparation_bytes(host_uses)
+            .map_err(ProviderExecutionError::from_source)?;
+        let plan = runmat_runtime::context::host_allocation::HostAllocationPlan::new(bytes, 0)
+            .map_err(ProviderExecutionError::from_source)?;
+        runmat_runtime::context::host_allocation::HostAllocationReceipt::admit(
+            request.runtime.as_ref(),
+            plan,
+        )
+        .map_err(ProviderExecutionError::from_source)?
+    } else {
+        None
+    };
+    let Some(bindings) = AdmittedBindings::new(request) else {
+        return Ok(FusionExecutionOutcome::SharedRuntime(
+            FusionCpuObservation::new(None),
+        ));
+    };
     let typed = async {
         let program = crate::fusion::semantics::ResolvedProgram::resolve(
             request.plan,

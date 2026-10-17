@@ -17,6 +17,16 @@ use runmat_value::Value;
 #[cfg(test)]
 mod tests;
 
+mod operator;
+pub use operator::{
+    call_object_operator_method, call_object_operator_method_in_context,
+    call_rhs_object_operator_method_ordered, call_rhs_object_operator_method_ordered_in_context,
+    call_rhs_operator_method_ordered_with_outputs,
+    call_rhs_operator_method_ordered_with_outputs_in_context, try_call_object_operator_method,
+    try_call_object_operator_method_in_context, try_call_rhs_object_operator_method_ordered,
+    try_call_rhs_object_operator_method_ordered_in_context, OperatorMethodDispatch,
+};
+
 fn method_member_name(identity: &CallableIdentity) -> Option<String> {
     match identity {
         CallableIdentity::DynamicName(runmat_types::SymbolName(name)) => {
@@ -61,10 +71,6 @@ fn runtime_named_identity(name: &str) -> (CallableIdentity, CallableFallbackPoli
             CallableFallbackPolicy::RuntimeNameResolution,
         )
     }
-}
-
-fn is_operator_overload_method(name: &runmat_types::MethodName) -> bool {
-    runmat_types::OperatorOverloadMethod::from_name(name).is_some()
 }
 
 async fn call_identity_with_policy(
@@ -274,7 +280,7 @@ async fn call_member_index_on_object_like(
     // Prevent recursive re-entry for operator overloading (e.g. builtin `plus` calling back
     // into object dispatch). If class-qualified lookup fails, surface the miss to arithmetic
     // fallback instead of resolving unqualified operator names at runtime.
-    if is_operator_overload_method(&method_name) {
+    if operator::is_operator_overload_method(&method_name) {
         return call_identity_with_policy(
             runtime,
             qualified_identity,
@@ -318,152 +324,6 @@ async fn call_member_index_on_object_like(
         )
 }
 
-pub async fn call_rhs_operator_method_ordered_with_outputs(
-    lhs: Value,
-    rhs: Value,
-    name: String,
-    requested_outputs: usize,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValueSequence, RuntimeError> {
-    call_rhs_operator_method_ordered_with_context(
-        None,
-        lhs,
-        rhs,
-        name,
-        requested_outputs,
-        caller_function_name,
-    )
-    .await
-}
-
-pub async fn call_rhs_operator_method_ordered_with_outputs_in_context(
-    runtime: &crate::context::RuntimeContext,
-    lhs: Value,
-    rhs: Value,
-    name: String,
-    requested_outputs: usize,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValueSequence, RuntimeError> {
-    call_rhs_operator_method_ordered_with_context(
-        Some(runtime),
-        lhs,
-        rhs,
-        name,
-        requested_outputs,
-        caller_function_name,
-    )
-    .await
-}
-
-async fn call_rhs_operator_method_ordered_with_context(
-    runtime: Option<&crate::context::RuntimeContext>,
-    lhs: Value,
-    rhs: Value,
-    name: String,
-    requested_outputs: usize,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValueSequence, RuntimeError> {
-    let work = call_rhs_operator_method_ordered_in_scope(
-        runtime,
-        lhs,
-        rhs,
-        name,
-        requested_outputs,
-        caller_function_name,
-    );
-    match runtime {
-        Some(runtime) => runtime.scope(work).await,
-        None => work.await,
-    }
-}
-
-async fn call_rhs_operator_method_ordered_in_scope(
-    runtime: Option<&crate::context::RuntimeContext>,
-    lhs: Value,
-    rhs: Value,
-    name: String,
-    requested_outputs: usize,
-    caller_function_name: Option<&str>,
-) -> Result<RootedValueSequence, RuntimeError> {
-    let class_name = match &rhs {
-        Value::Object(obj) => obj.class_name.clone(),
-        Value::HandleObject(handle) => handle.class_name.clone(),
-        _ => {
-            return Err(semantic_error(
-                "InvalidObjectDispatch",
-                "right-hand operator dispatch requires an object operand",
-            ));
-        }
-    };
-
-    let method_args = vec![lhs, rhs];
-    let method_name = runmat_types::MethodName::from(name.as_str());
-    if crate::object::protocol::selected_receiver_has_authority(&method_args[1])? {
-        let access = crate::object::protocol::ObjectAccessContext::from_legacy_function_name(
-            caller_function_name,
-        );
-        let method = crate::object::protocol::resolve_declared_object_method(
-            &method_args[1],
-            &method_name,
-            &access,
-        )?
-        .ok_or_else(|| {
-            semantic_error(
-                "UndefinedFunction",
-                "selected class has no admitted operator method",
-            )
-        })?;
-        return match runtime {
-            Some(runtime) => {
-                crate::object::protocol::invoke_resolved_object_method_in_context(
-                    runtime,
-                    &method,
-                    method_args,
-                    requested_outputs,
-                )
-                .await
-            }
-            None => {
-                crate::object::protocol::invoke_resolved_object_method(
-                    &method,
-                    method_args,
-                    requested_outputs,
-                )
-                .await
-            }
-        };
-    }
-    if let Some(bound) = crate::class_registry::lookup_bound_method(&class_name, &method_name) {
-        let m = &bound.declaration;
-        if m.is_static {
-            return Err(semantic_error(
-                "MethodStaticOnInstance",
-                format!(
-                    "Method '{}' is static; use classref({}).{}",
-                    name, class_name, name
-                ),
-            ));
-        }
-        if !method_access_permitted(&bound.declaring_class, &m.access, caller_function_name) {
-            return Err(semantic_error(
-                "MethodPrivate",
-                format!("Method '{}' is private", name),
-            ));
-        }
-        return call_registered_method(runtime, bound, method_args, requested_outputs).await;
-    }
-
-    let qualified_identity = external_qualified_identity(class_name.display_name(), &name);
-    call_identity_with_policy(
-        runtime,
-        qualified_identity,
-        method_args,
-        requested_outputs,
-        CallableFallbackPolicy::ExternalBoundary,
-    )
-    .await
-}
-
 pub async fn call_getfield_with_indices(
     base: Value,
     field: String,
@@ -493,74 +353,6 @@ async fn call_getfield_with_indices_with_context(
         getfield_args,
     )
     .await
-}
-
-pub async fn call_object_operator_method(
-    base: Value,
-    method: &str,
-    arg: Value,
-) -> Result<RootedValue, RuntimeError> {
-    require_single(
-        call_method_or_member_index_with_outputs(
-            base,
-            CallableIdentity::Method(MethodId(method.to_string())),
-            vec![arg],
-            1,
-            None,
-            CallableFallbackPolicy::ObjectDispatch,
-        )
-        .await?,
-    )
-}
-
-pub async fn call_object_operator_method_in_context(
-    runtime: &crate::context::RuntimeContext,
-    base: Value,
-    method: &str,
-    arg: Value,
-) -> Result<RootedValue, RuntimeError> {
-    require_single(
-        call_method_or_member_index_with_outputs_in_context(
-            runtime,
-            base,
-            CallableIdentity::Method(MethodId(method.to_string())),
-            vec![arg],
-            1,
-            None,
-            CallableFallbackPolicy::ObjectDispatch,
-        )
-        .await?,
-    )
-}
-
-pub async fn call_rhs_object_operator_method_ordered(
-    lhs: Value,
-    rhs: Value,
-    method: &str,
-) -> Result<RootedValue, RuntimeError> {
-    require_single(
-        call_rhs_operator_method_ordered_with_outputs(lhs, rhs, method.to_string(), 1, None)
-            .await?,
-    )
-}
-
-pub async fn call_rhs_object_operator_method_ordered_in_context(
-    runtime: &crate::context::RuntimeContext,
-    lhs: Value,
-    rhs: Value,
-    method: &str,
-) -> Result<RootedValue, RuntimeError> {
-    require_single(
-        call_rhs_operator_method_ordered_with_outputs_in_context(
-            runtime,
-            lhs,
-            rhs,
-            method.to_string(),
-            1,
-            None,
-        )
-        .await?,
-    )
 }
 
 pub async fn call_object_named_method_with_outputs(

@@ -156,6 +156,15 @@ impl ExecutableUnit {
         include_script: bool,
         resolve: impl FnOnce(&Self) -> Result<super::portable_entrypoint::PortableEntrypoint, String>,
     ) -> Result<runmat_execution::ExecutableUnitEnvelope, String> {
+        // A session compilation may retain earlier bodies for analysis and
+        // direct invocation. They belong to their own selected products, not
+        // to this primary V3 envelope. Explicit graph callers provide their
+        // own body selection and attach their own issued import section.
+        let automatic_selection = included
+            .is_none()
+            .then(|| self.portable_selection())
+            .flatten();
+        let included = included.or_else(|| automatic_selection.map(|(current, _)| current));
         let selected_scope = if include_script {
             None
         } else {
@@ -185,9 +194,54 @@ impl ExecutableUnit {
                 .collect::<Result<std::collections::BTreeSet<_>, _>>()?;
             Some((report, functions))
         };
-        let inferred = match &selected_scope {
-            Some((report, _)) => Self::inferred_interop_manifest_for_report(report),
-            None => self.inferred_interop_manifest(),
+        let mut selected_functions = selected_scope
+            .as_ref()
+            .map(|(_, functions)| functions.clone())
+            .unwrap_or_default();
+        let script_owners = if include_script {
+            self.compiled_script_owner_ids()?
+        } else {
+            std::collections::BTreeSet::new()
+        };
+        if include_script {
+            for function in &script_owners {
+                selected_functions.insert(runmat_types::ProgramFunctionId(
+                    u32::try_from(function.0)
+                        .map_err(|_| "script owner exceeds portable analysis identity")?,
+                ));
+            }
+            if let Some(included) = included {
+                for function in included {
+                    selected_functions.insert(runmat_types::ProgramFunctionId(
+                        u32::try_from(function.0)
+                            .map_err(|_| "selected function exceeds portable analysis identity")?,
+                    ));
+                }
+            }
+        }
+        let selected_report = if selected_scope.is_none() && included.is_some() {
+            let roots = selected_functions
+                .iter()
+                .map(|id| runmat_hir::FunctionId(id.0 as usize))
+                .collect();
+            let names = runmat_mir::analysis::ReachabilityNames {
+                sources: self
+                    .source_map()
+                    .entries()
+                    .iter()
+                    .map(|entry| (entry.source_id, entry.relative_path.clone()))
+                    .collect(),
+                bindings: self.binding_names(),
+            };
+            Some(runmat_mir::analysis::selected_body_reachability(self.mir(), &names, &roots).0)
+        } else {
+            None
+        };
+        let inferred = match (&selected_scope, &selected_report) {
+            (Some((report, _)), _) | (_, Some(report)) => {
+                Self::inferred_interop_manifest_for_report(report)
+            }
+            _ => self.inferred_interop_manifest(),
         };
         let interop = runmat_types::InteropManifest::merge([inferred, interop])
             .map_err(|error| format!("{}: {}", error.path, error.message))?;
@@ -195,29 +249,42 @@ impl ExecutableUnit {
         let revisions = self.component_revisions()?;
         let components = component_descriptors(&payloads, &revisions)?;
         let entrypoint = resolve(self)?;
-        let (entrypoint_name, entrypoint_function, entrypoint_kind, declaration_class) =
-            match entrypoint {
-                super::portable_entrypoint::PortableEntrypoint::Callable {
-                    name,
-                    function,
-                    kind,
-                    ..
-                } => (name, Some(function), kind, None),
-                super::portable_entrypoint::PortableEntrypoint::DeclarationOnly(class) => (
-                    class.display_name().to_string(),
-                    None,
-                    runmat_execution::ExecutableEntrypointKind::DeclarationOnly,
-                    Some(class),
-                ),
-            };
+        let (
+            entrypoint_name,
+            entrypoint_compiled,
+            entrypoint_function,
+            entrypoint_kind,
+            declaration_class,
+        ) = match entrypoint {
+            super::portable_entrypoint::PortableEntrypoint::Callable {
+                name,
+                compiled_function,
+                function,
+                kind,
+                ..
+            } => (name, Some(compiled_function), Some(function), kind, None),
+            super::portable_entrypoint::PortableEntrypoint::DeclarationOnly(class) => (
+                class.display_name().to_string(),
+                None,
+                None,
+                runmat_execution::ExecutableEntrypointKind::DeclarationOnly,
+                Some(class),
+            ),
+        };
+        if automatic_selection.is_some()
+            && entrypoint_compiled.is_some_and(|function| {
+                !script_owners.contains(&function)
+                    && included.is_none_or(|selected| !selected.contains(&function))
+            })
+        {
+            return Err("preferred entrypoint belongs to a retained definition product".into());
+        }
         let mut capabilities = runmat_types::CapabilitySet(
             self.analysis()
                 .functions
                 .iter()
                 .filter(|function| {
-                    selected_scope
-                        .as_ref()
-                        .is_none_or(|(_, selected)| selected.contains(&function.function))
+                    included.is_none() || selected_functions.contains(&function.function)
                 })
                 .flat_map(|function| function.capabilities.0.iter().copied())
                 .collect(),
@@ -232,7 +299,7 @@ impl ExecutableUnit {
                 .0
                 .insert(runmat_types::CapabilityRequirement::ForeignRuntime);
         }
-        let selected_functions = selected_scope.as_ref().map(|(_, functions)| functions);
+        let selected_functions = included.map(|_| &selected_functions);
         let mut parallel = self.analysis().parallel.clone();
         if let Some(functions) = selected_functions {
             parallel
@@ -247,6 +314,15 @@ impl ExecutableUnit {
             parallel
                 .collectives
                 .retain(|collective| functions.contains(&collective.id.region.0.function));
+        }
+        let mut optional_sections = Vec::new();
+        if let Some((_, imports)) = automatic_selection {
+            if !imports.is_empty() {
+                optional_sections.push(
+                    runmat_execution::executable::static_import_section(imports.to_vec())
+                        .map_err(|error| error.to_string())?,
+                );
+            }
         }
         let manifest = runmat_execution::ExecutableUnitManifest {
             schema_version: runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION,
@@ -278,7 +354,7 @@ impl ExecutableUnit {
                 .collect(),
             interop,
             parallel,
-            optional_sections: Vec::new(),
+            optional_sections,
         };
         runmat_execution::ExecutableUnitEnvelope::new(manifest, payloads)
             .map_err(|error| error.to_string())
@@ -287,13 +363,18 @@ impl ExecutableUnit {
     #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn native_product_digest(&self) -> Result<runmat_execution::Digest, String> {
         let revisions = self.component_revisions()?;
-        let components = component_descriptors(&self.component_payloads(None, true)?, &revisions)?;
+        let selection = self.portable_selection();
+        let components = component_descriptors(
+            &self.component_payloads(selection.map(|(current, _)| current), true)?,
+            &revisions,
+        )?;
         // VM layout, registry and bytecode also own the retained interpreter
         // capture, resume locations and coverage instrumentation.
         Ok(runmat_execution::Digest::sha256(canonical_json(&(
             "runmat-native-compilation-v1",
             revisions,
             components,
+            selection.map(|(_, imports)| imports),
             self.binding_names(),
             self.inferred_interop_manifest(),
             &self.source().owner_identity,

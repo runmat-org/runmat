@@ -1222,6 +1222,27 @@ fn diagnostics_do_not_report_assigned_locals_in_short_circuit_temps() {
 }
 
 #[test]
+fn dotted_call_argument_preparation_obeys_its_internal_definition_order() {
+    let source = "function run(testCase); testCase.verifyEqual(helper() + dependency(), 42); end\nfunction value = helper(); value = 40; end\nfunction value = dependency(); value = 2; end";
+    let diagnostics = analyze_assembly(&lower_mir(source)).diagnostics;
+
+    assert!(
+        !diagnostics
+            .iter()
+            .any(|diagnostic| matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+        "ordered dotted-call argument temporaries are initialized before use: {diagnostics:#?}"
+    );
+
+    let unassigned = analyze_assembly(&lower_mir(
+        "function run(flag); if flag; testCase = 1; end; testCase.verifyEqual(helper(), 42); end\nfunction value = helper(); value = 42; end",
+    ))
+    .diagnostics;
+    assert!(unassigned
+        .iter()
+        .any(|diagnostic| matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002")));
+}
+
+#[test]
 fn summary_records_function_outputs_and_store_entry() {
     let mir = lower_mir("function y = f(x); y = x; end");
     let body = mir.bodies.values().next().unwrap();

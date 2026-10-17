@@ -8,6 +8,7 @@ use runmat_types::ProgramSourceId;
 
 #[path = "program_sources/identity.rs"]
 pub(super) mod identity;
+use super::test_source_authority::CapturedTestSourceAuthority;
 use identity::executable_source_identity;
 
 /// A retained definition may refer to an older generation at the same source
@@ -83,6 +84,12 @@ struct CompanionSource {
     context: Arc<SourceContextData>,
     owner_identity: String,
     relative_path: String,
+}
+
+enum SelectedSourceAuthority<'a, 'snapshot> {
+    Ordinary,
+    CapturedTest(&'a CapturedTestSourceAuthority<'snapshot>),
+    Dynamic(&'a runmat_runtime::builtins::common::path_search::FileCandidateOrigin),
 }
 
 impl ProgramSourceTable {
@@ -268,7 +275,31 @@ impl ProgramSourceTable {
             discovery,
             primary_statement_count,
             handoff,
-            None,
+            SelectedSourceAuthority::Ordinary,
+            retained,
+        )
+    }
+
+    pub(in crate::session) fn build_with_test(
+        root: &crate::ExecutableSource,
+        root_full_path: Option<&str>,
+        discovery: &CompanionSourceDiscovery,
+        primary_statement_count: usize,
+        handoff: Option<&runmat_package::FrozenProjectHandoff>,
+        test_authority: &CapturedTestSourceAuthority<'_>,
+        retained: &[(
+            runmat_runtime::source_context::RuntimeSourceRef,
+            SourceContextData,
+            runmat_runtime::source_context::PortableSourceIdentity,
+        )],
+    ) -> Result<Self, String> {
+        Self::build_with_origin(
+            root,
+            root_full_path,
+            discovery,
+            primary_statement_count,
+            handoff,
+            SelectedSourceAuthority::CapturedTest(test_authority),
             retained,
         )
     }
@@ -287,7 +318,7 @@ impl ProgramSourceTable {
             discovery,
             primary_statement_count,
             handoff,
-            Some(origin),
+            SelectedSourceAuthority::Dynamic(origin),
             &[],
         )
     }
@@ -298,14 +329,26 @@ impl ProgramSourceTable {
         discovery: &CompanionSourceDiscovery,
         primary_statement_count: usize,
         handoff: Option<&runmat_package::FrozenProjectHandoff>,
-        origin: Option<&runmat_runtime::builtins::common::path_search::FileCandidateOrigin>,
+        authority: SelectedSourceAuthority<'_, '_>,
         retained: &[(
             runmat_runtime::source_context::RuntimeSourceRef,
             SourceContextData,
             runmat_runtime::source_context::PortableSourceIdentity,
         )],
     ) -> Result<Self, String> {
+        let (test_authority, origin) = match authority {
+            SelectedSourceAuthority::Ordinary => (None, None),
+            SelectedSourceAuthority::CapturedTest(test) => (Some(test), None),
+            SelectedSourceAuthority::Dynamic(origin) => (None, Some(origin)),
+        };
         let source_identity = |context: &SourceContextData| {
+            if let (Some(authority), Some(full)) =
+                (test_authority, context.fullpath_name.as_deref())
+            {
+                if let Some(identity) = authority.source_identity(full, &context.text)? {
+                    return Ok(identity);
+                }
+            }
             if handoff.is_none() {
                 if let Some(runmat_runtime::builtins::common::path_search::FileCandidateOrigin::SearchRoot {
                     ordinal,

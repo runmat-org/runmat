@@ -7,12 +7,12 @@ use runmat_accelerate_api::{
     ProviderRepresentation, ProviderResidency, ProviderStorage,
 };
 
-pub(super) struct AdmittedHostUploadOutputs {
-    pub(super) provider: &'static dyn AccelProvider,
-    pub(super) outputs: Vec<ProviderRepresentation>,
+pub(crate) struct AdmittedHostUploadOutputs {
+    pub(crate) provider: &'static dyn AccelProvider,
+    pub(crate) outputs: Vec<ProviderRepresentation>,
     /// A provider can certify an exact physical one-output route. Absence is
     /// unavailable evidence, not an inferred logical byte count.
-    pub(super) one_output_requested_bytes: Option<u64>,
+    pub(crate) one_output_requested_bytes: Option<u64>,
 }
 
 pub(super) enum UploadPublication {

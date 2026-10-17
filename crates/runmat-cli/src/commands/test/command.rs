@@ -455,7 +455,7 @@ fn reporters(args: &TestArgs, configured: &[ProjectTestReport]) -> ReporterFanou
     let mut reporters = ReporterFanout::default();
     for format in requested {
         match format {
-            TestReportArg::Human => reporters.push(HumanReporter::default()),
+            TestReportArg::Human => reporters.push(HumanReporter),
             TestReportArg::Json => reporters.push(JsonReporter::default()),
             TestReportArg::Junit => reporters.push(JunitReporter),
             TestReportArg::Tap => reporters.push(TapReporter),

@@ -1,6 +1,7 @@
 use crate::interpreter::stack::pop2;
 use crate::ops::integer_comparison::scalar_order;
 use runmat_runtime::execution::RootedValue;
+use runmat_runtime::object::dispatch::OperatorMethodDispatch;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::future::Future;
@@ -47,7 +48,7 @@ pub async fn relation<CM, CMFut, B, BFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
     BFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
@@ -55,9 +56,9 @@ where
     let _input_roots = crate::call::root_values([&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), name, b.clone()).await {
-                Ok(v) => v,
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), name, b.clone()).await? {
+                Some(v) => v,
+                None => {
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
@@ -67,9 +68,9 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), reverse_name, a.clone()).await {
-                Ok(v) => v,
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), reverse_name, a.clone()).await? {
+                Some(v) => v,
+                None => {
                     if rel_binary_use_builtin(&a, &b) {
                         call_builtin(name, a.clone(), b.clone()).await?
                     } else {
@@ -99,7 +100,7 @@ pub async fn relation_inverted<CM, CMFut, B, BFut, LT, LTFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
     BFut: Future<Output = Result<RootedValue, RuntimeError>>,
     LT: FnMut(Value, String) -> LTFut,
@@ -109,19 +110,19 @@ where
     let _input_roots = crate::call::root_values([&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), spec.name, b.clone()).await {
-                Ok(v) => v,
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), spec.name, b.clone()).await? {
+                Some(v) => v,
+                None => {
                     match call_method(Value::Object(obj.clone()), spec.inverse_name, b.clone())
-                        .await
+                        .await?
                     {
-                        Ok(v) => rooted_logical(
+                        Some(v) => rooted_logical(
                             !v.with_owned_async(|value| {
                                 logical_truth(value, "comparison result".to_string())
                             })
                             .await?,
                         )?,
-                        Err(_) => {
+                        None => {
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
@@ -133,23 +134,23 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), spec.right_name, a.clone()).await {
-                Ok(v) => v,
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), spec.right_name, a.clone()).await? {
+                Some(v) => v,
+                None => {
                     match call_method(
                         Value::Object(obj.clone()),
                         spec.right_inverse_name,
                         a.clone(),
                     )
-                    .await
+                    .await?
                     {
-                        Ok(v) => rooted_logical(
+                        Some(v) => rooted_logical(
                             !v.with_owned_async(|value| {
                                 logical_truth(value, "comparison result".to_string())
                             })
                             .await?,
                         )?,
-                        Err(_) => {
+                        None => {
                             if rel_binary_use_builtin(&a, &b) {
                                 call_builtin(spec.name, a.clone(), b.clone()).await?
                             } else {
@@ -180,7 +181,7 @@ pub async fn equal<CM, CMFut, B, BFut, LT, LTFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
     BFut: Future<Output = Result<RootedValue, RuntimeError>>,
     LT: FnMut(Value, String) -> LTFut,
@@ -190,9 +191,9 @@ where
     let _input_roots = crate::call::root_values([&a, &b])?;
     match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "eq", b.clone()).await {
-                Ok(v) => v.with_owned(|value| stack.push(value)),
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), "eq", b.clone()).await? {
+                Some(v) => v.with_owned(|value| stack.push(value)),
+                None => {
                     call_builtin("eq", a.clone(), b.clone())
                         .await?
                         .with_owned(|value| stack.push(value));
@@ -200,9 +201,9 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), "eq", a.clone()).await {
-                Ok(v) => v.with_owned(|value| stack.push(value)),
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), "eq", a.clone()).await? {
+                Some(v) => v.with_owned(|value| stack.push(value)),
+                None => {
                     call_builtin("eq", a.clone(), b.clone())
                         .await?
                         .with_owned(|value| stack.push(value));
@@ -236,7 +237,7 @@ pub async fn not_equal<CM, CMFut, B, BFut, LT, LTFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     B: FnMut(&'static str, Value, Value) -> BFut,
     BFut: Future<Output = Result<RootedValue, RuntimeError>>,
     LT: FnMut(Value, String) -> LTFut,
@@ -246,16 +247,16 @@ where
     let _input_roots = crate::call::root_values([&a, &b])?;
     match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "ne", b.clone()).await {
-                Ok(v) => v.with_owned(|value| stack.push(value)),
-                Err(_) => match call_method(Value::Object(obj.clone()), "eq", b.clone()).await {
-                    Ok(v) => stack.push(Value::Bool(
+            match call_method(Value::Object(obj.clone()), "ne", b.clone()).await? {
+                Some(v) => v.with_owned(|value| stack.push(value)),
+                None => match call_method(Value::Object(obj.clone()), "eq", b.clone()).await? {
+                    Some(v) => stack.push(Value::Bool(
                         !v.with_owned_async(|value| {
                             logical_truth(value, "comparison result".to_string())
                         })
                         .await?,
                     )),
-                    Err(_) => {
+                    None => {
                         call_builtin("ne", a.clone(), b.clone())
                             .await?
                             .with_owned(|value| stack.push(value));
@@ -264,16 +265,16 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), "ne", a.clone()).await {
-                Ok(v) => v.with_owned(|value| stack.push(value)),
-                Err(_) => match call_method(Value::Object(obj.clone()), "eq", a.clone()).await {
-                    Ok(v) => stack.push(Value::Bool(
+            match call_method(Value::Object(obj.clone()), "ne", a.clone()).await? {
+                Some(v) => v.with_owned(|value| stack.push(value)),
+                None => match call_method(Value::Object(obj.clone()), "eq", a.clone()).await? {
+                    Some(v) => stack.push(Value::Bool(
                         !v.with_owned_async(|value| {
                             logical_truth(value, "comparison result".to_string())
                         })
                         .await?,
                     )),
-                    Err(_) => {
+                    None => {
                         call_builtin("ne", a.clone(), b.clone())
                             .await?
                             .with_owned(|value| stack.push(value));
@@ -310,7 +311,7 @@ mod tests {
         _receiver: Value,
         _name: &'static str,
         _arg: Value,
-    ) -> Result<RootedValue, RuntimeError> {
+    ) -> Result<OperatorMethodDispatch, RuntimeError> {
         panic!("method dispatch should not be used by this test")
     }
 
@@ -373,3 +374,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "comparison/replay_tests.rs"]
+mod replay_tests;

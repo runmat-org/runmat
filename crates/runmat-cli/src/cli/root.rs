@@ -46,6 +46,8 @@ Examples:
   runmat --no-jit                          # Start REPL with interpreter only
   runmat --gc-preset low-latency           # Optimize GC for low latency
   runmat script.m                          # Execute MATLAB/Octave script
+  runmat < script.m                        # Execute stdin as one script
+  runmat -                                 # Explicit stdin script alias
   runmat --emit-bytecode script.m           # Emit bytecode disassembly
   runmat version --detailed                # Show detailed version information
 "#,

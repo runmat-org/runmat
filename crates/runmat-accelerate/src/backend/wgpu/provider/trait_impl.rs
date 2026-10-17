@@ -668,7 +668,7 @@ impl AccelProvider for WgpuProvider {
         {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
         }
-        if query.workload.gpu_random.is_some() {
+        if query.workload.gpu_random.is_some() || query.workload.gpu_integer.is_some() {
             use runmat_accelerate_api::observation::{
                 ProviderObservationCapability, ProviderObservationOverhead,
             };
@@ -1336,6 +1336,46 @@ impl AccelProvider for WgpuProvider {
         Option<runmat_accelerate_api::random::GpuRandomPhysicalProposal>,
     > {
         Ok(self.propose_random_child_exec(request))
+    }
+
+    fn propose_gpu_integer(
+        &self,
+        request: &runmat_accelerate_api::random::GpuIntegerRequest<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::random::GpuRandomPhysicalProposal>,
+    > {
+        Ok(self.propose_integer_child_exec(request))
+    }
+
+    fn execute_gpu_integer(
+        &self,
+        request: &runmat_accelerate_api::random::GpuIntegerRequest<'_>,
+        metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.integer_child_exec(request, metadata)
+    }
+
+    fn propose_gpu_integer_batch(
+        &self,
+        request: runmat_accelerate_api::random::GpuIntegerBatchRequest<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::random::GpuIntegerBatchPhysicalProposal>,
+    > {
+        Ok(self.propose_integer_child_batch_exec(request))
+    }
+
+    fn execute_gpu_integer_batch<'a>(
+        &'a self,
+        request: runmat_accelerate_api::random::GpuIntegerBatchRequest<'a>,
+        metadata: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        readback_control: Option<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        >,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::random::GpuIntegerBatchProgress,
+    > {
+        Box::pin(self.integer_child_batch_exec(request, metadata, readback_control))
     }
 
     fn random_exponential(&self, mu: f64, shape: &[usize]) -> Result<GpuTensorHandle> {

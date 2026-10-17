@@ -310,6 +310,7 @@ mod tests {
             semantic_operation: "min",
             variant: "missing_readback_fixture",
             domain_facts: runmat_execution::Digest::sha256(b"readback_fixture"),
+            calibration_facts: None,
             host_scratch: ResourceByteBound::Known(0),
             provider_host_scratch: ResourceByteBound::Known(0),
             host_cpu_millicores: 1000,

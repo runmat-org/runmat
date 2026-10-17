@@ -48,6 +48,9 @@ pub(crate) async fn dispatch_with_graphics(
             )
             .await
         }
+        (None, None) if !atty::is(atty::Stream::Stdin) => {
+            script::execute_stdin_script_with_graphics(emit_bytecode, cli, config, graphics).await
+        }
         (None, None) => repl::execute_repl_with_graphics(config, cli, graphics).await,
         (Some(_), Some(_)) => {
             log::error!("Cannot specify both command and script file");

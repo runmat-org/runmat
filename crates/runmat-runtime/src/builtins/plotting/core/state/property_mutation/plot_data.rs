@@ -159,3 +159,22 @@ pub(crate) fn update_plot_element_for_property(
     state.revision = state.revision.wrapping_add(1);
     Ok(())
 }
+
+pub(crate) fn try_update_plot_element_for_property<E>(
+    property: &PropertyMutationTarget,
+    figure_handle: FigureHandle,
+    plot_index: usize,
+    updater: impl FnOnce(&mut runmat_plot::plots::figure::PlotElement) -> Result<(), E>,
+) -> Result<Result<(), E>, FigureError> {
+    let mut reg = property.registry(PropertyLocation::Plot(figure_handle, plot_index))?;
+    let state = get_state_mut(&mut reg, figure_handle);
+    let plot = state
+        .figure
+        .get_plot_mut(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    let result = updater(plot);
+    if result.is_ok() {
+        state.revision = state.revision.wrapping_add(1);
+    }
+    Ok(result)
+}

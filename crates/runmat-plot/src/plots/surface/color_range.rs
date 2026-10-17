@@ -94,7 +94,25 @@ impl SurfacePlot {
         {
             return ScalarColorRange::NotMapped;
         }
-        let extent = if let Some(rows) = &self.z_data {
+        let extent = if let Some(source) = &self.source_c {
+            if self.source_c_rgb {
+                return ScalarColorRange::NotMapped;
+            }
+            let mut lower = f64::INFINITY;
+            let mut upper = f64::NEG_INFINITY;
+            for index in 0..source.len() {
+                let value = source
+                    .storage()
+                    .value_at(index)
+                    .expect("validated surface CData")
+                    .materialize_f64();
+                if value.is_finite() {
+                    lower = lower.min(value);
+                    upper = upper.max(value);
+                }
+            }
+            Some((lower, upper))
+        } else if let Some(rows) = &self.z_data {
             let mut lower = f64::INFINITY;
             let mut upper = f64::NEG_INFINITY;
             for value in rows

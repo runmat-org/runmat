@@ -1,4 +1,6 @@
 use super::*;
+#[cfg(not(target_arch = "wasm32"))]
+use futures::channel::oneshot;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]

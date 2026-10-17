@@ -1925,7 +1925,17 @@ impl Figure {
                     if s.color_mapping == crate::plots::surface::SurfaceColorMapping::Scaled {
                         s.set_color_limits(meta.color_limits);
                     }
+                    s.colormap_length = meta.colormap_length;
                     *s = s.clone().with_colormap(meta.colormap.clone());
+                }
+            }
+            if let PlotElement::Patch(patch) = p {
+                if let Some(meta) = self.axes_metadata.get(axes_index) {
+                    patch.set_color_context(
+                        meta.colormap.clone(),
+                        meta.colormap_length,
+                        meta.color_limits,
+                    );
                 }
             }
 

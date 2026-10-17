@@ -3,7 +3,6 @@ use super::ExecutableUnit;
 pub(super) enum PortableEntrypoint {
     Callable {
         name: String,
-        #[cfg(not(target_arch = "wasm32"))]
         compiled_function: runmat_hir::FunctionId,
         function: runmat_types::ProgramFunctionId,
         kind: runmat_execution::ExecutableEntrypointKind,
@@ -242,7 +241,6 @@ fn function_entrypoint(
     }
     Ok(PortableEntrypoint::Callable {
         name: registered_name.to_string(),
-        #[cfg(not(target_arch = "wasm32"))]
         compiled_function: function,
         function: body.portable_function,
         kind: runmat_execution::ExecutableEntrypointKind::Function,
@@ -299,7 +297,6 @@ pub(super) fn script_entrypoint(unit: &ExecutableUnit) -> Result<PortableEntrypo
         .map_err(|_| "script entrypoint exceeds its portable representation".to_string())?;
     Ok(PortableEntrypoint::Callable {
         name: "script".into(),
-        #[cfg(not(target_arch = "wasm32"))]
         compiled_function: function,
         function: portable,
         kind: runmat_execution::ExecutableEntrypointKind::Script,

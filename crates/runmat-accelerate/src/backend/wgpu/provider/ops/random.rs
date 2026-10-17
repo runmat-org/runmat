@@ -9,6 +9,8 @@ use super::{
 
 #[path = "random/child.rs"]
 mod child;
+#[path = "random/integer_child.rs"]
+mod integer_child;
 
 impl WgpuProvider {
     pub(crate) fn set_rng_state_exec(&self, state: u64) -> Result<()> {

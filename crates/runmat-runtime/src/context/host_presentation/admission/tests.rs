@@ -1,6 +1,60 @@
 use super::*;
 use runmat_execution::{PlacementRevision, ProviderResourceSnapshot};
 
+#[test]
+fn selected_upload_metadata_quote_tracks_each_owned_shape_and_operation() {
+    let output = ProviderRepresentation {
+        element_type: runmat_accelerate_api::ProviderElementType::F32,
+        storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+        layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+        shape: vec![2, 3],
+        residency: ProviderResidency::Device,
+    };
+    let operation = ProviderOperationIdentity::new("transfer.upload");
+    let one =
+        selected_upload_metadata_bytes(std::slice::from_ref(&output), &operation, "randi").unwrap();
+    let two =
+        selected_upload_metadata_bytes(&[output.clone(), output], &operation, "randi").unwrap();
+    assert_eq!(
+        two - one,
+        std::mem::size_of::<ProviderRepresentation>() as u64
+            + 2 * std::mem::size_of::<u64>() as u64
+    );
+    assert_eq!(
+        selected_upload_metadata_bytes(
+            std::slice::from_ref(&ProviderRepresentation {
+                element_type: runmat_accelerate_api::ProviderElementType::F32,
+                storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+                layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                shape: vec![2, 3],
+                residency: ProviderResidency::Device,
+            }),
+            &operation,
+            "randi2",
+        )
+        .unwrap()
+            - one,
+        1
+    );
+    let longer = ProviderOperationIdentity::new("transfer.upload.extra");
+    assert_eq!(
+        selected_upload_metadata_bytes(
+            &[ProviderRepresentation {
+                element_type: runmat_accelerate_api::ProviderElementType::F32,
+                storage: runmat_accelerate_api::ProviderStorage::DenseReal,
+                layout: runmat_accelerate_api::ProviderLayout::ColumnMajorContiguous,
+                shape: vec![2, 3],
+                residency: ProviderResidency::Device,
+            }],
+            &longer,
+            "randi"
+        )
+        .unwrap()
+            - one,
+        6
+    );
+}
+
 fn budget_request(logical: u64, physical: u64, capacity: u64) -> WholeWorkPlacementRequest {
     let digest = Digest::sha256(b"physical-host-upload-budget");
     let mut candidate = upload_candidate(

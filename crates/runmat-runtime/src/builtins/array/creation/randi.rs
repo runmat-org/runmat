@@ -7,6 +7,10 @@ use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor,
 
 mod gpu;
 
+#[cfg(all(test, feature = "wgpu", not(target_arch = "wasm32")))]
+#[path = "randi/gpu_integer_batch_tests.rs"]
+mod gpu_integer_batch_tests;
+
 use crate::build_runtime_error;
 #[cfg(test)]
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;

@@ -19,6 +19,7 @@ use crate::commands::accel::dump_provider_telemetry_if_requested;
 use crate::commands::bytecode::{emit_bytecode_with_catalog, write_bytecode_output};
 use crate::commands::fea::execute_fea_path;
 use crate::commands::package::install_project_for_source;
+use crate::commands::piped_input::PipedInput;
 use crate::commands::session::{create_session_with_graphics, drive_with_graphics_callbacks};
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_frontend_error, format_runtime_diagnostic};
@@ -64,6 +65,9 @@ pub(crate) async fn execute_script_with_graphics(
     fea_json: bool,
     graphics: &runmat_core::SessionGraphicsHost,
 ) -> Result<()> {
+    if script.as_path() == Path::new("-") {
+        return execute_stdin_script_with_graphics(emit_bytecode_path, cli, config, graphics).await;
+    }
     let script = resolve_script_input(script)?;
     info!("Executing script: {script:?}");
 
@@ -94,6 +98,38 @@ pub(crate) async fn execute_script_with_graphics(
     execute_script_request(
         script,
         SourceInput::Path(source_name),
+        cli,
+        config,
+        graphics,
+    )
+    .await
+}
+
+/// CLI stdin is a whole script, not a sequence of REPL submissions. Its
+/// synthetic source name is deliberately not a project-owned file identity:
+/// package installation comes from the current directory, while compilation
+/// uses exactly the bytes captured by the CLI's exclusive stdin reader.
+pub(crate) async fn execute_stdin_script_with_graphics(
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatRuntimeConfig,
+    graphics: &runmat_core::SessionGraphicsHost,
+) -> Result<()> {
+    let content = PipedInput::stdin()?
+        .await
+        .context("Failed to read stdin script")?;
+    if let Some(path) = emit_bytecode_path {
+        let output = emit_bytecode_with_catalog(&content, config, None)
+            .context("Failed to emit bytecode for stdin script")?;
+        return write_bytecode_output(&path, &output);
+    }
+    let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+    execute_script_request(
+        cwd.join("<stdin>"),
+        SourceInput::Text {
+            name: "<stdin>".to_owned(),
+            text: content,
+        },
         cli,
         config,
         graphics,

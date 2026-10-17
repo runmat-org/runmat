@@ -2985,6 +2985,43 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(unsupported_provider_operation("request-bound GPU random is not supported").into())
     }
 
+    fn propose_gpu_integer(
+        &self,
+        _request: &random::GpuIntegerRequest<'_>,
+    ) -> ProviderExecutionResult<Option<random::GpuRandomPhysicalProposal>> {
+        Ok(None)
+    }
+
+    fn execute_gpu_integer(
+        &self,
+        _request: &random::GpuIntegerRequest<'_>,
+        _metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        Err(unsupported_provider_operation("request-bound GPU integer is not supported").into())
+    }
+
+    /// One physically settled, bounded rejection-sampling batch. Providers
+    /// that cannot retain an unpublished output/mask leave this route
+    /// unsupported before effects; callers may choose a host-mediated route
+    /// only before committing the child range or submitting a batch.
+    fn execute_gpu_integer_batch<'a>(
+        &'a self,
+        _request: random::GpuIntegerBatchRequest<'a>,
+        _metadata: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        _readback_control: Option<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        >,
+    ) -> ProviderExecutionFuture<'a, random::GpuIntegerBatchProgress> {
+        unsupported_execution_future("bounded GPU integer batches are not supported")
+    }
+
+    fn propose_gpu_integer_batch(
+        &self,
+        _request: random::GpuIntegerBatchRequest<'_>,
+    ) -> ProviderExecutionResult<Option<random::GpuIntegerBatchPhysicalProposal>> {
+        Ok(None)
+    }
+
     /// Exponentially-distributed random values with mean `mu`.
     fn random_exponential(&self, _mu: f64, _shape: &[usize]) -> anyhow::Result<GpuTensorHandle> {
         Err(unsupported_provider_operation(

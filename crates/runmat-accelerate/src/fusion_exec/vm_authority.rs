@@ -45,4 +45,19 @@ impl<'a> VmFusionSelectionRight<'a> {
             Self::Decline(right) => Some(right),
         }
     }
+
+    pub(super) fn certified_decline(
+        self,
+        request: &super::FusionExecutionRequest<'_>,
+    ) -> Option<&'a VmFusionDeclineRight> {
+        let right = self.decline()?;
+        let runtime = request.runtime.as_ref()?;
+        (right.is_current(runtime)
+            && right.matches_group(
+                request.plan.group.id,
+                request.plan.group.span.start,
+                request.plan.group.span.end,
+            ))
+        .then_some(right)
+    }
 }

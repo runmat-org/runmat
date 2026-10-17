@@ -60,17 +60,27 @@ fn rhs_operator_callee_failures_are_not_retried_or_reordered() {
         *diagnostic.lock().expect("diagnostic fixture lock") = code;
         calls.store(0, Ordering::SeqCst);
         let rhs = Value::Object(runmat_value::ObjectInstance::new(class.clone()));
-        let err = block_on(call_rhs_operator_method_ordered_with_outputs(
+        let err = block_on(try_call_rhs_object_operator_method_ordered(
             Value::Num(2.0),
             rhs,
-            "plus".into(),
-            1,
-            None,
+            "plus",
         ))
         .expect_err("selected callee error must propagate");
         assert_eq!(err.identifier(), Some(format!("RunMat:{code}").as_str()));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
+}
+
+#[test]
+fn missing_operator_is_certified_absent_without_invocation() {
+    let object = Value::Object(runmat_value::ObjectInstance::new("MissingOperatorFixture"));
+    let outcome = block_on(try_call_object_operator_method(
+        object,
+        "plus",
+        Value::Num(2.0),
+    ))
+    .expect("missing operator resolution");
+    assert!(outcome.is_none());
 }
 
 #[test]

@@ -1,14 +1,7 @@
 //! MATLAB-compatible `patch` builtin.
 
 use glam::{Vec3, Vec4};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-};
+use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{NumericPlotData, PatchEdgeColorMode, PatchFaceColorMode, PatchPlot};
 use runmat_value::{IntegerStorage, NumericStorage, StructValue, Tensor, Value};
@@ -28,283 +21,12 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_color_value, value_as_f64, value_as_string, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "patch";
-
-const INTEGER_AXES_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "patch-integer-axes-handle",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "patch with a typed-integer numeric axes alias is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:PatchIntegerAxesHandleExtension"),
+pub use runmat_builtins::{
+    PATCH_DESCRIPTOR, PATCH_EXTENSIONS as EXTENSIONS,
+    PATCH_INTEGER_CAPABILITIES as INTEGER_CAPABILITIES,
 };
-
-pub const EXTENSIONS: [BuiltinExtensionDescriptor; 1] = [INTEGER_AXES_EXTENSION];
-
-macro_rules! patch_integer_input {
-    ($name:literal, $availability:expr, $notes:literal) => {
-        [BuiltinIntegerInputCapability {
-            name: $name,
-            classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-            availability: $availability,
-            scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-            notes: $notes,
-        }]
-    };
-}
-
-const INTEGER_X: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
-    "X",
-    BuiltinIntegerInputAvailability::Documented,
-    "The compatibility target explicitly lists every built-in integer class for X coordinates."
-);
-const INTEGER_Y: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
-    "Y",
-    BuiltinIntegerInputAvailability::Documented,
-    "The compatibility target explicitly lists every built-in integer class for Y coordinates."
-);
-const INTEGER_Z: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
-    "Z",
-    BuiltinIntegerInputAvailability::Documented,
-    "The compatibility target explicitly lists every built-in integer class for Z coordinates."
-);
-const INTEGER_C: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
-    "CData",
-    BuiltinIntegerInputAvailability::Documented,
-    "Integer color indices remain authoritative as patch CData before renderer colormap conversion."
-);
-const INTEGER_FACES: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
-    "Faces",
-    BuiltinIntegerInputAvailability::Documented,
-    "The compatibility target explicitly lists every built-in integer class for one-based face definitions."
-);
-const INTEGER_VERTICES: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
-    "Vertices",
-    BuiltinIntegerInputAvailability::Documented,
-    "The compatibility target explicitly lists every built-in integer class for vertex coordinates."
-);
-const INTEGER_AX: [BuiltinIntegerInputCapability; 1] = patch_integer_input!(
-    "ax",
-    BuiltinIntegerInputAvailability::RunMatOnly,
-    "MATLAB targets a graphics object; typed-integer numeric axes aliases are a gated RunMat representation extension."
-);
-
-const fn patch_data_capability(
-    form: &'static str,
-    inputs: &'static [BuiltinIntegerInputCapability],
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Native storage and shape remain authoritative on patch properties and in scene persistence; host triangulation and rendering are explicit floating boundaries, and documented gpuArray input executes through client gather.",
-    }
-}
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 7] = [
-    patch_data_capability("p = patch(integer_X, Y, C, ...)", &INTEGER_X),
-    patch_data_capability("p = patch(X, integer_Y, C, ...)", &INTEGER_Y),
-    patch_data_capability("p = patch(X, Y, integer_Z, C, ...)", &INTEGER_Z),
-    patch_data_capability("p = patch(..., integer_CData, ...)", &INTEGER_C),
-    patch_data_capability("p = patch('Faces', integer_F, 'Vertices', V, ...)", &INTEGER_FACES),
-    patch_data_capability("p = patch('Faces', F, 'Vertices', integer_V, ...)", &INTEGER_VERTICES),
-    BuiltinIntegerCapabilityDescriptor {
-        form: "p = patch(integer_ax, ...)",
-        inputs: &INTEGER_AX,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "The compatibility gate runs before axes selection, input gathering, triangulation, or rendering.",
-    },
-];
-
-const PATCH_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "h",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Handle to the created patch object.",
-}];
-
-const PATCH_INPUTS_XY_C: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Face color specification.",
-    },
-];
-
-const PATCH_INPUTS_XYZ_C: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch Z coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "C",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Face color specification.",
-    },
-];
-
-const PATCH_INPUTS_XYZ: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "X",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch X coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Y",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch Y coordinates.",
-    },
-    BuiltinParamDescriptor {
-        name: "Z",
-        ty: BuiltinParamType::NumericArray,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Patch Z coordinates.",
-    },
-];
-
-const PATCH_INPUTS_STRUCT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "S",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Struct containing patch properties.",
-}];
-
-const PATCH_INPUTS_FACEVERT_PROPS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "facevert",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Faces/Vertices property/value pairs.",
-    },
-    BuiltinParamDescriptor {
-        name: "props",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Additional patch property/value pairs.",
-    },
-];
-
-const PATCH_INPUTS_AX_DATA: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "ax",
-        ty: BuiltinParamType::NumericScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Target axes handle.",
-    },
-    BuiltinParamDescriptor {
-        name: "data",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Patch positional/property arguments.",
-    },
-];
-
-const PATCH_SIGNATURES: [BuiltinSignatureDescriptor; 6] = [
-    BuiltinSignatureDescriptor {
-        label: "h = patch(X, Y, C)",
-        inputs: &PATCH_INPUTS_XY_C,
-        outputs: &PATCH_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = patch(X, Y, Z)",
-        inputs: &PATCH_INPUTS_XYZ,
-        outputs: &PATCH_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = patch(X, Y, Z, C)",
-        inputs: &PATCH_INPUTS_XYZ_C,
-        outputs: &PATCH_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = patch(S)",
-        inputs: &PATCH_INPUTS_STRUCT,
-        outputs: &PATCH_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = patch('Faces', F, 'Vertices', V, ...)",
-        inputs: &PATCH_INPUTS_FACEVERT_PROPS,
-        outputs: &PATCH_OUTPUT_HANDLE,
-    },
-    BuiltinSignatureDescriptor {
-        label: "h = patch(ax, ...)",
-        inputs: &PATCH_INPUTS_AX_DATA,
-        outputs: &PATCH_OUTPUT_HANDLE,
-    },
-];
-
-const PATCH_ERROR_INVALID_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PATCH.INVALID_ARGUMENT",
-    identifier: Some("RunMat:patch:InvalidArgument"),
-    when: "Patch coordinates, faces/vertices, or property/value arguments are malformed.",
-    message: "patch: invalid argument",
-};
-
-const PATCH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.PATCH.INTERNAL",
-    identifier: Some("RunMat:patch:Internal"),
-    when: "Internal patch triangulation/render setup fails unexpectedly.",
-    message: "patch: internal operation failed",
-};
-
-const PATCH_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [PATCH_ERROR_INVALID_ARGUMENT, PATCH_ERROR_INTERNAL];
-
-pub const PATCH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PATCH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &PATCH_ERRORS,
+use runmat_builtins::{
+    PATCH_ERROR_INTERNAL, PATCH_ERROR_INVALID_ARGUMENT, PATCH_INTEGER_AXES_EXTENSION,
 };
 
 fn patch_error_with_detail(
@@ -378,9 +100,12 @@ struct PatchOptions {
     faces: Option<Tensor>,
     vertices: Option<Tensor>,
     c_data: Option<Tensor>,
+    c_data_kind: runmat_plot::plots::PatchColorSourceKind,
     face_color: Vec4,
     edge_color: Vec4,
     face_color_mode: PatchFaceColorMode,
+    face_color_explicit: bool,
+    color_mapping: runmat_plot::plots::surface::SurfaceColorMapping,
     edge_color_mode: PatchEdgeColorMode,
     face_alpha: f32,
     edge_alpha: f32,
@@ -398,9 +123,12 @@ impl Default for PatchOptions {
             faces: None,
             vertices: None,
             c_data: None,
+            c_data_kind: runmat_plot::plots::PatchColorSourceKind::FaceVertex,
             face_color: Vec4::new(0.0, 0.447, 0.741, 1.0),
             edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
             face_color_mode: PatchFaceColorMode::Color,
+            face_color_explicit: false,
+            color_mapping: runmat_plot::plots::surface::SurfaceColorMapping::Scaled,
             edge_color_mode: PatchEdgeColorMode::Color,
             face_alpha: 1.0,
             edge_alpha: 1.0,
@@ -471,7 +199,7 @@ fn gate_typed_integer_axes_alias(args: &[Value]) -> BuiltinResult<()> {
         || matches!(first, Value::GpuTensor(handle) if runmat_accelerate_api::handle_integer_type(handle).is_some());
     if typed_integer && super::properties::resolve_plot_handle(first, BUILTIN_NAME).is_ok() {
         crate::compatibility::ensure_builtin_extension_enabled(
-            &INTEGER_AXES_EXTENSION,
+            &PATCH_INTEGER_AXES_EXTENSION,
             BUILTIN_NAME,
         )?;
     }
@@ -497,6 +225,14 @@ pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
         apply_property_pairs(&mut opts, &remaining)?;
     }
 
+    if opts.c_data_kind == runmat_plot::plots::PatchColorSourceKind::CoordinateGrid
+        && (opts.x_data.is_none()
+            || opts.y_data.is_none()
+            || opts.c_data.as_ref().is_some_and(|data| data.len() == 1))
+    {
+        opts.c_data_kind = runmat_plot::plots::PatchColorSourceKind::FaceVertex;
+    }
+
     let (vertices, faces) = if let (Some(faces), Some(vertices)) = (&opts.faces, &opts.vertices) {
         (vertices_from_tensor(vertices)?, faces_from_tensor(faces)?)
     } else {
@@ -505,17 +241,21 @@ pub(super) fn parse_patch_plot(args: Vec<Value>) -> BuiltinResult<PatchPlot> {
 
     let mut plot =
         PatchPlot::new(vertices, faces).map_err(|err| patch_invalid(format!("patch: {err}")))?;
-    plot.set_source_data(
-        opts.x_data.as_ref().map(patch_data_from_tensor),
-        opts.y_data.as_ref().map(patch_data_from_tensor),
-        opts.z_data.as_ref().map(patch_data_from_tensor),
-        opts.c_data.as_ref().map(patch_data_from_tensor),
-        opts.faces.as_ref().map(patch_data_from_tensor),
-        opts.vertices.as_ref().map(patch_data_from_tensor),
-    );
+    plot.set_source_data(runmat_plot::plots::PatchSourceDataOwned {
+        x: opts.x_data.as_ref().map(patch_data_from_tensor),
+        y: opts.y_data.as_ref().map(patch_data_from_tensor),
+        z: opts.z_data.as_ref().map(patch_data_from_tensor),
+        colors: opts.c_data.as_ref().map(patch_data_from_tensor),
+        color_kind: opts.c_data_kind,
+        faces: opts.faces.as_ref().map(patch_data_from_tensor),
+        vertices: opts.vertices.as_ref().map(patch_data_from_tensor),
+    })
+    .map_err(patch_invalid)?;
     plot.set_face_color(opts.face_color);
     plot.set_edge_color(opts.edge_color);
     plot.set_face_color_mode(opts.face_color_mode);
+    plot.validate_color_mode().map_err(patch_invalid)?;
+    plot.set_color_mapping(opts.color_mapping);
     plot.set_edge_color_mode(opts.edge_color_mode);
     plot.set_face_alpha(opts.face_alpha);
     plot.set_edge_alpha(opts.edge_alpha);
@@ -531,62 +271,19 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
         args.clear();
         return Ok(());
     }
-    if args.len() >= 3
-        && !is_property_name(&args[2])
-        && value_matches_coordinate_values(&args[0], &args[1], &args[2])
-        && !is_color_literal(&args[2])
-    {
-        opts.z_data = Some(tensor_from_value(args.remove(2))?);
-    }
     opts.x_data = Some(tensor_from_value(args.remove(0))?);
     opts.y_data = Some(tensor_from_value(args.remove(0))?);
-
     if args.first().is_none_or(is_property_name) {
         return Ok(());
     }
-
-    if opts.z_data.is_some() {
-        apply_color_argument(opts, &args.remove(0));
-        return Ok(());
-    }
-
-    if args.len() >= 2 && !is_property_name(&args[1]) && !is_color_literal(&args[0]) {
+    // The three-data form is patch(X,Y,C). Z is positional only in the
+    // four-data form patch(X,Y,Z,C); a three-dimensional uncolored patch
+    // uses the explicit XData/YData/ZData properties.
+    if args.len() >= 2 && !is_property_name(&args[1]) {
         opts.z_data = Some(tensor_from_value(args.remove(0))?);
-        apply_color_argument(opts, &args.remove(0));
-    } else {
-        let value = args.remove(0);
-        if value_matches_coordinate_shape(opts, &value) && !is_color_literal(&value)
-            || !apply_color_argument(opts, &value)
-        {
-            opts.z_data = Some(tensor_from_value(value)?);
-        }
     }
+    apply_color_argument(opts, &args.remove(0))?;
     Ok(())
-}
-
-fn value_matches_coordinate_values(x: &Value, y: &Value, value: &Value) -> bool {
-    let (Ok(x), Ok(y), Ok(tensor)) = (
-        Tensor::try_from(x),
-        Tensor::try_from(y),
-        Tensor::try_from(value),
-    ) else {
-        return false;
-    };
-    let dimensions = patch_tensor_dimensions(tensor.shape());
-    dimensions == patch_tensor_dimensions(x.shape())
-        && dimensions == patch_tensor_dimensions(y.shape())
-}
-
-fn value_matches_coordinate_shape(opts: &PatchOptions, value: &Value) -> bool {
-    let (Some(x), Some(y)) = (&opts.x_data, &opts.y_data) else {
-        return false;
-    };
-    let Ok(tensor) = Tensor::try_from(value) else {
-        return false;
-    };
-    let dimensions = patch_tensor_dimensions(tensor.shape());
-    dimensions == patch_tensor_dimensions(x.shape())
-        && dimensions == patch_tensor_dimensions(y.shape())
 }
 
 fn is_color_literal(value: &Value) -> bool {
@@ -631,7 +328,19 @@ fn apply_property(opts: &mut PatchOptions, key: &str, value: &Value) -> BuiltinR
         "zdata" => opts.z_data = Some(tensor_from_value(value.clone())?),
         "faces" => opts.faces = Some(tensor_from_value(value.clone())?),
         "vertices" => opts.vertices = Some(tensor_from_value(value.clone())?),
-        "cdata" => apply_c_data(opts, value)?,
+        "cdata" => apply_c_data(
+            opts,
+            value,
+            runmat_plot::plots::PatchColorSourceKind::CoordinateGrid,
+        )?,
+        "facevertexcdata" => apply_c_data(
+            opts,
+            value,
+            runmat_plot::plots::PatchColorSourceKind::FaceVertex,
+        )?,
+        "cdatamapping" => {
+            opts.color_mapping = super::properties::parse_color_data_mapping(value, BUILTIN_NAME)?;
+        }
         "facecolor" | "color" => apply_face_color(opts, value)?,
         "edgecolor" => apply_edge_color(opts, value)?,
         "facealpha" => {
@@ -714,22 +423,21 @@ fn visible_value(value: &Value) -> BuiltinResult<bool> {
     }
 }
 
-fn apply_c_data(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
+fn apply_c_data(
+    opts: &mut PatchOptions,
+    value: &Value,
+    kind: runmat_plot::plots::PatchColorSourceKind,
+) -> BuiltinResult<()> {
     let tensor = tensor_from_value(value.clone())?;
-    if tensor.len() == 3 {
-        if let Ok(color) = parse_color_value(
-            &LineStyleParseOptions::generic(BUILTIN_NAME),
-            &Value::Tensor(tensor.clone()),
-        ) {
-            opts.face_color = color;
-            opts.face_color_mode = PatchFaceColorMode::Color;
-        } else {
-            opts.face_color_mode = PatchFaceColorMode::Flat;
-        }
-    } else {
+    if tensor.is_empty() {
+        opts.c_data = None;
+        return Ok(());
+    }
+    if !opts.face_color_explicit {
         opts.face_color_mode = PatchFaceColorMode::Flat;
     }
     opts.c_data = Some(tensor);
+    opts.c_data_kind = kind;
     Ok(())
 }
 
@@ -920,13 +628,18 @@ fn tensor_from_value(value: Value) -> BuiltinResult<Tensor> {
     }
 }
 
-fn apply_color_argument(opts: &mut PatchOptions, value: &Value) -> bool {
-    if let Ok(color) = parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value) {
+fn apply_color_argument(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
+    if is_color_literal(value) {
+        let color = parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value)?;
         opts.face_color = color;
         opts.face_color_mode = PatchFaceColorMode::Color;
-        return true;
+        return Ok(());
     }
-    false
+    apply_c_data(
+        opts,
+        value,
+        runmat_plot::plots::PatchColorSourceKind::CoordinateGrid,
+    )
 }
 
 fn apply_face_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()> {
@@ -934,10 +647,17 @@ fn apply_face_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()>
         match text.trim().to_ascii_lowercase().as_str() {
             "none" => {
                 opts.face_color_mode = PatchFaceColorMode::None;
+                opts.face_color_explicit = true;
                 return Ok(());
             }
-            "flat" | "interp" => {
+            "flat" => {
                 opts.face_color_mode = PatchFaceColorMode::Flat;
+                opts.face_color_explicit = true;
+                return Ok(());
+            }
+            "interp" => {
+                opts.face_color_mode = PatchFaceColorMode::Interp;
+                opts.face_color_explicit = true;
                 return Ok(());
             }
             _ => {}
@@ -945,6 +665,7 @@ fn apply_face_color(opts: &mut PatchOptions, value: &Value) -> BuiltinResult<()>
     }
     opts.face_color = parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value)?;
     opts.face_color_mode = PatchFaceColorMode::Color;
+    opts.face_color_explicit = true;
     Ok(())
 }
 
@@ -1117,6 +838,8 @@ pub(super) fn is_property_name(value: &Value) -> bool {
                     | "faces"
                     | "vertices"
                     | "cdata"
+                    | "facevertexcdata"
+                    | "cdatamapping"
                     | "facecolor"
                     | "edgecolor"
                     | "facealpha"
@@ -1181,6 +904,34 @@ mod tests {
         assert_eq!(plot.face_color(), Vec4::new(1.0, 0.0, 0.0, 1.0));
     }
 
+    #[test]
+    fn explicit_interpolated_face_color_survives_face_vertex_data_order() {
+        let data = tensor(3, 3, &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+        let geometry = [
+            tensor(3, 1, &[0.0, 1.0, 0.0]),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+        ];
+        for data_first in [false, true] {
+            let mut args = geometry.to_vec();
+            let colors = [Value::String("FaceVertexCData".into()), data.clone()];
+            let mode = [
+                Value::String("FaceColor".into()),
+                Value::String("interp".into()),
+            ];
+            if data_first {
+                args.extend(colors);
+                args.extend(mode);
+            } else {
+                args.extend(mode);
+                args.extend(colors);
+            }
+            let mut plot = parse_patch_plot(args).expect("interpolated vertex colors");
+            assert_eq!(plot.face_color_mode(), PatchFaceColorMode::Interp);
+            let vertices = plot.render_data().vertices;
+            assert_ne!(vertices[0].color, vertices[1].color);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn patch_rank_geometry_keeps_row_vectors_and_empty_rank_zero_data() {
@@ -1218,10 +969,45 @@ mod tests {
     }
 
     #[test]
-    fn patch_xyz_without_color_preserves_z_data() {
+    fn patch_three_data_arguments_are_coordinate_colors_not_z() {
         let plot = parse_patch_plot(vec![
             tensor(3, 1, &[0.0, 1.0, 0.0]),
             tensor(3, 1, &[0.0, 0.0, 1.0]),
+            tensor(3, 1, &[1.0, 2.0, 3.0]),
+            Value::String("FaceColor".into()),
+            Value::String("interp".into()),
+        ])
+        .expect("coordinate indexed colors");
+        assert!(plot.vertices().iter().all(|vertex| vertex.z == 0.0));
+        assert_eq!(
+            plot.color_source_kind(),
+            runmat_plot::plots::PatchColorSourceKind::CoordinateGrid
+        );
+        let (_, _, z, c, _, _) = plot.source_data();
+        assert!(z.is_none());
+        assert_eq!(c.expect("coordinate colors").shape(), &[3, 1]);
+
+        let mixed_orientation = parse_patch_plot(vec![
+            tensor(1, 3, &[0.0, 1.0, 0.0]),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+            tensor(3, 1, &[1.0, 2.0, 3.0]),
+        ])
+        .expect("vector coordinate orientations preserve color pairing");
+        assert_eq!(mixed_orientation.vertices().len(), 3);
+        assert_eq!(
+            mixed_orientation.color_source_kind(),
+            plot.color_source_kind()
+        );
+    }
+
+    #[test]
+    fn patch_xyz_properties_preserve_z_data() {
+        let plot = parse_patch_plot(vec![
+            Value::String("XData".into()),
+            tensor(3, 1, &[0.0, 1.0, 0.0]),
+            Value::String("YData".into()),
+            tensor(3, 1, &[0.0, 0.0, 1.0]),
+            Value::String("ZData".into()),
             tensor(3, 1, &[0.25, 0.5, 0.75]),
         ])
         .unwrap();
@@ -1232,10 +1018,13 @@ mod tests {
     }
 
     #[test]
-    fn patch_xyz_vectors_read_typed_integer_storage_exactly() {
+    fn patch_xyz_properties_read_typed_integer_storage_exactly() {
         let plot = parse_patch_plot(vec![
+            Value::String("XData".into()),
             int_tensor(3, 1, IntegerStorage::I16(vec![0, 1, 0])),
+            Value::String("YData".into()),
             int_tensor(3, 1, IntegerStorage::I16(vec![0, 0, 1])),
+            Value::String("ZData".into()),
             int_tensor(3, 1, IntegerStorage::I16(vec![2, 3, 4])),
         ])
         .unwrap();
@@ -1246,10 +1035,13 @@ mod tests {
     }
 
     #[test]
-    fn patch_xyz_accepts_trailing_name_value_pairs() {
+    fn patch_xyz_properties_accept_trailing_name_value_pairs() {
         let plot = parse_patch_plot(vec![
+            Value::String("XData".into()),
             tensor(3, 1, &[0.0, 1.0, 0.0]),
+            Value::String("YData".into()),
             tensor(3, 1, &[0.0, 0.0, 1.0]),
+            Value::String("ZData".into()),
             tensor(3, 1, &[0.25, 0.5, 0.75]),
             Value::String("FaceColor".into()),
             Value::String("r".into()),

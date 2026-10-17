@@ -48,6 +48,30 @@ async fn actual_linear_launch_tail_witness() {
         provider.workgroup_config.matmul_tile,
     );
     assert_ne!(first.repmat.linear_launch(), second.repmat.linear_launch());
+    for (first_bundle, second_bundle) in [
+        (&first.eye, &second.eye),
+        (&first.fspecial, &second.fspecial),
+        (&first.linspace, &second.linspace),
+    ] {
+        assert_eq!(first_bundle.linear_dispatch_groups(65).unwrap(), 2);
+        assert_eq!(second_bundle.linear_dispatch_groups(65).unwrap(), 1);
+        assert_eq!(
+            first_bundle.linear_chunk_capacity().unwrap(),
+            first_launch.chunk_capacity().unwrap()
+        );
+        assert_eq!(
+            second_bundle.linear_chunk_capacity().unwrap(),
+            second_launch.chunk_capacity().unwrap()
+        );
+        assert!(!first_bundle.frozen_shader_source().contains("@WG@"));
+        assert!(!second_bundle.frozen_shader_source().contains("@WG@"));
+        assert!(first_bundle
+            .frozen_shader_source()
+            .contains("@workgroup_size(64)"));
+        assert!(second_bundle
+            .frozen_shader_source()
+            .contains("@workgroup_size(128)"));
+    }
     provider
         .access
         .with_shared(|emission| -> anyhow::Result<()> {
@@ -55,12 +79,83 @@ async fn actual_linear_launch_tail_witness() {
             let second_cold = second.repmat.get(emission)?;
             assert!(std::ptr::eq(first_cold, first.repmat.get(emission)?));
             assert!(std::ptr::eq(second_cold, second.repmat.get(emission)?));
+            for bundle in [&first.eye, &first.fspecial, &first.linspace] {
+                bundle.get(emission)?;
+            }
+            for bundle in [&second.eye, &second.fspecial, &second.linspace] {
+                bundle.get(emission)?;
+            }
             assert_eq!(first.repmat.linear_dispatch_groups(65)?, 2);
             assert_eq!(second.repmat.linear_dispatch_groups(65)?, 1);
             Ok(())
         })
         .expect("WGPU access")
         .expect("cold and warm pipeline compilation");
+
+    let selected = runmat_accelerate_api::provider().expect("selected actual WGPU provider");
+    assert!(runmat_accelerate_api::same_provider_instance(
+        selected, provider
+    ));
+    let expected_class = match provider.precision() {
+        runmat_accelerate_api::ProviderPrecision::F32 => runmat_types::standard::SINGLE.owned(),
+        runmat_accelerate_api::ProviderPrecision::F64 => runmat_types::standard::DOUBLE.owned(),
+    };
+    let assert_floating_output = |handle: &runmat_accelerate_api::GpuTensorHandle,
+                                  shape: &[usize]| {
+        assert_eq!(handle.shape(), shape);
+        assert_eq!(
+            runmat_accelerate_api::handle_precision(handle),
+            Some(provider.precision())
+        );
+        assert_eq!(
+            runmat_accelerate_api::handle_class_identity(handle),
+            Some(expected_class.clone())
+        );
+    };
+
+    let eye = selected.eye(&[65, 65]).expect("eye tail dispatch");
+    assert_floating_output(&eye, &[65, 65]);
+    let eye_host = selected.download(&eye).await.expect("eye readback");
+    assert_eq!(eye_host.shape, vec![65, 65]);
+    for col in 0..65 {
+        for row in 0..65 {
+            assert_eq!(
+                eye_host.data[row + col * 65],
+                if row == col { 1.0 } else { 0.0 }
+            );
+        }
+    }
+
+    let average = selected
+        .fspecial(&runmat_accelerate_api::FspecialRequest {
+            filter: runmat_accelerate_api::FspecialFilter::Average { rows: 5, cols: 13 },
+        })
+        .expect("fspecial average tail dispatch");
+    assert_floating_output(&average, &[5, 13]);
+    let average_host = selected
+        .download(&average)
+        .await
+        .expect("fspecial average readback");
+    assert_eq!(average_host.shape, vec![5, 13]);
+    let average_value = match provider.precision() {
+        runmat_accelerate_api::ProviderPrecision::F32 => f64::from(1.0_f32 / 65.0_f32),
+        runmat_accelerate_api::ProviderPrecision::F64 => 1.0 / 65.0,
+    };
+    assert_eq!(average_host.data, vec![average_value; 65]);
+
+    let linspace = selected
+        .linspace(-1.0, 1.0, 129)
+        .expect("linspace tail dispatch");
+    assert_floating_output(&linspace, &[1, 129]);
+    let linspace_host = selected
+        .download(&linspace)
+        .await
+        .expect("linspace readback");
+    assert_eq!(linspace_host.shape, vec![1, 129]);
+    let expected_linspace = (0..129)
+        .map(|index| -1.0 + (index as f64) / 64.0)
+        .collect::<Vec<_>>();
+    assert_eq!(linspace_host.data, expected_linspace);
 
     let input_data = (0..1_026).map(f64::from).collect::<Vec<_>>();
     let input = provider
@@ -108,12 +203,12 @@ async fn actual_linear_launch_tail_witness() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "run explicitly on actual WGPU hardware with RUNMAT_WG=64"]
-fn native_repmat_round_digits_diff_use_frozen_launch() {
+fn native_linear_launch_families_use_frozen_launch() {
     pollster::block_on(actual_linear_launch_tail_witness());
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen_test::wasm_bindgen_test]
-async fn browser_repmat_round_digits_diff_use_frozen_launch() {
+async fn browser_linear_launch_families_use_frozen_launch() {
     actual_linear_launch_tail_witness().await;
 }

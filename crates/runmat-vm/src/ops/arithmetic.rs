@@ -2,6 +2,7 @@ use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop2;
 use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use runmat_runtime::execution::RootedValue;
+use runmat_runtime::object::dispatch::OperatorMethodDispatch;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::future::Future;
@@ -26,9 +27,9 @@ pub async fn add<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
@@ -37,15 +38,15 @@ where
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "plus", b.clone()).await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match call_method(Value::Object(obj.clone()), "plus", b.clone()).await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         (_, Value::Object(obj)) => {
-            match right_method(a.clone(), Value::Object(obj.clone()), "plus").await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match right_method(a.clone(), Value::Object(obj.clone()), "plus").await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         _ => fallback(a.clone(), b.clone()).await?,
@@ -62,9 +63,9 @@ pub async fn sub<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
@@ -73,15 +74,15 @@ where
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "minus", b.clone()).await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match call_method(Value::Object(obj.clone()), "minus", b.clone()).await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         (_, Value::Object(obj)) => {
-            match right_method(a.clone(), Value::Object(obj.clone()), "minus").await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match right_method(a.clone(), Value::Object(obj.clone()), "minus").await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         _ => fallback(a.clone(), b.clone()).await?,
@@ -98,9 +99,9 @@ pub async fn mul<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
@@ -109,15 +110,15 @@ where
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "mtimes", b.clone()).await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match call_method(Value::Object(obj.clone()), "mtimes", b.clone()).await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         (_, Value::Object(obj)) => {
-            match right_method(a.clone(), Value::Object(obj.clone()), "mtimes").await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match right_method(a.clone(), Value::Object(obj.clone()), "mtimes").await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         _ => fallback(a.clone(), b.clone()).await?,
@@ -135,9 +136,9 @@ pub async fn binary_method_ordered<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
@@ -146,15 +147,15 @@ where
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), method, b.clone()).await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match call_method(Value::Object(obj.clone()), method, b.clone()).await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         (_, Value::Object(obj)) => {
-            match call_right_method(a.clone(), Value::Object(obj.clone()), method).await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match call_right_method(a.clone(), Value::Object(obj.clone()), method).await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         _ => fallback(a.clone(), b.clone()).await?,
@@ -186,9 +187,9 @@ pub async fn power<CM, CMFut, RM, RMFut, F, FFut>(
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
@@ -197,15 +198,15 @@ where
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "power", b.clone()).await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match call_method(Value::Object(obj.clone()), "power", b.clone()).await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         (_, Value::Object(obj)) => {
-            match call_right_method(a.clone(), Value::Object(obj.clone()), "power").await {
-                Ok(v) => v,
-                Err(_) => fallback(a.clone(), b.clone()).await?,
+            match call_right_method(a.clone(), Value::Object(obj.clone()), "power").await? {
+                Some(value) => value,
+                None => fallback(a.clone(), b.clone()).await?,
             }
         }
         _ => fallback(a.clone(), b.clone()).await?,
@@ -270,9 +271,9 @@ pub async fn execute_right_division<CM, CMFut, RM, RMFut, SF, SFFut, MF, MFFut>(
 ) -> Result<RootedValue, RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     SF: FnMut(Value, Value) -> SFFut,
     SFFut: Future<Output = Result<RootedValue, RuntimeError>>,
     MF: FnMut(Value, Value) -> MFFut,
@@ -280,9 +281,9 @@ where
 {
     match (lhs, rhs) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "mrdivide", rhs.clone()).await {
-                Ok(v) => Ok(v),
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), "mrdivide", rhs.clone()).await? {
+                Some(value) => Ok(value),
+                None => {
                     if is_scalarish_for_division(rhs) {
                         scalarish_fallback(lhs.clone(), rhs.clone()).await
                     } else {
@@ -292,9 +293,9 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_right_method(lhs.clone(), Value::Object(obj.clone()), "mrdivide").await {
-                Ok(v) => Ok(v),
-                Err(_) => {
+            match call_right_method(lhs.clone(), Value::Object(obj.clone()), "mrdivide").await? {
+                Some(value) => Ok(value),
+                None => {
                     if is_scalarish_for_division(rhs) {
                         scalarish_fallback(lhs.clone(), rhs.clone()).await
                     } else {
@@ -323,9 +324,9 @@ pub async fn execute_left_division<CM, CMFut, RM, RMFut, SF, SFFut, MF, MFFut>(
 ) -> Result<RootedValue, RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
-    CMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    CMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     RM: FnMut(Value, Value, &'static str) -> RMFut,
-    RMFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     SF: FnMut(Value, Value) -> SFFut,
     SFFut: Future<Output = Result<RootedValue, RuntimeError>>,
     MF: FnMut(Value, Value) -> MFFut,
@@ -333,9 +334,9 @@ where
 {
     match (lhs, rhs) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), "mldivide", rhs.clone()).await {
-                Ok(v) => Ok(v),
-                Err(_) => {
+            match call_method(Value::Object(obj.clone()), "mldivide", rhs.clone()).await? {
+                Some(value) => Ok(value),
+                None => {
                     if is_scalarish_for_division(lhs) {
                         scalarish_fallback(lhs.clone(), rhs.clone()).await
                     } else {
@@ -345,9 +346,9 @@ where
             }
         }
         (_, Value::Object(obj)) => {
-            match call_right_method(lhs.clone(), Value::Object(obj.clone()), "mldivide").await {
-                Ok(v) => Ok(v),
-                Err(_) => {
+            match call_right_method(lhs.clone(), Value::Object(obj.clone()), "mldivide").await? {
+                Some(value) => Ok(value),
+                None => {
                     if is_scalarish_for_division(lhs) {
                         scalarish_fallback(lhs.clone(), rhs.clone()).await
                     } else {
@@ -365,3 +366,7 @@ where
         }
     }
 }
+
+#[cfg(test)]
+#[path = "arithmetic/replay_tests.rs"]
+mod replay_tests;

@@ -3312,6 +3312,11 @@ fn get_surface_property(
             st.insert("XData", surface_x_data_value(surface));
             st.insert("YData", surface_y_data_value(surface));
             st.insert("ZData", surface_z_data_value(surface));
+            st.insert("CData", surface_c_data_value(surface));
+            st.insert(
+                "CDataMapping",
+                Value::String(surface_color_mapping_name(surface.color_mapping).into()),
+            );
             st.insert("FaceAlpha", Value::Num(surface.alpha as f64));
             st.insert("FaceColor", surface_face_color_value(surface));
             st.insert("EdgeColor", surface_edge_color_value(surface));
@@ -3339,6 +3344,10 @@ fn get_surface_property(
         Some("xdata") => Ok(surface_x_data_value(surface)),
         Some("ydata") => Ok(surface_y_data_value(surface)),
         Some("zdata") => Ok(surface_z_data_value(surface)),
+        Some("colordata") => Ok(surface_c_data_value(surface)),
+        Some("cdatamapping") => Ok(Value::String(
+            surface_color_mapping_name(surface.color_mapping).into(),
+        )),
         Some("facealpha") => Ok(Value::Num(surface.alpha as f64)),
         Some("facecolor") | Some("color") => Ok(surface_face_color_value(surface)),
         Some("edgecolor") => Ok(surface_edge_color_value(surface)),
@@ -3635,9 +3644,15 @@ fn get_patch_property(
             st.insert("XData", patch_source_or_vertices(source_x, patch, 0));
             st.insert("YData", patch_source_or_vertices(source_y, patch, 1));
             st.insert("ZData", patch_source_or_vertices(source_z, patch, 2));
-            if let Some(c_data) = source_c {
-                st.insert("CData", patch_data_value(c_data));
-            }
+            let colors = source_c
+                .map(patch_data_value)
+                .unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0])));
+            st.insert("CData", colors.clone());
+            st.insert("FaceVertexCData", colors);
+            st.insert(
+                "CDataMapping",
+                Value::String(surface_color_mapping_name(patch.color_mapping()).into()),
+            );
             st.insert(
                 "FaceColor",
                 patch_color_property(patch.face_color_mode(), patch.face_color()),
@@ -3670,9 +3685,12 @@ fn get_patch_property(
         Some("xdata") => Ok(patch_source_or_vertices(source_x, patch, 0)),
         Some("ydata") => Ok(patch_source_or_vertices(source_y, patch, 1)),
         Some("zdata") => Ok(patch_source_or_vertices(source_z, patch, 2)),
-        Some("cdata") | Some("colordata") => source_c
+        Some("cdata") | Some("colordata") | Some("facevertexcdata") => Ok(source_c
             .map(patch_data_value)
-            .ok_or_else(|| plotting_error(builtin, format!("{builtin}: patch has no CData"))),
+            .unwrap_or_else(|| Value::Tensor(Tensor::zeros(vec![0, 0])))),
+        Some("cdatamapping") => Ok(Value::String(
+            surface_color_mapping_name(patch.color_mapping()).into(),
+        )),
         Some("facecolor") | Some("color") => Ok(patch_color_property(
             patch.face_color_mode(),
             patch.face_color(),
@@ -6159,6 +6177,7 @@ enum SurfacePropertyUpdate {
     Lighting(bool),
     FaceColor(glam::Vec4),
     FaceNone,
+    ColorDataMapping(runmat_plot::plots::surface::SurfaceColorMapping),
 }
 
 fn apply_surface_property(
@@ -6169,6 +6188,22 @@ fn apply_surface_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if key == "colordata" {
+        let data = line_numeric_data(value, "CData", builtin)?;
+        return super::state::try_update_plot_element_for_property(
+            authority,
+            surface_handle.figure,
+            surface_handle.plot_index,
+            |plot| match plot {
+                runmat_plot::plots::figure::PlotElement::Surface(surface) => {
+                    surface.set_color_source(data)
+                }
+                _ => Err("invalid surface handle".into()),
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error))?
+        .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")));
+    }
     if matches!(key, "xdata" | "ydata" | "zdata") {
         return apply_surface_data_property(authority, surface_handle, key, value, builtin);
     }
@@ -6197,6 +6232,9 @@ fn apply_surface_property(
                         surface.lighting_enabled = false;
                     }
                     SurfacePropertyUpdate::FaceNone => surface.alpha = 0.0,
+                    SurfacePropertyUpdate::ColorDataMapping(mapping) => {
+                        surface.set_color_mapping(*mapping);
+                    }
                 }
             }
         },
@@ -6381,6 +6419,9 @@ fn surface_property_update(
     builtin: &'static str,
 ) -> BuiltinResult<SurfacePropertyUpdate> {
     match key {
+        "cdatamapping" => Ok(SurfacePropertyUpdate::ColorDataMapping(
+            parse_color_data_mapping(value, builtin)?,
+        )),
         "facealpha" | "alpha" => {
             let alpha = value_as_f64(value).ok_or_else(|| {
                 plotting_error(builtin, format!("{builtin}: FaceAlpha must be numeric"))
@@ -6662,6 +6703,59 @@ fn apply_patch_property(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
+    if key == "cdatamapping" {
+        let mapping = parse_color_data_mapping(value, builtin)?;
+        return super::state::update_plot_element_for_property(
+            authority,
+            patch_handle.figure,
+            patch_handle.plot_index,
+            |plot| {
+                if let runmat_plot::plots::figure::PlotElement::Patch(patch) = plot {
+                    patch.set_color_mapping(mapping);
+                }
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error));
+    }
+    if matches!(key, "colordata" | "facevertexcdata") {
+        let data = line_numeric_data(value, "CData", builtin)?;
+        return super::state::try_update_plot_element_for_property(
+            authority,
+            patch_handle.figure,
+            patch_handle.plot_index,
+            |plot| match plot {
+                runmat_plot::plots::figure::PlotElement::Patch(patch) => {
+                    let (x, y, _, _, _, _) = patch.source_data();
+                    let kind =
+                        if key == "colordata" && x.is_some() && y.is_some() && data.len() != 1 {
+                            runmat_plot::plots::PatchColorSourceKind::CoordinateGrid
+                        } else {
+                            runmat_plot::plots::PatchColorSourceKind::FaceVertex
+                        };
+                    patch.set_color_data_kind(data, kind)
+                }
+                _ => Err("invalid patch handle".into()),
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error))?
+        .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")));
+    }
+    if key == "facecolor"
+        && value_as_string(value).is_some_and(|text| text.trim().eq_ignore_ascii_case("interp"))
+    {
+        return super::state::try_update_plot_element_for_property(
+            authority,
+            patch_handle.figure,
+            patch_handle.plot_index,
+            |plot| match plot {
+                runmat_plot::plots::figure::PlotElement::Patch(patch) => patch
+                    .set_face_color_mode_checked(runmat_plot::plots::PatchFaceColorMode::Interp),
+                _ => Err("invalid patch handle".into()),
+            },
+        )
+        .map_err(|error| map_figure_error(builtin, error))?
+        .map_err(|error| plotting_error(builtin, format!("{builtin}: {error}")));
+    }
     if !matches!(
         key,
         "facecolor"
@@ -7758,6 +7852,42 @@ fn surface_z_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
         .unwrap_or_else(|| tensor_from_vec(Vec::new()))
 }
 
+fn surface_c_data_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
+    surface
+        .color_source()
+        .map(numeric_plot_data_value)
+        .unwrap_or_else(|| surface_z_data_value(surface))
+}
+
+fn surface_color_mapping_name(
+    mapping: runmat_plot::plots::surface::SurfaceColorMapping,
+) -> &'static str {
+    match mapping {
+        runmat_plot::plots::surface::SurfaceColorMapping::Scaled => "scaled",
+        runmat_plot::plots::surface::SurfaceColorMapping::Direct => "direct",
+    }
+}
+
+pub(crate) fn parse_color_data_mapping(
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<runmat_plot::plots::surface::SurfaceColorMapping> {
+    let value = value_as_string(value).ok_or_else(|| {
+        plotting_error(
+            builtin,
+            format!("{builtin}: CDataMapping must be 'scaled' or 'direct'"),
+        )
+    })?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "scaled" => Ok(runmat_plot::plots::surface::SurfaceColorMapping::Scaled),
+        "direct" => Ok(runmat_plot::plots::surface::SurfaceColorMapping::Direct),
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: CDataMapping must be 'scaled' or 'direct'"),
+        )),
+    }
+}
+
 fn surface_grid_to_tensor(grid: &[Vec<f64>]) -> Value {
     let cols = grid.len();
     let rows = grid.first().map_or(0, Vec::len);
@@ -7987,6 +8117,7 @@ fn patch_color_property(mode: runmat_plot::plots::PatchFaceColorMode, color: gla
     match mode {
         runmat_plot::plots::PatchFaceColorMode::None => Value::String("none".into()),
         runmat_plot::plots::PatchFaceColorMode::Flat => Value::String("flat".into()),
+        runmat_plot::plots::PatchFaceColorMode::Interp => Value::String("interp".into()),
         runmat_plot::plots::PatchFaceColorMode::Color => Value::String(color_to_short_name(color)),
     }
 }

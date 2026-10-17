@@ -11,6 +11,7 @@ pub mod job;
 pub mod mex;
 pub mod native_interface;
 pub mod package;
+pub(crate) mod piped_input;
 pub mod repl;
 pub mod script;
 pub mod session;

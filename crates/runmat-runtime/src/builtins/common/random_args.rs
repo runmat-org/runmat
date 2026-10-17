@@ -40,6 +40,42 @@ pub(crate) fn validate_constructor_gpu_output_protecting(
     expected_logical: bool,
     protected: &[&runmat_accelerate_api::GpuTensorHandle],
 ) -> crate::BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
+    validate_constructor_gpu_storage_protecting(
+        label,
+        provider,
+        output,
+        expected_shape,
+        expected_storage,
+        expected_precision,
+        expected_integer,
+        expected_logical,
+        protected,
+    )?
+    .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+    .map_err(|source| {
+        crate::build_runtime_error(format!(
+            "{label}: cannot adopt constructor result: {source}"
+        ))
+        .with_builtin(label)
+        .with_source(source)
+        .build()
+    })
+}
+
+/// Validate physical ownership/class without allocating a replacement view.
+/// Intermediate provider outputs use this until their final language result
+/// is known, so each retry does not mint another retained view claim.
+pub(crate) fn validate_constructor_gpu_storage_protecting(
+    label: &str,
+    provider: &'static dyn runmat_accelerate_api::AccelProvider,
+    output: runmat_accelerate_api::GpuTensorHandle,
+    expected_shape: &[usize],
+    expected_storage: runmat_accelerate_api::GpuTensorStorage,
+    expected_precision: Option<runmat_accelerate_api::ProviderPrecision>,
+    expected_integer: Option<runmat_accelerate_api::IntegerElementType>,
+    expected_logical: bool,
+    protected: &[&runmat_accelerate_api::GpuTensorHandle],
+) -> crate::BuiltinResult<runmat_accelerate_api::GpuTensorHandle> {
     use crate::builtins::common::gpu_helpers::{exact_provider_for_handle, reject_gpu_output};
     let expected_class = crate::builtins::common::gpu_helpers::expected_gpu_class_identity(
         expected_precision,
@@ -93,16 +129,7 @@ pub(crate) fn validate_constructor_gpu_output_protecting(
             .build(),
         ));
     }
-    output
-        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
-        .map_err(|source| {
-            crate::build_runtime_error(format!(
-                "{label}: cannot adopt constructor result: {source}"
-            ))
-            .with_builtin(label)
-            .with_source(source)
-            .build()
-        })
+    Ok(output)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

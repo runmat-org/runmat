@@ -62,6 +62,33 @@ fn run_repl_with_piped_input(
     Ok(output)
 }
 
+fn run_script_with_piped_input(
+    args: &[&str],
+    input: &str,
+) -> Result<std::process::Output, Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let config_path = write_test_config(temp_dir.path());
+    let mut child = Command::new(get_binary_path())
+        .args(args)
+        .current_dir(temp_dir.path())
+        .env("RUNMAT_CONFIG", &config_path)
+        .env(
+            "RUNMAT_EXECUTION_STATE_DIR",
+            temp_dir.path().join("execution-state"),
+        )
+        .env("NO_GUI", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    child
+        .stdin
+        .take()
+        .expect("stdin should be piped")
+        .write_all(input.as_bytes())?;
+    Ok(child.wait_with_output()?)
+}
+
 fn write_test_config(dir: &Path) -> PathBuf {
     let config_path = dir.join("runmat.toml");
     fs::write(
@@ -548,6 +575,35 @@ fn test_repl_processes_piped_input() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("ans = 2"));
+    Ok(())
+}
+
+#[test]
+fn stdin_without_command_executes_one_fail_fast_script() -> Result<(), Box<dyn std::error::Error>> {
+    let output = run_script_with_piped_input(
+        &["--no-jit"],
+        "disp('before');\nerror('stdin-stop');\ndisp('after');\n",
+    )?;
+    assert!(!output.status.success());
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "before\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("stdin-stop"), "{stderr}");
+    assert!(!stderr.contains("runmat>"), "{stderr}");
+    Ok(())
+}
+
+#[test]
+fn dash_aliases_compile_multiline_stdin_as_one_script() -> Result<(), Box<dyn std::error::Error>> {
+    for args in [&["--no-jit", "-"][..], &["--no-jit", "run", "-"][..]] {
+        let output =
+            run_script_with_piped_input(args, "value = [1 2;\n3 4];\ndisp(value(2,2));\n")?;
+        assert!(
+            output.status.success(),
+            "args={args:?}, stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(String::from_utf8_lossy(&output.stdout), "4\n");
+    }
     Ok(())
 }
 

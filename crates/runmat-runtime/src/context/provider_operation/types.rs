@@ -6,7 +6,11 @@ use runmat_accelerate_api::{
     provider_for_handle, same_provider_instance, AccelProvider, GpuTensorHandle,
     ProviderFeasibilityQuery, ProviderProducedNumericReadbackEvidence, ProviderRepresentation,
 };
+use runmat_execution::WholeWorkCandidate;
 use runmat_execution::{Digest, ProviderInputStageDemands, ResourceByteBound};
+
+mod direct_publication;
+pub(super) use direct_publication::{DirectProviderOutputContract, DirectProviderPublication};
 
 /// An original resident operand whose native readback occurs during this
 /// provider-first route. `prior_created_bytes` is operation-created provider
@@ -60,6 +64,10 @@ pub(crate) struct ExactProviderOperation<'a> {
     /// Typed controls and original operand provenance. Never a textual
     /// substitute for the live handles that the domain owner authenticates.
     pub(crate) domain_facts: Digest,
+    /// Optional request-owner physical calibration class. When present, this
+    /// replaces per-invocation controls in placement feedback only; the full
+    /// query and live owner still govern selection and execution validation.
+    pub(crate) calibration_facts: Option<ProviderPhysicalCalibration>,
     /// Peak operation-owned host workspace, including any work before the
     /// provider hook but excluding provider internal host workspace.
     pub(crate) host_scratch: ResourceByteBound,
@@ -88,77 +96,42 @@ pub(crate) struct ExactProviderOperation<'a> {
     pub(crate) provider_host_mediated: bool,
 }
 
+/// Placement feedback groups physically equivalent requests. This is not a
+/// stream reservation, executable grant, or replacement for `domain_facts`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct ProviderPhysicalCalibration(Digest);
+
+impl ProviderPhysicalCalibration {
+    pub(crate) fn from_typed(facts: &impl serde::Serialize) -> Self {
+        Self(Digest::sha256_serialized(facts).expect("typed physical calibration serializes"))
+    }
+
+    pub(crate) fn digest(self) -> Digest {
+        self.0
+    }
+}
+
+/// An independently legal host-compute/provider-upload alternative. Its
+/// physical upload query and output contract are kept with the candidate so
+/// the selected receipt validates the actual publication, not just a cost.
+pub(crate) struct ExactHostUploadAlternative<'a> {
+    pub(crate) candidate: WholeWorkCandidate,
+    pub(crate) query: &'a ProviderFeasibilityQuery,
+    pub(crate) output: ProviderRepresentation,
+    pub(crate) requested_bytes: u64,
+}
+
+pub(crate) enum ExactProviderOrHostSelection {
+    Provider(SelectedProviderOperation),
+    HostUpload(HostPresentationReceipt),
+}
+
 pub(crate) struct SelectedProviderOperation {
     pub(super) provider: &'static dyn AccelProvider,
     pub(super) receipt: HostPresentationReceipt,
     pub(super) direct_output: DirectProviderPublication,
     pub(super) conditional_upload: ConditionalUploadPublication,
     pub(super) produced_readback: Option<PreparedProducedReadback>,
-}
-
-pub(super) enum DirectProviderPublication {
-    NoOutput,
-    Pending {
-        outputs: usize,
-        requested_bytes: u64,
-    },
-    Validated {
-        outputs: usize,
-        requested_bytes: u64,
-    },
-    Rejected,
-}
-
-impl DirectProviderPublication {
-    pub(super) fn new(outputs: usize, requested_bytes: Option<u64>) -> Option<Self> {
-        if outputs == 0 {
-            return Some(Self::NoOutput);
-        }
-        requested_bytes.map(|requested_bytes| Self::Pending {
-            outputs,
-            requested_bytes,
-        })
-    }
-
-    fn validate(
-        &mut self,
-        provider: &'static dyn AccelProvider,
-        handles: &[&GpuTensorHandle],
-    ) -> bool {
-        let (outputs, requested_bytes) = match *self {
-            Self::Pending {
-                outputs,
-                requested_bytes,
-            }
-            | Self::Validated {
-                outputs,
-                requested_bytes,
-            } => (outputs, requested_bytes),
-            Self::NoOutput | Self::Rejected => {
-                *self = Self::Rejected;
-                return false;
-            }
-        };
-        let actual_bytes = handles.iter().try_fold(0_u64, |total, handle| {
-            conditional_output_owner_valid(provider, handle)
-                .then(|| total.checked_add(handle.physical().requested_bytes()))
-                .flatten()
-        });
-        if handles.len() == outputs && actual_bytes == Some(requested_bytes) {
-            *self = Self::Validated {
-                outputs,
-                requested_bytes,
-            };
-            true
-        } else {
-            *self = Self::Rejected;
-            false
-        }
-    }
-
-    fn can_publish(&self) -> bool {
-        matches!(self, Self::NoOutput | Self::Validated { .. })
-    }
 }
 
 pub(super) enum ConditionalUploadPublication {
@@ -222,6 +195,15 @@ impl SelectedProviderOperation {
         outputs: &[&GpuTensorHandle],
     ) -> bool {
         self.direct_output.validate(self.provider, outputs)
+    }
+
+    pub(crate) fn validate_reused_direct_provider_outputs(
+        &mut self,
+        outputs: &[&GpuTensorHandle],
+        borrowed: &[&GpuTensorHandle],
+    ) -> bool {
+        self.direct_output
+            .validate_reused(self.provider, outputs, borrowed)
     }
 
     pub(crate) fn admits_produced_readback(&self, output: &GpuTensorHandle) -> bool {
@@ -328,129 +310,5 @@ impl SelectedProviderOperation {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{
-        conditional_output_owner_valid, ConditionalUploadPublication, DirectProviderPublication,
-    };
-    use crate::builtins::common::gpu_helpers;
-    use crate::context::physical_test_support::OwnedPhysicalProvider;
-    use runmat_accelerate::simple_provider::InProcessProvider;
-    use runmat_accelerate_api::{same_provider_instance, AccelProvider, ThreadProviderGuard};
-    use runmat_value::Tensor;
-
-    struct ForeignFacade(&'static InProcessProvider);
-
-    impl AccelProvider for ForeignFacade {
-        fn upload(
-            &self,
-            host: &runmat_accelerate_api::HostTensorView,
-        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
-            self.0.upload(host)
-        }
-
-        fn download<'a>(
-            &'a self,
-            handle: &'a runmat_accelerate_api::GpuTensorHandle,
-        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
-            self.0.download(handle)
-        }
-
-        fn device_info(&self) -> String {
-            self.0.device_info()
-        }
-
-        fn device_id(&self) -> u32 {
-            self.0.device_id()
-        }
-    }
-
-    #[test]
-    fn conditional_physical_publication_needs_exact_witness_and_rejection_is_terminal() {
-        let mut pending = ConditionalUploadPublication::new(Some(8));
-        assert!(!pending.validated());
-        assert!(!pending.conditional_attempted());
-        pending.begin();
-        assert!(pending.conditional_attempted());
-        assert!(pending.validate(8, true));
-        assert!(pending.validated());
-        assert!(!pending.validate(32, true));
-        assert!(!pending.validate(8, true));
-        assert!(!pending.validated());
-        assert!(!ConditionalUploadPublication::new(None).validate(8, true));
-        let mut invalid_owner = ConditionalUploadPublication::new(Some(8));
-        invalid_owner.begin();
-        assert!(!invalid_owner.validate(8, false));
-        let mut premature = ConditionalUploadPublication::new(Some(8));
-        assert!(!premature.validate(8, true));
-        assert!(premature.conditional_attempted());
-    }
-
-    #[test]
-    fn same_device_foreign_facade_is_not_a_conditional_output_owner() {
-        let owner: &'static InProcessProvider = Box::leak(Box::new(InProcessProvider::new()));
-        let foreign: &'static ForeignFacade = Box::leak(Box::new(ForeignFacade(owner)));
-        assert_eq!(owner.device_id(), foreign.device_id());
-        assert!(!same_provider_instance(owner, foreign));
-        let _selected_owner = ThreadProviderGuard::set(Some(owner));
-        let output = gpu_helpers::upload_tensor(
-            owner,
-            &Tensor::new(vec![1.0], vec![1, 1]).expect("one-element result"),
-        )
-        .expect("owner result");
-        assert!(!conditional_output_owner_valid(foreign, &output));
-        let mut selected =
-            ConditionalUploadPublication::new(Some(output.physical().requested_bytes()));
-        selected.begin();
-        assert!(!selected.validate(
-            output.physical().requested_bytes(),
-            conditional_output_owner_valid(foreign, &output),
-        ));
-        assert!(!selected.validated());
-        assert!(output.allocation_lease().validate_live().is_ok());
-    }
-
-    #[test]
-    fn direct_publication_uses_selected_physical_extent_and_exact_owner() {
-        let owner: &'static OwnedPhysicalProvider =
-            Box::leak(Box::new(OwnedPhysicalProvider::new()));
-        let foreign: &'static OwnedPhysicalProvider =
-            Box::leak(Box::new(OwnedPhysicalProvider::new()));
-        let _selected_owner = ThreadProviderGuard::set(Some(owner));
-        let exact = owner.allocate_f64(&[1, 1]);
-        let (retained_caller, larger_view) = owner.allocate_padded_f64_view(&[2, 2], &[1, 1]);
-        assert_eq!(larger_view.shape(), exact.handle.shape());
-        assert_eq!(
-            larger_view.physical().element_type(),
-            exact.handle.physical().element_type()
-        );
-        let expected = exact.handle.physical().requested_bytes();
-        assert!(larger_view.physical().requested_bytes() > expected);
-        assert!(DirectProviderPublication::new(0, None)
-            .expect("no-output form")
-            .can_publish());
-        assert!(DirectProviderPublication::new(1, None).is_none());
-        let mut admitted = DirectProviderPublication::new(1, Some(expected)).expect("bound");
-        assert!(!admitted.can_publish());
-        assert!(admitted.validate(owner, &[&exact.handle]));
-        assert!(admitted.can_publish());
-        let mut oversized = DirectProviderPublication::new(1, Some(expected)).expect("bound");
-        assert!(!oversized.validate(owner, &[&larger_view]));
-        assert!(!oversized.can_publish());
-        assert!(!oversized.validate(owner, &[&exact.handle]));
-        let mut wrong_owner = DirectProviderPublication::new(1, Some(expected)).expect("bound");
-        assert!(!wrong_owner.validate(foreign, &[&exact.handle]));
-        assert!(!wrong_owner.can_publish());
-        let error = crate::build_runtime_error("invalid provider result")
-            .with_identifier("RunMat:test")
-            .build();
-        let _ = gpu_helpers::reject_gpu_output(larger_view, error);
-        assert!(retained_caller
-            .handle
-            .allocation_lease()
-            .validate_live()
-            .is_ok());
-        assert!(exact.handle.allocation_lease().validate_live().is_ok());
-        assert_eq!(retained_caller.probe.retirements(), 0);
-        assert_eq!(exact.probe.retirements(), 0);
-    }
-}
+#[path = "types/tests.rs"]
+mod tests;

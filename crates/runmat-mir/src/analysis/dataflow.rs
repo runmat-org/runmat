@@ -13,8 +13,10 @@ use runmat_types::{
     ResidencyFact, ShapeFact, SpawnSafetyFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
 
+mod expression_regions;
 mod initialization;
 mod subscript_chain;
+use expression_regions::{diagnose_expression_steps, diagnose_subscript_chain_reads};
 use initialization::compute_init_dataflow;
 pub(crate) use subscript_chain::{SubscriptChainInference, SubscriptPathDisposition};
 
@@ -871,7 +873,7 @@ fn diagnose_rvalue_reads(
             diagnose_indexing_reads(indexing, state, span, diagnostics);
         }
         MirRvalue::SubscriptChain(chain) => {
-            chain.visit_operands(|operand| diagnose_operand_read(operand, state, span, diagnostics))
+            diagnose_subscript_chain_reads(chain, state, span, diagnostics)
         }
         MirRvalue::Member { base, .. } => diagnose_operand_read(base, state, span, diagnostics),
         MirRvalue::DynamicMember { base, member, .. } => {
@@ -948,22 +950,7 @@ fn diagnose_indexing_reads(
             }
             MirIndexComponent::ContextualExpr(region) => {
                 let mut nested_state = state.to_vec();
-                for step in region.steps() {
-                    match step {
-                        crate::MirExpressionStep::Let { local, value, span } => {
-                            diagnose_rvalue_reads(value, &mut nested_state, *span, diagnostics);
-                            nested_state[local.0] = InitFact::DefinitelyAssigned;
-                        }
-                        crate::MirExpressionStep::CaptureSequence { source, span, .. } => {
-                            diagnose_expansion_source_reads(
-                                source,
-                                &nested_state,
-                                *span,
-                                diagnostics,
-                            );
-                        }
-                    }
-                }
+                diagnose_expression_steps(region.steps(), &mut nested_state, diagnostics);
                 diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
             }
             MirIndexComponent::Colon => {}
@@ -979,7 +966,7 @@ fn diagnose_expansion_source_reads(
 ) {
     match source {
         crate::MirExpansionSource::SubscriptChain(chain) => {
-            chain.visit_operands(|operand| diagnose_operand_read(operand, state, span, diagnostics))
+            diagnose_subscript_chain_reads(chain, state, span, diagnostics)
         }
         crate::MirExpansionSource::CellContents { base, indexing } => {
             diagnose_operand_read(base, state, span, diagnostics);

@@ -84,34 +84,33 @@ pub(super) fn resource_candidate(
                 },
             )
         },
-        route_facts: Digest::sha256(
-            serde_json::to_vec(&(
-                query,
-                estimate,
-                request.conditional_host_fallback,
-                request.provider_host_mediated,
-                conditional_provider_upload.as_ref().map(|upload| {
-                    (
-                        upload.transfer_bytes,
-                        upload.provider_output_requested_bytes,
-                        upload.host_result_bytes,
-                        upload.host_scratch_bytes,
-                        upload.provider_scratch_bytes,
-                        upload.queue_slots,
-                    )
-                }),
-                input_stages,
-                request.output_queue_slots,
-                prepared.produced_readback.as_ref().map(|readback| {
-                    (
-                        &readback.output,
-                        readback.evidence,
-                        readback.public_host_bytes,
-                    )
-                }),
-            ))
-            .expect("provider route serializes"),
-        ),
+        route_facts: Digest::sha256_serialized(&(
+            request.calibration_facts.map(|facts| facts.digest()),
+            request.calibration_facts.is_none().then_some(query),
+            estimate,
+            request.conditional_host_fallback,
+            request.provider_host_mediated,
+            conditional_provider_upload.as_ref().map(|upload| {
+                (
+                    upload.transfer_bytes,
+                    upload.provider_output_requested_bytes,
+                    upload.host_result_bytes,
+                    upload.host_scratch_bytes,
+                    upload.provider_scratch_bytes,
+                    upload.queue_slots,
+                )
+            }),
+            input_stages,
+            request.output_queue_slots,
+            prepared.produced_readback.as_ref().map(|readback| {
+                (
+                    &readback.output,
+                    readback.evidence,
+                    readback.public_host_bytes,
+                )
+            }),
+        ))
+        .expect("provider route serializes"),
         cost: CandidateCostEvidence::Unavailable(CandidateCostUnavailable::NoEstimate),
         resources: CandidateResourceDemand {
             cpu_millicores: request.host_cpu_millicores,
@@ -146,10 +145,8 @@ pub(super) fn resource_candidate(
     prepared
         .provider_resources
         .sort_by_key(|resource| resource.device_id);
-    let digest = Digest::sha256(
-        serde_json::to_vec(&(parallel.epoch, &prepared.provider_resources))
-            .expect("resource snapshot serializes"),
-    );
+    let digest = Digest::sha256_serialized(&(parallel.epoch, &prepared.provider_resources))
+        .expect("resource snapshot serializes");
     let resources = PlacementResourceSnapshot {
         cpu_millicores_available: parallel.cpu_millicores_available,
         memory_available_bytes: parallel.memory_available_bytes,
@@ -173,44 +170,201 @@ pub(super) fn operation_signature(
     PlacementSignature {
         region: None,
         operation: request.semantic_operation.into(),
-        runtime_facts: Digest::sha256(
-            serde_json::to_vec(&(
-                request.variant,
-                request.semantic_operation,
-                request.domain_facts,
-                query,
-                &prepared.readback_facts,
-                input_stages,
-                prepared.host_scratch,
-                prepared.preparation_host_workspace,
-                prepared.conditional_readback_host_workspace,
-                request.output_queue_slots,
-                prepared.produced_readback.as_ref().map(|readback| {
-                    (
-                        &readback.output,
-                        readback.evidence,
-                        readback.public_host_bytes,
-                    )
-                }),
-                request.conditional_host_fallback,
-                request.conditional_host_scratch,
-                request.provider_host_mediated,
-                conditional_provider_upload.as_ref().map(|upload| {
-                    (
-                        upload.transfer_bytes,
-                        upload.provider_output_requested_bytes,
-                        upload.host_result_bytes,
-                        upload.host_scratch_bytes,
-                        upload.provider_scratch_bytes,
-                        upload.queue_slots,
-                    )
-                }),
-                provider.device_id(),
-            ))
-            .expect("typed provider operation serializes"),
-        ),
+        runtime_facts: Digest::sha256_serialized(&(
+            request.variant,
+            request.semantic_operation,
+            request
+                .calibration_facts
+                .map_or(request.domain_facts, |facts| facts.digest()),
+            request.calibration_facts.is_none().then_some(query),
+            &prepared.readback_facts,
+            input_stages,
+            prepared.host_scratch,
+            prepared.preparation_host_workspace,
+            prepared.conditional_readback_host_workspace,
+            request.output_queue_slots,
+            prepared.produced_readback.as_ref().map(|readback| {
+                (
+                    &readback.output,
+                    readback.evidence,
+                    readback.public_host_bytes,
+                )
+            }),
+            request.conditional_host_fallback,
+            request.conditional_host_scratch,
+            request.provider_host_mediated,
+            conditional_provider_upload.as_ref().map(|upload| {
+                (
+                    upload.transfer_bytes,
+                    upload.provider_output_requested_bytes,
+                    upload.host_result_bytes,
+                    upload.host_scratch_bytes,
+                    upload.provider_scratch_bytes,
+                    upload.queue_slots,
+                )
+            }),
+            provider.device_id(),
+        ))
+        .expect("typed provider operation serializes"),
         provider_provenance: None,
         graph_output_authority: None,
         revision,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::context::physical_test_support::OwnedPhysicalProvider;
+    use runmat_accelerate_api::random::{
+        GpuNormalTransform, GpuRandomAlgorithm, GpuRandomDistribution, GpuRandomReservation,
+        GpuRandomWorkload,
+    };
+    use runmat_accelerate_api::{
+        ProviderElementType, ProviderFeasibilityQuery, ProviderLayout, ProviderOperationFamily,
+        ProviderOperationIdentity, ProviderRepresentation, ProviderResidency, ProviderStorage,
+        ProviderWorkload,
+    };
+    use runmat_execution::PlacementExecutionAuthorityRevision;
+
+    #[test]
+    fn physical_feedback_reuses_work_without_reusing_random_reservation() {
+        let provider = Box::leak(Box::new(OwnedPhysicalProvider::new()));
+        let reservation = GpuRandomReservation {
+            algorithm: GpuRandomAlgorithm::Threefry4x64_20,
+            seed: 0,
+            first: 0,
+            count: 4,
+            normal_transform: GpuNormalTransform::BoxMuller,
+        };
+        let query = |reservation, distribution, class, shape: Vec<u64>| ProviderFeasibilityQuery {
+            operation: ProviderOperationIdentity::new("random.gpu_child"),
+            family: ProviderOperationFamily::Library,
+            inputs: vec![],
+            outputs: vec![ProviderRepresentation {
+                element_type: class,
+                storage: ProviderStorage::DenseReal,
+                layout: ProviderLayout::ColumnMajorContiguous,
+                shape,
+                residency: ProviderResidency::Device,
+            }],
+            workload: ProviderWorkload {
+                gpu_random: Some(GpuRandomWorkload {
+                    distribution,
+                    reservation,
+                }),
+                ..ProviderWorkload::default()
+            },
+        };
+        let first = query(
+            reservation,
+            GpuRandomDistribution::Uniform,
+            ProviderElementType::F32,
+            vec![4],
+        );
+        let second = query(
+            GpuRandomReservation {
+                seed: 93,
+                first: 1024,
+                ..reservation
+            },
+            GpuRandomDistribution::Uniform,
+            ProviderElementType::F32,
+            vec![4],
+        );
+        let normal = query(
+            reservation,
+            GpuRandomDistribution::StandardNormal,
+            ProviderElementType::F32,
+            vec![4],
+        );
+        let wide = query(
+            reservation,
+            GpuRandomDistribution::Uniform,
+            ProviderElementType::F64,
+            vec![4],
+        );
+        let larger = query(
+            GpuRandomReservation {
+                count: 8,
+                ..reservation
+            },
+            GpuRandomDistribution::Uniform,
+            ProviderElementType::F32,
+            vec![8],
+        );
+        let identity = |query: &ProviderFeasibilityQuery| {
+            let output_bytes = query.outputs[0].checked_byte_len().unwrap();
+            let calibration = super::super::types::ProviderPhysicalCalibration::from_typed(&(
+                &query.outputs,
+                query.workload.gpu_random.unwrap().distribution,
+                output_bytes,
+                1_u32,
+            ));
+            let request = ExactProviderOperation {
+                provider,
+                query,
+                semantic_operation: "rand",
+                variant: "random.gpu_child.explicit.v1",
+                domain_facts: Digest::sha256_serialized(query).unwrap(),
+                calibration_facts: Some(calibration),
+                host_scratch: ResourceByteBound::Known(0),
+                provider_host_scratch: ResourceByteBound::Known(0),
+                host_cpu_millicores: 1_000,
+                already_live_bytes: 0,
+                readbacks: &[],
+                produced_readback: None,
+                internal_input_stages: None,
+                output_queue_slots: Some(1),
+                conditional_host_fallback: None,
+                conditional_host_scratch: ResourceByteBound::Known(0),
+                conditional_provider_upload: None,
+                provider_host_mediated: false,
+            };
+            let mut prepared =
+                super::super::readbacks::prepare_readbacks(&request, Some(output_bytes), None)
+                    .unwrap()
+                    .unwrap();
+            let signature = operation_signature(
+                &request,
+                &prepared,
+                PlacementRevision {
+                    program: None,
+                    catalog: Digest::sha256(b"catalog"),
+                    compiler: Digest::sha256(b"compiler"),
+                    authority: PlacementExecutionAuthorityRevision::Provider(Digest::sha256(
+                        b"provider",
+                    )),
+                    policy: Digest::sha256(b"policy"),
+                },
+            );
+            let estimate = ProviderResourceEstimate {
+                transient_bytes: Some(output_bytes),
+                output_bytes: Some(output_bytes),
+                dispatches: Some(1),
+            };
+            let (candidate, _) = resource_candidate(
+                None,
+                &request,
+                &estimate,
+                None,
+                &mut prepared,
+                RuntimeParallelResources::default(),
+            );
+            (
+                request.domain_facts,
+                signature.runtime_facts,
+                candidate.route_facts,
+            )
+        };
+        let a = identity(&first);
+        let b = identity(&second);
+        assert_ne!(a.0, b.0, "exact reservations remain distinct");
+        assert_eq!((a.1, a.2), (b.1, b.2), "physical work reuses learning");
+        for changed in [&normal, &wide, &larger] {
+            let other = identity(changed);
+            assert_ne!(a.1, other.1);
+            assert_ne!(a.2, other.2);
+        }
     }
 }

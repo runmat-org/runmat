@@ -315,6 +315,8 @@ mod tests {
                 outputs: vec![],
                 workload: ProviderWorkload {
                     gpu_random: None,
+                    gpu_integer: None,
+                    gpu_integer_batch: None,
                     fused_elementwise: None,
                     real_power_mode: None,
                     real_power_scalar: None,

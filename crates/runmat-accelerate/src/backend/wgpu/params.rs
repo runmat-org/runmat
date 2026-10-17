@@ -1048,6 +1048,30 @@ pub struct RandomChildParams {
     pub first3: u32,
     pub seed0: u32,
     pub seed1: u32,
+    pub integer_lower: u32,
+    pub integer_mask: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+/// First twelve words match `RandomChildParams`; the remaining words are one
+/// bounded rejection batch's exact domain and attempt lane. Every dispatch
+/// uses the same type and shader binding layout.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RandomIntegerBatchParams {
+    pub base: RandomChildParams,
+    pub span0: u32,
+    pub span1: u32,
+    pub accept_limit0: u32,
+    pub accept_limit1: u32,
+    pub lower0: u32,
+    pub lower1: u32,
+    pub attempt0: u32,
+    pub attempt1: u32,
+    pub attempts: u32,
+    pub initial: u32,
+    pub _pad: [u32; 2],
 }
 
 /// Params for parameterized distribution samplers (exprnd, normrnd, unifrnd).

@@ -12,7 +12,7 @@ pub(crate) struct HostSinkReceipt {
 }
 
 impl HostSinkReceipt {
-    pub(super) fn new(runtime: RuntimeContext, selected: RuntimeWholeWorkSelection) -> Self {
+    pub(crate) fn new(runtime: RuntimeContext, selected: RuntimeWholeWorkSelection) -> Self {
         Self {
             runtime,
             selected,

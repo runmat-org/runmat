@@ -18,6 +18,7 @@ use crate::fusion::active_fusion;
 
 #[path = "core/readback.rs"]
 mod readback;
+pub(super) use readback::map_completion_host_upper_bytes;
 pub(super) use readback::ReadbackResourceOwner;
 
 impl WgpuProvider {
@@ -85,6 +86,16 @@ impl WgpuProvider {
         decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
     ) -> impl std::future::Future<Output = Result<T>> + 'a {
         readback::read_with(self.access.clone(), staging, context, decode)
+    }
+
+    pub(super) fn map_readback_with_admitted<'a, T: 'a>(
+        &'a self,
+        staging: impl ReadbackResourceOwner + 'a,
+        context: &'a str,
+        decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> impl std::future::Future<Output = Result<T>> + 'a {
+        readback::read_with_admitted(self.access.clone(), staging, context, decode, claim)
     }
 
     pub(super) fn map_readback_bytes_sync(

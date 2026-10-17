@@ -12,22 +12,27 @@ use runmat_accelerate_api::observation::{
     ProviderOperationRecorder,
 };
 use runmat_execution::profiling::{CommandProviderContribution, ProviderObservationTerminal};
+use runmat_execution::resource::RetainedHostAllocationClaim;
 use runmat_execution::{
     cancellation::CancellationToken, PlacementSignature, WholeWorkObservationOutcome,
 };
 use runmat_time::duration_ns_saturating;
+use std::sync::Arc;
 
 mod admission;
 mod host_sink;
 mod publication;
 pub(crate) use admission::combine_host_scratch;
 pub(crate) use admission::{
-    select_exact_host_upload, select_exact_host_upload_with_readbacks, ExactHostUpload,
+    select_exact_host_upload, select_exact_host_upload_with_readbacks, select_prepared_host_upload,
+    selected_upload_metadata_bytes, selected_upload_metadata_claim, upload_candidate,
+    ExactHostUpload, UploadStageResources,
 };
 pub(crate) use host_sink::{
     select_exact_host_sink, select_exact_host_sink_with_readbacks, ExactHostSink, HostSinkReceipt,
 };
-use publication::{AdmittedHostUploadOutputs, SelectedUploadPublication, UploadPublication};
+pub(crate) use publication::AdmittedHostUploadOutputs;
+use publication::{SelectedUploadPublication, UploadPublication};
 
 #[cfg(test)]
 #[path = "host_presentation/tests.rs"]
@@ -42,6 +47,9 @@ pub(crate) struct HostPresentationReceipt {
     receipt: ProviderOperationReceipt,
     command_contribution: Option<CommandProviderContribution>,
     upload_publication: UploadPublication,
+    // The selected request's cloned output/operation metadata may survive
+    // the temporary query-preparation receipt and the invoking frame.
+    publication_metadata_claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
 }
 
 impl HostPresentationReceipt {
@@ -59,10 +67,22 @@ impl HostPresentationReceipt {
             receipt,
             command_contribution,
             upload_publication: UploadPublication::NotApplicable,
+            publication_metadata_claim: None,
         }
     }
 
-    fn with_admitted_upload_outputs(mut self, admitted: AdmittedHostUploadOutputs) -> Self {
+    pub(crate) fn with_publication_metadata_claim(
+        mut self,
+        claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
+    ) -> Self {
+        self.publication_metadata_claim = claim;
+        self
+    }
+
+    pub(crate) fn with_admitted_upload_outputs(
+        mut self,
+        admitted: AdmittedHostUploadOutputs,
+    ) -> Self {
         self.upload_publication = UploadPublication::Selected {
             admitted,
             state: SelectedUploadPublication::Pending,
@@ -147,6 +167,10 @@ impl HostPresentationReceipt {
                 }
             }
         }
+        // Release the selected output descriptors while their retained claim
+        // is still here. The operation identity remains inside the provider
+        // receipt and moves with the claim into deferred completion.
+        self.upload_publication = UploadPublication::NotApplicable;
         let mut deferred = DeferredPresentationFeedback {
             receipt: self.receipt,
             command_contribution: self.command_contribution.take(),
@@ -156,6 +180,7 @@ impl HostPresentationReceipt {
             selected: Some(self.selected),
             cancellation: self.runtime.cancellation(),
             terminal_without_feedback: false,
+            _publication_metadata_claim: self.publication_metadata_claim.take(),
         };
         if let Some(service) = self.runtime.service_ports().placement() {
             if let Some(ready) = deferred.take_ready() {
@@ -176,6 +201,8 @@ struct DeferredPresentationFeedback {
     selected: Option<RuntimeWholeWorkSelection>,
     cancellation: CancellationToken,
     terminal_without_feedback: bool,
+    // Must drop after `receipt`, which retains the selected operation name.
+    _publication_metadata_claim: Option<Arc<dyn RetainedHostAllocationClaim>>,
 }
 
 impl RuntimePlacementFeedbackSource for DeferredPresentationFeedback {

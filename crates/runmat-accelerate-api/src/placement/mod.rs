@@ -80,10 +80,12 @@ pub use sum::{ProviderSumGeometry, ProviderSumWorkload};
 mod typed_reduction;
 pub use typed_reduction::ProviderTypedReductionWorkload;
 mod preparation;
+mod query_metadata;
 pub use preparation::{
     ProviderClassPreservingUpload, ProviderElementwiseGeometry, ProviderPreparationProgram,
     ProviderPreparationRoute, ProviderPreparationSnapshot,
 };
+pub use query_metadata::ProviderQueryMetadataFootprint;
 
 pub use capability::{
     ProviderCapabilityOperation, ProviderCapabilitySnapshot, ProviderConcurrencyCapabilities,

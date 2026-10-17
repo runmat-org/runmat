@@ -8,12 +8,15 @@ use crate::builtins::common::{
     random::gpu_upload::{after_stream_commit, GpuChildHostUpload},
 };
 use crate::context::host_allocation::{HostAllocationPlan, HostNumericWorkspace};
+use crate::context::host_presentation::select_prepared_host_upload;
+use crate::context::provider_operation::ExactProviderOrHostSelection;
 use crate::{build_runtime_error, BuiltinResult};
 use runmat_accelerate_api::random::GpuBoundedIntegerDomain;
 use runmat_accelerate_api::{
     GpuTensorHandle, GpuTensorStorage, HostNumericDataView, HostNumericTensorView,
     NumericElementType,
 };
+use runmat_execution::Digest;
 use runmat_value::{IntegerStorage, NumericDType, NumericScalar, Value};
 
 enum NativeSamples {
@@ -216,6 +219,11 @@ pub(super) async fn like(
             .try_fold(1_usize, |n, &d| n.checked_mul(d))
             .ok_or_else(|| builtin_error("randi: output extent overflow"))?
     };
+    let domain = GpuBoundedIntegerDomain::new(bounds.lower, bounds.span)
+        .ok_or_else(|| builtin_error("randi: invalid GPU integer range"))?;
+    if let Some(output) = random::gpu_integer::try_fixed_work(source, domain, shape, class)? {
+        return Ok(Value::GpuTensor(output));
+    }
     // The finite route uses one exact native workspace, and the admitted
     // scratch includes its allocator/claim metadata. Unbounded legacy calls
     // may still use Vec storage but do not claim finite admission.
@@ -228,7 +236,79 @@ pub(super) async fn like(
     let compute_scratch = exact_bytes
         .checked_sub(native_bytes)
         .ok_or_else(|| builtin_error("randi: sample metadata underflow"))?;
+    let host_quote =
+        GpuChildHostUpload::quote_candidate("randi", source, shape, class, compute_scratch)?;
+    let chosen = random::gpu_integer_batch::select_initial_route(
+        source,
+        domain,
+        shape,
+        class,
+        host_quote.as_ref(),
+    )?;
+    let host_selection = match chosen {
+        Some(random::gpu_integer_batch::InitialIntegerRoute {
+            selection: ExactProviderOrHostSelection::Provider(selected),
+            snapshot,
+            physical,
+        }) => {
+            // The host alternative was not selected. Its query preparation
+            // claim must not survive the provider continuation or consume
+            // headroom needed by a later acknowledged batch.
+            drop(host_quote);
+            let selected = random::gpu_integer_batch::SelectedInitialNativeBatch {
+                selected,
+                snapshot,
+                physical,
+            };
+            return random::gpu_integer_batch::execute_selected(
+                source, domain, shape, class, selected,
+            )
+            .await
+            .map(|output| Value::GpuTensor(output));
+        }
+        Some(random::gpu_integer_batch::InitialIntegerRoute {
+            selection: ExactProviderOrHostSelection::HostUpload(selected),
+            ..
+        }) => Some(selected),
+        None => {
+            let host_quote = host_quote
+                .as_ref()
+                .ok_or_else(|| builtin_error("randi: no admitted native or upload route"))?;
+            let provider = crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
+                .ok_or_else(|| builtin_error("randi: GPU prototype has no exact provider"))?;
+            let facts = Digest::sha256_serialized(&(
+                bounds.lower,
+                bounds.span,
+                class,
+                shape,
+                source.view_identity(),
+            ))
+            .expect("typed GPU integer host route serializes");
+            select_prepared_host_upload(
+                crate::context::legacy::active().as_ref(),
+                provider,
+                "randi",
+                "random.gpu_child.integer.host.v1",
+                facts,
+                host_quote.candidate.clone(),
+                &host_quote.query,
+                host_quote.output.clone(),
+                host_quote.requested_bytes,
+            )?
+        }
+    };
+    let selected_upload_bytes = host_quote
+        .as_ref()
+        .map(|quote| quote.requested_bytes)
+        .ok_or_else(|| builtin_error("randi: host selection lacks an upload quote"))?;
+    // The candidate's feasibility Vecs and their preparation claim retire
+    // before the selected upload constructs a fresh, separately admitted
+    // query. Keeping both would charge overlapping but unused descriptions.
+    drop(host_quote);
     let mut upload = GpuChildHostUpload::prepare("randi", source, shape, class, compute_scratch)?;
+    if let Some(selected) = host_selection {
+        upload = upload.with_selected_host_route(selected, selected_upload_bytes)?;
+    }
     let samples = sample(*bounds, len, class, &upload).await?;
     let output = upload.publish(&samples.view(shape)).map_err(|error| {
         if len == 0 {

@@ -416,18 +416,22 @@ impl Parser {
             let member = self.expect_ident()?;
             name = format!("{name}.{member}");
         }
-        if !self.consume(&Token::LParen) {
-            return Err("expected '('".into());
-        }
         let mut params = Vec::new();
-        if !self.consume(&Token::RParen) {
-            params.push(self.expect_ident()?);
-            while self.consume(&Token::Comma) {
-                params.push(self.expect_ident()?);
-            }
+        if self.consume(&Token::LParen) {
             if !self.consume(&Token::RParen) {
-                return Err("expected ')'".into());
+                params.push(self.expect_ident()?);
+                while self.consume(&Token::Comma) {
+                    params.push(self.expect_ident()?);
+                }
+                if !self.consume(&Token::RParen) {
+                    return Err("expected ')'".into());
+                }
             }
+        } else if !matches!(
+            self.peek_token(),
+            Some(Token::Newline | Token::Semicolon | Token::Comma | Token::End)
+        ) {
+            return Err("expected '(' or end of function signature".into());
         }
 
         if let Some(idx) = params.iter().position(|p| p == "varargin") {

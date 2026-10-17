@@ -14,6 +14,7 @@ use std::sync::mpsc;
 
 use crate::cli::Cli;
 use crate::commands::package::install_project_for_source;
+use crate::commands::piped_input::PipedInput;
 use crate::commands::session::{
     create_session_with_graphics,
     drive_repl_with_graphics_callbacks as drive_with_graphics_callbacks,
@@ -22,9 +23,6 @@ use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::{format_compact_runtime_diagnostic, format_frontend_error};
 use crate::presentation::{self, StreamStyles};
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
-
-#[path = "repl/piped_input.rs"]
-mod piped_input;
 
 pub async fn execute_repl(config: &RunMatRuntimeConfig, cli: &Cli) -> Result<()> {
     execute_repl_with_graphics(config, cli, &runmat_core::SessionGraphicsHost::Unavailable).await
@@ -72,7 +70,7 @@ pub(crate) async fn execute_repl_with_graphics(
     if !stdin_is_tty {
         // This CLI invocation is stdin's sole consumer until source admission;
         // no script/input builtin is running while this owner collects it.
-        let buffer = piped_input::PipedInput::stdin()?
+        let buffer = PipedInput::stdin()?
             .await
             .context("Failed to read piped input")?;
         let callbacks = engine.graphics_callback_queue().cloned();

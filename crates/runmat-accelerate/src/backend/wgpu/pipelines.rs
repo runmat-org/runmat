@@ -271,6 +271,17 @@ impl PipelineBundle {
             })
     }
 
+    pub(crate) fn linear_chunk_capacity(&self) -> anyhow::Result<usize> {
+        self.linear_launch
+            .and_then(FrozenLinearLaunch::chunk_capacity)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "{}: linear launch capacity exceeds its frozen device limits",
+                    self.pipeline_label
+                )
+            })
+    }
+
     fn with_scalar_launch(
         mut self,
         precision: NumericPrecision,
@@ -445,6 +456,13 @@ pub struct WgpuPipelines {
     pub random_child_uniform_f64: PipelineBundle,
     pub random_child_normal_f64: PipelineBundle,
     pub random_child_complex_normal_f64: PipelineBundle,
+    pub random_child_integer_f32: PipelineBundle,
+    pub random_child_integer_f64: PipelineBundle,
+    pub random_child_integer_u32: PipelineBundle,
+    pub random_child_batch_f32: PipelineBundle,
+    pub random_child_batch_f64: PipelineBundle,
+    pub random_child_batch_i32: PipelineBundle,
+    pub random_child_batch_u32: PipelineBundle,
     pub random_exprnd: PipelineBundle,
     pub random_normrnd: PipelineBundle,
     pub random_unifrnd: PipelineBundle,
@@ -1491,7 +1509,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => EYE_SHADER_F64,
                 NumericPrecision::F32 => EYE_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let fill = create_pipeline(
             access,
@@ -1515,7 +1534,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => LINSPACE_SHADER_F64,
                 NumericPrecision::F32 => LINSPACE_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let window = create_pipeline(
             access,
@@ -1610,6 +1630,51 @@ impl WgpuPipelines {
         )
         .with_linear_launch(linear_tokens);
 
+        let fixed_integer_pipeline = |class, label| {
+            create_pipeline(
+                access,
+                label,
+                label,
+                label,
+                vec![storage_read_write_entry(0), uniform_entry(1)],
+                crate::backend::wgpu::shaders::random_threefry::fixed_integer_shader(class)
+                    .expect("selected native class has a fixed-work shader"),
+            )
+            .with_linear_launch(linear_tokens)
+        };
+        use runmat_accelerate_api::NumericElementType as RandomIntegerClass;
+        let random_child_integer_f32 =
+            fixed_integer_pipeline(RandomIntegerClass::F32, "runmat-random-child-integer-f32");
+        let random_child_integer_f64 =
+            fixed_integer_pipeline(RandomIntegerClass::F64, "runmat-random-child-integer-f64");
+        let random_child_integer_u32 =
+            fixed_integer_pipeline(RandomIntegerClass::U32, "runmat-random-child-integer-u32");
+        let batch_integer_pipeline = |class, label| {
+            create_pipeline(
+                access,
+                label,
+                label,
+                label,
+                vec![
+                    storage_read_write_entry(0),
+                    uniform_entry(1),
+                    storage_read_write_entry(2),
+                    storage_read_write_entry(3),
+                ],
+                crate::backend::wgpu::shaders::random_threefry::integer_batch_shader(class)
+                    .expect("selected native class has a bounded batch shader"),
+            )
+            .with_linear_launch(linear_tokens)
+        };
+        let random_child_batch_f32 =
+            batch_integer_pipeline(RandomIntegerClass::F32, "runmat-random-child-batch-f32");
+        let random_child_batch_f64 =
+            batch_integer_pipeline(RandomIntegerClass::F64, "runmat-random-child-batch-f64");
+        let random_child_batch_i32 =
+            batch_integer_pipeline(RandomIntegerClass::I32, "runmat-random-child-batch-i32");
+        let random_child_batch_u32 =
+            batch_integer_pipeline(RandomIntegerClass::U32, "runmat-random-child-batch-u32");
+
         let random_exprnd = create_pipeline(
             access,
             "runmat-random-exprnd-layout",
@@ -1688,7 +1753,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => FSPECIAL_SHADER_F64,
                 NumericPrecision::F32 => FSPECIAL_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let peaks = create_pipeline(
             access,
@@ -2227,6 +2293,13 @@ impl WgpuPipelines {
             random_child_uniform_f64,
             random_child_normal_f64,
             random_child_complex_normal_f64,
+            random_child_integer_f32,
+            random_child_integer_f64,
+            random_child_integer_u32,
+            random_child_batch_f32,
+            random_child_batch_f64,
+            random_child_batch_i32,
+            random_child_batch_u32,
             random_exprnd,
             random_normrnd,
             random_unifrnd,

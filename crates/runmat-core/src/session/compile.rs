@@ -7,7 +7,10 @@ use std::sync::Arc;
 
 #[path = "compile/program_sources.rs"]
 pub(super) mod program_sources;
+#[path = "compile/test_source_authority.rs"]
+mod test_source_authority;
 use program_sources::identity::{executable_primary_access_path, executable_source_identity};
+use test_source_authority::CapturedTestSourceAuthority;
 
 fn fatal_frontend_diagnostic(
     diagnostics: &[runmat_hir::HirDiagnostic],
@@ -651,6 +654,7 @@ async fn compose_frozen_project_async(
     context: &ProjectCompilationContext,
     frozen: &runmat_package::FrozenProject,
     compat_mode: runmat_parser::CompatMode,
+    test_authority: Option<&CapturedTestSourceAuthority<'_>>,
 ) -> Result<CompanionSourceDiscovery, String> {
     let options = ParserOptions::new(compat_mode);
     let mut out = CompanionSourceDiscovery::default();
@@ -662,23 +666,29 @@ async fn compose_frozen_project_async(
         if source_paths_equivalent(access_path, &context.primary_source_path) {
             continue;
         }
-        let file_path = access_path.to_path_buf();
-        let file_path =
-            runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(&file_path)
-                .await;
-        let contents =
-            runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
-                .await
-                .map_err(|error| {
-                    format!(
-                        "failed to read graph-declared source {}: {error}",
-                        file_path.display()
-                    )
-                })?;
+        let captured =
+            test_authority.and_then(|authority| authority.captured_text_for(access_path));
+        let (file_path, contents, uses_pcode_reader) = if let Some(captured) = captured {
+            (access_path.to_path_buf(), Cow::Borrowed(captured), false)
+        } else {
+            let file_path =
+                runmat_runtime::builtins::io::repl_fs::pcode::prefer_pcode_source_path(access_path)
+                    .await;
+            let contents =
+                runmat_runtime::builtins::io::repl_fs::pcode::read_source_text_async(&file_path)
+                    .await
+                    .map_err(|error| {
+                        format!(
+                            "failed to read graph-declared source {}: {error}",
+                            file_path.display()
+                        )
+                    })?;
+            (file_path, Cow::Owned(contents), true)
+        };
         out.observed_sources.push(ObservedSourceRevision {
             access_path: file_path.clone(),
             content_revision: Some(runmat_execution::Digest::sha256(contents.as_bytes())),
-            uses_pcode_reader: true,
+            uses_pcode_reader,
         });
         if !contents.contains("classdef") && !contents.contains("function") {
             continue;
@@ -754,7 +764,7 @@ async fn compose_frozen_project_async(
                     &context.cwd,
                 ),
                 fullpath_name: Some(path_to_source_name(source_context_path)),
-                text: contents,
+                text: contents.into_owned(),
             }),
         );
     }
@@ -842,7 +852,7 @@ pub(super) async fn compose_project_compilation_context_async(
     compat_mode: runmat_parser::CompatMode,
 ) -> Result<CompanionSourceDiscovery, String> {
     if let Some(frozen) = context.frozen.as_ref() {
-        compose_frozen_project_async(context, frozen, compat_mode).await
+        compose_frozen_project_async(context, frozen, compat_mode, None).await
     } else if let Some(loose_index) = context.loose_index.as_ref() {
         compose_loose_project_async(context, loose_index, compat_mode).await
     } else {
@@ -864,9 +874,10 @@ pub(super) async fn companion_source_statements_from_handoff_async(
     source_name: &str,
     compat_mode: runmat_parser::CompatMode,
     handoff: &runmat_package::FrozenProjectHandoff,
+    test_authority: Option<&CapturedTestSourceAuthority<'_>>,
 ) -> Result<CompanionSourceDiscovery, String> {
     let context = project_compilation_context_from_handoff(source_name, handoff)?;
-    compose_project_compilation_context_async(&context, compat_mode).await
+    compose_frozen_project_async(&context, &handoff.project, compat_mode, test_authority).await
 }
 
 impl RunMatSession {
@@ -877,7 +888,47 @@ impl RunMatSession {
         source: impl Into<Cow<'a, crate::ExecutableSource>>,
         program_revision: Option<runmat_execution::ProgramRevision>,
     ) -> std::result::Result<crate::ExecutableUnit, RunError> {
-        let source = source.into();
+        self.compile_executable_unit_inner(source.into(), program_revision, None)
+            .await
+    }
+
+    /// Compile one selected test source from its frozen run, while retaining
+    /// the installed project's independent dependency/source authority.
+    pub async fn compile_test_executable_unit(
+        &mut self,
+        source: crate::ExecutableSource,
+        descriptor: &runmat_test::descriptor::SourceDescriptor,
+        snapshot: &runmat_test::discovery::FrozenTestRunSnapshot,
+        span_only: bool,
+    ) -> std::result::Result<crate::ExecutableUnit, RunError> {
+        let authority = CapturedTestSourceAuthority::new(
+            snapshot,
+            descriptor,
+            &source,
+            span_only,
+            self.project_handoff.as_ref(),
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableSourceIdentity")
+                    .build(),
+            )
+        })?;
+        self.compile_executable_unit_inner(
+            Cow::Owned(source),
+            Some(snapshot.program_revision.clone()),
+            Some(&authority),
+        )
+        .await
+    }
+
+    async fn compile_executable_unit_inner(
+        &mut self,
+        source: Cow<'_, crate::ExecutableSource>,
+        program_revision: Option<runmat_execution::ProgramRevision>,
+        test_authority: Option<&CapturedTestSourceAuthority<'_>>,
+    ) -> std::result::Result<crate::ExecutableUnit, RunError> {
         self.ensure_user_path_hydrated().await?;
         if let (Some(requested), Some(installed)) =
             (program_revision.as_ref(), self.project_revision())
@@ -895,37 +946,50 @@ impl RunMatSession {
             }
         }
 
-        let primary_access_path =
-            executable_primary_access_path(&source, self.project_handoff.as_ref()).map_err(
-                |error| {
-                    RunError::Runtime(
-                        build_runtime_error(error)
-                            .with_identifier("RunMat:ExecutableSourceIdentity")
-                            .build(),
-                    )
-                },
-            )?;
+        let primary_access_path = if let Some(authority) = test_authority {
+            Ok(authority.primary_access_path().map(str::to_owned))
+        } else {
+            executable_primary_access_path(&source, self.project_handoff.as_ref())
+        }
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableSourceIdentity")
+                    .build(),
+            )
+        })?;
         let previous_source_name = self.active_source_name.clone();
         let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
         let previous_pending = self.pending_companion_source_discovery.take();
-        self.active_source_name = source.relative_path.clone();
+        self.active_source_name = primary_access_path
+            .clone()
+            .unwrap_or_else(|| source.relative_path.clone());
         self.active_source_fullpath_name = primary_access_path;
 
         let companion_result = if let Some(handoff) = self.project_handoff.as_ref() {
             companion_source_statements_from_handoff_async(
-                &source.relative_path,
+                self.active_source_name.as_str(),
                 self.compat_mode,
                 handoff,
+                test_authority,
             )
             .await
+        } else if test_authority.is_some() {
+            Ok(CompanionSourceDiscovery::default())
         } else {
             discover_companion_source_statements_async(&source.relative_path, self.compat_mode)
                 .await
         };
+        let companion_result = companion_result.and_then(|mut companion| {
+            if let Some(authority) = test_authority {
+                authority.add_companions(&mut companion, self.compat_mode)?;
+            }
+            Ok(companion)
+        });
         let result = match companion_result {
             Ok(companion) => {
                 self.pending_companion_source_discovery = Some(companion);
-                self.compile_input_with_portable_source(&source.text, Some(&source))
+                self.compile_input_with_portable_source(&source.text, Some(&source), test_authority)
             }
             Err(error) => Err(RunError::Runtime(
                 build_runtime_error(format!("project composition failed: {error}"))
@@ -943,10 +1007,11 @@ impl RunMatSession {
             .portable_source_map
             .take()
             .expect("portable compilation must retain its source table");
-        let revision = crate::ExecutableRevision::derive(
+        let revision = crate::ExecutableRevision::derive_with_selection(
             &source,
             program_revision,
             crate::program_environment(self.compat_mode),
+            test_authority.and_then(CapturedTestSourceAuthority::executable_selection),
         );
         prepared
             .attach_function_origins(&revision.program_revision, &source_map)
@@ -964,7 +1029,7 @@ impl RunMatSession {
             bytecode,
             published_registry_for_reuse,
             private_companion_function_names,
-            current_function_ids,
+            mut current_function_ids,
             ..
         } = prepared;
         let mut draft = crate::executable::ExecutableUnitDraft::prepare(
@@ -982,12 +1047,14 @@ impl RunMatSession {
                     .build(),
             )
         })?;
+        let mut excluded_reused_ids = HashSet::new();
         if let Some(remap) = super::semantic_definition::unchanged_product_remap(
             draft.bytecode(),
             &current_function_ids,
             &published_registry_for_reuse,
             &private_companion_function_names,
         ) {
+            excluded_reused_ids.extend(remap.values().copied());
             draft
                 .rebind_current_definitions(&published_registry_for_reuse, &remap)
                 .map_err(|error| {
@@ -997,8 +1064,49 @@ impl RunMatSession {
                             .build(),
                     )
                 })?;
+            current_function_ids = current_function_ids
+                .into_iter()
+                .map(|id| remap.get(&id).copied().unwrap_or(id))
+                .collect();
         }
-        Ok(draft.seal())
+        let unit = draft.seal();
+        // The prepared product, not parser membership, decides which bodies
+        // this immutable program actually owns after unchanged-body reuse.
+        let current = unit.compiled_current_body_ids().map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableProduct")
+                    .build(),
+            )
+        })?;
+        if !current.is_disjoint(&excluded_reused_ids) || !current.is_subset(&current_function_ids) {
+            return Err(RunError::Runtime(
+                build_runtime_error("compiled body selection disagrees with reused definitions")
+                    .with_identifier("RunMat:ExecutableProduct")
+                    .build(),
+            ));
+        }
+        let selected = super::source_evaluation::selected_static_imports(
+            &unit,
+            &self.function_registry,
+            &current,
+            &excluded_reused_ids,
+        )
+        .map_err(|error| {
+            RunError::Runtime(
+                build_runtime_error(error)
+                    .with_identifier("RunMat:ExecutableStaticImport")
+                    .build(),
+            )
+        })?;
+        unit.with_portable_selection(current, selected.imports)
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableProduct")
+                        .build(),
+                )
+            })
     }
 
     #[cfg(test)]
@@ -1053,6 +1161,7 @@ impl RunMatSession {
                     source_name,
                     self.compat_mode,
                     handoff,
+                    None,
                 )
                 .await
             } else {
@@ -1077,7 +1186,7 @@ impl RunMatSession {
         &mut self,
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
-        self.compile_input_with_portable_source(input, None)
+        self.compile_input_with_portable_source(input, None, None)
     }
 
     pub(super) fn canonical_interactive_source(
@@ -1111,13 +1220,22 @@ impl RunMatSession {
         &mut self,
         input: &str,
         portable_source: Option<&crate::ExecutableSource>,
+        test_authority: Option<&CapturedTestSourceAuthority<'_>>,
     ) -> std::result::Result<PreparedExecution, RunError> {
         self.sync_workspace_binding_metadata()
             .map_err(RunError::Runtime)?;
         let source_name = self.current_source_name().to_string();
         let source_fullpath_name = self.current_source_fullpath_name().map(ToString::to_string);
-        let interactive_source = self.canonical_interactive_source(input)?;
-        let source_for_table = portable_source.unwrap_or(&interactive_source);
+        // Selected executable sources have already crossed their own authority
+        // boundary; resolve an interactive source only for interactive input.
+        let interactive_source;
+        let source_for_table = match portable_source {
+            Some(source) => source,
+            None => {
+                interactive_source = self.canonical_interactive_source(input)?;
+                &interactive_source
+            }
+        };
         self.source_pool
             .intern_with_fullpath(&source_name, source_fullpath_name.as_deref(), input);
         let (
@@ -1131,6 +1249,17 @@ impl RunMatSession {
         ) = {
             let _span = info_span!("runtime.parse").entered();
             let mut ast = parse_with_options(input, ParserOptions::new(self.compat_mode))?;
+            if let Some(authority) = test_authority {
+                authority
+                    .select_program(&mut ast, input.len())
+                    .map_err(|error| {
+                        RunError::Runtime(
+                            build_runtime_error(error)
+                                .with_identifier("RunMat:ExecutableSourceIdentity")
+                                .build(),
+                        )
+                    })?;
+            }
             let primary_function_names = function_names_in_statements(&ast.body)
                 .map(ToString::to_string)
                 .collect::<HashSet<_>>();
@@ -1194,14 +1323,26 @@ impl RunMatSession {
                     ));
                 }
             }
-            let source_table = program_sources::ProgramSourceTable::build(
-                source_for_table,
-                source_fullpath_name.as_deref(),
-                &companion,
-                ast.body.len(),
-                self.project_handoff.as_ref(),
-                &retained_sources,
-            )
+            let source_table = if let Some(authority) = test_authority {
+                program_sources::ProgramSourceTable::build_with_test(
+                    source_for_table,
+                    source_fullpath_name.as_deref(),
+                    &companion,
+                    ast.body.len(),
+                    self.project_handoff.as_ref(),
+                    authority,
+                    &retained_sources,
+                )
+            } else {
+                program_sources::ProgramSourceTable::build(
+                    source_for_table,
+                    source_fullpath_name.as_deref(),
+                    &companion,
+                    ast.body.len(),
+                    self.project_handoff.as_ref(),
+                    &retained_sources,
+                )
+            }
             .map_err(|error| {
                 RunError::Runtime(
                     build_runtime_error(error)

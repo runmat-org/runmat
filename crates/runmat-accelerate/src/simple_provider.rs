@@ -3963,6 +3963,7 @@ impl AccelProvider for InProcessProvider {
                 | "conv2"
                 | "transfer.upload"
                 | runmat_accelerate_api::random::PROVIDER_GPU_RANDOM_OPERATION
+                | runmat_accelerate_api::random::PROVIDER_GPU_INTEGER_OPERATION
         ) || !self.query_feasibility(query).is_supported()
         {
             return ProviderObservationCapability::Unsupported;
@@ -5498,6 +5499,23 @@ impl AccelProvider for InProcessProvider {
         metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         self.execute_child_random(request, metadata)
+    }
+
+    fn propose_gpu_integer(
+        &self,
+        request: &runmat_accelerate_api::random::GpuIntegerRequest<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::random::GpuRandomPhysicalProposal>,
+    > {
+        Ok(self.propose_child_integer(request))
+    }
+
+    fn execute_gpu_integer(
+        &self,
+        request: &runmat_accelerate_api::random::GpuIntegerRequest<'_>,
+        metadata: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.execute_child_integer(request, metadata)
     }
 
     fn random_uniform(&self, shape: &[usize]) -> Result<GpuTensorHandle> {

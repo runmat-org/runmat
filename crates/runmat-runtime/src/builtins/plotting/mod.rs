@@ -192,6 +192,8 @@ pub(crate) mod set;
 pub(crate) mod sgtitle;
 #[path = "ops/sphere.rs"]
 pub(crate) mod sphere;
+#[path = "ops/cylinder.rs"]
+pub(crate) mod cylinder;
 #[path = "ops/stackedplot.rs"]
 pub(crate) mod stackedplot;
 #[path = "ops/stairs.rs"]

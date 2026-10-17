@@ -93,6 +93,7 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
                         protocol_error("failed to initialize worker session", error)
                     })?;
                 if let Some(project) = bootstrap.project.clone() {
+                    let project = issue_local_project_paths(project)?;
                     session
                         .install_project_handoff(project)
                         .await
@@ -204,6 +205,46 @@ pub async fn run_core_worker_stdio() -> NativeRunnerResult<()> {
             }
         }
     }
+}
+
+/// The bootstrap identifies a project revision, not a portable access root.
+/// Issue the native worker's own local paths before Core derives attribution
+/// for frozen test files. The selected source bytes still come from the run
+/// snapshot; this step never rereads a test body.
+fn issue_local_project_paths(
+    mut handoff: runmat_package::FrozenProjectHandoff,
+) -> NativeRunnerResult<runmat_package::FrozenProjectHandoff> {
+    let root = std::fs::canonicalize(".")
+        .map_err(|error| protocol_error("native worker cannot issue its project root", error))?;
+    let original_root = handoff.project.workspace_root.clone();
+    let manifest_relative = handoff
+        .project
+        .manifest_path
+        .strip_prefix(&original_root)
+        .map_err(|_| {
+            NativeRunnerError::Protocol("native manifest is outside project root".into())
+        })?;
+    let manifest = std::fs::canonicalize(root.join(manifest_relative)).map_err(|error| {
+        protocol_error("native worker cannot locate its project manifest", error)
+    })?;
+    if manifest.parent() != Some(root.as_path()) {
+        return Err(NativeRunnerError::Protocol(
+            "native worker manifest is outside its project root".into(),
+        ));
+    }
+    for path in handoff.project.access_paths.values_mut() {
+        let issued = path
+            .strip_prefix(&original_root)
+            .map_or_else(|_| path.clone(), |relative| root.join(relative));
+        *path = std::fs::canonicalize(issued)
+            .map_err(|error| protocol_error("native worker cannot locate project source", error))?;
+    }
+    handoff.project.workspace_root = root;
+    handoff.project.manifest_path = manifest;
+    handoff
+        .validate()
+        .map_err(|error| protocol_error("native worker project remap is invalid", error))?;
+    Ok(handoff)
 }
 
 async fn reject(

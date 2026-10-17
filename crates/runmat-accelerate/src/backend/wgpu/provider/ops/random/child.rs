@@ -23,6 +23,11 @@ impl WgpuProvider {
         &self,
         query: &ProviderFeasibilityQuery,
     ) -> Option<ProviderFeasibility> {
+        if query.workload.gpu_integer.is_some()
+            || query.operation.0 == runmat_accelerate_api::random::PROVIDER_GPU_INTEGER_OPERATION
+        {
+            return self.integer_child_feasibility(query);
+        }
         let random_identity =
             query.operation.0 == runmat_accelerate_api::random::PROVIDER_GPU_RANDOM_OPERATION;
         let workload = match query.workload.gpu_random {
@@ -273,6 +278,10 @@ impl WgpuProvider {
                         first3: (first >> 96) as u32,
                         seed0: seed as u32,
                         seed1: (seed >> 32) as u32,
+                        integer_lower: 0,
+                        integer_mask: 0,
+                        _pad0: 0,
+                        _pad1: 0,
                     };
                     let params_buffer =
                         self.uniform_buffer(emission, &params, "runmat-random-child-params")?;

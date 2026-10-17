@@ -68,6 +68,7 @@ pub(super) fn select(
             semantic_operation: "fspecial",
             variant: "fspecial.optional_resident_constructor.v1",
             domain_facts,
+            calibration_facts: None,
             host_scratch,
             provider_host_scratch: ResourceByteBound::Known(0),
             host_cpu_millicores: 1_000,
