@@ -167,8 +167,9 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &groups,
         &[bridge],
         &[],
-        &[],
-        &stores
+        &mut [],
+        &stores,
+        &[]
     ));
 
     let mut missing_node = graph.clone();
@@ -178,8 +179,9 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &groups,
         &[bridge],
         &[],
-        &[],
-        &stores
+        &mut [],
+        &stores,
+        &[]
     ));
 
     let mut wrong_kind = graph.clone();
@@ -195,8 +197,9 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &groups,
         &[bridge],
         &[],
-        &[],
-        &stores
+        &mut [],
+        &stores,
+        &[]
     ));
 
     let mut wrong_pc = stores.clone();
@@ -210,8 +213,9 @@ fn graph_binding_elision_requires_exact_global_value_and_producer_node_ownership
         &groups,
         &[bridge],
         &[],
-        &[],
-        &wrong_pc
+        &mut [],
+        &wrong_pc,
+        &[]
     ));
 }
 
@@ -518,6 +522,114 @@ fn sealed_vecdim_controls_precede_image_group_recognition() {
         .detect_fusion_groups()
         .iter()
         .any(|group| group.kind == FusionKind::ImageNormalize));
+}
+
+#[test]
+fn projected_literal_loads_bind_exact_selected_stack_operands() {
+    for source in [
+        "a = int8.zeros(2, 3); b = int32.zeros([1 4]); \
+         c = uint16.zeros(3, 1); d = uint64.zeros(1, 2); \
+         ca = class(a); cb = class(b); cc = class(c); cd = class(d);",
+        "__register_test_classes(); o = new_object('OverIdx'); \
+         o = call_method(o,'subsasgn',struct('type', '.', 'subs', 'k'),5); \
+         a1 = (o ~= 10); a2 = (10 ~= o); b1 = (o >= 5); b2 = (o <= 5); \
+         c1 = ([2 3] .^ 2); c2 = (2 .^ [2 3]); d1 = (o ./ 2);",
+    ] {
+        let bytecode = compile_source(source);
+        let (raw, _, _) = crate::accel::graph::build_accel_graph_with_transcript(
+            &bytecode.instructions,
+            &bytecode.var_types,
+        );
+        let folded = literal_controls(&bytecode)
+            .into_iter()
+            .filter_map(|control| {
+                let node = raw
+                    .nodes
+                    .iter()
+                    .find(|node| node.span.end == control.producer_pc)?;
+                let [id] = node.outputs.as_slice() else {
+                    return None;
+                };
+                raw.exact_folded_literal_array(*id).map(|_| *id)
+            })
+            .collect::<Vec<_>>();
+        assert!(!folded.is_empty(), "actual sealed array source: {source}");
+        let (plan, graph) = bytecode.prepare_vm_fusion_plan();
+        let plan = plan.expect("actual selected plan");
+        let graph = graph.expect("same graph as selected plan");
+        assert!(
+            folded.iter().any(|id| {
+                graph.var_binding(*id).is_none()
+                    && plan.groups.iter().any(|selected| {
+                        selected.inputs.contains(id)
+                            && selected.group.stack_layout.as_ref().is_some_and(|layout| {
+                                layout
+                                    .bindings
+                                    .iter()
+                                    .any(|binding| binding.value_id == *id)
+                            })
+                    })
+            }),
+            "exact folded load must bind selected input: {source}"
+        );
+    }
+}
+
+#[test]
+fn changed_or_ambiguous_private_load_cannot_mint_stack_authority() {
+    let bytecode = compile_source("a = int32.zeros([1 4]); b = int8.zeros(2, 3);");
+    let (raw, stores, loads) = crate::accel::graph::build_accel_graph_with_transcript(
+        &bytecode.instructions,
+        &bytecode.var_types,
+    );
+    let groups = bytecode.runtime_fusion_groups_for_graph(&raw);
+    let controls = literal_controls(&bytecode);
+    let control = controls
+        .iter()
+        .find(|control| {
+            raw.nodes.iter().any(|node| {
+                node.span.end == control.producer_pc
+                    && node
+                        .outputs
+                        .iter()
+                        .any(|id| raw.exact_folded_literal_array(*id).is_some())
+            })
+        })
+        .expect("sealed literal");
+    for altered in [
+        {
+            let mut changed = loads.clone();
+            changed
+                .iter_mut()
+                .find(|load| load.pc == control.load_pc)
+                .expect("actual source load")
+                .value_id = u32::MAX;
+            changed
+        },
+        {
+            let mut ambiguous = loads.clone();
+            let duplicate = ambiguous
+                .iter()
+                .find(|load| load.pc == control.load_pc)
+                .expect("actual source load")
+                .clone();
+            ambiguous.push(duplicate);
+            ambiguous.sort_by_key(|load| load.pc);
+            ambiguous
+        },
+    ] {
+        let mut graph = raw.clone();
+        let mut controls = controls.clone();
+        assert!(!project_private_bindings(
+            &mut graph,
+            &groups,
+            &bridges(&bytecode),
+            &empty_controls(&bytecode),
+            &mut controls,
+            &stores,
+            &altered,
+        ));
+    }
 }
 
 #[test]

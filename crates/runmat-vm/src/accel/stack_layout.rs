@@ -3,19 +3,39 @@ use std::collections::{HashMap, HashSet};
 use runmat_accelerate::graph::{AccelGraph, ValueId, ValueOrigin, VarKind};
 use runmat_accelerate::{FusionGroup, FusionStackLayout, FusionStackValueBinding};
 
+use crate::bytecode::fusion_private_temp::FusionPrivateLiteralControl;
 use crate::instr::Instr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StackValue {
     Unknown,
     GraphValue(ValueId),
-    Variable { kind: VarKind, index: usize },
+    ProjectedLiteral {
+        value_id: ValueId,
+        load_pc: usize,
+        consumer_pc: usize,
+    },
+    Variable {
+        kind: VarKind,
+        index: usize,
+    },
 }
 
 pub fn annotate_fusion_groups_with_stack_layout(
     instructions: &[Instr],
     graph: &AccelGraph,
     groups: &mut [FusionGroup],
+) {
+    annotate_fusion_groups_with_projected_literals(instructions, graph, groups, &[]);
+}
+
+/// The extra certificates are minted only by exact private binding erasure;
+/// they are not a replacement for public graph variable bindings.
+pub(crate) fn annotate_fusion_groups_with_projected_literals(
+    instructions: &[Instr],
+    graph: &AccelGraph,
+    groups: &mut [FusionGroup],
+    literals: &[FusionPrivateLiteralControl],
 ) {
     if groups.is_empty() {
         return;
@@ -49,6 +69,16 @@ pub fn annotate_fusion_groups_with_stack_layout(
             }
         }
 
+        if matches!(instr, Instr::Swap) {
+            if stack.len() < 2 {
+                stack.clear();
+            } else {
+                let last = stack.len() - 1;
+                stack.swap(last, last - 1);
+            }
+            continue;
+        }
+
         let Some(effect) = instr.stack_effect() else {
             stack.clear();
             continue;
@@ -62,10 +92,27 @@ pub fn annotate_fusion_groups_with_stack_layout(
 
         let pushed_value = if effect.pushes == 1 {
             match instr {
-                Instr::LoadVar(index) => StackValue::Variable {
-                    kind: VarKind::Global,
-                    index: *index,
-                },
+                Instr::LoadVar(index) => {
+                    let certified = literals
+                        .binary_search_by_key(&pc, |literal| literal.load_pc)
+                        .ok()
+                        .filter(|&position| {
+                            (position == 0 || literals[position - 1].load_pc != pc)
+                                && (position + 1 == literals.len()
+                                    || literals[position + 1].load_pc != pc)
+                        })
+                        .and_then(|position| literals[position].projected_load_value(pc, *index));
+                    certified
+                        .map(|(value_id, consumer_pc)| StackValue::ProjectedLiteral {
+                            value_id,
+                            load_pc: pc,
+                            consumer_pc,
+                        })
+                        .unwrap_or(StackValue::Variable {
+                            kind: VarKind::Global,
+                            index: *index,
+                        })
+                }
                 Instr::LoadLocal(index) => StackValue::Variable {
                     kind: VarKind::Local,
                     index: *index,
@@ -111,6 +158,17 @@ fn build_group_stack_layout(
             {
                 *value_id
             }
+            StackValue::ProjectedLiteral {
+                value_id,
+                load_pc,
+                consumer_pc,
+            } if *load_pc < group.span.start
+                && group.span.end <= *consumer_pc
+                && stack_value_ids.contains(value_id)
+                && seen.insert(*value_id) =>
+            {
+                *value_id
+            }
             StackValue::Variable { kind, index } => {
                 // Retain each certified occurrence, including x+x; an ambiguous
                 // same-slot graph source cannot authenticate any occurrence.
@@ -125,7 +183,10 @@ fn build_group_stack_layout(
             value_id,
             stack_offset: absolute_offset - slice_start,
         };
-        if matches!(value, StackValue::Variable { .. }) {
+        if matches!(
+            value,
+            StackValue::Variable { .. } | StackValue::ProjectedLiteral { .. }
+        ) {
             compiler_variable_bindings.push(binding.clone());
         }
         bindings.push(binding);
@@ -275,6 +336,45 @@ mod tests {
             stack_layout: None,
         };
         build_group_stack_layout(&[Instr::Add], &graph, &group, &entry).expect("two entry operands")
+    }
+
+    #[test]
+    fn swap_preserves_exact_operand_provenance() {
+        let instructions = [
+            Instr::LoadVar(0),
+            Instr::LoadVar(1),
+            Instr::Swap,
+            Instr::Add,
+        ];
+        let graph = crate::accel::graph::build_accel_graph(
+            &instructions,
+            &[runmat_builtins::Type::Num, runmat_builtins::Type::Num],
+        );
+        let node = graph.nodes.last().expect("swapped Add node");
+        let mut groups = [FusionGroup {
+            id: 0,
+            kind: FusionKind::ElementwiseChain,
+            nodes: vec![node.id],
+            shape: ShapeInfo::Unknown,
+            span: InstrSpan { start: 3, end: 3 },
+            pattern: None,
+            stack_layout: None,
+        }];
+        annotate_fusion_groups_with_stack_layout(&instructions, &graph, &mut groups);
+        let layout = groups[0].stack_layout.as_ref().expect("exact stack layout");
+        assert_eq!(
+            layout.bindings,
+            vec![
+                FusionStackValueBinding {
+                    value_id: node.inputs[0],
+                    stack_offset: 0
+                },
+                FusionStackValueBinding {
+                    value_id: node.inputs[1],
+                    stack_offset: 1
+                },
+            ]
+        );
     }
 
     #[test]

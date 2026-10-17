@@ -1,10 +1,11 @@
 //! A private MIR temporary bridge, derived from the selected executable
 //! stream and its sealed statement facts. No serialized hint mints a bridge.
 
-use crate::accel::graph::AccelStore;
+use crate::accel::graph::{AccelLoad, AccelStore};
 use crate::bytecode::Bytecode;
 use runmat_accelerate::graph::{
-    AccelGraph, AccelGraphTag, AccelNodeLabel, AccelOpCategory, PrimitiveOp, VarBinding, VarKind,
+    AccelGraph, AccelGraphTag, AccelNodeLabel, AccelOpCategory, PrimitiveOp, ValueId, VarBinding,
+    VarKind,
 };
 use runmat_accelerate::FusionGroup;
 #[cfg(test)]
@@ -35,6 +36,16 @@ pub(crate) struct FusionPrivateLiteralControl {
     pub load_pc: usize,
     pub producer_pc: usize,
     pub consumer_pc: usize,
+    // Minted only when the exact graph binding is actually erased below.
+    projected_value: Option<ValueId>,
+}
+
+impl FusionPrivateLiteralControl {
+    pub(crate) fn projected_load_value(&self, pc: usize, slot: usize) -> Option<(ValueId, usize)> {
+        (self.load_pc == pc && self.slot == slot)
+            .then_some(self.projected_value.map(|id| (id, self.consumer_pc)))
+            .flatten()
+    }
 }
 
 #[path = "fusion_private_temp/coalesce.rs"]
@@ -116,8 +127,9 @@ pub(crate) fn project_private_bindings(
     groups: &[FusionGroup],
     bridges: &[FusionPrivateTempBridge],
     controls: &[FusionPrivateEmptyControl],
-    literals: &[FusionPrivateLiteralControl],
+    literals: &mut [FusionPrivateLiteralControl],
     stores: &[AccelStore],
+    loads: &[AccelLoad],
 ) -> bool {
     let index = projection_index::ProjectionIndex::new(graph, groups, stores);
     for bridge in bridges {
@@ -264,17 +276,28 @@ pub(crate) fn project_private_bindings(
             return false;
         };
         let consumer = &graph.nodes[consumer_position];
+        let matching_load = loads
+            .binary_search_by_key(&literal.load_pc, |load| load.pc)
+            .ok()
+            .filter(|&position| {
+                (position == 0 || loads[position - 1].pc != literal.load_pc)
+                    && (position + 1 == loads.len() || loads[position + 1].pc != literal.load_pc)
+            })
+            .map(|position| &loads[position]);
         if !consumer.inputs.contains(output)
             || store.value_id != *output
             || store.binding != expected
             || graph.var_binding(*output) != Some(&expected)
             || graph.node_binding(producer.id) != Some(&expected)
             || index.has_other_consumer(*output, consumer.id)
+            || !matching_load
+                .is_some_and(|load| load.value_id == *output && load.binding == expected)
         {
             return false;
         }
         graph.var_bindings.remove(output);
         graph.node_bindings.remove(&producer.id);
+        literal.projected_value = Some(*output);
     }
     true
 }

@@ -9,7 +9,7 @@ use runmat_accelerate::graph::{AccelGraph, VarBinding, VarKind};
 use runmat_accelerate::{prepare_fusion_plan, FusionPlanRef};
 
 use crate::accel::graph::{build_accel_graph_with_transcript, AccelLoad, AccelStore};
-use crate::accel::stack_layout::annotate_fusion_groups_with_stack_layout;
+use crate::accel::stack_layout::annotate_fusion_groups_with_projected_literals;
 use crate::bytecode::Instr;
 
 use runmat_runtime::context::{
@@ -189,13 +189,15 @@ impl Bytecode {
         // Scalar-vs-matrix normalization belongs to this exact graph. Close
         // certified private edges only after that distinction is available.
         let groups = self.runtime_fusion_groups_for_graph(&graph);
+        let mut literal_controls = crate::bytecode::fusion_private_temp::literal_controls(self);
         if !crate::bytecode::fusion_private_temp::project_private_bindings(
             &mut graph,
             &groups,
             &crate::bytecode::fusion_private_temp::bridges(self),
             &crate::bytecode::fusion_private_temp::empty_controls(self),
-            &crate::bytecode::fusion_private_temp::literal_controls(self),
+            &mut literal_controls,
             &stores,
+            &loads,
         ) {
             return (None, Some(graph), stores, loads);
         }
@@ -217,10 +219,12 @@ impl Bytecode {
                 .iter()
                 .map(|selected| selected.group.clone())
                 .collect::<Vec<_>>();
-            annotate_fusion_groups_with_stack_layout(
+            literal_controls.sort_by_key(|control| control.load_pc);
+            annotate_fusion_groups_with_projected_literals(
                 &self.instructions,
                 &graph,
                 &mut reconciled_groups,
+                &literal_controls,
             );
             for (selected, reconciled) in owned.groups.iter_mut().zip(reconciled_groups) {
                 selected.group.stack_layout = reconciled.stack_layout;

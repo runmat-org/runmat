@@ -10,7 +10,9 @@ use std::ops::Range;
 use runmat_accelerate::graph::{AccelGraph, ValueId, VarBinding, VarKind};
 use runmat_types::{ProgramFunctionId, ProgramPointId};
 
-use crate::accel::graph::{build_accel_graph_with_stores, AccelStore};
+use crate::accel::graph::{
+    build_accel_graph_with_stores, build_accel_graph_with_transcript, AccelStore,
+};
 use crate::bytecode::{
     Bytecode, FusionCandidateGroup, FusionStageSelectionOrigin, Instr, StatementPcRange,
 };
@@ -86,8 +88,9 @@ impl<'a> SelectedMultiStoreGraph<'a> {
     /// calls and materializations can separate its source-visible stores.
     pub(super) fn for_image(bytecode: &'a Bytecode) -> Option<Self> {
         bytecode.fusion_metadata.stage_projection.as_ref()?;
-        let (mut graph, stores) =
-            build_accel_graph_with_stores(&bytecode.instructions, &bytecode.var_types);
+        let (mut graph, stores, loads) =
+            build_accel_graph_with_transcript(&bytecode.instructions, &bytecode.var_types);
+        let mut literals = crate::bytecode::fusion_private_temp::literal_controls(bytecode);
         let groups = graph
             .detect_fusion_groups()
             .into_iter()
@@ -99,8 +102,9 @@ impl<'a> SelectedMultiStoreGraph<'a> {
                 &groups,
                 &crate::bytecode::fusion_private_temp::bridges(bytecode),
                 &crate::bytecode::fusion_private_temp::empty_controls(bytecode),
-                &crate::bytecode::fusion_private_temp::literal_controls(bytecode),
+                &mut literals,
                 &stores,
+                &loads,
             )
         {
             return None;

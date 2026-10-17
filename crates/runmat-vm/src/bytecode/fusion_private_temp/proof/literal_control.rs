@@ -73,5 +73,6 @@ pub(super) fn sealed_literal_control(
         load_pc,
         producer_pc,
         consumer_pc,
+        projected_value: None,
     })
 }
