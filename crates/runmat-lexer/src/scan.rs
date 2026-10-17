@@ -1,19 +1,19 @@
 use crate::token::Token;
 
 pub(crate) fn last_is_value_token(tok: &Token) -> bool {
-    matches!(
-        tok,
-        Token::Ident
-            | Token::Integer
-            | Token::RadixInteger
-            | Token::Float
-            | Token::True
-            | Token::False
-            | Token::RParen
-            | Token::RBracket
-            | Token::RBrace
-            | Token::Str
-    )
+    tok.can_be_identifier()
+        || matches!(
+            tok,
+            Token::Integer
+                | Token::RadixInteger
+                | Token::Float
+                | Token::True
+                | Token::False
+                | Token::RParen
+                | Token::RBracket
+                | Token::RBrace
+                | Token::Str
+        )
 }
 
 pub(crate) fn find_line_terminator(s: &str) -> Option<(usize, usize)> {

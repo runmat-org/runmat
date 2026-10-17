@@ -6,7 +6,8 @@ use super::{Parser, TokenInfo};
 
 impl Parser {
     pub(super) fn parse_call_argument(&mut self) -> Result<Expr, SyntaxError> {
-        if self.peek_token() == Some(&Token::Ident) && self.peek_token_at(1) == Some(&Token::Assign)
+        if self.peek_token().is_some_and(Token::can_be_identifier)
+            && self.peek_token_at(1) == Some(&Token::Assign)
         {
             let name = self.next().expect("peeked identifier");
             self.pos += 1; // consume '='
@@ -288,11 +289,11 @@ impl Parser {
                 }
                 let name_token = match self.peek().cloned() {
                     Some(TokenInfo {
-                        token: Token::Ident,
+                        token,
                         lexeme,
                         position,
                         end,
-                    }) => {
+                    }) if token.can_be_identifier() => {
                         self.pos += 1;
                         (lexeme, position, end)
                     }
@@ -372,7 +373,7 @@ impl Parser {
                 .unwrap_or(false);
             parts.push(first);
             while self.peek_token() == Some(&Token::Dot)
-                && matches!(self.peek_token_at(1), Some(Token::Ident))
+                && self.peek_token_at(1).is_some_and(Token::can_be_identifier)
             {
                 let next_lex = if let Some(ti) = self.tokens.get(self.pos + 1) {
                     ti.lexeme.clone()
@@ -454,7 +455,7 @@ impl Parser {
                     let span = self.span_from(info.position, info.end);
                     Ok(Expr::Ident("false".into(), span))
                 }
-                Token::Ident => {
+                token if token.can_be_identifier() => {
                     let span = self.span_from(info.position, info.end);
                     if self.peek_token() == Some(&Token::At) {
                         let method_name = info.lexeme;
@@ -526,7 +527,7 @@ impl Parser {
                     } else {
                         let mut name = self.expect_ident_syntax()?;
                         while self.peek_token() == Some(&Token::Dot)
-                            && matches!(self.peek_token_at(1), Some(Token::Ident))
+                            && self.peek_token_at(1).is_some_and(Token::can_be_identifier)
                         {
                             self.consume(&Token::Dot);
                             name.push('.');
@@ -616,22 +617,25 @@ impl Parser {
                     break;
                 }
                 match self.peek_token() {
-                    Some(
-                        Token::Ident
-                        | Token::Integer
-                        | Token::RadixInteger
-                        | Token::Float
-                        | Token::Str
-                        | Token::LParen
-                        | Token::LBracket
-                        | Token::LBrace
-                        | Token::At
-                        | Token::Plus
-                        | Token::Minus
-                        | Token::Colon
-                        | Token::True
-                        | Token::False,
-                    ) => {
+                    Some(token)
+                        if token.can_be_identifier()
+                            || matches!(
+                                token,
+                                Token::Integer
+                                    | Token::RadixInteger
+                                    | Token::Float
+                                    | Token::Str
+                                    | Token::LParen
+                                    | Token::LBracket
+                                    | Token::LBrace
+                                    | Token::At
+                                    | Token::Plus
+                                    | Token::Minus
+                                    | Token::Colon
+                                    | Token::True
+                                    | Token::False
+                            ) =>
+                    {
                         row.push(self.parse_matrix_expr()?);
                     }
                     _ => {
@@ -717,7 +721,7 @@ impl Parser {
                 self.pos = checkpoint;
                 return Ok(None);
             };
-            let field_name = if token.token == Token::Ident {
+            let field_name = if token.token.can_be_identifier() {
                 token.lexeme
             } else {
                 self.pos = checkpoint;
