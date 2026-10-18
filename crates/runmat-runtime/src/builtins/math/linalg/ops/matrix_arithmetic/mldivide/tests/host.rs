@@ -136,29 +136,6 @@ fn solves_native_precision_sparse_triangles_without_densifying_coefficients() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn solves_least_squares() {
-    let _accel_guard = test_support::accel_test_lock();
-    clear_accel_provider_state();
-    let a = Tensor::new(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap();
-    let b = Tensor::new(vec![7.0, 8.0, 9.0], vec![3, 1]).unwrap();
-    let result =
-        mldivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone())).expect("mldivide");
-    let gathered = test_support::gather(result).expect("gather");
-    assert_eq!(gathered.shape(), [2, 1]);
-
-    let mat_a = DMatrix::from_column_slice(a.rows(), a.cols(), &a.materialize_f64());
-    let mat_x = DMatrix::from_column_slice(
-        gathered.rows(),
-        gathered.cols(),
-        &gathered.materialize_f64(),
-    );
-    let mat_b = DMatrix::from_column_slice(b.rows(), b.cols(), &b.materialize_f64());
-    let residual = &mat_a * &mat_x - mat_b;
-    assert!(residual.norm() < 1e-10);
-}
-
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
 fn supports_complex_inputs() {
     let a = ComplexTensor::new(
         vec![(2.0, 1.0), (-1.0, 0.0), (1.0, -2.0), (3.0, -2.0)],

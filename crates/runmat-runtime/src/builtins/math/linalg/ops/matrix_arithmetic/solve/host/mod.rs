@@ -14,6 +14,7 @@ use crate::BuiltinResult;
 
 use super::SolveOrientation;
 
+pub(super) use general_sparse::try_rectangular as try_rectangular_sparse;
 pub(super) use general_sparse::try_solve as try_general_sparse;
 pub(super) use sparse_triangular::try_solve as try_sparse_triangular;
 

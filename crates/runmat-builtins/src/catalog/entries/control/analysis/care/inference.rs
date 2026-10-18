@@ -116,7 +116,10 @@ fn matrix_dims(
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> Option<(Option<usize>, Option<usize>)> {
     if matches!(value.residency, ResidencyFact::Remote { .. })
-        || !matches!(value.storage, StorageFact::Dense | StorageFact::Unknown)
+        || !matches!(
+            value.storage,
+            StorageFact::Scalar | StorageFact::Dense | StorageFact::Unknown
+        )
         || (!matches!(value.kind, ValueKindFact::Unknown)
             && !value
                 .numeric()

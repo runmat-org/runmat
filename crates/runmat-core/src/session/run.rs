@@ -702,9 +702,9 @@ impl RunMatSession {
         );
         let preparation::workspace::PreparedInteractiveWorkspace {
             #[cfg(not(target_arch = "wasm32"))]
-            unit: interactive_unit,
+                unit: interactive_unit,
             #[cfg(target_arch = "wasm32")]
-            unit: _interactive_unit,
+                unit: _interactive_unit,
             runtime: execution_runtime,
             bytecode,
             publication: source_registry_publication,

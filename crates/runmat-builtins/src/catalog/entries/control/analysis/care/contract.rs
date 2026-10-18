@@ -26,7 +26,7 @@ const R: BuiltinParamDescriptor = BuiltinParamDescriptor {
     ty: BuiltinParamType::NumericArray,
     arity: BuiltinParamArity::Optional,
     default: Some("eye(size(B,2))"),
-    description: "Positive-definite m-by-m input weight.",
+    description: "Symmetric nonsingular m-by-m input weight.",
 };
 const S: BuiltinParamDescriptor = BuiltinParamDescriptor {
     name: "S",

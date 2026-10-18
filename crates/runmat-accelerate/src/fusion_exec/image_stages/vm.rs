@@ -98,7 +98,10 @@ impl ImageVmStages {
             placement,
             decline,
             completion,
+            #[cfg(feature = "wgpu")]
             started,
+            #[cfg(not(feature = "wgpu"))]
+                started: _,
         } = request;
         let Some(FusionPattern::ImageNormalize(pattern)) = plan.group.pattern.as_ref() else {
             log::debug!("selected image declined: no image pattern");

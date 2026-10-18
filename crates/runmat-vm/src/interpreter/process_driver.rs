@@ -39,6 +39,10 @@ use typed_request::TypedQueuedRequest;
 mod queue_storage;
 use queue_storage::{PreparedQueueGrowth, QueueGrowthGeometry, ReadyStorage, TaskStorage};
 
+#[path = "process_driver/invocation_root.rs"]
+mod invocation_root;
+use invocation_root::{drain_placement_feedback, InvocationRoot};
+
 pub(crate) type SemanticReply = Result<(RootedValueSequence, RootedValues), RuntimeError>;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -898,8 +902,18 @@ impl ProcessContinuationDriver {
         ProcessDriverHandle(self.owner.handle())
     }
 
+    #[cfg(test)]
     pub(crate) fn drive<F: Future>(&self, root: F) -> DrivenInvocation<F> {
         let state = self.owner.state();
+        let root = InvocationRoot::new(state.clone(), Box::pin(root));
+        self.drive_root(state, root)
+    }
+
+    fn drive_root<F: Future>(
+        &self,
+        state: DriverStateOwner,
+        root: InvocationRoot<F>,
+    ) -> DrivenInvocation<F> {
         let hub = state.borrow().wake_hub.clone();
         let WakeHubOwner::Legacy(legacy_hub) = &hub else {
             unreachable!("legacy drive requires legacy hub")
@@ -915,10 +929,10 @@ impl ProcessContinuationDriver {
         TaskWake::wake_by_ref(&root_wake);
         self.transferred.set(true);
         DrivenInvocation {
+            root: Some(root),
             state,
             hub,
             root_wake: WakeOwner::Legacy(root_wake),
-            root: Some(Box::pin(root)),
             _scratch: None,
             managed_port: None,
         }
@@ -942,7 +956,12 @@ impl ProcessContinuationDriver {
             }
             if !state.tasks.is_managed() {
                 drop(state);
-                return Ok(self.drive(make_root()));
+                let state = self.owner.state();
+                let root = {
+                    let _guard = context.enter();
+                    InvocationRoot::new(state.clone(), Box::pin(make_root()))
+                };
+                return Ok(self.drive_root(state, root));
             }
         }
         let state_owner = self.owner.state();
@@ -976,7 +995,15 @@ impl ProcessContinuationDriver {
         let scratch = Some(prepared.retained_scratch());
         let (root, root_wake) = prepared
             .with_output_allocation(context, |permit| {
-                let root = try_box(make_root())?;
+                let root = {
+                    let _guard = context.enter();
+                    let root = try_box(make_root());
+                    if root.is_err() {
+                        drain_placement_feedback(context);
+                    }
+                    root?
+                };
+                let root = InvocationRoot::new(state_owner.clone(), Box::into_pin(root));
                 let claim =
                     permit.reserve_exact_claim(ExactShared::<TaskWake>::requested_bytes())?;
                 let managed_hub = match &hub {
@@ -994,7 +1021,7 @@ impl ProcessContinuationDriver {
                     _claim: Some(claim),
                 })
                 .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?;
-                Ok((Some(Box::into_pin(root)), WakeOwner::Managed(wake)))
+                Ok((Some(root), WakeOwner::Managed(wake)))
             })
             .map_err(|error| queue_allocation_error(context, error))?;
         prepared
@@ -1041,7 +1068,7 @@ pub(crate) struct DrivenInvocation<F: Future> {
     state: DriverStateOwner,
     hub: WakeHubOwner,
     root_wake: WakeOwner,
-    root: Option<Pin<Box<F>>>,
+    root: Option<InvocationRoot<F>>,
     _scratch: Option<Arc<runmat_runtime::context::host_effect::ManagedHostEffectStageReservation>>,
     managed_port: Option<ExactShared<ManagedDriverPort>>,
 }
@@ -1075,7 +1102,6 @@ impl<F: Future> Future for DrivenInvocation<F> {
                     .root
                     .as_mut()
                     .expect("VM invocation polled after completion")
-                    .as_mut()
                     .poll(&mut root_context)
                 {
                     Poll::Ready(result) => {

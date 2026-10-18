@@ -140,6 +140,43 @@ fn one_state_pole_is_real_and_unknown_shape_does_not_invent_dimensions() {
         .shape
         .known_dims()
         .is_some_and(|dims| dims.iter().all(Option::is_none)));
+
+    // A numeric scalar is an admitted 1-by-1 matrix in the shared runtime
+    // request, including the CARE form with its default identity R.
+    let scalar = ValueFact::proven(
+        ValueKindFact::Numeric(NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Real,
+        }),
+        ShapeFact::Scalar,
+        StorageFact::Scalar,
+    );
+    for (entry, count) in [
+        (&crate::CARE_CATALOG_ENTRY, 3),
+        (&crate::DLQR_CATALOG_ENTRY, 4),
+    ] {
+        let result = crate::infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: vec![scalar.clone(); count],
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(3)),
+            },
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 3);
+        for output in &result.outputs {
+            assert_eq!(output.shape, ShapeFact::from(vec![Some(1), Some(1)]));
+            assert_eq!(output.residency, ResidencyFact::Host);
+        }
+        assert_eq!(
+            result.outputs[1].kind,
+            ValueKindFact::Numeric(NumericFact {
+                class: NumericClass::Double,
+                domain: NumericDomain::Real,
+            })
+        );
+    }
 }
 
 #[test]

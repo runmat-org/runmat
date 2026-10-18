@@ -123,7 +123,11 @@ pub fn check_cancelled(
 }
 
 pub(super) fn cancellation_error() -> RuntimeError {
-    crate::interpreter::errors::mex("ExecutionCancelled", "Execution cancelled by user")
+    runmat_runtime::runtime_error::semantic_error_with_source(
+        "ExecutionCancelled",
+        "Execution cancelled by user",
+        runmat_runtime::execution::ExecutionServiceError::Cancelled,
+    )
 }
 
 pub fn note_pre_dispatch(

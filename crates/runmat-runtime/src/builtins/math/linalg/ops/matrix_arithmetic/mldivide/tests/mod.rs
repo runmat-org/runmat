@@ -92,6 +92,7 @@ use num_complex::Complex64;
 
 mod contract;
 mod host;
+mod least_squares;
 mod integer;
 mod provider;
 #[cfg(feature = "wgpu")]

@@ -180,15 +180,21 @@ pub async fn execute_prepared_graph_request(
         Err(error) => return graph_runtime_failure_response(error, &selected_runtime, &selected),
     };
     drop(active_runtime);
-    let result = match selected_runtime
-        .scope(invoke_selected_root(
-            request,
-            &selected,
-            &selected_runtime,
-            values,
-        ))
-        .await
+    let prepared_scope = match selected_runtime.prepare_poll_scope() {
+        Ok(scope) => scope,
+        Err(error) => return graph_runtime_failure_response(error, &selected_runtime, &selected),
+    };
+    let prepared_future = match prepared_scope.prepare_future() {
+        Ok(prepared) => prepared,
+        Err(error) => return graph_runtime_failure_response(error, &selected_runtime, &selected),
+    };
+    let selected_root = match prepared_future
+        .try_scope_with(|| invoke_selected_root(request, &selected, &selected_runtime, values))
     {
+        Ok(future) => future,
+        Err(error) => return graph_runtime_failure_response(error, &selected_runtime, &selected),
+    };
+    let result = match selected_root.await {
         Ok(values) => values,
         Err(response) => return response,
     };

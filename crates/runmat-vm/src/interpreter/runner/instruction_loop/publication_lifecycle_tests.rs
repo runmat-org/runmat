@@ -12,6 +12,7 @@ use runmat_accelerate::placement::PlacementSession;
 use runmat_execution::cancellation::CancellationSource;
 use runmat_runtime::context::{RuntimeContext, RuntimeInvocationArity, RuntimeServicePorts};
 use std::cell::{Cell, RefCell};
+use std::error::Error;
 use std::future::Future;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -203,14 +204,20 @@ fn real_store_rejection_and_caught_rejection_never_publish_reduction_feedback() 
                     reached.clone(),
                 )),
             ));
-            assert!(reached.get(), "fault reached the checked ordinary StoreVar");
+            assert!(
+                reached.get(),
+                "fault reached the checked ordinary StoreVar; result={result:?}; selected_reductions={}",
+                capture.reduction_selection.borrow().len()
+            );
             if caught {
                 result.expect("ordinary catch handles the real store failure");
                 assert_eq!(
                     *vars
                         .get(caught_slot.expect("caught branch has slot"))
                         .unwrap(),
-                    Value::String("RunMat:TransientSequenceNotStorable".into()),
+                    Value::CharArray(runmat_value::CharArray::new_row(
+                        "RunMat:TransientSequenceNotStorable"
+                    )),
                     "catch must observe the checked StoreVar rejection"
                 );
             } else {
@@ -264,6 +271,13 @@ fn cancellation_and_drop_at_checked_store_do_not_publish_reduction_feedback() {
                     Err(error) => error,
                 };
                 assert_eq!(error.identifier(), Some("RunMat:ExecutionCancelled"));
+                assert!(matches!(
+                    error
+                        .source()
+                        .and_then(|source| source
+                            .downcast_ref::<runmat_runtime::execution::ExecutionServiceError>()),
+                    Some(runmat_runtime::execution::ExecutionServiceError::Cancelled)
+                ));
                 assert!(cancellation.token().is_cancelled());
             } else {
                 let mut pending = Box::pin(scoped_faultable_run(

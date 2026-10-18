@@ -16,7 +16,11 @@ pub(super) async fn until_cancelled<F: Future>(
             return Poll::Ready(None);
         }
         if let Poll::Ready(result) = operation.as_mut().poll(cx) {
-            return Poll::Ready(Some(result));
+            // A provider may observe cancellation and return its own terminal
+            // error during this poll. Cancellation is invocation control, not
+            // a catchable provider failure, so preserve the VM cancellation
+            // contract instead of publishing that operational wrapper.
+            return Poll::Ready((!token.is_cancelled()).then_some(result));
         }
         // Registration rechecks cancellation under the authority's lock, so a
         // signal during the operation's first poll cannot be lost.
@@ -66,5 +70,16 @@ mod tests {
             None
         );
         assert_eq!(polls.get(), 1);
+
+        let source = CancellationSource::new();
+        let token = source.token();
+        assert_eq!(
+            futures::executor::block_on(until_cancelled(&token, async {
+                source.cancel(CancellationReason::User);
+                Err::<(), _>("provider observed cancellation")
+            })),
+            None,
+            "a same-poll provider error cannot mask invocation cancellation"
+        );
     }
 }

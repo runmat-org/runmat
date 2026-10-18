@@ -198,30 +198,23 @@ fn select_image_candidate(
     // deferred per-instruction resource checks as a comparable aggregate
     // candidate. Keep the decline right: if the provider is rejected, the VM
     // still resumes its ordinary source instructions under their own owners.
-    let original = decline
-        .filter(|_| !finite)
-        .filter(|_| original_tail.is_some())
-        .and_then(|decline| {
-            let completion =
-                completion.filter(|right| decline.same_installed_region(right, runtime))?;
-            let source = decline.semantic_identity(runtime)?.digest();
-            let route = runmat_execution::Digest::sha256_serialized(&(
-                "image.original-vm-region.v1",
-                source,
-                body.semantic_identity,
-                body.provider.device_id(),
-            ))
-            .ok()?;
-            Some((route, completion))
-        });
-    let (cpu, cpu_admission) = if let Some((route, _)) = original {
+    let original = decline.filter(|_| !finite).and_then(|decline| {
+        let tail = original_tail?;
+        let completion =
+            completion.filter(|right| decline.same_installed_region(right, runtime))?;
+        let source = decline.semantic_identity(runtime)?.digest();
+        let route = runmat_execution::Digest::sha256_serialized(&(
+            "image.original-vm-region.v1",
+            source,
+            body.semantic_identity,
+            body.provider.device_id(),
+        ))
+        .ok()?;
+        Some((route, completion, tail))
+    });
+    let (cpu, cpu_admission) = if let Some((route, _, tail)) = original {
         (
-            LocalCpuCandidate::original_vm_region(
-                route,
-                body.provider.device_id(),
-                original_tail.expect("checked tail"),
-                no_quote,
-            ),
+            LocalCpuCandidate::original_vm_region(route, body.provider.device_id(), tail, no_quote),
             LocalCpuAdmission::VmRegionAtUse,
         )
     } else {
@@ -240,7 +233,7 @@ fn select_image_candidate(
         semantic_identity: Some(body.semantic_identity),
         observation_contract: contract,
         prepared_authority: None,
-        vm_right: original.map(|(_, right)| right),
+        vm_right: original.map(|(_, right, _)| right),
         vm_decline: decline,
         family: ProviderOperationFamily::Fusion,
         cpu,

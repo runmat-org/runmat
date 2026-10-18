@@ -77,7 +77,9 @@ fn general_chain_reject_cancel_and_drop_at_publication_never_issue_full_call_rec
                     result.expect("ordinary catch handles the actual checked-store failure");
                     assert_eq!(
                         *vars.get(caught_slot.unwrap()).unwrap(),
-                        Value::String("RunMat:TransientSequenceNotStorable".into())
+                        Value::CharArray(runmat_value::CharArray::new_row(
+                            "RunMat:TransientSequenceNotStorable"
+                        ))
                     );
                 } else {
                     let error = match result {

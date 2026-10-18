@@ -239,7 +239,7 @@ pub async fn execute_deferred_program_in_context(
 /// service's `requires_program_capture` hint, authenticates the product and
 /// decodes its result.
 pub async fn execute_deferred_graph_in_context(
-    call: DeferredCall,
+    call: &DeferredCall,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError> {
     let requested_outputs = u16::try_from(call.invocation.requested_outputs())
@@ -249,7 +249,7 @@ pub async fn execute_deferred_graph_in_context(
         owned_work: None,
     };
     let (_, request, receipt) = materialize_deferred_graph_call(
-        &call,
+        call,
         outputs,
         runmat_execution_artifact::ProgramTarget::portable("vm-parallel-graph-v1"),
         runmat_execution::value::ValueLimits::default(),

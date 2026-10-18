@@ -4,8 +4,10 @@ use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
 use runmat_runtime::context::{
     ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
 };
+use runmat_runtime::execution::ExecutionServiceError;
 use runmat_value::{HandleRef, Value};
 use std::cell::RefCell;
+use std::error::Error;
 
 struct Retired(&'static str, Rc<RefCell<Vec<&'static str>>>);
 
@@ -52,6 +54,16 @@ impl Drop for Retired {
     fn drop(&mut self) {
         self.1.borrow_mut().push(self.0);
     }
+}
+
+fn assert_runtime_cancellation(error: &RuntimeError) {
+    assert_eq!(error.identifier(), Some("RunMat:Cancelled"));
+    assert!(matches!(
+        error
+            .source()
+            .and_then(|cause| cause.downcast_ref::<ExecutionServiceError>()),
+        Some(ExecutionServiceError::Cancelled)
+    ));
 }
 
 #[test]
@@ -340,10 +352,7 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
                 };
                 assert!(constructed.get());
                 assert!(dropped.get());
-                assert_eq!(
-                    error.identifier(),
-                    Some("RunMat:Interpreter:ProcessContinuation:Cancelled")
-                );
+                assert_runtime_cancellation(&error);
                 assert_eq!(handle.owner()?.borrow().tasks.ids().count(), 1);
                 drop(pending);
                 Ok::<_, RuntimeError>(())
@@ -355,4 +364,46 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
     assert!(ledger.snapshot().live_claimed_bytes > 0);
     drop(owner);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+    // A root that loses its authority after construction never reaches the
+    // ready queue, and its captures retire under the context that admitted it.
+    let refused_ledger = ManagedHostEffectLedger::new(8 * 1024 * 1024);
+    let refused_cancellation = runmat_execution::cancellation::CancellationSource::new();
+    let refused_runtime = RuntimeContext::with_cancellation(
+        Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+        refused_cancellation.token(),
+    )
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_parallel(Rc::new(ManagedParallel(refused_ledger.clone()))),
+    );
+    let refused_owner =
+        ProcessContinuationDriver::new_with_dynamic_admission_in_context(&refused_runtime, None)
+            .expect("admit canceled-root driver");
+    let constructed = Rc::new(Cell::new(false));
+    let constructed_in_factory = Rc::clone(&constructed);
+    let dropped = Rc::new(Cell::new(false));
+    let dropped_in_future = Rc::clone(&dropped);
+    let scope_id = refused_runtime.execution().scope_id();
+    let error = match refused_owner.drive_in_context(&refused_runtime, move || {
+        constructed_in_factory.set(true);
+        refused_cancellation.cancel(runmat_execution::CancellationReason::User);
+        let drop_probe = ScopedFutureDrop {
+            scope_id,
+            dropped: dropped_in_future,
+        };
+        async move {
+            let _drop_probe = drop_probe;
+            Ok::<_, RuntimeError>(())
+        }
+    }) {
+        Ok(_) => panic!("canceled root must not be published"),
+        Err(error) => error,
+    };
+    assert!(constructed.get());
+    assert!(dropped.get());
+    assert_runtime_cancellation(&error);
+    assert_eq!(refused_owner.owner.state().borrow().tasks.ids().count(), 0);
+    drop(refused_owner);
+    assert_eq!(refused_ledger.snapshot().live_claimed_bytes, 0);
 }

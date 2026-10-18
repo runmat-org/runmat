@@ -17,6 +17,7 @@ pub(crate) fn entrypoint(precision: ProviderPrecision) -> &'static str {
         .expect("floating power precision")
 }
 
+#[cfg(any(feature = "wgpu", test))]
 pub(crate) fn functions(precision: ProviderPrecision) -> String {
     let mut source = String::new();
     write_functions(precision, &mut source).expect("String writer is infallible");

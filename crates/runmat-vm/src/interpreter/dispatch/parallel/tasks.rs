@@ -440,12 +440,7 @@ async fn await_sequence(
                             &call.program,
                             runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
                         ) {
-                            crate::program_execution::execute_deferred_graph_in_context(
-                                *call,
-                                context.runtime.clone(),
-                            )
-                            .await
-                            .map_err(execution_error)
+                            execute_selected_graph_on_driver(context, *call).await
                         } else {
                             crate::execute_deferred_program_in_context(
                                 *call,
@@ -468,6 +463,75 @@ async fn await_sequence(
             }
         }
     }
+}
+
+// The service transfers a selected call to the awaiter. The queued owner
+// keeps its argument roots alive even when the driver has not polled it yet;
+// field order retires the call before the root lease on every exit.
+struct QueuedSelectedGraphCall {
+    call: runmat_runtime::execution::DeferredCall,
+    _argument_roots: runmat_runtime::execution::RootedValueLease,
+}
+
+impl QueuedSelectedGraphCall {
+    async fn execute(
+        self,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+        crate::program_execution::execute_deferred_graph_in_context(&self.call, runtime)
+            .await
+            .map_err(execution_error)
+    }
+}
+
+async fn execute_selected_graph_on_driver(
+    context: &ExecutionContext,
+    call: runmat_runtime::execution::DeferredCall,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let runmat_runtime::execution::DeferredInvocation::Program { arguments, .. } = &call.invocation
+    else {
+        return Err(crate::interpreter::errors::mex(
+            "ParallelTaskInvocation",
+            "selected graph task requires a program invocation",
+        ));
+    };
+    let driver = context.process_driver.as_ref().ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "ParallelProcessDriver",
+            "selected graph task requires its invocation continuation owner",
+        )
+    })?;
+    let argument_roots = runmat_runtime::execution::RootedValueLease::for_value_slices_in_context(
+        &[arguments.as_slice()],
+        &context.runtime,
+    )?;
+    let queued = QueuedSelectedGraphCall {
+        call,
+        _argument_roots: argument_roots,
+    };
+    let child_runtime = context.runtime.clone();
+    let policy = runmat_runtime::context::host_allocation::HostAllocationReceipt::policy(Some(
+        &context.runtime,
+    ))
+    .map_err(|source| {
+        runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+            Some(&context.runtime),
+            "RunMat:Interpreter:ParallelTaskScope",
+            "parallel graph task scope admission failed",
+            source,
+        )
+    })?;
+    match policy {
+        runmat_runtime::context::host_allocation::HostAllocationPolicy::Unbounded => driver
+            .enqueue_owned_in_context(&context.runtime, move || queued.execute(child_runtime))?,
+        runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed => {
+            let scope = context.runtime.prepare_poll_scope()?;
+            driver.enqueue_owned_scoped_in_context(&context.runtime, scope, move || {
+                queued.execute(child_runtime)
+            })?
+        }
+    }
+    .await
 }
 
 pub(super) async fn fetch_next(

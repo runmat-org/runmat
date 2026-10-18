@@ -1,6 +1,9 @@
 //! General square CSC left solve, currently limited to an explicitly
 //! Unbounded faer LU owner. This is not a finite factor-admission claim.
 
+mod rectangular;
+pub(in super::super) use rectangular::try_solve as try_rectangular;
+
 use faer::{c32, c64};
 use runmat_value::{ComplexElement, ComplexStorage, ComplexTensor, Tensor, Value};
 
