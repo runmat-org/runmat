@@ -176,6 +176,12 @@ const LINKS: &[BuiltinDocumentationLink] = &[
         label: "rcond",
         target: BuiltinDocumentationLinkTarget::Builtin("rcond"),
     },
+    BuiltinDocumentationLink {
+        label: "Open an issue",
+        target: BuiltinDocumentationLinkTarget::External(
+            "https://github.com/runmat-org/runmat/issues/new/choose",
+        ),
+    },
 ];
 
 pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {

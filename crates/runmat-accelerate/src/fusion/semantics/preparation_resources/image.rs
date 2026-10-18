@@ -259,6 +259,14 @@ impl ImageSourceGeometry {
                 fact_slots_upper,
                 resident_inputs,
                 source_operand_ids: operand_ids,
+                liveness_value_ids_upper: plan
+                    .inputs
+                    .len()
+                    .checked_add(usize::from(plan.output.is_some()))
+                    .and_then(|count| count.checked_add(plan.materialized_stores.len()))
+                    .and_then(|count| count.checked_add(operand_ids))
+                    .and_then(|count| count.checked_add(plan.operations.len()))
+                    .ok_or(PreparationBoundError::Overflow)?,
                 add_sign_operations,
                 max_rank,
             },

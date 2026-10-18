@@ -20,7 +20,11 @@ pub(super) fn resources_for_envelope(
     let resources = crate::fusion_exec::host_readback::resources(
         sources,
         envelope.bound.retained_bytes,
-        envelope.bound.scratch_bytes,
+        if managed {
+            envelope.prepared_scratch_bytes
+        } else {
+            envelope.bound.scratch_bytes
+        },
         envelope.operand_metadata,
         managed,
     )?;

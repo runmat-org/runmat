@@ -56,6 +56,7 @@ struct RouteState {
     next_pc: usize,
     terminal_confirmed: bool,
     numerical_outputs: Option<super::VmFusionHostOutputs>,
+    retirement_active: bool,
 }
 
 impl VmFusionHostRoute {
@@ -73,6 +74,7 @@ impl VmFusionHostRoute {
                 next_pc: origin.registration.span_start(),
                 terminal_confirmed: false,
                 numerical_outputs: None,
+                retirement_active: false,
             })),
             origin,
             expected_operations: expected_operations.into(),
@@ -113,6 +115,7 @@ impl VmFusionHostRoute {
         if state.pending.is_some()
             || state.next_pc != self.origin.registration.span_start()
             || state.numerical_outputs.is_some()
+            || state.retirement_active
         {
             state.invalid = true;
             return Err(crate::build_runtime_error(
@@ -133,38 +136,11 @@ impl VmFusionHostRoute {
         binding: BuiltinBindingIdentity,
     ) -> Result<Option<crate::context::preparation::PreparedHostNumericalOutput>, crate::RuntimeError>
     {
-        if !self.current_for(runtime) {
-            return Err(super::vm_fusion_host_outputs::missing_output(runtime));
-        }
-        let mut state = self.state.borrow_mut();
-        if !state
-            .pending
-            .is_some_and(|(_, expected, _)| self.instruction_matches(expected, instruction))
-            || !self
-                .expected_operations
-                .contains(&VmFusionHostOperation::Builtin(binding))
-        {
-            state.invalid = true;
-            return Err(crate::build_runtime_error(
-                "VM host numerical output request differs from its selected instruction",
-            )
-            .with_identifier("RunMat:Placement:InvalidDecision")
-            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build());
-        }
-        match state.numerical_outputs.as_mut() {
-            Some(outputs) => match outputs.take_builtin(runtime, instruction, binding) {
-                Ok(output) => Ok(Some(output)),
-                Err(error) => {
-                    state.invalid = true;
-                    Err(error)
-                }
-            },
-            None => match super::host_allocation::HostAllocationReceipt::policy(Some(runtime)) {
-                Ok(super::host_allocation::HostAllocationPolicy::Unbounded) => Ok(None),
-                _ => Err(super::vm_fusion_host_outputs::missing_output(runtime)),
-            },
-        }
+        self.take_selected_numerical_output(
+            runtime,
+            instruction,
+            VmFusionHostOperation::Builtin(binding),
+        )
     }
 
     pub fn take_intrinsic_numerical_output(
@@ -173,29 +149,162 @@ impl VmFusionHostRoute {
         operator: runmat_types::OperatorKind,
     ) -> Result<Option<crate::context::preparation::PreparedHostNumericalOutput>, crate::RuntimeError>
     {
-        let instruction = VmFusionHostInstruction::Intrinsic(operator);
         if !self.allows_intrinsic_host(runtime, operator) {
             return Err(super::vm_fusion_host_outputs::missing_output(runtime));
         }
-        let mut state = self.state.borrow_mut();
-        match state.numerical_outputs.as_mut() {
-            Some(outputs) => match outputs.take_intrinsic(runtime, instruction, operator) {
-                Ok(output) => Ok(Some(output)),
-                Err(error) => {
-                    state.invalid = true;
-                    Err(error)
-                }
-            },
-            None => match super::host_allocation::HostAllocationReceipt::policy(Some(runtime)) {
-                Ok(super::host_allocation::HostAllocationPolicy::Unbounded) => Ok(None),
-                _ => Err(super::vm_fusion_host_outputs::missing_output(runtime)),
-            },
+        self.take_selected_numerical_output(
+            runtime,
+            VmFusionHostInstruction::Intrinsic(operator),
+            VmFusionHostOperation::Intrinsic(operator),
+        )
+    }
+
+    fn take_selected_numerical_output(
+        &self,
+        runtime: &RuntimeContext,
+        instruction: VmFusionHostInstruction,
+        operation: VmFusionHostOperation,
+    ) -> Result<Option<crate::context::preparation::PreparedHostNumericalOutput>, crate::RuntimeError>
+    {
+        if !self.current_for(runtime) {
+            return Err(super::vm_fusion_host_outputs::missing_output(runtime));
         }
+        let mut outputs = {
+            let mut state = self.state.borrow_mut();
+            if state.invalid
+                || state.retirement_active
+                || !state
+                    .pending
+                    .is_some_and(|(_, expected, _)| self.instruction_matches(expected, instruction))
+                || !self.expected_operations.contains(&operation)
+            {
+                state.invalid = true;
+                return Err(super::vm_fusion_host_outputs::invalid_output());
+            }
+            let Some(outputs) = state.numerical_outputs.take() else {
+                drop(state);
+                return match super::host_allocation::HostAllocationReceipt::policy(Some(runtime)) {
+                    Ok(super::host_allocation::HostAllocationPolicy::Unbounded) => Ok(None),
+                    _ => Err(super::vm_fusion_host_outputs::missing_output(runtime)),
+                };
+            };
+            state.retirement_active = true;
+            outputs
+        };
+        // Binding a preallocated Tensor can retire a failed owner. Do this
+        // outside the route's RefCell borrow, just like operand retirement.
+        let result = match operation {
+            VmFusionHostOperation::Builtin(binding) => {
+                outputs.take_builtin(runtime, instruction, binding)
+            }
+            VmFusionHostOperation::Intrinsic(operator) => {
+                outputs.take_intrinsic(runtime, instruction, operator)
+            }
+        };
+        let mut state = self.state.borrow_mut();
+        state.retirement_active = false;
+        if result.is_err() {
+            state.invalid = true;
+        }
+        state.numerical_outputs = Some(outputs);
+        result.map(Some)
+    }
+    /// Return a completed operation's moved source operands as one batch.
+    /// The carrier is temporarily moved out of the RefCell so redundant
+    /// aliases and retired claims drop outside the route's mutable borrow.
+    pub fn retire_numerical_operands(
+        &self,
+        runtime: &RuntimeContext,
+        instruction: VmFusionHostInstruction,
+        operands: [Option<runmat_value::Value>; 2],
+    ) -> Result<(), crate::RuntimeError> {
+        self.retire_selected_numerical_operands(
+            runtime,
+            Some(instruction),
+            move |outputs, pending| outputs.retire_numerical_operands(pending, operands),
+        )
+    }
+
+    /// A named builtin returns its original owned argument vector after the
+    /// awaited result is rooted. The entry consumed by `take_numerical_output`
+    /// already authenticated the binding; retirement verifies that same
+    /// source-ordered entry without relying on transient selected-binding TLS.
+    pub fn retire_builtin_operands(
+        &self,
+        runtime: &RuntimeContext,
+        operands: Vec<runmat_value::Value>,
+    ) -> Result<(), crate::RuntimeError> {
+        self.retire_selected_numerical_operands(runtime, None, move |outputs, pending| {
+            let selected = outputs
+                .selected_builtin_retirement_instruction()?
+                .unwrap_or(pending);
+            if !self.instruction_matches(pending, selected) {
+                return Err(super::vm_fusion_host_outputs::invalid_output());
+            }
+            outputs.retire_builtin_operands(selected, operands)
+        })
+    }
+
+    fn retire_selected_numerical_operands(
+        &self,
+        runtime: &RuntimeContext,
+        instruction: Option<VmFusionHostInstruction>,
+        retire: impl FnOnce(
+            &mut super::VmFusionHostOutputs,
+            VmFusionHostInstruction,
+        ) -> Result<(), crate::RuntimeError>,
+    ) -> Result<(), crate::RuntimeError> {
+        if !self.current_for(runtime) {
+            return Err(super::vm_fusion_host_outputs::missing_output(runtime));
+        }
+        let (mut outputs, pending_instruction) = {
+            let mut state = self.state.borrow_mut();
+            if state.invalid
+                || state.retirement_active
+                || !state.pending.is_some_and(|(_, expected, _)| {
+                    instruction
+                        .is_none_or(|instruction| self.instruction_matches(expected, instruction))
+                })
+            {
+                state.invalid = true;
+                return Err(super::vm_fusion_host_outputs::invalid_output());
+            }
+            let Some((_, pending_instruction, _)) = state.pending else {
+                state.invalid = true;
+                return Err(super::vm_fusion_host_outputs::invalid_output());
+            };
+            let Some(outputs) = state.numerical_outputs.take() else {
+                return match super::host_allocation::HostAllocationReceipt::policy(Some(runtime)) {
+                    Ok(super::host_allocation::HostAllocationPolicy::Unbounded) => {
+                        drop(state);
+                        Ok(())
+                    }
+                    _ => {
+                        state.invalid = true;
+                        Err(super::vm_fusion_host_outputs::missing_output(runtime))
+                    }
+                };
+            };
+            state.retirement_active = true;
+            (outputs, pending_instruction)
+        };
+        let result = retire(&mut outputs, pending_instruction);
+        let mut state = self.state.borrow_mut();
+        state.retirement_active = false;
+        if result.is_err() {
+            state.invalid = true;
+        }
+        state.numerical_outputs = Some(outputs);
+        result
     }
 
     pub fn begin_instruction(&self, pc: usize, instruction: VmFusionHostInstruction) {
         let mut state = self.state.borrow_mut();
-        if !self.contains_pc(pc) || state.pending.is_some() || state.next_pc != pc {
+        if !self.contains_pc(pc)
+            || state.pending.is_some()
+            || state.next_pc != pc
+            || state.retirement_active
+        {
             state.invalid = true;
             return;
         }
@@ -211,6 +320,10 @@ impl VmFusionHostRoute {
 
     pub fn instruction_exit(&self, pc: usize) {
         let mut state = self.state.borrow_mut();
+        if state.retirement_active {
+            state.invalid = true;
+            return;
+        }
         match state.pending.take() {
             Some((pending, instruction, true)) if pending == pc => {
                 if pc == self.origin.registration.span_end() {
@@ -239,6 +352,7 @@ impl VmFusionHostRoute {
     pub fn complete(&self) -> bool {
         let state = self.state.borrow();
         !state.invalid
+            && !state.retirement_active
             && state.pending.is_none()
             && state.terminal_confirmed
             && self.origin.registration.span_end().checked_add(1) == Some(state.next_pc)

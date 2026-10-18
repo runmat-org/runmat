@@ -15,7 +15,11 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 "The optional typename selects `double`, `single`, or `logical` sparse storage.",
 "Scalar, two-element-vector, and two-argument dimensions accept single, double, and all eight integer classes and are decoded without conversion through double."] },
 BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &["`speye` produces a host sparse matrix because RunMat does not currently expose native sparse GPU handles.",
-"`speye` creates host-resident sparse CSC matrices. Native sparse GPU storage is not currently exposed by RunMat's acceleration API."] }],
+"`speye` creates host-resident sparse CSC matrices. Native sparse GPU storage is not currently exposed by RunMat's acceleration API."] },
+BuiltinDocumentationSection { heading: "Supported forms", paragraphs: &["S = speye()\nS = speye(n)\nS = speye(m, n)\nS = speye([m n])\nS = speye(..., typename)",
+"`S` is a sparse matrix whose class follows `typename`, or double when it is omitted.",
+"`speye` has one output.",
+"The result is host-resident sparse CSC storage."] }],
     examples: &[BuiltinExample { id: "example-1", title: "Rectangular sparse identity", program: "S = speye(2, 4);\nfull(S)", display_output: Some("ans = [1 0 0 0; 0 1 0 0]"), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(issparse(S)); assert(isequal(size(S), [2 4]));" } }],
     example_exemption: None,
     faqs: &[BuiltinDocumentationFaq { question: "Does `speye` allocate a dense matrix?", answer: "No. It constructs RunMat's compressed sparse column representation directly." },
@@ -24,7 +28,9 @@ BuiltinDocumentationFaq { question: "Can `speye` create native sparse GPU matric
 BuiltinDocumentationLink { label: "full", target: BuiltinDocumentationLinkTarget::Documentation("./full") },
 BuiltinDocumentationLink { label: "issparse", target: BuiltinDocumentationLinkTarget::Documentation("./issparse") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/sparse/mod.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "speye rectangular and size tests", location: "builtins::array::creation::sparse::tests::speye_supports_square_rectangular_vector_and_negative_sizes" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

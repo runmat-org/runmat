@@ -8,21 +8,10 @@
 //! the result so downstream operations continue to benefit from gpu residency.
 
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericStorage, StringArray,
@@ -30,211 +19,7 @@ use runmat_value::{
 };
 use std::collections::HashSet;
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::circshift")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "circshift",
-    op_kind: GpuOpKind::Custom("circshift"),
-    supported_precisions: &[
-        ScalarType::F32,
-        ScalarType::F64,
-        ScalarType::I32,
-        ScalarType::Bool,
-    ],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("circshift")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes:
-        "Providers may implement a dedicated circshift hook; otherwise the runtime gathers, rotates, and re-uploads once.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::circshift")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "circshift",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes:
-        "Circshift reorders data; fusion planners treat it as a residency boundary between kernels.",
-};
-
-fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape } => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Type::Logical { shape } => Type::Logical {
-            shape: shape.clone(),
-        },
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 const BUILTIN_NAME: &str = "circshift";
-
-const CIRCSHIFT_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Array with elements circularly shifted.",
-}];
-
-const CIRCSHIFT_INPUTS_A_K: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "K",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Shift scalar or vector.",
-    },
-];
-
-const CIRCSHIFT_INPUTS_A_K_DIM: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "K",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Shift scalar or vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimension index scalar or dimension vector.",
-    },
-];
-
-const CIRCSHIFT_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = circshift(A, K)",
-        inputs: &CIRCSHIFT_INPUTS_A_K,
-        outputs: &CIRCSHIFT_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = circshift(A, K, dim)",
-        inputs: &CIRCSHIFT_INPUTS_A_K_DIM,
-        outputs: &CIRCSHIFT_OUTPUT,
-    },
-];
-
-const CIRCSHIFT_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CIRCSHIFT.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:circshift:TooManyInputs"),
-    when: "More than three input arguments are supplied.",
-    message: "circshift: too many input arguments",
-};
-
-const CIRCSHIFT_ERROR_INVALID_SHIFT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CIRCSHIFT.INVALID_SHIFT",
-    identifier: Some("RunMat:circshift:InvalidShift"),
-    when: "Shift argument is not a finite real integer scalar/vector.",
-    message: "circshift: invalid shift argument",
-};
-
-const CIRCSHIFT_ERROR_INVALID_DIMS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CIRCSHIFT.INVALID_DIMS",
-    identifier: Some("RunMat:circshift:InvalidDimensions"),
-    when: "Dimension argument is invalid or not compatible with shift argument.",
-    message: "circshift: invalid dimension argument",
-};
-
-const CIRCSHIFT_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CIRCSHIFT.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:circshift:UnsupportedInput"),
-    when: "Input value type is unsupported for circshift.",
-    message: "circshift: unsupported input type",
-};
-
-const CIRCSHIFT_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.CIRCSHIFT.INTERNAL",
-    identifier: Some("RunMat:circshift:Internal"),
-    when: "Internal conversion/allocation/provider operations fail.",
-    message: "circshift: internal operation failed",
-};
-
-const CIRCSHIFT_ERRORS: [BuiltinErrorDescriptor; 5] = [
-    CIRCSHIFT_ERROR_TOO_MANY_INPUTS,
-    CIRCSHIFT_ERROR_INVALID_SHIFT,
-    CIRCSHIFT_ERROR_INVALID_DIMS,
-    CIRCSHIFT_ERROR_UNSUPPORTED_INPUT,
-    CIRCSHIFT_ERROR_INTERNAL,
-];
-
-pub const CIRCSHIFT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &CIRCSHIFT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &CIRCSHIFT_ERRORS,
-};
-
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 3] = [
-    BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "Array elements are permuted without changing or materializing their native integer class.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "K",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Shift scalars/vectors are parsed exactly for integer storage and must be finite integer-valued when floating.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Dimension scalars/vectors are parsed exactly, must be positive, and cannot contain duplicates.",
-    },
-];
-
-pub const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = circshift(A, K, dim)",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostAndGpu,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "All eight integer array classes preserve exact storage and shape; provider execution or exact gather/re-upload preserves residency where supported.",
-    }];
 
 fn circshift_error(
     error: &'static BuiltinErrorDescriptor,
@@ -269,13 +54,7 @@ fn circshift_internal(message: impl Into<String>) -> RuntimeError {
 
 #[runtime_builtin(
     name = "circshift",
-    category = "array/shape",
-    summary = "Rotate array elements circularly along one or more dimensions.",
-    keywords = "circshift,circular shift,rotate array,gpu,cyclic shift",
-    accel = "custom",
-    type_resolver(preserve_array_type),
-    descriptor(crate::builtins::array::shape::circshift::CIRCSHIFT_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::circshift::INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::circshift"
 )]
 async fn circshift_builtin(
@@ -283,12 +62,17 @@ async fn circshift_builtin(
     shift: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &CIRCSHIFT_DESCRIPTOR,
+        &CIRCSHIFT_ERROR_INVALID_SHIFT,
+        BUILTIN_NAME,
+    )?;
     if rest.len() > 1 {
         return Err(circshift_too_many_inputs(
             CIRCSHIFT_ERROR_TOO_MANY_INPUTS.message,
         ));
     }
-    let spec = parse_circshift_spec(&shift, &rest)?;
+    let spec = parse_circshift_spec(&value, &shift, &rest)?;
     let dims = &spec.dims;
     let shifts = &spec.shifts;
 
@@ -326,15 +110,11 @@ async fn circshift_builtin(
             .map_err(Into::into),
         Value::Struct(structure) => Ok(Value::Struct(structure)),
         Value::StructArray(array) => {
-            let rank = array.shape().len().max(
-                dims.iter()
-                    .copied()
-                    .max()
-                    .map_or(0, |dimension| dimension + 1),
-            );
-            let mut axis_shifts = vec![0isize; rank];
+            let mut axis_shifts = vec![0isize; array.shape().len()];
             for (&dimension, &shift) in dims.iter().zip(shifts) {
-                axis_shifts[dimension] = shift;
+                if let Some(axis_shift) = axis_shifts.get_mut(dimension) {
+                    *axis_shift = shift;
+                }
             }
             array
                 .circular_shift(&axis_shifts)
@@ -377,10 +157,18 @@ struct CircshiftSpec {
     shifts: Vec<isize>,
 }
 
-fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<CircshiftSpec> {
+fn parse_circshift_spec(
+    value: &Value,
+    shift: &Value,
+    rest: &[Value],
+) -> crate::BuiltinResult<CircshiftSpec> {
     let shifts = value_to_shift_vector(shift)?;
     let dims: Vec<usize> = if rest.is_empty() {
-        (0..shifts.len()).collect()
+        if shifts.len() == 1 {
+            vec![default_scalar_shift_axis(value)]
+        } else {
+            (0..shifts.len()).collect()
+        }
     } else {
         let tokens = tokens_from_values(rest);
         if let Some(token) = tokens.first() {
@@ -429,6 +217,20 @@ fn parse_circshift_spec(shift: &Value, rest: &[Value]) -> crate::BuiltinResult<C
     Ok(CircshiftSpec { dims, shifts })
 }
 
+fn default_scalar_shift_axis(value: &Value) -> usize {
+    let shape: &[usize] = match value {
+        Value::Tensor(value) => value.shape(),
+        Value::ComplexTensor(value) => value.shape(),
+        Value::LogicalArray(value) => &value.shape,
+        Value::StringArray(value) => &value.shape,
+        Value::CharArray(value) => return usize::from(value.rows <= 1 && value.cols > 1),
+        Value::GpuTensor(value) => value.shape(),
+        Value::StructArray(value) => value.shape(),
+        _ => return 0,
+    };
+    shape.iter().position(|&extent| extent > 1).unwrap_or(0)
+}
+
 fn dims_from_token(token: &ArgToken) -> Option<Vec<usize>> {
     match token {
         ArgToken::Number(value) => coerce_dim_value(*value).map(|dim| vec![dim]),
@@ -457,17 +259,9 @@ fn coerce_integer_dim_value(value: &IntValue) -> Option<usize> {
 }
 
 fn coerce_dim_value(value: f64) -> Option<usize> {
-    if !value.is_finite() {
-        return None;
-    }
-    let rounded = value.round();
-    if (rounded - value).abs() > f64::EPSILON {
-        return None;
-    }
-    if rounded < 1.0 {
-        return None;
-    }
-    Some(rounded as usize)
+    runmat_types::dimension::decode_shape_dimension(value)
+        .ok()
+        .filter(|&dimension| dimension >= 1)
 }
 
 fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
@@ -488,12 +282,7 @@ fn value_to_shift_vector(value: &Value) -> crate::BuiltinResult<Vec<isize>> {
                     "circshift: shifts must be integers",
                 ));
             }
-            if rounded < isize::MIN as f64 || rounded > isize::MAX as f64 {
-                return Err(circshift_invalid_shift(
-                    "circshift: shift magnitude is too large",
-                ));
-            }
-            Ok(vec![rounded as isize])
+            Ok(vec![numeric_to_isize(rounded)?])
         }
         Value::Tensor(tensor) => {
             if !is_vector_shape(tensor.shape()) && tensor_element_len(tensor) != 0 {
@@ -572,23 +361,9 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             }
             Ok(vec![dim])
         }
-        Value::Num(n) => {
-            if !n.is_finite() {
-                return Err(circshift_invalid_dims(
-                    "circshift: dimensions must be finite integers",
-                ));
-            }
-            let rounded = n.round();
-            if (rounded - n).abs() > f64::EPSILON {
-                return Err(circshift_invalid_dims(
-                    "circshift: dimensions must be integers",
-                ));
-            }
-            if rounded < 1.0 {
-                return Err(circshift_invalid_dims("circshift: dimensions must be >= 1"));
-            }
-            Ok(vec![rounded as usize])
-        }
+        Value::Num(n) => Ok(vec![coerce_dim_value(*n).ok_or_else(|| {
+            circshift_invalid_dims("circshift: dimensions must be positive platform-sized integers")
+        })?]),
         Value::Tensor(tensor) => {
             if !is_vector_shape(tensor.shape()) && tensor_element_len(tensor) != 0 {
                 return Err(circshift_invalid_dims(
@@ -604,21 +379,11 @@ fn value_to_dims_vector(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
             }
             let mut dims = Vec::with_capacity(tensor_element_len(tensor));
             for &val in tensor::tensor_values_f64_cow(tensor).iter() {
-                if !val.is_finite() {
-                    return Err(circshift_invalid_dims(
-                        "circshift: dimensions must be finite integers",
-                    ));
-                }
-                let rounded = val.round();
-                if (rounded - val).abs() > f64::EPSILON {
-                    return Err(circshift_invalid_dims(
-                        "circshift: dimensions must be integers",
-                    ));
-                }
-                if rounded < 1.0 {
-                    return Err(circshift_invalid_dims("circshift: dimensions must be >= 1"));
-                }
-                dims.push(rounded as usize);
+                dims.push(coerce_dim_value(val).ok_or_else(|| {
+                    circshift_invalid_dims(
+                        "circshift: dimensions must be positive platform-sized integers",
+                    )
+                })?);
             }
             Ok(dims)
         }
@@ -720,7 +485,9 @@ fn numeric_to_isize(value: f64) -> crate::BuiltinResult<isize> {
             "circshift: shift values must be integers",
         ));
     }
-    if rounded < isize::MIN as f64 || rounded > isize::MAX as f64 {
+    // The binary64 representation of isize::MAX rounds to 2^(BITS-1)
+    // on 64-bit targets. Equality with that upper boundary is out of range.
+    if rounded < isize::MIN as f64 || rounded >= (isize::MAX as f64 + 1.0) {
         return Err(circshift_invalid_shift(
             "circshift: shift magnitude is too large",
         ));
@@ -755,37 +522,45 @@ fn build_shift_plan(
             "circshift: shift vector must match the number of dimensions",
         ));
     }
-    let mut target_len = shape.len();
-    if let Some(max_axis) = dims.iter().copied().max() {
-        if max_axis + 1 > target_len {
-            target_len = max_axis + 1;
-        }
-    }
-    let mut ext_shape = shape.to_vec();
-    if target_len > ext_shape.len() {
-        ext_shape.resize(target_len, 1);
-    }
+    // Axes beyond the stored rank are implicit singletons. A circular shift
+    // there is an identity and must not allocate rank-sized metadata.
+    let target_len = shape.len();
+    let mut ext_shape = Vec::new();
+    ext_shape.try_reserve_exact(target_len).map_err(|_| {
+        circshift_invalid_dims("circshift: dimension metadata exceeds available memory")
+    })?;
+    ext_shape.extend_from_slice(shape);
 
-    let mut positive = vec![0usize; ext_shape.len()];
-    let mut provider = vec![0isize; ext_shape.len()];
+    let mut positive = Vec::new();
+    positive.try_reserve_exact(target_len).map_err(|_| {
+        circshift_invalid_dims("circshift: dimension metadata exceeds available memory")
+    })?;
+    positive.resize(target_len, 0usize);
+    let mut provider = Vec::new();
+    provider.try_reserve_exact(target_len).map_err(|_| {
+        circshift_invalid_dims("circshift: dimension metadata exceeds available memory")
+    })?;
+    provider.resize(target_len, 0isize);
 
     for (&axis, &shift) in dims.iter().zip(shifts.iter()) {
         if axis >= ext_shape.len() {
-            return Err(circshift_invalid_dims(
-                "circshift: dimension index out of range",
-            ));
+            continue;
         }
         provider[axis] = shift;
         let size = ext_shape[axis];
         if size == 0 || size == 1 {
             continue;
         }
-        let size_isize = size as isize;
-        let mut normalized = shift % size_isize;
-        if normalized < 0 {
-            normalized += size_isize;
-        }
-        positive[axis] = normalized as usize;
+        positive[axis] = if shift < 0 {
+            let magnitude = shift.unsigned_abs() % size;
+            if magnitude == 0 {
+                0
+            } else {
+                size - magnitude
+            }
+        } else {
+            (shift as usize) % size
+        };
     }
 
     Ok(ShiftPlan {
@@ -1049,7 +824,14 @@ fn circshift_generic<T: Clone>(
     if shape.len() != shifts.len() {
         return Err(circshift_internal("circshift: internal shape mismatch"));
     }
-    let total: usize = shape.iter().product();
+    let total = if shape.contains(&0) {
+        0
+    } else {
+        shape
+            .iter()
+            .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+            .ok_or_else(|| circshift_internal("circshift: shape product exceeds platform limits"))?
+    };
     if total != data.len() {
         return Err(circshift_internal(
             "circshift: shape does not match data length",
@@ -1208,22 +990,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn circshift_type_preserves_tensor_shape() {
-        let out = preserve_array_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(3), Some(2)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(2)])
-            }
-        );
-    }
-
-    #[test]
     fn circshift_preserves_all_exact_real_integer_classes() {
         let storages = [
             IntegerStorage::I8(vec![-2, 7, 9, 11]),
@@ -1321,6 +1087,31 @@ pub(crate) mod tests {
             }
             other => panic!("expected tensor, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn circshift_control_bounds_and_implicit_singletons_are_pre_effect() {
+        assert!(coerce_dim_value(1e300).is_none());
+        assert!(numeric_to_isize(isize::MAX as f64 + 1.0).is_err());
+        let plan = build_shift_plan(&[2, 3], &[usize::MAX - 1], &[1]).expect("implicit singleton");
+        assert_eq!(plan.ext_shape, vec![2, 3]);
+        assert!(plan.is_noop());
+        let plan = build_shift_plan(&[0, isize::MAX as usize + 1], &[1], &[-1])
+            .expect("empty tensor still has valid large metadata");
+        assert_eq!(plan.positive[1], isize::MAX as usize);
+    }
+
+    #[test]
+    fn circshift_scalar_shift_selects_first_nonsingleton_axis() {
+        let row = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).expect("row");
+        let Value::Tensor(out) =
+            circshift_builtin(Value::Tensor(row), Value::Int(IntValue::I32(1)), Vec::new())
+                .expect("row shift")
+        else {
+            panic!("expected row tensor");
+        };
+        assert_eq!(out.shape(), &[1, 4]);
+        assert_eq!(out.materialize_f64(), vec![4.0, 1.0, 2.0, 3.0]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

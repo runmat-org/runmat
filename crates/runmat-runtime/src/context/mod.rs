@@ -188,7 +188,9 @@ pub use vm_fusion_completion::{
     VmFusionFeedbackLease, VmFusionInstalledRegion, VmFusionRegionRegistration,
     VmFusionSemanticIdentity, VmFusionSessionRegistration,
 };
-pub use vm_fusion_host_outputs::{VmFusionHostOutputEntry, VmFusionHostOutputs};
+pub use vm_fusion_host_outputs::{
+    VmFusionHostOutputEntry, VmFusionHostOutputs, VmFusionHostRealSlotSpec, VmFusionHostRetirement,
+};
 pub use vm_fusion_host_route::{VmFusionHostInstruction, VmFusionHostOperation, VmFusionHostRoute};
 
 #[cfg(test)]

@@ -1,5 +1,31 @@
 use super::*;
 
+#[test]
+fn terminal_builtin_classification_preserves_output_slot_call_semantics() {
+    for (name, expected) in [
+        ("sin", VmFusionHostInstruction::ElementwiseCall),
+        ("sum", VmFusionHostInstruction::Reduction),
+    ] {
+        for instruction in [
+            Instr::CallBuiltinMulti(name.into(), 1, 1),
+            Instr::CallBuiltinMultiUsingOutputSlot(name.into(), 1, 7),
+        ] {
+            assert_eq!(
+                host_instruction_kind(&instruction, 0, &[], &[], true, Some(1)),
+                expected,
+                "{instruction:?}"
+            );
+        }
+        let dynamic = Instr::CallBuiltinMultiUsingOutputSlot(name.into(), 1, 7);
+        for count in [None, Some(0), Some(2)] {
+            assert_eq!(
+                host_instruction_kind(&dynamic, 0, &[], &[], true, count),
+                VmFusionHostInstruction::Unproved,
+            );
+        }
+    }
+}
+
 fn compiled_axis_control() -> crate::bytecode::Bytecode {
     let ast = runmat_parser::parse(
         "x = gpuArray(single([1, 2; 3, 4])); y = min(x + x, [], 2); z = gather(y);",
@@ -29,6 +55,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &bridges,
             &controls,
             false,
+            None,
         ),
         VmFusionHostInstruction::Structural,
     );
@@ -39,6 +66,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &bridges,
             &controls,
             false,
+            None,
         ),
         VmFusionHostInstruction::Structural,
     );
@@ -49,6 +77,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &bridges,
             &[],
             false,
+            None,
         ),
         VmFusionHostInstruction::Unproved,
     );
@@ -59,6 +88,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &bridges,
             &[],
             false,
+            None,
         ),
         VmFusionHostInstruction::Unproved,
     );
@@ -78,6 +108,7 @@ fn host_structural_control_requires_exact_sealed_empty_literal_and_store() {
             &crate::bytecode::fusion_private_temp::bridges(&changed),
             &changed_controls,
             false,
+            None,
         ),
         VmFusionHostInstruction::Unproved,
     );

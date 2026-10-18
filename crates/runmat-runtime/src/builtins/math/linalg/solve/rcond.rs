@@ -305,10 +305,11 @@ fn rcond_complex_tensor_impl(matrix: &ComplexTensor) -> BuiltinResult<f64> {
     }
     if matrix.len() == 1 {
         let (re, im) = matrix.materialize_f64()[0];
-        let magnitude = re.hypot(im);
-        return Ok(if !magnitude.is_finite() {
+        // A finite nonzero scalar has condition one even when computing its
+        // modulus would overflow or underflow the floating-point range.
+        return Ok(if !re.is_finite() || !im.is_finite() {
             f64::NAN
-        } else if magnitude == 0.0 {
+        } else if re == 0.0 && im == 0.0 {
             0.0
         } else {
             1.0
@@ -428,12 +429,28 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn rcond_zero_is_zero() {
+    fn rcond_scalar_zero_and_finite_extremes() {
         let tensor = Tensor::new(vec![0.0], vec![1, 1]).unwrap();
         let result = rcond_builtin(Value::Tensor(tensor)).expect("rcond");
         match result {
             Value::Num(value) => assert_eq!(value, 0.0),
             other => panic!("expected scalar result, got {other:?}"),
+        }
+
+        for (re, im, expected) in [
+            (0.0, 0.0, 0.0),
+            (1e308, 1e308, 1.0),
+            (f64::MAX, f64::MAX, 1.0),
+            (f64::from_bits(1), f64::from_bits(1), 1.0),
+            (f64::INFINITY, 1.0, f64::NAN),
+        ] {
+            let tensor = ComplexTensor::new(vec![(re, im)], vec![1, 1]).unwrap();
+            let result = rcond_builtin(Value::ComplexTensor(tensor)).expect("complex rcond");
+            match result {
+                Value::Num(value) if expected.is_nan() => assert!(value.is_nan()),
+                Value::Num(value) => assert_eq!(value, expected, "scalar ({re:e}, {im:e})"),
+                other => panic!("expected complex-scalar rcond, got {other:?}"),
+            }
         }
     }
 

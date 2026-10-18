@@ -4,7 +4,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
  keywords: &["reshape","resize","dimensions","gpu","auto dimension"], sections: &[BuiltinDocumentationSection { heading: "Behavior", paragraphs: &["Accepts either a size vector `reshape(A, [m n …])` or individual dimensions `reshape(A, m, n, …)`.",
 "Exactly one dimension may be specified as `[]`; RunMat infers its value from `numel(A)`.",
 "Dimensions must be nonnegative integers. Zero-sized dimensions are allowed when `numel(A) == 0`.",
-"Works on numeric, logical, complex, string, char, GPU, cell, structure, and object arrays using each runtime carrier's admitted shape rules.",
+"Works on numeric, logical, complex, string, char, GPU, cell, structure, and object arrays using each runtime carrier's admitted shape rules. Character and cell arrays can be reshaped into higher dimensions when the element count matches.",
 "All eight integer data classes preserve authoritative native storage exactly, and typed integer dimensions are decoded structurally.",
 "Contiguous GPU reshape retains the input allocation as a shape view. Lazy device layouts materialize through their exact owner; host carriers retain their existing structural reshape path.",
 "Scalar input preserves its value; an output extent product other than one is rejected. Higher-rank singleton shapes may use an array carrier.",
@@ -42,6 +42,6 @@ BuiltinDocumentationLink { label: "triu", target: BuiltinDocumentationLinkTarget
 BuiltinDocumentationLink { label: "vertcat", target: BuiltinDocumentationLinkTarget::Builtin("vertcat") }],
  media: &[], evidence: BuiltinDocumentationEvidence {
  implementation: &[BuiltinDocumentationLink { label: "crates/runmat-runtime/src/builtins/array/shape/reshape.rs", target: BuiltinDocumentationLinkTarget::Source("crates/runmat-runtime/src/builtins/array/shape/reshape.rs") }],
- verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "builtins::array::shape::reshape::tests", location: "crates/runmat-runtime/src/builtins/array/shape/reshape.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "builtins::array::shape::reshape::tests::reshape_gpu_preserves_handle_shape", location: "crates/runmat-runtime/src/builtins/array/shape/reshape.rs" }], notes: &[], },
+ verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "reshape unit tests", location: "builtins::array::shape::reshape::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "reshape resident shape test", location: "builtins::array::shape::reshape::tests::reshape_gpu_preserves_handle_shape" }], notes: &[], },
  introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

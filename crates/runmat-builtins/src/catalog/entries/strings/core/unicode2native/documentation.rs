@@ -16,6 +16,12 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
         "Text encoding runs on the CPU. GPU-resident inputs are gathered before validation and encoding.",
     ] },
+    BuiltinDocumentationSection { heading: "Syntax", paragraphs: &[
+        "bytes = unicode2native(unicodestr)\nbytes = unicode2native(unicodestr, encoding)",
+        "`unicodestr` must be a string scalar or character vector.",
+        "`encoding` must be a string scalar or character vector containing an encoding name.",
+        "Returns `bytes`, a `uint8` row vector.",
+    ] },
 ];
 
 const EXAMPLES: &[BuiltinExample] = &[

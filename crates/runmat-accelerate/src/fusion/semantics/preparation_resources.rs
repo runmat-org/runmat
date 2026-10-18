@@ -176,6 +176,7 @@ pub(crate) struct PureSourceGeometry {
     pub fact_slots_upper: usize,
     pub resident_inputs: usize,
     pub source_operand_ids: usize,
+    pub liveness_value_ids_upper: usize,
     pub add_sign_operations: usize,
     pub max_rank: usize,
 }
@@ -221,6 +222,14 @@ impl PureSourceGeometry {
         let fact_slots_upper = source_leaves_upper
             .checked_add(plan.operations.len())
             .ok_or(PreparationBoundError::Overflow)?;
+        let liveness_value_ids_upper = plan
+            .inputs
+            .len()
+            .checked_add(usize::from(plan.output.is_some()))
+            .and_then(|count| count.checked_add(plan.materialized_stores.len()))
+            .and_then(|count| count.checked_add(source_operand_ids))
+            .and_then(|count| count.checked_add(plan.operations.len()))
+            .ok_or(PreparationBoundError::Overflow)?;
         Ok(Self {
             inputs: inputs.len(),
             constants: plan.const_values.len(),
@@ -230,6 +239,7 @@ impl PureSourceGeometry {
             fact_slots_upper,
             resident_inputs,
             source_operand_ids,
+            liveness_value_ids_upper,
             add_sign_operations,
             max_rank,
         })
@@ -360,6 +370,7 @@ impl PureSourceGeometry {
                     load_uses,
                     self.operations,
                     self.source_operand_ids,
+                    self.liveness_value_ids_upper,
                     self.max_rank,
                 )
                 .ok_or(PreparationBoundError::Overflow)

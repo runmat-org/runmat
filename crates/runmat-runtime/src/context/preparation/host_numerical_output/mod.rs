@@ -33,6 +33,81 @@ struct NumericalAllocation {
 impl PreparedHostNumericalOutput {
     const COPY_CHUNK: usize = 4096;
 
+    /// Prepare only operation-local scratch for an already-admitted real
+    /// whole-Tensor slot. The slot is bound at the source-ordered VM take;
+    /// its payload and shape claims are never charged a second time here.
+    pub fn prepare_recycling_work(
+        context: &RuntimeContext,
+        resources: &super::AdmittedHostResources,
+        slot_dtype: NumericDType,
+        slot_shape: &[usize],
+    ) -> Result<Self, HostAllocationError> {
+        let prepared_scratch_bytes = validated_prepared_scratch(resources)?;
+        let dtype = match resources.output_class {
+            NumericClass::Single => NumericDType::F32,
+            NumericClass::Double => NumericDType::F64,
+            _ => return Err(unsupported_recycling_class()),
+        };
+        if resources.output_domain != FusionHostOutputDomain::Exact(NumericDomain::Real)
+            || slot_dtype != dtype
+            || slot_shape != resources.output_shape.as_slice()
+            || resources.bound.retained_bytes
+                != HostAllocationPlan::retained_tensor_bytes(dtype, slot_shape)?
+        {
+            return Err(unsupported_recycling_class());
+        }
+        let Some(receipt) = HostAllocationReceipt::admit(
+            Some(context),
+            HostAllocationPlan::new(prepared_scratch_bytes, 0)?,
+        )?
+        else {
+            return Err(HostAllocationError::MissingManagedOwner);
+        };
+        let broadcast = match resources.operation {
+            BuiltinPreparationOperation::ElementwiseBinary
+            | BuiltinPreparationOperation::RealPower => {
+                let [left, right] = resources.operand_shapes.as_slice() else {
+                    return Err(unsupported_recycling_class());
+                };
+                Some(
+                    crate::builtins::common::broadcast::PreparedBroadcastPlan::prepare(
+                        &receipt,
+                        context,
+                        left,
+                        right,
+                        &resources.output_shape,
+                    )?,
+                )
+            }
+            _ => None,
+        };
+        receipt.checkpoint(context)?;
+        Ok(Self {
+            operation: resources.operation,
+            dtype,
+            domain: resources.output_domain,
+            len: allocation_len(slot_shape)?,
+            allocation: NumericalAllocation {
+                real: None,
+                complex: None,
+            },
+            broadcast,
+            receipt,
+        })
+    }
+
+    pub(crate) fn bind_recycled_tensor(mut self, tensor: Tensor) -> Result<Self, Tensor> {
+        if self.allocation.real.is_some()
+            || self.allocation.complex.is_some()
+            || tensor.numeric_dtype() != self.dtype
+            || tensor.len() != self.len
+        {
+            return Err(tensor);
+        }
+        self.allocation.real = Some(tensor);
+        Ok(self)
+    }
+
     /// Prepare the exact selected numerical result before any provider
     /// readback. `RealOrComplex` reserves both possible physical results: the
     /// semantic kernel may inspect values to choose a domain, but it cannot
@@ -41,6 +116,7 @@ impl PreparedHostNumericalOutput {
         context: &RuntimeContext,
         resources: &super::AdmittedHostResources,
     ) -> Result<Option<Self>, HostAllocationError> {
+        let prepared_scratch_bytes = validated_prepared_scratch(resources)?;
         let dtype = match resources.output_class {
             NumericClass::Single => NumericDType::F32,
             NumericClass::Double => NumericDType::F64,
@@ -52,10 +128,7 @@ impl PreparedHostNumericalOutput {
         };
         let Some(receipt) = HostAllocationReceipt::admit(
             Some(context),
-            HostAllocationPlan::new(
-                resources.bound.scratch_bytes,
-                resources.bound.retained_bytes,
-            )?,
+            HostAllocationPlan::new(prepared_scratch_bytes, resources.bound.retained_bytes)?,
         )?
         else {
             return Ok(None);
@@ -279,6 +352,30 @@ impl PreparedHostNumericalOutput {
         }
         Ok(())
     }
+}
+
+fn validated_prepared_scratch(
+    resources: &super::AdmittedHostResources,
+) -> Result<u64, HostAllocationError> {
+    let calculated = crate::builtins::math::host_resources::prepared_scratch_for_shapes(
+        resources.operation,
+        &resources.operand_shapes,
+        &resources.output_shape,
+    )
+    .ok_or_else(unsupported_prepared_scratch)?;
+    if calculated != resources.prepared_scratch_bytes || calculated > resources.bound.scratch_bytes
+    {
+        return Err(unsupported_prepared_scratch());
+    }
+    Ok(calculated)
+}
+
+fn unsupported_prepared_scratch() -> HostAllocationError {
+    HostAllocationError::Numeric(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
+}
+
+fn unsupported_recycling_class() -> HostAllocationError {
+    HostAllocationError::Numeric(runmat_value::ExactHostNumericAllocationError::UnsupportedClass)
 }
 
 fn allocation_len(shape: &[usize]) -> Result<usize, HostAllocationError> {

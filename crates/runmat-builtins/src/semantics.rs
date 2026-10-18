@@ -164,6 +164,9 @@ pub enum BuiltinSemanticKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ShapeTransformKind {
     General,
+    Flip,
+    Rotate90,
+    CircularShift,
     Reshape,
     Permute,
     Repmat,
@@ -205,8 +208,7 @@ pub fn builtin_semantics_for_name(name: &str) -> Option<BuiltinSemantics> {
         "transpose" | "ctranspose" => pure(BuiltinSemanticKind::ShapeTransform(
             ShapeTransformKind::Transpose,
         )),
-        "flip" | "fliplr" | "flipud" | "rot90" | "circshift" | "tril" | "triu" | "diag"
-        | "kron" => pure(BuiltinSemanticKind::ShapeTransform(
+        "tril" | "triu" | "diag" | "kron" => pure(BuiltinSemanticKind::ShapeTransform(
             ShapeTransformKind::General,
         )),
         "cat" => pure(BuiltinSemanticKind::ShapeTransform(

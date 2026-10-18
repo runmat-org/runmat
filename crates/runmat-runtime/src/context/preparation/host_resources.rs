@@ -10,6 +10,9 @@ use runmat_value::Value;
 
 pub struct AdmittedHostResources {
     pub bound: FusionHostResourceBound,
+    /// Exact temporary storage for a body that consumes the canonical
+    /// preallocated numerical output. Legacy bodies retain `bound.scratch_bytes`.
+    pub prepared_scratch_bytes: u64,
     pub output_shape: Vec<usize>,
     pub output_class: NumericClass,
     pub output_domain: FusionHostOutputDomain,
@@ -132,14 +135,19 @@ pub(super) fn bound(
         .zip(&classes)
         .map(|(shape, &class)| FusionHostResourceInput { shape, class })
         .collect::<Vec<_>>();
-    let bound = callback(&FusionHostResourceQuery {
+    let query = FusionHostResourceQuery {
         inputs: &inputs,
         output: FusionHostResourceInput {
             shape: &output_shape,
             class: output_class,
         },
         output_domain,
-    })?;
+    };
+    let bound = callback(&query)?;
+    let prepared_scratch_bytes = crate::builtins::math::host_resources::prepared_scratch_bytes(
+        request.form().operation,
+        &query,
+    )?;
     let operand_metadata = shapes.iter().try_fold(0_u64, |total, shape| {
         total.checked_add(
             u64::try_from(shape.len())
@@ -158,10 +166,12 @@ pub(super) fn bound(
         (&output_shape, output_class, output_domain),
         bound.retained_bytes,
         bound.scratch_bytes,
+        prepared_scratch_bytes,
     ))
     .ok()?;
     Some(AdmittedHostResources {
         bound,
+        prepared_scratch_bytes,
         output_shape,
         output_class,
         output_domain,

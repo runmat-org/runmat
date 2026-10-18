@@ -14,8 +14,8 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "Additional arguments beyond those required by the repeating format string raise an error to match MATLAB diagnostics.",
     ] },
     BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
-        "Formatting executes on the CPU. GPU tensors are gathered via the active provider before substitution.",
-        "`sprintf` is a residency sink. When inputs include GPU tensors, RunMat gathers them back to host memory via the active acceleration provider before executing the formatter. Formatting itself runs entirely on the CPU, ensuring consistent behaviour regardless of device availability.",
+        "Formatting executes on the CPU. GPU tensors are gathered through their exact owning provider before substitution.",
+        "`sprintf` is a residency sink. When inputs include GPU tensors, RunMat gathers them back to host memory through each tensor's exact owning provider before executing the formatter. Formatting itself runs entirely on the CPU; an unavailable owner or failed transfer returns an error.",
     ] },
 ];
 

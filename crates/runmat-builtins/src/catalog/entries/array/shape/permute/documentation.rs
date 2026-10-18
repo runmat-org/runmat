@@ -49,6 +49,6 @@ BuiltinDocumentationLink { label: "triu", target: BuiltinDocumentationLinkTarget
 BuiltinDocumentationLink { label: "vertcat", target: BuiltinDocumentationLinkTarget::Builtin("vertcat") }],
  media: &[], evidence: BuiltinDocumentationEvidence {
  implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/shape/permute.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/shape/permute.rs") }],
- verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "builtins::array::shape::permute::tests", location: "crates/runmat-runtime/src/builtins/array/shape/permute.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs", location: "crates/runmat-runtime/src/builtins/array/shape/permute.rs" }], notes: &[], },
+ verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "permute unit tests", location: "builtins::array::shape::permute::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "native integer transform semantics", location: "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs" }], notes: &[], },
  introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

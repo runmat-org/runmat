@@ -8,6 +8,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "All-mode execution has the host's existing dynamic-evaluation privileges and can invoke effectful functions. Do not use it for untrusted text; choose Evaluation='restricted' or str2double.",
     ] },
     BuiltinDocumentationSection { heading: "Execution and placement", paragraphs: &[
+        "Evaluation is host-only. Integer, numeric, and provider-resident inputs are not text and reject before provider access.",
         "All text uses the session's captured source-evaluation authority and canonical parser in an isolated transactional frame; it does not publish implicit variables into the base workspace.",
         "Not eligible for fusion. Dynamic source evaluation may suspend and requires the host's source-evaluation capability.",
     ] },

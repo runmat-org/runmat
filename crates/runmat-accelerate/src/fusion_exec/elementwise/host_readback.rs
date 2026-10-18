@@ -13,6 +13,7 @@ use runmat_runtime::context::host_allocation::{HostAllocationPolicy, HostAllocat
 use runmat_runtime::context::preparation::AdmittedHostResources;
 use runmat_runtime::context::{
     VmFusionHostInstruction, VmFusionHostOperation, VmFusionHostOutputEntry, VmFusionHostOutputs,
+    VmFusionHostRetirement,
 };
 use runmat_types::NumericDomain;
 
@@ -20,13 +21,66 @@ pub(super) struct Admission {
     pub plan: CpuReadbackPlan,
     pub resources: CpuHostResources,
     pub program: crate::fusion::semantics::ResolvedProgram,
-    pub outputs: Vec<HostOutputSpec>,
+    pub outputs: HostOutputPlan,
 }
 
 pub(crate) struct HostOutputSpec {
+    source_index: usize,
     owner: VmFusionHostOperation,
     instruction: VmFusionHostInstruction,
     envelope: AdmittedHostResources,
+}
+
+pub(crate) struct HostOutputPlan {
+    specs: Vec<HostOutputSpec>,
+    liveness: Option<super::host_liveness::HostLivenessPlan>,
+}
+
+impl HostOutputPlan {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.specs.is_empty() && self.liveness.is_none()
+    }
+}
+
+fn recyclable_named_instruction(
+    specs: &[HostOutputSpec],
+    source_index: usize,
+    binding: BuiltinBindingIdentity,
+    input_count: usize,
+) -> Option<VmFusionHostInstruction> {
+    if !(1..=2).contains(&input_count) {
+        return None;
+    }
+    let spec = specs
+        .binary_search_by_key(&source_index, |spec| spec.source_index)
+        .ok()
+        .and_then(|index| specs.get(index))?;
+    if spec.owner != VmFusionHostOperation::Builtin(binding)
+        || !matches!(
+            spec.instruction,
+            VmFusionHostInstruction::ElementwiseCall | VmFusionHostInstruction::ElementwiseBinary
+        )
+        || spec.envelope.output_domain != FusionHostOutputDomain::Exact(NumericDomain::Real)
+        || !matches!(
+            spec.envelope.output_class,
+            runmat_types::NumericClass::Single | runmat_types::NumericClass::Double
+        )
+        || spec.envelope.operand_shapes.len() != input_count
+    {
+        return None;
+    }
+    let dtype = match spec.envelope.output_class {
+        runmat_types::NumericClass::Single => runmat_value::NumericDType::F32,
+        runmat_types::NumericClass::Double => runmat_value::NumericDType::F64,
+        _ => return None,
+    };
+    let retained =
+        runmat_runtime::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+            dtype,
+            &spec.envelope.output_shape,
+        )
+        .ok()?;
+    (spec.envelope.bound.retained_bytes == retained).then_some(spec.instruction)
 }
 
 impl HostOutputSpec {
@@ -63,12 +117,88 @@ impl HostOutputSpec {
 
 pub(crate) fn prepare_outputs(
     context: &runmat_runtime::context::RuntimeContext,
-    specs: &[HostOutputSpec],
+    plan: &HostOutputPlan,
 ) -> Result<
     Option<VmFusionHostOutputs>,
     runmat_runtime::context::host_allocation::HostAllocationError,
 > {
-    VmFusionHostOutputs::prepare_with(context, specs.len(), |index| specs[index].prepare(context))
+    let Some(liveness) = plan.liveness.as_ref() else {
+        return VmFusionHostOutputs::prepare_with(context, plan.specs.len(), |index| {
+            plan.specs[index].prepare(context)
+        });
+    };
+    let slots = liveness.slot_specs();
+    VmFusionHostOutputs::prepare_recycled_with(
+        context,
+        &slots,
+        liveness.operations.len(),
+        |source_index, slots| {
+            let operation = &liveness.operations[source_index];
+            let retirements = operation.retirements.map(|retirement| {
+                retirement.map(|retirement| VmFusionHostRetirement {
+                    operand_position: retirement.operand_position,
+                    slot: retirement.slot,
+                })
+            });
+            let work = match operation.output_slot {
+                Some(slot) => {
+                    let spec = plan
+                        .specs
+                        .binary_search_by_key(&source_index, |spec| spec.source_index)
+                        .ok()
+                        .and_then(|index| plan.specs.get(index))
+                        .ok_or(runmat_runtime::context::host_allocation::HostAllocationError::Numeric(
+                            runmat_value::ExactHostNumericAllocationError::ExceedsPermit,
+                        ))?;
+                    let slot = slots.get(slot).ok_or(
+                        runmat_runtime::context::host_allocation::HostAllocationError::Numeric(
+                            runmat_value::ExactHostNumericAllocationError::ExceedsPermit,
+                        ),
+                    )?;
+                    Some(
+                        runmat_runtime::context::preparation::PreparedHostNumericalOutput::prepare_recycling_work(
+                            context,
+                            &spec.envelope,
+                            slot.dtype,
+                            slot.shape,
+                        )?,
+                    )
+                }
+                None => None,
+            };
+            match operation.operation {
+                VmFusionHostOperation::Intrinsic(operator) => {
+                    Ok(VmFusionHostOutputEntry::recycled_intrinsic(
+                        operator,
+                        operation.instruction,
+                        operation.output_slot,
+                        retirements,
+                        work,
+                    ))
+                }
+                VmFusionHostOperation::Builtin(binding) => {
+                    let output_slot = operation.output_slot.ok_or(
+                        runmat_runtime::context::host_allocation::HostAllocationError::Numeric(
+                            runmat_value::ExactHostNumericAllocationError::ExceedsPermit,
+                        ),
+                    )?;
+                    let work = work.ok_or(
+                        runmat_runtime::context::host_allocation::HostAllocationError::Numeric(
+                            runmat_value::ExactHostNumericAllocationError::ExceedsPermit,
+                        ),
+                    )?;
+                    Ok(VmFusionHostOutputEntry::recycled_builtin(
+                        binding,
+                        operation.instruction,
+                        output_slot,
+                        retirements,
+                        work,
+                    ))
+                }
+            }
+        },
+    )
+    .map(Some)
 }
 
 fn numerical_form(
@@ -362,18 +492,47 @@ fn admit_inputs(
             _ => FusionHostOutputDomain::Exact(NumericDomain::Real),
         };
         let output_class = program.floating_class(output).ok()?;
-        let bound = bindings.host_resource_bound(
-            index,
-            request.runtime.as_ref(),
-            &FusionHostResourceQuery {
-                inputs: &args,
-                output_domain,
-                output: FusionHostResourceInput {
-                    shape: &output_shape,
-                    class: output_class,
-                },
+        let query = FusionHostResourceQuery {
+            inputs: &args,
+            output_domain,
+            output: FusionHostResourceInput {
+                shape: &output_shape,
+                class: output_class,
             },
-        )?;
+        };
+        let bound = bindings.host_resource_bound(index, request.runtime.as_ref(), &query)?;
+        let scalar_shape = [1usize, 1];
+        let prepared_scratch_bytes = match selected {
+            Some((
+                VmFusionHostOperation::Intrinsic(runmat_types::OperatorKind::UnaryMinus),
+                preparation,
+                _,
+            )) => {
+                let virtual_inputs = [
+                    FusionHostResourceInput {
+                        shape: &scalar_shape,
+                        class: runmat_types::NumericClass::Double,
+                    },
+                    *args.first()?,
+                ];
+                let virtual_query = FusionHostResourceQuery {
+                    inputs: &virtual_inputs,
+                    output: query.output,
+                    output_domain,
+                };
+                runmat_runtime::builtins::math::host_resources::prepared_scratch_bytes(
+                    preparation,
+                    &virtual_query,
+                )?
+            }
+            Some((_, preparation, _)) => {
+                runmat_runtime::builtins::math::host_resources::prepared_scratch_bytes(
+                    preparation,
+                    &query,
+                )?
+            }
+            None => bound.scratch_bytes,
+        };
         if let Some((owner, preparation, instruction)) = selected {
             let operand_shapes = if matches!(
                 owner,
@@ -399,13 +558,16 @@ fn admit_inputs(
                 output_domain,
                 bound.retained_bytes,
                 bound.scratch_bytes,
+                prepared_scratch_bytes,
             ))
             .ok()?;
             outputs.push(HostOutputSpec {
+                source_index: index,
                 owner,
                 instruction,
                 envelope: AdmittedHostResources {
                     bound,
+                    prepared_scratch_bytes,
                     output_shape,
                     output_class,
                     output_domain,
@@ -420,10 +582,27 @@ fn admit_inputs(
         // Each output owner is constructed before source staging and retains
         // its own scratch reservation through this selected VM continuation.
         active_scratch = if managed {
-            active_scratch.checked_add(bound.scratch_bytes)?
+            active_scratch.checked_add(prepared_scratch_bytes)?
         } else {
             active_scratch.max(bound.scratch_bytes)
         };
+    }
+    let liveness = if managed {
+        super::host_liveness::plan(
+            request.plan,
+            program,
+            &canonical,
+            |index, binding, input_count| {
+                recyclable_named_instruction(&outputs, index, binding, input_count)
+            },
+        )
+    } else {
+        None
+    };
+    if let Some(plan) = liveness.as_ref() {
+        let slots = plan.slot_specs();
+        retained_outputs =
+            VmFusionHostOutputs::retained_bytes_with_slots(plan.operations.len(), &slots).ok()?;
     }
     let resources = crate::fusion_exec::host_readback::resources(
         &sources,
@@ -442,7 +621,10 @@ fn admit_inputs(
     resident_offsets.dedup();
     Some(Admission {
         program: host_program,
-        outputs,
+        outputs: HostOutputPlan {
+            specs: outputs,
+            liveness,
+        },
         plan: CpuReadbackPlan {
             sources,
             stack_len: layout.required_stack_operands,

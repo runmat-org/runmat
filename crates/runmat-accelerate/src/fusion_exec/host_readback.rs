@@ -75,6 +75,7 @@ pub(crate) fn candidate_preparation_bytes(
     load_uses: usize,
     operations: usize,
     operand_occurrences: usize,
+    liveness_value_ids_upper: usize,
     max_rank: usize,
 ) -> Option<u64> {
     fn vector<T>(count: usize) -> Option<u64> {
@@ -134,6 +135,11 @@ pub(crate) fn candidate_preparation_bytes(
     // The canonical host binary calculator constructs a BroadcastPlan while
     // pricing its body. Its ten-vector geometry comes from that owner.
     add(runmat_runtime::builtins::math::host_resources::broadcast_metadata_bytes(max_rank)?)?;
+    add(super::elementwise::host_liveness_preparation_bytes(
+        liveness_value_ids_upper,
+        operations,
+        max_rank,
+    )?)?;
     Some(bytes)
 }
 

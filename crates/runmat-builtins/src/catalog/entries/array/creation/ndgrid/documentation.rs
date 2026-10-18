@@ -15,7 +15,10 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 "The output size is `[length(x1), length(x2), ..., length(xn)]`; the one-output form uses `length(x) x 1`.",
 "Each output preserves the corresponding input axis class independently: complex axes produce complex outputs, logical axes produce logical outputs, and dense numeric tensors preserve their RunMat dtype metadata.",
 "Requesting more outputs than supplied vectors is an error unless the single-vector syntax is used."] },
-BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &["Documented resident single and double gpuArray vector inputs use the provider ndgrid hook when available. Explicit real-integer gpuArray axes reject; automatically resident real-integer axes gather transparently and produce exact host grids. Paired-complex integer axes use exact owner-resolved fallback and remain resident."] }],
+BuiltinDocumentationSection { heading: "Execution and residency", paragraphs: &["Documented resident single and double gpuArray vector inputs use the provider ndgrid hook when available. Explicit real-integer gpuArray axes reject; automatically resident real-integer axes gather transparently and produce exact host grids. Paired-complex integer axes use exact owner-resolved fallback and remain resident."] },
+BuiltinDocumentationSection { heading: "Syntax", paragraphs: &["[X1, X2, ..., Xn] = ndgrid(x1, x2, ..., xn)",
+"`[X1, X2, ..., Xn] = ndgrid(xg)` reuses a single grid vector for every requested dimension.",
+"`X = ndgrid(x)` returns a one-dimensional grid as a column vector."] }],
     examples: &[BuiltinExample { id: "example-1", title: "Create a 2-D grid", program: "x = 1:2:9;\ny = [10 20 30];\n[X, Y] = ndgrid(x, y)", display_output: Some("% X and Y are size 5-by-3."), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isequal(size(X), [5 3])); assert(isequal(size(Y), [5 3]));" } },
 BuiltinExample { id: "example-2", title: "Reuse one vector for multiple dimensions", program: "v = [0 1];\n[X, Y, Z] = ndgrid(v)", display_output: Some("% X, Y, and Z are size 2-by-2-by-2."), compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Succeeds },
 BuiltinExample { id: "example-3", title: "Create a 3-D rectangular grid", program: "[X, Y, Z] = ndgrid(1:4, 1:3, 1:2)", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Succeeds },
@@ -28,7 +31,10 @@ BuiltinDocumentationFaq { question: "Can `ndgrid` return gpuArray outputs?", ans
     links: &[BuiltinDocumentationLink { label: "meshgrid", target: BuiltinDocumentationLinkTarget::Documentation("./meshgrid") },
 BuiltinDocumentationLink { label: "linspace", target: BuiltinDocumentationLinkTarget::Documentation("./linspace") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/ndgrid.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/ndgrid.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/ndgrid.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/ndgrid.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "ndgrid unit tests", location: "builtins::array::creation::ndgrid::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "ndgrid resident provider output test", location: "builtins::array::creation::ndgrid::tests::ndgrid_gpu_inputs_use_provider_resident_outputs" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

@@ -32,7 +32,10 @@ BuiltinDocumentationLink { label: "meshgrid", target: BuiltinDocumentationLinkTa
 BuiltinDocumentationLink { label: "linspace", target: BuiltinDocumentationLinkTarget::Documentation("./linspace") },
 BuiltinDocumentationLink { label: "magic", target: BuiltinDocumentationLinkTarget::Documentation("./magic") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/peaks.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/peaks.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/peaks.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/peaks.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "peaks unit and provider tests", location: "builtins::array::creation::peaks::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "peaks VM integration test source", location: "crates/runmat-vm/tests/integer_numeric_transform_semantics.rs" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

@@ -79,7 +79,7 @@ struct VmCpuCompletion {
     host_route: Option<VmFusionHostRoute>,
     runtime: Option<RuntimeContext>,
     readback: Option<CpuReadbackPlan>,
-    outputs: Option<Vec<super::elementwise::host_readback::HostOutputSpec>>,
+    outputs: Option<super::elementwise::host_readback::HostOutputPlan>,
     prepared: Option<super::host_readback::PreparedVmHostInputs>,
 }
 
@@ -118,7 +118,7 @@ impl FusionCpuObservation {
         runtime: Option<&RuntimeContext>,
         operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
         readback: Option<CpuReadbackPlan>,
-        outputs: Option<Vec<super::elementwise::host_readback::HostOutputSpec>>,
+        outputs: Option<super::elementwise::host_readback::HostOutputPlan>,
     ) -> Self {
         // The VM right authenticates execution. A missing price/measurement
         // permit suppresses feedback, not an already admitted host readback.

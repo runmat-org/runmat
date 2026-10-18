@@ -108,7 +108,11 @@ fn exact_host_resources_keep_double_intermediates_beside_automatic_single_inputs
         let actual = exp_bound(&host);
         assert_eq!(
             actual.retained_bytes,
-            3 * 8 + 2 * std::mem::size_of::<usize>() as u64
+            runmat_runtime::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+                runmat_value::NumericDType::F64,
+                &[1, 3],
+            )
+            .unwrap()
         );
         let projected = exp_bound(&effective);
         if policy == PrecisionPolicy::AllowDoubleToSingle {

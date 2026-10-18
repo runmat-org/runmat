@@ -10,8 +10,18 @@ use effects::ElementwiseEffects;
 mod abi;
 #[path = "elementwise/host_readback.rs"]
 pub(super) mod host_readback;
+#[path = "elementwise/host_liveness.rs"]
+mod host_liveness;
 #[path = "elementwise/host_candidate.rs"]
 mod host_candidate;
+
+pub(super) fn host_liveness_preparation_bytes(
+    value_ids_upper: usize,
+    operations: usize,
+    max_rank: usize,
+) -> Option<u64> {
+    host_liveness::preparation_bytes(value_ids_upper, operations, max_rank)
+}
 
 #[cfg(test)]
 #[path = "elementwise/effect_tests.rs"]
@@ -20,7 +30,7 @@ mod effect_tests;
 struct ElementwiseHostContinuation {
     operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
     readback: Option<super::host_readback::CpuReadbackPlan>,
-    outputs: Option<Vec<host_readback::HostOutputSpec>>,
+    outputs: Option<host_readback::HostOutputPlan>,
 }
 
 struct TypedProducerPreparation {

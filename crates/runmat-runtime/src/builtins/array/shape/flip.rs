@@ -6,227 +6,17 @@
 //! dimension-vector and direction-keyword extensions.
 
 use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexTensor, LogicalArray, NumericScalar, NumericStorage, StringArray, Tensor,
     Value,
 };
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::flip")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "flip",
-    op_kind: GpuOpKind::Custom("flip"),
-    supported_precisions: &[
-        ScalarType::F32,
-        ScalarType::F64,
-        ScalarType::I32,
-        ScalarType::Bool,
-    ],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("flip")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Providers may implement flip directly; the runtime falls back to gather→flip→upload when the hook is missing.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::flip")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "flip",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Flip is a data-reordering boundary; fusion planner treats it as a residency-preserving barrier.",
-};
-
-fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape } => Type::Tensor {
-            shape: shape.clone(),
-        },
-        Type::Logical { shape } => Type::Logical {
-            shape: shape.clone(),
-        },
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
 const BUILTIN_NAME: &str = "flip";
-
-const FLIP_TYPED_DIMENSION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "flip-typed-dimension",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "flip(A,dim) with a typed-integer or logical dim is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FlipTypedDimensionExtension"),
-};
-const FLIP_DIMENSION_VECTOR_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "flip-dimension-vector",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "flip(A,dims) with multiple or zero dimension entries is a RunMat extension",
-    error_identifier: Some("RunMat:compatibility:FlipDimensionVectorExtension"),
-};
-const FLIP_DIRECTION_EXTENSION: BuiltinExtensionDescriptor = BuiltinExtensionDescriptor {
-    id: "flip-direction-keyword",
-    mode: BuiltinExtensionMode::RunMatOnly,
-    description: "flip(A,direction) is a RunMat convenience extension",
-    error_identifier: Some("RunMat:compatibility:FlipDirectionExtension"),
-};
-pub const FLIP_EXTENSIONS: [BuiltinExtensionDescriptor; 3] = [
-    FLIP_TYPED_DIMENSION_EXTENSION,
-    FLIP_DIMENSION_VECTOR_EXTENSION,
-    FLIP_DIRECTION_EXTENSION,
-];
-
-const FLIP_INTEGER_A_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
-    }];
-const FLIP_INTEGER_DIM_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "dim",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed-integer dimensions are exact structural controls and are gated as a RunMat extension.",
-    }];
-pub const FLIP_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = flip(integer_A[,dim])",
-        inputs: &FLIP_INTEGER_A_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "The operation only permutes elements; GPU fallback gathers and re-uploads exact integer storage to the owning provider.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = flip(A,integer_dim)",
-        inputs: &FLIP_INTEGER_DIM_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Strict compatibility rejects this extension before parsing the dimension value.",
-    },
-];
-
-const FLIP_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array with selected dimensions reversed.",
-}];
-
-const FLIP_INPUTS_A: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array/value to reverse.",
-}];
-
-const FLIP_INPUTS_A_DIM: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array/value to reverse.",
-    },
-    BuiltinParamDescriptor {
-        name: "dim_or_direction",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description:
-            "Dimension index/vector or direction keyword ('horizontal', 'vertical', 'both').",
-    },
-];
-
-const FLIP_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = flip(A)",
-        inputs: &FLIP_INPUTS_A,
-        outputs: &FLIP_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = flip(A, dim_or_direction)",
-        inputs: &FLIP_INPUTS_A_DIM,
-        outputs: &FLIP_OUTPUT,
-    },
-];
-
-const FLIP_ERROR_TOO_MANY_INPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIP.TOO_MANY_INPUTS",
-    identifier: Some("RunMat:flip:TooManyInputs"),
-    when: "More than one optional argument is provided after A.",
-    message: "flip: too many input arguments",
-};
-
-const FLIP_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIP.INVALID_INPUT",
-    identifier: Some("RunMat:flip:InvalidInput"),
-    when: "Input type, dimension argument, or direction token is invalid.",
-    message: "flip: invalid input argument",
-};
-
-const FLIP_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIP.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:flip:UnsupportedInput"),
-    when: "Input type is unsupported for flip.",
-    message: "flip: unsupported input type",
-};
-
-const FLIP_ERRORS: [BuiltinErrorDescriptor; 3] = [
-    FLIP_ERROR_TOO_MANY_INPUTS,
-    FLIP_ERROR_INVALID_INPUT,
-    FLIP_ERROR_UNSUPPORTED_INPUT,
-];
-
-pub const FLIP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FLIP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FLIP_ERRORS,
-};
 
 fn flip_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     flip_error_with_message(error.message, error)
@@ -249,17 +39,15 @@ fn flip_error_for(builtin: &'static str, message: impl Into<String>) -> RuntimeE
 
 #[runtime_builtin(
     name = "flip",
-    category = "array/shape",
-    summary = "Reverse element order along dimensions.",
-    keywords = "flip,reverse,dimension,gpu,horizontal,vertical",
-    accel = "custom",
-    type_resolver(preserve_array_type),
-    descriptor(crate::builtins::array::shape::flip::FLIP_DESCRIPTOR),
-    extensions(crate::builtins::array::shape::flip::FLIP_EXTENSIONS),
-    integer_capabilities(crate::builtins::array::shape::flip::FLIP_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::flip"
 )]
 async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &FLIP_DESCRIPTOR,
+        &FLIP_ERROR_INVALID_INPUT,
+        BUILTIN_NAME,
+    )?;
     if rest.len() > 1 {
         return Err(flip_error(&FLIP_ERROR_TOO_MANY_INPUTS));
     }
@@ -861,7 +649,15 @@ fn flip_generic<T: Clone>(
     if data.is_empty() {
         return Ok(Vec::new());
     }
-    let total: usize = shape.iter().product();
+    let total = shape
+        .iter()
+        .try_fold(1usize, |count, &extent| count.checked_mul(extent))
+        .ok_or_else(|| {
+            flip_error_for(
+                builtin,
+                format!("{builtin}: shape product exceeds platform limits"),
+            )
+        })?;
     if total != data.len() {
         return Err(flip_error_for(
             builtin,
@@ -963,22 +759,6 @@ pub(crate) mod tests {
                 other => panic!("expected numeric value, got {other:?}"),
             })
             .collect()
-    }
-
-    #[test]
-    fn flip_type_preserves_logical_shape() {
-        let out = preserve_array_type(
-            &[Type::Logical {
-                shape: Some(vec![Some(2), Some(1)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![Some(2), Some(1)])
-            }
-        );
     }
 
     #[test]

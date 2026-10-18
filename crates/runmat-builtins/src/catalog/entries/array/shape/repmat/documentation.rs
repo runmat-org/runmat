@@ -47,6 +47,6 @@ BuiltinDocumentationLink { label: "triu", target: BuiltinDocumentationLinkTarget
 BuiltinDocumentationLink { label: "vertcat", target: BuiltinDocumentationLinkTarget::Builtin("vertcat") }],
  media: &[], evidence: BuiltinDocumentationEvidence {
  implementation: &[BuiltinDocumentationLink { label: "crates/runmat-runtime/src/builtins/array/shape/repmat.rs", target: BuiltinDocumentationLinkTarget::Source("crates/runmat-runtime/src/builtins/array/shape/repmat.rs") }],
- verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "builtins::array::shape::repmat::tests", location: "crates/runmat-runtime/src/builtins/array/shape/repmat.rs" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "builtins::array::shape::repmat::tests::repmat_gpu_roundtrip", location: "crates/runmat-runtime/src/builtins/array/shape/repmat.rs" }], notes: &[], },
+ verification: &[BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "repmat unit tests", location: "builtins::array::shape::repmat::tests" }, BuiltinEvidenceReference { kind: BuiltinEvidenceKind::ProviderTest, label: "repmat resident roundtrip test", location: "builtins::array::shape::repmat::tests::repmat_gpu_roundtrip" }], notes: &[], },
  introduced: None, status: Some(BuiltinDocumentationStatus::Stable),
 };

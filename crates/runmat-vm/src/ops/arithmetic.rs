@@ -89,11 +89,12 @@ where
     result.with_owned(|value| stack.try_push(value))
 }
 
-pub async fn mul<CM, CMFut, RM, RMFut, F, FFut>(
+pub async fn mul<CM, CMFut, RM, RMFut, F, FFut, RT>(
     stack: &mut crate::interpreter::stack::InterpreterStack,
     mut call_method: CM,
     mut right_method: RM,
     mut fallback: F,
+    mut retire: RT,
 ) -> Result<(), RuntimeError>
 where
     CM: FnMut(Value, &'static str, Value) -> CMFut,
@@ -102,6 +103,7 @@ where
     RMFut: Future<Output = Result<OperatorMethodDispatch, RuntimeError>>,
     F: FnMut(Value, Value) -> FFut,
     FFut: Future<Output = Result<RootedValue, RuntimeError>>,
+    RT: FnMut([Option<Value>; 2]) -> Result<(), RuntimeError>,
 {
     let (a, b) = pop2(stack)?;
     let _input_roots = crate::call::root_values([&a, &b])?;
@@ -121,6 +123,7 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
+    retire([Some(a), Some(b)])?;
     result.with_owned(|value| stack.try_push(value))
 }
 
@@ -240,6 +243,36 @@ where
     reject_typed_complex_integer_arithmetic(&[&value])?;
     let _input_roots = crate::call::root_values([&value])?;
     op(value).await?.with_owned(|result| stack.try_push(result))
+}
+
+/// Retain the moved VM operand until a selected host kernel has finished
+/// reading it, then hand the original owner to the route before publishing the
+/// rooted result. Unary plus aliases its argument and therefore passes no
+/// retired owner; its empty batch still advances the source-ordered carrier.
+pub async fn unary_arithmetic_with_retirement<UF, UFut, RT>(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    retain_operand: bool,
+    mut op: UF,
+    mut retire: RT,
+) -> Result<(), RuntimeError>
+where
+    UF: FnMut(Value) -> UFut,
+    UFut: Future<Output = Result<runmat_runtime::execution::RootedValue, RuntimeError>>,
+    RT: FnMut([Option<Value>; 2]) -> Result<(), RuntimeError>,
+{
+    let value = stack
+        .pop()
+        .ok_or(mex("StackUnderflow", "stack underflow"))?;
+    reject_typed_complex_integer_arithmetic(&[&value])?;
+    let _input_roots = crate::call::root_values([&value])?;
+    let (argument, retired) = if retain_operand {
+        (value.clone(), Some(value))
+    } else {
+        (value, None)
+    };
+    let result = op(argument).await?;
+    retire([retired, None])?;
+    result.with_owned(|result| stack.try_push(result))
 }
 
 pub fn is_scalarish_for_division(value: &Value) -> bool {

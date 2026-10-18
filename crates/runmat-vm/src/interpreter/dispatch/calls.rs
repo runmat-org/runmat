@@ -388,6 +388,15 @@ async fn handle_builtin_call_inner(
     let result =
         call_builtins::call_builtin_or_imported(runtime, name, imports, &args, requested_outputs)
             .await;
+    let result = match result {
+        Ok(sequence) => match runtime.vm_fusion_host_route() {
+            Some(route) => route
+                .retire_builtin_operands(runtime, args)
+                .map(|()| sequence),
+            None => Ok(sequence),
+        },
+        Err(error) => Err(error),
+    };
     handle_builtin_outcome(
         result,
         ImportedBuiltinResolution::NotFound,

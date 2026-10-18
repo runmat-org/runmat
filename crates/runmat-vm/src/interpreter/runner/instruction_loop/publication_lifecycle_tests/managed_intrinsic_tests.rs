@@ -14,7 +14,7 @@ use runmat_runtime::context::{
 };
 use runmat_value::NumericDType;
 
-const SOURCE: &str = "w = 2 * (-(+x));";
+const SOURCE: &str = "w = sin(-(2 * (-(+x))));";
 
 struct ManagedParallel(ManagedHostEffectLedger);
 
@@ -45,10 +45,15 @@ fn slot(bytecode: &crate::bytecode::Bytecode, name: &str) -> usize {
         .unwrap_or_else(|| panic!("compiled source has no {name} slot"))
 }
 
-fn assert_intrinsic_group(bytecode: &crate::bytecode::Bytecode) {
+fn assert_numerical_group(bytecode: &crate::bytecode::Bytecode) {
     let (graph, groups) = bytecode
         .reconciled_runtime_fusion_graph()
         .expect("compiled intrinsic source has a reconciled fusion graph");
+    let named = runmat_accelerate::graph::FusionCallOrigin::named("sin");
+    assert!(matches!(
+        named,
+        runmat_accelerate::graph::FusionCallOrigin::Named { .. }
+    ));
     assert!(
         groups.iter().any(|group| {
             let operations = group
@@ -66,9 +71,18 @@ fn assert_intrinsic_group(bytecode: &crate::bytecode::Bytecode) {
                     )
                 })
                 .collect::<Vec<_>>();
-            operations == [PrimitiveOp::UPlus, PrimitiveOp::Neg, PrimitiveOp::Mul]
+            let has_named_call = group.nodes.iter().filter_map(|id| graph.node(*id)).any(
+                |node| matches!(&node.label, AccelNodeLabel::Builtin { origin, .. } if *origin == named),
+            );
+            has_named_call && operations
+                == [
+                    PrimitiveOp::UPlus,
+                    PrimitiveOp::Neg,
+                    PrimitiveOp::Mul,
+                    PrimitiveOp::Neg,
+                ]
         }),
-        "one source-ordered UPlus/Neg/scalar-Mul group required: {groups:?}; {graph:?}"
+        "one source-ordered UPlus/Neg/scalar-Mul/Neg/sin group required: {groups:?}; {graph:?}"
     );
 }
 
@@ -111,7 +125,7 @@ fn managed_intrinsics_consume_source_ordered_owners_and_refund_exact_outputs() {
         });
         let bindings = std::collections::HashMap::from([("x".to_string(), 0)]);
         let bytecode = compile_source_with_bindings(SOURCE, &bindings);
-        assert_intrinsic_group(&bytecode);
+        assert_numerical_group(&bytecode);
         let slots = [slot(&bytecode, "x"), slot(&bytecode, "w")];
         let one_output = HostAllocationPlan::retained_tensor_bytes(NumericDType::F32, &[1, 2])
             .expect("two-element F32 retained output");
@@ -167,9 +181,15 @@ fn managed_intrinsics_consume_source_ordered_owners_and_refund_exact_outputs() {
             }
 
             assert_f32(&vars[slots[0]], &[1.0, 2.0]);
-            assert_f32(&vars[slots[1]], &[-2.0, -4.0]);
-            let retained = ledger.snapshot().live_claimed_bytes;
+            assert_f32(
+                &vars[slots[1]],
+                &[f64::from(2.0_f32.sin()), f64::from(4.0_f32.sin())],
+            );
+            // The completed frame owns its admitted value-vector and root
+            // metadata as well as aliases of the returned values. Retire it
+            // before measuring the independently published tensor owners.
             drop(outcome);
+            let retained = ledger.snapshot().live_claimed_bytes;
             drop(vars);
             let after_drop = ledger.snapshot().live_claimed_bytes;
             assert_eq!(

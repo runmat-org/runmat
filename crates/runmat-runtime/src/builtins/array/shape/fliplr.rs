@@ -4,101 +4,14 @@ use crate::builtins::array::shape::flip::{
     complex_tensor_into_value, flip_char_array_with, flip_complex_tensor_with, flip_gpu_with,
     flip_logical_array_with, flip_string_array_with, flip_tensor_with,
 };
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
-};
 use crate::builtins::common::tensor;
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor, ResolveContext, Type,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, Value};
 
 const LR_DIM: [usize; 1] = [2];
 const BUILTIN_NAME: &str = "fliplr";
-
-const FLIPLR_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::NotApplicable,
-        notes: "All eight integer classes are reordered through authoritative storage without numeric conversion.",
-    }];
-pub const FLIPLR_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "B = fliplr(integer_A)",
-        inputs: &FLIPLR_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ElementwiseShapePreserving,
-        notes: "Dimension 2 is reversed exactly; GPU fallback restores the result to the owning provider.",
-    }];
-
-fn preserve_matrix_type(args: &[Type], _context: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    match input {
-        Type::Tensor { shape: Some(shape) } => Type::Tensor {
-            shape: Some(shape.clone()),
-        },
-        Type::Logical { shape: Some(shape) } => Type::Logical {
-            shape: Some(shape.clone()),
-        },
-        Type::Tensor { shape: None } => Type::tensor(),
-        Type::Logical { shape: None } => Type::logical(),
-        Type::Num | Type::Int | Type::Bool => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
-}
-
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::fliplr")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "fliplr",
-    op_kind: GpuOpKind::Custom("flip"),
-    supported_precisions: &[
-        ScalarType::F32,
-        ScalarType::F64,
-        ScalarType::I32,
-        ScalarType::Bool,
-    ],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[ProviderHook::Custom("flip")],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::NewHandle,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "Delegates to the generic flip hook with axis=1; falls back to host mirror when the hook is missing.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::fliplr")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "fliplr",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "Acts as a data-reordering barrier; fusion planner preserves residency but does not fuse through fliplr.",
-};
 
 fn fliplr_error(message: impl Into<String>) -> RuntimeError {
     fliplr_error_with_message(message, &FLIPLR_ERROR_INVALID_INPUT)
@@ -107,52 +20,6 @@ fn fliplr_error(message: impl Into<String>) -> RuntimeError {
 fn fliplr_error_descriptor(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
     fliplr_error_with_message(error.message, error)
 }
-
-const FLIPLR_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array mirrored left-to-right (dimension 2).",
-}];
-
-const FLIPLR_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "A",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Input array/value to reverse along columns.",
-}];
-
-const FLIPLR_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "B = fliplr(A)",
-    inputs: &FLIPLR_INPUTS,
-    outputs: &FLIPLR_OUTPUT,
-}];
-
-const FLIPLR_ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIPLR.INVALID_INPUT",
-    identifier: Some("RunMat:fliplr:InvalidInput"),
-    when: "Input type or conversion path is unsupported for fliplr.",
-    message: "fliplr: invalid input argument",
-};
-
-const FLIPLR_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FLIPLR.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:fliplr:UnsupportedInput"),
-    when: "Input type is unsupported for fliplr.",
-    message: "fliplr: unsupported input type",
-};
-
-const FLIPLR_ERRORS: [BuiltinErrorDescriptor; 2] =
-    [FLIPLR_ERROR_INVALID_INPUT, FLIPLR_ERROR_UNSUPPORTED_INPUT];
-
-pub const FLIPLR_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FLIPLR_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &FLIPLR_ERRORS,
-};
 
 fn fliplr_error_with_message(
     message: impl Into<String>,
@@ -177,16 +44,15 @@ fn remap_fliplr_error(err: RuntimeError) -> RuntimeError {
 
 #[runtime_builtin(
     name = "fliplr",
-    category = "array/shape",
-    summary = "Flip arrays left-to-right.",
-    keywords = "fliplr,flip,horizontal,matrix,gpu",
-    accel = "custom",
-    type_resolver(preserve_matrix_type),
-    descriptor(crate::builtins::array::shape::fliplr::FLIPLR_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::fliplr::FLIPLR_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::array::shape::fliplr"
 )]
 async fn fliplr_builtin(value: Value) -> crate::BuiltinResult<Value> {
+    crate::output_count::validate_fixed_outputs(
+        &FLIPLR_DESCRIPTOR,
+        &FLIPLR_ERROR_INVALID_INPUT,
+        BUILTIN_NAME,
+    )?;
     match value {
         Value::Tensor(tensor) => Ok(flip_tensor_with("fliplr", tensor, &LR_DIM)
             .map(tensor::tensor_into_value)
@@ -280,38 +146,13 @@ pub(crate) mod tests {
     use crate::builtins::array::shape::flip::{flip_logical_array, flip_tensor};
     use crate::builtins::common::test_support;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::Type;
     use runmat_value::{
         CharArray, IntegerComplexStorage, IntegerStorage, LogicalArray, StringArray, StructArray,
         StructValue, Tensor, Value,
     };
 
     #[test]
-    fn fliplr_type_keeps_matrix_shape() {
-        let out = preserve_matrix_type(
-            &[Type::Tensor {
-                shape: Some(vec![Some(2), Some(4)]),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![Some(2), Some(4)])
-            }
-        );
-    }
-
-    #[test]
-    fn fliplr_type_keeps_full_nd_shape_and_integer_contract() {
-        let shape = vec![Some(2), Some(3), Some(4), Some(5)];
-        let out = preserve_matrix_type(
-            &[Type::Tensor {
-                shape: Some(shape.clone()),
-            }],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(out, Type::Tensor { shape: Some(shape) });
+    fn fliplr_integer_contract_preserves_storage() {
         assert_eq!(FLIPLR_INTEGER_CAPABILITIES[0].inputs[0].classes.len(), 8);
         assert_eq!(
             FLIPLR_INTEGER_CAPABILITIES[0].output_class,

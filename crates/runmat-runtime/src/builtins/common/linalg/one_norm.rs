@@ -53,7 +53,10 @@ where
     // Scaling keeps the 1-norm and LU solves away from avoidable overflow;
     // rcond is invariant under multiplication by a nonzero scalar.
     let scale = binary_lu_scale(scale).expect("finite positive matrix maximum");
-    matrix.apply(|value| *value /= T::from_real(scale));
+    // Divide by a real scalar, not a complex value with a zero imaginary
+    // component: complex division can overflow/underflow its denominator
+    // even when the scaled components are finite.
+    matrix.apply(|value| *value = (*value).unscale(scale));
     let matrix_norm = matrix
         .column_iter()
         .map(|column| column.iter().map(|value| (*value).modulus()).sum::<f64>())
@@ -122,7 +125,7 @@ where
             if magnitude == 0.0 {
                 T::one()
             } else {
-                value / T::from_real(magnitude)
+                value.unscale(magnitude)
             }
         });
         let Some(adjoint_solution) = solve_adjoint(&signs) else {
@@ -251,7 +254,13 @@ mod tests {
 
     #[test]
     fn finite_large_complex_scalar_keeps_unit_reciprocal_condition() {
-        let matrix = DMatrix::from_element(1, 1, Complex64::new(1e308, 1e308));
-        assert!((reciprocal_one_norm(matrix) - 1.0).abs() < 1e-12);
+        for component in [1e308, f64::MAX, f64::from_bits(1)] {
+            let matrix = DMatrix::from_element(1, 1, Complex64::new(component, component));
+            let actual = reciprocal_one_norm(matrix);
+            assert!(
+                (actual - 1.0).abs() < 1e-12,
+                "component {component:e}: reciprocal condition was {actual}"
+            );
+        }
     }
 }

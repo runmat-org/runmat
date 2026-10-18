@@ -11,6 +11,8 @@ pub(crate) struct PreparedBroadcastPlan {
     len: usize,
 }
 
+const CHECKPOINT_CHUNK: usize = 4096;
+
 fn invalid_shape() -> HostAllocationError {
     HostAllocationError::Numeric(ExactHostNumericAllocationError::ExceedsPermit)
 }
@@ -27,19 +29,29 @@ fn extent(shape: &[usize], rank: usize, axis: usize) -> usize {
     }
 }
 
-fn initialize(
-    metadata: &mut [usize],
+fn validate_shapes(
     left: &[usize],
     right: &[usize],
     output: &[usize],
 ) -> Result<usize, HostAllocationError> {
+    validate_shapes_with(left, right, output, || Ok(()))
+}
+
+fn validate_shapes_with(
+    left: &[usize],
+    right: &[usize],
+    output: &[usize],
+    mut checkpoint: impl FnMut() -> Result<(), HostAllocationError>,
+) -> Result<usize, HostAllocationError> {
     let rank = output.len();
-    if rank < left.len().max(right.len())
-        || metadata.len() != rank.checked_mul(4).ok_or(HostAllocationError::Overflow)?
-    {
+    if rank < left.len().max(right.len()) {
         return Err(invalid_shape());
     }
+    let mut empty = false;
     for (axis, &actual) in output.iter().enumerate() {
+        if axis % CHECKPOINT_CHUNK == 0 {
+            checkpoint()?;
+        }
         let (a, b) = (extent(left, rank, axis), extent(right, rank, axis));
         let expected = if a == b || b == 1 {
             a
@@ -51,22 +63,65 @@ fn initialize(
         if actual != expected {
             return Err(invalid_shape());
         }
+        empty |= actual == 0;
     }
-    let len = if output.contains(&0) {
-        0
+    if empty {
+        Ok(0)
     } else {
-        output
-            .iter()
-            .try_fold(1usize, |size, &extent| size.checked_mul(extent))
-            .ok_or(HostAllocationError::Overflow)?
-    };
-    metadata.fill(0);
-    metadata[..rank].copy_from_slice(output);
+        let mut len = 1usize;
+        for (axis, &extent) in output.iter().enumerate() {
+            if axis % CHECKPOINT_CHUNK == 0 {
+                checkpoint()?;
+            }
+            len = len
+                .checked_mul(extent)
+                .ok_or(HostAllocationError::Overflow)?;
+        }
+        Ok(len)
+    }
+}
+
+#[cfg(test)]
+fn initialize(
+    metadata: &mut [usize],
+    left: &[usize],
+    right: &[usize],
+    output: &[usize],
+) -> Result<usize, HostAllocationError> {
+    initialize_with_checkpoint(metadata, left, right, output, || Ok(()))
+}
+
+fn initialize_with_checkpoint(
+    metadata: &mut [usize],
+    left: &[usize],
+    right: &[usize],
+    output: &[usize],
+    mut checkpoint: impl FnMut() -> Result<(), HostAllocationError>,
+) -> Result<usize, HostAllocationError> {
+    let rank = output.len();
+    if metadata.len() != rank.checked_mul(4).ok_or(HostAllocationError::Overflow)? {
+        return Err(invalid_shape());
+    }
+    let len = validate_shapes_with(left, right, output, &mut checkpoint)?;
+    for chunk in metadata.chunks_mut(CHECKPOINT_CHUNK) {
+        checkpoint()?;
+        chunk.fill(0);
+    }
+    for (target, source) in metadata[..rank]
+        .chunks_mut(CHECKPOINT_CHUNK)
+        .zip(output.chunks(CHECKPOINT_CHUNK))
+    {
+        checkpoint()?;
+        target.copy_from_slice(source);
+    }
     // An empty broadcast never reads an operand. Its zero extents also avoid
     // manufacturing an overflow from unreachable source-stride arithmetic.
     if len != 0 {
         let (mut stride_a, mut stride_b) = (1usize, 1usize);
         for axis in 0..rank {
+            if axis % CHECKPOINT_CHUNK == 0 {
+                checkpoint()?;
+            }
             let (a, b) = (extent(left, rank, axis), extent(right, rank, axis));
             metadata[rank + axis] = if a > 1 { stride_a } else { 0 };
             metadata[2 * rank + axis] = if b > 1 { stride_b } else { 0 };
@@ -88,6 +143,15 @@ impl PreparedBroadcastPlan {
         )
     }
 
+    pub(crate) fn quoted_for_shapes(
+        left: &[usize],
+        right: &[usize],
+        output: &[usize],
+    ) -> Result<u64, HostAllocationError> {
+        validate_shapes(left, right, output)?;
+        Self::quoted_bytes(output.len())
+    }
+
     pub(crate) fn prepare(
         receipt: &HostAllocationReceipt,
         runtime: &RuntimeContext,
@@ -102,7 +166,9 @@ impl PreparedBroadcastPlan {
                 .checked_mul(4)
                 .ok_or(HostAllocationError::Overflow)?,
         )?;
-        let len = initialize(metadata.as_mut_slice(), left, right, output)?;
+        let len = initialize_with_checkpoint(metadata.as_mut_slice(), left, right, output, || {
+            receipt.checkpoint(runtime)
+        })?;
         receipt.checkpoint(runtime)?;
         Ok(Self {
             metadata,

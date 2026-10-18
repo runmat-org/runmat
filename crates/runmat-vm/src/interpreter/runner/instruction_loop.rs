@@ -647,6 +647,12 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             &private_temp_bridges,
             &private_empty_controls,
             fusion_observations.is_terminal(*pc),
+            match &bytecode.instructions[*pc] {
+                Instr::CallBuiltinMultiUsingOutputSlot(_, _, slot) => {
+                    interp_dispatch::requested_outputs_from_slot(vars, *slot).ok()
+                }
+                _ => None,
+            },
         );
         #[cfg(feature = "native-accel")]
         if let Some(route) = fusion_observations.instruction_route(*pc, host_kind) {
@@ -1099,6 +1105,7 @@ fn host_instruction_kind(
     private_bridges: &[crate::bytecode::fusion_private_temp::FusionPrivateTempBridge],
     private_controls: &[crate::bytecode::fusion_private_temp::FusionPrivateEmptyControl],
     selected_terminal: bool,
+    dynamic_output_count: Option<usize>,
 ) -> VmFusionHostInstruction {
     match instr {
         Instr::Add
@@ -1115,24 +1122,23 @@ fn host_instruction_kind(
         // The actual selected builtin identity is checked by the runtime
         // dispatcher and the host reduction branch. This opcode alone never
         // certifies a reduction or a CPU sample.
-        Instr::CallBuiltinMulti(..) | Instr::CallBuiltinMultiUsingOutputSlot(..)
-            if selected_terminal =>
-        {
-            match instr {
-                Instr::CallBuiltinMulti(name, arguments, outputs)
-                    if crate::accel::fusion_declaration::call_kind(name, *arguments, *outputs)
-                        == Some(crate::bytecode::FusionInstructionKind::Elementwise) =>
-                {
+        Instr::CallBuiltinMulti(name, arguments, _)
+        | Instr::CallBuiltinMultiUsingOutputSlot(name, arguments, _) => {
+            let outputs = match instr {
+                Instr::CallBuiltinMulti(_, _, outputs) => Some(*outputs),
+                _ => dynamic_output_count,
+            };
+            match outputs.and_then(|outputs| {
+                crate::accel::fusion_declaration::call_kind(name, *arguments, outputs)
+            }) {
+                Some(crate::bytecode::FusionInstructionKind::Elementwise) => {
                     VmFusionHostInstruction::ElementwiseCall
                 }
-                _ => VmFusionHostInstruction::Reduction,
+                Some(crate::bytecode::FusionInstructionKind::Reduction) if selected_terminal => {
+                    VmFusionHostInstruction::Reduction
+                }
+                _ => VmFusionHostInstruction::Unproved,
             }
-        }
-        Instr::CallBuiltinMulti(name, arguments, outputs)
-            if crate::accel::fusion_declaration::call_kind(name, *arguments, *outputs)
-                == Some(crate::bytecode::FusionInstructionKind::Elementwise) =>
-        {
-            VmFusionHostInstruction::ElementwiseCall
         }
         Instr::StoreVar(slot)
             if private_bridges

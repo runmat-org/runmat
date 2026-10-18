@@ -10,6 +10,9 @@ use runmat_value::NumericDType;
 
 mod envelope;
 pub use envelope::{promoting_output, PromotingOutput};
+mod prepared;
+pub use prepared::scratch_bytes as prepared_scratch_bytes;
+pub(crate) use prepared::scratch_for_shapes as prepared_scratch_for_shapes;
 
 fn width(class: NumericClass) -> Option<u64> {
     match class {
@@ -270,7 +273,9 @@ pub fn intrinsic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::broadcast::PreparedBroadcastPlan;
     use crate::context::host_allocation::HostAllocationPlan;
+    use runmat_builtins::BuiltinPreparationOperation;
 
     #[test]
     fn real_cast_bounds_both_precision_directions_without_aliasing_widths() {
@@ -306,6 +311,10 @@ mod tests {
                 .unwrap()
             );
             assert_eq!(bound.scratch_bytes, payload(input).unwrap() + 32);
+            assert_eq!(
+                prepared_scratch_bytes(BuiltinPreparationOperation::FloatingCast(target), &query,),
+                Some(0)
+            );
             assert!(real_map(&query).is_none());
             assert!(real_cast(&FusionHostResourceQuery {
                 output_domain: FusionHostOutputDomain::Exact(NumericDomain::Complex),
@@ -331,6 +340,19 @@ mod tests {
                 };
                 let direct = real_map(&unary).unwrap();
                 let promoting = real_promoting_map(&unary).unwrap();
+                assert_eq!(
+                    prepared_scratch_bytes(BuiltinPreparationOperation::Unary, &unary),
+                    Some(0)
+                );
+                assert_eq!(
+                    prepared_scratch_bytes(
+                        BuiltinPreparationOperation::RealUnary(
+                            runmat_types::RealUnaryPredicate::Nonnegative,
+                        ),
+                        &unary,
+                    ),
+                    Some(0)
+                );
                 let identity = intrinsic(OperatorKind::UnaryPlus, &unary).unwrap();
                 assert_eq!(identity.retained_bytes, 0);
                 assert_eq!(identity.scratch_bytes, 0);
@@ -367,6 +389,20 @@ mod tests {
                 };
                 let native = real_binary(&binary).unwrap();
                 let power = real_power(&binary).unwrap();
+                let prepared_broadcast = PreparedBroadcastPlan::quoted_for_shapes(
+                    scalar.shape,
+                    input.shape,
+                    input.shape,
+                )
+                .unwrap();
+                assert_eq!(
+                    prepared_scratch_bytes(BuiltinPreparationOperation::ElementwiseBinary, &binary,),
+                    Some(prepared_broadcast)
+                );
+                assert_eq!(
+                    prepared_scratch_bytes(BuiltinPreparationOperation::RealPower, &binary),
+                    Some(prepared_broadcast)
+                );
                 assert_eq!(native.retained_bytes, real);
                 assert_eq!(power.retained_bytes, real);
                 let complex_power = real_power(&FusionHostResourceQuery {

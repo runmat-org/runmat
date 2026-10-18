@@ -9,12 +9,28 @@ use crate::context::preparation::PreparedHostNumericalOutput;
 use crate::RuntimeError;
 use allocator_api2::vec::Vec as AllocatedVec;
 use runmat_builtins::BuiltinBindingIdentity;
+use runmat_value::{NumericDType, SharedShape, Tensor};
 use std::alloc::Layout;
+
+mod recycling;
+pub use recycling::{VmFusionHostRealSlotSpec, VmFusionHostRetirement};
 
 pub struct VmFusionHostOutputEntry {
     operation: VmFusionHostOperation,
     instruction: VmFusionHostInstruction,
-    output: Option<PreparedHostNumericalOutput>,
+    work: Option<PreparedHostNumericalOutput>,
+    lifecycle: EntryLifecycle,
+}
+
+enum EntryLifecycle {
+    Legacy,
+    RecycledReady {
+        output_slot: Option<usize>,
+        retirements: [Option<VmFusionHostRetirement>; 2],
+    },
+    AwaitingRetirement {
+        retirements: [Option<VmFusionHostRetirement>; 2],
+    },
 }
 
 impl VmFusionHostOutputEntry {
@@ -26,7 +42,8 @@ impl VmFusionHostOutputEntry {
         Self {
             operation: VmFusionHostOperation::Builtin(binding),
             instruction,
-            output: Some(output),
+            work: Some(output),
+            lifecycle: EntryLifecycle::Legacy,
         }
     }
 
@@ -38,14 +55,61 @@ impl VmFusionHostOutputEntry {
         Self {
             operation: VmFusionHostOperation::Intrinsic(operator),
             instruction,
-            output: Some(output),
+            work: Some(output),
+            lifecycle: EntryLifecycle::Legacy,
         }
     }
+
+    /// Entries include allocation-free aliases such as UPlus. Their empty
+    /// retirement batch still advances source ordering after VM completion.
+    pub fn recycled_intrinsic(
+        operator: runmat_types::OperatorKind,
+        instruction: VmFusionHostInstruction,
+        output_slot: Option<usize>,
+        retirements: [Option<VmFusionHostRetirement>; 2],
+        work: Option<PreparedHostNumericalOutput>,
+    ) -> Self {
+        Self {
+            operation: VmFusionHostOperation::Intrinsic(operator),
+            instruction,
+            work,
+            lifecycle: EntryLifecycle::RecycledReady {
+                output_slot,
+                retirements,
+            },
+        }
+    }
+
+    pub fn recycled_builtin(
+        binding: BuiltinBindingIdentity,
+        instruction: VmFusionHostInstruction,
+        output_slot: usize,
+        retirements: [Option<VmFusionHostRetirement>; 2],
+        work: PreparedHostNumericalOutput,
+    ) -> Self {
+        Self {
+            operation: VmFusionHostOperation::Builtin(binding),
+            instruction,
+            work: Some(work),
+            lifecycle: EntryLifecycle::RecycledReady {
+                output_slot: Some(output_slot),
+                retirements,
+            },
+        }
+    }
+}
+
+struct RecycledRealSlot {
+    value: Option<Tensor>,
+    dtype: NumericDType,
+    shape: SharedShape,
 }
 
 pub struct VmFusionHostOutputs {
     entries:
         AllocatedVec<VmFusionHostOutputEntry, super::host_allocation::AdmittedCollectionAllocator>,
+    real_slots:
+        Option<AllocatedVec<RecycledRealSlot, super::host_allocation::AdmittedCollectionAllocator>>,
     next: usize,
 }
 
@@ -83,7 +147,11 @@ impl VmFusionHostOutputs {
             entries.push(prepare(index)?);
         }
         receipt.checkpoint(context)?;
-        Ok(Some(Self { entries, next: 0 }))
+        Ok(Some(Self {
+            entries,
+            real_slots: None,
+            next: 0,
+        }))
     }
 
     pub(super) fn take_builtin(
@@ -124,15 +192,55 @@ impl VmFusionHostOutputs {
         if entry.instruction != instruction || entry.operation != operation {
             return Err(invalid_output());
         }
-        let Some(output) = entry.output.take() else {
+        let (slot_index, output, retirements) = match &entry.lifecycle {
+            EntryLifecycle::Legacy => {
+                let output = entry.work.take().ok_or_else(invalid_output)?;
+                self.next += 1;
+                return Ok(output);
+            }
+            EntryLifecycle::RecycledReady {
+                output_slot: Some(slot_index),
+                retirements,
+            } => (
+                *slot_index,
+                entry.work.take().ok_or_else(invalid_output)?,
+                *retirements,
+            ),
+            _ => return Err(invalid_output()),
+        };
+        let Some(slot) = self
+            .real_slots
+            .as_mut()
+            .and_then(|slots| slots.get_mut(slot_index))
+        else {
             return Err(invalid_output());
         };
-        self.next += 1;
+        let Some(mut tensor) = slot.value.take() else {
+            return Err(invalid_output());
+        };
+        if tensor.numeric_dtype() != slot.dtype
+            || tensor.shape() != slot.shape.as_slice()
+            || !unique_real_tensor(&mut tensor)
+        {
+            return Err(invalid_output());
+        }
+        let output = output
+            .bind_recycled_tensor(tensor)
+            .map_err(|_| invalid_output())?;
+        entry.lifecycle = EntryLifecycle::AwaitingRetirement { retirements };
         Ok(output)
     }
 
     pub(super) fn complete(&self) -> bool {
         self.next == self.entries.len()
+    }
+}
+
+fn unique_real_tensor(tensor: &mut Tensor) -> bool {
+    match tensor.numeric_dtype() {
+        NumericDType::F32 => tensor.try_as_f32_slice_mut_unique().is_some(),
+        NumericDType::F64 => tensor.try_as_f64_slice_mut_unique().is_some(),
+        _ => false,
     }
 }
 
@@ -153,7 +261,7 @@ pub(super) fn missing_output(context: &RuntimeContext) -> RuntimeError {
     )
 }
 
-fn invalid_output() -> RuntimeError {
+pub(super) fn invalid_output() -> RuntimeError {
     crate::build_runtime_error("VM host numerical output disagrees with its selected instruction")
         .with_identifier("RunMat:Placement:InvalidDecision")
         .with_gpu_gather_retry(crate::GpuGatherRetry::Never)

@@ -99,6 +99,20 @@ pub(super) fn suspend_arithmetic<'a>(
                         )
                         .map_err(|error| error.into_runtime_error())
                     },
+                    |operands| {
+                        runtime
+                            .vm_fusion_host_route()
+                            .map(|route| {
+                                route.retire_numerical_operands(
+                                    runtime,
+                                    runmat_runtime::context::VmFusionHostInstruction::Intrinsic(
+                                        runmat_types::OperatorKind::MatrixMultiply,
+                                    ),
+                                    operands,
+                                )
+                            })
+                            .unwrap_or(Ok(()))
+                    },
                 )
                 .await?;
                 Ok(())
@@ -235,15 +249,40 @@ pub(super) fn suspend_arithmetic<'a>(
         }
         crate::bytecode::Instr::Neg => {
             runmat_runtime::execution::admit_stack_mutation(runtime, async move {
-                arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                    runmat_runtime::unary_arithmetic::evaluate_in_context(
-                        Some(runtime),
-                        runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Minus,
-                        value,
+                if let Some(route) = runtime.vm_fusion_host_route().cloned() {
+                    arithmetic_ops::unary_arithmetic_with_retirement(
+                        stack,
+                        true,
+                        |value| async move {
+                            runmat_runtime::unary_arithmetic::evaluate_in_context(
+                                Some(runtime),
+                                runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Minus,
+                                value,
+                            )
+                            .await
+                        },
+                        |operands| {
+                            route.retire_numerical_operands(
+                                runtime,
+                                runmat_runtime::context::VmFusionHostInstruction::Intrinsic(
+                                    runmat_types::OperatorKind::UnaryMinus,
+                                ),
+                                operands,
+                            )
+                        },
                     )
-                    .await
-                })
-                .await?;
+                    .await?;
+                } else {
+                    arithmetic_ops::unary_arithmetic(stack, |value| async move {
+                        runmat_runtime::unary_arithmetic::evaluate_in_context(
+                            Some(runtime),
+                            runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Minus,
+                            value,
+                        )
+                        .await
+                    })
+                    .await?;
+                }
                 Ok(())
             })
         }
@@ -279,15 +318,40 @@ pub(super) fn suspend_arithmetic<'a>(
         }
         crate::bytecode::Instr::UPlus => {
             runmat_runtime::execution::admit_stack_mutation(runtime, async move {
-                arithmetic_ops::unary_arithmetic(stack, |value| async move {
-                    runmat_runtime::unary_arithmetic::evaluate_in_context(
-                        Some(runtime),
-                        runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Plus,
-                        value,
+                if let Some(route) = runtime.vm_fusion_host_route().cloned() {
+                    arithmetic_ops::unary_arithmetic_with_retirement(
+                        stack,
+                        false,
+                        |value| async move {
+                            runmat_runtime::unary_arithmetic::evaluate_in_context(
+                                Some(runtime),
+                                runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Plus,
+                                value,
+                            )
+                            .await
+                        },
+                        |operands| {
+                            route.retire_numerical_operands(
+                                runtime,
+                                runmat_runtime::context::VmFusionHostInstruction::Intrinsic(
+                                    runmat_types::OperatorKind::UnaryPlus,
+                                ),
+                                operands,
+                            )
+                        },
                     )
-                    .await
-                })
-                .await?;
+                    .await?;
+                } else {
+                    arithmetic_ops::unary_arithmetic(stack, |value| async move {
+                        runmat_runtime::unary_arithmetic::evaluate_in_context(
+                            Some(runtime),
+                            runmat_runtime::unary_arithmetic::UnaryArithmeticOperation::Plus,
+                            value,
+                        )
+                        .await
+                    })
+                    .await?;
+                }
                 Ok(())
             })
         }
