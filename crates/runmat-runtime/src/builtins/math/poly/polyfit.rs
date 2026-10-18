@@ -112,7 +112,7 @@ async fn polyfit_builtin(
     let eval = evaluate_requested(x, y, degree, &rest, outputs).await?;
     if let Some(out_count) = requested_count {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = vec![eval.coefficients()];
         if out_count >= 2 {

@@ -39,13 +39,16 @@ fn normalize_dlupdate_outputs(
 ) -> BuiltinResult<RootedValues> {
     value.with_owned(|value| {
         let values = normalize_raw_outputs(value, requested_outputs)?;
-        RootedValues::new(values).map_err(|error| error.into_runtime_error())
+        RootedValues::from_output_storage(values).map_err(|error| error.into_runtime_error())
     })
 }
 
-fn normalize_raw_outputs(value: Value, requested_outputs: usize) -> BuiltinResult<Vec<Value>> {
+fn normalize_raw_outputs(
+    value: Value,
+    requested_outputs: usize,
+) -> BuiltinResult<runmat_value::OutputListStorage> {
     if requested_outputs == 0 {
-        return Ok(Vec::new());
+        return Ok(runmat_value::OutputListStorage::empty());
     }
     match value {
         Value::OutputList(values) if values.len() == requested_outputs => Ok(values),
@@ -57,7 +60,9 @@ fn normalize_raw_outputs(value: Value, requested_outputs: usize) -> BuiltinResul
                 requested_outputs
             ),
         )),
-        other if requested_outputs == 1 => Ok(vec![other]),
+        other if requested_outputs == 1 => {
+            Ok(runmat_value::OutputListStorage::unbounded(vec![other]))
+        }
         _ => Err(deep_learning_error(
             "dlupdate",
             "dlupdate: function did not return the requested number of outputs",

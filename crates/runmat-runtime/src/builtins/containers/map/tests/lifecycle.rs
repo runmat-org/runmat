@@ -44,7 +44,7 @@ fn assignment_rejects_transient_value_without_changing_map() {
         map.clone(),
         "()".into(),
         key("invalid"),
-        Value::OutputList(vec![Value::Num(1.0)]),
+        Value::output_list(vec![Value::Num(1.0)]),
     );
     assert!(result.is_err());
     assert_eq!(

@@ -456,7 +456,7 @@ fn later_upload_failure_retires_first_staged_output_and_preserves_cause() {
         .unwrap();
     let provider = RestoreProvider::new(UploadBehavior::FailSecond, owner);
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let values = Value::OutputList(vec![
+    let values = Value::output_list(vec![
         Value::Tensor(Tensor::new(vec![1.0; 4], vec![4, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![2.0; 2], vec![2, 1]).unwrap()),
     ]);

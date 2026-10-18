@@ -75,7 +75,11 @@ fn poisoned_int_tensor(storage: IntegerStorage, rows: usize, cols: usize, _poiso
 
 fn outputs(value: Value) -> Vec<Value> {
     match value {
-        Value::OutputList(values) => values,
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list"),
         other => panic!("expected output list, got {other:?}"),
     }
 }

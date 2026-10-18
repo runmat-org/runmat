@@ -112,11 +112,11 @@ impl CovarianceGpuEval {
             }
         };
         match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![gpu_helpers::resident_gpu_value(
                 first,
             )?])),
-            Some(2) => Ok(Value::OutputList(vec![
+            Some(2) => Ok(Value::output_list(vec![
                 gpu_helpers::resident_gpu_value(first)?,
                 gpu_helpers::resident_gpu_value(second)?,
             ])),

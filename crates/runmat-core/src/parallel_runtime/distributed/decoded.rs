@@ -32,12 +32,12 @@ pub(super) fn decode_parts(
     let values = values
         .finish()
         .map_err(|error| error.into_runtime_error())?;
-    values.with_owned_values(|values| {
+    values.with_unbounded_values(|values| {
         let partitions = layouts
             .into_iter()
             .zip(values)
             .map(|(layout, value)| DistributedPartitionValue { layout, value })
             .collect();
         RootedResult::new(DecodedPartitions(partitions)).map_err(|error| error.into_runtime_error())
-    })
+    })?
 }

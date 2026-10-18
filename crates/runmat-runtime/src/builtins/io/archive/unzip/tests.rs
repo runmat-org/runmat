@@ -268,7 +268,7 @@ fn unzip_zero_requested_outputs_returns_empty_output_list() {
     )
     .expect("unzip");
 
-    assert_eq!(value, Value::OutputList(Vec::new()));
+    assert_eq!(value, Value::output_list(Vec::new()));
     assert_eq!(
         fs::read_to_string(out.path().join("a.txt")).unwrap(),
         "alpha"

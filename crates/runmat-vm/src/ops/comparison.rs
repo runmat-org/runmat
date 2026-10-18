@@ -39,7 +39,7 @@ fn rooted_logical(value: bool) -> Result<RootedValue, RuntimeError> {
 }
 
 pub async fn relation<CM, CMFut, B, BFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     name: &'static str,
     reverse_name: &'static str,
     predicate: fn(f64, f64) -> bool,
@@ -87,12 +87,11 @@ where
             }
         }
     };
-    result.with_owned(|value| stack.push(value));
-    Ok(())
+    result.with_owned(|value| stack.try_push(value))
 }
 
 pub async fn relation_inverted<CM, CMFut, B, BFut, LT, LTFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     spec: RelationInvertedSpec,
     mut call_method: CM,
     mut call_builtin: B,
@@ -169,12 +168,11 @@ where
             }
         }
     };
-    result.with_owned(|value| stack.push(value));
-    Ok(())
+    result.with_owned(|value| stack.try_push(value))
 }
 
 pub async fn equal<CM, CMFut, B, BFut, LT, LTFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut call_method: CM,
     mut call_builtin: B,
     _logical_truth: LT,
@@ -192,29 +190,23 @@ where
     match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "eq", b.clone()).await? {
-                Some(v) => v.with_owned(|value| stack.push(value)),
-                None => {
-                    call_builtin("eq", a.clone(), b.clone())
-                        .await?
-                        .with_owned(|value| stack.push(value));
-                }
+                Some(v) => v.with_owned(|value| stack.try_push(value)),
+                None => call_builtin("eq", a.clone(), b.clone())
+                    .await?
+                    .with_owned(|value| stack.try_push(value)),
             }
         }
         (_, Value::Object(obj)) => {
             match call_method(Value::Object(obj.clone()), "eq", a.clone()).await? {
-                Some(v) => v.with_owned(|value| stack.push(value)),
-                None => {
-                    call_builtin("eq", a.clone(), b.clone())
-                        .await?
-                        .with_owned(|value| stack.push(value));
-                }
+                Some(v) => v.with_owned(|value| stack.try_push(value)),
+                None => call_builtin("eq", a.clone(), b.clone())
+                    .await?
+                    .with_owned(|value| stack.try_push(value)),
             }
         }
-        _ if rel_binary_use_builtin(&a, &b) => {
-            call_builtin("eq", a, b)
-                .await?
-                .with_owned(|value| stack.push(value));
-        }
+        _ if rel_binary_use_builtin(&a, &b) => call_builtin("eq", a, b)
+            .await?
+            .with_owned(|value| stack.try_push(value)),
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
                 ordering == std::cmp::Ordering::Equal
@@ -223,14 +215,14 @@ where
                 let bb: f64 = (&b).try_into()?;
                 aa == bb
             };
-            stack.push(Value::Bool(equal));
+            stack.try_push(Value::Bool(equal))
         }
-    }
+    }?;
     Ok(())
 }
 
 pub async fn not_equal<CM, CMFut, B, BFut, LT, LTFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut call_method: CM,
     mut call_builtin: B,
     mut logical_truth: LT,
@@ -248,45 +240,39 @@ where
     match (&a, &b) {
         (Value::Object(obj), _) => {
             match call_method(Value::Object(obj.clone()), "ne", b.clone()).await? {
-                Some(v) => v.with_owned(|value| stack.push(value)),
+                Some(v) => v.with_owned(|value| stack.try_push(value)),
                 None => match call_method(Value::Object(obj.clone()), "eq", b.clone()).await? {
-                    Some(v) => stack.push(Value::Bool(
+                    Some(v) => stack.try_push(Value::Bool(
                         !v.with_owned_async(|value| {
                             logical_truth(value, "comparison result".to_string())
                         })
                         .await?,
                     )),
-                    None => {
-                        call_builtin("ne", a.clone(), b.clone())
-                            .await?
-                            .with_owned(|value| stack.push(value));
-                    }
+                    None => call_builtin("ne", a.clone(), b.clone())
+                        .await?
+                        .with_owned(|value| stack.try_push(value)),
                 },
             }
         }
         (_, Value::Object(obj)) => {
             match call_method(Value::Object(obj.clone()), "ne", a.clone()).await? {
-                Some(v) => v.with_owned(|value| stack.push(value)),
+                Some(v) => v.with_owned(|value| stack.try_push(value)),
                 None => match call_method(Value::Object(obj.clone()), "eq", a.clone()).await? {
-                    Some(v) => stack.push(Value::Bool(
+                    Some(v) => stack.try_push(Value::Bool(
                         !v.with_owned_async(|value| {
                             logical_truth(value, "comparison result".to_string())
                         })
                         .await?,
                     )),
-                    None => {
-                        call_builtin("ne", a.clone(), b.clone())
-                            .await?
-                            .with_owned(|value| stack.push(value));
-                    }
+                    None => call_builtin("ne", a.clone(), b.clone())
+                        .await?
+                        .with_owned(|value| stack.try_push(value)),
                 },
             }
         }
-        _ if rel_binary_use_builtin(&a, &b) => {
-            call_builtin("ne", a, b)
-                .await?
-                .with_owned(|value| stack.push(value));
-        }
+        _ if rel_binary_use_builtin(&a, &b) => call_builtin("ne", a, b)
+            .await?
+            .with_owned(|value| stack.try_push(value)),
         _ => {
             let equal = if let Some(ordering) = scalar_order(&a, &b) {
                 ordering == std::cmp::Ordering::Equal
@@ -295,9 +281,9 @@ where
                 let bb: f64 = (&b).try_into()?;
                 aa == bb
             };
-            stack.push(Value::Bool(!equal));
+            stack.try_push(Value::Bool(!equal))
         }
-    }
+    }?;
     Ok(())
 }
 
@@ -352,7 +338,11 @@ mod tests {
             (Value::Num(f64::NAN), Value::Num(f64::NAN), false),
         ] {
             for (a, b) in [(left.clone(), right.clone()), (right, left)] {
-                let mut eq_stack = vec![a.clone(), b.clone()];
+                let mut eq_stack =
+                    crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+                        a.clone(),
+                        b.clone(),
+                    ]);
                 block_on(equal(
                     &mut eq_stack,
                     unreachable_call_method,
@@ -360,8 +350,9 @@ mod tests {
                     unreachable_logical_truth,
                 ))
                 .unwrap();
-                assert_eq!(eq_stack, vec![Value::Bool(expected)]);
-                let mut ne_stack = vec![a, b];
+                assert_eq!(eq_stack.as_slice(), &[Value::Bool(expected)]);
+                let mut ne_stack =
+                    crate::interpreter::stack::InterpreterStack::from_unbounded(vec![a, b]);
                 block_on(not_equal(
                     &mut ne_stack,
                     unreachable_call_method,
@@ -369,7 +360,7 @@ mod tests {
                     unreachable_logical_truth,
                 ))
                 .unwrap();
-                assert_eq!(ne_stack, vec![Value::Bool(!expected)]);
+                assert_eq!(ne_stack.as_slice(), &[Value::Bool(!expected)]);
             }
         }
     }

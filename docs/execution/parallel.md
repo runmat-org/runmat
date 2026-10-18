@@ -62,6 +62,8 @@ The serial path uses the same region contract and result semantics. It is useful
 
 Nested parallel regions, suspension, loop-control escape, ambiguous sliced writes, iteration-variable escape, and inconsistent reductions are rejected during analysis. A structurally valid loop can still be ineligible for worker placement when a captured value cannot cross the selected worker boundary or the body requires an effect that cannot run safely on a worker. In that case, RunMat executes the analyzed region through its serial correctness path instead of weakening its transfer or effect contract.
 
+Cancellation, failed input transfers, and errors preparing reduction values are reported with their original runtime cause. These failures do not trigger serial execution of the loop. Already submitted tasks are canceled if a later submission fails or the coordinating execution is dropped.
+
 ## Schedule Functions
 
 `parfeval` schedules one function invocation and returns a future:

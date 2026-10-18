@@ -132,7 +132,7 @@ async fn imwrite_builtin(
             )
         })?;
 
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 fn value_numeric_dtype(value: &Value) -> Option<NumericDType> {

@@ -1,11 +1,10 @@
 use super::{write_sequence_register, ObjectDispatchContext};
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
-use runmat_value::Value;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence_register: &mut super::super::SequenceState,
     context: ObjectDispatchContext<'_>,
 ) -> Result<bool, RuntimeError> {

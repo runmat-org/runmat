@@ -44,13 +44,16 @@ fn project_foreign_integer(
         )))
         .expect("invoke started project foreign host");
     sequence.with_owned(|sequence| {
-        let mut values = runmat_runtime::sequence::ResolveValueSequence::resolve(
+        let values = runmat_runtime::sequence::ResolveValueSequence::resolve(
             sequence,
             runmat_types::SequenceUse::RequireSingle,
             runmat_runtime::sequence::SequenceResolutionContext::default(),
         )
         .expect("one project foreign result");
-        let value = values.pop().expect("one project foreign value");
+        let value = values
+            .try_into_first()
+            .expect("unique project foreign output")
+            .expect("one project foreign value");
         let runmat_value::Value::Int(value) = value else {
             panic!("project foreign answer must be an exact integer: {value:?}");
         };

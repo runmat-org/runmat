@@ -27,7 +27,7 @@ pub(super) type InstructionLoopResult = Result<(), RuntimeError>;
 pub(super) struct InstructionLoopContext<'a> {
     pub(super) bytecode: &'a Bytecode,
     pub(super) pc: &'a mut usize,
-    pub(super) stack: &'a mut Vec<Value>,
+    pub(super) stack: &'a mut crate::interpreter::stack::InterpreterStack,
     pub(super) vars: &'a mut InterpreterVars,
     pub(super) completion_boundary:
         Option<crate::interpreter::state::InterpreterCompletionBoundary>,
@@ -134,7 +134,7 @@ type FusionExecutionFuture<'a> = Pin<
 
 #[cfg(feature = "native-accel")]
 struct FusionExecutionFrame<'a> {
-    stack: &'a mut Vec<Value>,
+    stack: &'a mut crate::interpreter::stack::InterpreterStack,
     vars: &'a mut InterpreterVars,
     context: &'a mut crate::bytecode::program::ExecutionContext,
     persistent_aliases: &'a crate::interpreter::PersistentAliases,
@@ -355,13 +355,14 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 }
                 Err(error) => {
                     fusion_observations.abort();
-                    sequence_register.clear(&mut *stack);
+                    sequence_register.clear(stack);
                     match interp_dispatch::redirect_exception_to_catch(
                         error,
                         &mut *try_stack,
                         &mut *vars,
                         &mut *last_exception,
                         &mut *pc,
+                        stack,
                     ) {
                         interp_dispatch::ExceptionHandling::Caught => continue,
                         interp_dispatch::ExceptionHandling::Uncaught(error) => return Err(*error),
@@ -481,7 +482,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         &plan,
                         graph,
                         FusionExecutionFrame {
-                            stack: &mut *stack,
+                            stack,
                             vars: &mut *vars,
                             context: &mut *context,
                             persistent_aliases: &*persistent_aliases,
@@ -520,13 +521,14 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                 },
                             ) {
                                 fusion_observations.abort();
-                                sequence_register.clear(&mut *stack);
+                                sequence_register.clear(stack);
                                 match interp_dispatch::redirect_exception_to_catch(
                                     err,
                                     &mut *try_stack,
                                     &mut *vars,
                                     &mut *last_exception,
                                     &mut *pc,
+                                    stack,
                                 ) {
                                     interp_dispatch::ExceptionHandling::Caught => continue,
                                     interp_dispatch::ExceptionHandling::Uncaught(err) => {
@@ -534,7 +536,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                     }
                                 }
                             }
-                            stack.push(result.final_value);
+                            stack.try_push(result.final_value)?;
                             let executed_pc = plan.group.span.end;
                             *pc = plan.group.span.end + 1;
                             if let Some(completion) = result.completion.take() {
@@ -568,13 +570,14 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         }
                         Err(accel_fusion::FusionAttemptError::Terminal(err)) => {
                             fusion_observations.abort();
-                            sequence_register.clear(&mut *stack);
+                            sequence_register.clear(stack);
                             match interp_dispatch::redirect_exception_to_catch(
                                 err,
                                 &mut *try_stack,
                                 &mut *vars,
                                 &mut *last_exception,
                                 &mut *pc,
+                                stack,
                             ) {
                                 interp_dispatch::ExceptionHandling::Caught => continue,
                                 interp_dispatch::ExceptionHandling::Uncaught(err) => {
@@ -673,7 +676,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                     VmFusionPublicationFault::Reject(_, reached) => {
                         reached.set(true);
                         *stack.last_mut().expect("checked publication has a result") =
-                            Value::OutputList(vec![Value::Num(0.0)]);
+                            Value::output_list(vec![Value::Num(0.0)]);
                     }
                     VmFusionPublicationFault::Cancel(_, source, reached) => {
                         reached.set(true);
@@ -701,7 +704,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 current_function_name,
             },
             interp_dispatch::DispatchState {
-                stack: &mut *stack,
+                stack,
                 vars: &mut *vars,
                 sequence_register: &mut *sequence_register,
                 context: &mut *context,
@@ -752,13 +755,14 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             Err(err) => {
                 #[cfg(feature = "native-accel")]
                 fusion_observations.abort();
-                sequence_register.clear(&mut *stack);
+                sequence_register.clear(stack);
                 match interp_dispatch::redirect_exception_to_catch(
                     err,
                     &mut *try_stack,
                     &mut *vars,
                     &mut *last_exception,
                     &mut *pc,
+                    stack,
                 ) {
                     interp_dispatch::ExceptionHandling::Caught => {
                         continue;
@@ -862,13 +866,14 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 Err(err) => {
                     #[cfg(feature = "native-accel")]
                     fusion_observations.abort();
-                    sequence_register.clear(&mut *stack);
+                    sequence_register.clear(stack);
                     match interp_dispatch::redirect_exception_to_catch(
                         err,
                         &mut *try_stack,
                         &mut *vars,
                         &mut *last_exception,
                         &mut *pc,
+                        stack,
                     ) {
                         interp_dispatch::ExceptionHandling::Caught => continue,
                         interp_dispatch::ExceptionHandling::Uncaught(err) => return Err(*err),

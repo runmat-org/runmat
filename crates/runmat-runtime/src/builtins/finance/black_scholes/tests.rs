@@ -35,7 +35,11 @@ fn low_rank_pricing_admission_and_numeric_input_use_the_same_geometry() {
 
 fn output_list(value: Value) -> Vec<Value> {
     match value {
-        Value::OutputList(values) => values,
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique test output list")
+            .try_into_unbounded_vec()
+            .expect("ordinary unbounded test output list"),
         other => panic!("expected output list, got {other:?}"),
     }
 }

@@ -67,14 +67,17 @@ impl RuntimeAccelerationService for Service {
         self.events.borrow_mut().push("prepare");
         let mode = self.mode;
         let observation = Some(Box::new(Observer(self.events.clone())) as Box<_>);
-        let prepared = request.into_operands().with_owned_values(|values| {
-            let values = if matches!(mode, Mode::Invalid) {
-                vec![Value::String("invalid service result".into())]
-            } else {
-                values
-            };
-            PreparedBuiltinOperands::new(values, observation)
-        });
+        let prepared = request
+            .into_operands()
+            .with_unbounded_values(|values| {
+                let values = if matches!(mode, Mode::Invalid) {
+                    vec![Value::String("invalid service result".into())]
+                } else {
+                    values
+                };
+                PreparedBuiltinOperands::new(values, observation)
+            })
+            .and_then(std::convert::identity);
         Box::pin(async move {
             if matches!(mode, Mode::Pending) {
                 std::future::pending::<()>().await;

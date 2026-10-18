@@ -163,7 +163,7 @@ fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
         0,
     ))
     .expect("zero-output statement");
-    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert_eq!(result, Value::output_list(Vec::new()));
     TEST_WORKSPACE.with(|slot| assert_eq!(slot.borrow().get("x"), Some(&Value::Num(9.0))));
 }
 use crate::builtins::common::test_support::filesystem::tempdir;

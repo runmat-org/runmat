@@ -116,17 +116,21 @@ async fn eig_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
         let require_left = out_count >= 3;
         let eval = evaluate(value, &rest, require_left).await?;
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.eigenvalues()]));
+            return Ok(Value::output_list(vec![eval.eigenvalues()]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![eval.right(), eval.diagonal()]));
+            return Ok(Value::output_list(vec![eval.right(), eval.diagonal()]));
         }
         if out_count == 3 {
             let left = eval.left()?;
-            return Ok(Value::OutputList(vec![eval.right(), eval.diagonal(), left]));
+            return Ok(Value::output_list(vec![
+                eval.right(),
+                eval.diagonal(),
+                left,
+            ]));
         }
         return Err(eig_error(&EIG_ERROR_INVALID_ARGUMENT));
     }

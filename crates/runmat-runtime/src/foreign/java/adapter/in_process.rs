@@ -288,7 +288,7 @@ impl JavaAdapter {
         arguments
             .finish()
             .map_err(|error| JavaInvocationError::Callback(error.to_string()))?
-            .with_owned_values_async(|arguments| async move {
+            .with_unbounded_values_async(|arguments| async move {
                 let request = foreign_callback_request(
                     &context,
                     &registration.callable,
@@ -300,7 +300,7 @@ impl JavaAdapter {
                     .await
                     .map_err(callback_error)?;
                 sequence.with_owned_sequence(|sequence| {
-                    let mut values = crate::sequence::ResolveValueSequence::resolve(
+                    let values = crate::sequence::ResolveValueSequence::resolve(
                         sequence,
                         runmat_types::SequenceUse::SelectPrefix {
                             count: requested_outputs,
@@ -313,12 +313,20 @@ impl JavaAdapter {
                     }
                     self.argument_to_java(
                         &context,
-                        values.pop().expect("one selected Java callback result"),
+                        values
+                            .try_into_first()
+                            .map_err(|_| {
+                                JavaInvocationError::Callback(
+                                    "shared output storage requires separate admission".into(),
+                                )
+                            })?
+                            .expect("one selected Java callback result"),
                     )
                     .map_err(callback_error)
                 })
             })
             .await
+            .map_err(callback_error)?
     }
 }
 

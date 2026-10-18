@@ -201,7 +201,7 @@ mod tests {
         .unwrap();
 
         result.with_owned_sequence(|values| {
-            assert_eq!(values.into_values(), vec![Value::Num(42.0)]);
+            assert_eq!(values.as_slice(), &[Value::Num(42.0)]);
         });
         let requests = service.requests.borrow();
         assert_eq!(requests.len(), 1);

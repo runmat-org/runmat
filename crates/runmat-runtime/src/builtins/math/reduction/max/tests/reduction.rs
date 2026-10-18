@@ -19,7 +19,7 @@ fn max_requested_two_and_discarded_outputs_follow_one_evaluation() {
     .expect("two outputs");
     assert_eq!(
         both,
-        Value::OutputList(vec![Value::Num(5.0), Value::Num(2.0)])
+        Value::output_list(vec![Value::Num(5.0), Value::Num(2.0)])
     );
     let discarded = block_on(crate::call_builtin_async_with_outputs(
         "max",
@@ -27,7 +27,7 @@ fn max_requested_two_and_discarded_outputs_follow_one_evaluation() {
         0,
     ))
     .expect("zero outputs");
-    assert_eq!(discarded, Value::OutputList(Vec::new()));
+    assert_eq!(discarded, Value::output_list(Vec::new()));
 }
 
 #[test]

@@ -7,7 +7,7 @@ use runmat_value::Value;
 use super::{execution_error, pop};
 
 pub(super) fn schedule_feval(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     context: &ExecutionContext,
     function_registry: &FunctionRegistry,
     call_arg_count: usize,
@@ -42,7 +42,7 @@ pub(super) fn schedule_feval(
             .execution()
             .spawn_on(&future, Some(&pool))
             .map_err(execution_error)?;
-        stack.push(runmat_runtime::parallel::future::wrap_task(task));
+        stack.try_push(runmat_runtime::parallel::future::wrap_task(task))?;
         return Ok(());
     }
     let worker_count = context
@@ -62,15 +62,15 @@ pub(super) fn schedule_feval(
                 .map_err(execution_error)?,
         );
     }
-    stack.push(
+    stack.try_push(
         runmat_runtime::parallel::future::wrap_on_all_tasks(tasks)
             .map_err(|error| crate::interpreter::errors::mex("FutureArray", &error))?,
-    );
+    )?;
     Ok(())
 }
 
 pub(super) fn spawn(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     context: &ExecutionContext,
     explicit_pool: bool,
 ) -> Result<(), RuntimeError> {
@@ -95,11 +95,11 @@ pub(super) fn spawn(
             .spawn(&future)
             .map_err(execution_error)?
     };
-    stack.push(if explicit_pool {
+    stack.try_push(if explicit_pool {
         runmat_runtime::parallel::future::wrap_task(task)
     } else {
         Value::Task(task)
-    });
+    })?;
     Ok(())
 }
 
@@ -374,11 +374,22 @@ pub(super) async fn await_value(
 
     await_sequence(context, value).await?.try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 runmat_runtime::sequence::SequenceResolutionContext::default(),
             )?;
-            Ok(values.remove(0))
+            values
+                .try_into_first()
+                .map_err(|_| {
+                    runmat_runtime::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?
+                .ok_or_else(|| {
+                    execution_error(
+                        runmat_runtime::execution::ExecutionServiceError::InvalidOutputContract,
+                    )
+                })
         },
         runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
     )
@@ -547,7 +558,7 @@ pub(super) async fn fetch_outputs(
         return worker_outputs
             .pop()
             .expect("one task produced one output row")
-            .with_owned_values(root_join_outputs);
+            .with_owned_output_storage(root_join_outputs);
     }
     let mut combined =
         runmat_runtime::execution::RootedValuesBuilder::with_capacity(requested_outputs);
@@ -568,11 +579,22 @@ pub(super) async fn fetch_outputs(
                 .await?
                 .try_map_owned(
                     |sequence| {
-                        let mut values = sequence.resolve(
+                        let values = sequence.resolve(
                             runmat_types::SequenceUse::RequireSingle,
                             runmat_runtime::sequence::SequenceResolutionContext::default(),
                         )?;
-                        Ok(values.remove(0))
+                        values
+                            .try_into_first()
+                            .map_err(|_| {
+                                runmat_runtime::sequence::sequence_error_to_runtime(
+                                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                                )
+                            })?
+                            .ok_or_else(|| {
+                                execution_error(
+                            runmat_runtime::execution::ExecutionServiceError::InvalidOutputContract,
+                        )
+                            })
                     },
                     runmat_runtime::execution::ExecutionServiceError::into_runtime_error,
                 )?;
@@ -589,7 +611,7 @@ pub(super) async fn fetch_outputs(
     combined
         .finish()
         .map_err(execution_error)?
-        .with_owned_values(root_join_outputs)
+        .with_owned_output_storage(root_join_outputs)
 }
 
 pub(super) fn fetch_outputs_options(arguments: &[Value]) -> Result<bool, RuntimeError> {
@@ -630,7 +652,7 @@ fn split_outputs(
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     sequence.with_owned_sequence(|sequence| {
         let values = match count {
-            0 => Ok(Vec::new()),
+            0 => Ok(runmat_value::OutputListStorage::empty()),
             1 => sequence.resolve(
                 runmat_types::SequenceUse::SelectPrefix { count: 1 },
                 runmat_runtime::sequence::SequenceResolutionContext::default(),
@@ -647,24 +669,34 @@ fn split_outputs(
                     )
                 }),
         }?;
-        runmat_runtime::execution::RootedValues::new(values).map_err(execution_error)
+        runmat_runtime::execution::RootedValues::from_output_storage(values)
+            .map_err(execution_error)
     })
 }
 
-fn join_outputs(outputs: Vec<Value>) -> Result<runmat_value::ValueSequence, RuntimeError> {
+fn join_outputs(
+    outputs: runmat_value::OutputListStorage,
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     Ok(match outputs.len() {
         0 => runmat_value::ValueSequence::empty(),
         1 => runmat_value::ValueSequence::single(
-            outputs.into_iter().next().expect("one output is present"),
+            outputs
+                .try_into_first()
+                .map_err(|_| {
+                    runmat_runtime::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?
+                .expect("one output is present"),
         )
         .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
-        _ => runmat_value::ValueSequence::comma_separated(outputs)
+        _ => runmat_value::ValueSequence::from_output_storage(outputs)
             .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
     })
 }
 
 fn root_join_outputs(
-    outputs: Vec<Value>,
+    outputs: runmat_value::OutputListStorage,
 ) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
     runmat_runtime::execution::RootedValueSequence::new(join_outputs(outputs)?)
         .map_err(execution_error)
@@ -707,7 +739,12 @@ fn fetch_next_outputs(
         |result| {
             let mut outputs = Vec::with_capacity(requested_outputs);
             outputs.push(Value::Num((index + 1) as f64));
-            outputs.extend(result.into_values());
+            let values = result.into_output_storage().try_into_owned().map_err(|_| {
+                runmat_runtime::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
+            outputs.extend(values);
             runmat_value::ValueSequence::comma_separated(outputs)
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
         },

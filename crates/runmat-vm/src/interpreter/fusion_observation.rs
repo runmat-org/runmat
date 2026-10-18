@@ -116,7 +116,7 @@ impl FusionRegionObservations {
         &self,
         pc: usize,
         instruction: &crate::bytecode::Instr,
-        stack: &mut [runmat_value::Value],
+        stack: &mut crate::interpreter::stack::InterpreterStack,
     ) -> Result<(), Box<runmat_runtime::RuntimeError>> {
         use runmat_accelerate::graph::{VarBinding, VarKind};
         let binding = match instruction {

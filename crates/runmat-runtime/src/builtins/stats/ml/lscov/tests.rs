@@ -28,7 +28,12 @@ fn third_position_algorithm_has_a_typed_admission_route() {
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
     let output = block_on(lscov_builtin(a, b, vec![Value::from("orth")])).unwrap();
     let x = match output {
-        Value::OutputList(values) => values.into_iter().next().unwrap(),
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique outputs")
+            .into_iter()
+            .next()
+            .unwrap(),
         value => value,
     };
     let Value::Tensor(x) = x else {
@@ -111,7 +116,11 @@ fn empty_nd_weight_is_the_unweighted_fit() {
 
 fn outputs(value: Value) -> Vec<Value> {
     match value {
-        Value::OutputList(values) => values,
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list"),
         other => panic!("expected output list, got {other:?}"),
     }
 }

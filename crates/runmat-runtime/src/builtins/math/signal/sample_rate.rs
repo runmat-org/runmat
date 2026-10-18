@@ -410,14 +410,14 @@ async fn resample_in_runtime(
     if requested_outputs == Some(0) {
         validate_resample_options(rest, p, q).await?;
         validate_discarded_resample_input(&x)?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let options = parse_resample_options(rest, p, q).await?;
     if let Value::GpuTensor(handle) = &x {
         if let Some(eval) = resample_gpu(handle, p, q, &options).await? {
             return match requested_outputs {
-                Some(1) => Ok(Value::OutputList(vec![eval.y])),
-                Some(2) => Ok(Value::OutputList(vec![
+                Some(1) => Ok(Value::output_list(vec![eval.y])),
+                Some(2) => Ok(Value::output_list(vec![
                     eval.y,
                     Value::Tensor(filter_tensor(eval.filter.host_values().await?)?),
                 ])),
@@ -433,8 +433,8 @@ async fn resample_in_runtime(
     };
     let eval = apply_resample(input, p, q, &host_options, &mut cooperation).await?;
     match requested_outputs {
-        Some(1) => Ok(Value::OutputList(vec![eval.y])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(1) => Ok(Value::output_list(vec![eval.y])),
+        Some(2) => Ok(Value::output_list(vec![
             eval.y,
             Value::Tensor(filter_tensor(eval.filter.host_values().await?)?),
         ])),

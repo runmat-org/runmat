@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use super::*;
-use crate::ExactHostAllocationReservation;
+use crate::{ExactHostAllocationReservation, ValueSequence, ValueSequenceError};
 
 #[derive(Debug)]
 struct Permit {
@@ -55,7 +55,7 @@ fn shared_output_backing_and_consumption_preserve_one_physical_claim() {
     })
     .unwrap();
     assert!(list.has_retained_claim());
-    assert_eq!(list.payload.as_ref().unwrap().get().values.capacity(), 3);
+    assert_eq!(list.physical_capacity(), 3);
     let pointer = list.as_slice().as_ptr();
     let alias = list.clone();
     assert_eq!(pointer, alias.as_slice().as_ptr());
@@ -114,5 +114,56 @@ fn initialization_refuses_before_elements_and_refunds_failed_construction() {
         .expect("empty output does not initialize elements");
     assert!(empty.is_empty());
     assert_eq!(empty, OutputListStorage::unbounded(Vec::new()));
+    assert_eq!(permit.live.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn sequence_map_preserves_exact_backing_and_refuses_shared_aliases() {
+    let bytes = OutputListStorage::requested_bytes(2).unwrap();
+    let permit = Permit {
+        limit: bytes,
+        live: Arc::new(AtomicUsize::new(0)),
+    };
+    let list = OutputListStorage::try_initialize(2, &permit, |index| {
+        Ok::<_, ()>(Value::Num(index as f64 + 1.0))
+    })
+    .unwrap();
+    let alias = list.clone();
+    let sequence = ValueSequence::from_output_storage(list).unwrap();
+    let mut calls = 0;
+    let error = sequence
+        .try_map::<ValueSequenceError>(
+            |value| {
+                calls += 1;
+                Ok(value)
+            },
+            std::convert::identity,
+        )
+        .unwrap_err();
+    assert_eq!(error, ValueSequenceError::SharedOutputStorage);
+    assert_eq!(calls, 0);
+    assert_eq!(permit.live.load(Ordering::SeqCst), bytes);
+    drop(alias);
+    assert_eq!(permit.live.load(Ordering::SeqCst), 0);
+
+    let list = OutputListStorage::try_initialize(2, &permit, |index| {
+        Ok::<_, ()>(Value::Num(index as f64 + 1.0))
+    })
+    .unwrap();
+    let pointer = list.as_slice().as_ptr();
+    let sequence = ValueSequence::from_output_storage(list).unwrap();
+    let mapped = sequence
+        .try_map::<ValueSequenceError>(
+            |value| match value {
+                Value::Num(number) => Ok(Value::Num(number * 2.0)),
+                _ => unreachable!("fixture contains only numeric values"),
+            },
+            std::convert::identity,
+        )
+        .unwrap();
+    assert_eq!(mapped.as_slice().as_ptr(), pointer);
+    assert_eq!(mapped.as_slice(), &[Value::Num(2.0), Value::Num(4.0)]);
+    assert_eq!(permit.live.load(Ordering::SeqCst), bytes);
+    drop(mapped);
     assert_eq!(permit.live.load(Ordering::SeqCst), 0);
 }

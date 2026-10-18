@@ -114,7 +114,7 @@ fn no_output_failure_throws_and_success_still_moves() {
     File::create(&source).unwrap();
     assert_eq!(
         run(vec![text(&source), text(&target)]).unwrap(),
-        Value::OutputList(vec![])
+        Value::output_list(vec![])
     );
     assert!(!source.exists() && target.exists());
 }

@@ -230,7 +230,7 @@ fn transient_global_value_is_rejected_before_publication() {
     let authority = context.session_variable_authority();
     let before = authority.global_revision().unwrap();
     let error = authority
-        .store_global_with_context(&context, "bad", Value::OutputList(vec![Value::Num(1.0)]))
+        .store_global_with_context(&context, "bad", Value::output_list(vec![Value::Num(1.0)]))
         .unwrap_err();
     assert_eq!(
         error.identifier(),

@@ -38,7 +38,7 @@ fn hold_state(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     };
     apply_axes_target(axes_target, "hold")?;
     set_hold(mode);
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 #[cfg(test)]
@@ -66,11 +66,11 @@ mod tests {
         let _ = hold_builtin(Vec::new()).unwrap();
         assert_eq!(
             hold_builtin(vec![Value::String("on".into())]).unwrap(),
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         );
         assert_eq!(
             hold_builtin(vec![Value::String("off".into())]).unwrap(),
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         );
         assert!(hold_builtin(vec![Value::from("on"), Value::from("off")]).is_err());
     }

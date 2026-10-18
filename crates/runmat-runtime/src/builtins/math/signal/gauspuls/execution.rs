@@ -18,7 +18,7 @@ pub(super) async fn gauspuls_with_output_count(
         let tensor = sample_tensor(t).await?;
         super::math::ensure_exact_integer_tensor_boundary(&tensor, "sample time")
             .map_err(map_gauspuls_tensor_error)?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     if out_count <= 1 {
         return Ok(crate::output_count::output_list_with_padding(

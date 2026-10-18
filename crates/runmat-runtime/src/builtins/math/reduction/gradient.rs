@@ -350,7 +350,7 @@ async fn gradient_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
     .await?;
 
     if crate::output_count::current_output_count().is_some() {
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
 
     Ok(outputs

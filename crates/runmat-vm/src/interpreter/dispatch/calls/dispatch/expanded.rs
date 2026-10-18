@@ -78,7 +78,7 @@ pub(super) async fn dispatch(
             .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result = args
-                .with_owned_values_async(|args| async move {
+                .with_unbounded_values_async(|args| async move {
                     runmat_runtime::call_super_constructor(
                         &context.runtime,
                         current_class.clone(),
@@ -87,7 +87,7 @@ pub(super) async fn dispatch(
                     )
                     .await
                 })
-                .await?;
+                .await??;
             let result = result.try_map_owned(
                 runmat_runtime::call::arguments::adapt_legacy_builtin_result,
                 |error| error.into_runtime_error(),
@@ -113,7 +113,7 @@ pub(super) async fn dispatch(
             .await?;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let result = args
-                .with_owned_values_async(|args| async move {
+                .with_unbounded_values_async(|args| async move {
                     runmat_runtime::call_super_method_in_context(
                         &context.runtime,
                         current_class.clone(),
@@ -123,7 +123,7 @@ pub(super) async fn dispatch(
                     )
                     .await
                 })
-                .await?;
+                .await??;
             let result = result.try_map_owned(
                 runmat_runtime::call::arguments::adapt_legacy_builtin_result,
                 |error| error.into_runtime_error(),
@@ -155,7 +155,7 @@ pub(super) async fn dispatch(
             )
             .await?;
             match args
-                .with_owned_values_async(|args| {
+                .with_unbounded_values_async(|args| {
                     handle_prepared_user_function_call(
                         calls::UserCallContext {
                             stack,
@@ -180,7 +180,7 @@ pub(super) async fn dispatch(
                         args,
                     )
                 })
-                .await?
+                .await??
             {
                 UserCallHandling::Completed(sequence) => {
                     calls::publish_rooted_fixed_outputs(stack, sequence, out_count)?;
@@ -212,7 +212,7 @@ pub(super) async fn dispatch(
             )
             .await?;
             match args
-                .with_owned_values_async(|args| {
+                .with_unbounded_values_async(|args| {
                     handle_workspace_first_prepared_call(
                         calls::WorkspaceFirstCallContext {
                             stack,
@@ -239,7 +239,7 @@ pub(super) async fn dispatch(
                         args,
                     )
                 })
-                .await?
+                .await??
             {
                 UserCallHandling::Completed(sequence) => {
                     calls::publish_rooted_fixed_outputs(stack, sequence, out_count)?;
@@ -272,7 +272,7 @@ pub(super) async fn dispatch(
             )
             .await?;
             match args
-                .with_owned_values_async(|args| {
+                .with_unbounded_values_async(|args| {
                     handle_workspace_first_prepared_call(
                         calls::WorkspaceFirstCallContext {
                             stack,
@@ -299,7 +299,7 @@ pub(super) async fn dispatch(
                         args,
                     )
                 })
-                .await?
+                .await??
             {
                 UserCallHandling::Completed(sequence) => {
                     sequence_register.stage_rooted_call_output_sequence(stack, sequence)?;
@@ -327,7 +327,7 @@ pub(super) async fn dispatch(
             )
             .await?;
             match args
-                .with_owned_values_async(|args| {
+                .with_unbounded_values_async(|args| {
                     handle_prepared_user_function_call(
                         calls::UserCallContext {
                             stack,
@@ -352,7 +352,7 @@ pub(super) async fn dispatch(
                         args,
                     )
                 })
-                .await?
+                .await??
             {
                 UserCallHandling::Completed(sequence) => {
                     calls::publish_rooted_fixed_outputs(stack, sequence, out_count)?;
@@ -381,7 +381,7 @@ pub(super) async fn dispatch(
                 &context.runtime,
             )
             .await?;
-            let call_args = args.with_owned_values(|args| {
+            let call_args = args.with_unbounded_values(|args| {
                 let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
                 for slot in capture_slots {
                     crate::interpreter::dispatch::lexical::refresh(context, vars, *slot)?;
@@ -394,7 +394,7 @@ pub(super) async fn dispatch(
                 call_args.extend(args);
                 runmat_runtime::execution::RootedValues::new(call_args)
                     .map_err(|error| error.into_runtime_error())
-            })?;
+            })??;
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
@@ -407,7 +407,7 @@ pub(super) async fn dispatch(
                     context.lexical_environment.clone(),
                 )
                 .await?;
-            updated_captures.with_owned_values(|captures| {
+            updated_captures.with_unbounded_values(|captures| {
                 if context.lexical_environment.is_none() {
                     for (slot, value) in capture_slots.iter().zip(captures.into_iter()) {
                         if *slot < vars.len() {
@@ -418,7 +418,7 @@ pub(super) async fn dispatch(
                     }
                 }
                 Ok::<_, RuntimeError>(())
-            })?;
+            })??;
             calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

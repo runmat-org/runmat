@@ -17,6 +17,16 @@ use learnables::*;
 
 const DLUPDATE_MAX_DEPTH: usize = 256;
 
+fn into_owned_outputs(
+    values: runmat_value::OutputListStorage,
+) -> BuiltinResult<runmat_value::OwnedOutputListValues> {
+    values.try_into_owned().map_err(|_| {
+        crate::sequence::sequence_error_to_runtime(
+            runmat_value::ValueSequenceError::SharedOutputStorage,
+        )
+    })
+}
+
 #[runtime_builtin(
     name = "dlupdate",
     binding_variant = "default",
@@ -70,11 +80,18 @@ async fn dlupdate_in_runtime(
     let requested_outputs = requested_outputs.unwrap_or(1);
     preflight::matching_trees(&trees)?;
     let outputs = dlupdate_node(runtime, &function, &trees, requested_outputs, 0).await?;
-    outputs.with_owned_values(|mut outputs| {
+    outputs.with_owned_output_storage(|outputs| {
         let result = if requested_outputs == 0 {
-            Value::OutputList(Vec::new())
+            Value::OutputList(outputs)
         } else if requested_outputs == 1 {
-            outputs.remove(0)
+            outputs
+                .try_into_first()
+                .map_err(|_| {
+                    crate::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?
+                .expect("one output")
         } else {
             Value::OutputList(outputs)
         };

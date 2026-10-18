@@ -40,7 +40,7 @@ impl Collector {
             Self::Cell(values) => values
                 .finish()
                 .map_err(|error| error.into_runtime_error())?
-                .with_owned_values(|values| {
+                .with_unbounded_values(|values| {
                     RootedValue::new(
                         CellArray::from_column_major(values, shape.to_vec())
                             .map(Value::Cell)
@@ -49,7 +49,7 @@ impl Collector {
                             })?,
                     )
                     .map_err(|error| error.into_runtime_error())
-                }),
+                })?,
         }
     }
 }
@@ -65,10 +65,20 @@ pub(in crate::builtins::cells::core::cellfun) fn normalize(
     })
 }
 
-fn normalize_raw(value: Value, count: usize) -> BuiltinResult<Vec<Value>> {
+fn normalize_raw(value: Value, count: usize) -> BuiltinResult<runmat_value::OwnedOutputListValues> {
     match value {
-        Value::OutputList(values) if values.len() == count => Ok(values),
-        value if count == 1 && !matches!(value, Value::OutputList(_)) => Ok(vec![value]),
+        Value::OutputList(values) if values.len() == count => {
+            values.try_into_owned().map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })
+        }
+        value if count == 1 && !matches!(value, Value::OutputList(_)) => {
+            Ok(runmat_value::OutputListStorage::unbounded(vec![value])
+                .try_into_owned()
+                .expect("unique unbounded output"))
+        }
         _ => Err(super::super::error::invalid(
             "cellfun: callback did not return the requested number of outputs",
         )),

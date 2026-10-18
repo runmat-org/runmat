@@ -64,8 +64,8 @@ async fn sequence_fixture(requested_outputs: Option<usize>) -> BuiltinResult<Val
 )]
 async fn legacy_fixture(requested_outputs: Option<usize>) -> BuiltinResult<Value> {
     Ok(match requested_outputs {
-        Some(0) => Value::OutputList(Vec::new()),
-        Some(2) => Value::OutputList(vec![Value::Num(2.0), Value::Num(3.0)]),
+        Some(0) => Value::output_list(Vec::new()),
+        Some(2) => Value::output_list(vec![Value::Num(2.0), Value::Num(3.0)]),
         _ => Value::Num(13.0),
     })
 }

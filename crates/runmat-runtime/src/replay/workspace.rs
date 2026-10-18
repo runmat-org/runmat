@@ -271,7 +271,7 @@ mod tests {
     #[test]
     fn workspace_export_rejects_nested_transient_sequences_before_encoding() {
         let value = Value::Cell(
-            runmat_value::CellArray::new(vec![Value::OutputList(Vec::new())], 1, 1).unwrap(),
+            runmat_value::CellArray::new(vec![Value::output_list(Vec::new())], 1, 1).unwrap(),
         );
         let error =
             block_on(encode_workspace_payload(&[("entry".into(), value)], "auto")).unwrap_err();

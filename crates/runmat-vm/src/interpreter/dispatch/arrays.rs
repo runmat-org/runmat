@@ -70,12 +70,16 @@ pub(crate) fn qualify_matrix_construction_shape(
     bound
 }
 
-pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result<(), RuntimeError> {
+pub fn create_matrix(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    rows: usize,
+    cols: usize,
+) -> Result<(), RuntimeError> {
     array_ops::create_matrix(stack, rows, cols)
 }
 
 pub async fn create_matrix_dynamic<F, Fut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     num_rows: usize,
     create_from_values: F,
 ) -> Result<(), RuntimeError>
@@ -87,7 +91,7 @@ where
 }
 
 pub async fn create_range<F, Fut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     has_step: bool,
     call_colon: F,
 ) -> Result<(), RuntimeError>
@@ -98,14 +102,23 @@ where
     array_ops::create_range(stack, has_step, call_colon).await
 }
 
-pub fn pack_to_row(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeError> {
+pub fn pack_to_row(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    count: usize,
+) -> Result<(), RuntimeError> {
     array_ops::pack_to_row(stack, count)
 }
 
-pub fn pack_to_col(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeError> {
+pub fn pack_to_col(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    count: usize,
+) -> Result<(), RuntimeError> {
     array_ops::pack_to_col(stack, count)
 }
 
-pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeError> {
+pub fn unpack(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    out_count: usize,
+) -> Result<(), RuntimeError> {
     array_ops::unpack(stack, out_count)
 }

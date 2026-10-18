@@ -1616,7 +1616,7 @@ fn export_onnx_network_writes_supported_feedforward_graph() {
         Value::String("scores".into()),
     ]))
     .unwrap();
-    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert_eq!(result, Value::output_list(Vec::new()));
 
     let bytes = std::fs::read(path).unwrap();
     assert!(bytes.len() > 200);
@@ -1658,7 +1658,7 @@ fn export_onnx_options_read_typed_integer_storage_exactly() {
         cleared_int_tensor(IntegerStorage::U8(vec![0]), vec![1, 1]),
     ]))
     .unwrap();
-    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert_eq!(result, Value::output_list(Vec::new()));
     assert!(path.exists());
 }
 

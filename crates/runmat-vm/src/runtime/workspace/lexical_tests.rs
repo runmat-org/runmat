@@ -335,11 +335,12 @@ fn assignin_atomically_updates_the_caller_frame_and_owned_lexical_binding() {
                         &mut child_vars,
                         FrameGlobalBindings::default(),
                     );
-                    let mut stack = vec![
-                        Value::String("caller".into()),
-                        Value::String("shared".into()),
-                        Value::Num(8.0),
-                    ];
+                    let mut stack =
+                        crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+                            Value::String("caller".into()),
+                            Value::String("shared".into()),
+                            Value::Num(8.0),
+                        ]);
                     crate::call::builtins::vm_dynamic_workspace_builtin(
                         &invocation_runtime,
                         &mut stack,

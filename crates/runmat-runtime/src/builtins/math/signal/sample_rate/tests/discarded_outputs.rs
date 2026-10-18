@@ -133,7 +133,7 @@ fn discarded_resample_outputs_still_admit_inputs_rates_and_options() {
     );
 
     let valid = call(signal(), Value::Num(2.0), Value::Num(1.0), vec![]).unwrap();
-    assert_eq!(valid, Value::OutputList(Vec::new()));
+    assert_eq!(valid, Value::output_list(Vec::new()));
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn discarded_resample_does_not_allocate_provider_output_or_touch_borrowed_source
         vec![tensor(vec![0.0, 1.0, 0.0], vec![1, 3])],
     ))
     .unwrap();
-    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert_eq!(result, Value::output_list(Vec::new()));
     assert_eq!(provider.probes.lock().unwrap().len(), 1);
     assert_eq!(provider.gathers.load(Ordering::Relaxed), 0);
     assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);

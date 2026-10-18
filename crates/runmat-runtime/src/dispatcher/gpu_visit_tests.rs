@@ -84,7 +84,7 @@ fn gather_traversal_preserves_passthrough_identity_and_rejects_transient_sequenc
             }
         })
         .unwrap();
-        let transient = Value::OutputList(vec![Value::Num(1.0)]);
+        let transient = Value::output_list(vec![Value::Num(1.0)]);
         let admission = try_visit_gathered_gpu_handles(&transient, &mut |_| {}).unwrap_err();
         let runtime = futures::executor::block_on(gather_if_needed_async(&transient)).unwrap_err();
         assert_eq!(admission.identifier(), runtime.identifier());

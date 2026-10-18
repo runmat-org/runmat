@@ -30,7 +30,12 @@ pub(crate) async fn execute(
                 right_values,
             } = plan;
             right_values
-                .with_owned_values_async(|right_values| async move {
+                .with_owned_output_storage_async(|right_values| async move {
+                    let right_values = right_values.try_into_owned().map_err(|_| {
+                        crate::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?;
                     let mut names = Vec::with_capacity(variables.len());
                     let mut output = RootedValuesBuilder::with_capacity(variables.len());
                     for ((name, lhs), rhs) in variables.into_iter().zip(right_values) {

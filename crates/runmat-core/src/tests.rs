@@ -55,6 +55,9 @@ mod native_arity;
 #[path = "tests/native_deal.rs"]
 mod native_deal;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/parfor_placement.rs"]
+mod parfor_placement;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_max.rs"]
 mod native_max;
 #[cfg(not(target_arch = "wasm32"))]
@@ -14821,16 +14824,19 @@ fn parfor_without_a_semantic_contract_is_rejected_before_execution() {
 
 #[test]
 fn parfor_has_a_deterministic_serial_execution_fallback() {
-    let mut session = RunMatSession::with_options(false, false).expect("session init");
-    execute_text_request(
-        &mut session,
+    for source in [
         "total = 0; parfor index = 1:4; total = total + index; end;",
-    )
-    .expect("execute parfor through serial scheduler fallback");
-    assert_eq!(
-        session.get_variables().unwrap().get("total"),
-        Some(&runmat_value::Value::Num(10.0))
-    );
+        "total = 0; parfor (index = 1:4, 0); total = total + index; end;",
+    ] {
+        let mut session = RunMatSession::with_options(false, false).expect("session init");
+        execute_text_request(&mut session, source)
+            .expect("execute parfor through serial scheduler fallback");
+        assert_eq!(
+            session.get_variables().unwrap().get("total"),
+            Some(&runmat_value::Value::Num(10.0)),
+            "serial parfor source: {source}"
+        );
+    }
 }
 
 #[test]

@@ -28,7 +28,7 @@ mod workspace;
 
 pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
     pub instr: &'a Instr,
-    pub stack: &'a mut Vec<Value>,
+    pub stack: &'a mut crate::interpreter::stack::InterpreterStack,
     pub vars: &'a mut crate::interpreter::vars::InterpreterVars,
     pub sequence_register: &'a mut SequenceState,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,

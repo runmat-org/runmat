@@ -34,7 +34,7 @@ fn fileparts_dispatch_preserves_requested_outputs_and_text_admission() {
             count,
         ))
         .unwrap();
-        assert_eq!(result, Value::OutputList(expected[..count].to_vec()));
+        assert_eq!(result, Value::output_list(expected[..count].to_vec()));
     }
     for count in [0, 3] {
         let error = block_on(call_builtin_async_with_outputs(

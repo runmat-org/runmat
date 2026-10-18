@@ -291,7 +291,12 @@ fn provider_zero_through_three_outputs_expand_xy_with_z_and_release_discarded_ha
             };
             assert_eq!(values.len(), count);
             provider.assert_reclaimed(count);
-            for (index, value) in values.into_iter().enumerate() {
+            for (index, value) in values
+                .try_into_owned()
+                .expect("unique output list")
+                .into_iter()
+                .enumerate()
+            {
                 let Value::GpuTensor(handle) = value else {
                     panic!("resident output")
                 };
@@ -348,7 +353,7 @@ fn pol2cart_outputs_preserve_automatic_and_explicit_input_provenance() {
             let Value::OutputList(outputs) = value else {
                 panic!("outputs")
             };
-            for output in outputs {
+            for output in outputs.try_into_owned().expect("unique output list") {
                 let Value::GpuTensor(handle) = output else {
                     panic!("resident output")
                 };

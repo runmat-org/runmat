@@ -350,7 +350,7 @@ async fn finalize(
     let result = outcome.result;
     let requested = match crate::output_count::current_output_count() {
         None => return vector_to_value(NAME, result.x, x_shape, x_scalar),
-        Some(0) => return Ok(Value::OutputList(Vec::new())),
+        Some(0) => return Ok(Value::output_list(Vec::new())),
         Some(count @ 1..=5) => count,
         Some(_) => {
             return Err(fsolve_error_with_detail(

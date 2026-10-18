@@ -51,9 +51,11 @@ fn host(
     result.try_map_owned(
         |value| -> Result<Value, Box<RuntimeError>> {
             Ok(match value {
-                Value::OutputList(mut outputs) => {
+                Value::OutputList(outputs) => {
                     assert_eq!(outputs.len(), 1, "{name}: exactly one requested result");
-                    outputs.remove(0)
+                    runmat_runtime::sequence::into_first_output(outputs)
+                        .map_err(Box::new)?
+                        .expect("one requested result")
                 }
                 value => value,
             })

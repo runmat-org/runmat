@@ -119,7 +119,7 @@ fn task_results_retain_managed_members_through_collecting_root_retirement() {
             }))
             .expect("observe task root retirement");
             let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-            let outputs = block_on(inputs.with_owned_values_async(|inputs| {
+            let outputs = block_on(inputs.with_unbounded_values_async(|inputs| {
                 interpret_parfor_task_in_context(ParforTaskExecution {
                     bytecode: &bytecode,
                     region,
@@ -131,6 +131,7 @@ fn task_results_retain_managed_members_through_collecting_root_retirement() {
                     runtime,
                 })
             }))
+            .and_then(std::convert::identity)
             .expect("execute task");
             assert_eq!(outputs.values().len(), region.output_variables().count());
             assert!(

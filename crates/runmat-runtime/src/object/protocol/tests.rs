@@ -20,7 +20,8 @@ fn single(sequence: crate::execution::RootedValueSequence) -> crate::execution::
                         SequenceResolutionContext::default(),
                     )
                     .expect("single sequence")
-                    .pop()
+                    .try_into_first()
+                    .expect("unique single-output storage")
                     .expect("one value"))
             },
             |error| error.into_runtime_error(),
@@ -193,7 +194,10 @@ fn callable_selected_from_cell_uses_parentheses_as_one_invocation() {
             SequenceResolutionContext::default(),
         )
     });
-    assert_eq!(values.expect("two outputs"), vec![Value::Num(7.0); 2]);
+    assert_eq!(
+        values.expect("two outputs").as_slice(),
+        &[Value::Num(7.0), Value::Num(7.0)]
+    );
 
     let colon = block_on(read_subscript_path_with_access(
         cell(Value::FunctionHandle("sqrt".into())),

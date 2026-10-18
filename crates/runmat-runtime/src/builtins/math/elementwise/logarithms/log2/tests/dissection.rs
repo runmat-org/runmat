@@ -66,7 +66,7 @@ fn dissection_preserves_single_class_and_table_identity() {
 fn output_count_and_dissection_rejections_are_stable() {
     assert_eq!(
         call_with_outputs(Value::Num(8.0), 0).expect("zero outputs"),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
     assert_eq!(
         call_with_outputs(Value::Num(8.0), 3)

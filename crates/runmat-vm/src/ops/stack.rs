@@ -59,39 +59,57 @@ pub async fn emit_var(
 }
 
 #[inline]
-pub fn load_const(stack: &mut Vec<Value>, value: f64) {
-    stack.push(Value::Num(value));
+pub fn load_const(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: f64,
+) -> Result<(), RuntimeError> {
+    stack.try_push(Value::Num(value))
 }
 
 #[inline]
-pub fn load_int(stack: &mut Vec<Value>, value: runmat_value::IntValue) {
-    stack.push(Value::Int(value));
+pub fn load_int(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: runmat_value::IntValue,
+) -> Result<(), RuntimeError> {
+    stack.try_push(Value::Int(value))
 }
 
 #[inline]
-pub fn load_complex(stack: &mut Vec<Value>, re: f64, im: f64) {
-    stack.push(Value::Complex(re, im));
+pub fn load_complex(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    re: f64,
+    im: f64,
+) -> Result<(), RuntimeError> {
+    stack.try_push(Value::Complex(re, im))
 }
 
 #[inline]
-pub fn load_bool(stack: &mut Vec<Value>, value: bool) {
-    stack.push(Value::Bool(value));
+pub fn load_bool(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: bool,
+) -> Result<(), RuntimeError> {
+    stack.try_push(Value::Bool(value))
 }
 
 #[inline]
-pub fn load_string(stack: &mut Vec<Value>, value: String) {
-    stack.push(Value::String(value));
+pub fn load_string(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: String,
+) -> Result<(), RuntimeError> {
+    stack.try_push(Value::String(value))
 }
 
-pub fn load_char_row(stack: &mut Vec<Value>, value: String) -> Result<(), RuntimeError> {
+pub fn load_char_row(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: String,
+) -> Result<(), RuntimeError> {
     let ca = CharArray::new(value.chars().collect(), 1, value.chars().count())
         .map_err(|e| mex("CharError", &e))?;
-    stack.push(Value::CharArray(ca));
-    Ok(())
+    stack.try_push(Value::CharArray(ca))
 }
 
 pub fn load_local(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     context: &ExecutionContext,
     vars: &InterpreterVars,
     offset: usize,
@@ -101,30 +119,34 @@ pub fn load_local(
         if local_index >= context.locals.len() {
             return Err("Local variable index out of bounds".to_string().into());
         }
-        stack.push(context.locals[local_index].clone());
+        stack.try_push(context.locals[local_index].clone())?;
     } else if offset < vars.len() {
-        stack.push(
+        stack.try_push(
             vars.get(offset)
                 .expect("local fallback slot lies within frame extent")
                 .clone(),
-        );
+        )?;
     } else {
-        stack.push(Value::Num(0.0));
+        stack.try_push(Value::Num(0.0))?;
     }
     Ok(())
 }
 
 #[inline]
-pub fn load_var(stack: &mut Vec<Value>, vars: &InterpreterVars, index: usize) {
-    stack.push(workspace_slot_value(index).unwrap_or_else(|| {
+pub fn load_var(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    vars: &InterpreterVars,
+    index: usize,
+) -> Result<(), RuntimeError> {
+    stack.try_push(workspace_slot_value(index).unwrap_or_else(|| {
         vars.get(index)
             .expect("loaded variable slot lies within frame extent")
             .clone()
-    }));
+    }))
 }
 
 pub fn store_var<BeforeOverwrite, AfterStore>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
     index: usize,
     var_names: &HashMap<usize, String>,
@@ -166,7 +188,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterLocalStore, AfterFallbackStore>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     context: &mut ExecutionContext,
     vars: &mut InterpreterVars,
     offset: usize,
@@ -257,9 +279,9 @@ where
 }
 
 #[inline]
-pub fn swap(stack: &mut Vec<Value>) -> Result<(), RuntimeError> {
+pub fn swap(stack: &mut crate::interpreter::stack::InterpreterStack) -> Result<(), RuntimeError> {
     let (b, a) = pop2(stack)?;
-    stack.push(a);
-    stack.push(b);
+    stack.try_push(a)?;
+    stack.try_push(b)?;
     Ok(())
 }

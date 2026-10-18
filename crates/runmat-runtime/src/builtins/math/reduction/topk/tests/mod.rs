@@ -11,7 +11,11 @@ pub(super) fn values(tensor: &Tensor) -> Vec<f64> {
 
 pub(super) fn outputs(value: Value) -> Vec<Value> {
     match value {
-        Value::OutputList(values) => values,
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list"),
         other => vec![other],
     }
 }

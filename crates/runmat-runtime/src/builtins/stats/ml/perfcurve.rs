@@ -76,7 +76,7 @@ async fn perfcurve_builtin(
     gate_host_integer_exactness(&scores, &rest, &names).await?;
     let admitted = admission::preflight(labels, scores, posclass, rest, names)?;
     if let Some(0) = requested_outputs {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     let (labels, scores, posclass, controls, precomputed_negatives) = admitted.finish().await?;

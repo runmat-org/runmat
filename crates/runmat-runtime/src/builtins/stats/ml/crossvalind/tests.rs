@@ -27,7 +27,11 @@ fn tensor_data(value: Value) -> Vec<f64> {
 
 fn output_list(value: Value) -> Vec<Value> {
     match value {
-        Value::OutputList(values) => values,
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list"),
         other => panic!("expected output list, got {other:?}"),
     }
 }

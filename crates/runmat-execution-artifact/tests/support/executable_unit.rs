@@ -119,7 +119,8 @@ pub fn bytes(revision: ProgramRevision) -> Vec<u8> {
                         role: ParallelVariableRole::Loop,
                         access: ParallelAccess::ReadWrite,
                         fact: dynamic_fact(),
-                        transferable: true,
+                        transferability:
+                            runmat_types::ParallelTransferability::RequiresRuntimeValidation,
                     }],
                     maximum_workers: Some(LabCount(4)),
                     effects: Default::default(),

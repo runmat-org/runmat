@@ -31,7 +31,8 @@ pub(super) async fn dlupdate_learnables_struct(
         .collect::<BuiltinResult<Vec<_>>>()?;
     let updated_values =
         dlupdate_node(runtime, function, &value_columns, requested_outputs, depth).await?;
-    updated_values.with_owned_values(|updated_values| {
+    updated_values.with_owned_output_storage(|updated_values| {
+        let updated_values = into_owned_outputs(updated_values)?;
         let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
         for value_column in updated_values {
             let mut out = reference.clone();
@@ -120,7 +121,8 @@ pub(super) async fn dlupdate_table(
     let updated_values =
         dlupdate_node(runtime, function, &value_columns, requested_outputs, depth).await?;
 
-    updated_values.with_owned_values(|updated_values| {
+    updated_values.with_owned_output_storage(|updated_values| {
+        let updated_values = into_owned_outputs(updated_values)?;
         let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
         for value_column in updated_values {
             let mut variables = table_variables[0].clone();
@@ -180,7 +182,8 @@ pub(super) async fn dlupdate_network(
         depth,
     )
     .await?;
-    updated.with_owned_values(|updated| {
+    updated.with_owned_output_storage(|updated| {
+        let updated = into_owned_outputs(updated)?;
         let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
         for learnables in updated {
             let network = model::apply_learnables(reference.clone(), learnables, "dlupdate")?;

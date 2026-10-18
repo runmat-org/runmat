@@ -1098,6 +1098,11 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
             flatten_value(gathered, output, context).await?;
         }
         Value::OutputList(values) => {
+            let values = values.try_into_owned().map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
             for value in values {
                 flatten_value(value, output, context).await?;
             }

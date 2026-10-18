@@ -1525,17 +1525,21 @@ fn finish_invocation(
             ),
         ));
     }
-    outputs.with_owned_values(|outputs| {
-        let mut selected = outputs
-            .into_iter()
-            .take(requested_outputs)
-            .collect::<Vec<_>>();
+    outputs.with_owned_output_storage(|mut selected| {
+        selected.truncate(requested_outputs);
         let sequence = match requested_outputs {
             0 => Ok(runmat_value::ValueSequence::empty()),
             1 => super::super::single_output_sequence(
-                selected.pop().expect("validated one MEX output"),
+                selected
+                    .try_into_first()
+                    .map_err(|_| {
+                        crate::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?
+                    .expect("validated one MEX output"),
             ),
-            _ => runmat_value::ValueSequence::comma_separated(selected)
+            _ => runmat_value::ValueSequence::from_output_storage(selected)
                 .map_err(crate::sequence::sequence_error_to_runtime),
         }?;
         crate::execution::RootedValueSequence::new(sequence)

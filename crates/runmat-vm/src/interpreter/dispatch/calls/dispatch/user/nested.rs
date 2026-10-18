@@ -49,7 +49,7 @@ pub(super) async fn dispatch(
                     context.lexical_environment.clone(),
                 )
                 .await?;
-            updated_captures.with_owned_values(|captures| {
+            updated_captures.with_unbounded_values(|captures| {
                 if context.lexical_environment.is_some() {
                     return Ok::<_, RuntimeError>(());
                 }
@@ -61,7 +61,7 @@ pub(super) async fn dispatch(
                     }
                 }
                 Ok::<_, RuntimeError>(())
-            })?;
+            })??;
             calls::publish_rooted_fixed_outputs(stack, result, *out_count)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -102,7 +102,7 @@ pub(super) async fn dispatch(
                     context.lexical_environment.clone(),
                 )
                 .await?;
-            updated_captures.with_owned_values(|captures| {
+            updated_captures.with_unbounded_values(|captures| {
                 if context.lexical_environment.is_some() {
                     return Ok::<_, RuntimeError>(());
                 }
@@ -114,7 +114,7 @@ pub(super) async fn dispatch(
                     }
                 }
                 Ok::<_, RuntimeError>(())
-            })?;
+            })??;
             sequence_register.stage_rooted_call_output_sequence(stack, result)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

@@ -11,7 +11,7 @@ use super::support::{pop_values, root, stack_underflow};
 
 pub(super) async fn dispatch(
     instruction: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &InterpreterVars,
     state: &mut SequenceState,
 ) -> Result<bool, RuntimeError> {
@@ -78,18 +78,20 @@ pub(super) async fn dispatch(
     Ok(true)
 }
 
-fn dynamic_member(stack: &mut Vec<Value>) -> Result<runmat_types::MemberName, RuntimeError> {
+fn dynamic_member(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+) -> Result<runmat_types::MemberName, RuntimeError> {
     let value = stack.pop().ok_or_else(stack_underflow)?;
     Ok(runmat_types::MemberName(String::try_from(&value)?))
 }
 
-fn parentheses(indices: Vec<Value>) -> AssignmentStepSpec {
+fn parentheses(indices: impl IntoIterator<Item = Value>) -> AssignmentStepSpec {
     AssignmentStepSpec::Parentheses {
         selectors: values(indices),
     }
 }
 
-fn values(values: Vec<Value>) -> Vec<ObjectIndexComponent> {
+fn values(values: impl IntoIterator<Item = Value>) -> Vec<ObjectIndexComponent> {
     values
         .into_iter()
         .map(ObjectIndexComponent::Value)

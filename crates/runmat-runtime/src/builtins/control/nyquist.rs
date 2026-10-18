@@ -20,6 +20,7 @@ use crate::builtins::control::tf_model::{control_error, TfModel};
 use crate::BuiltinResult;
 
 const BUILTIN_NAME: &str = "nyquist";
+#[cfg(test)]
 const DEFAULT_FREQUENCY_POINTS: usize = 200;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::nyquist")]
@@ -71,13 +72,13 @@ async fn nyquist_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
     if let Some(n) = crate::output_count::current_output_count() {
         if n == 0 {
             render_plot(&response).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
-        return Ok(Value::OutputList(response.outputs(n)?));
+        return Ok(Value::output_list(response.outputs(n)?));
     }
     if crate::output_context::requested_output_count() == Some(0) {
         render_plot(&response).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     response.re_value()
 }

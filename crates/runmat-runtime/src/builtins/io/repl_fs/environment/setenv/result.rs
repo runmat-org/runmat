@@ -28,7 +28,7 @@ impl SetenvResult {
         ];
         match requested {
             None => outputs[0].clone(),
-            Some(0) => Value::OutputList(Vec::new()),
+            Some(0) => Value::output_list(Vec::new()),
             Some(count) => crate::output_count::output_list_with_padding(count, outputs),
         }
     }

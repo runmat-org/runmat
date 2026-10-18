@@ -759,8 +759,9 @@ impl ForeignAdapter for NativeFfiAdapter {
                     )
                     .await
                     .and_then(|outputs| {
-                        outputs
-                            .with_owned_values(|values| isolated_outputs(values, requested_outputs))
+                        outputs.with_owned_output_storage(|values| {
+                            isolated_outputs(values, requested_outputs)
+                        })
                     });
                 outcome
             }
@@ -776,15 +777,22 @@ impl ForeignAdapter for NativeFfiAdapter {
 }
 
 fn isolated_outputs(
-    mut outputs: Vec<Value>,
+    outputs: runmat_value::OutputListStorage,
     requested_outputs: usize,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
     let sequence = match (requested_outputs, outputs.len()) {
         (1, 1) => runmat_value::ValueSequence::single(
-            outputs.pop().expect("one isolated native FFI output"),
+            outputs
+                .try_into_first()
+                .map_err(|_| {
+                    crate::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?
+                .expect("one isolated native FFI output"),
         )
         .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
-        _ => runmat_value::ValueSequence::comma_separated(outputs)
+        _ => runmat_value::ValueSequence::from_output_storage(outputs)
             .map_err(|error| foreign_error_with_source(ForeignErrorKind::InvalidCall, error)),
     }?;
     crate::execution::RootedValueSequence::new(sequence).map_err(|error| error.into_runtime_error())
@@ -803,14 +811,16 @@ mod output_sequence_tests {
         assert_eq!(
             requested_output_sequence(source.clone(), 1)
                 .expect("one output")
-                .into_values(),
-            vec![Value::Num(1.0)]
+                .into_output_storage()
+                .as_slice(),
+            &[Value::Num(1.0)]
         );
         assert_eq!(
             requested_output_sequence(source.clone(), 3)
                 .expect("three outputs")
-                .into_values(),
-            source
+                .into_output_storage()
+                .as_slice(),
+            source.as_slice()
         );
         assert!(requested_output_sequence(vec![Value::Num(1.0)], 2).is_err());
     }

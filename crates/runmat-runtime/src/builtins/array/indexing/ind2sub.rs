@@ -92,7 +92,7 @@ async fn ind2sub_builtin(dims_val: Value, indices_val: Value) -> crate::BuiltinR
 
     let requested_outputs = crate::output_count::current_output_count().unwrap_or(dims.len());
     if requested_outputs == 0 {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let effective_dims = effective_output_dims(&dims, requested_outputs)?;
     let total = total_elements(&effective_dims, IndexingOperation::Ind2Sub)?;
@@ -180,7 +180,7 @@ fn effective_output_dims(
 
 fn finish_outputs(outputs: Vec<Value>) -> crate::BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some() {
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let len = outputs.len();
     make_cell(outputs, 1, len).map_err(|message| ind2sub_error(message))

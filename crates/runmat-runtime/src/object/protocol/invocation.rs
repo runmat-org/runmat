@@ -119,11 +119,11 @@ async fn invoke_resolved_object_assignment_in_scope(
         .await?
         .try_map_owned(
             |sequence| {
-                let mut values = sequence.resolve(
+                let values = sequence.resolve(
                     runmat_types::SequenceUse::RequireSingle,
                     SequenceResolutionContext::default(),
                 )?;
-                values.pop().ok_or_else(|| {
+                crate::sequence::into_first_output(values)?.ok_or_else(|| {
                     semantic_error(
                         "ObjectAssignmentOutput",
                         "object assignment protocol did not return its updated receiver",
@@ -345,11 +345,11 @@ pub(super) async fn invoke_prepared_object_end_with_context(
     .await?
     .try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 SequenceResolutionContext::default(),
             )?;
-            values.pop().ok_or_else(|| {
+            crate::sequence::into_first_output(values)?.ok_or_else(|| {
                 semantic_error(
                     "ObjectEndOutput",
                     "object end protocol did not return one scalar value",

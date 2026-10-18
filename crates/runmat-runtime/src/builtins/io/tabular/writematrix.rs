@@ -155,8 +155,8 @@ async fn writematrix_builtin(
         )
     })?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Num(bytes_written as f64)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Num(bytes_written as f64)])),
         Some(_) => Err(writematrix_error(&WRITEMATRIX_ERROR_ARG_CONFIG)),
         None => Ok(Value::Num(bytes_written as f64)),
     }

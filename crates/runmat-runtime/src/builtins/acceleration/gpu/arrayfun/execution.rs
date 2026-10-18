@@ -117,12 +117,12 @@ pub(super) async fn execute(
         cell_outputs
             .finish()
             .map_err(|error| error.into_runtime_error())?
-            .with_owned_values(|values| {
+            .with_unbounded_values(|values| {
                 RootedValue::new(
                     make_cell_with_shape(values, base_shape)
                         .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?,
                 )
                 .map_err(|error| error.into_runtime_error())
-            })
+            })?
     }
 }

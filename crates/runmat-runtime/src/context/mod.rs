@@ -149,9 +149,10 @@ pub use services::{
     RuntimeManagedWholeWorkSelection, RuntimeNativeService, RuntimeObjectService,
     RuntimeParallelResources, RuntimeParallelService, RuntimePlacementFeedbackDelivery,
     RuntimePlacementFeedbackSource, RuntimePlacementService, RuntimeServiceFuture,
-    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdOutput, RuntimeSpmdRetainedOutput,
-    RuntimeSpmdService, RuntimeWholeWorkObservationAuthority, RuntimeWholeWorkObservationPermit,
-    RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
+    RuntimeServicePorts, RuntimeSpmdAdmission, RuntimeSpmdGangLease, RuntimeSpmdOutput,
+    RuntimeSpmdRetainedOutput, RuntimeSpmdService, RuntimeWholeWorkObservationAuthority,
+    RuntimeWholeWorkObservationPermit, RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection,
+    RuntimeWorkspaceService,
 };
 pub use source_evaluation::{
     execute_assignin_effect, execute_selected_dynamic_workspace, DynamicWorkspaceInvocation,

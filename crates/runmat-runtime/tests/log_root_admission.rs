@@ -35,7 +35,8 @@ impl RuntimeAccelerationService for Recorder {
         Box::pin(async move {
             request
                 .into_operands()
-                .with_owned_values(PreparedBuiltinOperands::passthrough)
+                .with_unbounded_values(PreparedBuiltinOperands::passthrough)
+                .and_then(std::convert::identity)
         })
     }
 }

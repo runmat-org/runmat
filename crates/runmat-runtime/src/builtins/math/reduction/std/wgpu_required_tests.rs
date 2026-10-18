@@ -10,9 +10,10 @@ async fn public_value(name: &str, arguments: &[Value]) -> crate::execution::Root
     outputs
         .try_map_owned(
             |outputs| {
-                let [value]: [Value; 1] = outputs
-                    .into_values()
-                    .try_into()
+                let value = outputs
+                    .into_output_storage()
+                    .try_into_first()
+                    .expect("unique dispersion output")
                     .expect("one dispersion output");
                 Ok::<Value, crate::RuntimeError>(value)
             },

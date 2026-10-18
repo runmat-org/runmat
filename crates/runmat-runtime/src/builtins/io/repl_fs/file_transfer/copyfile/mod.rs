@@ -26,7 +26,7 @@ async fn copyfile_builtin(
     let outcome = execute::evaluate(&args, context.as_ref()).await?;
     if let Some(count) = crate::output_count::current_output_count() {
         if count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         return Ok(crate::output_count::output_list_with_padding(
             count,

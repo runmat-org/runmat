@@ -28,8 +28,8 @@ pub(super) async fn apply(
     let collected =
         super::invoke::groups(input.function, &input.data, &input.groups, requested).await?;
     let outputs = super::assemble::outputs(collected).await?;
-    outputs.with_owned_values(|outputs| {
+    outputs.with_unbounded_values(|outputs| {
         let value = super::super::requested_outputs::finish(outputs)?;
         crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
-    })
+    })?
 }

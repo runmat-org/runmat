@@ -41,11 +41,11 @@ pub(in super::super) async fn read_property(
                         .await?;
                     return outputs.try_map_owned(
                         |sequence| {
-                            let mut values = sequence.resolve(
+                            let values = sequence.resolve(
                                 runmat_types::SequenceUse::RequireSingle,
                                 crate::sequence::SequenceResolutionContext::default(),
                             )?;
-                            values.pop().ok_or_else(|| {
+                            crate::sequence::into_first_output(values)?.ok_or_else(|| {
                                 errors::with_message(
                                     "dependent getter returned no value",
                                     &SETFIELD_ERROR_OBJECT_PROPERTY,

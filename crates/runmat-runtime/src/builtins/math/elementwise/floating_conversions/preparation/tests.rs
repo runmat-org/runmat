@@ -68,17 +68,20 @@ impl RuntimeAccelerationService for Service {
         let replace = self.replace;
         let observer = Observation(self.events.clone());
         Box::pin(async move {
-            request.into_operands().with_owned_values(|mut operands| {
-                assert_eq!(
-                    operands.len(),
-                    1,
-                    "option and prototype must stay domain-local"
-                );
-                if replace {
-                    operands[0] = Value::OutputList(vec![]);
-                }
-                PreparedBuiltinOperands::new(operands, Some(Box::new(observer)))
-            })
+            request
+                .into_operands()
+                .with_unbounded_values(|mut operands| {
+                    assert_eq!(
+                        operands.len(),
+                        1,
+                        "option and prototype must stay domain-local"
+                    );
+                    if replace {
+                        operands[0] = Value::output_list(vec![]);
+                    }
+                    PreparedBuiltinOperands::new(operands, Some(Box::new(observer)))
+                })
+                .and_then(std::convert::identity)
         })
     }
 }
@@ -148,7 +151,7 @@ fn invalid_options_prototypes_and_output_counts_never_prepare() {
             ],
             vec![Value::Num(1.0), Value::from("invalid"), Value::Num(0.0)],
             vec![Value::Num(1.0), Value::from("like"), Value::from("invalid")],
-            vec![Value::OutputList(vec![])],
+            vec![Value::output_list(vec![])],
         ] {
             assert!(block_on(crate::dispatcher::call_builtin_async_in_context(
                 &runtime, name, &args

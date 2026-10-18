@@ -46,11 +46,12 @@ fn root_value(value: Value) -> Result<RootedValue, RuntimeError> {
 fn resolve_single_sequence(sequence: RootedValueSequence) -> Result<RootedValue, RuntimeError> {
     sequence.try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 runmat_runtime::sequence::SequenceResolutionContext::default(),
             )?;
-            Ok(values.remove(0))
+            Ok(runmat_runtime::sequence::into_first_output(values)?
+                .expect("one required index output was resolved"))
         },
         |error| error.into_runtime_error(),
     )
@@ -234,7 +235,9 @@ async fn assign_object_scalar_indices(
             &method,
             base,
             path,
-            runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?.into_values(),
+            runmat_runtime::sequence::into_unbounded_values(
+                runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?,
+            )?,
         )
         .await;
     }
@@ -289,7 +292,9 @@ async fn invoke_object_brace_assignment(
         &method,
         base,
         path,
-        runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?.into_values(),
+        runmat_runtime::sequence::into_unbounded_values(
+            runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?,
+        )?,
     )
     .await
 }
@@ -351,7 +356,10 @@ fn gather_struct_array_with_plan(
     runmat_runtime::indexing::structure::read_with_plan(array, plan)
 }
 
-fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
+fn pop_index_values(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    count: usize,
+) -> Result<Vec<Value>, RuntimeError> {
     let mut values = Vec::with_capacity(count);
     for _ in 0..count {
         let value = stack.pop().ok_or(crate::interpreter::errors::mex(
@@ -364,7 +372,9 @@ fn pop_index_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, 
     Ok(values)
 }
 
-fn pop_index_base(stack: &mut Vec<Value>) -> Result<Value, RuntimeError> {
+fn pop_index_base(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+) -> Result<Value, RuntimeError> {
     stack.pop().ok_or(crate::interpreter::errors::mex(
         "StackUnderflow",
         "stack underflow",
@@ -559,7 +569,7 @@ async fn execute_brace_operation(
                 Value::Cell(ca) => {
                     let rhs = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?;
                     let rhs_kind = rhs.kind();
-                    let mut rhs_values = rhs.into_values();
+                    let mut rhs_values = runmat_runtime::sequence::into_unbounded_values(rhs)?;
                     let updated = if raw_indices.len() > 1 {
                         let indices = resolve_cell_indices(raw_indices).await?;
                         match rhs_kind {
@@ -641,7 +651,7 @@ async fn execute_brace_operation(
 }
 
 async fn execute_brace_operation_from_stack(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     _vars: &mut InterpreterVars,
     request: BraceStackRequest,
     runtime: &runmat_runtime::context::RuntimeContext,
@@ -651,10 +661,10 @@ async fn execute_brace_operation_from_stack(
     let outcome = execute_brace_operation(base, &raw_indices, request.operation, runtime).await?;
     match (outcome, request.expectation) {
         (BraceIndexOutcome::Value(value), BraceOutcomeExpectation::SingleValue { .. }) => {
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
         }
         (BraceIndexOutcome::Expanded(values), BraceOutcomeExpectation::ExpandedValues { .. }) => {
-            values.with_owned_values(|values| stack.extend(values));
+            values.with_owned_output_storage(|values| stack.try_extend_output(values))?;
         }
         (
             BraceIndexOutcome::Value(_),
@@ -806,7 +816,7 @@ pub async fn paren_index_value(
 
 pub async fn dispatch_indexing(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
     function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,

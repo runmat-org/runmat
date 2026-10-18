@@ -97,7 +97,7 @@ impl<'a> ObjectiveEvaluator<'a> {
         let cooperation = &mut *self.cooperation;
         let (f, grad) = value
             .with_owned_async(|value| async move {
-                let Value::OutputList(mut outputs) = value else {
+                let Value::OutputList(outputs) = value else {
                     return Err(fminunc_error_with_detail(
                         &FMINUNC_ERROR_INVALID_INPUT,
                         "objective must return [f, g] when SpecifyObjectiveGradient is true",
@@ -109,8 +109,14 @@ impl<'a> ObjectiveEvaluator<'a> {
                         "objective must return both objective value and gradient",
                     ));
                 }
-                let objective = outputs.remove(0);
-                let gradient = outputs.remove(0);
+                let outputs = outputs.try_into_owned().map_err(|_| {
+                    crate::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?;
+                let mut outputs = outputs.into_iter();
+                let objective = outputs.next().expect("validated objective output");
+                let gradient = outputs.next().expect("validated gradient output");
                 let f = crate::builtins::math::optim::common::value_to_scalar_with_extensions(
                     NAME,
                     objective,
@@ -441,7 +447,7 @@ pub(super) async fn finalize(
 ) -> BuiltinResult<Value> {
     let requested = match crate::output_count::current_output_count() {
         None => return vector_to_value(NAME, outcome.x, shape, scalar),
-        Some(0) => return Ok(Value::OutputList(Vec::new())),
+        Some(0) => return Ok(Value::output_list(Vec::new())),
         Some(count @ 1..=6) => count,
         Some(_) => {
             return Err(fminunc_error_with_detail(

@@ -623,13 +623,19 @@ impl RunMatSession {
                             (name == "__runmat_input_result__").then_some(*idx)
                         });
                         let vars = runmat_vm::interpret(&bc).await?;
-                        vars.with_owned_values(|mut vars| {
+                        vars.with_owned_output_storage(|vars| {
                             let index = result_idx.ok_or_else(|| {
                                 build_runtime_error("input: expression produced no value")
                                     .with_identifier("RunMat:input:NoValue")
                                     .build()
                             })?;
+                            let mut vars = vars.try_into_owned().map_err(|_| {
+                                runmat_runtime::sequence::sequence_error_to_runtime(
+                                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                                )
+                            })?;
                             let value = vars
+                                .as_mut_slice()
                                 .get_mut(index)
                                 .map(|slot| std::mem::replace(slot, Value::Num(0.0)))
                                 .ok_or_else(|| {
@@ -1484,41 +1490,52 @@ fn apply_requested_output_policy(
         }
         RuntimeFlow::NoValue => Ok(ValueSequence::empty()),
         RuntimeFlow::Single(value) => ValueSequence::single(value),
-        RuntimeFlow::OutputList(values) => ValueSequence::comma_separated(values),
+        RuntimeFlow::OutputList(values) => ValueSequence::from_output_storage(values),
     }
     .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
     .map_err(RunError::Runtime)?;
 
     outcome.flow = match requested_outputs {
         RequestedOutputCount::Zero => RuntimeFlow::NoValue,
-        RequestedOutputCount::One => first_runtime_flow_value(flow),
+        RequestedOutputCount::One => first_runtime_flow_value(flow)?,
         RequestedOutputCount::Exactly(count) => {
             if *count == 0 {
                 RuntimeFlow::NoValue
             } else if *count == 1 {
-                first_runtime_flow_value(flow)
+                first_runtime_flow_value(flow)?
             } else {
-                let mut values = flow.into_values();
+                let mut values = flow.into_output_storage();
                 values.truncate(*count);
                 RuntimeFlow::OutputList(values)
             }
         }
         RequestedOutputCount::CurrentFunctionNargout
         | RequestedOutputCount::DestinationSequenceCardinality => match flow.kind() {
-            ValueSequenceKind::Single => first_runtime_flow_value(flow),
-            ValueSequenceKind::CommaSeparated => RuntimeFlow::OutputList(flow.into_values()),
+            ValueSequenceKind::Single => first_runtime_flow_value(flow)?,
+            ValueSequenceKind::CommaSeparated => {
+                RuntimeFlow::OutputList(flow.into_output_storage())
+            }
         },
     };
     Ok(outcome)
 }
 
-fn first_runtime_flow_value(sequence: runmat_value::ValueSequence) -> crate::abi::RuntimeFlow {
+fn first_runtime_flow_value(
+    sequence: runmat_value::ValueSequence,
+) -> Result<crate::abi::RuntimeFlow, RunError> {
     sequence
-        .into_values()
-        .into_iter()
-        .next()
-        .map(crate::abi::RuntimeFlow::Single)
-        .unwrap_or(crate::abi::RuntimeFlow::NoValue)
+        .into_output_storage()
+        .try_into_first()
+        .map_err(|_| {
+            RunError::Runtime(runmat_runtime::sequence::sequence_error_to_runtime(
+                runmat_value::ValueSequenceError::SharedOutputStorage,
+            ))
+        })
+        .map(|value| {
+            value
+                .map(crate::abi::RuntimeFlow::Single)
+                .unwrap_or(crate::abi::RuntimeFlow::NoValue)
+        })
 }
 
 fn resolve_source_identity(
@@ -1862,14 +1879,14 @@ mod tests {
         };
 
         let zero = apply_requested_output_policy(
-            outcome(RuntimeFlow::OutputList(vec![Value::Num(1.0)])),
+            outcome(RuntimeFlow::output_list(vec![Value::Num(1.0)])),
             &RequestedOutputCount::Zero,
         )
         .unwrap();
         assert!(matches!(zero.flow, RuntimeFlow::NoValue));
 
         let one = apply_requested_output_policy(
-            outcome(RuntimeFlow::OutputList(vec![
+            outcome(RuntimeFlow::output_list(vec![
                 Value::Num(1.0),
                 Value::Num(2.0),
             ])),
@@ -1885,15 +1902,15 @@ mod tests {
         .unwrap();
         assert!(matches!(
             many.flow,
-            RuntimeFlow::OutputList(ref values) if values == &[Value::Num(1.0)]
+            RuntimeFlow::OutputList(ref values) if values.as_slice() == [Value::Num(1.0)]
         ));
     }
 
     #[test]
     fn requested_output_policy_rejects_legacy_sequences_at_any_depth() {
         for flow in [
-            RuntimeFlow::Single(Value::OutputList(vec![Value::Num(1.0)])),
-            RuntimeFlow::OutputList(vec![Value::OutputList(vec![Value::Num(1.0)])]),
+            RuntimeFlow::Single(Value::output_list(vec![Value::Num(1.0)])),
+            RuntimeFlow::output_list(vec![Value::output_list(vec![Value::Num(1.0)])]),
         ] {
             let error = apply_requested_output_policy(
                 ExecutionOutcome {

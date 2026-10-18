@@ -50,7 +50,24 @@ pub const BANDWIDTH_INPUTS_SELECTOR: [BuiltinParamDescriptor; 2] = [
     },
 ];
 
-pub const BANDWIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
+pub const BANDWIDTH_INPUTS_TF: [BuiltinParamDescriptor; 2] = [
+    BuiltinParamDescriptor {
+        name: "sys",
+        ty: BuiltinParamType::Any,
+        arity: BuiltinParamArity::Required,
+        default: None,
+        description: "Zero-delay scalar SISO tf model.",
+    },
+    BuiltinParamDescriptor {
+        name: "dbdrop",
+        ty: BuiltinParamType::NumericScalar,
+        arity: BuiltinParamArity::Optional,
+        default: Some("-3"),
+        description: "Finite negative gain drop in decibels.",
+    },
+];
+
+pub const BANDWIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 3] = [
     BuiltinSignatureDescriptor {
         label: "[lower, upper] = bandwidth(A)",
         inputs: &BANDWIDTH_INPUTS,
@@ -59,6 +76,11 @@ pub const BANDWIDTH_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
     BuiltinSignatureDescriptor {
         label: "b = bandwidth(A, selector)",
         inputs: &BANDWIDTH_INPUTS_SELECTOR,
+        outputs: &BANDWIDTH_OUTPUT_SCALAR,
+    },
+    BuiltinSignatureDescriptor {
+        label: "w = bandwidth(sys, dbdrop)",
+        inputs: &BANDWIDTH_INPUTS_TF,
         outputs: &BANDWIDTH_OUTPUT_SCALAR,
     },
 ];
@@ -84,10 +106,18 @@ pub const BANDWIDTH_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescrip
     message: "bandwidth: internal runtime failure",
 };
 
-pub const BANDWIDTH_ERRORS: [BuiltinErrorDescriptor; 3] = [
+pub const BANDWIDTH_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.BANDWIDTH.UNSUPPORTED_MODEL",
+    identifier: Some("RunMat:bandwidth:UnsupportedModel"),
+    when: "A transfer function is well formed but outside the current zero-delay scalar SISO physical-frequency subset.",
+    message: "bandwidth: unsupported model",
+};
+
+pub const BANDWIDTH_ERRORS: [BuiltinErrorDescriptor; 4] = [
     BANDWIDTH_ERROR_INVALID_ARGUMENT,
     BANDWIDTH_ERROR_INVALID_INPUT,
     BANDWIDTH_ERROR_INTERNAL,
+    BANDWIDTH_ERROR_UNSUPPORTED_MODEL,
 ];
 
 pub const BANDWIDTH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {

@@ -1,5 +1,5 @@
 use runmat_gc::{GcHandle, PreparedRootPlan, Trace, Tracer};
-use runmat_value::{Value, ValueSequence};
+use runmat_value::{OutputListStorage, Value, ValueSequence};
 
 use super::ExecutionServiceError;
 
@@ -26,7 +26,7 @@ pub type RootedValue = RootedResult<Value>;
 /// [`RootedValueSequence`].
 #[derive(Clone, Debug)]
 pub struct RootedValues {
-    values: Vec<Value>,
+    values: OutputListStorage,
     _roots: RetainedValueRoots,
 }
 
@@ -208,7 +208,7 @@ impl RootedValuesBuilder {
 
     pub fn finish(self) -> Result<RootedValues, ExecutionServiceError> {
         Ok(RootedValues {
-            values: self.values,
+            values: OutputListStorage::unbounded(self.values),
             _roots: self.member_roots.finish(),
         })
     }
@@ -242,7 +242,7 @@ impl RootedValues {
             },
         )?;
         Ok(Self {
-            values,
+            values: OutputListStorage::unbounded(values),
             _roots: RetainedValueRoots::direct(roots),
         })
     }
@@ -254,28 +254,73 @@ impl RootedValues {
             ))
         })?;
         Ok(Self {
+            values: OutputListStorage::unbounded(values),
+            _roots: RetainedValueRoots::direct(roots),
+        })
+    }
+
+    /// Retain the canonical output backing and its physical claim while
+    /// registering the Values' independent managed roots.
+    pub fn from_output_storage(values: OutputListStorage) -> Result<Self, ExecutionServiceError> {
+        let roots = RootedValueHandles::for_values(values.iter()).map_err(|error| {
+            ExecutionServiceError::Infrastructure(format!(
+                "could not root retained future inputs: {error}"
+            ))
+        })?;
+        Ok(Self {
+            values,
+            _roots: RetainedValueRoots::direct(roots),
+        })
+    }
+
+    pub fn from_output_storage_in_context(
+        values: OutputListStorage,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let roots = RootedValueHandles::for_values_slice_in_context(values.as_slice(), runtime)
+            .map_err(|source| match source {
+                RootedValueAdmissionError::Host(source) => {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Call:Arguments",
+                        "function argument root admission failed",
+                        source,
+                    )
+                }
+                RootedValueAdmissionError::Gc(source) => {
+                    crate::runtime_error::semantic_error_with_source(
+                        "RunMat:Call:Arguments",
+                        "function argument root admission failed",
+                        source,
+                    )
+                }
+            })?;
+        Ok(Self {
             values,
             _roots: RetainedValueRoots::direct(roots),
         })
     }
 
     pub fn values(&self) -> &[Value] {
-        &self.values
+        self.values.as_slice()
     }
 
-    /// Publish retained values into a registered sink before their temporary
-    /// root lease can notify retirement observers.
-    pub fn with_owned_values<R>(self, publish: impl FnOnce(Vec<Value>) -> R) -> R {
+    /// Transfer the original collection owner while the prior roots remain
+    /// live through synchronous publication. Claimed backing is never turned
+    /// into a bare Vec or reallocated here.
+    pub fn with_owned_output_storage<R>(self, publish: impl FnOnce(OutputListStorage) -> R) -> R {
         let Self { values, _roots } = self;
         let result = publish(values);
         drop(_roots);
         result
     }
 
-    /// Keep the input lease through an effectful consumer. The returned value
-    /// must itself be rooted before this future completes if it can contain
-    /// managed outputs; this method transfers only the argument ownership.
-    pub async fn with_owned_values_async<R, F>(self, consume: impl FnOnce(Vec<Value>) -> F) -> R
+    /// Async form of the exact-owner handoff. The root lease remains in the
+    /// suspended future through completion of the consumer.
+    pub async fn with_owned_output_storage_async<R, F>(
+        self,
+        consume: impl FnOnce(OutputListStorage) -> F,
+    ) -> R
     where
         F: std::future::Future<Output = R>,
     {
@@ -284,19 +329,72 @@ impl RootedValues {
         drop(_roots);
         result
     }
+
+    /// Compatibility handoff for APIs that still require a bare Vec. Exact
+    /// backing is refused rather than losing its physical claim. This is not
+    /// an admission mechanism for a new contiguous collection.
+    pub fn with_unbounded_values<R>(
+        self,
+        publish: impl FnOnce(Vec<Value>) -> R,
+    ) -> Result<R, crate::RuntimeError> {
+        let Self { values, _roots } = self;
+        let values = values
+            .try_into_owned()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?
+            .try_into_unbounded_vec()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
+        let result = publish(values);
+        drop(_roots);
+        Ok(result)
+    }
+
+    /// Async compatibility handoff with the same explicit finite refusal.
+    pub async fn with_unbounded_values_async<R, F>(
+        self,
+        consume: impl FnOnce(Vec<Value>) -> F,
+    ) -> Result<R, crate::RuntimeError>
+    where
+        F: std::future::Future<Output = R>,
+    {
+        let Self { values, _roots } = self;
+        let values = values
+            .try_into_owned()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?
+            .try_into_unbounded_vec()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
+        let result = consume(values).await;
+        drop(_roots);
+        Ok(result)
+    }
 }
 
 impl std::ops::Deref for RootedValues {
     type Target = [Value];
 
     fn deref(&self) -> &Self::Target {
-        &self.values
+        self.values.as_slice()
     }
 }
 
 impl PartialEq<Vec<Value>> for RootedValues {
     fn eq(&self, other: &Vec<Value>) -> bool {
-        &self.values == other
+        self.values.as_slice() == other.as_slice()
     }
 }
 
@@ -407,9 +505,56 @@ impl PartialEq<RootedValueSequence> for ValueSequence {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests {
     use super::*;
-    use runmat_value::{HandleRef, Value};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use runmat_value::{
+        ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
+        HandleRef, Value,
+    };
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Arc;
+
+    #[derive(Debug)]
+    struct OutputPermit(Arc<AtomicUsize>);
+    #[derive(Debug)]
+    struct OutputClaim(Arc<AtomicUsize>, usize);
+    impl ExactHostAllocationReservation for OutputClaim {}
+    impl Drop for OutputClaim {
+        fn drop(&mut self) {
+            self.0.fetch_sub(self.1, Ordering::SeqCst);
+        }
+    }
+    impl ExactHostAllocationPermit for OutputPermit {
+        fn reserve_exact(
+            &self,
+            bytes: usize,
+        ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError>
+        {
+            self.0.fetch_add(bytes, Ordering::SeqCst);
+            Ok(Arc::new(OutputClaim(Arc::clone(&self.0), bytes)))
+        }
+    }
+
+    #[test]
+    fn rooted_output_handoff_retains_exact_backing_without_vec_materialization() {
+        let live = Arc::new(AtomicUsize::new(0));
+        let storage = OutputListStorage::try_initialize(2, &OutputPermit(Arc::clone(&live)), |i| {
+            Ok::<_, ()>(Value::Num(i as f64 + 1.0))
+        })
+        .expect("admitted output storage");
+        let pointer = storage.as_slice().as_ptr();
+        let rooted = RootedValues::from_output_storage(storage).expect("root output values");
+        assert!(live.load(Ordering::SeqCst) > 0);
+        let sequence = rooted.with_owned_output_storage(|storage| {
+            assert_eq!(storage.as_slice().as_ptr(), pointer);
+            RootedValueSequence::new(
+                ValueSequence::from_output_storage(storage).expect("valid output sequence"),
+            )
+            .expect("root successor")
+        });
+        assert_eq!(sequence.as_slice().as_ptr(), pointer);
+        assert!(live.load(Ordering::SeqCst) > 0);
+        drop(sequence);
+        assert_eq!(live.load(Ordering::SeqCst), 0);
+    }
 
     #[test]
     fn unmanaged_values_need_no_shared_root_owner() {

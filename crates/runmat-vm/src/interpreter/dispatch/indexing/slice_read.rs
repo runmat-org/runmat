@@ -10,7 +10,7 @@ use runmat_runtime::indexing::symbolic::apply_function_reference as apply_symbol
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     _vars: &mut InterpreterVars,
     function_registry: &crate::bytecode::FunctionRegistry,
     _pc: usize,
@@ -64,7 +64,8 @@ pub(super) async fn dispatch(
                             1,
                         )
                         .await?;
-                        resolve_single_sequence(sequence)?.with_owned(|value| stack.push(value));
+                        resolve_single_sequence(sequence)?
+                            .with_owned(|value| stack.try_push(value))?;
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
                             .expect("object-like values have an object-array shape");
@@ -72,9 +73,9 @@ pub(super) async fn dispatch(
                             build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
                                 .await?;
                         let plan = build_index_plan(&selectors, *dims, &shape)?;
-                        stack.push(runmat_runtime::indexing::object::read_with_plan(
+                        stack.try_push(runmat_runtime::indexing::object::read_with_plan(
                             &base, &plan,
-                        )?);
+                        )?)?;
                     }
                 }
                 Value::FunctionHandle(_)
@@ -99,7 +100,8 @@ pub(super) async fn dispatch(
                     .await?
                     {
                         crate::call::feval::FevalDispatch::Completed(sequence) => {
-                            resolve_single_sequence(sequence)?.with_owned(|value| stack.push(value))
+                            resolve_single_sequence(sequence)?
+                                .with_owned(|value| stack.try_push(value))?
                         }
                     }
                 }
@@ -111,11 +113,11 @@ pub(super) async fn dispatch(
                                 "symbolic function calls do not support colon or end selector syntax",
                             ));
                         }
-                        stack.push(apply_symbolic_function_reference(
+                        stack.try_push(apply_symbolic_function_reference(
                             name, parameters, &numeric,
-                        )?);
+                        )?)?;
                     } else {
-                        stack.push(
+                        stack.try_push(
                             read_scalar_like_slice(
                                 &Value::Symbolic(expr),
                                 *dims,
@@ -124,12 +126,12 @@ pub(super) async fn dispatch(
                                 &numeric,
                             )
                             .await?,
-                        );
+                        )?;
                     }
                 }
                 Value::Tensor(t) => {
                     if *dims == 1 {
-                        stack.push(
+                        stack.try_push(
                             idx_read_slice::read_tensor_slice_1d(
                                 &t,
                                 *colon_mask,
@@ -137,9 +139,9 @@ pub(super) async fn dispatch(
                                 &numeric,
                             )
                             .await?,
-                        )
+                        )?
                     } else {
-                        stack.push(
+                        stack.try_push(
                             idx_read_slice::read_tensor_slice_nd(
                                 &t,
                                 *dims,
@@ -148,10 +150,10 @@ pub(super) async fn dispatch(
                                 &numeric,
                             )
                             .await?,
-                        )
+                        )?
                     }
                 }
-                Value::ComplexTensor(ct) => stack.push(
+                Value::ComplexTensor(ct) => stack.try_push(
                     idx_read_slice::read_complex_slice(
                         &ct,
                         *dims,
@@ -160,12 +162,12 @@ pub(super) async fn dispatch(
                         &numeric,
                     )
                     .await?,
-                ),
-                Value::SparseTensor(st) => stack.push(
+                )?,
+                Value::SparseTensor(st) => stack.try_push(
                     idx_read_slice::read_sparse_slice(&st, *dims, *colon_mask, *end_mask, &numeric)
                         .await?,
-                ),
-                Value::GpuTensor(handle) => stack.push(
+                )?,
+                Value::GpuTensor(handle) => stack.try_push(
                     idx_read_slice::read_gpu_slice(
                         &handle,
                         *dims,
@@ -174,11 +176,11 @@ pub(super) async fn dispatch(
                         &numeric,
                     )
                     .await?,
-                ),
-                Value::StringArray(sa) => stack.push(
+                )?,
+                Value::StringArray(sa) => stack.try_push(
                     idx_read_slice::read_string_slice(&sa, *dims, *colon_mask, *end_mask, &numeric)
                         .await?,
-                ),
+                )?,
                 Value::CharArray(chars) => {
                     let selectors = build_slice_selectors(
                         *dims,
@@ -189,17 +191,17 @@ pub(super) async fn dispatch(
                     )
                     .await?;
                     let plan = build_index_plan(&selectors, *dims, chars.shape())?;
-                    stack.push(runmat_runtime::indexing::value::read_with_plan(
+                    stack.try_push(runmat_runtime::indexing::value::read_with_plan(
                         Value::CharArray(chars),
                         &plan,
-                    )?);
+                    )?)?;
                 }
                 Value::Cell(ca) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ca.shape)
                             .await?;
                     let plan = build_index_plan(&selectors, *dims, &ca.shape)?;
-                    stack.push(gather_cell_with_plan(&ca, &plan)?);
+                    stack.try_push(gather_cell_with_plan(&ca, &plan)?)?;
                 }
                 Value::StructArray(array) => {
                     let selectors = build_slice_selectors(
@@ -211,13 +213,13 @@ pub(super) async fn dispatch(
                     )
                     .await?;
                     let plan = build_index_plan(&selectors, *dims, array.shape())?;
-                    stack.push(gather_struct_array_with_plan(&array, &plan)?);
+                    stack.try_push(gather_struct_array_with_plan(&array, &plan)?)?;
                 }
                 other => {
-                    stack.push(
+                    stack.try_push(
                         read_scalar_like_slice(&other, *dims, *colon_mask, *end_mask, &numeric)
                             .await?,
-                    );
+                    )?;
                 }
             }
             if logical_base {
@@ -231,7 +233,7 @@ pub(super) async fn dispatch(
                     Value::Bool(_) | Value::LogicalArray(_) => result,
                     other => other,
                 };
-                stack.push(converted);
+                stack.try_push(converted)?;
             }
             Ok(true)
         }

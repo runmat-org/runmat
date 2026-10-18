@@ -20,11 +20,11 @@ fn selected_dispatcher_admits_each_form_requested_output_count() {
             &runtime, name, &bounds, 0,
         ))
         .expect("zero-output form is discarded");
-        assert_eq!(discarded, Value::OutputList(Vec::new()));
+        assert_eq!(discarded, Value::output_list(Vec::new()));
         let implicit =
             futures::executor::block_on(call_builtin_async_in_context(&runtime, name, &bounds))
                 .expect("implicit statement form");
-        assert_eq!(implicit, Value::OutputList(Vec::new()));
+        assert_eq!(implicit, Value::output_list(Vec::new()));
         let error = futures::executor::block_on(call_builtin_async_with_outputs_in_context(
             &runtime, name, &bounds, 1,
         ))
@@ -62,7 +62,7 @@ fn selected_dispatcher_admits_each_form_requested_output_count() {
             0,
         ))
         .expect("discarded legacy result");
-        assert_eq!(discarded, Value::OutputList(Vec::new()));
+        assert_eq!(discarded, Value::output_list(Vec::new()));
         let error = futures::executor::block_on(call_builtin_async_with_outputs_in_context(
             &runtime,
             NARGOUTCHK_BUILTIN_NAME,
@@ -99,7 +99,7 @@ fn narginchk_uses_runtime_call_count_context() {
     let value =
         dispatch_narginchk_in_context(Some(&runtime), vec![Value::Num(1.0), Value::Num(2.0)])
             .expect("narginchk succeeds");
-    assert_eq!(value, Value::OutputList(Vec::new()));
+    assert_eq!(value, Value::output_list(Vec::new()));
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn nargoutchk_uses_runtime_call_count_context() {
     let value =
         dispatch_nargoutchk_in_context(Some(&runtime), vec![Value::Num(1.0), Value::Num(1.0)])
             .expect("nargoutchk succeeds");
-    assert_eq!(value, Value::OutputList(Vec::new()));
+    assert_eq!(value, Value::output_list(Vec::new()));
 }
 
 #[test]
@@ -205,7 +205,7 @@ fn arity_bounds_read_typed_integer_tensor_storage_exactly() {
     let value =
         dispatch_narginchk_in_context(Some(&runtime), vec![Value::Tensor(min), Value::Tensor(max)])
             .expect("narginchk succeeds");
-    assert_eq!(value, Value::OutputList(Vec::new()));
+    assert_eq!(value, Value::output_list(Vec::new()));
 
     assert_eq!(
         parse_finite_arity_bound(
@@ -277,7 +277,7 @@ fn positive_single_infinity_is_an_admitted_maximum() {
             ),
         )
         .expect("single positive infinity admits an unbounded max");
-        assert_eq!(value, Value::OutputList(Vec::new()));
+        assert_eq!(value, Value::output_list(Vec::new()));
     }
 }
 
@@ -301,7 +301,7 @@ fn arity_checks_accept_every_documented_integer_class() {
                 vec![Value::Int(min.clone()), Value::Int(max.clone())]
             )
             .expect("documented integer narginchk bounds"),
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         );
         assert_eq!(
             dispatch_nargoutchk_in_context(
@@ -309,7 +309,7 @@ fn arity_checks_accept_every_documented_integer_class() {
                 vec![Value::Int(min.clone()), Value::Int(max.clone())]
             )
             .expect("documented integer nargoutchk bounds"),
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         );
         let text = dispatch_nargoutchk(vec![
             Value::Int(min.clone()),

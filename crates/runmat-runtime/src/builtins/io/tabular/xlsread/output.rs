@@ -86,13 +86,13 @@ impl XlsReadResult {
             return Ok(self.num.expect("num output"));
         }
         match (outputs.num, outputs.txt, outputs.raw) {
-            (false, false, false) => Ok(Value::OutputList(Vec::new())),
-            (true, false, false) => Ok(Value::OutputList(vec![self.num.expect("num output")])),
-            (true, true, false) => Ok(Value::OutputList(vec![
+            (false, false, false) => Ok(Value::output_list(Vec::new())),
+            (true, false, false) => Ok(Value::output_list(vec![self.num.expect("num output")])),
+            (true, true, false) => Ok(Value::output_list(vec![
                 self.num.expect("num output"),
                 self.txt.expect("txt output"),
             ])),
-            (true, true, true) => Ok(Value::OutputList(vec![
+            (true, true, true) => Ok(Value::output_list(vec![
                 self.num.expect("num output"),
                 self.txt.expect("txt output"),
                 self.raw.expect("raw output"),

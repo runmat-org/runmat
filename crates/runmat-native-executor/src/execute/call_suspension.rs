@@ -140,6 +140,14 @@ pub(super) enum CompletedPayload {
     Terminator(Box<TerminatorReady>),
 }
 
+pub(super) fn own_output_storage(
+    values: runmat_value::OutputListStorage,
+) -> NativeExecutorResult<runmat_value::OwnedOutputListValues> {
+    values.try_into_owned().map_err(|_| {
+        NativeExecutorError::Host("native output adoption requires unique canonical storage".into())
+    })
+}
+
 impl CompletedCall {
     fn new(
         request: NativeSiteRequest,
@@ -323,12 +331,12 @@ pub(super) async fn complete(
                     requested_outputs,
                 )?),
                 CallCompletion::RootedArguments(arguments) => {
-                    CompletedPayload::Values(adopt_rooted_arguments(state, arguments))
+                    CompletedPayload::Values(adopt_rooted_arguments(state, arguments)?)
                 }
                 CallCompletion::RootedExpandedCallArguments(arguments) => {
                     CompletedPayload::ExpandedCallArguments(adopt_rooted_arguments(
                         state, arguments,
-                    ))
+                    )?)
                 }
                 CallCompletion::Lexical {
                     result,
@@ -337,11 +345,11 @@ pub(super) async fn complete(
                     let outputs = result.with_owned(|result| {
                         state.apply_lexical_captures(result.captures)?;
                         super::call::normalize_sequence_outputs(result.outputs, requested_outputs)
-                            .map(|values| {
-                                values
+                            .and_then(|values| {
+                                Ok(own_output_storage(values)?
                                     .into_iter()
                                     .map(|value| state.arena.insert(value))
-                                    .collect()
+                                    .collect())
                             })
                     })?;
                     CompletedPayload::Values(outputs)

@@ -103,7 +103,7 @@ fn all_controls_preserve_distinct_rate_and_callback_requests() {
         let arguments = tokens.into_iter().map(Value::from).collect();
         assert_eq!(
             block_on(drawnow_builtin(Some(runtime), Some(0), arguments)).unwrap(),
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         );
         assert_eq!(requests.borrow().as_slice(), &[expected]);
     }
@@ -117,7 +117,7 @@ fn no_figure_still_requires_processed_callbacks_and_no_service_is_not_success() 
     });
     assert_eq!(
         block_on(drawnow_builtin(Some(runtime), Some(0), vec![])).unwrap(),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
     assert_eq!(requests.borrow().len(), 1);
 
@@ -452,7 +452,7 @@ fn update_busy_deferral_is_distinct_from_rate_limiting() {
             vec![Value::from("update")]
         ))
         .unwrap(),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
 }
 
@@ -476,7 +476,7 @@ fn terminal_success_and_error_win_same_poll_cancellation() {
         let outcome = block_on(drawnow_builtin(Some(runtime), Some(0), vec![]));
         assert!(cancellation.token().is_cancelled());
         match outcome {
-            Ok(value) => assert_eq!(value, Value::OutputList(Vec::new())),
+            Ok(value) => assert_eq!(value, Value::output_list(Vec::new())),
             Err(error) => {
                 assert_eq!(error.identifier(), Some("Host:Terminal"));
                 assert_eq!(

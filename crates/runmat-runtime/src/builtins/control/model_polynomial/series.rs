@@ -179,7 +179,7 @@ impl SeriesModel {
 
     fn gain_for(gain: num_complex::Complex64, peer: &Self) -> BuiltinResult<Self> {
         let (variable, sample_time) = match peer {
-            Self::Tf(model) => (model.variable.clone(), model.sample_time),
+            Self::Tf(model) => (model.variable.as_str().to_owned(), model.sample_time()),
             Self::Ss(model) if model.sample_time > 0.0 => ("z".to_owned(), model.sample_time),
             Self::Ss(_) | Self::Gain(_) => ("s".to_owned(), 0.0),
         };
@@ -305,7 +305,7 @@ impl RealStateSpace {
             b,
             c,
             d: DMatrix::from_element(1, 1, direct),
-            sample_time: model.sample_time,
+            sample_time: model.sample_time(),
             input_names: vec![String::new()],
             output_names: vec![String::new()],
         })

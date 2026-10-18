@@ -57,7 +57,7 @@ async fn deep_learning_square_grad_helper(
                 )
                 .await?;
                 gradient.with_owned(|gradient| {
-                    RootedValue::new(Value::OutputList(vec![loss, gradient]))
+                    RootedValue::new(Value::output_list(vec![loss, gradient]))
                         .map_err(|error| error.into_runtime_error())
                 })
             })
@@ -81,7 +81,7 @@ async fn deep_learning_network_grad_helper(
 ) -> BuiltinResult<RootedValue> {
     let inputs = RootedValues::new(vec![net, x]).map_err(|error| error.into_runtime_error())?;
     inputs
-        .with_owned_values_async(|mut inputs| async move {
+        .with_unbounded_values_async(|mut inputs| async move {
             let x = inputs.pop().expect("fixture input x");
             let net = inputs.pop().expect("fixture input network");
             let y = call_one(
@@ -109,5 +109,5 @@ async fn deep_learning_network_grad_helper(
             })
             .await
         })
-        .await
+        .await?
 }

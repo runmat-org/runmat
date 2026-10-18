@@ -80,13 +80,14 @@ pub fn prepare_workspace_guard(
 }
 
 pub fn create_gc_context<'roots>(
-    stack: &'roots Vec<Value>,
+    stack: &'roots crate::interpreter::stack::InterpreterStack,
     vars: &'roots InterpreterVars,
     locals: &'roots Vec<Value>,
     sequence: &'roots crate::interpreter::dispatch::SequenceState,
     thread_roots: Vec<Value>,
 ) -> Result<InterpretContext<'roots>, String> {
-    let mut gc_context = InterpretContext::new_frame(stack, vars, locals, sequence)?;
+    let mut gc_context =
+        InterpretContext::new_frame(stack.gc_root_owner(), vars, locals, sequence)?;
     let _ = gc_context.register_global_values(thread_roots, "thread_globals_persistents");
     Ok(gc_context)
 }

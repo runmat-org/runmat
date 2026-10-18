@@ -118,7 +118,7 @@ async fn execute(
     };
 
     let published = match requested_outputs {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(count) => eval.output_list(count),
         None => eval.x_value(),
     }?;

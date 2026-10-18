@@ -198,13 +198,13 @@ fn output_result(result: Cheb2ordResult) -> BuiltinResult<Value> {
     };
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![order]));
+            return Ok(Value::output_list(vec![order]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![order, wn]));
+            return Ok(Value::output_list(vec![order, wn]));
         }
         return Err(cheb2ord_error(&CHEB2ORD_ERROR_TOO_MANY_OUTPUTS));
     }

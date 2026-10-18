@@ -62,7 +62,7 @@ async fn size_builtin(value: Value, selectors: Vec<Value>) -> BuiltinResult<Valu
 
 fn unselected_size(dimensions: &VisibleDimensions) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(count) if count > 1 => {
             let values = dimensions.collapsed_outputs(count).ok_or_else(|| {
                 descriptor_error(
@@ -78,7 +78,7 @@ fn unselected_size(dimensions: &VisibleDimensions) -> BuiltinResult<Value> {
 
 fn selected_size(values: &[u64]) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(count) if count > 1 => {
             if count != values.len() {
                 return Err(descriptor_error(
@@ -102,7 +102,7 @@ fn scalar_outputs(values: &[u64]) -> BuiltinResult<Value> {
         .copied()
         .map(scalar_value)
         .collect::<BuiltinResult<Vec<_>>>()
-        .map(Value::OutputList)
+        .map(Value::output_list)
 }
 
 fn scalar_value(value: u64) -> BuiltinResult<Value> {
@@ -203,7 +203,7 @@ mod tests {
         let tensor = Tensor::new(vec![0.0; 60], vec![3, 4, 5]).unwrap();
         assert_eq!(
             call(Value::Tensor(tensor), vec![]).unwrap(),
-            Value::OutputList(vec![Value::Num(3.0), Value::Num(20.0)])
+            Value::output_list(vec![Value::Num(3.0), Value::Num(20.0)])
         );
     }
 
@@ -220,7 +220,7 @@ mod tests {
         let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
         assert_eq!(
             call(Value::Tensor(tensor.clone()), vec![Value::Tensor(dims)]).unwrap(),
-            Value::OutputList(vec![Value::Num(2.0), Value::Num(4.0)])
+            Value::output_list(vec![Value::Num(2.0), Value::Num(4.0)])
         );
         assert!(call(Value::Tensor(tensor), vec![Value::Num(1.0)]).is_err());
     }

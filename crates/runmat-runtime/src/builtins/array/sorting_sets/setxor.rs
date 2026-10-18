@@ -362,7 +362,7 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -371,7 +371,7 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
                 vec![eval.into_values_value()],
                 setxor_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
         let mut host_outputs = vec![values, ia, ib];
@@ -382,7 +382,7 @@ async fn setxor_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinR
             host_outputs,
             setxor_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,

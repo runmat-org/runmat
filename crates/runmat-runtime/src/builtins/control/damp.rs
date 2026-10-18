@@ -13,8 +13,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::control::tf_model::{
-    control_error, output_complex_column, polynomial_roots, ss_poles_from_object_async, TfModel,
-    EPS, SS_CLASS, TF_CLASS,
+    control_error, output_complex_column, ss_poles_from_object_async, TfModel, TfSampleDomain, EPS,
+    SS_CLASS, TF_CLASS,
 };
 use crate::BuiltinResult;
 
@@ -62,13 +62,13 @@ async fn damp_builtin(sys: Value) -> BuiltinResult<Value> {
     }
     let eval = DampingEval::from_value(sys).await?;
     match output_count {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![eval.wn_value()?])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![eval.wn_value()?])),
+        Some(2) => Ok(Value::output_list(vec![
             eval.wn_value()?,
             eval.zeta_value()?,
         ])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(3) => Ok(Value::output_list(vec![
             eval.wn_value()?,
             eval.zeta_value()?,
             eval.poles_value()?,
@@ -95,8 +95,11 @@ impl DampingEval {
         match value {
             Value::Object(object) if object.is_class(TF_CLASS) => {
                 let model = TfModel::from_value_async(Value::Object(object), BUILTIN_NAME).await?;
-                let poles = polynomial_roots(&model.denominator, BUILTIN_NAME)?;
-                Ok(Self::from_poles(poles, model.sample_time))
+                if model.sample_domain() == TfSampleDomain::DiscreteUnspecified {
+                    return Err(damp_error(&DAMP_ERROR_UNSUPPORTED_MODEL,
+                        "damp: discrete model requires a known positive sample time for physical natural frequency"));
+                }
+                Ok(Self::from_poles(model.poles()?, model.sample_time()))
             }
             Value::Object(object) if object.is_class(SS_CLASS) => {
                 let (poles, sample_time) =
@@ -251,7 +254,7 @@ mod tests {
         let Value::OutputList(outputs) = block_on(damp_builtin(sys)).expect("damp") else {
             panic!("expected output list");
         };
-        outputs
+        crate::sequence::into_unbounded_output_values(outputs).expect("ordinary damp outputs")
     }
 
     fn tensor_data(value: &Value) -> Vec<f64> {

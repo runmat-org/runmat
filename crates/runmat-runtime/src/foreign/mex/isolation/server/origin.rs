@@ -42,7 +42,7 @@ impl<W: Write> IsolatedOriginBoundaryAdapter<W> {
     ) -> Result<Vec<MxArray>, MexDiagnostic> {
         let values = decode_value_transfers_rooted(values, &self.host.snapshots)
             .map_err(Self::callback_error)?;
-        values.with_owned_values(|values| {
+        values.with_owned_output_storage(|values| {
             values
                 .iter()
                 .map(|value| self.codec.encode(value))

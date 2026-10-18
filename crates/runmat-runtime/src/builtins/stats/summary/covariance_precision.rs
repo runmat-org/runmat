@@ -98,11 +98,13 @@ impl CovariancePrecision {
                 .map(Value::ComplexTensor)
                 .map_err(error)
             }
-            Value::OutputList(values) => values
-                .into_iter()
-                .map(|value| self.cast_host(value, builtin))
-                .collect::<BuiltinResult<Vec<_>>>()
-                .map(Value::OutputList),
+            Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values)
+                .map_err(crate::sequence::sequence_error_to_runtime)?
+                .try_map(
+                    |value| self.cast_host(value, builtin),
+                    crate::sequence::sequence_error_to_runtime,
+                )
+                .map(|sequence| Value::OutputList(sequence.into_output_storage())),
             other => Ok(other),
         }
     }
@@ -342,7 +344,7 @@ mod tests {
 
     #[test]
     fn host_cast_preserves_shape_and_all_output_classes() {
-        let input = Value::OutputList(vec![
+        let input = Value::output_list(vec![
             Value::Tensor(Tensor::new(vec![0.25], vec![1, 1]).unwrap()),
             Value::Tensor(Tensor::new(vec![0.5, 0.75], vec![2, 1]).unwrap()),
         ]);

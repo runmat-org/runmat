@@ -1,6 +1,8 @@
 //! Shared SISO transfer-function object parsing, construction, and algebra.
 mod admission;
+mod domain;
 mod numerics;
+mod physical;
 mod power;
 #[cfg(test)]
 mod boundary_tests;
@@ -10,7 +12,9 @@ use admission::{
     admit_coefficient_property, admit_delay_property, admit_sample_time_property,
     preflight_host_model_properties,
 };
+pub use domain::{TfPolynomialBasis, TfSampleDomain, TfVariable};
 use numerics::{finite_complex_ratio, finite_complex_ratio_direction};
+pub use physical::PhysicalPolynomials;
 use runmat_types::MemberAccess;
 
 use std::collections::HashMap;
@@ -65,8 +69,8 @@ static TF_CLASS_REGISTERED: crate::class_registry::ClassRegistration =
 pub struct TfModel {
     pub numerator: Vec<Complex64>,
     pub denominator: Vec<Complex64>,
-    pub variable: String,
-    pub sample_time: f64,
+    pub variable: TfVariable,
+    pub sample_domain: TfSampleDomain,
     pub input_delay: f64,
     pub output_delay: f64,
 }
@@ -75,7 +79,7 @@ pub struct TfModel {
 pub struct RealTfModel {
     pub numerator: Vec<f64>,
     pub denominator: Vec<f64>,
-    pub sample_time: f64,
+    pub sample_domain: TfSampleDomain,
     pub input_delay: f64,
     pub output_delay: f64,
 }
@@ -196,16 +200,16 @@ impl TfModel {
                 "tf: invalid denominator coefficients: denominator coefficients must not all be zero",
             ));
         }
-        let variable = validate_variable(&options.variable, "tf")?;
-        validate_sample_time(options.sample_time, "tf")?;
-        validate_variable_domain(&variable, options.sample_time, "tf")?;
+        let variable = TfVariable::parse(&options.variable, "tf")?;
+        let sample_domain = TfSampleDomain::parse(options.sample_time, variable, "tf")?;
         validate_delay(input_delay, "InputDelay", "tf")?;
         validate_delay(output_delay, "OutputDelay", "tf")?;
+        let (numerator, denominator) = physical_coefficients(numerator, denominator, variable);
         Ok(Self {
-            numerator: trim_leading_complex_zeros(numerator),
-            denominator: trim_leading_complex_zeros(denominator),
+            numerator,
+            denominator,
             variable,
-            sample_time: options.sample_time,
+            sample_domain,
             input_delay,
             output_delay,
         })
@@ -224,11 +228,20 @@ impl TfModel {
     }
 
     pub fn discrete_variable(variable: impl Into<String>, sample_time: f64) -> BuiltinResult<Self> {
+        let variable = variable.into();
+        let coefficients = if matches!(
+            TfVariable::parse(&variable, "tf")?.basis(),
+            TfPolynomialBasis::DiscreteInverse
+        ) {
+            vec![Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)]
+        } else {
+            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)]
+        };
         Self::new(
-            vec![Complex64::new(1.0, 0.0), Complex64::new(0.0, 0.0)],
+            coefficients,
             vec![Complex64::new(1.0, 0.0)],
             TfOptions {
-                variable: variable.into(),
+                variable,
                 sample_time,
             },
         )
@@ -302,7 +315,6 @@ impl TfModel {
         }
         let input_delay = scalar_property(&object, "InputDelay", builtin)?;
         let output_delay = scalar_property(&object, "OutputDelay", builtin)?;
-        validate_sample_time(sample_time, builtin)?;
         validate_delay(input_delay, "InputDelay", builtin)?;
         validate_delay(output_delay, "OutputDelay", builtin)?;
         if all_zero(&denominator) {
@@ -313,21 +325,22 @@ impl TfModel {
             ));
         }
         let variable = match object.properties.get("Variable") {
-            Some(value) => validate_variable(&scalar_text(value, "Variable", builtin)?, builtin)?,
+            Some(value) => TfVariable::parse(&scalar_text(value, "Variable", builtin)?, builtin)?,
             None => {
-                if sample_time > 0.0 {
-                    DEFAULT_DISCRETE_VARIABLE.to_string()
+                if sample_time != 0.0 {
+                    TfVariable::Z
                 } else {
-                    DEFAULT_CONTINUOUS_VARIABLE.to_string()
+                    TfVariable::S
                 }
             }
         };
-        validate_variable_domain(&variable, sample_time, builtin)?;
+        let sample_domain = TfSampleDomain::parse(sample_time, variable, builtin)?;
+        let (numerator, denominator) = physical_coefficients(numerator, denominator, variable);
         Ok(Self {
-            numerator: trim_leading_complex_zeros(numerator),
-            denominator: trim_leading_complex_zeros(denominator),
+            numerator,
+            denominator,
             variable,
-            sample_time,
+            sample_domain,
             input_delay,
             output_delay,
         })
@@ -335,22 +348,23 @@ impl TfModel {
 
     pub fn to_value(&self, builtin: &'static str) -> BuiltinResult<Value> {
         ensure_tf_class_registered();
+        let (numerator, denominator) = self.external_coefficients();
         let mut object = ObjectInstance::new(TF_CLASS.to_string());
         object.properties.insert(
             "Numerator".to_string(),
-            coefficient_value(&self.numerator, builtin)?,
+            coefficient_value(&numerator, builtin)?,
         );
         object.properties.insert(
             "Denominator".to_string(),
-            coefficient_value(&self.denominator, builtin)?,
+            coefficient_value(&denominator, builtin)?,
         );
         object.properties.insert(
             "Variable".to_string(),
-            Value::CharArray(CharArray::new_row(&self.variable)),
+            Value::CharArray(CharArray::new_row(self.variable.as_str())),
         );
         object
             .properties
-            .insert("Ts".to_string(), Value::Num(self.sample_time));
+            .insert("Ts".to_string(), Value::Num(self.sample_time()));
         object
             .properties
             .insert("InputDelay".to_string(), Value::Num(self.input_delay));
@@ -361,26 +375,62 @@ impl TfModel {
     }
 
     pub fn coefficient_values(&self, builtin: &'static str) -> BuiltinResult<(Value, Value)> {
+        let (numerator, denominator) = self.external_coefficients();
         Ok((
-            coefficient_value(&self.numerator, builtin)?,
-            coefficient_value(&self.denominator, builtin)?,
+            coefficient_value(&numerator, builtin)?,
+            coefficient_value(&denominator, builtin)?,
         ))
     }
 
+    fn external_coefficients(&self) -> (Vec<Complex64>, Vec<Complex64>) {
+        let mut numerator = self.numerator.clone();
+        let mut denominator = self.denominator.clone();
+        if self.variable.basis() == TfPolynomialBasis::DiscreteInverse {
+            // Inverse-basis public arrays are ascending powers of z^-1.
+            // Equal physical degree therefore requires leading, not trailing,
+            // zero padding at egress. The two arrays must share one degree.
+            let width = numerator.len().max(denominator.len());
+            let numerator_pad = width - numerator.len();
+            let denominator_pad = width - denominator.len();
+            numerator.resize(width, Complex64::new(0.0, 0.0));
+            denominator.resize(width, Complex64::new(0.0, 0.0));
+            numerator.rotate_right(numerator_pad);
+            denominator.rotate_right(denominator_pad);
+        }
+        (numerator, denominator)
+    }
+
     pub fn to_real(&self, builtin: &'static str) -> BuiltinResult<RealTfModel> {
-        let numerator = real_coefficients(&self.numerator, "Numerator", builtin)?;
-        let denominator = real_coefficients(&self.denominator, "Denominator", builtin)?;
+        let physical = self.physical_polynomials();
+        let numerator = real_coefficients(physical.numerator(), "Numerator", builtin)?;
+        let denominator = real_coefficients(physical.denominator(), "Denominator", builtin)?;
         Ok(RealTfModel {
             numerator,
             denominator,
-            sample_time: self.sample_time,
+            sample_domain: self.sample_domain,
             input_delay: self.input_delay,
             output_delay: self.output_delay,
         })
     }
 
     pub fn is_discrete(&self) -> bool {
-        self.sample_time > 0.0
+        self.sample_domain.is_discrete()
+    }
+
+    pub fn sample_time(&self) -> f64 {
+        self.sample_domain.sample_time()
+    }
+
+    pub fn sample_domain(&self) -> TfSampleDomain {
+        self.sample_domain
+    }
+
+    pub fn ensure_zero_delays(&self, builtin: &'static str) -> BuiltinResult<()> {
+        validate_zero_delays(self.input_delay, self.output_delay, builtin)
+    }
+
+    pub fn physical_polynomials(&self) -> PhysicalPolynomials<'_> {
+        PhysicalPolynomials::borrowed(&self.numerator, &self.denominator)
     }
 
     pub fn normalized(&self) -> BuiltinResult<Self> {
@@ -487,8 +537,8 @@ impl TfModel {
         let one = Self::scalar(
             Complex64::new(1.0, 0.0),
             TfOptions {
-                variable: self.variable.clone(),
-                sample_time: self.sample_time,
+                variable: self.variable.as_str().to_string(),
+                sample_time: self.sample_time(),
             },
         )?;
         if exponent == 0 {
@@ -513,24 +563,20 @@ impl TfModel {
     }
 
     pub fn poles(&self) -> BuiltinResult<Vec<Complex64>> {
-        polynomial_roots(&self.denominator, "pole")
+        polynomial_roots(self.physical_polynomials().denominator(), "pole")
     }
 
     pub fn zeros(&self) -> BuiltinResult<Vec<Complex64>> {
-        polynomial_roots(&self.numerator, "zero")
+        polynomial_roots(self.physical_polynomials().numerator(), "zero")
     }
 
     /// Evaluate an admitted model at a complex frequency-domain point.
     /// Exact denominator zeros are undefined here; DC pole direction is
     /// handled separately by `dc_gain`.
     pub fn frequency_response(&self, point: Complex64) -> Complex64 {
-        let numerator = poly_eval(&self.numerator, point);
-        let denominator = poly_eval(&self.denominator, point);
-        if denominator == Complex64::new(0.0, 0.0) {
-            Complex64::new(f64::NAN, f64::NAN)
-        } else {
-            finite_complex_ratio(numerator, denominator)
-        }
+        self.physical_polynomials()
+            .evaluate(point)
+            .unwrap_or(Complex64::new(f64::NAN, f64::NAN))
     }
 
     pub fn dc_gain(&self) -> BuiltinResult<Complex64> {
@@ -539,8 +585,9 @@ impl TfModel {
         } else {
             Complex64::new(0.0, 0.0)
         };
-        let num = poly_eval(&self.numerator, point);
-        let den = poly_eval(&self.denominator, point);
+        let physical = self.physical_polynomials();
+        let num = poly_eval(physical.numerator(), point);
+        let den = poly_eval(physical.denominator(), point);
         if den == Complex64::new(0.0, 0.0) {
             if num == Complex64::new(0.0, 0.0) {
                 Ok(Complex64::new(f64::NAN, f64::NAN))
@@ -549,7 +596,7 @@ impl TfModel {
                 // component. Factor the pole so the infinite result retains the local
                 // signed/complex-axis direction of the positive-real approach to the DC point.
                 let local_denominator =
-                    first_nonzero_local_polynomial_coefficient(&self.denominator, point);
+                    first_nonzero_local_polynomial_coefficient(physical.denominator(), point);
                 Ok(complex_infinity_in_direction(
                     finite_complex_ratio_direction(num, local_denominator),
                 ))
@@ -594,7 +641,7 @@ impl TfModel {
         op: ArithmeticOperation,
     ) -> BuiltinResult<()> {
         let name = op.name();
-        if self.sample_time != rhs.sample_time {
+        if self.sample_domain != rhs.sample_domain {
             let (builtin, identifier) = op.error("RunMat:tf:SampleTimeMismatch");
             return Err(control_error(
                 builtin,
@@ -632,20 +679,31 @@ impl TfModel {
         numerator: Vec<Complex64>,
         denominator: Vec<Complex64>,
     ) -> BuiltinResult<Self> {
-        Self::with_delays(
-            numerator,
-            denominator,
-            TfOptions {
-                variable: self.variable.clone(),
-                sample_time: self.sample_time,
-            },
-            self.input_delay,
-            self.output_delay,
-        )
+        validate_coefficients("numerator", &numerator, "tf")?;
+        validate_coefficients("denominator", &denominator, "tf")?;
+        if all_zero(&denominator) {
+            return Err(control_error(
+                "tf",
+                "RunMat:tf:DenominatorInvalid",
+                "tf: denominator coefficients must not all be zero",
+            ));
+        }
+        Ok(Self {
+            numerator: trim_leading_complex_zeros(numerator),
+            denominator: trim_leading_complex_zeros(denominator),
+            variable: self.variable,
+            sample_domain: self.sample_domain,
+            input_delay: self.input_delay,
+            output_delay: self.output_delay,
+        })
     }
 }
 
 impl RealTfModel {
+    pub fn sample_time(&self) -> f64 {
+        self.sample_domain.sample_time()
+    }
+
     pub fn normalized(&self, builtin: &'static str) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
         let den = trim_leading_real_zeros(self.denominator.clone());
         if den.is_empty() || den[0] == 0.0 {
@@ -675,17 +733,19 @@ impl RealTfModel {
     }
 
     pub fn ensure_zero_delays(&self, builtin: &'static str) -> BuiltinResult<()> {
-        if self.input_delay != 0.0 || self.output_delay != 0.0 {
-            return Err(control_error(
-                builtin,
-                unsupported_model_identifier(builtin),
-                format!(
-                    "{builtin}: transfer functions with input or output delays are not supported"
-                ),
-            ));
-        }
-        Ok(())
+        validate_zero_delays(self.input_delay, self.output_delay, builtin)
     }
+}
+
+fn validate_zero_delays(input: f64, output: f64, builtin: &'static str) -> BuiltinResult<()> {
+    if input != 0.0 || output != 0.0 {
+        return Err(control_error(
+            builtin,
+            unsupported_model_identifier(builtin),
+            format!("{builtin}: transfer functions with input or output delays are not supported"),
+        ));
+    }
+    Ok(())
 }
 
 pub async fn parse_coefficients(
@@ -749,8 +809,8 @@ pub async fn value_to_model_with_reference(
     TfModel::scalar(
         scalar,
         TfOptions {
-            variable: reference.variable.clone(),
-            sample_time: reference.sample_time,
+            variable: reference.variable.as_str().to_string(),
+            sample_time: reference.sample_time(),
         },
     )
 }
@@ -888,19 +948,11 @@ pub fn scalar_complex(value: &Value, builtin: &'static str) -> BuiltinResult<Com
 }
 
 pub fn validate_variable(variable: &str, builtin: &'static str) -> BuiltinResult<String> {
-    let variable = variable.trim();
-    match variable {
-        "s" | "p" | "z" | "q" | "z^-1" | "q^-1" => Ok(variable.to_string()),
-        _ => Err(control_error(
-            builtin,
-            invalid_variable_identifier(builtin),
-            format!("{builtin}: invalid Variable option: must be one of 's', 'p', 'z', 'q', 'z^-1', or 'q^-1'"),
-        )),
-    }
+    Ok(TfVariable::parse(variable, builtin)?.as_str().to_string())
 }
 
 pub fn is_discrete_variable(variable: &str) -> bool {
-    matches!(variable.trim(), "z" | "q" | "z^-1" | "q^-1")
+    matches!(TfVariable::parse(variable, "tf"), Ok(value) if value.is_discrete())
 }
 
 pub fn validate_variable_domain(
@@ -908,24 +960,7 @@ pub fn validate_variable_domain(
     sample_time: f64,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let discrete_variable = is_discrete_variable(variable);
-    if discrete_variable && sample_time != -1.0 && sample_time <= 0.0 {
-        return Err(control_error(
-            builtin,
-            invalid_sample_time_identifier(builtin),
-            format!(
-                "{builtin}: discrete transfer-function variables require a positive sample time"
-            ),
-        ));
-    }
-    if !discrete_variable && sample_time != 0.0 {
-        return Err(control_error(
-            builtin,
-            invalid_variable_identifier(builtin),
-            format!("{builtin}: continuous transfer-function variables require Ts = 0"),
-        ));
-    }
-    Ok(())
+    TfSampleDomain::parse(sample_time, TfVariable::parse(variable, builtin)?, builtin).map(|_| ())
 }
 
 pub fn validate_sample_time(sample_time: f64, builtin: &'static str) -> BuiltinResult<()> {
@@ -1392,16 +1427,35 @@ fn ensure_vector_shape(label: &str, shape: &[usize], builtin: &'static str) -> B
     }
 }
 
-fn trim_leading_complex_zeros(coeffs: Vec<Complex64>) -> Vec<Complex64> {
+fn physical_coefficients(
+    mut numerator: Vec<Complex64>,
+    mut denominator: Vec<Complex64>,
+    variable: TfVariable,
+) -> (Vec<Complex64>, Vec<Complex64>) {
+    if variable.basis() == TfPolynomialBasis::DiscreteInverse {
+        // Public inverse-basis arrays are ascending in z^-1. With a *shared*
+        // degree they are already descending physical-z coefficients: multiply
+        // both polynomials by the same z power by padding their right edges.
+        let width = numerator.len().max(denominator.len());
+        numerator.resize(width, Complex64::new(0.0, 0.0));
+        denominator.resize(width, Complex64::new(0.0, 0.0));
+    }
+    (
+        trim_leading_complex_zeros(numerator),
+        trim_leading_complex_zeros(denominator),
+    )
+}
+
+fn trim_leading_complex_zeros(mut coeffs: Vec<Complex64>) -> Vec<Complex64> {
     let first_nonzero = coeffs
         .iter()
         .position(|value| value.re != 0.0 || value.im != 0.0)
         .unwrap_or(coeffs.len());
-    let trimmed = coeffs[first_nonzero..].to_vec();
-    if trimmed.is_empty() {
+    coeffs.drain(..first_nonzero);
+    if coeffs.is_empty() {
         vec![Complex64::new(0.0, 0.0)]
     } else {
-        trimmed
+        coeffs
     }
 }
 
@@ -1633,19 +1687,31 @@ mod tests {
     #[test]
     fn feedback_reports_its_own_structural_compatibility_errors() {
         let lhs = TfModel::scalar(Complex64::new(1.0, 0.0), TfOptions::default()).unwrap();
-        let mut rhs = lhs.clone();
-        rhs.sample_time = 1.0e-14;
+        let mut rhs = TfModel::scalar(
+            Complex64::new(1.0, 0.0),
+            TfOptions {
+                variable: "z".into(),
+                sample_time: 1.0e-14,
+            },
+        )
+        .unwrap();
         assert_eq!(
             lhs.feedback(&rhs, -1.0).unwrap_err().identifier(),
             Some("RunMat:feedback:UnsupportedModel")
         );
-        rhs.sample_time = 0.0;
-        rhs.variable = "p".into();
+        rhs = TfModel::scalar(
+            Complex64::new(1.0, 0.0),
+            TfOptions {
+                variable: "p".into(),
+                sample_time: 0.0,
+            },
+        )
+        .unwrap();
         assert_eq!(
             lhs.feedback(&rhs, -1.0).unwrap_err().identifier(),
             Some("RunMat:feedback:UnsupportedModel")
         );
-        rhs.variable = "s".into();
+        rhs = lhs.clone();
         rhs.input_delay = 1.0e-14;
         assert_eq!(
             lhs.feedback(&rhs, -1.0).unwrap_err().identifier(),

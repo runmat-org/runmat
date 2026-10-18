@@ -73,10 +73,10 @@ pub(in crate::builtins::deep_learning) async fn adamupdate_builtin(
     let eval = evaluate_adamupdate(options)?;
     match crate::output_count::current_output_count() {
         None => Ok(eval.parameters),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![eval.parameters])),
-        Some(2) => Ok(Value::OutputList(vec![eval.parameters, eval.average_grad])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![eval.parameters])),
+        Some(2) => Ok(Value::output_list(vec![eval.parameters, eval.average_grad])),
+        Some(3) => Ok(Value::output_list(vec![
             eval.parameters,
             eval.average_grad,
             eval.average_sq_grad,

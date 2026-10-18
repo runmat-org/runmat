@@ -111,12 +111,12 @@ pub fn create_host_matrix_from_values(
         .finish()
         .map_err(|error| error.into_runtime_error())?;
     validate_matrix_row_widths(row_matrices.values())?;
-    row_matrices.with_owned_values(|mut values| {
+    row_matrices.with_unbounded_values(|mut values| {
         let value = if values.len() == 1 {
             values.remove(0)
         } else {
             crate::builtins::array::shape::vertcat::concatenate_host_values(values)?
         };
         crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
-    })
+    })?
 }

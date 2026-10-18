@@ -99,7 +99,7 @@ async fn rlocus_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     if is_statement_form_call() {
         plot_root_locus_statement(sys, rest).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     if rest.len() > 1 {
@@ -120,16 +120,16 @@ async fn rlocus_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         && crate::output_count::current_output_count().is_none()
     {
         render_root_locus_plot(&eval, None).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             render_root_locus_plot(&eval, None).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.roots_value()?]));
+            return Ok(Value::output_list(vec![eval.roots_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -410,21 +410,24 @@ impl DynamicModel {
 impl RootLocus {
     fn compute(model: &TfModel, gains: Option<Vec<f64>>) -> BuiltinResult<Self> {
         ensure_supported_model(model)?;
-        let gains = gains.unwrap_or_else(|| default_gains(model));
-        let branches = characteristic_branch_count(model);
+        let physical = model.physical_polynomials();
+        let numerator = physical.numerator();
+        let denominator = physical.denominator();
+        let gains = gains.unwrap_or_else(|| default_gains(numerator, denominator));
+        let branches = characteristic_branch_count(numerator, denominator);
         #[cfg(feature = "plot-core")]
-        let poles = polynomial_roots(&model.denominator, BUILTIN_NAME)?;
+        let poles = polynomial_roots(denominator, BUILTIN_NAME)?;
         #[cfg(feature = "plot-core")]
-        let zeros = if max_norm(&model.numerator) <= EPS {
+        let zeros = if max_norm(numerator) <= EPS {
             Vec::new()
         } else {
-            polynomial_roots(&model.numerator, BUILTIN_NAME)?
+            polynomial_roots(numerator, BUILTIN_NAME)?
         };
 
         let mut previous: Option<Vec<Complex64>> = None;
         let mut roots = Vec::with_capacity(branches.saturating_mul(gains.len()));
         for gain in &gains {
-            let mut column = roots_for_gain(model, *gain, branches)?;
+            let mut column = roots_for_gain(numerator, denominator, *gain, branches)?;
             column = match previous.as_ref() {
                 Some(prev) => track_roots(prev, column),
                 None => sort_roots(column),
@@ -502,16 +505,17 @@ fn ensure_supported_model(model: &TfModel) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn characteristic_branch_count(model: &TfModel) -> usize {
-    model
-        .denominator
-        .len()
-        .max(model.numerator.len())
-        .saturating_sub(1)
+fn characteristic_branch_count(numerator: &[Complex64], denominator: &[Complex64]) -> usize {
+    denominator.len().max(numerator.len()).saturating_sub(1)
 }
 
-fn roots_for_gain(model: &TfModel, gain: f64, branches: usize) -> BuiltinResult<Vec<Complex64>> {
-    let polynomial = characteristic_polynomial(model, gain);
+fn roots_for_gain(
+    numerator: &[Complex64],
+    denominator: &[Complex64],
+    gain: f64,
+    branches: usize,
+) -> BuiltinResult<Vec<Complex64>> {
+    let polynomial = characteristic_polynomial(numerator, denominator, gain);
     let mut roots = polynomial_roots(&polynomial, BUILTIN_NAME)?;
     if roots.len() > branches {
         return Err(rlocus_error(
@@ -523,27 +527,31 @@ fn roots_for_gain(model: &TfModel, gain: f64, branches: usize) -> BuiltinResult<
     Ok(roots)
 }
 
-fn characteristic_polynomial(model: &TfModel, gain: f64) -> Vec<Complex64> {
-    let len = model.denominator.len().max(model.numerator.len()).max(1);
+fn characteristic_polynomial(
+    numerator: &[Complex64],
+    denominator: &[Complex64],
+    gain: f64,
+) -> Vec<Complex64> {
+    let len = denominator.len().max(numerator.len()).max(1);
     let mut out = vec![Complex64::new(0.0, 0.0); len];
-    let denominator_offset = len - model.denominator.len();
-    for (idx, coeff) in model.denominator.iter().enumerate() {
+    let denominator_offset = len - denominator.len();
+    for (idx, coeff) in denominator.iter().enumerate() {
         out[denominator_offset + idx] += *coeff;
     }
-    let numerator_offset = len - model.numerator.len();
+    let numerator_offset = len - numerator.len();
     let gain = Complex64::new(gain, 0.0);
-    for (idx, coeff) in model.numerator.iter().enumerate() {
+    for (idx, coeff) in numerator.iter().enumerate() {
         out[numerator_offset + idx] += gain * *coeff;
     }
     out
 }
 
-fn default_gains(model: &TfModel) -> Vec<f64> {
-    let numerator_scale = max_norm(&model.numerator);
+fn default_gains(numerator: &[Complex64], denominator: &[Complex64]) -> Vec<f64> {
+    let numerator_scale = max_norm(numerator);
     if numerator_scale <= EPS {
         return vec![0.0];
     }
-    let denominator_scale = max_norm(&model.denominator).max(1.0);
+    let denominator_scale = max_norm(denominator).max(1.0);
     let center = (denominator_scale / numerator_scale).clamp(1.0e-9, 1.0e9);
     let start = center.log10() - DEFAULT_GAIN_DECADES;
     let stop = center.log10() + DEFAULT_GAIN_DECADES;
@@ -561,7 +569,7 @@ fn default_gains(model: &TfModel) -> Vec<f64> {
             gains.push(gain);
         }
     }
-    for gain in critical_gains(model) {
+    for gain in critical_gains(numerator, denominator) {
         push_gain_window(&mut gains, gain);
     }
     sort_and_dedup_gains(gains)
@@ -574,12 +582,12 @@ fn max_norm(coeffs: &[Complex64]) -> f64 {
         .fold(0.0_f64, f64::max)
 }
 
-fn critical_gains(model: &TfModel) -> Vec<f64> {
-    let den_derivative = poly_derivative(&model.denominator);
-    let num_derivative = poly_derivative(&model.numerator);
+fn critical_gains(numerator: &[Complex64], denominator: &[Complex64]) -> Vec<f64> {
+    let den_derivative = poly_derivative(denominator);
+    let num_derivative = poly_derivative(numerator);
     let equation = poly_sub(
-        &poly_mul(&den_derivative, &model.numerator),
-        &poly_mul(&model.denominator, &num_derivative),
+        &poly_mul(&den_derivative, numerator),
+        &poly_mul(denominator, &num_derivative),
     );
     let Ok(points) = polynomial_roots(&equation, BUILTIN_NAME) else {
         return Vec::new();
@@ -589,11 +597,11 @@ fn critical_gains(model: &TfModel) -> Vec<f64> {
         if point.im.abs() > 1.0e-7 {
             continue;
         }
-        let numerator = poly_eval(&model.numerator, point);
-        if numerator.norm() <= EPS {
+        let numerator_at_point = poly_eval(numerator, point);
+        if numerator_at_point.norm() <= EPS {
             continue;
         }
-        let gain = -poly_eval(&model.denominator, point) / numerator;
+        let gain = -poly_eval(denominator, point) / numerator_at_point;
         if gain.im.abs() <= 1.0e-7 && gain.re.is_finite() && gain.re > 0.0 {
             gains.push(gain.re);
         }

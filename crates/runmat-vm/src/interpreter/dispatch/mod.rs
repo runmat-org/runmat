@@ -67,7 +67,7 @@ pub struct DispatchMeta<'a> {
 }
 
 pub struct DispatchState<'a> {
-    pub stack: &'a mut Vec<Value>,
+    pub stack: &'a mut crate::interpreter::stack::InterpreterStack,
     pub vars: &'a mut InterpreterVars,
     pub sequence_register: &'a mut SequenceState,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
@@ -324,7 +324,7 @@ impl SequenceState {
 
     pub(super) fn finish_dotted_invoke_receiver(
         &mut self,
-        stack: &mut Vec<Value>,
+        stack: &mut crate::interpreter::stack::InterpreterStack,
         prefix_operand_count: usize,
         argument_operand_count: usize,
     ) -> Result<(), RuntimeError> {
@@ -383,7 +383,7 @@ impl SequenceState {
             }
         }
         stack.drain(prefix_start..=receiver_index);
-        stack.insert(prefix_start, prepared);
+        stack.try_insert(prefix_start, prepared)?;
         Ok(())
     }
 
@@ -436,8 +436,8 @@ impl SequenceState {
     pub fn capture(
         &mut self,
         slot: usize,
-        stack: &mut Vec<Value>,
-        values: Vec<Value>,
+        stack: &mut crate::interpreter::stack::InterpreterStack,
+        values: impl Into<runmat_value::OutputListStorage>,
     ) -> Result<(), RuntimeError> {
         if self.captures.contains_key(&slot) {
             return Err(crate::interpreter::errors::mex(
@@ -445,18 +445,19 @@ impl SequenceState {
                 "captured sequence slot was overwritten before consumption",
             ));
         }
+        let values = values.into();
         let window = SequenceRegister {
             start: stack.len(),
             len: values.len(),
         };
-        stack.extend(values);
+        stack.try_extend_output(values)?;
         self.captures.insert(slot, window);
         Ok(())
     }
 
     pub fn take_captures(
         &mut self,
-        stack: &mut Vec<Value>,
+        stack: &mut crate::interpreter::stack::InterpreterStack,
         slots: &[usize],
     ) -> Result<HashMap<usize, Vec<Value>>, RuntimeError> {
         let mut seen = BTreeSet::new();
@@ -519,7 +520,7 @@ impl SequenceState {
         Ok(values)
     }
 
-    pub fn clear(&mut self, stack: &mut Vec<Value>) {
+    pub fn clear(&mut self, stack: &mut crate::interpreter::stack::InterpreterStack) {
         let mut windows = self.captures.values().copied().collect::<Vec<_>>();
         if let Some(window) = self.assignment.take() {
             windows.push(window);
@@ -565,7 +566,7 @@ pub struct DispatchHooks<'a> {
 }
 
 fn materialize_aggregate_rows(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence_state: &mut SequenceState,
     row_lengths: &[usize],
     elements: &[crate::bytecode::AggregateElementSpec],
@@ -702,7 +703,7 @@ fn initialize_object_with_defaults(class_name: &runmat_types::ClassIdentity) -> 
 }
 
 fn pop_aggregate_literal_values(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     field_count: usize,
 ) -> Result<Vec<Value>, RuntimeError> {
     let mut values = Vec::with_capacity(field_count);
@@ -760,31 +761,31 @@ fn dispatch_immediate(
     } = hooks;
     match instr {
         Instr::LoadConst(value) => {
-            load_const(stack, *value);
+            load_const(stack, *value)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::LoadInt(value) => {
-            load_int(stack, value.clone());
+            load_int(stack, value.clone())?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::LoadComplex(re, im) => {
-            load_complex(stack, *re, *im);
+            load_complex(stack, *re, *im)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::LoadBool(value) => {
-            load_bool(stack, *value);
+            load_bool(stack, *value)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::LoadString(value) => {
-            load_string(stack, value.clone());
+            load_string(stack, value.clone())?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -871,7 +872,7 @@ fn dispatch_immediate(
                 if slot_name == *var_name {
                     if let Some(value) = builtin_constant_value(var_name) {
                         debug::trace_load_var(*pc, *index, &value);
-                        stack.push(value);
+                        stack.try_push(value)?;
                         return Ok(Some(DispatchHandled::Generic(
                             DispatchDecision::FallThrough,
                         )));
@@ -890,7 +891,7 @@ fn dispatch_immediate(
                 .expect("loaded variable slot lies within frame extent")
                 .clone();
             debug::trace_load_var(*pc, *index, &value);
-            load_var(stack, vars, *index);
+            load_var(stack, vars, *index)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -911,7 +912,7 @@ fn dispatch_immediate(
                 if matches!(instr, Instr::LoadVarForStructAssignment(_)) {
                     let empty = Value::Struct(runmat_value::StructValue::new());
                     debug::trace_load_var(*pc, *index, &empty);
-                    stack.push(empty);
+                    stack.try_push(empty)?;
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::FallThrough,
                     )));
@@ -919,7 +920,7 @@ fn dispatch_immediate(
                 if matches!(instr, Instr::LoadVarForCellAssignment(_)) {
                     let empty = slot_authority::empty_cell_root();
                     debug::trace_load_var(*pc, *index, &empty);
-                    stack.push(empty);
+                    stack.try_push(empty)?;
                     return Ok(Some(DispatchHandled::Generic(
                         DispatchDecision::FallThrough,
                     )));
@@ -933,7 +934,7 @@ fn dispatch_immediate(
                         )
                     })?;
                 debug::trace_load_var(*pc, *index, &Value::Tensor(empty.clone()));
-                stack.push(Value::Tensor(empty));
+                stack.try_push(Value::Tensor(empty))?;
                 return Ok(Some(DispatchHandled::Generic(
                     DispatchDecision::FallThrough,
                 )));
@@ -943,7 +944,7 @@ fn dispatch_immediate(
                 .expect("assignment base slot lies within frame extent")
                 .clone();
             debug::trace_load_var(*pc, *index, &value);
-            load_var(stack, vars, *index);
+            load_var(stack, vars, *index)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1034,7 +1035,13 @@ fn dispatch_immediate(
             catch_pc,
             catch_var,
         } => {
-            crate::ops::control_flow::enter_try(try_stack, *scope, *catch_pc, *catch_var);
+            crate::ops::control_flow::enter_try(
+                try_stack,
+                *scope,
+                *catch_pc,
+                *catch_var,
+                stack.len(),
+            );
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1185,9 +1192,9 @@ fn dispatch_immediate(
                 ))?);
             }
             elems.reverse();
-            stack.push(runmat_runtime::object::cell::create_cell_2d(
+            stack.try_push(runmat_runtime::object::cell::create_cell_2d(
                 elems, *rows, *cols,
-            )?);
+            )?)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1207,9 +1214,9 @@ fn dispatch_immediate(
             }
             let row_count = rows.len();
             let values = rows.into_iter().flatten().collect();
-            stack.push(runmat_runtime::object::cell::create_cell_2d(
+            stack.try_push(runmat_runtime::object::cell::create_cell_2d(
                 values, row_count, columns,
-            )?);
+            )?)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1220,7 +1227,7 @@ fn dispatch_immediate(
             for (field, value) in fields.iter().zip(values) {
                 struct_value.fields.insert(field.clone(), value);
             }
-            stack.push(Value::Struct(struct_value));
+            stack.try_push(Value::Struct(struct_value))?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1231,7 +1238,7 @@ fn dispatch_immediate(
             for (field, value) in fields.iter().zip(values) {
                 object.properties.insert(field.clone(), value);
             }
-            stack.push(Value::Object(object));
+            stack.try_push(Value::Object(object))?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1272,7 +1279,7 @@ fn dispatch_immediate(
             )))
         }
         Instr::CreateMethodFunctionHandle(name) => {
-            stack.push(Value::method_function_handle(name.clone()));
+            stack.try_push(Value::method_function_handle(name.clone()))?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1312,13 +1319,13 @@ fn dispatch_immediate(
                     runmat_runtime::user_functions::source_file_for(function.0),
                 )
             };
-            stack.push(Value::bound_function_handle(
+            stack.try_push(Value::bound_function_handle(
                 name.clone(),
                 selected_function,
                 authority,
                 *source_role,
                 source_file,
-            ));
+            ))?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1335,7 +1342,7 @@ fn dispatch_immediate(
             property,
         } => {
             if let Some(value) = crate::runtime::workspace::workspace_lookup(name) {
-                stack.push(value);
+                stack.try_push(value)?;
             } else {
                 handle_load_static_property(stack, class_name, property.display_name())?;
             }

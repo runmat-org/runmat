@@ -9,7 +9,7 @@ use runmat_runtime::indexing::plan::{build_indexed_store_plan, IndexedStorePlanM
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     _vars: &mut InterpreterVars,
     _function_registry: &crate::bytecode::FunctionRegistry,
     _pc: usize,
@@ -64,11 +64,12 @@ pub(super) async fn dispatch(
                                 &method,
                                 base,
                                 path,
-                                runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?
-                                    .into_values(),
+                                runmat_runtime::sequence::into_unbounded_values(
+                                    runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?,
+                                )?,
                             )
                             .await?
-                            .with_owned(|value| stack.push(value));
+                            .with_owned(|value| stack.try_push(value))?;
                     } else {
                         let shape = runmat_runtime::indexing::object::shape(&base)
                             .expect("object-like values have an object-array shape");
@@ -76,9 +77,9 @@ pub(super) async fn dispatch(
                             build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &shape)
                                 .await?;
                         let plan = build_index_plan(&selectors, *dims, &shape)?;
-                        stack.push(runmat_runtime::indexing::object::assign_with_plan(
+                        stack.try_push(runmat_runtime::indexing::object::assign_with_plan(
                             base, &plan, rhs, delete,
-                        )?);
+                        )?)?;
                     }
                 }
                 Value::FunctionHandle(_)
@@ -101,11 +102,11 @@ pub(super) async fn dispatch(
                         plan_mode,
                     )
                     .await?;
-                    stack.push(if delete {
+                    stack.try_push(if delete {
                         idx_write_slice::delete_tensor_with_plan(t, &plan, &rhs)?
                     } else {
                         idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?
-                    });
+                    })?;
                 }
                 Value::LogicalArray(la) => {
                     let data: Vec<f64> = la
@@ -129,14 +130,14 @@ pub(super) async fn dispatch(
                     } else {
                         idx_write_slice::assign_tensor_with_plan(tensor, &plan, &rhs).await?
                     };
-                    stack.push(match updated {
+                    stack.try_push(match updated {
                         Value::Tensor(t) => logical_value_from_tensor(t)?,
                         Value::Bool(_) | Value::LogicalArray(_) => updated,
                         Value::Num(n) => Value::Bool(n != 0.0),
                         other => other,
-                    });
+                    })?;
                 }
-                Value::GpuTensor(handle) => stack.push({
+                Value::GpuTensor(handle) => stack.try_push({
                     let plan = build_indexed_store_plan(
                         *dims,
                         *colon_mask,
@@ -151,7 +152,7 @@ pub(super) async fn dispatch(
                     } else {
                         idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
                     }
-                }),
+                })?,
                 Value::ComplexTensor(ct) => {
                     let plan = build_indexed_store_plan(
                         *dims,
@@ -164,14 +165,16 @@ pub(super) async fn dispatch(
                     .await
                     .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if delete {
-                        stack.push(idx_write_slice::delete_complex_with_plan(ct, &plan, &rhs)?);
+                        stack.try_push(idx_write_slice::delete_complex_with_plan(
+                            ct, &plan, &rhs,
+                        )?)?;
                         return Ok(true);
                     }
-                    stack.push(
+                    stack.try_push(
                         idx_write_slice::assign_complex_with_plan(ct, &plan, &rhs)
                             .await
                             .map_err(|e| map_slice_plan_error("slice assign", e))?,
-                    );
+                    )?;
                 }
                 Value::Cell(ca) => {
                     let selectors =
@@ -182,11 +185,11 @@ pub(super) async fn dispatch(
                         .map_err(|e| map_slice_plan_error("cell slice assign", e))?;
                     let selected: Vec<usize> =
                         plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
-                    stack.push(
+                    stack.try_push(
                         runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
                             ca, &selected, &rhs, delete,
                         )?,
-                    );
+                    )?;
                 }
                 base @ (Value::Struct(_) | Value::StructArray(_)) => {
                     let shape = match &base {
@@ -202,9 +205,9 @@ pub(super) async fn dispatch(
                         plan_mode,
                     )
                     .await?;
-                    stack.push(runmat_runtime::indexing::structure::assign_with_plan(
+                    stack.try_push(runmat_runtime::indexing::structure::assign_with_plan(
                         base, &plan, rhs, delete,
-                    )?);
+                    )?)?;
                 }
                 Value::SparseTensor(sparse) => {
                     let shape = sparse.shape();
@@ -227,11 +230,11 @@ pub(super) async fn dispatch(
                         build_sparse_assignment_plan(&selectors, *dims, &shape)
                     }
                     .map_err(|e| map_slice_plan_error("sparse slice assign", e))?;
-                    stack.push(if delete {
+                    stack.try_push(if delete {
                         idx_write_slice::delete_sparse_with_plan(sparse, &plan, &rhs)?
                     } else {
                         idx_write_slice::assign_sparse_with_plan(sparse, &plan, &rhs).await?
-                    });
+                    })?;
                 }
                 Value::StringArray(mut sa) => {
                     if delete {
@@ -252,7 +255,7 @@ pub(super) async fn dispatch(
                             &plan.selection_lengths,
                         )
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                        stack.push(Value::StringArray(sa));
+                        stack.try_push(Value::StringArray(sa))?;
                         return Ok(true);
                     }
                     let rhs_view =
@@ -260,7 +263,7 @@ pub(super) async fn dispatch(
                             .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     idx_write_slice::scatter_string_with_plan(&mut sa, &plan, &rhs_view)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                    stack.push(Value::StringArray(sa));
+                    stack.try_push(Value::StringArray(sa))?;
                 }
                 other => {
                     log::warn!(

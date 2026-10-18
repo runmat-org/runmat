@@ -26,6 +26,10 @@ fn classify(sample: Value, training: Value, group: Value, rest: Vec<Value>) -> V
         panic!("expected output list");
     };
     values
+        .try_into_owned()
+        .expect("unique output list")
+        .try_into_unbounded_vec()
+        .expect("unbounded output list")
 }
 
 fn with_outputs<T>(count: usize, f: impl FnOnce() -> T) -> T {

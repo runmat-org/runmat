@@ -236,9 +236,9 @@ fn captures_failure_as_outputs() -> bool {
 
 fn status_outputs(success: bool, err: Option<&RuntimeError>) -> Value {
     match crate::output_count::current_output_count() {
-        Some(0) => Value::OutputList(Vec::new()),
-        Some(1) => Value::OutputList(vec![Value::Bool(success)]),
-        Some(2) => Value::OutputList(vec![Value::Bool(success), message_value(err)]),
+        Some(0) => Value::output_list(Vec::new()),
+        Some(1) => Value::output_list(vec![Value::Bool(success)]),
+        Some(2) => Value::output_list(vec![Value::Bool(success), message_value(err)]),
         None => Value::Bool(success),
         Some(_) => Value::Bool(success),
     }

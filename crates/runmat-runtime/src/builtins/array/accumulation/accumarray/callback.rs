@@ -61,10 +61,10 @@ pub(super) async fn evaluate(
     values
         .finish()
         .map_err(|error| error.into_runtime_error())?
-        .with_owned_values(|values| {
+        .with_unbounded_values(|values| {
             let output = output::from_scalars(values, shape, sparse)?;
             crate::execution::RootedValue::new(output).map_err(|error| error.into_runtime_error())
-        })
+        })?
 }
 
 async fn invoke(function: Value, values: Value) -> BuiltinResult<crate::execution::RootedValue> {
@@ -77,7 +77,9 @@ async fn invoke(function: Value, values: Value) -> BuiltinResult<crate::executio
     result.try_map_owned(
         |value| {
             scalar(match value {
-                Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+                Value::OutputList(values) if values.len() == 1 => {
+                    crate::sequence::into_first_output(values)?.expect("one callback output")
+                }
                 other => other,
             })
         },

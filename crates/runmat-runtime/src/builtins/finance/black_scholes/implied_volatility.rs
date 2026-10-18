@@ -19,7 +19,7 @@ pub(super) async fn blsimpv_builtin(
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs == Some(0) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     if requested_outputs.is_some_and(|count| count > 1) {
         return Err(error(

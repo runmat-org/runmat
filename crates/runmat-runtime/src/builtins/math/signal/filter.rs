@@ -102,10 +102,10 @@ async fn filter_builtin(
     let eval = evaluate_with_runtime(runtime.as_ref(), b, a, x, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_value()]));
+            return Ok(Value::output_list(vec![eval.into_value()]));
         }
         let (output, final_state) = eval.into_pair();
         return Ok(crate::output_count::output_list_with_padding(

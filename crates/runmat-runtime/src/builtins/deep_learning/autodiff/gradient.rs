@@ -107,7 +107,7 @@ async fn dlgradient_in_runtime(
     if requested == 1 {
         Ok(outputs.remove(0))
     } else {
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     }
 }
 

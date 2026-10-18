@@ -397,14 +397,14 @@ fn grpstats_matrix_impl(value: Value, group: Value, rest: Vec<Value>) -> Builtin
     }
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count != outputs.len() {
             return Err(invalid_argument(
                 "grpstats: number of outputs must match requested statistics",
             ));
         }
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     Ok(outputs
         .into_iter()

@@ -185,10 +185,15 @@ function enforceTransientSequenceQuarantine() {
   const adapterPath = "crates/runmat-runtime/src/call/arguments.rs";
   const adapter = productionRust(read(adapterPath));
   const occurrences = adapter.match(/\bValue::OutputList\b/g)?.length ?? 0;
+  const projector = rustFunctionRegions(adapter).find(
+    (region) => region.name === "project_legacy_builtin_value_abi"
+  );
+  const projectorSource = projector ? adapter.slice(projector.start, projector.end) : "";
   if (
     !adapter.includes("pub fn adapt_legacy_builtin_result") ||
     !adapter.includes("pub(crate) fn project_legacy_builtin_value_abi") ||
-    occurrences !== 2
+    occurrences !== 1 ||
+    !projectorSource.includes("sequence.into_legacy_value()")
   ) {
     fail(`${adapterPath} must contain the sole executor adapter and legacy builtin Value ABI projector`);
   }

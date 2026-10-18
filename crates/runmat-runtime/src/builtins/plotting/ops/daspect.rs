@@ -50,7 +50,7 @@ fn daspect_state(args: Vec<Value>) -> BuiltinResult<Value> {
                         let mode = data_aspect_ratio_mode_from_value(value, BUILTIN_NAME)?;
                         let ratio = current_ratio(target)?;
                         set_ratio_and_mode(target, ratio, mode)?;
-                        return Ok(Value::OutputList(Vec::new()));
+                        return Ok(Value::output_list(Vec::new()));
                     }
                     _ => {}
                 }
@@ -58,7 +58,7 @@ fn daspect_state(args: Vec<Value>) -> BuiltinResult<Value> {
             ensure_setter_has_no_output()?;
             let ratio = ratio_from_value(value)?;
             set_ratio_and_mode(target, ratio, "manual")?;
-            Ok(Value::OutputList(Vec::new()))
+            Ok(Value::output_list(Vec::new()))
         }
         _ => Err(daspect_err("expected zero or one data-aspect argument")),
     }

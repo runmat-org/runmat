@@ -66,8 +66,8 @@ async fn predict_in_runtime(
         model => predict_statistical(model, xnew, rest).await?,
     };
     match requested_outputs {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![output[0].clone()])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![output[0].clone()])),
         Some(out_count) if out_count > output.len() => {
             Err(predict_invalid("predict: too many output arguments"))
         }

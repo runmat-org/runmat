@@ -132,7 +132,7 @@ fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
         assert_eq!(gathered_mask.shape(), &[1, 2]);
         assert_eq!(gathered_mask.materialize_f64(), vec![0.0, 0.0]);
         assert!(gpu_helpers::exact_provider_for_handle(&source).is_some());
-        for output in outputs {
+        for output in outputs.try_into_owned().expect("unique missing outputs") {
             if let Value::GpuTensor(handle) = output {
                 handle.release().unwrap();
             }

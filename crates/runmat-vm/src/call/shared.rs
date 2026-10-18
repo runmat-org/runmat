@@ -5,7 +5,7 @@ use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 pub async fn build_expanded_args_from_specs(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     specs: &[ArgumentSpec],
     sequence_state: &mut crate::interpreter::dispatch::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
@@ -88,7 +88,9 @@ pub async fn build_expanded_args_from_specs(
     runmat_runtime::call::arguments::expand_arguments(runtime, arguments).await
 }
 
-fn pop_argument(stack: &mut Vec<Value>) -> Result<Value, RuntimeError> {
+fn pop_argument(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+) -> Result<Value, RuntimeError> {
     stack
         .pop()
         .ok_or_else(|| crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))
@@ -311,12 +313,12 @@ mod tests {
 
     #[test]
     fn build_expanded_args_from_specs_supports_cell_index_expansion() {
-        let mut stack = vec![
+        let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
             Value::Cell(
                 runmat_value::CellArray::new(vec![Value::Num(9.0), Value::Num(2.0)], 1, 2).unwrap(),
             ),
             Value::Num(1.0),
-        ];
+        ]);
         let specs = vec![ArgumentSpec::Expansion(
             runmat_runtime::call::arguments::ArgumentExpansionSpec::CellContents {
                 num_indices: 1,
@@ -333,12 +335,12 @@ mod tests {
         .expect("expanded args");
         assert_eq!(expanded, vec![Value::Num(9.0)]);
 
-        let mut stack = vec![
+        let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
             Value::Cell(
                 runmat_value::CellArray::new(vec![Value::Num(9.0), Value::Num(2.0)], 1, 2).unwrap(),
             ),
             Value::Tensor(runmat_value::Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
-        ];
+        ]);
         let mut sequences = crate::interpreter::dispatch::SequenceState::default();
         let expanded = block_on(build_expanded_args_from_specs(
             &mut stack,

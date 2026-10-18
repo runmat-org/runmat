@@ -24,7 +24,8 @@ impl RuntimeAccelerationService for Service {
         assert_eq!(request.form().data_arguments, &[0]);
         let output = request
             .into_operands()
-            .with_owned_values(PreparedBuiltinOperands::passthrough);
+            .with_unbounded_values(PreparedBuiltinOperands::passthrough)
+            .and_then(std::convert::identity);
         Box::pin(async move { output })
     }
 }

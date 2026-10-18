@@ -300,13 +300,16 @@ pub(crate) async fn invoke(
             use crate::sequence::ResolveValueSequence;
             sequence.try_map_owned(
                 |sequence| {
-                    let mut values = sequence
+                    let values = sequence
                         .resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
                     if requested_outputs == 1 {
-                        ValueSequence::single(values.remove(0))
-                            .map_err(crate::sequence::sequence_error_to_runtime)
+                        ValueSequence::single(
+                            crate::sequence::into_first_output(values)?
+                                .expect("one requested output was resolved"),
+                        )
+                        .map_err(crate::sequence::sequence_error_to_runtime)
                     } else {
-                        ValueSequence::comma_separated(values)
+                        ValueSequence::from_output_storage(values)
                             .map_err(crate::sequence::sequence_error_to_runtime)
                     }
                 },

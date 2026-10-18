@@ -677,7 +677,7 @@ async fn finalize(
 ) -> BuiltinResult<Value> {
     let requested = match crate::output_count::current_output_count() {
         None => return x_value(&result.x, x_shape, x_scalar),
-        Some(0) => return Ok(Value::OutputList(Vec::new())),
+        Some(0) => return Ok(Value::output_list(Vec::new())),
         Some(count @ 1..=7) => count,
         Some(_) => {
             return Err(lsq_error_with_detail(

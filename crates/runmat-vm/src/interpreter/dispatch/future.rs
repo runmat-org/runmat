@@ -288,7 +288,7 @@ async fn dispatch_semantic_closure(
         }
         if let Some(captures) = additional_captures {
             let _stack_roots = runmat_runtime::execution::RootedValueLease::for_values(
-                state.stack[state.stack.len() - *capture_count..].iter(),
+                state.stack.as_slice()[state.stack.len() - *capture_count..].iter(),
             )
             .map_err(|error| error.into_runtime_error())?;
             let mut originals = Vec::with_capacity(*capture_count);
@@ -297,7 +297,7 @@ async fn dispatch_semantic_closure(
             }
             originals.reverse();
             let mut originals = originals.into_iter().map(Some).collect::<Vec<_>>();
-            captures.with_owned_values(|captures| -> Result<(), RuntimeError> {
+            captures.with_unbounded_values(|captures| -> Result<(), RuntimeError> {
                 let mut added = captures.into_iter();
                 let mut ordered = Vec::with_capacity(compiled.captures.len());
                 for source in &compiled.captures {
@@ -331,9 +331,9 @@ async fn dispatch_semantic_closure(
                     ordered,
                     *source_role,
                     lexical_environment,
-                );
+                )?;
                 Ok(())
-            })?;
+            })??;
         } else {
             crate::call::closures::create_selected_semantic_closure(
                 state.stack,
@@ -434,25 +434,36 @@ async fn dispatch_name_handle(meta: DispatchMeta<'_>, state: DispatchState<'_>) 
     if let Some(result) = selected {
         let rooted = result?;
         rooted.with_owned(|sequence| {
-            let mut values = sequence.into_values();
-            if values.len() != 1 || !matches!(values.first(), Some(Value::BoundFunctionHandle(_))) {
+            if sequence.len() != 1
+                || !matches!(
+                    sequence.as_slice().first(),
+                    Some(Value::BoundFunctionHandle(_))
+                )
+            {
                 return Err(runmat_runtime::build_runtime_error(
                     "selected source did not return one exact bound handle",
                 )
                 .with_identifier("RunMat:SelectedHandle:InvalidOutput")
                 .build());
             }
-            state
-                .stack
-                .push(values.pop().expect("one checked selected handle"));
+            let selected = sequence
+                .into_output_storage()
+                .try_into_first()
+                .map_err(|_| {
+                    runmat_runtime::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?
+                .expect("one checked selected handle");
+            state.stack.try_push(selected)?;
             Ok(())
         })?;
     } else if external {
         state
             .stack
-            .push(Value::external_function_handle(name.clone()));
+            .try_push(Value::external_function_handle(name.clone()))?;
     } else {
-        state.stack.push(Value::function_handle(name.clone()));
+        state.stack.try_push(Value::function_handle(name.clone()))?;
     }
     Ok(Some(DispatchHandled::Generic(
         DispatchDecision::FallThrough,
@@ -723,7 +734,7 @@ async fn dispatch_aggregate(meta: DispatchMeta<'_>, state: DispatchState<'_>) ->
                 .map_err(|error| {
                     arrays::qualify_matrix_construction_shape(error, source_ref, invocation_arity)
                 })?
-                .with_owned(|value| state.stack.push(value));
+                .with_owned(|value| state.stack.try_push(value))?;
         }
         Instr::CreateMatrixDynamic(num_rows) => {
             create_matrix_dynamic(state.stack, *num_rows, |rows_data| async move {

@@ -679,14 +679,21 @@ impl PythonAdapter {
 
     fn shape_python_outputs(
         requested_outputs: usize,
-        values: Vec<Value>,
+        values: runmat_value::OutputListStorage,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         if values.len() == 1 && requested_outputs <= 1 {
             return super::super::single_output_sequence(
-                values.into_iter().next().expect("one Python output"),
+                values
+                    .try_into_first()
+                    .map_err(|_| {
+                        crate::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?
+                    .expect("one Python output"),
             );
         }
-        runmat_value::ValueSequence::comma_separated(values)
+        runmat_value::ValueSequence::from_output_storage(values)
             .map_err(crate::sequence::sequence_error_to_runtime)
     }
 
@@ -825,15 +832,15 @@ impl PythonAdapter {
         sequence: crate::execution::RootedValueSequence,
     ) -> Result<PythonValue, PythonError> {
         sequence.with_owned_sequence(|sequence| {
-            let value = crate::sequence::ResolveValueSequence::resolve(
+            let values = crate::sequence::ResolveValueSequence::resolve(
                 sequence,
                 runmat_types::SequenceUse::SelectPrefix { count: 1 },
                 crate::sequence::SequenceResolutionContext::default(),
             )
-            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
-            .into_iter()
-            .next()
-            .expect("one Python callback output was selected");
+            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
+            let value = crate::sequence::into_first_output(values)
+                .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
+                .expect("one Python callback output was selected");
             self.argument_to_python(context, value)
                 .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))
         })
@@ -1028,13 +1035,20 @@ fn isolated_outputs(
     outputs: crate::execution::RootedValues,
     requested_outputs: usize,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
-    outputs.with_owned_values(|mut values| {
+    outputs.with_owned_output_storage(|values| {
         let sequence = match (requested_outputs, values.len()) {
             (1, 1) => runmat_value::ValueSequence::single(
-                values.pop().expect("one isolated Python output"),
+                values
+                    .try_into_first()
+                    .map_err(|_| {
+                        crate::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?
+                    .expect("one isolated Python output"),
             )
             .map_err(|error| invalid_call(error.to_string())),
-            _ => runmat_value::ValueSequence::comma_separated(values)
+            _ => runmat_value::ValueSequence::from_output_storage(values)
                 .map_err(|error| invalid_call(error.to_string())),
         }?;
         crate::execution::RootedValueSequence::new(sequence)
@@ -1611,7 +1625,7 @@ mod tests {
                 .convert_arguments(
                     &adapter,
                     &context,
-                    vec![callback(unpublished_handle), Value::OutputList(Vec::new())],
+                    vec![callback(unpublished_handle), Value::output_list(Vec::new())],
                 )
                 .expect_err("later transient argument must reject the call");
             unpublished.unroot().expect("transfer unpublished root");
@@ -1635,8 +1649,11 @@ mod tests {
 
     fn only_output(sequence: crate::execution::RootedValueSequence) -> Value {
         sequence.with_owned_sequence(|sequence| {
-            let [value] = sequence.into_values().try_into().expect("one output");
-            value
+            sequence
+                .into_output_storage()
+                .try_into_first()
+                .expect("one unique output")
+                .expect("one output")
         })
     }
 

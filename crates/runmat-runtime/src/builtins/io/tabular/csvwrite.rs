@@ -188,8 +188,8 @@ async fn csvwrite_builtin(
     .await?;
     cooperation.completed(0).await?;
     match requested_outputs {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Num(bytes as f64)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Num(bytes as f64)])),
         Some(_) => Err(csvwrite_error_with(
             &CSVWRITE_ERROR_DATA_INPUT,
             "csvwrite: too many output arguments",

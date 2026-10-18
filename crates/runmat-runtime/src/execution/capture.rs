@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn spawn_capture_rejects_transient_sequences_before_recursive_traversal() {
         let nested = Value::Cell(
-            CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1)
+            CellArray::new(vec![Value::output_list(vec![Value::Num(1.0)])], 1, 1)
                 .expect("nested capture"),
         );
         let error = validate_spawn_capture(&nested).expect_err("transient capture must fail");
@@ -241,7 +241,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::OutputList(Vec::new())],
+                captures: vec![Value::output_list(Vec::new())],
             },
         ));
         let error = validate_spawn_capture(&closure).expect_err("transient closure must fail");

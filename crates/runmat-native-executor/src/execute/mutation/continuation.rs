@@ -363,10 +363,13 @@ fn read_step(
     allow_init: bool,
 ) -> NativeExecutorResult<Value> {
     if let PlaceSegment::Index(indexing) = segment {
-        let mut values = super::super::indexing::read_value(state, base, indexing, 1)?;
-        return values.pop().ok_or_else(|| {
-            NativeExecutorError::Host("nested indexing did not produce one value".into())
-        });
+        let values = super::super::indexing::read_value(state, base, indexing, 1)?;
+        return super::super::call_suspension::own_output_storage(values)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                NativeExecutorError::Host("nested indexing did not produce one value".into())
+            });
     }
     let field = field_name(state, segment)?;
     let runtime = state.runtime.clone();

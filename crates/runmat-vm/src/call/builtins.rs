@@ -175,7 +175,7 @@ pub fn is_vm_dynamic_workspace_builtin(name: &str) -> bool {
 mod dispatch_tests;
 
 pub fn collect_call_args(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     arg_count: usize,
 ) -> Result<Vec<Value>, RuntimeError> {
     pop_args(stack, arg_count)
@@ -202,7 +202,7 @@ fn validate_intrinsic_arg_count(
 }
 
 pub fn vm_intrinsic_builtin(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     name: &str,
     arg_count: usize,
     invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
@@ -231,7 +231,7 @@ pub fn vm_intrinsic_builtin(
 #[cfg(test)]
 pub async fn vm_dynamic_workspace_builtin(
     runtime: &runmat_runtime::context::RuntimeContext,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     name: &str,
     arg_count: usize,
     requested_outputs: usize,
@@ -262,7 +262,7 @@ pub(crate) struct DynamicBuiltinSource {
 
 pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
     runtime: &runmat_runtime::context::RuntimeContext,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     name: &str,
     arg_count: usize,
     requested_outputs: usize,
@@ -480,7 +480,7 @@ fn evalc_output_value(
     requested_outputs: usize,
 ) -> Result<Value, RuntimeError> {
     if requested_outputs == 0 {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     let mut outputs = Vec::with_capacity(requested_outputs.max(1));
@@ -488,6 +488,12 @@ fn evalc_output_value(
     if requested_outputs > 1 {
         match result {
             Value::OutputList(values) => {
+                let values = values.try_into_owned().map_err(|_| {
+                    mex(
+                        "SharedOutputStorage",
+                        "evalc result storage is shared and cannot be materialized implicitly",
+                    )
+                })?;
                 outputs.extend(values.into_iter().take(requested_outputs - 1))
             }
             value => outputs.push(value),
@@ -507,7 +513,7 @@ fn evalc_output_value(
     if requested_outputs == 1 {
         Ok(outputs.remove(0))
     } else {
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     }
 }
 
@@ -1339,7 +1345,7 @@ async fn eval_workspace_source(
         _source_lease,
     }) = completed
     else {
-        return runmat_runtime::execution::RootedValue::new(Value::OutputList(Vec::new()))
+        return runmat_runtime::execution::RootedValue::new(Value::output_list(Vec::new()))
             .map_err(|error| error.into_runtime_error());
     };
     let result = match outcome {
@@ -1352,7 +1358,7 @@ async fn eval_workspace_source(
                 // Root the selected value before committing that trim, while
                 // retaining the existing single public-result Value clone.
                 let value = if requested_outputs == 0 {
-                    Ok(Value::OutputList(Vec::new()))
+                    Ok(Value::output_list(Vec::new()))
                 } else if let Some(result) = captured_result {
                     vars.get(result.slot)
                         .map(|value| value.clone())
@@ -1363,7 +1369,7 @@ async fn eval_workspace_source(
                             )
                         })
                 } else if empty_value_when_no_result {
-                    Ok(Value::OutputList(Vec::new()))
+                    Ok(Value::output_list(Vec::new()))
                 } else {
                     Ok(Value::Num(0.0))
                 };

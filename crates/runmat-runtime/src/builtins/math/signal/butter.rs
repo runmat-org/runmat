@@ -88,16 +88,16 @@ async fn evaluate_with_cooperation(
 
     let output = if let Some(out_count) = out_count {
         match out_count {
-            0 => Value::OutputList(Vec::new()),
-            1 => Value::OutputList(vec![design.numerator_value()?]),
-            2 => Value::OutputList(vec![design.numerator_value()?, design.denominator_value()?]),
+            0 => Value::output_list(Vec::new()),
+            1 => Value::output_list(vec![design.numerator_value()?]),
+            2 => Value::output_list(vec![design.numerator_value()?, design.denominator_value()?]),
             3 => {
                 let (z, p, k) = design.zpk_values()?;
-                Value::OutputList(vec![z, p, k])
+                Value::output_list(vec![z, p, k])
             }
             4 => {
                 let (a, b, c, d) = design.state_space_values(cooperation).await?;
-                Value::OutputList(vec![a, b, c, d])
+                Value::output_list(vec![a, b, c, d])
             }
             _ => return Err(butter_error(&BUTTER_ERROR_TOO_MANY_OUTPUTS)),
         }

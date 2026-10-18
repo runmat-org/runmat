@@ -12,7 +12,10 @@ fn object() -> Value {
 fn selected_comparison_error_is_not_replayed_through_builtin() {
     let method_calls = Rc::new(Cell::new(0));
     let builtin_calls = Rc::new(Cell::new(0));
-    let mut stack = vec![object(), Value::Num(2.0)];
+    let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+        object(),
+        Value::Num(2.0),
+    ]);
     let error = block_on(equal(
         &mut stack,
         {
@@ -47,7 +50,10 @@ fn selected_comparison_error_is_not_replayed_through_builtin() {
 #[test]
 fn certified_missing_comparison_uses_builtin_once() {
     let builtin_calls = Rc::new(Cell::new(0));
-    let mut stack = vec![object(), Value::Num(2.0)];
+    let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+        object(),
+        Value::Num(2.0),
+    ]);
     block_on(equal(
         &mut stack,
         |_, _, _| ready(Ok(None)),
@@ -66,5 +72,5 @@ fn certified_missing_comparison_uses_builtin_once() {
     .expect("certified absence permits builtin fallback");
 
     assert_eq!(builtin_calls.get(), 1);
-    assert_eq!(stack, vec![Value::Bool(false)]);
+    assert_eq!(stack.as_slice(), &[Value::Bool(false)]);
 }

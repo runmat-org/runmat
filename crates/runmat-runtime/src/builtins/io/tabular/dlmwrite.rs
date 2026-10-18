@@ -181,8 +181,8 @@ async fn dlmwrite_builtin(
         )
     })?;
     match outputs {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Num(bytes as f64)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Num(bytes as f64)])),
         Some(_) => Err(dlmwrite_error_with(
             &DLMWRITE_ERROR_ARG_CONFIG,
             "dlmwrite: too many output arguments",

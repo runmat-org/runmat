@@ -44,13 +44,18 @@ pub(crate) fn table_replace_variables_like_owned(
     names: Vec<String>,
     columns: crate::execution::RootedValues,
 ) -> BuiltinResult<crate::execution::RootedValue> {
-    columns.with_owned_values(|values| {
+    columns.with_owned_output_storage(|values| {
         if names.len() != values.len() {
             return Err(crate::RuntimeError::new(
                 "table: owned column count differs from variable names",
             ));
         }
         let mut variables = StructValue::new();
+        let values = values.try_into_owned().map_err(|_| {
+            crate::sequence::sequence_error_to_runtime(
+                runmat_value::ValueSequenceError::SharedOutputStorage,
+            )
+        })?;
         for (name, value) in names.into_iter().zip(values) {
             variables.insert(name, value);
         }

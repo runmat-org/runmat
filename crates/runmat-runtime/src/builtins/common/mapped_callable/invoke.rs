@@ -1,8 +1,11 @@
+mod builtin;
+
 use crate::execution::RootedValue;
 use crate::user_functions;
 use runmat_value::Value;
 
 use super::{CallableCallError, MappedCallable};
+use builtin::invoke_builtin_dispatch;
 
 impl MappedCallable {
     pub(crate) fn invoke_with_outputs<'a>(
@@ -168,25 +171,4 @@ async fn invoke_closure(
             .map_err(CallableCallError::Runtime);
     }
     invoke_builtin_dispatch(context, &closure.function_name, &merged, requested_outputs).await
-}
-
-async fn invoke_builtin_dispatch(
-    context: Option<&crate::context::RuntimeContext>,
-    name: &str,
-    arguments: &[Value],
-    requested_outputs: usize,
-) -> Result<RootedValue, CallableCallError> {
-    let result = match context {
-        Some(context) => {
-            crate::call_builtin_async_with_outputs_in_context(
-                context,
-                name,
-                arguments,
-                requested_outputs,
-            )
-            .await
-        }
-        None => crate::call_builtin_async_with_outputs(name, arguments, requested_outputs).await,
-    };
-    result.map_err(CallableCallError::Runtime)
 }

@@ -30,7 +30,7 @@ fn selected_sink_binding_projects_exact_requested_status_count() {
             0,
         ))
         .unwrap_or_else(|error| panic!("{name} zero-output save failed: {error}"));
-        assert_eq!(zero, Value::OutputList(Vec::new()), "{name}");
+        assert_eq!(zero, Value::output_list(Vec::new()), "{name}");
 
         let one = block_on(crate::call_builtin_async_with_outputs_in_context(
             &runtime,

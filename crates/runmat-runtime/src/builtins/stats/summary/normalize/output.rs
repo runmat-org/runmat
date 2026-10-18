@@ -33,7 +33,7 @@ impl RequestedOutputs {
     fn publish(self, mut outputs: Vec<Value>) -> Value {
         match self {
             Self::ImplicitOne => outputs.remove(0),
-            Self::Discard => Value::OutputList(Vec::new()),
+            Self::Discard => Value::output_list(Vec::new()),
             Self::Explicit(count) => crate::output_count::output_list_with_padding(count, outputs),
         }
     }

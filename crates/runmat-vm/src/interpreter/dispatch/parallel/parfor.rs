@@ -3,7 +3,7 @@ use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
-use super::{execution_error, tasks};
+use super::{execution_error, task_group::SubmittedTaskGroup, tasks};
 
 #[derive(Clone, Copy)]
 struct ParforExecution<'a> {
@@ -39,7 +39,7 @@ pub(super) async fn execute(
     let iteration_values = iteration_values
         .finish()
         .map_err(|error| error.into_runtime_error())?;
-    iteration_values.with_owned_values_async(|iteration_values| async move {
+    iteration_values.with_unbounded_values_async(|iteration_values| async move {
     validate_parfor_iterations(&iteration_values).await?;
     let randomness = parallel_randomness_context(
         executable.contract.randomness,
@@ -64,7 +64,7 @@ pub(super) async fn execute(
         current_function_name,
     };
     if maximum_workers == Some(0) {
-        return execute_parfor_serial(
+        return prepare_parfor_serial(
             execution,
             ParforTaskPayload {
                 inputs,
@@ -73,7 +73,7 @@ pub(super) async fn execute(
                 randomness,
             },
             vars,
-        )
+        )?
         .await;
     }
     let pool = context
@@ -123,11 +123,25 @@ pub(super) async fn execute(
         }) => {
             return Err(error.into_runtime_error());
         }
+        Err(crate::interpreter::parallel_placement::ParallelPlacementRejection::AutomaticGatherFailed {
+            error,
+            ..
+        } | crate::interpreter::parallel_placement::ParallelPlacementRejection::ReductionIdentityFailed {
+            error,
+            ..
+        } | crate::interpreter::parallel_placement::ParallelPlacementRejection::InputMaterializationFailed {
+            error,
+        }) => {
+            // This is an operational failure, not an unavailable placement.
+            // Preserve cancellation/provider provenance; serial execution
+            // must not replay the region after a failed input transfer.
+            return Err(runmat_runtime::RuntimeError::from_shared_original(error));
+        }
         Err(reason) => {
             tracing::debug!(reason = %reason, effects = ?executable.contract.effects, "using serial parfor correctness backend");
         }
     }
-    execute_parfor_serial(
+    prepare_parfor_serial(
         execution,
         ParforTaskPayload {
             inputs,
@@ -136,9 +150,23 @@ pub(super) async fn execute(
             randomness,
         },
         vars,
-    )
+    )?
     .await
-    }).await
+    }).await?
+}
+
+/// A serial region still invokes a child VM interpreter. Admit that one child
+/// continuation before constructing its future so the outer interpreter does
+/// not carry both concrete poll frames on the process stack.
+fn prepare_parfor_serial<'a>(
+    execution: ParforExecution<'a>,
+    task: ParforTaskPayload,
+    vars: &'a mut InterpreterVars,
+) -> Result<runmat_runtime::execution::RuntimeContinuationFuture<'a, ()>, RuntimeError> {
+    runmat_runtime::execution::admit_domain_continuation_with(
+        &execution.context.runtime,
+        move || execute_parfor_serial(execution, task, vars),
+    )
 }
 
 async fn execute_parfor_serial(
@@ -165,8 +193,17 @@ async fn execute_parfor_serial(
         },
     )
     .await?;
-    outputs.with_owned_values(|outputs| {
-        for (variable, output) in execution.executable.output_variables().zip(outputs) {
+    outputs.with_owned_output_storage(|outputs| {
+        let outputs = outputs.try_into_owned().map_err(|_| {
+            runmat_runtime::sequence::sequence_error_to_runtime(
+                runmat_value::ValueSequenceError::SharedOutputStorage,
+            )
+        })?;
+        for (variable, output) in execution
+            .executable
+            .output_variables()
+            .zip(outputs.into_iter())
+        {
             if vars.get(variable.slot).is_none() {
                 return Err(crate::interpreter::errors::mex(
                     "ParallelFrame",
@@ -273,7 +310,7 @@ async fn execute_parfor_tasks(
     } else {
         context.runtime.program_revision().cloned()
     };
-    let mut tasks = Vec::with_capacity(graph.chunks.len());
+    let mut tasks = SubmittedTaskGroup::with_capacity(&context.runtime, graph.chunks.len());
     for chunk in &graph.chunks {
         let values = iterations[chunk.start..chunk.start + chunk.len].to_vec();
         let iteration_argument = Value::Cell(
@@ -309,16 +346,29 @@ async fn execute_parfor_tasks(
                 program: program.clone(),
             })
             .map_err(execution_error)?;
-        tasks.push(
-            context
-                .runtime
-                .execution()
-                .spawn_on(&future, Some(pool))
-                .map_err(execution_error)?,
-        );
+        match context.runtime.execution().spawn_on(&future, Some(pool)) {
+            Ok(task) => tasks.push(task),
+            Err(error) => {
+                // The service already owns the deferred call even though it
+                // did not issue a task handle. Retire that future as well as
+                // the earlier submissions owned by the group.
+                let _ = context.runtime.execution().cancel(
+                    &Value::Future(future),
+                    runmat_execution::CancellationReason::DependencyFailed,
+                );
+                return Err(execution_error(error));
+            }
+        }
     }
 
-    let results = await_parallel_tasks(context, &tasks).await?;
+    let results = match await_parallel_tasks(context, &mut tasks).await {
+        Ok(results) => results,
+        Err(error) => {
+            tasks.cancel(runmat_execution::CancellationReason::DependencyFailed);
+            return Err(error);
+        }
+    };
+    tasks.complete();
     assemble_sliced_results(
         &context.runtime,
         executable,
@@ -334,59 +384,40 @@ async fn execute_parfor_tasks(
 
 async fn await_parallel_tasks(
     context: &ExecutionContext,
-    tasks: &[runmat_execution::TaskHandle],
+    group: &mut SubmittedTaskGroup<'_>,
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     use runmat_execution::TaskResultClaim;
 
-    let mut results = vec![None; tasks.len()];
-    let mut remaining = tasks.len();
+    let mut results = vec![None; group.as_slice().len()];
+    let mut remaining = group.as_slice().len();
     while remaining > 0 {
         if let Err(error) = crate::interpreter::engine::check_cancelled(&context.runtime) {
-            cancel_parallel_tasks(context, tasks, runmat_execution::CancellationReason::User);
+            group.cancel(runmat_execution::CancellationReason::User);
             return Err(error);
         }
-        let claim = match context.runtime.execution().claim_next_task_result(tasks) {
-            Ok(claim) => claim,
-            Err(error) => {
-                cancel_parallel_tasks(
-                    context,
-                    tasks,
-                    runmat_execution::CancellationReason::DependencyFailed,
-                );
-                return Err(execution_error(error));
-            }
-        };
+        let claim = context
+            .runtime
+            .execution()
+            .claim_next_task_result(group.as_slice())
+            .map_err(execution_error)?;
         match claim {
             TaskResultClaim::Claimed { index } => {
-                let Some(task) = tasks.get(index) else {
-                    cancel_parallel_tasks(
-                        context,
-                        tasks,
-                        runmat_execution::CancellationReason::DependencyFailed,
-                    );
+                let Some(task) = group.as_slice().get(index) else {
                     return Err(crate::interpreter::errors::mex(
                         "ParallelTaskState",
                         "parallel scheduler returned an invalid completed-task index",
                     ));
                 };
                 let result = tasks::await_value(context, Value::Task(task.clone())).await;
-                if let Err(error) = context.runtime.execution().mark_task_result_read(task) {
-                    cancel_parallel_tasks(
-                        context,
-                        tasks,
-                        runmat_execution::CancellationReason::DependencyFailed,
-                    );
-                    return Err(execution_error(error));
-                }
+                context
+                    .runtime
+                    .execution()
+                    .mark_task_result_read(task)
+                    .map_err(execution_error)?;
                 match result {
                     Ok(value) => {
                         let slot = &mut results[index];
                         if slot.replace(value).is_some() {
-                            cancel_parallel_tasks(
-                                context,
-                                tasks,
-                                runmat_execution::CancellationReason::DependencyFailed,
-                            );
                             return Err(crate::interpreter::errors::mex(
                                 "ParallelTaskState",
                                 "parallel scheduler completed one task more than once",
@@ -394,23 +425,11 @@ async fn await_parallel_tasks(
                         }
                         remaining -= 1;
                     }
-                    Err(error) => {
-                        cancel_parallel_tasks(
-                            context,
-                            tasks,
-                            runmat_execution::CancellationReason::DependencyFailed,
-                        );
-                        return Err(error);
-                    }
+                    Err(error) => return Err(error),
                 }
             }
             TaskResultClaim::Pending => tasks::yield_once().await,
             TaskResultClaim::Exhausted => {
-                cancel_parallel_tasks(
-                    context,
-                    tasks,
-                    runmat_execution::CancellationReason::DependencyFailed,
-                );
                 return Err(crate::interpreter::errors::mex(
                     "ParallelTaskState",
                     "parallel scheduler exhausted results before the task graph completed",
@@ -431,19 +450,6 @@ async fn await_parallel_tasks(
             .map_err(|error| error.into_runtime_error())?;
     }
     rooted.finish().map_err(|error| error.into_runtime_error())
-}
-
-fn cancel_parallel_tasks(
-    context: &ExecutionContext,
-    tasks: &[runmat_execution::TaskHandle],
-    reason: runmat_execution::CancellationReason,
-) {
-    for task in tasks {
-        let _ = context
-            .runtime
-            .execution()
-            .cancel(&Value::Task(task.clone()), reason);
-    }
 }
 
 async fn parallel_randomness_context(

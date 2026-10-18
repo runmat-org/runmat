@@ -34,7 +34,7 @@ pub(super) async fn audioinfo_builtin(
         })?;
         cooperation.completed(0).await?;
         let value = match outputs {
-            Some(0) => Value::OutputList(Vec::new()),
+            Some(0) => Value::output_list(Vec::new()),
             None | Some(1) => Value::Struct(metadata.into_struct(&path, scan.file_size as f64)),
             Some(_) => unreachable!("output arity was admitted before filesystem capture"),
         };

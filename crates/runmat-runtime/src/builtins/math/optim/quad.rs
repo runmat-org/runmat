@@ -733,7 +733,7 @@ fn finalize(result: QuadResult) -> BuiltinResult<Value> {
     let fcnt = Value::Num(result.func_count as f64);
     match crate::output_count::current_output_count() {
         None => Ok(q),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(crate::output_count::output_list_with_padding(1, vec![q])),
         Some(2) => Ok(crate::output_count::output_list_with_padding(
             2,

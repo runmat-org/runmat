@@ -47,7 +47,7 @@ impl TransferOutcome {
                 .with_identifier(self.message_id)
                 .build());
         }
-        Ok(Value::OutputList(Vec::new()))
+        Ok(Value::output_list(Vec::new()))
     }
 
     #[cfg(test)]

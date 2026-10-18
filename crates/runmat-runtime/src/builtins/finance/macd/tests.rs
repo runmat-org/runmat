@@ -257,7 +257,7 @@ fn two_outputs_return_macd_and_signal() {
 fn zero_outputs_return_empty_without_validating_input() {
     let _guard = crate::output_count::push_output_count(Some(0));
     let result = call(Value::String("not data".to_string())).unwrap();
-    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert_eq!(result, Value::output_list(Vec::new()));
 }
 
 #[test]

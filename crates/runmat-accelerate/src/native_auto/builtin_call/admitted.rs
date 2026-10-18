@@ -64,7 +64,7 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
             if request.form().operation == Operation::RuntimeOwned {
                 return request
                     .into_operands()
-                    .with_owned_values(PreparedBuiltinOperands::passthrough);
+                    .with_unbounded_values(PreparedBuiltinOperands::passthrough)?;
             }
             if let Operation::Sink(mode) = request.form().operation {
                 fusion_residency::clear_inputs(
@@ -74,7 +74,7 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
                 return match mode {
                     BuiltinSinkPreparation::Barrier => request
                         .into_operands()
-                        .with_owned_values(PreparedBuiltinOperands::passthrough),
+                        .with_unbounded_values(PreparedBuiltinOperands::passthrough)?,
                     BuiltinSinkPreparation::Gather => {
                         let operands = gather_args(request.operands())
                             .await
@@ -86,12 +86,12 @@ impl RuntimeAccelerationService for AdmittedAcceleration {
             if !auto_enabled() {
                 return request
                     .into_operands()
-                    .with_owned_values(PreparedBuiltinOperands::passthrough);
+                    .with_unbounded_values(PreparedBuiltinOperands::passthrough)?;
             }
             let Some(auto) = global().await else {
                 return request
                     .into_operands()
-                    .with_owned_values(PreparedBuiltinOperands::passthrough);
+                    .with_unbounded_values(PreparedBuiltinOperands::passthrough)?;
             };
             let prepared = prepare_async(&auto, &context, request)
                 .await
@@ -130,9 +130,10 @@ fn prepare_with_inner(
     compound: Option<&runmat_runtime::context::preparation::AdmittedBuiltinCompound>,
 ) -> PreparationResult<PreparedBuiltinCall> {
     if request.form().operation == Operation::RuntimeOwned {
-        return Ok(request
+        return request
             .into_operands()
-            .with_owned_values(PreparedBuiltinCall::unobserved));
+            .with_unbounded_values(PreparedBuiltinCall::unobserved)
+            .map_err(Box::new);
     }
     let host_instruction = match request.form().operation {
         Operation::ElementwiseBinary => {
@@ -151,23 +152,28 @@ fn prepare_with_inner(
                 })
         })
     }) {
-        return Ok(request.into_operands().with_owned_values(PreparedBuiltinCall::unobserved));
+        return request
+            .into_operands()
+            .with_unbounded_values(PreparedBuiltinCall::unobserved)
+            .map_err(Box::new);
     }
     if !auto.enabled
         || (request.form().provider_requirement == BuiltinPreparationProviderRequirement::F64
             && auto.provider.precision() != ProviderPrecision::F64)
     {
-        return Ok(request
+        return request
             .into_operands()
-            .with_owned_values(PreparedBuiltinCall::unobserved));
+            .with_unbounded_values(PreparedBuiltinCall::unobserved)
+            .map_err(Box::new);
     }
     if !super::owner_admission::matches_selected_owner(auto.provider, request.operands())? {
         // The domain already owns the correct direct/cross-provider behavior.
         // Do not upload other operands or observe a candidate whose retained
         // provider cannot execute the actual borrowed operands.
-        return Ok(request
+        return request
             .into_operands()
-            .with_owned_values(PreparedBuiltinCall::unobserved));
+            .with_unbounded_values(PreparedBuiltinCall::unobserved)
+            .map_err(Box::new);
     }
     let operation = match request.form().operation {
         Operation::Unary => ArgumentOperation::Unary(UnaryOp::Generic),
@@ -212,9 +218,10 @@ fn prepare_with_inner(
             if controls.axes.is_empty() && controls.input_class == controls.publication_class {
                 // The domain has proved an identity route with no class change.
                 // Do not upload a host array only to return it unchanged.
-                return Ok(request
+                return request
                     .into_operands()
-                    .with_owned_values(PreparedBuiltinCall::unobserved));
+                    .with_unbounded_values(PreparedBuiltinCall::unobserved)
+                    .map_err(Box::new);
             }
             let axes = controls
                 .axes

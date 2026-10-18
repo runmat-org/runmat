@@ -123,13 +123,15 @@ fn public_nonsquare_cb_normalization_then_dense_stays_resident_and_matches_oracl
                 .unwrap(),
             );
             let layers = layers.finish().unwrap();
-            let network = layers.with_owned_values(|layers| {
-                call_builtin(
-                    "dlnetwork",
-                    &[Value::Cell(CellArray::new(layers, 3, 1).unwrap())],
-                )
-                .unwrap()
-            });
+            let network = layers
+                .with_unbounded_values(|layers| {
+                    call_builtin(
+                        "dlnetwork",
+                        &[Value::Cell(CellArray::new(layers, 3, 1).unwrap())],
+                    )
+                    .unwrap()
+                })
+                .expect("fixture layer batch is unbounded");
             provider.reset_telemetry();
             let output = network.with_owned(|network| {
                 input.with_owned(|input| call_builtin("forward", &[network, input]).unwrap())

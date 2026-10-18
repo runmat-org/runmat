@@ -55,7 +55,8 @@ pub(super) async fn dlupdate_struct_array(
                 .collect::<BuiltinResult<Vec<_>>>()?;
             let updated =
                 dlupdate_node(runtime, function, &fields, requested_outputs, depth).await?;
-            updated.with_owned_values(|updated| {
+            updated.with_owned_output_storage(|updated| {
+                let updated = into_owned_outputs(updated)?;
                 for (output, value) in outputs.iter_mut().zip(updated) {
                     output
                         .push(value)
@@ -70,7 +71,7 @@ pub(super) async fn dlupdate_struct_array(
         let values = values
             .finish()
             .map_err(|error| error.into_runtime_error())?;
-        let result = values.with_owned_values(|values| {
+        let result = values.with_unbounded_values(|values| {
             let value = StructArray::normalize_field_major(
                 field_names.clone(),
                 values,
@@ -78,7 +79,7 @@ pub(super) async fn dlupdate_struct_array(
             )
             .map_err(|error| deep_learning_error("dlupdate", error))?;
             RootedValue::new(value).map_err(|error| error.into_runtime_error())
-        })?;
+        })??;
         result.with_owned(|value| {
             rebuilt
                 .push(value)
@@ -128,7 +129,8 @@ pub(super) async fn dlupdate_struct(
             .collect::<Vec<_>>();
         let updated =
             dlupdate_node(runtime, function, &field_values, requested_outputs, depth).await?;
-        updated.with_owned_values(|updated| {
+        updated.with_owned_output_storage(|updated| {
+            let updated = into_owned_outputs(updated)?;
             for (out, value) in outputs.iter_mut().zip(updated) {
                 out.push(value)
                     .map_err(|error| error.into_runtime_error())?;
@@ -142,7 +144,8 @@ pub(super) async fn dlupdate_struct(
         let fields = fields
             .finish()
             .map_err(|error| error.into_runtime_error())?;
-        let result = fields.with_owned_values(|fields| {
+        let result = fields.with_owned_output_storage(|fields| {
+            let fields = into_owned_outputs(fields)?;
             let mut out = StructValue::new();
             for (name, value) in field_names.iter().cloned().zip(fields) {
                 out.insert(name, value);
@@ -190,7 +193,8 @@ pub(super) async fn dlupdate_cell(
             .map(|cell| cell.data[idx].clone())
             .collect::<Vec<_>>();
         let updated = dlupdate_node(runtime, function, &elements, requested_outputs, depth).await?;
-        updated.with_owned_values(|updated| {
+        updated.with_owned_output_storage(|updated| {
+            let updated = into_owned_outputs(updated)?;
             for (out, value) in outputs.iter_mut().zip(updated) {
                 out.push(value)
                     .map_err(|error| error.into_runtime_error())?;
@@ -202,12 +206,12 @@ pub(super) async fn dlupdate_cell(
     let mut rebuilt = RootedValuesBuilder::with_capacity(requested_outputs);
     for data in outputs {
         let data = data.finish().map_err(|error| error.into_runtime_error())?;
-        let result = data.with_owned_values(|data| {
+        let result = data.with_unbounded_values(|data| {
             let value = CellArray::new_with_shape(data, reference.shape.clone())
                 .map(Value::Cell)
                 .map_err(|err| deep_learning_error("dlupdate", err))?;
             RootedValue::new(value).map_err(|error| error.into_runtime_error())
-        })?;
+        })??;
         result.with_owned(|value| {
             rebuilt
                 .push(value)

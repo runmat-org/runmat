@@ -67,7 +67,7 @@ pub(super) async fn try_pol2cart_gpu(
                     .next()
                     .expect("implicit first coordinate")
             } else {
-                Value::OutputList(values)
+                Value::output_list(values)
             };
             // Register the exact coordinate/list graph before Outputs retires
             // its remaining temporary and borrowed allocation authorities.

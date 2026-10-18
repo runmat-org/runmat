@@ -216,7 +216,7 @@ fn value_tracing_covers_all_nested_container_edges() {
             valid: true,
         })],
     }));
-    let value = Value::OutputList(vec![cell, structures, objects, closure]);
+    let value = Value::output_list(vec![cell, structures, objects, closure]);
     let mut tracer = RecordingTracer(Vec::new());
     value.trace(&mut tracer);
     assert_eq!(tracer.0.len(), handles.len());

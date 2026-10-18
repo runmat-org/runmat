@@ -477,6 +477,11 @@ async fn parse_soc_constraints(value: Value, n: usize) -> BuiltinResult<Vec<SocC
         }
         Value::OutputList(values) => {
             let mut out = Vec::with_capacity(values.len());
+            let values = values.try_into_owned().map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
             for value in values {
                 let Value::Struct(st) = value else {
                     return Err(coneprog_error(
@@ -1088,7 +1093,7 @@ fn finalize(outcome: ConeOutcome) -> Value {
 
     match crate::output_count::current_output_count() {
         None => x,
-        Some(0) => Value::OutputList(Vec::new()),
+        Some(0) => Value::output_list(Vec::new()),
         Some(1) => crate::output_count::output_list_with_padding(1, vec![x]),
         Some(2) => crate::output_count::output_list_with_padding(2, vec![x, fval]),
         Some(3) => crate::output_count::output_list_with_padding(3, vec![x, fval, exitflag]),
@@ -1273,7 +1278,11 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(outputs));
         let value = block_on(coneprog_builtin(args)).expect("coneprog");
         match value {
-            Value::OutputList(values) => values,
+            Value::OutputList(values) => values
+                .try_into_owned()
+                .expect("unique output list")
+                .try_into_unbounded_vec()
+                .expect("unbounded output list"),
             other => vec![other],
         }
     }

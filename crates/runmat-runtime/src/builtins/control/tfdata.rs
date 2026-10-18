@@ -63,7 +63,7 @@ async fn scalar_model_data(
         Value::Object(object) if object.is_class(TF_CLASS) => {
             let model = TfModel::from_value_async(Value::Object(object), NAME).await?;
             let (num, den) = model.coefficient_values(NAME)?;
-            Ok((vec![num], vec![den], model.sample_time, 1, 1))
+            Ok((vec![num], vec![den], model.sample_time(), 1, 1))
         }
         Value::Object(object) if object.is_class(SS_CLASS) => {
             // A definitely MIMO model cannot satisfy the vector selector. Do
@@ -143,12 +143,12 @@ fn publish_values(
         outputs.push(empty()?);
     }
     if requested == 0 {
-        Ok(Value::OutputList(Vec::new()))
+        Ok(Value::output_list(Vec::new()))
     } else if requested == 1 {
         Ok(outputs.remove(0))
     } else {
         outputs.truncate(requested);
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     }
 }
 

@@ -179,9 +179,9 @@ mod tests {
     #[test]
     fn transient_output_list_is_rejected_at_top_level_and_inside_cell() {
         for input in [
-            Value::OutputList(vec![Value::Num(1.0)]),
+            Value::output_list(vec![Value::Num(1.0)]),
             Value::Cell(
-                CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1).unwrap(),
+                CellArray::new(vec![Value::output_list(vec![Value::Num(1.0)])], 1, 1).unwrap(),
             ),
         ] {
             let error = block_on(gather_if_needed_owned_async(input, None))
@@ -221,7 +221,7 @@ mod tests {
         let nested_transient = Value::Cell(
             CellArray::new(
                 vec![Value::Cell(
-                    CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1).unwrap(),
+                    CellArray::new(vec![Value::output_list(vec![Value::Num(1.0)])], 1, 1).unwrap(),
                 )],
                 1,
                 1,
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn host_aggregates_preserve_canonical_transient_descendant_rejection() {
-        let transient = || Value::OutputList(vec![Value::Num(1.0)]);
+        let transient = || Value::output_list(vec![Value::Num(1.0)]);
         let mut structure = StructValue::new();
         structure.insert("payload", transient());
         let mut object = ObjectInstance::new("GatherFixture");

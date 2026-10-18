@@ -262,6 +262,11 @@ async fn restore_kmeans_value_cooperative(
                 values.len(),
                 "kmeans: restored outputs exceed available memory",
             )?;
+            let values = values.try_into_owned().map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
             for value in values {
                 let mut protected = match borrowed_handle_refs(borrowed.protected()) {
                     Ok(handles) => handles,
@@ -290,7 +295,7 @@ async fn restore_kmeans_value_cooperative(
                     return Err(retire_staged_outputs(restored, error));
                 }
             }
-            Ok(Value::OutputList(restored))
+            Ok(Value::output_list(restored))
         }
         other => Ok(other),
     }

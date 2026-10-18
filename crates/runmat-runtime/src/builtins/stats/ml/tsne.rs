@@ -191,8 +191,8 @@ async fn tsne_in_runtime(
     let result = compute_tsne_cooperative(tensor, options, &mut cooperation).await?;
     cooperation.completed(0).await?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Tensor(result.embedding)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Tensor(result.embedding)])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![Value::Tensor(result.embedding), Value::Num(result.loss)],

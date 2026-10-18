@@ -27,14 +27,14 @@ impl BoundsEvaluation {
     fn into_value(self) -> BuiltinResult<Value> {
         if let Some(out_count) = crate::output_count::current_output_count() {
             if out_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
             return Ok(crate::output_count::output_list_with_padding(
                 out_count,
                 vec![self.smallest, self.largest],
             ));
         }
-        Ok(Value::OutputList(vec![self.smallest, self.largest]))
+        Ok(Value::output_list(vec![self.smallest, self.largest]))
     }
 }
 

@@ -100,12 +100,12 @@ pub(super) fn begin_arguments(
 pub(super) fn adopt_rooted_arguments(
     state: &mut HostState,
     arguments: RootedValues,
-) -> Vec<NativeValueRef> {
-    arguments.with_owned_values(|values| {
-        values
+) -> NativeExecutorResult<Vec<NativeValueRef>> {
+    arguments.with_owned_output_storage(|values| {
+        Ok(super::own_output_storage(values)?
             .into_iter()
             .map(|value| state.arena.insert(value))
-            .collect()
+            .collect())
     })
 }
 
@@ -154,7 +154,7 @@ pub(super) fn adopt_rooted_sequence(
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
     sequence.with_owned_sequence(|sequence| {
         let values = super::super::call::normalize_sequence_outputs(sequence, requested_outputs)?;
-        Ok(values
+        Ok(super::own_output_storage(values)?
             .into_iter()
             .map(|value| state.arena.insert(value))
             .collect())

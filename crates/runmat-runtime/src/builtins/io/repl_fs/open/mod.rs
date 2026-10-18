@@ -159,10 +159,17 @@ async fn call_extension_handler(
             sequence
                 .try_map_owned(
                     |sequence| {
-                        let mut values = sequence.into_values();
+                        let values = sequence.into_output_storage();
                         match values.len() {
                             0 => Ok(empty_array()),
-                            1 => Ok(values.pop().expect("single output")),
+                            1 => Ok(values
+                                .try_into_first()
+                                .map_err(|_| {
+                                    crate::sequence::sequence_error_to_runtime(
+                                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                                    )
+                                })?
+                                .expect("single output")),
                             count => Err(crate::runtime_error::semantic_error(
                                 "RunMat:OpenHandlerOutputCount",
                                 format!(

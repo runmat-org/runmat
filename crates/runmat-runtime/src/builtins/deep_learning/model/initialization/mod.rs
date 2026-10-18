@@ -87,7 +87,10 @@ pub(in crate::builtins) async fn initialise_layers_in_runtime(
                 })?;
                 result.try_map_owned(
                     |result| match result {
-                        Value::OutputList(mut values) if values.len() == 1 => Ok(values.remove(0)),
+                        Value::OutputList(values) if values.len() == 1 => {
+                            Ok(crate::sequence::into_first_output(values)?
+                                .expect("one initializer output"))
+                        }
                         Value::OutputList(values) => Err(deep_learning_error(
                             function,
                             format!(

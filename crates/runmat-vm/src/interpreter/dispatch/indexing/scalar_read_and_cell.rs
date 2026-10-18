@@ -1,13 +1,13 @@
 use super::{
     execute_brace_operation, execute_brace_operation_from_stack, paren_index_value, pop_index_base,
     pop_index_values, BraceIndexOperation, BraceIndexOutcome, BraceOutcomeExpectation,
-    BraceStackRequest, RuntimeError, Value,
+    BraceStackRequest, RuntimeError,
 };
 use crate::interpreter::vars::InterpreterVars;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
     function_registry: &crate::bytecode::FunctionRegistry,
     _pc: usize,
@@ -30,7 +30,7 @@ pub(super) async fn dispatch(
             ))?;
             paren_index_value(runtime, base, raw_indices, 1, function_registry)
                 .await?
-                .with_owned(|value| stack.push(value));
+                .with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::IndexCell { num_indices } => {

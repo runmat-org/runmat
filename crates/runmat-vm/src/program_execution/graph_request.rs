@@ -517,7 +517,7 @@ async fn invoke_bound_root_v12(
 ) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
     let (binding, view, selected_runtime) = prepare_bound_root(request, selected, target)?;
     values
-        .with_owned_values_async(move |mut owned| async move {
+        .with_unbounded_values_async(move |mut owned| async move {
             if owned.is_empty() {
                 return Err(runmat_runtime::runtime_error::semantic_error(
                     "WorkerGraph",
@@ -568,7 +568,7 @@ async fn invoke_bound_root_v12(
             )
             .await
         })
-        .await
+        .await?
 }
 
 fn prepare_bound_root(

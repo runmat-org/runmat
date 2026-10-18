@@ -71,7 +71,7 @@ async fn pzmap_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     if is_plot_form_call() {
         plot_pole_zero_map_statement(sys, rest).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     if !rest.is_empty() {
@@ -85,11 +85,11 @@ async fn pzmap_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             render_pole_zero_map(&eval, None, 0).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         return match out_count {
-            1 => Ok(Value::OutputList(vec![eval.poles_value()?])),
-            2 => Ok(Value::OutputList(eval.outputs()?)),
+            1 => Ok(Value::output_list(vec![eval.poles_value()?])),
+            2 => Ok(Value::output_list(eval.outputs()?)),
             _ => Err(pzmap_error(
                 "pzmap: too many output arguments",
                 &PZMAP_ERROR_INVALID_ARGUMENT,

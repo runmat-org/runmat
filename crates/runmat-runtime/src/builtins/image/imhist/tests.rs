@@ -610,7 +610,7 @@ fn statement_form_renders_bar_chart_without_value() {
     let _requested = crate::output_context::push_output_count(0);
     let image = tensor(vec![0.0, 1.0, 1.0, 2.0], vec![2, 2], NumericDType::U8);
     let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
-    assert_eq!(out, Value::OutputList(Vec::new()));
+    assert_eq!(out, Value::output_list(Vec::new()));
     if let Some(fig) = clone_figure(current_figure_handle()) {
         if let Some(plot) = fig.plots().next() {
             assert!(matches!(plot, PlotElement::Bar(_)));
@@ -624,5 +624,5 @@ fn statement_form_noops_without_plot_core() {
     let _requested = crate::output_context::push_output_count(0);
     let image = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
     let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
-    assert_eq!(out, Value::OutputList(Vec::new()));
+    assert_eq!(out, Value::output_list(Vec::new()));
 }

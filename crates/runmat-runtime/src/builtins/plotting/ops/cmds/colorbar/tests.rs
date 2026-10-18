@@ -31,7 +31,7 @@ fn strict_colorbar_reuses_live_handle_and_off_deletes_without_selection_drift() 
     let _outputs = crate::output_count::push_output_count(Some(0));
     assert_eq!(
         colorbar_builtin(vec![target, Value::String("off".into())]).unwrap(),
-        Value::OutputList(vec![])
+        Value::output_list(vec![])
     );
     assert!(crate::builtins::plotting::state::plot_child_handle_snapshot(bar).is_err());
     assert_eq!(current_axes_state().active_index, 1);

@@ -653,9 +653,6 @@ async fn invoke_native_values_legacy(
 pub(crate) fn install_acceleration_services(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> runmat_runtime::context::RuntimeContext {
-    if runmat_accelerate_api::provider().is_none() {
-        return runtime;
-    }
     let runtime = if runtime.service_ports().placement().is_none() {
         let ports = runtime.service_ports().clone().with_placement(Rc::new(
             runmat_accelerate::placement::PlacementSession::default(),

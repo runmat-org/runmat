@@ -18,8 +18,11 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::control::frequency_response;
+use crate::builtins::control::tf_model::TF_CLASS;
 #[cfg(test)]
 use crate::builtins::math::linalg::type_resolvers::bandwidth_type;
+use crate::context::RuntimeContext;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 const NAME: &str = "bandwidth";
@@ -84,9 +87,28 @@ enum BandSelector {
 #[runtime_builtin(
     name = "bandwidth",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::math::linalg::structure::bandwidth"
 )]
-async fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn bandwidth_builtin(
+    runtime: Option<RuntimeContext>,
+    matrix: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
+    if matches!(&matrix, Value::Object(object) if object.is_class(TF_CLASS)) {
+        if rest.len() > 1 || crate::output_count::current_output_count().is_some_and(|n| n > 1) {
+            return Err(bandwidth_error_with_detail(
+                &BANDWIDTH_ERROR_INVALID_ARGUMENT,
+                "transfer-function form accepts at most one dB drop and one output",
+            ));
+        }
+        let value = frequency_response::bandwidth(runtime.as_ref(), matrix, rest.first()).await?;
+        return if crate::output_count::current_output_count() == Some(0) {
+            Ok(Value::output_list(Vec::new()))
+        } else {
+            Ok(value)
+        };
+    }
     ensure_input_extensions(&matrix)?;
     let selector = parse_selector(&rest)?;
     let data = MatrixData::from_value(matrix)?;
@@ -131,9 +153,9 @@ fn ensure_input_extensions(value: &Value) -> BuiltinResult<()> {
 
 fn bandwidth_outputs(lower: usize, upper: usize) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count().unwrap_or(1) {
-        0 => Ok(Value::OutputList(Vec::new())),
+        0 => Ok(Value::output_list(Vec::new())),
         1 => Ok(Value::Num(lower as f64)),
-        2 => Ok(Value::OutputList(vec![
+        2 => Ok(Value::output_list(vec![
             Value::Num(lower as f64),
             Value::Num(upper as f64),
         ])),
@@ -146,7 +168,7 @@ fn bandwidth_outputs(lower: usize, upper: usize) -> BuiltinResult<Value> {
 
 fn one_bandwidth_output(value: usize) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count().unwrap_or(1) {
-        0 => Ok(Value::OutputList(Vec::new())),
+        0 => Ok(Value::output_list(Vec::new())),
         1 => Ok(Value::Num(value as f64)),
         _ => Err(bandwidth_error_with_detail(
             &BANDWIDTH_ERROR_INVALID_ARGUMENT,
@@ -513,7 +535,7 @@ pub(crate) mod tests {
         let _outputs = crate::output_count::push_output_count(Some(2));
         assert_eq!(
             bandwidth_builtin(Value::SparseTensor(sparse), Vec::new()).unwrap(),
-            Value::OutputList(vec![Value::Num(2.0), Value::Num(2.0)])
+            Value::output_list(vec![Value::Num(2.0), Value::Num(2.0)])
         );
         let integer = SparseTensor::new_integer(
             2,
@@ -545,7 +567,7 @@ pub(crate) mod tests {
         let _outputs = crate::output_count::push_output_count(Some(2));
         assert_eq!(
             bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth"),
-            Value::OutputList(vec![Value::Num(1.0), Value::Num(1.0)])
+            Value::output_list(vec![Value::Num(1.0), Value::Num(1.0)])
         );
     }
 
@@ -708,7 +730,7 @@ pub(crate) mod tests {
             let _outputs = crate::output_count::push_output_count(Some(2));
             assert_eq!(
                 bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth"),
-                Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+                Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])
             );
         }
     }
@@ -757,7 +779,7 @@ pub(crate) mod tests {
         let _outputs = crate::output_count::push_output_count(Some(2));
         assert_eq!(
             bandwidth_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("bandwidth"),
-            Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+            Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])
         );
     }
 
@@ -839,7 +861,7 @@ pub(crate) mod tests {
                 let _outputs = crate::output_count::push_output_count(Some(2));
                 assert_eq!(
                     bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth"),
-                    Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+                    Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])
                 );
             }
         });
@@ -910,12 +932,12 @@ pub(crate) mod tests {
             let _outputs = crate::output_count::push_output_count(Some(2));
             assert_eq!(
                 bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth"),
-                Value::OutputList(vec![Value::Num(0.0), Value::Num(1.0)])
+                Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])
             );
         }
     }
 
     fn bandwidth_builtin(matrix: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
-        block_on(super::bandwidth_builtin(matrix, rest))
+        block_on(super::bandwidth_builtin(None, matrix, rest))
     }
 }

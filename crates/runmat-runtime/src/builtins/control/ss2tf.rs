@@ -116,9 +116,9 @@ async fn ss2tf_builtin(
         None
     };
     match requested {
-        0 => Ok(Value::OutputList(Vec::new())),
+        0 => Ok(Value::output_list(Vec::new())),
         1 => Ok(numerator.expect("one output requested")),
-        2 => Ok(Value::OutputList(vec![
+        2 => Ok(Value::output_list(vec![
             numerator.expect("numerator requested"),
             denominator.expect("denominator requested"),
         ])),

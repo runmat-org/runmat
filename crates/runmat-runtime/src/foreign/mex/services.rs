@@ -208,6 +208,11 @@ impl MexCallOutput for RuntimeMexCallOutput {
                 crate::sequence::SequenceResolutionContext::default(),
             )
             .map_err(runtime_diagnostic)?;
+            let values = values.try_into_owned().map_err(|_| {
+                runtime_diagnostic(crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                ))
+            })?;
             for value in values {
                 sink(value)?;
             }

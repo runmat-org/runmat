@@ -130,7 +130,7 @@ async fn classify_builtin(
     ensure_compatibility_extensions(&sample, &training, &group, &rest)?;
     let admitted = header::admit(&sample, &training, group, &rest)?;
     if requested_outputs == Some(0) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let sample = gathered(sample).await?;
     let training = gathered(training).await?;
@@ -146,7 +146,7 @@ async fn classify_builtin(
         output_limit,
     )?;
     match requested_outputs {
-        Some(1) => Ok(Value::OutputList(vec![result[0].clone()])),
+        Some(1) => Ok(Value::output_list(vec![result[0].clone()])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count, result,
         )),

@@ -7736,6 +7736,7 @@ dependencies = [
  "ndarray",
  "num-bigint",
  "num-complex",
+ "num-rational",
  "num-traits",
  "once_cell",
  "openblas-src",

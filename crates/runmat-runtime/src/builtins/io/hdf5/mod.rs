@@ -235,7 +235,7 @@ async fn h5write_builtin(
     path::check(&path, H5WRITE_NAME)?;
     imp::write_dataset(H5WRITE_NAME, &path, dataset_path, data, selection)?;
     path::check(&path, H5WRITE_NAME)?;
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 #[runtime_builtin(
@@ -262,7 +262,7 @@ async fn hdf5write_builtin(
     path::check(&path, HDF5WRITE_NAME)?;
     imp::write_dataset(HDF5WRITE_NAME, &path, dataset_path, data, selection)?;
     path::check(&path, HDF5WRITE_NAME)?;
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 #[runtime_builtin(
@@ -295,7 +295,7 @@ async fn h5writeatt_builtin(
     path::check(&path, H5WRITEATT_NAME)?;
     imp::write_attribute(H5WRITEATT_NAME, &path, location_path, attr_name, data)?;
     path::check(&path, H5WRITEATT_NAME)?;
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 #[runtime_builtin(
@@ -351,7 +351,7 @@ async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     path::check(&path, H5DISP_NAME)?;
     if crate::output_count::current_output_count() == Some(0) {
         record_console_line(ConsoleStream::Stdout, result);
-        Ok(Value::OutputList(Vec::new()))
+        Ok(Value::output_list(Vec::new()))
     } else {
         Ok(Value::String(result))
     }

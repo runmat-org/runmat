@@ -132,10 +132,12 @@ impl SharedCollectives {
     }
 
     fn complete(&self, completions: Vec<CollectiveCompletion>) {
-        let mut pending = self.pending.borrow_mut();
         for completion in completions {
             let key = PendingKey::from_completion(&completion);
-            if let Some(sender) = pending.remove(&key) {
+            let sender = self.pending.borrow_mut().remove(&key);
+            if let Some(sender) = sender {
+                // Sending can wake external execution. The pending map must
+                // be unlocked before that execution can submit or retire.
                 let _ = sender.send(completion.result.map_err(runner_error));
             }
         }

@@ -9,9 +9,9 @@ mod subscript;
 mod write;
 
 pub(super) fn write_sequence_register(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     register: &mut super::SequenceState,
-    values: Vec<Value>,
+    values: impl Into<runmat_value::OutputListStorage>,
 ) -> Result<(), RuntimeError> {
     if register.assignment.is_some() {
         return Err(crate::interpreter::errors::mex(
@@ -19,23 +19,36 @@ pub(super) fn write_sequence_register(
             "sequence register was overwritten before consumption",
         ));
     }
+    let values = values.into();
     let start = stack.len();
     let len = values.len();
-    stack.extend(values);
+    stack.try_extend_output(values)?;
     register.assignment = Some(super::SequenceRegister { start, len });
     Ok(())
 }
 
 pub(super) fn write_rooted_sequence_register(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     register: &mut super::SequenceState,
     values: RootedValues,
 ) -> Result<(), RuntimeError> {
-    values.with_owned_values(|values| write_sequence_register(stack, register, values))
+    values.with_owned_output_storage(|values| {
+        if register.assignment.is_some() {
+            return Err(crate::interpreter::errors::mex(
+                "RunMat:CommaSeparatedListState",
+                "sequence register was overwritten before consumption",
+            ));
+        }
+        let start = stack.len();
+        let len = values.as_slice().len();
+        stack.try_extend_output(values)?;
+        register.assignment = Some(super::SequenceRegister { start, len });
+        Ok(())
+    })
 }
 
 pub(super) fn take_sequence_register(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     register: &mut super::SequenceState,
 ) -> Result<runmat_value::ValueSequence, RuntimeError> {
     let window = register
@@ -58,7 +71,7 @@ pub(super) fn take_sequence_register(
             "sequence register did not remain the top operand-stack window",
         ));
     }
-    runmat_value::ValueSequence::comma_separated(stack.split_off(window.start))
+    runmat_value::ValueSequence::from_output_storage(stack.try_extract_output(window.start)?)
         .map_err(runmat_runtime::sequence::sequence_error_to_runtime)
 }
 
@@ -72,7 +85,7 @@ pub struct ObjectDispatchContext<'a> {
 
 pub async fn dispatch_object(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence_register: &mut super::SequenceState,
     context: ObjectDispatchContext<'_>,
 ) -> Result<bool, RuntimeError> {
@@ -152,7 +165,7 @@ struct SubscriptPathReadContext {
 
 async fn execute_subscript_path(
     runtime: &runmat_runtime::context::RuntimeContext,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     steps: &[crate::bytecode::BytecodeSubscriptStep],
     read: SubscriptPathReadContext,
     state: &mut super::SequenceState,
@@ -180,7 +193,7 @@ async fn execute_subscript_path(
                         runtime,
                     )
                     .await?;
-                    values.with_owned_values(|values| {
+                    values.with_unbounded_values(|values| {
                         argument_roots.push(crate::call::root_values(&values)?);
                         groups.push(
                             values
@@ -189,7 +202,7 @@ async fn execute_subscript_path(
                                 .collect(),
                         );
                         Ok::<_, RuntimeError>(())
-                    })?;
+                    })??;
                 }
             }
         }
@@ -216,8 +229,16 @@ async fn execute_subscript_path(
         let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
             crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
         })?;
-        let operands = stack.split_off(start);
-        let roots = crate::call::root_values(&operands)?;
+        let operands = stack
+            .try_extract_output(start)?
+            .try_into_owned()
+            .map_err(|_| {
+                crate::interpreter::errors::mex(
+                    "SharedOutputStorage",
+                    "subscript operands unexpectedly have shared storage",
+                )
+            })?;
+        let roots = crate::call::root_values(operands.as_slice())?;
         let (root, path) = materialize_subscript_path(operands, steps)?;
         (root, path, roots)
     };
@@ -254,13 +275,13 @@ async fn execute_subscript_path(
         )
         .await?;
     sequence.with_owned_sequence(|sequence| {
-        RootedValues::new(sequence.resolve(read.selection, sequence_context)?)
+        RootedValues::from_output_storage(sequence.resolve(read.selection, sequence_context)?)
             .map_err(|error| error.into_runtime_error())
     })
 }
 
 fn materialize_subscript_path(
-    values: Vec<Value>,
+    values: impl IntoIterator<Item = Value>,
     steps: &[crate::bytecode::BytecodeSubscriptStep],
 ) -> Result<
     (

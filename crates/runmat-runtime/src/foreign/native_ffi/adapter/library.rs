@@ -501,7 +501,7 @@ mod load_trailer_tests {
         let mut named = prefix();
         named.extend([
             Value::String("AddHeader".into()),
-            Value::OutputList(Vec::new()),
+            Value::output_list(Vec::new()),
         ]);
         let error = parse_load_trailer(&named).expect_err("invalid named value");
         assert_eq!(error.identifier(), Some("RunMat:Foreign:InvalidCall"));

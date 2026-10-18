@@ -14,12 +14,14 @@ pub mod program;
 mod region;
 mod sequence_register;
 mod source_ref;
+mod stack_geometry;
 mod statement_pc;
 mod subscript;
 
-/// Portable schema for serialized [`Bytecode`] payloads. Version 24 adds
-/// borrowed stochastic source operand descriptors and an exact For fallback.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 24;
+/// Portable schema for serialized [`Bytecode`] payloads. Version 25 carries
+/// verifier-derived operand-stack geometry; older payloads cannot default a
+/// managed capacity claim.
+pub const BYTECODE_SCHEMA_VERSION: u16 = 25;
 /// Portable schema for serialized [`FunctionRegistry`] payloads. Version 18
 /// carries the borrowed stochastic opcode in retained function bodies.
 pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 18;
@@ -67,6 +69,7 @@ pub use program::{
 pub use region::{BytecodeRegion, BytecodeRegionBoundary};
 pub use sequence_register::validate_sequence_register_flow;
 pub use source_ref::BytecodeSourceRef;
+pub use stack_geometry::{derive_stack_geometry, validate_stack_geometry, BytecodeStackGeometry};
 pub use statement_pc::{StatementPcProjectionError, StatementPcRange};
 pub use subscript::{
     BytecodeDottedInvokeArgument, BytecodeSubscriptSelector, BytecodeSubscriptStep,

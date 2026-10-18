@@ -258,7 +258,7 @@ fn publish(
         }
     }
     match count {
-        Some(_) => Ok(Value::OutputList(outputs)),
+        Some(_) => Ok(Value::output_list(outputs)),
         None => Ok(outputs.remove(0)),
     }
 }
@@ -385,7 +385,7 @@ fn publish_real(
         }
     }
     match count {
-        Some(_) => Ok(Value::OutputList(outputs)),
+        Some(_) => Ok(Value::output_list(outputs)),
         None => Ok(outputs.remove(0)),
     }
 }
@@ -592,7 +592,7 @@ pub(super) async fn generalized_ordeig(
     work.checkpoint(u64::try_from(n).unwrap_or(u64::MAX))
         .await?;
     if !requested {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let allocation = runtime.zip(receipt.as_ref());
     let shape = vec![n, 1];
@@ -628,8 +628,8 @@ pub(super) async fn generalized_ordeig(
                 })
                 .map_err(|source| work::admit_error("ordeig", source))?;
             return match crate::output_count::current_output_count() {
-                Some(0) => Ok(Value::OutputList(Vec::new())),
-                Some(1) => Ok(Value::OutputList(vec![Value::Tensor(tensor)])),
+                Some(0) => Ok(Value::output_list(Vec::new())),
+                Some(1) => Ok(Value::output_list(vec![Value::Tensor(tensor)])),
                 _ => Ok(Value::Tensor(tensor)),
             };
         }
@@ -672,8 +672,8 @@ pub(super) async fn generalized_ordeig(
             .map_err(|e| ordeig_invalid(e.to_string()))
     };
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![output?])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![output?])),
         _ => output,
     }
 }

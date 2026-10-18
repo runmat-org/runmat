@@ -195,9 +195,9 @@ pub(super) async fn shortestpath_builtin(
     let path_value = node_list_value(&graph, &path, "shortestpath")?;
     let distance = distances[target];
     match output_count {
-        TwoOutputRequest::Discarded => Ok(Value::OutputList(Vec::new())),
-        TwoOutputRequest::Single => Ok(Value::OutputList(vec![path_value])),
-        TwoOutputRequest::Pair => Ok(Value::OutputList(vec![path_value, Value::Num(distance)])),
+        TwoOutputRequest::Discarded => Ok(Value::output_list(Vec::new())),
+        TwoOutputRequest::Single => Ok(Value::output_list(vec![path_value])),
+        TwoOutputRequest::Pair => Ok(Value::output_list(vec![path_value, Value::Num(distance)])),
         TwoOutputRequest::Default => Ok(path_value),
     }
 }
@@ -361,9 +361,9 @@ pub(super) async fn treelayout_builtin(parents: Value) -> BuiltinResult<Value> {
     let x_value = tensor_value(x, vec![1, n], "treelayout")?;
     let y_value = tensor_value(y, vec![1, n], "treelayout")?;
     match output_count {
-        TwoOutputRequest::Discarded => Ok(Value::OutputList(Vec::new())),
-        TwoOutputRequest::Single => Ok(Value::OutputList(vec![x_value])),
-        TwoOutputRequest::Pair => Ok(Value::OutputList(vec![x_value, y_value])),
+        TwoOutputRequest::Discarded => Ok(Value::output_list(Vec::new())),
+        TwoOutputRequest::Single => Ok(Value::output_list(vec![x_value])),
+        TwoOutputRequest::Pair => Ok(Value::output_list(vec![x_value, y_value])),
         TwoOutputRequest::Default => Ok(x_value),
     }
 }

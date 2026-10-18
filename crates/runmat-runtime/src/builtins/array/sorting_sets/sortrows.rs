@@ -421,7 +421,7 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let (sorted, indices) = eval.into_values();
         let outputs = if out_count == 1 {
@@ -429,7 +429,7 @@ async fn sortrows_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         } else {
             vec![sorted, indices]
         };
-        return Ok(Value::OutputList(super::restore_set_outputs(
+        return Ok(Value::output_list(super::restore_set_outputs(
             provider,
             BUILTIN_NAME,
             outputs,

@@ -756,8 +756,8 @@ impl GraphResultReceipt for SelectedGraphResult {
                 self.limits,
             )
             .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
-        values.with_owned_values(|values| {
-            let sequence = ValueSequence::comma_separated(values)
+        values.with_owned_output_storage(|values| {
+            let sequence = ValueSequence::from_output_storage(values)
                 .map_err(|error| ExecutionServiceError::Failed(error.to_string()))?;
             RootedValueSequence::new(sequence)
         })

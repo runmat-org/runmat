@@ -38,7 +38,7 @@ fn direct_host_indexing_allowed(state: &HostState) -> NativeExecutorResult<bool>
 }
 
 enum IndexedReadOutcome {
-    Ordinary(Vec<Value>),
+    Ordinary(runmat_value::OutputListStorage),
     Host(runmat_runtime::execution::RootedValues),
 }
 
@@ -50,10 +50,10 @@ impl IndexedReadOutcome {
         }
     }
 
-    fn into_values(self) -> Vec<Value> {
+    fn into_storage(self) -> runmat_value::OutputListStorage {
         match self {
             Self::Ordinary(values) => values,
-            Self::Host(values) => values.with_owned_values(|values| values),
+            Self::Host(values) => values.with_owned_output_storage(|values| values),
         }
     }
 }
@@ -74,13 +74,20 @@ impl IndexedAssignmentOutcome {
     fn into_value(self) -> NativeExecutorResult<Value> {
         match self {
             Self::Ordinary(value) => Ok(value),
-            Self::Host(values) => values.with_owned_values(|mut values| {
-                if values.len() != 1 {
+            Self::Host(values) => values.with_owned_output_storage(|values| {
+                if values.as_slice().len() != 1 {
                     return Err(NativeExecutorError::Host(
                         "host indexed assignment did not produce one receiver".into(),
                     ));
                 }
-                Ok(values.remove(0))
+                super::call_suspension::own_output_storage(values)?
+                    .into_iter()
+                    .next()
+                    .ok_or_else(|| {
+                        NativeExecutorError::Host(
+                            "host indexed assignment lost its receiver".into(),
+                        )
+                    })
             }),
         }
     }
@@ -118,7 +125,7 @@ pub(super) fn read(
     base: &MirOperand,
     indexing: &MirIndexing,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<runmat_value::OutputListStorage> {
     let embedded = state.enter_embedded_call()?;
     if let Some(values) = super::call_suspension::take_completed_semantic_operation(
         state,
@@ -134,7 +141,7 @@ pub(super) fn read(
     let result = read_inner(state, base, indexing, requested_outputs, embedded.as_ref());
     state
         .settle_embedded_result(embedded.as_ref(), result, IndexedReadOutcome::values)
-        .map(IndexedReadOutcome::into_values)
+        .map(IndexedReadOutcome::into_storage)
 }
 
 fn read_inner(
@@ -145,7 +152,9 @@ fn read_inner(
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
 ) -> NativeExecutorResult<IndexedReadOutcome> {
     if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
-        return Ok(IndexedReadOutcome::Ordinary(outputs));
+        return Ok(IndexedReadOutcome::Ordinary(
+            runmat_value::OutputListStorage::unbounded(outputs),
+        ));
     }
     let base = if indexing_requires_retention(indexing) {
         materialize_retained_operand(state, base)?.1
@@ -160,7 +169,7 @@ pub(super) fn read_value(
     base: Value,
     indexing: &MirIndexing,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<runmat_value::OutputListStorage> {
     let embedded = state.enter_embedded_call()?;
     if let Some(values) = super::call_suspension::take_completed_semantic_operation(
         state,
@@ -182,7 +191,7 @@ pub(super) fn read_value(
     );
     state
         .settle_embedded_result(embedded.as_ref(), result, IndexedReadOutcome::values)
-        .map(IndexedReadOutcome::into_values)
+        .map(IndexedReadOutcome::into_storage)
 }
 
 fn read_value_inner_with_completion(
@@ -193,7 +202,9 @@ fn read_value_inner_with_completion(
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
 ) -> NativeExecutorResult<IndexedReadOutcome> {
     if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
-        return Ok(IndexedReadOutcome::Ordinary(outputs));
+        return Ok(IndexedReadOutcome::Ordinary(
+            runmat_value::OutputListStorage::unbounded(outputs),
+        ));
     }
     read_value_inner(state, base, indexing, requested_outputs, embedded)
 }
@@ -233,17 +244,22 @@ pub(super) fn assign(
         embedded.as_ref(),
         super::call_suspension::SemanticOperationKind::IndexedAssignment,
     )? {
-        let mut values = super::call_suspension::settle_completed_semantic_values(
+        let values = super::call_suspension::settle_completed_semantic_values(
             state,
             embedded.as_ref(),
             values,
         )?;
-        if values.len() != 1 {
+        if values.as_slice().len() != 1 {
             return Err(NativeExecutorError::Host(
                 "completed indexed assignment did not produce one receiver".into(),
             ));
         }
-        return Ok(values.remove(0));
+        return super::call_suspension::own_output_storage(values)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| {
+                NativeExecutorError::Host("completed indexed assignment lost its receiver".into())
+            });
     }
     let result =
         assign_inner_with_completion(state, base, indexing, rhs, delete, embedded.as_ref());
@@ -286,7 +302,22 @@ fn assign_inner_with_completion(
                 &selectors,
             )?));
             let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs.clone())?
-                .into_values();
+                .into_output_storage();
+            let values = values
+                .try_into_owned()
+                .map_err(|_| {
+                    NativeExecutorError::from(semantic_error(
+                        "ManagedObjectAssignmentOutputUnavailable",
+                        "object assignment cannot detach shared managed output storage",
+                    ))
+                })?
+                .try_into_unbounded_vec()
+                .map_err(|_| {
+                    NativeExecutorError::from(semantic_error(
+                        "ManagedObjectAssignmentOutputUnavailable",
+                        "object assignment requires an unbounded output owner",
+                    ))
+                })?;
             let roots = RootedValueLease::for_values(
                 std::iter::once(&base)
                     .chain(selectors.numeric.iter())
@@ -353,13 +384,17 @@ fn assign_inner_with_completion(
         Vec::new(),
         future,
     )?;
-    values.with_owned_values(|mut values| {
-        if values.len() != 1 {
+    values.with_owned_output_storage(|values| {
+        if values.as_slice().len() != 1 {
             return Err(NativeExecutorError::Host(
                 "indexed assignment did not produce one receiver".into(),
             ));
         }
-        Ok(IndexedAssignmentOutcome::Ordinary(values.remove(0)))
+        super::call_suspension::own_output_storage(values)?
+            .into_iter()
+            .next()
+            .map(IndexedAssignmentOutcome::Ordinary)
+            .ok_or_else(|| NativeExecutorError::Host("indexed assignment lost its receiver".into()))
     })
 }
 
@@ -612,7 +647,7 @@ fn read_brace(
     selectors: MaterializedSelectors,
     indexing: &MirIndexing,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<runmat_value::OutputListStorage> {
     let Value::Cell(cell) = base else {
         return Err(NativeExecutorError::from(semantic_error(
             "CellIndexType",
@@ -630,10 +665,12 @@ fn read_brace(
                 ),
             )));
         }
-        return Ok(values);
+        return Ok(runmat_value::OutputListStorage::unbounded(values));
     }
     match values.as_slice() {
-        [value] if requested_outputs == 1 => Ok(vec![value.clone()]),
+        [value] if requested_outputs == 1 => Ok(runmat_value::OutputListStorage::unbounded(vec![
+            value.clone(),
+        ])),
         _ => Err(NativeExecutorError::from(semantic_error(
             "CellIndexArity",
             "Cell brace indexing must select exactly one value in scalar context",
@@ -666,20 +703,30 @@ fn assign_brace(
     let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(rhs)?;
     let kind = sequence.kind();
     let values = match kind {
-        runmat_value::ValueSequenceKind::CommaSeparated => sequence.into_values(),
-        runmat_value::ValueSequenceKind::Single if positions.len() == 1 => sequence.into_values(),
+        runmat_value::ValueSequenceKind::CommaSeparated => sequence.into_output_storage(),
+        runmat_value::ValueSequenceKind::Single if positions.len() == 1 => {
+            sequence.into_output_storage()
+        }
         runmat_value::ValueSequenceKind::Single => {
-            let value = sequence.into_values().pop().ok_or_else(|| {
-                semantic_error(
-                    "CellAssignmentArityMismatch",
-                    "single cell assignment value is missing",
-                )
-            })?;
-            vec![value; positions.len()]
+            let value = super::call_suspension::own_output_storage(sequence.into_output_storage())?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    semantic_error(
+                        "CellAssignmentArityMismatch",
+                        "single cell assignment value is missing",
+                    )
+                })?;
+            runmat_value::OutputListStorage::unbounded(vec![value; positions.len()])
         }
     };
-    runmat_runtime::object::cell::assign_cell_value_multi(cell, &positions, &values, |_, _| {})
-        .map_err(NativeExecutorError::from)
+    runmat_runtime::object::cell::assign_cell_value_multi(
+        cell,
+        &positions,
+        values.as_slice(),
+        |_, _| {},
+    )
+    .map_err(NativeExecutorError::from)
 }
 
 fn read_with_plan(base: Value, plan: &IndexPlan) -> NativeExecutorResult<Value> {
@@ -772,24 +819,28 @@ fn gather<T: Clone>(data: &[T], plan: &IndexPlan, kind: &str) -> NativeExecutorR
         .collect()
 }
 
-fn normalize_outputs(value: Value, requested_outputs: usize) -> NativeExecutorResult<Vec<Value>> {
-    let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?.into_values();
+fn normalize_outputs(
+    value: Value,
+    requested_outputs: usize,
+) -> NativeExecutorResult<runmat_value::OutputListStorage> {
+    let values =
+        runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?.into_output_storage();
     normalize_output_values(values, requested_outputs).map_err(NativeExecutorError::Runtime)
 }
 
 fn normalize_sequence_outputs(
     sequence: runmat_value::ValueSequence,
     requested_outputs: usize,
-) -> Result<Vec<Value>, Box<RuntimeError>> {
-    normalize_output_values(sequence.into_values(), requested_outputs)
+) -> Result<runmat_value::OutputListStorage, Box<RuntimeError>> {
+    normalize_output_values(sequence.into_output_storage(), requested_outputs)
 }
 
 fn normalize_output_values(
-    values: Vec<Value>,
+    values: runmat_value::OutputListStorage,
     requested_outputs: usize,
-) -> Result<Vec<Value>, Box<RuntimeError>> {
-    match (requested_outputs, values.len()) {
-        (0, _) => Ok(Vec::new()),
+) -> Result<runmat_value::OutputListStorage, Box<RuntimeError>> {
+    match (requested_outputs, values.as_slice().len()) {
+        (0, _) => Ok(runmat_value::OutputListStorage::unbounded(Vec::new())),
         (expected, actual) if expected == actual => Ok(values),
         (expected, actual) => Err(Box::new(semantic_error(
             "OutputArityMismatch",
@@ -865,7 +916,7 @@ mod tests {
             let base = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap());
             let read = read_value(&mut state, base.clone(), &indexing, 1)
                 .expect("host selector read must finish directly");
-            assert_eq!(read, vec![Value::Num(20.0)]);
+            assert_eq!(read.as_slice(), &[Value::Num(20.0)]);
             assert!(state.pending_call.is_none());
             let updated = assign(&mut state, base, &indexing, Value::Num(99.0), false)
                 .expect("host selector write must finish directly");

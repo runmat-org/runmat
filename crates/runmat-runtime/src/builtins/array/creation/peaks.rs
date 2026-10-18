@@ -273,12 +273,12 @@ async fn peaks_from_n(n: usize, out_count: Option<usize>) -> crate::BuiltinResul
                 provider.upload(&z_view),
             ) {
                 return Ok(match out_count {
-                    Some(3) => Value::OutputList(vec![
+                    Some(3) => Value::output_list(vec![
                         Value::GpuTensor(xh),
                         Value::GpuTensor(yh),
                         Value::GpuTensor(zh),
                     ]),
-                    _ => Value::OutputList(vec![Value::GpuTensor(xh), Value::GpuTensor(yh)]),
+                    _ => Value::output_list(vec![Value::GpuTensor(xh), Value::GpuTensor(yh)]),
                 });
             }
         }
@@ -298,12 +298,12 @@ async fn peaks_from_xy(
         if let Some(provider) = runmat_accelerate_api::provider() {
             if let Ok(z_handle) = provider.peaks_xy(x_handle, y_handle) {
                 return match out_count {
-                    Some(3) => Ok(Value::OutputList(vec![
+                    Some(3) => Ok(Value::output_list(vec![
                         Value::GpuTensor(x_handle.clone()),
                         Value::GpuTensor(y_handle.clone()),
                         Value::GpuTensor(z_handle),
                     ])),
-                    Some(2) => Ok(Value::OutputList(vec![
+                    Some(2) => Ok(Value::output_list(vec![
                         Value::GpuTensor(x_handle.clone()),
                         Value::GpuTensor(y_handle.clone()),
                     ])),
@@ -445,13 +445,13 @@ fn build_output(
             let x_val = make_tensor(x_flat, shape.clone())?;
             let y_val = make_tensor(y_flat, shape.clone())?;
             let z_val = make_tensor(z_flat, shape)?;
-            Ok(Value::OutputList(vec![x_val, y_val, z_val]))
+            Ok(Value::output_list(vec![x_val, y_val, z_val]))
         }
         // Caller requested 2 outputs: [X, Y] = peaks(…) — unusual but allowed
         Some(2) => {
             let x_val = make_tensor(x_flat, shape.clone())?;
             let y_val = make_tensor(y_flat, shape)?;
-            Ok(Value::OutputList(vec![x_val, y_val]))
+            Ok(Value::output_list(vec![x_val, y_val]))
         }
         // Default single output: Z = peaks(…)
         _ => make_tensor(z_flat, shape),
@@ -466,12 +466,12 @@ fn build_xy_output(
     out_count: Option<usize>,
 ) -> crate::BuiltinResult<Value> {
     match out_count {
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(3) => Ok(Value::output_list(vec![
             tensor::tensor_into_value(x),
             tensor::tensor_into_value(y),
             make_tensor(z, z_shape)?,
         ])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(2) => Ok(Value::output_list(vec![
             tensor::tensor_into_value(x),
             tensor::tensor_into_value(y),
         ])),

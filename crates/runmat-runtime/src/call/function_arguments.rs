@@ -165,13 +165,13 @@ impl RootedFunctionArguments {
     pub async fn with_owned_supplied_async<R, F>(
         self,
         consume: impl FnOnce(Option<RetainedValueReadLease>, Vec<Value>) -> F,
-    ) -> R
+    ) -> Result<R, RuntimeError>
     where
         F: std::future::Future<Output = R>,
     {
         let Self { callable, supplied } = self;
         supplied
-            .with_owned_values_async(|values| consume(callable, values))
+            .with_unbounded_values_async(|values| consume(callable, values))
             .await
     }
 }

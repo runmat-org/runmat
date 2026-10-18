@@ -1,8 +1,7 @@
 //! Host SISO frequency response and output materialization.
 
 use super::*;
-use crate::builtins::control::tf_model::poly_eval;
-use num_complex::Complex64;
+use crate::builtins::control::frequency_response;
 
 pub(super) struct NyquistResponse {
     pub(super) re: Vec<f64>,
@@ -40,28 +39,20 @@ impl NyquistResponse {
 pub(super) fn evaluate(model: &TfModel, w: Vec<f64>) -> BuiltinResult<NyquistResponse> {
     let mut re = Vec::with_capacity(w.len());
     let mut im = Vec::with_capacity(w.len());
+    let physical = model.physical_polynomials();
     for &frequency in &w {
-        let point = if model.is_discrete() {
-            let phase = frequency * model.sample_time;
-            if !phase.is_finite() {
-                return Err(control_error(
-                    BUILTIN_NAME,
-                    "RunMat:nyquist:InvalidArgument",
-                    "nyquist: frequency and sample time overflow the phase range",
-                ));
-            }
-            Complex64::new(phase.cos(), phase.sin())
-        } else {
-            Complex64::new(0.0, frequency)
-        };
-        if poly_eval(&model.denominator, point) == Complex64::new(0.0, 0.0) {
-            return Err(control_error(
+        let point = frequency_response::point_at_frequency(
+            frequency_response::FrequencyApi::Nyquist,
+            model,
+            frequency,
+        )?;
+        let value = physical.evaluate(point).ok_or_else(|| {
+            control_error(
                 BUILTIN_NAME,
                 "RunMat:nyquist:InvalidArgument",
                 "nyquist: frequency response is singular at a requested frequency",
-            ));
-        }
-        let value = model.frequency_response(point);
+            )
+        })?;
         if !value.re.is_finite() || !value.im.is_finite() {
             return Err(control_error(
                 BUILTIN_NAME,

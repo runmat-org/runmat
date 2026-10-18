@@ -7,7 +7,7 @@ use runmat_value::Value;
 use super::super::{PendingSequenceDestination, PreparedOutputTarget, SequenceState};
 
 pub(super) fn pop_selector_components(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     selectors: &[crate::bytecode::BytecodeSubscriptSelector],
 ) -> Result<Vec<ObjectIndexComponent>, RuntimeError> {
     let value_count = selectors
@@ -67,7 +67,18 @@ pub(super) fn stack_underflow() -> RuntimeError {
     crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
 }
 
-pub(super) fn pop_values(stack: &mut Vec<Value>, count: usize) -> Result<Vec<Value>, RuntimeError> {
+pub(super) fn pop_values(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    count: usize,
+) -> Result<runmat_value::OwnedOutputListValues, RuntimeError> {
     let start = stack.len().checked_sub(count).ok_or_else(stack_underflow)?;
-    Ok(stack.split_off(start))
+    stack
+        .try_extract_output(start)?
+        .try_into_owned()
+        .map_err(|_| {
+            crate::interpreter::errors::mex(
+                "SharedOutputStorage",
+                "prepared output operands unexpectedly have shared storage",
+            )
+        })
 }

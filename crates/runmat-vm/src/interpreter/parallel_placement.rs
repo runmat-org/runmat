@@ -2,7 +2,7 @@ use std::fmt;
 
 use runmat_execution::PoolBackend;
 use runmat_runtime::execution::{RootedValueLease, RootedValuesBuilder};
-use runmat_types::{EffectKind, EffectSet, ParallelVariableRole};
+use runmat_types::{EffectKind, EffectSet, ParallelTransferability, ParallelVariableRole};
 use runmat_value::Value;
 
 use crate::BytecodeParforRegion;
@@ -20,7 +20,7 @@ pub(crate) struct PreparedParallelInputs {
     pub(crate) sliced_destinations: Vec<(usize, Value)>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub(crate) enum ParallelPlacementRejection {
     NoWorkerCapacity,
     UnsafeEffect(EffectKind),
@@ -32,7 +32,7 @@ pub(crate) enum ParallelPlacementRejection {
     },
     AutomaticGatherFailed {
         slot: usize,
-        reason: String,
+        error: runmat_runtime::runtime_error::RuntimeErrorOwner,
     },
     UnsupportedSlicedStorage {
         slot: usize,
@@ -40,10 +40,17 @@ pub(crate) enum ParallelPlacementRejection {
     },
     RuntimeValueNotTransferable {
         slot: usize,
-        reason: String,
+        error: runmat_runtime::runtime_error::RuntimeErrorOwner,
+    },
+    ReductionIdentityFailed {
+        slot: usize,
+        error: runmat_runtime::runtime_error::RuntimeErrorOwner,
     },
     InputRootingFailed {
         error: runmat_runtime::execution::ExecutionServiceError,
+    },
+    InputMaterializationFailed {
+        error: runmat_runtime::runtime_error::RuntimeErrorOwner,
     },
 }
 
@@ -64,20 +71,30 @@ impl fmt::Display for ParallelPlacementRejection {
                 formatter,
                 "compiled slot {slot} carries explicit device-residency intent"
             ),
-            Self::AutomaticGatherFailed { slot, reason } => write!(
+            Self::AutomaticGatherFailed { slot, error } => write!(
                 formatter,
-                "automatic residency for compiled slot {slot} could not be gathered: {reason}"
+                "automatic residency for compiled slot {slot} could not be gathered: {error}"
             ),
             Self::UnsupportedSlicedStorage { slot, family } => write!(
                 formatter,
                 "compiled sliced slot {slot} uses unsupported {family} storage"
             ),
-            Self::RuntimeValueNotTransferable { slot, reason } => write!(
+            Self::RuntimeValueNotTransferable { slot, error } => write!(
                 formatter,
-                "compiled slot {slot} failed runtime transfer validation: {reason}"
+                "compiled slot {slot} failed runtime transfer validation: {error}"
+            ),
+            Self::ReductionIdentityFailed { slot, error } => write!(
+                formatter,
+                "parallel reduction identity for compiled slot {slot} failed: {error}"
             ),
             Self::InputRootingFailed { error } => {
                 write!(formatter, "parallel task input ownership failed: {error}")
+            }
+            Self::InputMaterializationFailed { error } => {
+                write!(
+                    formatter,
+                    "parallel task input materialization failed: {error}"
+                )
             }
         }
     }
@@ -101,7 +118,7 @@ pub(crate) async fn prepare(
     let mut sliced_destinations = Vec::new();
     for (variable, value) in executable.input_variables().zip(inputs) {
         let slot = variable.slot;
-        if !variable.contract.transferable {
+        if variable.contract.transferability == ParallelTransferability::NonTransferable {
             return Err(ParallelPlacementRejection::StaticValueNotTransferable { slot });
         }
         if runmat_runtime::dispatcher::value_contains_explicit_gpu(value) {
@@ -112,7 +129,7 @@ pub(crate) async fn prepare(
             .await
             .map_err(|error| ParallelPlacementRejection::AutomaticGatherFailed {
                 slot,
-                reason: error.to_string(),
+                error: error.into(),
             })?;
         if matches!(variable.contract.role, ParallelVariableRole::Sliced { .. })
             && !runmat_runtime::parallel::assembly::supports_sliced_assembly(&host_value)
@@ -125,7 +142,7 @@ pub(crate) async fn prepare(
         runmat_runtime::execution::validate_spawn_capture(&host_value).map_err(|error| {
             ParallelPlacementRejection::RuntimeValueNotTransferable {
                 slot,
-                reason: error.to_string(),
+                error: error.into(),
             }
         })?;
 
@@ -138,9 +155,9 @@ pub(crate) async fn prepare(
                 )
                 .await
                 .map_err(|error| {
-                    ParallelPlacementRejection::RuntimeValueNotTransferable {
+                    ParallelPlacementRejection::ReductionIdentityFailed {
                         slot,
-                        reason: error.to_string(),
+                        error: error.into(),
                     }
                 })?;
                 identity
@@ -163,9 +180,14 @@ pub(crate) async fn prepare(
         .finish()
         .map_err(|error| ParallelPlacementRejection::InputRootingFailed { error })?;
     let (task_inputs, task_roots) = task_inputs
-        .with_owned_values(|values| {
+        .with_unbounded_values(|values| {
             RootedValueLease::for_values(values.iter()).map(|roots| (values, roots))
         })
+        .map_err(
+            |error| ParallelPlacementRejection::InputMaterializationFailed {
+                error: error.into(),
+            },
+        )?
         .map_err(|error| ParallelPlacementRejection::InputRootingFailed { error })?;
 
     Ok(PreparedParallelInputs {

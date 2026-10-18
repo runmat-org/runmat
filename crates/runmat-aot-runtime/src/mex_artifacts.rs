@@ -136,7 +136,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
                     .expect("installed artifact resolves")
                     .expect("embedded artifact executes");
                 value.with_owned_sequence(|value| {
-                    assert_eq!(value.into_values(), vec![runmat_value::Value::Num(42.0)]);
+                    assert_eq!(value.as_slice(), &[runmat_value::Value::Num(42.0)]);
                 });
                 match guard.shutdown_gracefully_retirement().await {
                     runmat_runtime::foreign::MexSessionRetirement::Retired(result) => {

@@ -320,12 +320,16 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
         let _requested = crate::output_count::push_output_count(Some(2));
         let gradients =
             block_on(super::super::dlgradient_direct(loss, vec![input, network])).unwrap();
-        let Value::OutputList(mut gradients) = gradients else {
+        let Value::OutputList(gradients) = gradients else {
             panic!("input and network gradients expected")
         };
         assert_eq!(gradients.len(), 2);
-        let network_gradient = gradients.pop().unwrap();
-        let gradient = gradients.pop().unwrap();
+        let mut gradients = gradients
+            .try_into_owned()
+            .expect("unique gradient outputs")
+            .into_iter();
+        let network_gradient = gradients.next_back().unwrap();
+        let gradient = gradients.next_back().unwrap();
         let Value::Object(gradient) = gradient else {
             panic!("dlarray gradient expected")
         };

@@ -175,11 +175,13 @@ fn restore_isoutlier_value(
         Value::LogicalArray(logical) => {
             restore_isoutlier_array(Value::LogicalArray(logical), source)
         }
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|value| restore_isoutlier_value(value, Some(source)))
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(Value::OutputList),
+        Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)?
+            .try_map(
+                |value| restore_isoutlier_value(value, Some(source)),
+                crate::sequence::sequence_error_to_runtime,
+            )
+            .map(|sequence| Value::OutputList(sequence.into_output_storage())),
         other => Ok(other),
     }
 }
@@ -441,7 +443,7 @@ fn outlier_outputs(
         vec![mask_value, lower, upper, center]
     };
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count, outputs,
         )),

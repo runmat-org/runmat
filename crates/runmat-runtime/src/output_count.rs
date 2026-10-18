@@ -89,7 +89,7 @@ pub fn output_list_with_padding(out_count: usize, mut outputs: Vec<Value>) -> Va
     if outputs.len() < out_count {
         outputs.resize(out_count, Value::Num(0.0));
     }
-    Value::OutputList(outputs)
+    Value::output_list(outputs)
 }
 
 #[cfg(test)]

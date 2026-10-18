@@ -367,11 +367,11 @@ async fn invoke_prepared_subsref(
 fn resolve_single(sequence: RootedValueSequence) -> Result<RootedValue, RuntimeError> {
     sequence.try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 SequenceResolutionContext::default(),
             )?;
-            values.pop().ok_or_else(|| {
+            crate::sequence::into_first_output(values)?.ok_or_else(|| {
                 semantic_error(
                     "CommaSeparatedListRequiresSingleValue",
                     "subscript read requires one value",

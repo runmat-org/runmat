@@ -8,20 +8,20 @@ pub(super) async fn outputs_for_count_cooperative(
     cooperation: &mut super::cooperation::KmeansCooperation,
 ) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![
             idx_output(&result, data, cooperation).await?,
         ])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(2) => Ok(Value::output_list(vec![
             idx_output(&result, data, cooperation).await?,
             Value::Tensor(matrix_output(&result.centers, cooperation).await?),
         ])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(3) => Ok(Value::output_list(vec![
             idx_output(&result, data, cooperation).await?,
             Value::Tensor(matrix_output(&result.centers, cooperation).await?),
             Value::Tensor(sumd_output(&result, cooperation).await?),
         ])),
-        Some(4) => Ok(Value::OutputList(vec![
+        Some(4) => Ok(Value::output_list(vec![
             idx_output(&result, data, cooperation).await?,
             Value::Tensor(matrix_output(&result.centers, cooperation).await?),
             Value::Tensor(sumd_output(&result, cooperation).await?),

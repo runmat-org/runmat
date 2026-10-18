@@ -84,10 +84,10 @@ async fn eigs_builtin(a: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let eval = compute_subset(request).await?;
 
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![eval.values])),
-        Some(2) => Ok(Value::OutputList(vec![eval.vectors, eval.diagonal])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![eval.values])),
+        Some(2) => Ok(Value::output_list(vec![eval.vectors, eval.diagonal])),
+        Some(3) => Ok(Value::output_list(vec![
             eval.vectors,
             eval.diagonal,
             Value::Num(0.0),
@@ -1421,7 +1421,11 @@ mod tests {
 
     fn outputs(value: Value) -> Vec<Value> {
         match value {
-            Value::OutputList(values) => values,
+            Value::OutputList(values) => values
+                .try_into_owned()
+                .expect("unique output list")
+                .try_into_unbounded_vec()
+                .expect("unbounded output list"),
             other => panic!("expected output list, got {other:?}"),
         }
     }

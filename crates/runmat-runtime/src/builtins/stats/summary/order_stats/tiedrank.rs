@@ -55,8 +55,8 @@ pub(crate) async fn tiedrank_builtin(value: Value, flags: Vec<Value>) -> Builtin
     let input = super::value_to_tensor("tiedrank", value).await?;
     let (ranks, tieadj) = super::tiedrank_tensor(input, mode)?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![ranks])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![ranks])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![ranks, tieadj],

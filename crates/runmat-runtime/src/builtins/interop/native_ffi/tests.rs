@@ -39,7 +39,7 @@ mod native {
     #[test]
     fn invalid_public_controls_do_not_invoke_foreign_service() {
         let (runtime, calls) = recording_context();
-        let invalid = Value::OutputList(Vec::new());
+        let invalid = Value::output_list(Vec::new());
         let results = [
             futures::executor::block_on(loadlibrary_builtin(Some(runtime.clone()), None, vec![])),
             futures::executor::block_on(calllib_builtin(Some(runtime.clone()), None, vec![])),

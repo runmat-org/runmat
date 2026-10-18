@@ -328,7 +328,7 @@ async fn sphere_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if is_plot_form_call() {
         let (x, y, z) = make_sphere_tensors(n, true, true, true)?;
         render_sphere_plot(x, y, z)?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     build_output(n)
@@ -342,18 +342,18 @@ fn is_plot_form_call() -> bool {
 
 fn build_output(n: usize) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => {
             let (x, _, _) = make_sphere_tensors(n, true, false, false)?;
-            Ok(Value::OutputList(vec![Value::Tensor(x)]))
+            Ok(Value::output_list(vec![Value::Tensor(x)]))
         }
         Some(2) => {
             let (x, y, _) = make_sphere_tensors(n, true, true, false)?;
-            Ok(Value::OutputList(vec![Value::Tensor(x), Value::Tensor(y)]))
+            Ok(Value::output_list(vec![Value::Tensor(x), Value::Tensor(y)]))
         }
         Some(3) => {
             let (x, y, z) = make_sphere_tensors(n, true, true, true)?;
-            Ok(Value::OutputList(vec![
+            Ok(Value::output_list(vec![
                 Value::Tensor(x),
                 Value::Tensor(y),
                 Value::Tensor(z),
@@ -583,6 +583,8 @@ mod tests {
             panic!("expected output list, got {value:?}");
         };
         outputs
+            .try_into_owned()
+            .expect("unique unbounded sphere fixture outputs")
             .into_iter()
             .map(|value| match value {
                 Value::Tensor(tensor) => tensor,

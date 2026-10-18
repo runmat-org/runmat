@@ -443,7 +443,7 @@ async fn invoke_semantic_function_with_captures_inner(
             )
             .await
         })
-        .await
+        .await?
 }
 
 struct OwnedFunctionEntry<'a> {
@@ -1233,6 +1233,8 @@ async fn interpret_with_vars_inner(
         .map_err(RuntimeError::new)?;
     crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
         .map_err(RuntimeError::new)?;
+    crate::bytecode::validate_stack_geometry(&bytecode.instructions, bytecode.stack_geometry)
+        .map_err(RuntimeError::new)?;
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&runtime));
@@ -1253,6 +1255,7 @@ async fn interpret_with_vars_inner(
         invocation_arity,
         runtime,
     ));
+    state.prepare_operand_stack()?;
     state.context.dynamic_eval_admission = dynamic_admission;
     match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
@@ -1281,6 +1284,8 @@ async fn interpret_with_vars_owner_inner(
         .validate_selected_source_owners(&runtime)
         .map_err(RuntimeError::new)?;
     crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
+        .map_err(RuntimeError::new)?;
+    crate::bytecode::validate_stack_geometry(&bytecode.instructions, bytecode.stack_geometry)
         .map_err(RuntimeError::new)?;
     let source_id = bytecode
         .source_id
@@ -2237,7 +2242,7 @@ pub(crate) async fn interpret_parfor_task_in_context(
             values
                 .finish()
                 .map_err(|error| error.into_runtime_error())?
-                .with_owned_values(|values| {
+                .with_unbounded_values(|values| {
                     let length = values.len();
                     let value = runmat_value::CellArray::new(values, 1, length)
                         .map(Value::Cell)
@@ -2245,7 +2250,7 @@ pub(crate) async fn interpret_parfor_task_in_context(
                     outputs
                         .push(value)
                         .map_err(|error| error.into_runtime_error())
-                })?;
+                })??;
             continue;
         }
         let value = frame
@@ -2507,10 +2512,7 @@ mod tests {
     #[test]
     fn output_sequence_multi_requested_remains_transient() {
         let sequence = output_sequence(vec![Value::Num(1.0), Value::Num(2.0)], 2).unwrap();
-        assert_eq!(
-            sequence.into_values(),
-            vec![Value::Num(1.0), Value::Num(2.0)]
-        );
+        assert_eq!(sequence.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
     }
 
     #[test]
@@ -3218,7 +3220,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::GpuTensor(handle.clone()));
+            state
+                .stack
+                .try_push(Value::GpuTensor(handle.clone()))
+                .expect("test stack capacity");
             state.vars = vec![Value::Num(0.0)].into();
             drop(handle);
 
@@ -3255,7 +3260,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::GpuTensor(handle.clone()));
+            state
+                .stack
+                .try_push(Value::GpuTensor(handle.clone()))
+                .expect("test stack capacity");
             state.vars = vec![Value::Num(0.0)].into();
 
             let mut result_vars = vec![Value::Num(0.0)];
@@ -3289,7 +3297,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::GpuTensor(handle.clone()));
+            state
+                .stack
+                .try_push(Value::GpuTensor(handle.clone()))
+                .expect("test stack capacity");
             state.vars = vec![Value::GpuTensor(handle.clone())].into();
 
             let mut result_vars = vec![Value::GpuTensor(handle.clone())];
@@ -3508,7 +3519,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![
                 Value::GpuTensor(handle.clone()),
                 Value::GpuTensor(handle.clone()),
@@ -3554,7 +3568,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![Value::GpuTensor(handle.clone())].into();
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
@@ -3609,7 +3626,10 @@ mod tests {
                 valid: true,
             })]
             .into();
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
 
             let mut result_vars = state.vars.clone_values_for_test();
             let weak = handle.downgrade();
@@ -3656,7 +3676,10 @@ mod tests {
                 valid: true,
             });
             state.vars = vec![nested.clone(), nested.clone()].into();
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
 
             let mut result_vars = state.vars.clone_values_for_test();
             let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars))).expect(
@@ -3710,7 +3733,10 @@ mod tests {
                 valid: true,
             });
             state.vars = vec![nested.clone()].into();
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.context.locals.push(nested);
 
             let mut result_vars = state.vars.clone_values_for_test();
@@ -3753,7 +3779,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![Value::GpuTensor(handle.clone())].into();
             state
                 .context
@@ -3807,7 +3836,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![Value::Num(0.0)].into();
             state
                 .context
@@ -3862,7 +3894,10 @@ mod tests {
                 Some("<main>"),
                 RuntimeInvocationArity::Script,
             );
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![Value::Num(0.0)].into();
             state
                 .context
@@ -3914,7 +3949,10 @@ mod tests {
                 .insert("nested".to_string(), Value::GpuTensor(handle.clone()));
             let target =
                 runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![Value::Num(0.0)].into();
             state
                 .context
@@ -3976,7 +4014,10 @@ mod tests {
                 target,
                 valid: true,
             });
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![local_value.clone()].into();
             state
                 .context
@@ -4042,7 +4083,10 @@ mod tests {
                 target,
                 valid: true,
             });
-            state.stack.push(Value::Num(0.0));
+            state
+                .stack
+                .try_push(Value::Num(0.0))
+                .expect("test stack capacity");
             state.vars = vec![Value::Num(0.0)].into();
             state
                 .context

@@ -67,23 +67,23 @@ async fn gather_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let len = eval.len();
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if len == 1 {
             if out_count > 1 {
                 return Err(gather_error(&GATHER_ERROR_TOO_MANY_OUTPUTS).into());
             }
-            return Ok(Value::OutputList(vec![eval.into_first()]));
+            return Ok(Value::output_list(vec![eval.into_first()]));
         }
         if out_count != len {
             return Err(gather_error(&GATHER_ERROR_OUTPUT_COUNT_MISMATCH).into());
         }
-        return Ok(Value::OutputList(eval.into_outputs()));
+        return Ok(Value::output_list(eval.into_outputs()));
     }
     if len == 1 {
         Ok(eval.into_first())
     } else {
-        Ok(Value::OutputList(eval.into_outputs()))
+        Ok(Value::output_list(eval.into_outputs()))
     }
 }
 
@@ -289,7 +289,7 @@ pub(crate) mod tests {
         let Value::OutputList(outputs) = result else {
             panic!("expected output list for multiple inputs");
         };
-        assert_eq!(outputs, vec![Value::Num(1.0), Value::from("two")]);
+        assert_eq!(outputs.as_slice(), &[Value::Num(1.0), Value::from("two")]);
     }
 
     #[test]

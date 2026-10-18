@@ -218,10 +218,13 @@ fn compile_with_bound_analysis(
             .map(std::sync::Arc::new);
     }
 
+    let stack_geometry =
+        crate::bytecode::derive_stack_geometry(&c.instructions).map_err(CompileError::new)?;
     let bytecode = Bytecode {
         active_function: entrypoint_target,
         active_class_method_owner: None,
         instructions: c.instructions,
+        stack_geometry,
         catch_scopes: c.catch_scopes,
         instr_spans: c.instr_spans,
         call_arg_spans: c.call_arg_spans,

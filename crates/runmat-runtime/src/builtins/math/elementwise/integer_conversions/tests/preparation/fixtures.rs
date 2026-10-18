@@ -48,14 +48,17 @@ impl RuntimeAccelerationService for Service {
         let replace_invalid = self.replace_invalid;
         let observer = Observer(self.events.clone());
         Box::pin(async move {
-            request.into_operands().with_owned_values(|operands| {
-                let operands = if replace_invalid {
-                    vec![Value::String("invalid service replacement".into())]
-                } else {
-                    operands
-                };
-                PreparedBuiltinOperands::new(operands, Some(Box::new(observer)))
-            })
+            request
+                .into_operands()
+                .with_unbounded_values(|operands| {
+                    let operands = if replace_invalid {
+                        vec![Value::String("invalid service replacement".into())]
+                    } else {
+                        operands
+                    };
+                    PreparedBuiltinOperands::new(operands, Some(Box::new(observer)))
+                })
+                .and_then(std::convert::identity)
         })
     }
 }

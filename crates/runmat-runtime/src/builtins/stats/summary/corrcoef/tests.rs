@@ -25,7 +25,7 @@ fn single_observations_keep_all_four_output_classes() {
         panic!("expected output list");
     };
     assert_eq!(outputs.len(), 4);
-    for output in outputs {
+    for output in outputs.try_into_owned().expect("unique output list") {
         let Value::Tensor(tensor) = output else {
             panic!("expected tensor");
         };
@@ -400,7 +400,7 @@ fn corrcoef_low_rank_inputs_keep_statistics_outputs_canonical() {
             panic!("expected output list")
         };
         assert_eq!(outputs.len(), 4);
-        for output in outputs {
+        for output in outputs.try_into_owned().expect("unique output list") {
             let Value::Tensor(output) = output else {
                 panic!("statistics output must be a tensor")
             };

@@ -92,7 +92,7 @@ async fn frewind_builtin(
     fid: Value,
 ) -> crate::BuiltinResult<Value> {
     evaluate_in(runtime.as_ref(), &fid).await?;
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 /// Evaluate the `frewind` builtin without invoking the runtime dispatcher.

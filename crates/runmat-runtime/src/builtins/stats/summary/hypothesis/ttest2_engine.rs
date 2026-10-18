@@ -43,14 +43,16 @@ struct TestResult {
 
 pub(super) fn outputs_for_count(out_count: usize, eval: Evaluation) -> BuiltinResult<Value> {
     match out_count {
-        0 => Ok(Value::OutputList(Vec::new())),
-        1 => Ok(Value::OutputList(vec![eval.h])),
-        2 => Ok(Value::OutputList(vec![eval.h, eval.p])),
+        0 => Ok(Value::output_list(Vec::new())),
+        1 => Ok(Value::output_list(vec![eval.h])),
+        2 => Ok(Value::output_list(vec![eval.h, eval.p])),
         3 => Ok(crate::output_count::output_list_with_padding(
             3,
             vec![eval.h, eval.p, eval.ci, eval.stats],
         )),
-        4 => Ok(Value::OutputList(vec![eval.h, eval.p, eval.ci, eval.stats])),
+        4 => Ok(Value::output_list(vec![
+            eval.h, eval.p, eval.ci, eval.stats,
+        ])),
         _ => Err(invalid_argument(
             "ttest2: too many output arguments; maximum is 4",
         )),

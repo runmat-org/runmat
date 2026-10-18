@@ -339,10 +339,10 @@ pub(crate) fn build_ode_output(name: &str, result: OdeResult) -> BuiltinResult<V
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![y]));
+            return Ok(Value::output_list(vec![y]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,

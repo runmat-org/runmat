@@ -54,8 +54,8 @@ async fn confusionmat_builtin(
     let rest = gather_values(rest).await?;
     let outputs = confusionmat_compute(group, grouphat, rest, requested_outputs.unwrap_or(1))?;
     match requested_outputs {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![outputs[0].clone()])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![outputs[0].clone()])),
         Some(count) => Ok(crate::output_count::output_list_with_padding(
             count, outputs,
         )),

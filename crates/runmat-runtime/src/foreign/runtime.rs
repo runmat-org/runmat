@@ -413,7 +413,7 @@ mod tests {
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
             .with_service_ports(services);
         let nested = Value::Cell(
-            CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1)
+            CellArray::new(vec![Value::output_list(vec![Value::Num(1.0)])], 1, 1)
                 .expect("valid cell fixture"),
         );
 

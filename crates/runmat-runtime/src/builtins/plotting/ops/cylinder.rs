@@ -113,7 +113,7 @@ async fn cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 return Err(error(3, err.message));
             }
         }
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let mut outputs = vec![Value::Tensor(x)];
     if let Some(y) = y {
@@ -123,7 +123,7 @@ async fn cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         outputs.push(Value::Tensor(z));
     }
     if requested.is_some() {
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     } else {
         Ok(outputs.remove(0))
     }

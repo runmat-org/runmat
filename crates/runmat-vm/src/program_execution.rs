@@ -803,7 +803,7 @@ async fn execute_parallel_region_values(
     )
     .await
     .and_then(|outputs| {
-        outputs.with_owned_values(|outputs| {
+        outputs.with_unbounded_values(|outputs| {
             runmat_value::CellArray::new(outputs, 1, executable.output_variables().count())
                 .map(Value::Cell)
                 .map_err(|error| {
@@ -816,7 +816,7 @@ async fn execute_parallel_region_values(
                     runmat_runtime::execution::RootedValue::new(value)
                         .map_err(|error| error.into_runtime_error())
                 })
-        })
+        })?
     });
     result.map_err(ParallelRegionError::Runtime)
 }

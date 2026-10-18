@@ -42,7 +42,8 @@ impl RuntimeAccelerationService for RecordingService {
         Box::pin(async move {
             request
                 .into_operands()
-                .with_owned_values(PreparedBuiltinOperands::passthrough)
+                .with_unbounded_values(PreparedBuiltinOperands::passthrough)
+                .and_then(std::convert::identity)
         })
     }
 }
@@ -193,9 +194,12 @@ impl RuntimeAccelerationService for NativeService {
         self.events.borrow_mut().push("prepare");
         let events = self.events.clone();
         Box::pin(async move {
-            request.into_operands().with_owned_values(|values| {
-                PreparedBuiltinOperands::new(values, Some(Box::new(NativeObservation(events))))
-            })
+            request
+                .into_operands()
+                .with_unbounded_values(|values| {
+                    PreparedBuiltinOperands::new(values, Some(Box::new(NativeObservation(events))))
+                })
+                .and_then(std::convert::identity)
         })
     }
 }

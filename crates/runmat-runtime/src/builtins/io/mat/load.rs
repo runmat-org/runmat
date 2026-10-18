@@ -78,7 +78,7 @@ async fn load_builtin(
                 )
             })?;
             target.assign_all(eval.variables(), receipt.as_ref())?;
-            RootedValue::new(Value::OutputList(Vec::new()))
+            RootedValue::new(Value::output_list(Vec::new()))
                 .map_err(|error| error.into_runtime_error())
         } else {
             if let Some(receipt) = receipt.as_ref() {

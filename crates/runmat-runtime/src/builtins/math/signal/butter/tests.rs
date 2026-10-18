@@ -9,7 +9,11 @@ use runmat_value::{IntValue, IntegerStorage};
 fn output_values(order: usize, cutoff: Value, rest: Vec<Value>, outputs: usize) -> Vec<Value> {
     let _guard = crate::output_count::push_output_count(Some(outputs));
     match block_on(butter_builtin(None, Value::Num(order as f64), cutoff, rest)).expect("butter") {
-        Value::OutputList(values) => values,
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list"),
         other => panic!("expected output list, got {other:?}"),
     }
 }
@@ -293,7 +297,11 @@ fn butter_order_reads_typed_integer_storage_exactly() {
     ))
     .expect("butter")
     {
-        Value::OutputList(values) => values,
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list"),
         other => panic!("expected output list, got {other:?}"),
     };
 

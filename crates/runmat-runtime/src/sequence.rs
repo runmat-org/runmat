@@ -12,8 +12,41 @@ pub fn sequence_error_to_runtime(error: runmat_value::ValueSequenceError) -> Run
     let identifier = match error {
         runmat_value::ValueSequenceError::TooManyOutputs { .. } => "OutputSequenceLimitExceeded",
         runmat_value::ValueSequenceError::TransientValue(_) => "NestedLegacyOutputList",
+        runmat_value::ValueSequenceError::SharedOutputStorage => "SharedOutputStorage",
     };
     semantic_error(identifier, error.to_string())
+}
+
+/// Take the first output without detaching an exact physical backing claim.
+/// Callers retain responsibility for their own required-cardinality check.
+pub fn into_first_output(
+    values: runmat_value::OutputListStorage,
+) -> Result<Option<Value>, RuntimeError> {
+    values.try_into_first().map_err(|_| {
+        sequence_error_to_runtime(runmat_value::ValueSequenceError::SharedOutputStorage)
+    })
+}
+
+/// Bridge only to legacy consumers whose ABI requires a bare Vec. A claimed
+/// or shared output backing is refused rather than detached from its owner.
+pub fn into_unbounded_values(sequence: ValueSequence) -> Result<Vec<Value>, RuntimeError> {
+    into_unbounded_output_values(sequence.into_output_storage())
+}
+
+/// Compatibility bridge for an output owner whose consumer still requires an
+/// ordinary Vec and cannot retain an exact physical backing claim.
+pub fn into_unbounded_output_values(
+    values: runmat_value::OutputListStorage,
+) -> Result<Vec<Value>, RuntimeError> {
+    values
+        .try_into_owned()
+        .map_err(|_| {
+            sequence_error_to_runtime(runmat_value::ValueSequenceError::SharedOutputStorage)
+        })?
+        .try_into_unbounded_vec()
+        .map_err(|_| {
+            sequence_error_to_runtime(runmat_value::ValueSequenceError::SharedOutputStorage)
+        })
 }
 
 /// Constructs the checked one-value result used by runtime call boundaries.
@@ -79,7 +112,7 @@ pub trait ResolveValueSequence {
         self,
         use_context: SequenceUse,
         context: SequenceResolutionContext,
-    ) -> Result<Vec<Value>, RuntimeError>;
+    ) -> Result<runmat_value::OutputListStorage, RuntimeError>;
 }
 
 impl ResolveValueSequence for ValueSequence {
@@ -87,10 +120,10 @@ impl ResolveValueSequence for ValueSequence {
         self,
         use_context: SequenceUse,
         context: SequenceResolutionContext,
-    ) -> Result<Vec<Value>, RuntimeError> {
+    ) -> Result<runmat_value::OutputListStorage, RuntimeError> {
         match use_context {
-            SequenceUse::Discard => Ok(Vec::new()),
-            SequenceUse::ExpandAll => Ok(self.into_values()),
+            SequenceUse::Discard => Ok(runmat_value::OutputListStorage::empty()),
+            SequenceUse::ExpandAll => Ok(self.into_output_storage()),
             SequenceUse::RequireSingle => select_prefix(self, 1, true),
             SequenceUse::SelectPrefix { count } => select_prefix(self, count, false),
             SequenceUse::SelectCurrentFunctionOutputs => {
@@ -119,9 +152,9 @@ fn select_prefix(
     sequence: ValueSequence,
     count: usize,
     require_exact_single: bool,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_value::OutputListStorage, RuntimeError> {
     runmat_value::validate_output_count(count).map_err(sequence_error_to_runtime)?;
-    let mut values = sequence.into_values();
+    let mut values = sequence.into_output_storage();
     if require_exact_single && values.len() != 1 {
         return Err(semantic_error(
             "CommaSeparatedListRequiresSingleValue",
@@ -168,8 +201,9 @@ mod tests {
                 SequenceUse::SelectPrefix { count: 2 },
                 SequenceResolutionContext::default(),
             )
-            .unwrap(),
-            vec![Value::Num(1.0), Value::Num(2.0)]
+            .unwrap()
+            .as_slice(),
+            &[Value::Num(1.0), Value::Num(2.0)]
         );
     }
 

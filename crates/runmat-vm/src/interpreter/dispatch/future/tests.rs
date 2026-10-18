@@ -5,7 +5,7 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
     let instruction = Instr::LoadConst(7.0);
     let bytecode = crate::bytecode::Bytecode::empty();
     let registry = crate::bytecode::FunctionRegistry::default();
-    let mut stack = Vec::new();
+    let mut stack = crate::interpreter::stack::InterpreterStack::unbounded();
     let mut vars = crate::interpreter::vars::InterpreterVars::from_owned(Vec::new());
     let mut sequence = SequenceState::default();
     let mut execution = crate::bytecode::program::ExecutionContext::default();
@@ -76,12 +76,12 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
         ))))
     ));
     drop(future);
-    assert_eq!(stack, vec![Value::Num(7.0)]);
+    assert_eq!(stack.as_slice(), &[Value::Num(7.0)]);
 
     let dropped_instruction = Instr::LoadConst(9.0);
     let unpolled = immediate_future!(&dropped_instruction);
     drop(unpolled);
-    assert_eq!(stack, vec![Value::Num(7.0)]);
+    assert_eq!(stack.as_slice(), &[Value::Num(7.0)]);
 
     let enter_try = Instr::EnterTry {
         scope: 3,
@@ -110,6 +110,7 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
             scope: 3,
             catch_pc: 11,
             catch_var: Some(2),
+            stack_depth: stack.len(),
         }]
     );
 }

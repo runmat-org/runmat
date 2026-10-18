@@ -61,12 +61,15 @@ impl RuntimeAccelerationService for Service {
         self.0.borrow_mut().push("prepare");
         let mode = self.1;
         let observation = Some(Box::new(Observation(self.0.clone())) as Box<_>);
-        let prepared = request.into_operands().with_owned_values(|mut operands| {
-            if matches!(mode, Mode::Invalid) {
-                operands[1] = Value::String("invalid".into());
-            }
-            PreparedBuiltinOperands::new(operands, observation)
-        });
+        let prepared = request
+            .into_operands()
+            .with_unbounded_values(|mut operands| {
+                if matches!(mode, Mode::Invalid) {
+                    operands[1] = Value::String("invalid".into());
+                }
+                PreparedBuiltinOperands::new(operands, observation)
+            })
+            .and_then(std::convert::identity);
         Box::pin(async move {
             if matches!(mode, Mode::Pending) {
                 std::future::pending::<()>().await;

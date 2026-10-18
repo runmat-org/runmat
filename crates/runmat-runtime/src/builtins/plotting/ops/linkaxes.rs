@@ -38,7 +38,7 @@ pub fn linkaxes_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             "RunMat:linkaxes:Internal",
         )
     })?;
-    Ok(Value::OutputList(vec![]))
+    Ok(Value::output_list(vec![]))
 }
 
 fn parse_linkaxes_args(args: Vec<Value>) -> crate::BuiltinResult<ParsedLinkAxesArgs> {

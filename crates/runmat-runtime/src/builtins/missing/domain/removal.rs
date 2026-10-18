@@ -500,6 +500,6 @@ pub(super) fn empty_like(value: Value) -> BuiltinResult<Value> {
         Value::Cell(_) => CellArray::new(Vec::new(), 0, 0)
             .map(Value::Cell)
             .map_err(internal_error),
-        _ => Ok(Value::OutputList(Vec::new())),
+        _ => Ok(Value::output_list(Vec::new())),
     }
 }

@@ -75,13 +75,13 @@ impl TopKEvaluation {
     fn into_value(self, kind: TopKKind) -> BuiltinResult<Value> {
         if let Some(out_count) = crate::output_count::current_output_count() {
             if out_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
             if out_count == 1 {
-                return Ok(Value::OutputList(vec![self.values]));
+                return Ok(Value::output_list(vec![self.values]));
             }
             if out_count == 2 {
-                return Ok(Value::OutputList(vec![self.values, self.indices]));
+                return Ok(Value::output_list(vec![self.values, self.indices]));
             }
             return Err(topk_invalid_argument(
                 kind,

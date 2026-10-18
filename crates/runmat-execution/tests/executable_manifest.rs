@@ -146,7 +146,7 @@ fn manifest() -> ExecutableUnitManifest {
                     role: ParallelVariableRole::Loop,
                     access: ParallelAccess::ReadWrite,
                     fact: ValueFact::scalar(ValueKindFact::Logical),
-                    transferable: true,
+                    transferability: runmat_types::ParallelTransferability::ProvenTransferable,
                 }],
                 maximum_workers: Some(LabCount(4)),
                 effects: Default::default(),

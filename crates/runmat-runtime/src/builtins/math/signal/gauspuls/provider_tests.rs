@@ -18,7 +18,7 @@ fn resident_samples_gather_to_host_for_each_requested_component() {
             panic!("components")
         };
         assert_eq!(outputs.len(), 3);
-        for output in outputs {
+        for output in outputs.try_into_owned().expect("unique output list") {
             let Value::Tensor(tensor) = output else {
                 panic!("host result")
             };

@@ -1275,9 +1275,16 @@ pub async fn create_matrix_from_values(
 
     // Stack rows using vertcat builtin
     if row_matrices.len() == 1 {
-        row_matrices.with_owned_values(|mut values| {
-            crate::execution::RootedValue::new(values.remove(0))
-                .map_err(|error| error.into_runtime_error())
+        row_matrices.with_owned_output_storage(|values| {
+            let value = values
+                .try_into_first()
+                .map_err(|_| {
+                    crate::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?
+                .expect("one row");
+            crate::execution::RootedValue::new(value).map_err(|error| error.into_runtime_error())
         })
     } else {
         crate::call_builtin_async("vertcat", row_matrices.values()).await

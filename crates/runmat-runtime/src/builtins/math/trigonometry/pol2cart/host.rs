@@ -69,7 +69,7 @@ impl Pol2CartEval {
                 self.z.clone().expect("z output available"),
             ));
         }
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     }
 }
 

@@ -609,7 +609,7 @@ pub trait RuntimeAccelerationService {
         Box::pin(async move {
             request
                 .into_operands()
-                .with_owned_values(super::preparation::PreparedBuiltinOperands::passthrough)
+                .with_unbounded_values(super::preparation::PreparedBuiltinOperands::passthrough)?
         })
     }
 }
@@ -1186,6 +1186,18 @@ pub trait RuntimeParallelService {
 pub struct RuntimeSpmdAdmission {
     pub gang: runmat_execution::GangSnapshot,
     pub labs: Vec<Rc<dyn RuntimeCollectiveService>>,
+    /// The host's exact gang generation remains live through an unpolled
+    /// admission future, a suspended VM invocation, and every cloned lab
+    /// admission. Its last drop retires the gang synchronously.
+    pub lifetime: Rc<dyn RuntimeSpmdGangLease>,
+}
+
+/// Host-owned lifecycle for exactly one admitted SPMD gang generation.
+/// `retire` is idempotent; dropping the final owner performs the same local
+/// retirement without polling an async future or scheduling detached work.
+pub trait RuntimeSpmdGangLease {
+    fn gang_handle(&self) -> &runmat_execution::GangHandle;
+    fn retire(&self) -> Result<(), RuntimeError>;
 }
 
 #[derive(Debug, Clone)]
@@ -1209,7 +1221,8 @@ impl RuntimeSpmdAdmission {
                 error.to_string(),
             )
         })?;
-        if self.labs.len() != self.gang.handle.labs.0 as usize
+        if self.lifetime.gang_handle() != &self.gang.handle
+            || self.labs.len() != self.gang.handle.labs.0 as usize
             || self
                 .labs
                 .iter()
@@ -1236,11 +1249,6 @@ pub trait RuntimeSpmdService {
         available_labs: runmat_types::LabCount,
         region: runmat_types::ParallelRegionId,
     ) -> RuntimeServiceFuture<Result<RuntimeSpmdAdmission, RuntimeError>>;
-
-    fn retire(
-        &self,
-        gang: runmat_execution::GangHandle,
-    ) -> RuntimeServiceFuture<Result<(), RuntimeError>>;
 
     /// Records that one admitted lab completed its region body. The gang
     /// authority uses this typed lifecycle transition to distinguish a live

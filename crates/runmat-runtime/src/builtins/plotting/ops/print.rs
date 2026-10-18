@@ -49,7 +49,7 @@ pub async fn print_builtin(
 ) -> BuiltinResult<Value> {
     let status = execute_print(runtime, requested_outputs, args).await?;
     Ok(if requested_outputs == Some(0) {
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     } else {
         Value::Bool(status)
     })

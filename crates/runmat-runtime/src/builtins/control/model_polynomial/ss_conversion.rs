@@ -2,7 +2,7 @@
 use crate::builtins::common::tensor;
 use crate::builtins::control::tf_model::{
     control_error, gather_ss_properties, internal_identifier, invalid_model_identifier, scalar_f64,
-    unsupported_model_identifier, TfModel,
+    unsupported_model_identifier, TfModel, TfOptions,
 };
 use crate::context::host_allocation::{HostAllocationError, HostAllocationReceipt};
 use crate::context::RuntimeContext;
@@ -206,13 +206,19 @@ fn ss_object_to_tf(object: &ObjectInstance, builtin: &'static str) -> Conversion
     ensure_finite_coefficients("Numerator", &numerator)?;
     ensure_finite_coefficients("Denominator", &denominator)?;
 
-    Ok(TfModel {
+    TfModel::new(
         numerator,
         denominator,
-        variable: if sample_time > 0.0 { "z" } else { "s" }.to_string(),
-        sample_time,
-        input_delay: 0.0,
-        output_delay: 0.0,
+        TfOptions {
+            variable: if sample_time != 0.0 { "z" } else { "s" }.to_string(),
+            sample_time,
+        },
+    )
+    .map_err(|error| {
+        conversion_error(
+            format!("ss model produced an invalid transfer function: {error}"),
+            ConversionErrorKind::Internal,
+        )
     })
 }
 

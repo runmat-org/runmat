@@ -170,7 +170,7 @@ async fn pdist2_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<V
     match selection {
         Some(selection) => selected_distance_outputs(&distances, selection),
         None => match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
+            Some(0) => Ok(Value::output_list(Vec::new())),
             Some(out_count) => Ok(crate::output_count::output_list_with_padding(
                 out_count,
                 vec![Value::Tensor(distances)],
@@ -429,11 +429,13 @@ fn restore_knnsearch_value_protecting(
                 .map(Value::Cell)
                 .map_err(|error| distance_error(KNNSEARCH_NAME, error))
         }
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|value| restore_knnsearch_value_protecting(value, source, protected_outputs))
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(Value::OutputList),
+        Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)?
+            .try_map(
+                |value| restore_knnsearch_value_protecting(value, source, protected_outputs),
+                crate::sequence::sequence_error_to_runtime,
+            )
+            .map(|sequence| Value::OutputList(sequence.into_output_storage())),
         other => Ok(other),
     }
 }

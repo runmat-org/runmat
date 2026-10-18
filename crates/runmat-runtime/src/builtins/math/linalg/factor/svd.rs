@@ -109,16 +109,16 @@ async fn svd_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Val
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.singular_values()]));
+            return Ok(Value::output_list(vec![eval.singular_values()]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![eval.u(), eval.sigma()]));
+            return Ok(Value::output_list(vec![eval.u(), eval.sigma()]));
         }
         if out_count == 3 {
-            return Ok(Value::OutputList(vec![eval.u(), eval.sigma(), eval.v()]));
+            return Ok(Value::output_list(vec![eval.u(), eval.sigma(), eval.v()]));
         }
         return Err(svd_error(&SVD_ERROR_INVALID_ARGUMENT));
     }

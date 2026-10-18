@@ -60,6 +60,7 @@ pub(super) async fn execute(
         )
         .await?;
     admission.validate()?;
+    let lifetime = std::rc::Rc::clone(&admission.lifetime);
     let gang = admission.gang.handle.clone();
     let execution_result = async {
         let rank_results = match execution.runtime.execution().spmd_execution_mode() {
@@ -146,7 +147,7 @@ pub(super) async fn execute(
         Ok(())
     }
     .await;
-    let retirement = spmd.retire(gang).await;
+    let retirement = lifetime.retire();
     match execution_result {
         Err(error) => Err(error),
         Ok(()) => retirement,

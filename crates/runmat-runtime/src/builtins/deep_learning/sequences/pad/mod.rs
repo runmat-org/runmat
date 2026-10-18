@@ -221,10 +221,10 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
             let mask = CellArray::new_with_shape(masks, cell.shape)
                 .map(Value::Cell)
                 .map_err(|err| deep_learning_error("padsequences", err))?;
-            return Ok(Value::OutputList(vec![output, mask]));
+            return Ok(Value::output_list(vec![output, mask]));
         }
         return Ok(if requested_outputs == 0 {
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         } else {
             output
         });
@@ -235,8 +235,8 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
                 .map_err(|err| deep_learning_error("padsequences", err))?,
         );
         return Ok(match requested_outputs {
-            0 => Value::OutputList(Vec::new()),
-            2 => Value::OutputList(vec![
+            0 => Value::output_list(Vec::new()),
+            2 => Value::output_list(vec![
                 output,
                 Value::LogicalArray(
                     LogicalArray::new(Vec::new(), vec![0, 0])
@@ -280,8 +280,8 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
     }
     let output = Value::Tensor(output);
     Ok(match requested_outputs {
-        0 => Value::OutputList(Vec::new()),
-        2 => Value::OutputList(vec![
+        0 => Value::output_list(Vec::new()),
+        2 => Value::output_list(vec![
             output,
             Value::LogicalArray(
                 LogicalArray::new(mask_data.unwrap_or_default(), output_shape)

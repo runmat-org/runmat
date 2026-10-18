@@ -2,25 +2,62 @@ use super::collective::{LabCollectiveService, SharedCollectives};
 use runmat_execution::{CompositeHandle, CompositeId, GangHandle, GangRequest, SpmdTaskContext};
 use runmat_execution_runner::{DistributedStore, GangCoordinator};
 use runmat_runtime::context::{
-    RuntimeCollectiveService, RuntimeServiceFuture, RuntimeSpmdAdmission, RuntimeSpmdOutput,
-    RuntimeSpmdRetainedOutput, RuntimeSpmdService,
+    RuntimeCollectiveService, RuntimeServiceFuture, RuntimeSpmdAdmission, RuntimeSpmdGangLease,
+    RuntimeSpmdOutput, RuntimeSpmdRetainedOutput, RuntimeSpmdService,
 };
 use runmat_runtime::RuntimeError;
 use runmat_types::{LabCount, ParallelRegionId};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 #[derive(Default)]
 pub(crate) struct CoreSpmdService {
-    gangs: RefCell<GangCoordinator>,
+    gangs: Rc<RefCell<GangCoordinator>>,
     collectives: Rc<SharedCollectives>,
     values: Rc<RefCell<DistributedStore>>,
+}
+
+struct CoreGangLease {
+    handle: GangHandle,
+    gangs: Rc<RefCell<GangCoordinator>>,
+    collectives: Rc<SharedCollectives>,
+    retired: Cell<bool>,
+}
+
+impl RuntimeSpmdGangLease for CoreGangLease {
+    fn gang_handle(&self) -> &GangHandle {
+        &self.handle
+    }
+
+    fn retire(&self) -> Result<(), RuntimeError> {
+        if self.retired.get() {
+            return Ok(());
+        }
+        // No coordinator borrow is held across a service callback or await.
+        // The same exact generation is checked by GangCoordinator::retire.
+        self.gangs
+            .borrow_mut()
+            .retire(&self.handle)
+            .map_err(runtime_error)?;
+        // Collective completion can wake external execution. Publish the
+        // retired state after releasing the coordinator borrow and before
+        // those callbacks can observe or reenter this lease.
+        self.retired.set(true);
+        self.collectives.retire_gang(&self.handle);
+        Ok(())
+    }
+}
+
+impl Drop for CoreGangLease {
+    fn drop(&mut self) {
+        let _ = self.retire();
+    }
 }
 
 impl CoreSpmdService {
     pub(super) fn new(values: Rc<RefCell<DistributedStore>>) -> Self {
         Self {
-            gangs: RefCell::default(),
+            gangs: Rc::default(),
             collectives: Rc::default(),
             values,
         }
@@ -38,10 +75,19 @@ impl RuntimeSpmdService for CoreSpmdService {
             .gangs
             .borrow_mut()
             .admit(request, available_labs)
-            .map_err(runtime_error);
+            .map_err(runtime_error)
+            .map(|gang| {
+                let lifetime: Rc<dyn RuntimeSpmdGangLease> = Rc::new(CoreGangLease {
+                    handle: gang.handle.clone(),
+                    gangs: Rc::clone(&self.gangs),
+                    collectives: Rc::clone(&self.collectives),
+                    retired: Cell::new(false),
+                });
+                (gang, lifetime)
+            });
         let collectives = Rc::clone(&self.collectives);
         Box::pin(async move {
-            let gang = admitted?;
+            let (gang, lifetime) = admitted?;
             let labs = gang
                 .ranks
                 .iter()
@@ -57,21 +103,14 @@ impl RuntimeSpmdService for CoreSpmdService {
                     )) as Rc<dyn RuntimeCollectiveService>
                 })
                 .collect();
-            let admission = RuntimeSpmdAdmission { gang, labs };
+            let admission = RuntimeSpmdAdmission {
+                gang,
+                labs,
+                lifetime,
+            };
             admission.validate()?;
             Ok(admission)
         })
-    }
-
-    fn retire(&self, gang: GangHandle) -> RuntimeServiceFuture<Result<(), RuntimeError>> {
-        self.collectives.retire_gang(&gang);
-        let retired = self
-            .gangs
-            .borrow_mut()
-            .retire(&gang)
-            .map(|_| ())
-            .map_err(runtime_error);
-        Box::pin(async move { retired })
     }
 
     fn rank_finished(
@@ -189,4 +228,147 @@ fn runtime_error(error: impl std::fmt::Display) -> RuntimeError {
         "RunMat:parallel:GangAdmission",
         error.to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_execution::{
+        CollectiveInvocation, CollectiveRequest, CollectiveSequence, ExecutionScopeId, GangId,
+        PoolHandle, PoolId,
+    };
+    use runmat_types::{CollectiveId, ProgramFunctionId, RegionId, SpmdLabRequirement};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    struct Reentry {
+        lease: Rc<dyn RuntimeSpmdGangLease>,
+        second_lab: Rc<dyn RuntimeCollectiveService>,
+        gangs: Rc<RefCell<GangCoordinator>>,
+        handle: GangHandle,
+        region: ParallelRegionId,
+    }
+
+    thread_local! {
+        static REENTRY: RefCell<Option<Reentry>> = const { RefCell::new(None) };
+    }
+
+    struct InspectWake(AtomicUsize);
+
+    impl Wake for InspectWake {
+        fn wake(self: Arc<Self>) {
+            self.wake_by_ref();
+        }
+
+        fn wake_by_ref(self: &Arc<Self>) {
+            REENTRY.with(|slot| {
+                let borrowed = slot.borrow();
+                let state = borrowed.as_ref().expect("reentrant test state");
+                assert!(
+                    state.gangs.borrow().snapshot(&state.handle).is_err(),
+                    "the exact gang must retire before waking a collective waiter"
+                );
+                state
+                    .lease
+                    .retire()
+                    .expect("reentrant retirement is idempotent");
+                // execute() submits before returning its future. That submit
+                // borrows the same pending-sender map; a live RefMut held
+                // across the first sender's wake would panic here.
+                let request = CollectiveRequest {
+                    context: state.second_lab.context().clone(),
+                    id: CollectiveId {
+                        region: state.region,
+                        ordinal: 2,
+                    },
+                    sequence: CollectiveSequence(1),
+                    invocation: CollectiveInvocation::Barrier,
+                };
+                drop(state.second_lab.execute(request));
+            });
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    fn admission_future_and_last_lease_drop_retire_exact_gang_generation() {
+        let values = Rc::new(RefCell::new(DistributedStore::default()));
+        let service = CoreSpmdService::new(values);
+        let scope_id = ExecutionScopeId::derive(&[b"spmd-lifetime"]);
+        let pool = PoolHandle {
+            id: PoolId::derive(&[b"spmd-lifetime-pool"]),
+            scope_id,
+            generation: 1,
+        };
+        let request = GangRequest {
+            pool: pool.clone(),
+            labs: SpmdLabRequirement::Exact { labs: LabCount(2) },
+        };
+        let region = ParallelRegionId(RegionId {
+            function: ProgramFunctionId(1),
+            ordinal: 1,
+        });
+
+        // Core reserves the gang before returning the admission future. Its
+        // own future must therefore hold the lifetime even when never polled.
+        let pending = service.admit(request.clone(), LabCount(2), region);
+        let first = GangHandle {
+            id: GangId::derive(&[pool.id.bytes(), pool.scope_id.bytes(), &1_u64.to_be_bytes()]),
+            scope_id,
+            generation: 1,
+            pool: pool.clone(),
+            labs: LabCount(2),
+        };
+        assert!(service.gangs.borrow().snapshot(&first).is_ok());
+        drop(pending);
+        assert!(service.gangs.borrow().snapshot(&first).is_err());
+
+        let admission = futures::executor::block_on(service.admit(request, LabCount(2), region))
+            .expect("second admitted generation");
+        admission.validate().expect("exact lease identity");
+        let second = admission.gang.handle.clone();
+        let retained = Rc::clone(&admission.lifetime);
+        let first_lab = Rc::clone(&admission.labs[0]);
+        let second_lab = Rc::clone(&admission.labs[1]);
+        drop(admission);
+        assert!(service.gangs.borrow().snapshot(&second).is_ok());
+
+        let request = CollectiveRequest {
+            context: first_lab.context().clone(),
+            id: CollectiveId { region, ordinal: 1 },
+            sequence: CollectiveSequence(1),
+            invocation: CollectiveInvocation::Barrier,
+        };
+        let mut pending = first_lab.execute(request);
+        let waking = Arc::new(InspectWake(AtomicUsize::new(0)));
+        let waker = Waker::from(Arc::clone(&waking));
+        let mut task = Context::from_waker(&waker);
+        assert!(matches!(pending.as_mut().poll(&mut task), Poll::Pending));
+        REENTRY.with(|slot| {
+            *slot.borrow_mut() = Some(Reentry {
+                lease: Rc::clone(&retained),
+                second_lab,
+                gangs: Rc::clone(&service.gangs),
+                handle: second.clone(),
+                region,
+            });
+        });
+        retained.retire().expect("normal completion retirement");
+        assert_eq!(waking.0.load(Ordering::SeqCst), 1);
+        assert!(matches!(
+            pending.as_mut().poll(&mut task),
+            Poll::Ready(Err(_))
+        ));
+        REENTRY.with(|slot| {
+            slot.borrow_mut().take();
+        });
+        retained
+            .retire()
+            .expect("same lease retirement is idempotent");
+        assert!(service.gangs.borrow().snapshot(&second).is_err());
+        drop(retained);
+        assert!(service.gangs.borrow().snapshot(&second).is_err());
+    }
 }

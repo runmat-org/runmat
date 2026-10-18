@@ -322,7 +322,7 @@ async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Built
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -331,7 +331,7 @@ async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Built
                 vec![eval.into_values_value()],
                 intersect_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         if out_count == 2 {
             let (values, ia) = eval.into_pair();
@@ -341,7 +341,7 @@ async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Built
                 vec![values, ia],
                 intersect_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
         let outputs = super::restore_set_outputs(
@@ -350,7 +350,7 @@ async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Built
             vec![values, ia, ib],
             intersect_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,

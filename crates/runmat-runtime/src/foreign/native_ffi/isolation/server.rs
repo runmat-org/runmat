@@ -188,7 +188,7 @@ async fn invoke(
         .finish()
         .map_err(|error| wire_error("RunMat:NativeFFI:ValueDecode", error.to_string()))?;
     let value = supervisor
-        .participate_foreground(arguments.with_owned_values_async(|arguments| async {
+        .participate_foreground(arguments.with_unbounded_values_async(|arguments| async {
             let value = context
                 .clone()
                 .scope(adapter.invoke(
@@ -207,6 +207,7 @@ async fn invoke(
         }))
         .await
         .map_err(runtime_wire_error)?
+        .map_err(runtime_wire_error)?
         .map_err(runtime_wire_error)?;
     value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
 }
@@ -216,7 +217,7 @@ fn encode_host_outputs(
     snapshots: &SharedSnapshotStore,
     resources: &mut RemoteResources,
 ) -> Result<Vec<NativeWireValue>, NativeWireError> {
-    let values = sequence.into_values();
+    let values = sequence.into_output_storage();
     if values.len() > super::NATIVE_FFI_HOST_MAX_OUTPUTS {
         return Err(wire_error(
             "RunMat:NativeFFI:HostProtocol",
@@ -224,6 +225,13 @@ fn encode_host_outputs(
         ));
     }
     values
+        .try_into_owned()
+        .map_err(|_| {
+            wire_error(
+                "RunMat:NativeFFI:HostProtocol",
+                "shared output storage requires separate admission",
+            )
+        })?
         .into_iter()
         .map(|value| encode_host_value(value, snapshots, resources))
         .collect()

@@ -16,7 +16,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::control::response::{
     parse_real_model, preflight_response_model_operand, ResponseKind,
 };
-use crate::builtins::control::tf_model::RealTfModel;
+use crate::builtins::control::tf_model::{RealTfModel, TfSampleDomain, TfVariable};
 use crate::plotting_hooks::{presentation_failed, with_render_cause};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -100,10 +100,10 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             emit_impulse_plot(&response).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![response.y_value()?]));
+            return Ok(Value::output_list(vec![response.y_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -113,7 +113,7 @@ async fn impulse_builtin(system: Value, rest: Vec<Value>) -> BuiltinResult<Value
 
     if crate::output_context::requested_output_count() == Some(0) {
         emit_impulse_plot(&response).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     response.y_value()
@@ -240,15 +240,15 @@ struct TfSystem {
 impl TfSystem {
     async fn parse(value: Value) -> BuiltinResult<Self> {
         let model = parse_real_model(value, ResponseKind::Impulse).await?;
-        if model.sample_time < 0.0 {
+        if model.sample_time() < 0.0 {
             return Err(impulse_error_with_detail(
                 &IMPULSE_ERROR_INVALID_MODEL,
                 "impulse requires a known nonnegative sample time",
             ));
         }
+        let sample_time = model.sample_time();
         let numerator = model.numerator;
         let denominator = model.denominator;
-        let sample_time = model.sample_time;
         if numerator.iter().all(|value| *value == 0.0) {
             return Ok(Self {
                 numerator: Vec::new(),
@@ -281,10 +281,16 @@ impl TfSystem {
     }
 
     fn normalized(&self) -> BuiltinResult<(Vec<f64>, Vec<f64>)> {
+        let variable = if self.is_discrete() {
+            TfVariable::Z
+        } else {
+            TfVariable::S
+        };
+        let sample_domain = TfSampleDomain::parse(self.sample_time, variable, BUILTIN_NAME)?;
         RealTfModel {
             numerator: self.numerator.clone(),
             denominator: self.denominator.clone(),
-            sample_time: self.sample_time,
+            sample_domain,
             input_delay: 0.0,
             output_delay: 0.0,
         }

@@ -99,14 +99,14 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
     if is_statement_form_call() {
         plot_multiple_step_responses(sys, rest).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     let model = parse_real_model(sys, ResponseKind::Step).await?;
     let time_host = gather_step_time(rest.first()).await?;
     let time = admit_time(
         time_host.as_ref(),
-        model.sample_time,
+        model.sample_time(),
         StepSimulationCaller::Step,
     )?;
     let eval = simulate(&model, time, StepSimulationCaller::Step)?;
@@ -115,16 +115,16 @@ async fn step_builtin(sys: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         && crate::output_count::current_output_count().is_none()
     {
         plot_response(&eval).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
             plot_response(&eval).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.y_value()?]));
+            return Ok(Value::output_list(vec![eval.y_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -200,7 +200,7 @@ async fn plot_multiple_step_responses(first_sys: Value, rest: Vec<Value>) -> Bui
     for (model, style) in models {
         let time = admit_time(
             gathered_time.as_ref(),
-            model.sample_time,
+            model.sample_time(),
             StepSimulationCaller::Step,
         )?;
         responses.push((simulate(&model, time, StepSimulationCaller::Step)?, style));

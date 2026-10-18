@@ -30,7 +30,7 @@ const SIGNAL_ALPHA: f64 = 0.20;
 async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
     let output_count = crate::output_count::current_output_count();
     match output_count {
-        Some(0) => return Ok(Value::OutputList(Vec::new())),
+        Some(0) => return Ok(Value::output_list(Vec::new())),
         Some(count) if count > 2 => {
             return Err(macd_error(
                 ERROR_OUTPUT_COUNT,
@@ -44,8 +44,8 @@ async fn macd_builtin(data: Value) -> BuiltinResult<Value> {
     let include_signal = output_count == Some(2);
     let eval = input.evaluate(include_signal)?;
     match output_count {
-        Some(1) => Ok(Value::OutputList(vec![eval.macd])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(1) => Ok(Value::output_list(vec![eval.macd])),
+        Some(2) => Ok(Value::output_list(vec![
             eval.macd,
             eval.signal.expect("signal requested"),
         ])),

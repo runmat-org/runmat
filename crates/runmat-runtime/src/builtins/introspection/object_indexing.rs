@@ -133,12 +133,12 @@ async fn subsref_with_context(
     };
     sequence.try_map_owned(
         |sequence| {
-            let mut values =
+            let values =
                 sequence.resolve(usage, crate::sequence::SequenceResolutionContext::default())?;
             if requested.is_some() {
-                Ok(Value::OutputList(values))
+                Ok(Value::output_list(values))
             } else {
-                Ok(values.remove(0))
+                Ok(crate::sequence::into_first_output(values)?.expect("single object output"))
             }
         },
         |error| error.into_runtime_error(),

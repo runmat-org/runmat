@@ -754,7 +754,7 @@ fn admitted_owner_proof_traverses_nested_values_and_rejects_unresolved_handles()
     let borrowed = other.input(&[2.0]);
     assert!(futures::executor::block_on(selected.download(&borrowed)).is_err());
     assert!(futures::executor::block_on(other.download(&borrowed)).is_ok());
-    let nested = Value::OutputList(vec![Value::OutputList(vec![Value::GpuTensor(
+    let nested = Value::output_list(vec![Value::output_list(vec![Value::GpuTensor(
         borrowed.clone(),
     )])]);
     assert!(!super::super::owner_admission::matches_selected_owner(selected, &[nested]).unwrap());

@@ -89,6 +89,8 @@ fn output_tensors(value: Value) -> Vec<Tensor> {
         panic!("expected output list");
     };
     values
+        .try_into_owned()
+        .expect("unique output list")
         .into_iter()
         .map(|value| match value {
             Value::Tensor(tensor) => tensor,

@@ -465,8 +465,12 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
     // The ordinary VM has two live operands above an unrelated lower stack
     // value at the first producer PC. Gather must consume only those operands.
     let lower = Value::Num(-37.0);
-    let mut stack = vec![lower.clone(), Value::Num(3.0), Value::Num(5.0)];
-    let original = stack.clone();
+    let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+        lower.clone(),
+        Value::Num(3.0),
+        Value::Num(5.0),
+    ]);
+    let original = stack.as_slice().to_vec();
     let vars = crate::interpreter::vars::InterpreterVars::from_owned(vec![
         Value::Num(11.0);
         bytecode.var_count
@@ -484,9 +488,10 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
     assert_eq!(request.inputs, vec![Value::Num(11.0)]);
     drop(request);
     guard.commit();
-    assert_eq!(stack, vec![lower.clone()]);
+    assert_eq!(stack.as_slice(), std::slice::from_ref(&lower));
 
-    let mut too_shallow = vec![lower.clone()];
+    let mut too_shallow =
+        crate::interpreter::stack::InterpreterStack::from_unbounded(vec![lower.clone()]);
     assert!(crate::accel::fusion::gather_fusion_inputs(
         selected,
         &graph,
@@ -496,7 +501,7 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         None,
     )
     .is_err());
-    assert_eq!(too_shallow, vec![lower.clone()]);
+    assert_eq!(too_shallow.as_slice(), std::slice::from_ref(&lower));
 
     // A malformed plan that asks for an internal private result must fail
     // before execution, restoring the exact original stack slice on error.
@@ -509,7 +514,7 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         .expect("private producer output");
     let mut malformed = selected.clone();
     malformed.inputs.push(internal);
-    stack = original.clone();
+    stack = crate::interpreter::stack::InterpreterStack::from_unbounded(original.clone());
     let error = crate::accel::fusion::gather_fusion_inputs(
         &malformed,
         &graph,
@@ -521,7 +526,7 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
     .err()
     .expect("internal output has no independent source");
     assert!(error.to_string().contains("missing input"));
-    assert_eq!(stack, original);
+    assert_eq!(stack.as_slice(), original.as_slice());
 }
 
 #[test]

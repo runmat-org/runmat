@@ -99,7 +99,19 @@ pub(in crate::builtins) fn layers_from_value(
     match value {
         Value::Object(_) => Ok(vec![value]),
         Value::Cell(cell) => Ok(cell.data),
-        Value::OutputList(values) => Ok(values),
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?
+            .try_into_unbounded_vec()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            }),
         other => Err(deep_learning_error(
             function,
             format!("{function}: layers must be a layer object, cell array, or object array, got {other:?}"),

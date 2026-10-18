@@ -52,7 +52,7 @@ pub(super) fn evaluate(
     }
 }
 
-pub(super) fn real(
+pub(in crate::builtins::math::linalg::ops::matrix_arithmetic) fn real(
     orientation: SolveOrientation,
     lhs: &Tensor,
     rhs: &Tensor,

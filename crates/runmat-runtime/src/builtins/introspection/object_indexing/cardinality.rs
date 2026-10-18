@@ -193,11 +193,11 @@ pub(super) fn exact_output_count(value: &Value) -> crate::BuiltinResult<usize> {
 pub(super) fn require_single_sequence(
     sequence: runmat_value::ValueSequence,
 ) -> crate::BuiltinResult<Value> {
-    let mut values = sequence.resolve(
+    let values = sequence.resolve(
         runmat_types::SequenceUse::RequireSingle,
         crate::sequence::SequenceResolutionContext::default(),
     )?;
-    Ok(values.remove(0))
+    Ok(crate::sequence::into_first_output(values)?.expect("single sequence value"))
 }
 
 pub(super) fn exact_count_as_f64(count: usize) -> crate::BuiltinResult<f64> {

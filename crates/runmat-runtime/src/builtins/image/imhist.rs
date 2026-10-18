@@ -128,7 +128,7 @@ async fn imhist_builtin(
             return Ok(eval.into_host_counts_value());
         }
         eval.render_plot()?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -137,15 +137,15 @@ async fn imhist_builtin(
                 return Ok(eval.into_host_counts_value());
             }
             eval.render_plot()?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let output = placement::publish(&mut selected, || eval.into_counts_value())?;
-            return Ok(Value::OutputList(vec![output]));
+            return Ok(Value::output_list(vec![output]));
         }
         if out_count == 2 {
             let outputs = placement::publish_many(&mut selected, || eval.into_outputs())?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         return Err(too_many_outputs());
     }

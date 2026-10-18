@@ -418,7 +418,7 @@ impl IsolatedPythonClient {
             ))
         })?;
         let sequence = arguments
-            .with_owned_values_async(|arguments| async {
+            .with_unbounded_values_async(|arguments| async {
                 let request =
                     foreign_callback_request(&runtime, &callable, arguments, requested_outputs)?;
                 let callback_future = invoke_foreign_callback(runtime.clone(), request);
@@ -437,7 +437,7 @@ impl IsolatedPythonClient {
                     }
                 }
             })
-            .await?;
+            .await??;
         let values = sequence.with_owned_sequence(|sequence| {
             let values = crate::sequence::ResolveValueSequence::resolve(
                 sequence,
@@ -446,11 +446,16 @@ impl IsolatedPythonClient {
                 },
                 crate::sequence::SequenceResolutionContext::default(),
             )?;
-            crate::execution::RootedValues::new(values).map_err(|error| error.into_runtime_error())
+            crate::execution::RootedValues::from_output_storage_in_context(values, &runtime)
         })?;
         values
-            .with_owned_values_async(|values| async {
+            .with_owned_output_storage_async(|values| async {
                 let mut encoded = Vec::with_capacity(values.len());
+                let values = values.try_into_owned().map_err(|_| {
+                    crate::sequence::sequence_error_to_runtime(
+                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                    )
+                })?;
                 for value in values {
                     if super::super::super::is_callable(&value) {
                         encoded.push(

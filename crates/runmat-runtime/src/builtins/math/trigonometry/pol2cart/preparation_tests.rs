@@ -37,7 +37,8 @@ impl RuntimeAccelerationService for Service {
             .push((count, request.admission().requested_outputs));
         let result = request
             .into_operands()
-            .with_owned_values(PreparedBuiltinOperands::passthrough);
+            .with_unbounded_values(PreparedBuiltinOperands::passthrough)
+            .and_then(std::convert::identity);
         Box::pin(async move { result })
     }
 }

@@ -54,14 +54,14 @@ async fn histcounts2_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     let eval = evaluate(x, y, &rest).await?;
     if let Some(out_count) = requested_outputs {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_counts_value()]));
+            return Ok(Value::output_list(vec![eval.into_counts_value()]));
         }
         if out_count == 2 {
             let (counts, x_edges) = eval.into_pair();
-            return Ok(Value::OutputList(vec![counts, x_edges]));
+            return Ok(Value::output_list(vec![counts, x_edges]));
         }
         let (counts, x_edges, y_edges, x_bins, y_bins) = eval.into_all();
         return Ok(crate::output_count::output_list_with_padding(

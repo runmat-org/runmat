@@ -192,7 +192,7 @@ async fn invoke_request(
         .finish()
         .map_err(|error| wire_error("RunMat:Python:ValueDecode", error.to_string()))?;
     let value = supervisor
-        .participate_foreground(arguments.with_owned_values_async(|arguments| async {
+        .participate_foreground(arguments.with_unbounded_values_async(|arguments| async {
             let value = context
                 .clone()
                 .scope(adapter.invoke(
@@ -211,6 +211,7 @@ async fn invoke_request(
         }))
         .await
         .map_err(runtime_wire_error)?
+        .map_err(runtime_wire_error)?
         .map_err(runtime_wire_error)?;
     value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
 }
@@ -220,7 +221,7 @@ fn encode_host_outputs(
     snapshots: &SharedSnapshotStore,
     resources: &Rc<RefCell<RemoteResources>>,
 ) -> Result<Vec<PythonWireValue>, PythonWireError> {
-    let values = sequence.into_values();
+    let values = sequence.into_output_storage();
     if values.len() > super::PYTHON_HOST_MAX_OUTPUTS {
         return Err(wire_error(
             "RunMat:Python:HostProtocol",
@@ -228,6 +229,13 @@ fn encode_host_outputs(
         ));
     }
     values
+        .try_into_owned()
+        .map_err(|_| {
+            wire_error(
+                "RunMat:Python:HostProtocol",
+                "shared output storage requires separate admission",
+            )
+        })?
         .into_iter()
         .map(|value| encode_host_value(value, snapshots, resources))
         .collect()
@@ -413,13 +421,21 @@ impl HostCallbackRouter {
                         let values = values.finish().map_err(|error| {
                             wire_error("RunMat:Python:ValueDecode", error.to_string())
                         })?;
-                        return values.with_owned_values(|mut values| {
+                        return values.with_owned_output_storage(|values| {
                             let sequence = if requested_outputs == 1 && values.len() == 1 {
                                 runmat_value::ValueSequence::single(
-                                    values.pop().expect("one Python callback output"),
+                                    values
+                                        .try_into_first()
+                                        .map_err(|_| {
+                                            wire_error(
+                                                "RunMat:Python:CallbackProtocol",
+                                                "shared output storage requires separate admission",
+                                            )
+                                        })?
+                                        .expect("one Python callback output"),
                                 )
                             } else {
-                                runmat_value::ValueSequence::comma_separated(values)
+                                runmat_value::ValueSequence::from_output_storage(values)
                             }
                             .map_err(|error| {
                                 wire_error("RunMat:Python:CallbackProtocol", error.to_string())
@@ -480,19 +496,21 @@ fn invoke_nested_request(
     let arguments = arguments
         .finish()
         .map_err(|error| wire_error("RunMat:Python:ValueDecode", error.to_string()))?;
-    arguments.with_owned_values(|arguments| {
-        let value = pollster::block_on(context.scope(adapter.invoke(
-            context.clone(),
-            ForeignCall {
-                adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
-                symbol: request.operation,
-                arguments,
-                requested_outputs: request.requested_outputs as usize,
-            },
-        )))
-        .map_err(runtime_wire_error)?;
-        value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
-    })
+    arguments
+        .with_unbounded_values(|arguments| {
+            let value = pollster::block_on(context.scope(adapter.invoke(
+                context.clone(),
+                ForeignCall {
+                    adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
+                    symbol: request.operation,
+                    arguments,
+                    requested_outputs: request.requested_outputs as usize,
+                },
+            )))
+            .map_err(runtime_wire_error)?;
+            value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))
+        })
+        .map_err(runtime_wire_error)?
 }
 
 thread_local! {

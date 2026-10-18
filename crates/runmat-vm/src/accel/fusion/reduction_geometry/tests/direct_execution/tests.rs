@@ -66,8 +66,10 @@ fn forced_reduction_executes_actual_geometry_and_keeps_cached_plan_unchanged() {
             } else {
                 vec![input]
             };
-            let mut stack = inputs.clone();
-            let guard = StackSliceGuard::new(&mut stack, 0);
+            let mut stack =
+                crate::interpreter::stack::InterpreterStack::from_unbounded(inputs.clone());
+            let guard = StackSliceGuard::new(&mut stack, 0)
+                .expect("the unbounded test stack has a unique operand slice");
             let before = provider.reductions.load(Ordering::SeqCst);
             let output = block_on(execute_fusion_reduction(
                 &plan,
@@ -115,8 +117,10 @@ fn forced_invalid_geometry_restores_stack_without_provider_queries_or_uploads() 
         ] {
             let plan = request_plan(&shape, axes, false);
             let inputs = vec![tensor(&shape)];
-            let mut stack = inputs.clone();
-            let guard = StackSliceGuard::new(&mut stack, 0);
+            let mut stack =
+                crate::interpreter::stack::InterpreterStack::from_unbounded(inputs.clone());
+            let guard = StackSliceGuard::new(&mut stack, 0)
+                .expect("the unbounded test stack has a unique operand slice");
             assert!(block_on(execute_fusion_reduction(
                 &plan,
                 FusionExecutionRequest {
@@ -129,12 +133,13 @@ fn forced_invalid_geometry_restores_stack_without_provider_queries_or_uploads() 
                 None,
             ))
             .is_err());
-            assert_eq!(stack, inputs);
+            assert_eq!(stack.as_slice(), inputs.as_slice());
         }
         let plan = request_plan(&[2, 3], ReductionAxes::All, true);
         let inputs = vec![tensor(&[2, 1]), tensor(&[1, 3])];
-        let mut stack = inputs.clone();
-        let guard = StackSliceGuard::new(&mut stack, 0);
+        let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(inputs.clone());
+        let guard = StackSliceGuard::new(&mut stack, 0)
+            .expect("the unbounded test stack has a unique operand slice");
         assert!(block_on(execute_fusion_reduction(
             &plan,
             FusionExecutionRequest {
@@ -147,15 +152,17 @@ fn forced_invalid_geometry_restores_stack_without_provider_queries_or_uploads() 
             None,
         ))
         .is_err());
-        assert_eq!(stack, inputs);
+        assert_eq!(stack.as_slice(), inputs.as_slice());
         for dimension in [1.5, f64::NAN, f64::INFINITY] {
             let mut plan = request_plan(&[2, 3], ReductionAxes::Unspecified, false);
             let id = plan.inputs.iter().copied().max().unwrap() + 100;
             plan.reduction_dim = Some(id);
             plan.const_values.insert(id, Value::Num(dimension));
             let inputs = vec![tensor(&[2, 3])];
-            let mut stack = inputs.clone();
-            let guard = StackSliceGuard::new(&mut stack, 0);
+            let mut stack =
+                crate::interpreter::stack::InterpreterStack::from_unbounded(inputs.clone());
+            let guard = StackSliceGuard::new(&mut stack, 0)
+                .expect("the unbounded test stack has a unique operand slice");
             assert!(block_on(execute_fusion_reduction(
                 &plan,
                 FusionExecutionRequest {
@@ -168,7 +175,7 @@ fn forced_invalid_geometry_restores_stack_without_provider_queries_or_uploads() 
                 None,
             ))
             .is_err());
-            assert_eq!(stack, inputs);
+            assert_eq!(stack.as_slice(), inputs.as_slice());
         }
         assert_eq!(provider.queries.load(Ordering::SeqCst), 0);
         assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);

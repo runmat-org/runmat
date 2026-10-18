@@ -92,7 +92,7 @@ async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let available = eval.output_count();
         if out_count > available {
@@ -112,7 +112,7 @@ async fn meshgrid_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         if out_count >= 3 {
             outputs.push(eval.third().await?);
         }
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     eval.first().await
 }

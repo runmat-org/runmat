@@ -238,7 +238,7 @@ fn pending_turn_abandonment_drops_service_future() {
 
 #[test]
 fn aggregate_scope_is_explicit_not_a_synchronous_fallback() {
-    let aggregate = Value::OutputList(vec![Value::Int(IntValue::U64(1_u64 << 54))]);
+    let aggregate = Value::output_list(vec![Value::Int(IntValue::U64(1_u64 << 54))]);
     assert!(matches!(
         futures::executor::block_on(prepare_direct_integer_f64_boundary(&aggregate, None)),
         Err(IntegerBoundaryFailure::AggregateNeedsTraversal)

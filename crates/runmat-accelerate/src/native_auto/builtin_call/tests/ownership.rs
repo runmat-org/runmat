@@ -137,7 +137,7 @@ fn malformed_upload_alias_cannot_free_nested_borrowed_input() {
     let provider = provider(None);
     *provider.alias_on.lock().unwrap() = Some((1, 900));
     let borrowed = Value::GpuTensor(provider.allocate(900, vec![0.; 2], vec![1, 2]).unwrap());
-    let args = [host(), host(), Value::OutputList(vec![borrowed])];
+    let args = [host(), host(), Value::output_list(vec![borrowed])];
     assert!(prepare(provider, &args).is_err());
     assert!(provider.retired().is_empty());
 }
@@ -337,7 +337,7 @@ fn abandoned_preparation_and_failed_call_release_uploads() {
 fn nested_return_alias_adopts_only_its_own_upload() {
     let provider = provider(None);
     let prepared = prepare(provider, &[host(), host()]).unwrap();
-    let output = Value::OutputList(vec![Value::OutputList(vec![prepared.args()[0].clone()])]);
+    let output = Value::output_list(vec![Value::output_list(vec![prepared.args()[0].clone()])]);
     let output = Ok(output);
     prepared.into_execution().1.finish(output.as_ref()).unwrap();
     assert_eq!(provider.retired(), vec![2]);
@@ -391,7 +391,7 @@ fn public_execution_adopts_nested_result_alias_and_releases_other_arguments() {
     let prepared = prepare(provider, &[host(), host()]).unwrap();
     let result = futures::executor::block_on(
         prepared
-            .execute(|args| async move { Ok(rooted(Value::OutputList(vec![args[0].clone()]))) }),
+            .execute(|args| async move { Ok(rooted(Value::output_list(vec![args[0].clone()]))) }),
     )
     .unwrap();
     assert_eq!(provider.retired(), vec![2]);

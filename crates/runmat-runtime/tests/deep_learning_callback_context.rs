@@ -97,12 +97,14 @@ fn training_layers(regression_output: bool) -> runmat_runtime::execution::Rooted
     }
     let layers = layers.finish().expect("rooted layer batch");
     let count = layers.values().len();
-    layers.with_owned_values(|layers| {
-        runmat_runtime::execution::RootedValue::new(Value::Cell(
-            CellArray::new(layers, count, 1).expect("layer column"),
-        ))
-        .expect("rooted layer column")
-    })
+    layers
+        .with_unbounded_values(|layers| {
+            runmat_runtime::execution::RootedValue::new(Value::Cell(
+                CellArray::new(layers, count, 1).expect("layer column"),
+            ))
+            .expect("rooted layer column")
+        })
+        .expect("fixture layer batch is unbounded")
 }
 
 fn training_options() -> runmat_runtime::execution::RootedValue {
@@ -134,7 +136,7 @@ fn dlfeval_callback_uses_invoking_runtime_and_structural_output_count() {
     .expect("selected callback");
     assert_eq!(
         output,
-        Value::OutputList(vec![Value::Num(23.0), Value::Num(29.0)])
+        Value::output_list(vec![Value::Num(23.0), Value::Num(29.0)])
     );
     CALLBACKS.with(|calls| {
         assert_eq!(
@@ -320,10 +322,11 @@ fn cancelled_runtime_rejects_both_trainers_before_initializer_effects() {
         // This invokes the registered implementation without entering a
         // thread-local runtime scope. Cancellation must come from the
         // invocation, before either callback or built-in RNG initializer.
-        let error = block_on(args.with_owned_values_async(|args| async move {
+        let error = block_on(args.with_unbounded_values_async(|args| async move {
             (binding.implementation)(RuntimeBuiltinInvocation::new(&args, Some(runtime), Some(1)))
                 .await
         }))
+        .and_then(std::convert::identity)
         .expect_err("cancelled training");
         assert_eq!(
             error.identifier(),

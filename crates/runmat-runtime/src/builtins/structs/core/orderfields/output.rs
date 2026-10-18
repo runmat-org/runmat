@@ -39,7 +39,7 @@ impl Evaluation {
             return Ok(self.ordered);
         };
         if count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let Self {
             ordered,

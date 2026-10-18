@@ -13,5 +13,5 @@ pub(super) async fn apply(value: Value) -> BuiltinResult<Value> {
     let gn = output::names(&index)?;
     let gl = input.levels(&index)?;
     let (g, gl) = provider::restore(resident.as_ref(), g, gl)?;
-    Ok(Value::OutputList(vec![g, gn, gl]))
+    Ok(Value::output_list(vec![g, gn, gl]))
 }

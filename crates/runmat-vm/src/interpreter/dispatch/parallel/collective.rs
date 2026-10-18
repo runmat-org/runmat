@@ -285,7 +285,7 @@ async fn collective_response(
         }
         CollectiveResponse::Values { values } => {
             let count = values.len();
-            decode_values(&values)?.with_owned_values(|values| {
+            decode_values(&values)?.with_unbounded_values(|values| {
                 runmat_value::CellArray::new_with_shape(values, vec![count, 1])
                     .map(Value::Cell)
                     .map_err(|error| {
@@ -295,11 +295,11 @@ async fn collective_response(
                         )
                     })
                     .and_then(single_output)
-            })
+            })?
         }
         CollectiveResponse::ReductionInputs { operator, values } => {
             decode_values(&values)?
-                .with_owned_values_async(|values| async move {
+                .with_unbounded_values_async(|values| async move {
                     let mut values = values.into_iter();
                     let accumulator = values.next().ok_or_else(|| {
                         crate::interpreter::errors::mex(
@@ -320,14 +320,14 @@ async fn collective_response(
                     }
                     single_rooted_output(accumulator)
                 })
-                .await
+                .await?
         }
         CollectiveResponse::ConcatenationInputs { dimension, values } => {
             if values.len() == 1 {
                 return single_rooted_output(decode_value(&values[0])?);
             }
             decode_values(&values)?
-                .with_owned_values_async(|values| async move {
+                .with_unbounded_values_async(|values| async move {
                     let mut arguments = Vec::with_capacity(values.len() + 1);
                     arguments.push(Value::Int(runmat_value::IntValue::U32(dimension)));
                     arguments.extend(values);
@@ -345,12 +345,12 @@ async fn collective_response(
                     )
                     .await
                 })
-                .await
+                .await?
         }
         CollectiveResponse::FunctionalReductionInputs { reducer, values } => {
             let reducer = decode_value(&reducer)?;
             decode_values(&values)?
-                .with_owned_values_async(|values| async move {
+                .with_unbounded_values_async(|values| async move {
                     let mut values = values.into_iter();
                     let accumulator = values.next().ok_or_else(|| {
                         crate::interpreter::errors::mex(
@@ -380,18 +380,24 @@ async fn collective_response(
                         drop(argument_roots);
                         accumulator = outputs.try_map_owned(
                             |sequence| {
-                                let mut outputs = sequence.resolve(
+                                let outputs = sequence.resolve(
                                     runmat_types::SequenceUse::RequireSingle,
                                     runmat_runtime::sequence::SequenceResolutionContext::default(),
                                 )?;
-                                Ok(outputs.remove(0))
+                                outputs.try_into_first().map_err(|_| {
+                                    runmat_runtime::sequence::sequence_error_to_runtime(
+                                        runmat_value::ValueSequenceError::SharedOutputStorage,
+                                    )
+                                })?.ok_or_else(|| crate::interpreter::errors::mex(
+                                    "CollectiveResult", "collective reducer returned no output",
+                                ))
                             },
                             |error| error.into_runtime_error(),
                         )?;
                     }
                     single_rooted_output(accumulator)
                 })
-                .await
+                .await?
         }
         CollectiveResponse::Probe { available } => single_output(Value::Bool(available)),
         CollectiveResponse::Agreement { .. } | CollectiveResponse::DistributedBuild { .. } => {

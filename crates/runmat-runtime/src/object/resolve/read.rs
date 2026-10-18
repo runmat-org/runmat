@@ -20,12 +20,11 @@ pub async fn load_member_with_context(
         .await?
         .try_map_owned(
             |sequence| {
-                let mut values = sequence.resolve(
+                let values = sequence.resolve(
                     runmat_types::SequenceUse::RequireSingle,
                     crate::sequence::SequenceResolutionContext::default(),
                 )?;
-                values
-                    .pop()
+                crate::sequence::into_first_output(values)?
                     .ok_or_else(|| RuntimeError::from("member read did not produce one value"))
             },
             |error| error.into_runtime_error(),
@@ -76,11 +75,14 @@ async fn read_member_sequence_in_scope(
                 .await?
                 .try_map_owned(
                     |sequence| {
-                        let mut selected = sequence.resolve(
+                        let selected = sequence.resolve(
                             runmat_types::SequenceUse::RequireSingle,
                             crate::sequence::SequenceResolutionContext::default(),
                         )?;
-                        Ok::<_, RuntimeError>(selected.pop().expect("single sequence resolution"))
+                        Ok::<_, RuntimeError>(
+                            crate::sequence::into_first_output(selected)?
+                                .expect("single sequence resolution"),
+                        )
                     },
                     |error| error.into_runtime_error(),
                 )?;

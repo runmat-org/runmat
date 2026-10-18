@@ -96,7 +96,7 @@ async fn lscov_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinResult<Va
     let parsed = finish_header(header, matrix_rows(&a)).await?;
 
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(out_count) if out_count > 4 => Err(invalid("lscov: too many output arguments")),
         Some(out_count) => {
             let outputs = lscov_compute(a, b, parsed, out_count)?;

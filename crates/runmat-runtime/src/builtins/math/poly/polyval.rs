@@ -80,7 +80,7 @@ async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::Builtin
     if let Some(out_count) = crate::output_count::current_output_count() {
         let eval = evaluate(p, x, &rest, out_count >= 2).await?;
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = vec![eval.value()];
         if out_count >= 2 {

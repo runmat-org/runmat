@@ -114,13 +114,13 @@ async fn imread_builtin(
 
     match requested_outputs {
         None => Ok(Value::Tensor(materialized.image)),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Tensor(materialized.image)])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Tensor(materialized.image)])),
+        Some(2) => Ok(Value::output_list(vec![
             Value::Tensor(materialized.image),
             empty_tensor_value()?,
         ])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(3) => Ok(Value::output_list(vec![
             Value::Tensor(materialized.image),
             empty_tensor_value()?,
             materialized

@@ -157,7 +157,7 @@ async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> Builti
                 );
                 let empty = empty_model_array(first.shape().to_vec(), class)?;
                 return if crate::output_count::current_output_count() == Some(0) {
-                    Ok(Value::OutputList(Vec::new()))
+                    Ok(Value::output_list(Vec::new()))
                 } else {
                     Ok(empty)
                 };
@@ -193,7 +193,7 @@ async fn series_builtin(first: Value, second: Value, rest: Vec<Value>) -> Builti
         (first, second) => compose_pair(first, second, named, channels.as_ref()).await?,
     };
     if crate::output_count::current_output_count() == Some(0) {
-        Ok(Value::OutputList(Vec::new()))
+        Ok(Value::output_list(Vec::new()))
     } else {
         Ok(model)
     }

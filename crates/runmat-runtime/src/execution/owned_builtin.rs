@@ -166,7 +166,7 @@ pub async fn execute_owned_builtin_work(
     let invocation_runtime = runtime.clone();
     let requested_outputs = usize::from(request.requested_outputs);
     let result = values
-        .with_owned_values_async(move |values| async move {
+        .with_owned_output_storage_async(move |values| async move {
             (binding.implementation)(RuntimeBuiltinInvocation::new(
                 &values,
                 Some(invocation_runtime.with_vm_fusion_selected_binding(Some(binding.identity))),

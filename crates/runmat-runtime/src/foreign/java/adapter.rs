@@ -564,11 +564,11 @@ fn value_from_java_parts(
             return converted
                 .finish()
                 .map_err(|error| error.into_runtime_error())?
-                .with_owned_values(|values| {
+                .with_unbounded_values(|values| {
                     CellArray::new(values, length, 1)
                         .map(Value::Cell)
                         .map_err(invalid_conversion)
-                });
+                })?;
         }
         return array_from_java(component, elements);
     }

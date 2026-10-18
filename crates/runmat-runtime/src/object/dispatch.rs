@@ -809,11 +809,11 @@ fn require_single(sequence: RootedValueSequence) -> Result<RootedValue, RuntimeE
     use crate::sequence::ResolveValueSequence;
     sequence.try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 crate::sequence::SequenceResolutionContext::default(),
             )?;
-            values.pop().ok_or_else(|| {
+            crate::sequence::into_first_output(values)?.ok_or_else(|| {
                 semantic_error(
                     "CommaSeparatedListRequiresSingleValue",
                     "object operation requires one value",

@@ -754,7 +754,7 @@ async fn strsplit_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value>
 
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let matches_value = make_strsplit_output(matches, input_kind)?;
         return Ok(crate::output_count::output_list_with_padding(
@@ -925,7 +925,7 @@ impl TextMatrix {
             let parts = Value::StringArray(parts);
             if let Some(output_count) = crate::output_count::current_output_count() {
                 if output_count == 0 {
-                    return Ok(Value::OutputList(Vec::new()));
+                    return Ok(Value::output_list(Vec::new()));
                 }
                 let matches = StringArray::new(Vec::new(), shape).map_err(|e| {
                     split_error_with_message(format!("{BUILTIN_NAME}: {e}"), &SPLIT_ERROR_INTERNAL)
@@ -961,7 +961,7 @@ impl TextMatrix {
         let parts = Value::StringArray(array);
         if let Some(output_count) = crate::output_count::current_output_count() {
             if output_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
             let (matches, match_shape) =
                 orient_split_values(&per_element_matches, rows, cols, dimension, max_matches)?;
@@ -2204,7 +2204,7 @@ pub(crate) mod tests {
             panic!("expected output list")
         };
         assert_eq!(outputs.len(), 2);
-        for output in outputs {
+        for output in outputs.try_into_owned().expect("unique split outputs") {
             let Value::StringArray(array) = output else {
                 panic!("expected empty string array")
             };

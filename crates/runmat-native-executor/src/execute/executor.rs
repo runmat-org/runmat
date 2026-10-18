@@ -168,7 +168,7 @@ impl NativeExecutor {
                 };
                 self.begin_request_with_environment_parts(request, lexical_environment)
             })
-            .await
+            .await?
     }
 
     /// Bind verified Native IR to an executable with the same exact function set.

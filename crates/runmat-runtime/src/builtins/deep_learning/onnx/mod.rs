@@ -65,7 +65,7 @@ pub(super) async fn export_onnx_network_builtin(args: Vec<Value>) -> BuiltinResu
             .with_source(err)
             .build()
         })?;
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 #[cfg(test)]

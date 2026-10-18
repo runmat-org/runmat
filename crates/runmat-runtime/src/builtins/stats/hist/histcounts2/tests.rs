@@ -90,7 +90,10 @@ fn five_outputs_preserve_bin_shapes_and_zero_excluded_positions() {
         panic!("expected output list");
     };
     assert_eq!(outputs.len(), 5);
-    let mut outputs = outputs.into_iter();
+    let mut outputs = outputs
+        .try_into_owned()
+        .expect("unique outputs")
+        .into_iter();
     let counts = tensor_from_value(outputs.next().unwrap());
     assert_eq!(counts.shape(), vec![2, 2]);
     assert_eq!(double_values(&counts), &[1.0, 0.0, 0.0, 1.0]);

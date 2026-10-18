@@ -124,7 +124,7 @@ fn fzero_single_interval_returns_single_numerical_outputs() {
         panic!("expected three outputs");
     };
     assert_eq!(outputs.len(), 3);
-    for output in outputs {
+    for output in outputs.try_into_owned().expect("unique output list") {
         assert!(
             matches!(output, Value::Tensor(tensor) if tensor.numeric_dtype() == runmat_value::NumericDType::F32)
         );

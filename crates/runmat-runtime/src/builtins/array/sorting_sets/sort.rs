@@ -383,14 +383,14 @@ async fn sort_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let (sorted, indices) = eval.into_values();
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![sorted]));
+            return Ok(Value::output_list(vec![sorted]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![sorted, indices]));
+            return Ok(Value::output_list(vec![sorted, indices]));
         }
         return Err(sort_invalid_argument(
             "sort: too many output arguments; maximum is 2",

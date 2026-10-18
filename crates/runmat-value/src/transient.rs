@@ -82,7 +82,7 @@ mod tests {
         storage.insert_unique(ContainersMapEntry {
             normalized: ContainersMapKey::String("nested".into()),
             key_value: Value::from("nested"),
-            value: Value::OutputList(vec![Value::Num(1.0)]),
+            value: Value::output_list(vec![Value::Num(1.0)]),
         });
         let object = Value::Object(
             ObjectInstance::new("containers.Map").with_containers_map_payload(storage),

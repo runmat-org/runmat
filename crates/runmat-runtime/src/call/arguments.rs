@@ -3,9 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueSequence, RootedValues};
 use crate::object::indexing::{ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath};
-use crate::sequence::ResolveValueSequence;
 use crate::{runtime_error::semantic_error, RuntimeError};
-use runmat_value::{CellArray, IntValue, Value, ValueSequence};
+use runmat_value::{CellArray, IntValue, OutputListStorage, Value, ValueSequence};
 
 pub(crate) mod roots;
 
@@ -80,36 +79,184 @@ pub async fn expand_arguments(
     runtime: &RuntimeContext,
     arguments: Vec<MaterializedArgument>,
 ) -> Result<RootedValues, RuntimeError> {
+    use crate::context::host_allocation::{
+        host_allocation_runtime_error, HostAllocationPlan, HostAllocationPolicy,
+        HostAllocationReceipt,
+    };
     let roots = roots::ExpansionRoots::new()?;
     roots.retain_arguments(&arguments);
-    let mut expanded_arguments = Vec::new();
-    for argument in arguments {
+    // Reuse the input descriptor vector as the segment ledger. Each source
+    // expression completes exactly once; its returned owner remains present
+    // until actual final width is known and the final backing is admitted.
+    let mut arguments = arguments;
+    for index in 0..arguments.len() {
+        let argument = std::mem::replace(
+            &mut arguments[index],
+            MaterializedArgument::Sequence(ValueSequence::empty()),
+        );
         match argument {
-            MaterializedArgument::Single(value) => expanded_arguments.push(value),
+            MaterializedArgument::Single(value) => {
+                arguments[index] = MaterializedArgument::Single(value);
+            }
             MaterializedArgument::Expansion(source) => {
-                materialize_expansion(runtime, source)
+                let sequence = materialize_expansion(runtime, source)
                     .await?
                     .with_owned_sequence(|sequence| {
-                        let values = sequence.resolve(
-                            runmat_types::SequenceUse::ExpandAll,
-                            crate::sequence::SequenceResolutionContext::default(),
-                        )?;
-                        roots.retain_values(&values);
-                        expanded_arguments.extend(values);
-                        Ok::<_, RuntimeError>(())
+                        roots.retain_values(sequence.as_slice());
+                        Ok::<_, RuntimeError>(sequence)
                     })?;
+                arguments[index] = MaterializedArgument::Sequence(sequence);
             }
             MaterializedArgument::Sequence(sequence) => {
-                let values = sequence.resolve(
-                    runmat_types::SequenceUse::ExpandAll,
-                    crate::sequence::SequenceResolutionContext::default(),
-                )?;
-                roots.retain_values(&values);
-                expanded_arguments.extend(values);
+                arguments[index] = MaterializedArgument::Sequence(sequence);
             }
         }
     }
-    RootedValues::new(expanded_arguments).map_err(|error| error.into_runtime_error())
+    let policy = HostAllocationReceipt::policy(Some(runtime)).map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:Call:Arguments",
+            "expanded argument policy unavailable",
+            source,
+        )
+    })?;
+    if arguments.len() == 1 {
+        if let MaterializedArgument::Sequence(sequence) = &arguments[0] {
+            if policy == HostAllocationPolicy::Unbounded
+                || sequence.is_empty()
+                || sequence.has_retained_output_claim()
+            {
+                let MaterializedArgument::Sequence(sequence) =
+                    arguments.pop().expect("one argument")
+                else {
+                    unreachable!("checked sequence")
+                };
+                return RootedValues::from_output_storage_in_context(
+                    sequence.into_output_storage(),
+                    runtime,
+                );
+            }
+        }
+    }
+    let width = arguments.iter().try_fold(0usize, |width, argument| {
+        let next = match argument {
+            MaterializedArgument::Single(_) => 1,
+            MaterializedArgument::Sequence(sequence) => sequence.len(),
+            MaterializedArgument::Expansion(_) => unreachable!("expansions are materialized"),
+        };
+        width.checked_add(next).ok_or_else(|| {
+            semantic_error("RunMat:Call:Arguments", "expanded argument count overflows")
+        })
+    })?;
+    let mut arguments = arguments.into_iter();
+    let mut current: Option<runmat_value::OutputListIntoIter> = None;
+    let mut next_value = || -> Result<Value, RuntimeError> {
+        loop {
+            if let Some(value) = current.as_mut().and_then(Iterator::next) {
+                return Ok(value);
+            }
+            current = None;
+            match arguments.next() {
+                Some(MaterializedArgument::Single(value)) => return Ok(value),
+                Some(MaterializedArgument::Sequence(sequence)) => {
+                    current = Some(
+                        sequence
+                            .into_output_storage()
+                            .try_into_owned()
+                            .map_err(|_| {
+                                crate::sequence::sequence_error_to_runtime(
+                                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                                )
+                            })?
+                            .into_iter(),
+                    );
+                }
+                Some(MaterializedArgument::Expansion(_)) => unreachable!("materialized source"),
+                None => unreachable!("validated expanded argument width"),
+            }
+        }
+    };
+    let raw = OutputListStorage::requested_bytes(width).map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:Call:Arguments",
+            "expanded argument layout overflow",
+            source.into(),
+        )
+    })?;
+    let raw = u64::try_from(raw).map_err(|_| {
+        semantic_error(
+            "RunMat:Call:Arguments",
+            "expanded argument layout overflows",
+        )
+    })?;
+    let retained = HostAllocationPlan::retained_exact_output_bytes(raw, usize::from(width != 0))
+        .map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "expanded argument admission failed",
+                source,
+            )
+        })?;
+    let receipt = HostAllocationReceipt::admit(
+        Some(runtime),
+        HostAllocationPlan::new(0, retained).map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "expanded argument admission failed",
+                source,
+            )
+        })?,
+    )
+    .map_err(|source| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:Call:Arguments",
+            "expanded argument admission failed",
+            source,
+        )
+    })?;
+    let values = if let Some(receipt) = receipt {
+        let permit = receipt.output_permit(runtime).map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "expanded argument admission failed",
+                source,
+            )
+        })?;
+        let values = OutputListStorage::try_initialize(width, &permit, |_| next_value()).map_err(
+            |error| match error {
+                runmat_value::OutputListInitializationError::Allocation(source) => {
+                    host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Call:Arguments",
+                        "expanded argument allocation failed",
+                        source.into(),
+                    )
+                }
+                runmat_value::OutputListInitializationError::Element(source) => source,
+            },
+        )?;
+        receipt.checkpoint(runtime).map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "expanded argument checkpoint failed",
+                source,
+            )
+        })?;
+        values
+    } else {
+        let mut values = Vec::with_capacity(width);
+        for _ in 0..width {
+            values.push(next_value()?);
+        }
+        OutputListStorage::unbounded(values)
+    };
+    RootedValues::from_output_storage_in_context(values, runtime)
 }
 
 pub async fn materialize_expansion(
@@ -130,12 +277,12 @@ pub async fn materialize_expansion(
                     Value::Composite(handle) => {
                         return expand_composite_values(runtime, *handle, &[], true)
                             .await?
-                            .with_owned_values(rooted_sequence_from_values);
+                            .with_owned_output_storage(rooted_sequence_from_storage);
                     }
                     base @ (Value::Object(_) | Value::HandleObject(_)) => {
                         return expand_brace_values(base, &[], None)
                             .await?
-                            .with_owned_values(rooted_sequence_from_values);
+                            .with_owned_output_storage(rooted_sequence_from_storage);
                     }
                     _ => {
                         return Err(semantic_error(
@@ -152,12 +299,12 @@ pub async fn materialize_expansion(
                     (Value::Composite(handle), _) => {
                         return expand_composite_values(runtime, *handle, &indices, false)
                             .await?
-                            .with_owned_values(rooted_sequence_from_values);
+                            .with_owned_output_storage(rooted_sequence_from_storage);
                     }
                     (base @ (Value::Object(_) | Value::HandleObject(_)), _) => {
                         return expand_brace_values(base, &indices, None)
                             .await?
-                            .with_owned_values(rooted_sequence_from_values);
+                            .with_owned_output_storage(rooted_sequence_from_storage);
                     }
                     _ => {
                         return Err(semantic_error(
@@ -198,8 +345,14 @@ pub async fn materialize_expansion(
 }
 
 fn rooted_sequence_from_values(values: Vec<Value>) -> Result<RootedValueSequence, RuntimeError> {
+    rooted_sequence_from_storage(OutputListStorage::unbounded(values))
+}
+
+fn rooted_sequence_from_storage(
+    values: OutputListStorage,
+) -> Result<RootedValueSequence, RuntimeError> {
     RootedValueSequence::new(
-        crate::sequence::ValueSequence::comma_separated(values)
+        crate::sequence::ValueSequence::from_output_storage(values)
             .map_err(crate::sequence::sequence_error_to_runtime)?,
     )
     .map_err(|error| error.into_runtime_error())
@@ -210,7 +363,7 @@ fn rooted_sequence_from_values(values: Vec<Value>) -> Result<RootedValueSequence
 /// OutputList can never be accepted as one of another OutputList's outputs.
 pub fn adapt_legacy_builtin_result(value: Value) -> Result<ValueSequence, RuntimeError> {
     match value {
-        Value::OutputList(values) => ValueSequence::comma_separated(values)
+        Value::OutputList(values) => ValueSequence::from_output_storage(values)
             .map_err(crate::sequence::sequence_error_to_runtime),
         value => ValueSequence::single(value).map_err(crate::sequence::sequence_error_to_runtime),
     }
@@ -220,12 +373,7 @@ pub fn adapt_legacy_builtin_result(value: Value) -> Result<ValueSequence, Runtim
 /// pass through this function only while a rooted source owner remains live and
 /// a rooted replacement is registered before that owner retires.
 pub(crate) fn project_legacy_builtin_value_abi(sequence: ValueSequence) -> Value {
-    let kind = sequence.kind();
-    let mut values = sequence.into_values();
-    match kind {
-        runmat_value::ValueSequenceKind::Single => values.remove(0),
-        runmat_value::ValueSequenceKind::CommaSeparated => Value::OutputList(values),
-    }
+    sequence.into_legacy_value()
 }
 
 /// Project an owning sequence at the legacy scalar ABI boundary without
@@ -333,9 +481,27 @@ pub async fn expand_brace_values(
             )
             .await?;
             return value.with_owned_sequence(|sequence| {
-                let mut values = sequence.into_values();
-                pad_brace_values(&mut values, pad_to_outputs);
-                RootedValues::new(values).map_err(|error| error.into_runtime_error())
+                let mut values = sequence.into_output_storage();
+                if let Some(output_count) = pad_to_outputs {
+                    if values.len() > output_count {
+                        values.truncate(output_count);
+                    } else if values.len() < output_count {
+                        let owned = values.try_into_owned().map_err(|_| {
+                            crate::sequence::sequence_error_to_runtime(
+                                runmat_value::ValueSequenceError::SharedOutputStorage,
+                            )
+                        })?;
+                        let mut unbounded = owned.try_into_unbounded_vec().map_err(|_| {
+                            crate::sequence::sequence_error_to_runtime(
+                                runmat_value::ValueSequenceError::SharedOutputStorage,
+                            )
+                        })?;
+                        unbounded.resize(output_count, Value::Num(0.0));
+                        values = OutputListStorage::unbounded(unbounded);
+                    }
+                }
+                RootedValues::from_output_storage(values)
+                    .map_err(|error| error.into_runtime_error())
             });
         }
         _ => {
@@ -437,11 +603,10 @@ mod tests {
 
     #[test]
     fn legacy_builtin_adapter_rejects_nested_output_lists() {
-        let error =
-            super::adapt_legacy_builtin_result(Value::OutputList(vec![Value::OutputList(vec![
-                Value::Num(1.0),
-            ])]))
-            .unwrap_err();
+        let error = super::adapt_legacy_builtin_result(Value::output_list(vec![
+            Value::output_list(vec![Value::Num(1.0)]),
+        ]))
+        .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:NestedLegacyOutputList"));
     }
 

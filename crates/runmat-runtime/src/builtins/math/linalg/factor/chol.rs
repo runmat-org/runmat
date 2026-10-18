@@ -113,16 +113,16 @@ async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             if !eval.is_positive_definite() {
                 return Err(chol_error(&CHOL_ERROR_NOT_POSITIVE_DEFINITE));
             }
-            return Ok(Value::OutputList(vec![eval.factor()]));
+            return Ok(Value::output_list(vec![eval.factor()]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![eval.factor(), eval.flag()]));
+            return Ok(Value::output_list(vec![eval.factor(), eval.flag()]));
         }
         return Err(chol_error(&CHOL_ERROR_INVALID_ARGUMENT));
     }

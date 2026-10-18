@@ -112,17 +112,17 @@ mod native {
             vec![path.clone()],
         ))
         .unwrap();
-        assert_eq!(added.value(), &Value::OutputList(Vec::new()));
+        assert_eq!(added.value(), &Value::output_list(Vec::new()));
         let removed = futures::executor::block_on(java_remove_path_builtin(
             Some(runtime.clone()),
             vec![path.clone()],
         ))
         .unwrap();
-        assert_eq!(removed.value(), &Value::OutputList(Vec::new()));
+        assert_eq!(removed.value(), &Value::output_list(Vec::new()));
         let replaced =
             futures::executor::block_on(java_class_path_builtin(Some(runtime), vec![path]))
                 .unwrap();
-        assert_eq!(replaced.value(), &Value::OutputList(Vec::new()));
+        assert_eq!(replaced.value(), &Value::output_list(Vec::new()));
         let calls = recorder.calls.borrow();
         assert_eq!(calls.len(), 3);
         assert_eq!(calls[0].symbol, "add_classpath");
@@ -198,7 +198,7 @@ mod native {
             vec![Value::String("-v1".into())],
         ))
         .unwrap();
-        assert_eq!(quiet.value(), &Value::OutputList(Vec::new()));
+        assert_eq!(quiet.value(), &Value::output_list(Vec::new()));
         let appended = futures::executor::block_on(java_add_path_builtin(
             Some(runtime),
             vec![
@@ -207,7 +207,7 @@ mod native {
             ],
         ))
         .unwrap();
-        assert_eq!(appended.value(), &Value::OutputList(Vec::new()));
+        assert_eq!(appended.value(), &Value::output_list(Vec::new()));
         let calls = recorder.calls.borrow();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].symbol, "classpath");

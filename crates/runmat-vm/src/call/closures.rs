@@ -3,7 +3,7 @@ use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
 pub fn create_closure(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     func_name: String,
     capture_count: usize,
 ) -> Result<(), RuntimeError> {
@@ -12,14 +12,13 @@ pub fn create_closure(
         captures.push(pop_value(stack)?);
     }
     captures.reverse();
-    stack.push(runmat_runtime::call::closures::closure_value(
+    stack.try_push(runmat_runtime::call::closures::closure_value(
         func_name, captures,
-    ));
-    Ok(())
+    ))
 }
 
 pub fn create_semantic_closure(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     function: runmat_hir::FunctionId,
     display_name: String,
     capture_count: usize,
@@ -31,21 +30,20 @@ pub fn create_semantic_closure(
         captures.push(pop_value(stack)?);
     }
     captures.reverse();
-    stack.push(runmat_runtime::call::closures::semantic_closure_value(
+    stack.try_push(runmat_runtime::call::closures::semantic_closure_value(
         function,
         display_name,
         captures,
         source_role,
         lexical_environment,
-    ));
-    Ok(())
+    ))
 }
 
 /// Issue a closure from a function-only selected product. The binding and
 /// source presentation were authenticated against that product before this
 /// stack is changed; ambient numeric lookup cannot replace either one.
 pub fn create_selected_semantic_closure(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     binding: runmat_value::BoundFunctionBinding,
     display_name: String,
     source_file: Option<String>,
@@ -66,34 +64,33 @@ pub fn create_selected_semantic_closure(
         captures,
         source_role,
         lexical_environment,
-    );
-    Ok(())
+    )
 }
 
 /// Publish compiler-ordered captures that were read and rooted at this exact
 /// issuance point. The caller holds their root lease until this pushes the
 /// closure into the traced VM stack.
 pub fn create_selected_semantic_closure_with_captures(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     binding: runmat_value::BoundFunctionBinding,
     display_name: String,
     source_file: Option<String>,
     captures: Vec<Value>,
     source_role: runmat_types::FunctionSourceRole,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
-) {
-    stack.push(Value::Closure(runmat_value::Closure::new(
+) -> Result<(), RuntimeError> {
+    stack.try_push(Value::Closure(runmat_value::Closure::new(
         display_name,
         Some(binding),
         source_role,
         source_file,
         captures,
         lexical_environment,
-    )));
+    )))
 }
 
 pub fn collect_method_args(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     arg_count: usize,
 ) -> Result<(Value, Vec<Value>), RuntimeError> {
     let args = pop_args(stack, arg_count)?;

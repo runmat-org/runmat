@@ -57,7 +57,7 @@ async fn regexpi_builtin(
     let evaluation = evaluate(subject, pattern, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = evaluation.outputs_for_multi()?;
         if outputs.len() > out_count {

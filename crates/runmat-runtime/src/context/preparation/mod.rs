@@ -51,7 +51,7 @@ pub async fn prepare_admitted(
         }
         None => request
             .into_operands()
-            .with_owned_values(PreparedBuiltinOperands::passthrough)?,
+            .with_unbounded_values(PreparedBuiltinOperands::passthrough)??,
     };
     if prepared.operands().len() != expected {
         let mut error = request::invalid("preparation service changed the declared operand count");
@@ -166,7 +166,7 @@ where
             execute_prepared_compound(
                 request
                     .into_operands()
-                    .with_owned_values(PreparedBuiltinOperands::passthrough)?,
+                    .with_unbounded_values(PreparedBuiltinOperands::passthrough)??,
                 execute,
             )
             .await

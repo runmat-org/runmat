@@ -74,6 +74,7 @@ pub struct ActiveTryHandler {
     pub scope: usize,
     pub catch_pc: usize,
     pub catch_var: Option<usize>,
+    pub stack_depth: usize,
 }
 
 #[cfg(all(
@@ -130,7 +131,7 @@ impl VmFusionPublicationFault {
 #[derive(Debug)]
 pub struct InterpreterState {
     pub bytecode: Bytecode,
-    pub stack: Vec<Value>,
+    pub stack: crate::interpreter::stack::InterpreterStack,
     pub vars: InterpreterVars,
     pub pc: usize,
     pub completion_boundary: Option<InterpreterCompletionBoundary>,
@@ -230,14 +231,16 @@ impl InterpreterState {
             )
             .into_runtime_error());
         }
-        Ok(Self::from_prepared_vars_in_context(
+        let mut state = Self::from_prepared_vars_in_context(
             bytecode,
             vars,
             initial_assigned_var_count,
             current_function_name,
             invocation_arity,
             runtime,
-        ))
+        );
+        state.prepare_operand_stack()?;
+        Ok(state)
     }
 
     fn from_prepared_vars_in_context(
@@ -263,7 +266,7 @@ impl InterpreterState {
             bytecode.prepare_vm_fusion_plan_with_installation(&runtime);
         let graph_program = runtime.selected_graph_program().cloned();
         Self {
-            stack: Vec::new(),
+            stack: crate::interpreter::stack::InterpreterStack::unbounded(),
             context: ExecutionContext {
                 call_stack: Vec::new(),
                 locals: Vec::new(),
@@ -305,6 +308,15 @@ impl InterpreterState {
             fusion_publication_fault: None,
             bytecode,
         }
+    }
+
+    pub(crate) fn prepare_operand_stack(&mut self) -> Result<(), runmat_runtime::RuntimeError> {
+        let prepared = crate::interpreter::stack::InterpreterStack::prepare(
+            &self.context.runtime,
+            self.bytecode.stack_geometry,
+        )?;
+        self.stack = prepared;
+        Ok(())
     }
 }
 

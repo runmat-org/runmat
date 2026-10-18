@@ -28,7 +28,7 @@ fn hgload_applies_property_overrides_and_returns_old_values() {
         ],
     ))
     .expect("hgload");
-    let outputs = result.into_values();
+    let outputs = result.into_output_storage();
     assert_eq!(outputs.len(), 2);
     let Value::Cell(cell) = &outputs[1] else {
         panic!("expected old values cell");

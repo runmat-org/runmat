@@ -138,8 +138,8 @@ async fn nlparci_in_runtime(
     )
     .await?;
     match (outputs, result) {
-        (Some(0), None) => Ok(Value::OutputList(Vec::new())),
-        (Some(1), Some(result)) => Ok(Value::OutputList(vec![result])),
+        (Some(0), None) => Ok(Value::output_list(Vec::new())),
+        (Some(1), Some(result)) => Ok(Value::output_list(vec![result])),
         (None, Some(result)) => Ok(result),
         _ => Err(numerical(
             "interval result does not match the requested output count",

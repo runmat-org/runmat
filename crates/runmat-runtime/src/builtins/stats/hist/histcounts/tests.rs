@@ -34,7 +34,16 @@ fn histcounts_three_outputs_preserve_low_rank_bin_indices() {
         else {
             panic!("expected three histogram outputs")
         };
-        let outputs: [Value; 3] = outputs.try_into().expect("three outputs");
+        let mut output_iter = outputs
+            .try_into_owned()
+            .expect("unique outputs")
+            .into_iter();
+        let outputs = [
+            output_iter.next().expect("counts output"),
+            output_iter.next().expect("edges output"),
+            output_iter.next().expect("bins output"),
+        ];
+        assert!(output_iter.next().is_none(), "exactly three outputs");
         let [Value::Tensor(counts), Value::Tensor(bin_edges), Value::Tensor(bins)] = outputs else {
             panic!("expected tensor histogram outputs")
         };
@@ -131,7 +140,10 @@ fn third_output_preserves_input_shape_and_marks_excluded_observations() {
         panic!("expected three outputs");
     };
     assert_eq!(outputs.len(), 3);
-    let mut outputs = outputs.into_iter();
+    let mut outputs = outputs
+        .try_into_owned()
+        .expect("unique outputs")
+        .into_iter();
     assert_eq!(
         values_from_tensor(outputs.next().unwrap()),
         vec![1.0, 1.0, 2.0]

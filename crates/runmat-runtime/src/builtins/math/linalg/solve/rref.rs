@@ -176,9 +176,9 @@ impl RrefEval {
     fn into_requested_outputs(self) -> BuiltinResult<Value> {
         if let Some(out_count) = crate::output_count::current_output_count() {
             return match out_count {
-                0 => Ok(Value::OutputList(Vec::new())),
-                1 => Ok(Value::OutputList(vec![self.reduced])),
-                2 => Ok(Value::OutputList(vec![
+                0 => Ok(Value::output_list(Vec::new())),
+                1 => Ok(Value::output_list(vec![self.reduced])),
+                2 => Ok(Value::output_list(vec![
                     self.reduced,
                     tensor::tensor_into_value(self.pivots),
                 ])),
@@ -536,7 +536,11 @@ pub(crate) mod tests {
 
     fn output_list(value: Value) -> Vec<Value> {
         match value {
-            Value::OutputList(values) => values,
+            Value::OutputList(values) => values
+                .try_into_owned()
+                .expect("unique output list")
+                .try_into_unbounded_vec()
+                .expect("unbounded output list"),
             other => panic!("expected output list, got {other:?}"),
         }
     }

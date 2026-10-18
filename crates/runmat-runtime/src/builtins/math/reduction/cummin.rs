@@ -390,7 +390,7 @@ async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count > 1 {
             return Err(cummin_error_with_detail(
@@ -398,7 +398,7 @@ async fn cummin_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
                 "cummin returns exactly one output",
             ));
         }
-        return Ok(Value::OutputList(vec![eval.into_value()]));
+        return Ok(Value::output_list(vec![eval.into_value()]));
     }
     Ok(eval.into_value())
 }

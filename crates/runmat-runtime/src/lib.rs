@@ -463,11 +463,11 @@ async fn dispatch_named_with_requested_outputs(
 fn require_single_sequence(sequence: runmat_value::ValueSequence) -> BuiltinResult<Value> {
     use crate::sequence::ResolveValueSequence;
 
-    let mut values = sequence.resolve(
+    let values = sequence.resolve(
         runmat_types::SequenceUse::RequireSingle,
         crate::sequence::SequenceResolutionContext::default(),
     )?;
-    Ok(values.remove(0))
+    Ok(crate::sequence::into_first_output(values)?.expect("one required output was resolved"))
 }
 
 pub(crate) async fn dispatch_callable_with_policy(
@@ -3970,7 +3970,7 @@ mod tests {
 
         let result = block_on(feval_builtin(handle, vec![Value::Num(5.0)]))
             .expect("semantic function handle feval succeeds");
-        assert_eq!(result, Value::OutputList(Vec::new()));
+        assert_eq!(result, Value::output_list(Vec::new()));
     }
 
     #[test]
@@ -4005,7 +4005,7 @@ mod tests {
             .expect("semantic function handle feval succeeds");
         assert_eq!(
             result,
-            Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)])
+            Value::output_list(vec![Value::Num(1.0), Value::Num(2.0)])
         );
     }
 

@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn matfile_encoding_uses_owning_error_identity() {
         let error = block_on(convert_value_with_cooperation(
-            Value::OutputList(Vec::new()),
+            Value::output_list(Vec::new()),
             MatEncodingOwner::MatFile,
             None,
         ))

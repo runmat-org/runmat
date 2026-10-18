@@ -62,10 +62,10 @@ pub(super) fn corr_compute(args: CorrArgs) -> BuiltinResult<Value> {
         .map_err(|err| corr_internal(format!("corr: {err}")))?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![rho]));
+            return Ok(Value::output_list(vec![rho]));
         }
         let p = Tensor::new(p_data, shape)
             .map(tensor::tensor_into_value)

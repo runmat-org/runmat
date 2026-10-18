@@ -117,7 +117,7 @@ fn parallel() -> ParallelManifest {
                 role: ParallelVariableRole::Loop,
                 access: ParallelAccess::ReadWrite,
                 fact: ValueFact::scalar(ValueKindFact::Logical),
-                transferable: true,
+                transferability: runmat_types::ParallelTransferability::ProvenTransferable,
             }],
             maximum_workers: Some(LabCount(4)),
             effects: Default::default(),
@@ -230,6 +230,21 @@ fn construct_schemas_reject_version_order_and_kind_drift() {
     let mut local_exact = parallel();
     local_exact.spmd_regions[0].labs = SpmdLabRequirement::Exact { labs: LabCount(0) };
     local_exact.validate().unwrap();
+
+    let mut previous_parallel = parallel();
+    previous_parallel.schema_version -= 1;
+    assert_eq!(
+        previous_parallel.validate().unwrap_err().path,
+        "parallel.schema_version"
+    );
+
+    let mut legacy_transfer = serde_json::to_value(parallel()).unwrap();
+    let variable = legacy_transfer["parfor_regions"][0]["variables"][0]
+        .as_object_mut()
+        .unwrap();
+    variable.remove("transferability");
+    variable.insert("transferable".into(), serde_json::Value::Bool(true));
+    assert!(serde_json::from_value::<ParallelManifest>(legacy_transfer).is_err());
 }
 
 #[cfg(target_arch = "wasm32")]

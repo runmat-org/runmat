@@ -262,6 +262,7 @@ pub(crate) fn local_bytecode_semantic_fingerprint(
 ) -> Result<String, serde_json::Error> {
     let super::Bytecode {
         instructions,
+        stack_geometry,
         catch_scopes,
         active_function: _,
         active_class_method_owner: _,
@@ -329,6 +330,7 @@ pub(crate) fn local_bytecode_semantic_fingerprint(
     }
     append!("selected-local-bytecode-semantics-v1");
     append!(instructions);
+    append!(stack_geometry);
     append!(catch_scopes);
     append!(instr_spans);
     append!(call_arg_spans);

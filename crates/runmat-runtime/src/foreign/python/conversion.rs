@@ -659,7 +659,7 @@ mod tests {
     #[test]
     fn python_conversion_rejects_nested_transient_sequences_before_recursion() {
         let nested = Value::Cell(
-            runmat_value::CellArray::new(vec![Value::OutputList(Vec::new())], 1, 1)
+            runmat_value::CellArray::new(vec![Value::output_list(Vec::new())], 1, 1)
                 .expect("nested cell"),
         );
         let error = value_to_python(nested).expect_err("transient sequence must not cross Python");

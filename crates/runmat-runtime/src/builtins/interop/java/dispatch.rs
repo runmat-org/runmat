@@ -108,13 +108,14 @@ pub(super) async fn invoke_java(
                             "Java {symbol} returned an unexpected result value"
                         )));
                     }
-                    return Ok(Value::OutputList(Vec::new()));
+                    return Ok(Value::output_list(Vec::new()));
                 }
-                let mut values = sequence.resolve(
+                let values = sequence.resolve(
                     runmat_types::SequenceUse::RequireSingle,
                     crate::sequence::SequenceResolutionContext::default(),
                 )?;
-                Ok(values.remove(0))
+                crate::sequence::into_first_output(values)?
+                    .ok_or_else(|| invalid_call("Java callback returned no value"))
             },
             |error| error.into_runtime_error(),
         )

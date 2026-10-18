@@ -118,13 +118,13 @@ async fn deconv_builtin(
     )
     .await?;
     match requested {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(count) => {
             let mut published = vec![outputs.quotient.take().ok_or_else(deconv_missing_output)?];
             if count == 2 {
                 published.push(outputs.remainder.take().ok_or_else(deconv_missing_output)?);
             }
-            Ok(Value::OutputList(published))
+            Ok(Value::output_list(published))
         }
         None => outputs.quotient.take().ok_or_else(deconv_missing_output),
     }

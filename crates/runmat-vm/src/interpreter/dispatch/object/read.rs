@@ -6,7 +6,7 @@ use runmat_value::Value;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence_register: &mut super::super::SequenceState,
     context: ObjectDispatchContext<'_>,
 ) -> Result<bool, RuntimeError> {
@@ -29,7 +29,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberOrInit(field) => {
@@ -46,7 +46,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberDynamic => {
@@ -68,7 +68,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberDynamicOrInit => {
@@ -90,7 +90,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberSequence { member, selection } => {
@@ -108,7 +108,7 @@ pub(super) async fn dispatch(
             )
             .await?;
             values.with_owned_sequence(|values| {
-                stack.extend(values.resolve(*selection, Default::default())?);
+                stack.try_extend_output(values.resolve(*selection, Default::default())?)?;
                 Ok::<_, RuntimeError>(())
             })?;
             Ok(true)
@@ -133,7 +133,7 @@ pub(super) async fn dispatch(
             )
             .await?;
             values.with_owned_sequence(|values| {
-                stack.extend(values.resolve(*selection, Default::default())?);
+                stack.try_extend_output(values.resolve(*selection, Default::default())?)?;
                 Ok::<_, RuntimeError>(())
             })?;
             Ok(true)
@@ -145,7 +145,7 @@ pub(super) async fn dispatch(
             ))?;
             let _base_roots = crate::call::root_values([&base])?;
             let count = obj_resolve::member_sequence_cardinality(&base)?;
-            stack.push(Value::Num(count as f64));
+            stack.try_push(Value::Num(count as f64))?;
             Ok(true)
         }
         crate::bytecode::Instr::LoadMemberSequenceUsingOutputSlot {

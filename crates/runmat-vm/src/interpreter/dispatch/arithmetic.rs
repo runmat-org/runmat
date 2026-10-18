@@ -42,7 +42,7 @@ async fn call_right_operator_method_ordered_in_context(
 
 pub(super) fn suspend_arithmetic<'a>(
     instr: &crate::bytecode::Instr,
-    stack: &'a mut Vec<Value>,
+    stack: &'a mut crate::interpreter::stack::InterpreterStack,
     runtime: &'a runmat_runtime::context::RuntimeContext,
 ) -> Result<ArithmeticDispatchFuture<'a>, RuntimeError> {
     let call_operator_method =
@@ -421,7 +421,7 @@ pub(super) fn suspend_arithmetic<'a>(
                 let _roots = crate::call::root_values([&value])?;
                 crate::call::call_builtin_async(runtime, "not", &[value])
                     .await?
-                    .with_owned(|result| stack.push(result));
+                    .with_owned(|result| stack.try_push(result))?;
                 Ok(())
             })
         }
@@ -436,7 +436,7 @@ pub(super) fn suspend_arithmetic<'a>(
                 let _roots = crate::call::root_values([&lhs, &rhs])?;
                 crate::call::call_builtin_async(runtime, "and", &[lhs, rhs])
                     .await?
-                    .with_owned(|result| stack.push(result));
+                    .with_owned(|result| stack.try_push(result))?;
                 Ok(())
             })
         }
@@ -451,7 +451,7 @@ pub(super) fn suspend_arithmetic<'a>(
                 let _roots = crate::call::root_values([&lhs, &rhs])?;
                 crate::call::call_builtin_async(runtime, "or", &[lhs, rhs])
                     .await?
-                    .with_owned(|result| stack.push(result));
+                    .with_owned(|result| stack.try_push(result))?;
                 Ok(())
             })
         }

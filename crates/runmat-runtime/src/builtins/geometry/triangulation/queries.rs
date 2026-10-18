@@ -61,7 +61,7 @@ pub(super) async fn point_location_value(dt: Value, rest: Vec<Value>) -> Builtin
     let bc = Tensor::new_2d(bary, queries.len(), 3)
         .map(Value::Tensor)
         .map_err(invalid)?;
-    Ok(Value::OutputList(vec![ti, bc]))
+    Ok(Value::output_list(vec![ti, bc]))
 }
 
 pub(super) fn require_delaunay_object(value: &Value) -> BuiltinResult<&ObjectInstance> {

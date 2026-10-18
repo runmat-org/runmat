@@ -15,7 +15,7 @@ pub(crate) fn convert_variadic(
         .map(convert)
         .collect::<BuiltinResult<Vec<_>>>()?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(n) => Ok(crate::output_count::output_list_with_padding(n, outputs)),
         None => Ok(outputs
             .into_iter()

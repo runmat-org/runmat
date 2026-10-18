@@ -844,7 +844,7 @@ mod tests {
     #[test]
     fn execution_payload_serializes_runtime_flow_kind() {
         let outcome = ExecutionOutcome {
-            flow: RuntimeFlow::OutputList(vec![Value::Num(1.0), Value::Num(2.0)]),
+            flow: RuntimeFlow::output_list(vec![Value::Num(1.0), Value::Num(2.0)]),
             ..ExecutionOutcome::default()
         };
 

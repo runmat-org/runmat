@@ -88,9 +88,9 @@ async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult
                 _ => unreachable!("input count validated above"),
             }?;
             if out_count == 0 {
-                return Ok(Value::OutputList(Vec::new()));
+                return Ok(Value::output_list(Vec::new()));
             }
-            return Ok(Value::OutputList(vec![result]));
+            return Ok(Value::output_list(vec![result]));
         }
         if rest.len() != 1 {
             return Err(polyder_argument_error(

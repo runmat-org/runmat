@@ -106,7 +106,7 @@ fn build_mex(arguments: Vec<Value>, builtin: &'static str, cuda: bool) -> Builti
         crate::console::ConsoleStream::Stdout,
         format!("Built {}", output.module.display()),
     );
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 fn map_mex_build_error(
@@ -181,7 +181,7 @@ mod tests {
 
     #[test]
     fn mexcuda_invalid_argument_class_precedes_target_check() {
-        let error = mexcuda_builtin(vec![Value::OutputList(Vec::new())]).unwrap_err();
+        let error = mexcuda_builtin(vec![Value::output_list(Vec::new())]).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:InvalidBuildArguments"));
     }
 
@@ -287,7 +287,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             Value::from(source.display().to_string()),
         ];
         let result = mex_builtin(arguments).unwrap();
-        assert_eq!(result, Value::OutputList(Vec::new()));
+        assert_eq!(result, Value::output_list(Vec::new()));
         assert!(directory
             .path()
             .join(format!(

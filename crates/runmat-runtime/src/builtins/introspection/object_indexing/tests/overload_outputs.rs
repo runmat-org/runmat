@@ -82,7 +82,9 @@ fn overloaded_reads_execute_once_for_zero_and_multiple_outputs_and_failures() {
             } else {
                 assert_eq!(
                     result.unwrap(),
-                    Value::OutputList((0..count).map(|n| Value::Num(n as f64)).collect())
+                    Value::output_list(
+                        (0..count).map(|n| Value::Num(n as f64)).collect::<Vec<_>>()
+                    )
                 );
             }
         }

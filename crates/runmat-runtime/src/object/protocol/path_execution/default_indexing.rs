@@ -106,11 +106,11 @@ pub(super) async fn read_default_step(
             .await?
             .try_map_owned(
                 |sequence| {
-                    let mut values = sequence.resolve(
+                    let values = sequence.resolve(
                         runmat_types::SequenceUse::RequireSingle,
                         SequenceResolutionContext::default(),
                     )?;
-                    values.pop().ok_or_else(single_value_error)
+                    crate::sequence::into_first_output(values)?.ok_or_else(single_value_error)
                 },
                 |error| error.into_runtime_error(),
             )
@@ -125,11 +125,11 @@ pub(super) async fn read_default_step(
             .await?
             .try_map_owned(
                 |sequence| {
-                    let mut values = sequence.resolve(
+                    let values = sequence.resolve(
                         runmat_types::SequenceUse::RequireSingle,
                         SequenceResolutionContext::default(),
                     )?;
-                    values.pop().ok_or_else(single_value_error)
+                    crate::sequence::into_first_output(values)?.ok_or_else(single_value_error)
                 },
                 |error| error.into_runtime_error(),
             ),
@@ -173,9 +173,9 @@ async fn read_brace_sequence(
         base @ (Value::Cell(_) | Value::Object(_) | Value::HandleObject(_)) => {
             crate::call::arguments::expand_brace_values(base, &indices, None)
                 .await?
-                .with_owned_values(|values| {
+                .with_owned_output_storage(|values| {
                     RootedValueSequence::new(
-                        ValueSequence::comma_separated(values)
+                        ValueSequence::from_output_storage(values)
                             .map_err(crate::sequence::sequence_error_to_runtime)?,
                     )
                     .map_err(|error| error.into_runtime_error())

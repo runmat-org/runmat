@@ -68,36 +68,59 @@ pub async fn emit_var(
     stack_ops::emit_var(&context.runtime, vars, var_index, label, var_names).await
 }
 
-pub fn load_const(stack: &mut Vec<Value>, value: f64) {
-    stack_ops::load_const(stack, value);
+pub fn load_const(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: f64,
+) -> Result<(), RuntimeError> {
+    stack_ops::load_const(stack, value)
 }
 
-pub fn load_int(stack: &mut Vec<Value>, value: runmat_value::IntValue) {
-    stack_ops::load_int(stack, value);
+pub fn load_int(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: runmat_value::IntValue,
+) -> Result<(), RuntimeError> {
+    stack_ops::load_int(stack, value)
 }
 
-pub fn load_complex(stack: &mut Vec<Value>, re: f64, im: f64) {
-    stack_ops::load_complex(stack, re, im);
+pub fn load_complex(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    re: f64,
+    im: f64,
+) -> Result<(), RuntimeError> {
+    stack_ops::load_complex(stack, re, im)
 }
 
-pub fn load_bool(stack: &mut Vec<Value>, value: bool) {
-    stack_ops::load_bool(stack, value);
+pub fn load_bool(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: bool,
+) -> Result<(), RuntimeError> {
+    stack_ops::load_bool(stack, value)
 }
 
-pub fn load_string(stack: &mut Vec<Value>, value: String) {
-    stack_ops::load_string(stack, value);
+pub fn load_string(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: String,
+) -> Result<(), RuntimeError> {
+    stack_ops::load_string(stack, value)
 }
 
-pub fn load_char_row(stack: &mut Vec<Value>, value: String) -> Result<(), RuntimeError> {
+pub fn load_char_row(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    value: String,
+) -> Result<(), RuntimeError> {
     stack_ops::load_char_row(stack, value)
 }
 
-pub fn load_var(stack: &mut Vec<Value>, vars: &InterpreterVars, index: usize) {
-    stack_ops::load_var(stack, vars, index);
+pub fn load_var(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    vars: &InterpreterVars,
+    index: usize,
+) -> Result<(), RuntimeError> {
+    stack_ops::load_var(stack, vars, index)
 }
 
 pub fn load_local(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     context: &ExecutionContext,
     vars: &InterpreterVars,
     offset: usize,
@@ -106,7 +129,7 @@ pub fn load_local(
 }
 
 pub fn store_var<BeforeOverwrite, AfterStore>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
     index: usize,
     var_names: &HashMap<usize, String>,
@@ -122,7 +145,7 @@ where
 
 #[allow(clippy::too_many_arguments)]
 pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterLocalStore, AfterFallbackStore>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     context: &mut ExecutionContext,
     vars: &mut InterpreterVars,
     offset: usize,

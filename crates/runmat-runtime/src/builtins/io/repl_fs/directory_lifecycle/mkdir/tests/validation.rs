@@ -73,7 +73,7 @@ fn requested_outputs_preserve_filesystem_effects_and_failure_policy() {
         let _outputs = crate::output_count::push_output_count(Some(0));
         assert_eq!(
             super::invoke(args.clone()).unwrap(),
-            Value::OutputList(vec![])
+            Value::output_list(vec![])
         );
         assert!(path.is_dir());
     }

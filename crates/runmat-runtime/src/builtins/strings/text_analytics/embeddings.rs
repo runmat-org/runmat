@@ -1000,7 +1000,7 @@ async fn vec2word_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         Tensor::new(distances, vec![matrix_rows, options.k])
             .map_err(|err| embedding_error("vec2word", err))?,
     );
-    Ok(Value::OutputList(vec![words, dist]))
+    Ok(Value::output_list(vec![words, dist]))
 }
 
 async fn enforce_vec2word_integer_policy(args: &[Value]) -> BuiltinResult<()> {

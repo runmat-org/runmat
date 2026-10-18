@@ -299,7 +299,7 @@ async fn forward_in_runtime(
         requested_state,
     )?;
     if requested_state {
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     } else {
         Ok(outputs.remove(0))
     }

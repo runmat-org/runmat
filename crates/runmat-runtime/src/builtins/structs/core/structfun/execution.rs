@@ -68,9 +68,16 @@ pub(super) async fn execute(
     outputs
         .finish()
         .map_err(|error| error.into_runtime_error())?
-        .with_owned_values(|mut values| {
+        .with_owned_output_storage(|values| {
             let value = if requested == 1 {
-                values.pop().expect("one requested output")
+                values
+                    .try_into_first()
+                    .map_err(|_| {
+                        crate::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?
+                    .expect("one requested output")
             } else {
                 Value::OutputList(values)
             };

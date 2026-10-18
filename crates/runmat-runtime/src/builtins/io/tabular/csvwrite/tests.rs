@@ -435,7 +435,7 @@ fn csvwrite_output_and_resident_gates_run_before_side_effects_or_provider_access
         Vec::new(),
     )
     .unwrap();
-    assert_eq!(value, Value::OutputList(Vec::new()));
+    assert_eq!(value, Value::output_list(Vec::new()));
     drop(no_outputs);
     let _ = fs::remove_file(path);
 

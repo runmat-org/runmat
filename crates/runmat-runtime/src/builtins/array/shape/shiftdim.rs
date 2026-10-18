@@ -366,9 +366,12 @@ async fn shiftdim_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
     let shifted = apply_plan(value, &plan).await?;
     match requested {
         None => Ok(shifted),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![shifted])),
-        Some(2) => Ok(Value::OutputList(vec![shifted, Value::Num(removed as f64)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![shifted])),
+        Some(2) => Ok(Value::output_list(vec![
+            shifted,
+            Value::Num(removed as f64),
+        ])),
         Some(_) => unreachable!("output count validated above"),
     }
 }

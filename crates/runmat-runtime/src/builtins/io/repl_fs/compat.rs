@@ -165,7 +165,7 @@ fn output_list_for_count(default: Vec<Value>) -> Value {
     if default.len() == 1 {
         default.into_iter().next().unwrap()
     } else {
-        Value::OutputList(default)
+        Value::output_list(default)
     }
 }
 

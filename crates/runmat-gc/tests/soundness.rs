@@ -203,7 +203,7 @@ fn root_traversal_scans_nested_trace_variants() {
             None,
             Default::default(),
             None,
-            vec![Value::OutputList(vec![handle, listener])],
+            vec![Value::output_list(vec![handle, listener])],
             None,
         ));
 

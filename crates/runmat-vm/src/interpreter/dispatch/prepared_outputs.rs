@@ -19,7 +19,7 @@ pub(super) struct PreparedOutputContext<'a> {
 
 pub(super) async fn dispatch(
     instruction: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
     state: &mut SequenceState,
     context: PreparedOutputContext<'_>,
@@ -90,7 +90,7 @@ pub(super) async fn dispatch(
             let extent = state
                 .destination_builder_mut()?
                 .selector_extent(component_count, *component)?;
-            stack.push(Value::Num(extent as f64));
+            stack.try_push(Value::Num(extent as f64))?;
         }
         Instr::BeginContextualIndexSelectors { component_count } => {
             let base = stack.last().ok_or_else(stack_underflow)?;
@@ -99,7 +99,7 @@ pub(super) async fn dispatch(
         }
         Instr::LoadContextualIndexEnd { component } => {
             let extent = state.contextual_index_extent(*component)?;
-            stack.push(Value::Num(extent as f64));
+            stack.try_push(Value::Num(extent as f64))?;
         }
         Instr::FinishContextualIndexSelectors { component_count } => {
             state.finish_contextual_index(*component_count)?;
@@ -164,7 +164,7 @@ pub(super) async fn dispatch(
                     "output destination cardinality exceeds the supported limit",
                 )
             })?;
-            stack.push(Value::Int(IntValue::U64(total)));
+            stack.try_push(Value::Int(IntValue::U64(total)))?;
         }
         Instr::CommitPreparedOutputTargets { retained_outputs } => {
             commit::commit(

@@ -1,27 +1,16 @@
 mod errors;
 mod host;
 mod integer;
+mod orientation;
 mod provider;
 
-use runmat_value::{Tensor, Value};
+use runmat_value::Value;
 
 use crate::context::RuntimeContext;
 use crate::BuiltinResult;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::builtins::math::linalg) enum SolveOrientation {
-    Left,
-    Right,
-}
-
-impl SolveOrientation {
-    pub(super) const fn name(self) -> &'static str {
-        match self {
-            Self::Left => "mldivide",
-            Self::Right => "mrdivide",
-        }
-    }
-}
+pub(super) use host::real as host_real;
+pub(in crate::builtins::math::linalg) use orientation::SolveOrientation;
 
 pub(in crate::builtins::math::linalg) async fn evaluate(
     orientation: SolveOrientation,
@@ -65,12 +54,4 @@ pub(in crate::builtins::math::linalg) async fn evaluate_with_context(
         .await
         .map_err(|error| errors::map_control_flow(orientation, error))?;
     host::evaluate(orientation, lhs, rhs)
-}
-
-pub(super) fn host_real(
-    orientation: SolveOrientation,
-    lhs: &Tensor,
-    rhs: &Tensor,
-) -> BuiltinResult<Tensor> {
-    host::real(orientation, lhs, rhs)
 }

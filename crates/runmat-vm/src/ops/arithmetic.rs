@@ -20,7 +20,7 @@ fn reject_typed_complex_integer_arithmetic(values: &[&Value]) -> Result<(), Runt
 }
 
 pub async fn add<CM, CMFut, RM, RMFut, F, FFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut call_method: CM,
     mut right_method: RM,
     mut fallback: F,
@@ -51,12 +51,11 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    result.with_owned(|value| stack.push(value));
-    Ok(())
+    result.with_owned(|value| stack.try_push(value))
 }
 
 pub async fn sub<CM, CMFut, RM, RMFut, F, FFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut call_method: CM,
     mut right_method: RM,
     mut fallback: F,
@@ -87,12 +86,11 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    result.with_owned(|value| stack.push(value));
-    Ok(())
+    result.with_owned(|value| stack.try_push(value))
 }
 
 pub async fn mul<CM, CMFut, RM, RMFut, F, FFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut call_method: CM,
     mut right_method: RM,
     mut fallback: F,
@@ -123,12 +121,11 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    result.with_owned(|value| stack.push(value));
-    Ok(())
+    result.with_owned(|value| stack.try_push(value))
 }
 
 pub async fn binary_method_ordered<CM, CMFut, RM, RMFut, F, FFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     method: &'static str,
     mut call_method: CM,
     mut call_right_method: RM,
@@ -160,12 +157,11 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    result.with_owned(|value| stack.push(value));
-    Ok(())
+    result.with_owned(|value| stack.try_push(value))
 }
 
 pub async fn binary_fallback<F, FFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut fallback: F,
 ) -> Result<(), RuntimeError>
 where
@@ -175,12 +171,13 @@ where
     let (a, b) = pop2(stack)?;
     let _input_roots = crate::call::root_values([&a, &b])?;
     reject_typed_complex_integer_arithmetic(&[&a, &b])?;
-    fallback(a, b).await?.with_owned(|value| stack.push(value));
-    Ok(())
+    fallback(a, b)
+        .await?
+        .with_owned(|value| stack.try_push(value))
 }
 
 pub async fn power<CM, CMFut, RM, RMFut, F, FFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut call_method: CM,
     mut call_right_method: RM,
     mut fallback: F,
@@ -211,11 +208,13 @@ where
         }
         _ => fallback(a.clone(), b.clone()).await?,
     };
-    result.with_owned(|value| stack.push(value));
-    Ok(())
+    result.with_owned(|value| stack.try_push(value))
 }
 
-pub async fn unary<UF, UFut>(stack: &mut Vec<Value>, mut op: UF) -> Result<(), RuntimeError>
+pub async fn unary<UF, UFut>(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    mut op: UF,
+) -> Result<(), RuntimeError>
 where
     UF: FnMut(Value) -> UFut,
     UFut: Future<Output = Result<RootedValue, RuntimeError>>,
@@ -224,12 +223,11 @@ where
         .pop()
         .ok_or(mex("StackUnderflow", "stack underflow"))?;
     let _input_roots = crate::call::root_values([&value])?;
-    op(value).await?.with_owned(|result| stack.push(result));
-    Ok(())
+    op(value).await?.with_owned(|result| stack.try_push(result))
 }
 
 pub async fn unary_arithmetic<UF, UFut>(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     mut op: UF,
 ) -> Result<(), RuntimeError>
 where
@@ -241,8 +239,7 @@ where
         .ok_or(mex("StackUnderflow", "stack underflow"))?;
     reject_typed_complex_integer_arithmetic(&[&value])?;
     let _input_roots = crate::call::root_values([&value])?;
-    op(value).await?.with_owned(|result| stack.push(result));
-    Ok(())
+    op(value).await?.with_owned(|result| stack.try_push(result))
 }
 
 pub fn is_scalarish_for_division(value: &Value) -> bool {

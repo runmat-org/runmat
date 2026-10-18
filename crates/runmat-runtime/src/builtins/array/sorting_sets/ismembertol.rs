@@ -465,7 +465,7 @@ async fn ismembertol_builtin(a: Value, b: Value, rest: Vec<Value>) -> BuiltinRes
             super::restore_set_outputs(output_provider, NAME, outputs, internal_error_from_string)?;
     }
     if requested_outputs.is_some() {
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     } else {
         Ok(outputs.pop().expect("ismembertol mask output"))
     }
@@ -1194,7 +1194,7 @@ mod tests {
         .expect("rank-zero rows membership") else {
             panic!("expected two outputs");
         };
-        assert_eq!(outputs, vec![Value::Bool(true), Value::Num(1.0)]);
+        assert_eq!(outputs.as_slice(), &[Value::Bool(true), Value::Num(1.0)]);
 
         let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one input");
         let set = Tensor::new(vec![2.0], vec![1]).expect("rank-one set");

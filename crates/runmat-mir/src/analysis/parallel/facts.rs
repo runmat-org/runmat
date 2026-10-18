@@ -1,5 +1,6 @@
 use runmat_types::{
-    DynamicReason, ProgramFunctionId, ProgramPointId, RegionValueId, ValueFact, ValueKindFact,
+    DynamicReason, ParallelTransferability, ProgramFunctionId, ProgramPointId, RegionValueId,
+    ValueFact,
 };
 
 use crate::{BasicBlockId, MirOperand, MirRvalue};
@@ -61,16 +62,6 @@ pub(super) fn operand_fact(
     }
 }
 
-pub(super) fn transferable(fact: &ValueFact) -> bool {
-    !matches!(
-        fact.kind,
-        ValueKindFact::Never
-            | ValueKindFact::Unknown
-            | ValueKindFact::Object(_)
-            | ValueKindFact::ClassReference(_)
-            | ValueKindFact::Execution(_)
-            | ValueKindFact::Distributed(_)
-            | ValueKindFact::Composite(_)
-            | ValueKindFact::Foreign(_)
-    )
+pub(super) fn transferability(fact: &ValueFact) -> ParallelTransferability {
+    ParallelTransferability::for_fact(fact)
 }

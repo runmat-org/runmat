@@ -456,7 +456,7 @@ fn finalize(outcome: Outcome, options: &FminbndOptions) -> BuiltinResult<Value> 
 
     match crate::output_count::current_output_count() {
         None => Ok(x),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(crate::output_count::output_list_with_padding(1, vec![x])),
         Some(2) => Ok(crate::output_count::output_list_with_padding(
             2,
@@ -485,7 +485,7 @@ fn finalize_inconsistent_bounds(options: &FminbndOptions) -> BuiltinResult<Value
 
     match crate::output_count::current_output_count() {
         None => Ok(x),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(crate::output_count::output_list_with_padding(1, vec![x])),
         Some(2) => Ok(crate::output_count::output_list_with_padding(
             2,

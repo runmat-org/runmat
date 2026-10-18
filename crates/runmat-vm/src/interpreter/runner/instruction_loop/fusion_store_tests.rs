@@ -161,7 +161,7 @@ fn second_store_failure_keeps_first_publication_and_exact_error() {
             let error = publish_fusion_stores(
                 vec![
                     (store(0), Value::Num(7.0)),
-                    (store(1), Value::OutputList(vec![Value::Num(8.0)])),
+                    (store(1), Value::output_list(vec![Value::Num(8.0)])),
                 ],
                 FusionPublicationFrame {
                     vars: &mut vars,

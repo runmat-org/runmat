@@ -123,7 +123,7 @@ async fn importdata_builtin(
     cooperation.completed(0).await?;
     if let Some(output_count) = crate::output_count::current_output_count() {
         if output_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let outputs = vec![
             imported.value,

@@ -133,11 +133,11 @@ pub(super) fn kstest_outputs_for_count(
     eval: KstestEvaluation,
 ) -> BuiltinResult<Value> {
     match out_count {
-        0 => Ok(Value::OutputList(Vec::new())),
-        1 => Ok(Value::OutputList(vec![eval.h])),
-        2 => Ok(Value::OutputList(vec![eval.h, eval.p])),
-        3 => Ok(Value::OutputList(vec![eval.h, eval.p, eval.ksstat])),
-        4 => Ok(Value::OutputList(vec![
+        0 => Ok(Value::output_list(Vec::new())),
+        1 => Ok(Value::output_list(vec![eval.h])),
+        2 => Ok(Value::output_list(vec![eval.h, eval.p])),
+        3 => Ok(Value::output_list(vec![eval.h, eval.p, eval.ksstat])),
+        4 => Ok(Value::output_list(vec![
             eval.h,
             eval.p,
             eval.ksstat,

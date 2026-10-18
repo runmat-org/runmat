@@ -239,20 +239,31 @@ fn hidden_state(net: &Value, x: Value) -> Value {
         let _count = crate::output_count::push_output_count(Some(2));
         block_on(forward_builtin(net.clone(), x, vec![])).unwrap()
     };
-    let Value::OutputList(mut outputs) = outputs else {
+    let Value::OutputList(outputs) = outputs else {
         panic!("[Y, State]")
     };
+    let mut outputs = outputs
+        .try_into_owned()
+        .expect("unique forward outputs")
+        .into_iter();
     let Value::Object(network) = net else {
         panic!("network")
     };
     let mut hidden = None;
-    model::state::map_result_values(network, outputs.remove(1), "forward", |key, value| {
-        if key.role == StateRole::HiddenState {
-            hidden = Some(value.clone());
-        }
-        Ok(value)
-    })
+    let prediction = outputs.next().expect("prediction output");
+    model::state::map_result_values(
+        network,
+        outputs.next().expect("State output"),
+        "forward",
+        |key, value| {
+            if key.role == StateRole::HiddenState {
+                hidden = Some(value.clone());
+            }
+            Ok(value)
+        },
+    )
     .unwrap();
+    drop(prediction);
     hidden.expect("canonical HiddenState output")
 }
 
@@ -317,23 +328,33 @@ fn prediction_and_states(net: &Value, x: Value) -> [Value; 3] {
         let _count = crate::output_count::push_output_count(Some(2));
         block_on(forward_builtin(net.clone(), x, vec![])).unwrap()
     };
-    let Value::OutputList(mut outputs) = outputs else {
+    let Value::OutputList(outputs) = outputs else {
         panic!("[Y, State]")
     };
+    let mut outputs = outputs
+        .try_into_owned()
+        .expect("unique forward outputs")
+        .into_iter();
     let Value::Object(network) = net else {
         panic!("network")
     };
     let mut hidden = None;
     let mut cell = None;
-    model::state::map_result_values(network, outputs.remove(1), "forward", |key, value| {
-        match key.role {
-            StateRole::HiddenState => hidden = Some(value.clone()),
-            StateRole::CellState => cell = Some(value.clone()),
-        }
-        Ok(value)
-    })
+    let prediction = outputs.next().expect("prediction output");
+    model::state::map_result_values(
+        network,
+        outputs.next().expect("State output"),
+        "forward",
+        |key, value| {
+            match key.role {
+                StateRole::HiddenState => hidden = Some(value.clone()),
+                StateRole::CellState => cell = Some(value.clone()),
+            }
+            Ok(value)
+        },
+    )
     .unwrap();
-    [outputs.remove(0), hidden.unwrap(), cell.unwrap()]
+    [prediction, hidden.unwrap(), cell.unwrap()]
 }
 
 #[test]

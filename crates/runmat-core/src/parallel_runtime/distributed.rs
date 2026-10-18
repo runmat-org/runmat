@@ -358,11 +358,11 @@ impl RuntimeDistributedService for CoreDistributedService {
                 .await?;
                 value.with_owned(|value| {
                     let values = split_partition_outputs(value, request.requested_outputs)?;
-                    for (index, value) in values.into_iter().enumerate() {
+                    for (index, value) in values.iter().enumerate() {
                         partition_outputs[index].push(OwnedPartition {
                             layout: part.layout.clone(),
                             value: runmat_runtime::execution::value_codec::encode_inline_value(
-                                &value,
+                                value,
                             )
                             .map_err(error)?,
                         });
@@ -799,11 +799,11 @@ async fn materialize(
 fn split_partition_outputs(
     value: Value,
     requested_outputs: usize,
-) -> Result<Vec<Value>, RuntimeError> {
+) -> Result<runmat_value::ValueSequence, RuntimeError> {
     if requested_outputs == 0 {
-        return Ok(Vec::new());
+        return Ok(runmat_value::ValueSequence::empty());
     }
-    let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?.into_values();
+    let values = runmat_runtime::call::arguments::adapt_legacy_builtin_result(value)?;
     if values.len() == requested_outputs {
         Ok(values)
     } else {

@@ -5849,7 +5849,8 @@ fn explained_variance_matches_cpu() {
         ensure_provider_registered();
         let vars_gpu = vars_cpu
             .clone()
-            .with_owned_values(|vars| interpret_function(&bytecode, vars))
+            .with_unbounded_values(|vars| interpret_function(&bytecode, vars))
+            .and_then(std::convert::identity)
             .expect("gpu interpret");
         let eval_gpu = vars_gpu.get(eval_index).expect("gpu eval");
         assert!(matches!(eval_gpu, Value::GpuTensor(_) | Value::Tensor(_)));

@@ -37,7 +37,8 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
     {
         return Ok(request
             .into_operands()
-            .with_owned_values(PreparedBuiltinCall::unobserved)
+            .with_unbounded_values(PreparedBuiltinCall::unobserved)
+            .map_err(Box::new)?
             .with_request_input_root(root));
     }
     let mut prepared = prepare_with_inner(

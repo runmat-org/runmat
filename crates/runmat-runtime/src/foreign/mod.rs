@@ -192,12 +192,11 @@ fn require_foreign_single(
     use crate::sequence::ResolveValueSequence;
     sequence.try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 crate::sequence::SequenceResolutionContext::default(),
             )?;
-            Ok(values
-                .pop()
+            Ok(crate::sequence::into_first_output(values)?
                 .expect("RequireSingle returned one foreign value"))
         },
         |error| error.into_runtime_error(),

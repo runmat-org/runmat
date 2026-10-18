@@ -832,7 +832,9 @@ mod tests {
 
     fn output_list(value: Value) -> Vec<Value> {
         match value {
-            Value::OutputList(values) => values,
+            Value::OutputList(values) => {
+                crate::sequence::into_unbounded_output_values(values).expect("ordinary LQR outputs")
+            }
             other => panic!("expected output list, got {other:?}"),
         }
     }

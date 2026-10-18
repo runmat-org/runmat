@@ -98,14 +98,16 @@ impl RuntimeAccelerationService for AdmittedService {
             }) as Box<dyn BuiltinPreparationObservation>
         });
         Box::pin(async move {
-            request.into_operands().with_owned_values(|mut operands| {
-                if fail_body {
-                    // Admission used the original numeric argument. This service
-                    // fault forces the actual prepared body to return an error.
-                    operands[0] = Value::String("body fixture invalid operand".into());
-                }
-                PreparedBuiltinOperands::new(operands, guard)
-            })
+            request
+                .into_operands()
+                .with_unbounded_values(|mut operands| {
+                    if fail_body {
+                        // Admission used the original numeric argument. This service
+                        // fault forces the actual prepared body to return an error.
+                        operands[0] = Value::String("body fixture invalid operand".into());
+                    }
+                    PreparedBuiltinOperands::new(operands, guard)
+                })?
         })
     }
 }

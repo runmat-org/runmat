@@ -24,9 +24,9 @@ pub(super) fn output_values(
         ConversionKind::Cov2corr => (sigma_as_row(name, sigma)?, r),
     };
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![first])),
-        Some(2) => Ok(Value::OutputList(vec![first, second])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![first])),
+        Some(2) => Ok(Value::output_list(vec![first, second])),
         Some(_) => Err(conversion_error(
             name,
             format!("{name}: too many output arguments; maximum is 2"),

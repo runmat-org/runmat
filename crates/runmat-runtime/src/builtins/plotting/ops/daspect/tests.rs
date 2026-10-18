@@ -52,7 +52,7 @@ fn daspect_descriptor_and_runtime_keep_setters_outputless() {
     assert!(error.message().contains("do not return"));
     assert_eq!(
         set_daspect(vec![ratio(&[1.0, 2.0, 1.0])]).unwrap(),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
 }
 
@@ -62,7 +62,7 @@ fn daspect_queries_sets_ratio_and_mode() {
     let ax = crate::builtins::plotting::gca::gca_builtin(Vec::new()).unwrap();
     assert_eq!(
         set_daspect(vec![ratio(&[1.0, 2.0, 1.0])]).unwrap(),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
     assert_eq!(
         daspect_builtin(vec![Value::String("mode".into())]).unwrap(),
@@ -82,7 +82,7 @@ fn daspect_queries_sets_ratio_and_mode() {
 
     assert_eq!(
         set_daspect(vec![Value::String("auto".into())]).unwrap(),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
 }
 
@@ -158,7 +158,7 @@ fn daspect_accepts_all_documented_integer_ratio_classes() {
         let value = Value::Tensor(Tensor::new_integer(storage, vec![1, 3]).unwrap());
         assert_eq!(
             set_daspect(vec![value]).unwrap(),
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         );
         assert_eq!(
             tensor_data(daspect_builtin(Vec::new()).unwrap()),
@@ -205,7 +205,7 @@ fn daspect_rank_one_ratio_is_admitted_but_rank_zero_is_not() {
     let vector = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).expect("rank-one ratio");
     assert_eq!(
         set_daspect(vec![Value::Tensor(vector)]).unwrap(),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
     assert_eq!(
         tensor_data(daspect_builtin(Vec::new()).unwrap()),

@@ -259,14 +259,14 @@ mod tests {
 
     #[test]
     fn transient_output_sequences_are_rejected_at_every_portable_value_depth() {
-        let direct = encode_inline_value(&Value::OutputList(vec![Value::Num(1.0)])).unwrap_err();
+        let direct = encode_inline_value(&Value::output_list(vec![Value::Num(1.0)])).unwrap_err();
         assert!(matches!(
             direct,
             ValueCodecError::TransientSequenceNotPortable { ref path } if path == "$"
         ));
 
         let nested = Value::Cell(
-            CellArray::new(vec![Value::OutputList(vec![Value::Num(2.0)])], 1, 1).unwrap(),
+            CellArray::new(vec![Value::output_list(vec![Value::Num(2.0)])], 1, 1).unwrap(),
         );
         let error = encode_inline_value(&nested).unwrap_err();
         assert!(matches!(
@@ -289,7 +289,7 @@ mod tests {
             },
         ])
         .unwrap();
-        for value in [Value::OutputList(vec![Value::Num(1.0)]), nested] {
+        for value in [Value::output_list(vec![Value::Num(1.0)]), nested] {
             let error = super::encode_payload_graph_in_context(
                 &[value],
                 &runtime,

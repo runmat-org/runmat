@@ -122,9 +122,9 @@ fn output_network(
 ) -> BuiltinResult<Value> {
     match requested_outputs {
         None => Ok(network),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![network])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![network])),
+        Some(2) => Ok(Value::output_list(vec![
             network,
             info.expect("second result is constructed for two outputs"),
         ])),

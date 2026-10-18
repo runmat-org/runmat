@@ -119,7 +119,7 @@ pub(crate) fn simulate(
 ) -> BuiltinResult<StepResponse> {
     model.ensure_zero_delays(caller.name())?;
     let result = (|| {
-        if model.sample_time < 0.0 {
+        if model.sample_time() < 0.0 {
             return Err(simulation_error(
                 SimulationErrorKind::InvalidModel,
                 "step response requires a known nonnegative sample time",

@@ -1,6 +1,6 @@
 use crate::{
     CapabilitySet, CollectiveId, DistributedValueId, LabCount, OperatorKind, ParallelRegionId,
-    RegionValueId, SchemaValidationError, ValueFact,
+    RegionValueId, SchemaValidationError, ValueFact, ValueKindFact,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -8,7 +8,7 @@ use std::collections::BTreeSet;
 mod spmd;
 pub use spmd::SpmdLabRequirement;
 
-pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 9;
+pub const PARALLEL_MANIFEST_SCHEMA_VERSION: u16 = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind", content = "value")]
@@ -84,6 +84,41 @@ pub enum ParallelAccess {
     ReadWrite,
 }
 
+/// Static transfer knowledge, distinct from the required runtime capture check.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParallelTransferability {
+    ProvenTransferable,
+    RequiresRuntimeValidation,
+    NonTransferable,
+}
+
+impl ParallelTransferability {
+    pub fn for_fact(fact: &ValueFact) -> Self {
+        match &fact.kind {
+            ValueKindFact::Never
+            | ValueKindFact::Void
+            | ValueKindFact::Object(_)
+            | ValueKindFact::ClassReference(_)
+            | ValueKindFact::Execution(_)
+            | ValueKindFact::Distributed(_)
+            | ValueKindFact::Composite(_)
+            | ValueKindFact::Foreign(_) => Self::NonTransferable,
+            ValueKindFact::Unknown
+            | ValueKindFact::Cell(_)
+            | ValueKindFact::Struct(_)
+            | ValueKindFact::Callable(_)
+            | ValueKindFact::OutputList(_)
+            | ValueKindFact::Exception(_)
+            | ValueKindFact::Symbolic => Self::RequiresRuntimeValidation,
+            ValueKindFact::Numeric(_)
+            | ValueKindFact::Logical
+            | ValueKindFact::Character
+            | ValueKindFact::String => Self::ProvenTransferable,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParallelVariableContract {
@@ -91,7 +126,7 @@ pub struct ParallelVariableContract {
     pub role: ParallelVariableRole,
     pub access: ParallelAccess,
     pub fact: ValueFact,
-    pub transferable: bool,
+    pub transferability: ParallelTransferability,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -479,6 +514,12 @@ fn validate_variables(
         ));
     }
     for variable in variables {
+        if variable.transferability != ParallelTransferability::for_fact(&variable.fact) {
+            return Err(SchemaValidationError::new(
+                path,
+                "transferability must match the classified value fact",
+            ));
+        }
         if let ParallelVariableRole::Sliced { access } = &variable.role {
             if matches!(access.axis, ParallelSliceAxis::Dimension(0)) {
                 return Err(SchemaValidationError::new(

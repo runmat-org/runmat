@@ -44,7 +44,7 @@ fn discarded_samples_still_validate_representation_and_exactness() {
     assert!(call(Value::GpuTensor(handle), vec![]).is_err());
     assert_eq!(
         call(Value::Num(0.0), vec![]).unwrap(),
-        Value::OutputList(vec![])
+        Value::output_list(vec![])
     );
 }
 
@@ -187,7 +187,7 @@ fn gauspuls_preserves_native_single_time_shape_and_output_class() {
     else {
         panic!("expected output list");
     };
-    for output in outputs {
+    for output in outputs.try_into_owned().expect("unique output list") {
         let output = expect_tensor(output);
         assert_eq!(output.shape(), &[2, 1]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);

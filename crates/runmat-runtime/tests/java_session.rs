@@ -97,13 +97,15 @@ fn invoke(
     .map_err(Box::new)?;
     sequence.try_map_owned(
         |sequence| {
-            let mut values = runmat_runtime::sequence::ResolveValueSequence::resolve(
+            let values = runmat_runtime::sequence::ResolveValueSequence::resolve(
                 sequence,
                 runmat_types::SequenceUse::RequireSingle,
                 runmat_runtime::sequence::SequenceResolutionContext::default(),
             )
             .map_err(Box::new)?;
-            Ok(values.pop().expect("RequireSingle returned one Java value"))
+            Ok(runmat_runtime::sequence::into_first_output(values)
+                .map_err(Box::new)?
+                .expect("RequireSingle returned one Java value"))
         },
         |error| Box::new(error.into_runtime_error()),
     )

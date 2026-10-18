@@ -54,17 +54,17 @@ async fn histcounts_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResu
     let eval = evaluate_with_bins(data, &rest, requested_outputs == Some(3)).await?;
     if let Some(out_count) = requested_outputs {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_counts_value()]));
+            return Ok(Value::output_list(vec![eval.into_counts_value()]));
         }
         if out_count == 3 {
             let (counts, edges, bins) = eval.into_triple()?;
-            return Ok(Value::OutputList(vec![counts, edges, bins]));
+            return Ok(Value::output_list(vec![counts, edges, bins]));
         }
         let (counts, edges) = eval.into_pair();
-        return Ok(Value::OutputList(vec![counts, edges]));
+        return Ok(Value::output_list(vec![counts, edges]));
     }
     Ok(eval.into_counts_value())
 }

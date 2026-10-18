@@ -25,7 +25,7 @@ pub(super) fn run(args: Vec<Value>) -> BuiltinResult<Value> {
     )?;
     let count = requested.unwrap_or(3);
     if count == 0 {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let mut folders = Vec::with_capacity(input.values.len());
     let mut names = (count >= 2).then(|| Vec::with_capacity(input.values.len()));
@@ -55,6 +55,6 @@ pub(super) fn run(args: Vec<Value>) -> BuiltinResult<Value> {
         .collect::<BuiltinResult<Vec<_>>>()?;
     Ok(match requested {
         Some(count) => crate::output_count::output_list_with_padding(count, outputs),
-        None => Value::OutputList(outputs),
+        None => Value::output_list(outputs),
     })
 }

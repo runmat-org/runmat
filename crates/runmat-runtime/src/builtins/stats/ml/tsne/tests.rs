@@ -506,7 +506,7 @@ fn nested_integer_boundary_checks_large_aggregates_incrementally() {
     use std::num::NonZeroU64;
     use std::rc::Rc;
 
-    let values = Value::OutputList(vec![Value::Num(1.0); 4_096]);
+    let values = Value::output_list(vec![Value::Num(1.0); 4_096]);
     let source = Rc::new(CancellationSource::new());
     let cancel = source.clone();
     let budget = CpuCooperationBudget::with_test_turn(

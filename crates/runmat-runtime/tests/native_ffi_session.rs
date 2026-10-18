@@ -96,8 +96,16 @@ fn invoke(
             outputs.len()
         ))));
     }
-    outputs.with_owned_values(|mut values| {
-        runmat_runtime::execution::RootedValue::new(values.pop().expect("one output"))
+    outputs.with_owned_output_storage(|values| {
+        let value = values
+            .try_into_first()
+            .map_err(|_| {
+                Box::new(runmat_runtime::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                ))
+            })?
+            .expect("one output");
+        runmat_runtime::execution::RootedValue::new(value)
             .map_err(|error| Box::new(error.into_runtime_error()))
     })
 }
@@ -125,7 +133,7 @@ fn invoke_outputs(
     )))
     .map_err(Box::new)?
     .with_owned_sequence(|sequence| {
-        runmat_runtime::execution::RootedValues::new(sequence.into_values())
+        runmat_runtime::execution::RootedValues::from_output_storage(sequence.into_output_storage())
             .map_err(|error| Box::new(error.into_runtime_error()))
     })
 }
@@ -676,5 +684,11 @@ async fn isolated_add(context: &RuntimeContext) -> Value {
         ))
         .await
         .expect("isolated native fixture call")
-        .with_owned_sequence(|sequence| sequence.into_values().pop().expect("one native output"))
+        .with_owned_sequence(|sequence| {
+            sequence
+                .into_output_storage()
+                .try_into_first()
+                .expect("unique native output")
+                .expect("one native output")
+        })
 }

@@ -211,13 +211,13 @@ pub(crate) async fn ecdf_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
     if is_statement_form_call() {
         emit_ecdf_plot(axes_target, &eval)?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     match crate::output_count::current_output_count() {
         Some(0) => {
             emit_ecdf_plot(axes_target, &eval)?;
-            Ok(Value::OutputList(Vec::new()))
+            Ok(Value::output_list(Vec::new()))
         }
         Some(out_count) => {
             let outputs = eval.outputs_for_count(out_count)?;
@@ -440,8 +440,8 @@ async fn cdfplot_with_presentation(args: Vec<Value>) -> BuiltinResult<Value> {
     let handle = plot_ecdf_line(CDFPLOT_OWNER, &eval)?;
 
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Num(handle)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Num(handle)])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![Value::Num(handle), Value::Struct(stats)],

@@ -266,8 +266,8 @@ fn crossvalind_compute(
 fn output_value(output: PartitionOutput) -> BuiltinResult<Value> {
     match output {
         PartitionOutput::Folds(folds) => match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![folds])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![folds])),
             Some(_) => Err(invalid_argument(
                 "crossvalind: KFold returns one output argument",
             )),
@@ -275,9 +275,9 @@ fn output_value(output: PartitionOutput) -> BuiltinResult<Value> {
         },
         PartitionOutput::TrainTest { train, test } => {
             match crate::output_count::current_output_count() {
-                Some(0) => Ok(Value::OutputList(Vec::new())),
-                Some(1) => Ok(Value::OutputList(vec![train])),
-                Some(2) => Ok(Value::OutputList(vec![train, test])),
+                Some(0) => Ok(Value::output_list(Vec::new())),
+                Some(1) => Ok(Value::output_list(vec![train])),
+                Some(2) => Ok(Value::output_list(vec![train, test])),
                 Some(_) => Err(invalid_argument(
                     "crossvalind: too many output arguments; maximum is 2",
                 )),

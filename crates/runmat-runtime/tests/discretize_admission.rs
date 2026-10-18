@@ -18,9 +18,9 @@ fn invoke(
         .with_owned(|value| {
             let values = match value {
                 Value::OutputList(values) => values,
-                value => vec![value],
+                value => vec![value].into(),
             };
-            runmat_runtime::execution::RootedValues::new(values)
+            runmat_runtime::execution::RootedValues::from_output_storage(values)
                 .map_err(|error| Box::new(error.into_runtime_error()))
         })
 }

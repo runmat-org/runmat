@@ -106,7 +106,7 @@ async fn regexp_builtin(
     let evaluation = evaluate(subject, pattern, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = evaluation.outputs_for_multi()?;
         if outputs.len() > out_count {
@@ -1511,7 +1511,7 @@ pub(crate) mod tests {
             let _outputs = crate::output_count::push_output_count(Some(0));
             assert_eq!(
                 call(vec![Value::String("match".into())]),
-                Value::OutputList(vec![])
+                Value::output_list(vec![])
             );
         }
         for count in [7, 8] {

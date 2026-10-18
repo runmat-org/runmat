@@ -153,7 +153,7 @@ mod tests {
                     Ok(args
                         .into_iter()
                         .next()
-                        .unwrap_or_else(|| Value::OutputList(Vec::new())))
+                        .unwrap_or_else(|| Value::output_list(Vec::new())))
                 })
             },
         ));

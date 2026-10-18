@@ -83,9 +83,11 @@ impl RuntimeAccelerationService for Service {
         let observer = Observer(self.events.clone());
         let pause = self.pause_after_preparation;
         Box::pin(async move {
-            let prepared = operands.with_owned_values(|values| {
-                PreparedBuiltinOperands::new(values, Some(Box::new(observer)))
-            });
+            let prepared = operands
+                .with_unbounded_values(|values| {
+                    PreparedBuiltinOperands::new(values, Some(Box::new(observer)))
+                })
+                .and_then(std::convert::identity);
             if pause {
                 std::future::pending::<()>().await;
             }

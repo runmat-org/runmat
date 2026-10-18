@@ -548,9 +548,9 @@ pub async fn hist_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult
     let evaluation = evaluate_async(data, &rest).await?;
     evaluation.render_plot()?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![evaluation.counts_value()])),
-        Some(2) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![evaluation.counts_value()])),
+        Some(2) => Ok(Value::output_list(vec![
             evaluation.counts_value(),
             evaluation.centers_value(),
         ])),

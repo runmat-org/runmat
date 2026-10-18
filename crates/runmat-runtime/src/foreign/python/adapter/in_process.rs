@@ -149,7 +149,7 @@ impl PythonAdapter {
         converted
             .finish()
             .map_err(|error| error.into_runtime_error())?
-            .with_owned_values(|values| {
+            .with_owned_output_storage(|values| {
                 let value = Self::shape_python_outputs(requested_outputs, values)?;
                 crate::execution::RootedValueSequence::new(value)
                     .map_err(|error| error.into_runtime_error())
@@ -223,7 +223,7 @@ impl PythonAdapter {
         arguments
             .finish()
             .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
-            .with_owned_values_async(|arguments| async move {
+            .with_unbounded_values_async(|arguments| async move {
                 let request =
                     foreign_callback_request(&context, &registration.callback, arguments, 1)
                         .map_err(|error| {
@@ -235,5 +235,6 @@ impl PythonAdapter {
                 self.finish_callback(&context, sequence)
             })
             .await
+            .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
     }
 }

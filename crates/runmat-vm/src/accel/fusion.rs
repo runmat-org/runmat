@@ -136,23 +136,34 @@ pub use final_only_stores::final_only_span_requires_ordinary_stores;
 pub(crate) use final_only_stores::final_only_span_requires_ordinary_stores_with_private;
 
 pub struct StackSliceGuard<'a> {
-    stack: *mut Vec<Value>,
-    slice: Option<Vec<Value>>,
-    _marker: std::marker::PhantomData<&'a mut Vec<Value>>,
+    stack: *mut crate::interpreter::stack::InterpreterStack,
+    slice: Option<runmat_value::OwnedOutputListValues>,
+    _marker: std::marker::PhantomData<&'a mut crate::interpreter::stack::InterpreterStack>,
 }
 
 impl<'a> StackSliceGuard<'a> {
-    pub fn new(stack: &'a mut Vec<Value>, slice_start: usize) -> Self {
-        let slice = stack.split_off(slice_start);
-        Self {
+    pub fn new(
+        stack: &'a mut crate::interpreter::stack::InterpreterStack,
+        slice_start: usize,
+    ) -> Result<Self, RuntimeError> {
+        let slice = stack
+            .try_extract_output(slice_start)?
+            .try_into_owned()
+            .map_err(|_| {
+                mex(
+                    "SharedOutputStorage",
+                    "fusion operands unexpectedly have shared storage",
+                )
+            })?;
+        Ok(Self {
             stack,
             slice: Some(slice),
             _marker: std::marker::PhantomData,
-        }
+        })
     }
 
     pub fn slice(&self) -> &[Value] {
-        self.slice.as_ref().expect("stack slice missing").as_slice()
+        self.slice.as_ref().map_or(&[], |slice| slice.as_slice())
     }
 
     /// Validate every destination before changing the selected operand slice.
@@ -161,7 +172,7 @@ impl<'a> StackSliceGuard<'a> {
         &mut self,
         replacements: Vec<(usize, Value)>,
     ) -> Result<(), RuntimeError> {
-        let Some(slice) = self.slice.as_mut() else {
+        let Some(slice) = self.slice.as_mut().map(|slice| slice.as_mut_slice()) else {
             return Err(mex(
                 "FusionHostReadback",
                 "fusion host stack slice was consumed",
@@ -194,7 +205,7 @@ impl<'a> StackSliceGuard<'a> {
 impl Drop for StackSliceGuard<'_> {
     fn drop(&mut self) {
         if let Some(slice) = self.slice.take() {
-            unsafe { (&mut *self.stack).extend(slice) }
+            unsafe { (&mut *self.stack).restore_extracted(slice) }
         }
     }
 }
@@ -202,7 +213,7 @@ impl Drop for StackSliceGuard<'_> {
 pub fn gather_fusion_inputs<'a>(
     plan: &'a runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
-    stack: &'a mut Vec<Value>,
+    stack: &'a mut crate::interpreter::stack::InterpreterStack,
     vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
@@ -314,7 +325,7 @@ pub fn gather_fusion_inputs<'a>(
     }
     let available = required_stack_operands;
     let slice_start = stack.len() - available;
-    let stack_guard = StackSliceGuard::new(stack, slice_start);
+    let stack_guard = StackSliceGuard::new(stack, slice_start)?;
     let slice = stack_guard.slice().to_vec();
     let mut consumed_inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
     let input_positions: HashMap<runmat_accelerate::graph::ValueId, usize> = plan
@@ -838,7 +849,7 @@ async fn execute_fusion_reduction_vm(
 pub async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
@@ -869,7 +880,7 @@ pub(crate) struct VmFusionInvocation<'a> {
 pub(crate) async fn try_execute_fusion_group_with_inputs(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
@@ -1072,13 +1083,14 @@ mod tests {
                 Value::GpuTensor(left.clone()),
                 Value::GpuTensor(right.clone()),
             ];
-            let mut stack = vec![
+            let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
                 Value::Num(3.0),
                 Value::GpuTensor(left.clone()),
                 Value::GpuTensor(right.clone()),
-            ];
+            ]);
             {
-                let mut guard = StackSliceGuard::new(&mut stack, 1);
+                let mut guard = StackSliceGuard::new(&mut stack, 1)
+                    .expect("the unbounded test stack has a unique operand slice");
                 assert!(guard
                     .replace_host_operands(vec![(0, Value::Num(7.0))])
                     .is_err());
@@ -1110,8 +1122,8 @@ mod tests {
                 assert_eq!(guard.slice(), &[Value::Num(7.0), Value::Num(9.0)]);
             }
             assert_eq!(
-                stack,
-                vec![Value::Num(3.0), Value::Num(7.0), Value::Num(9.0)]
+                stack.as_slice(),
+                &[Value::Num(3.0), Value::Num(7.0), Value::Num(9.0)]
             );
             assert!(
                 matches!(&public[0], Value::GpuTensor(handle) if handle.view_identity() == left.view_identity())
@@ -1126,23 +1138,33 @@ mod tests {
 
     #[test]
     fn fusion_stack_transaction_restores_before_commit_and_never_replays_after_commit() {
-        let mut failed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        let mut failed = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]);
         {
-            let guard = StackSliceGuard::new(&mut failed, 1);
+            let guard = StackSliceGuard::new(&mut failed, 1)
+                .expect("the unbounded test stack has a unique operand slice");
             assert_eq!(guard.slice(), &[Value::Num(2.0), Value::Num(3.0)]);
             // A provider/placement failure drops the guard without publishing
             // outputs; the original VM operands are restored exactly once.
         }
         assert_eq!(
-            failed,
-            vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]
+            failed.as_slice(),
+            &[Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]
         );
 
-        let mut completed = vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)];
+        let mut completed = crate::interpreter::stack::InterpreterStack::from_unbounded(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+        ]);
         {
-            let guard = StackSliceGuard::new(&mut completed, 1);
+            let guard = StackSliceGuard::new(&mut completed, 1)
+                .expect("the unbounded test stack has a unique operand slice");
             guard.commit();
         }
-        assert_eq!(completed, vec![Value::Num(1.0)]);
+        assert_eq!(completed.as_slice(), &[Value::Num(1.0)]);
     }
 }

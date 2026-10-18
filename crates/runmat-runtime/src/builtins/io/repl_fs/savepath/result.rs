@@ -28,7 +28,7 @@ impl Outcome {
             return Value::Num(self.status);
         };
         if requested_outputs == 0 {
-            return Value::OutputList(Vec::new());
+            return Value::output_list(Vec::new());
         }
         let outputs = vec![
             Value::Num(self.status),

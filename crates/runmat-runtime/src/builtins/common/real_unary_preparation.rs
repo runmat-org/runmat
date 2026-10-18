@@ -104,8 +104,8 @@ where
     {
         return request
             .into_operands()
-            .with_owned_values_async(|mut values| body(values.remove(0)))
-            .await;
+            .with_unbounded_values_async(|mut values| body(values.remove(0)))
+            .await?;
     }
     let direct = if runtime.is_none_or(|runtime| runtime.service_ports().acceleration().is_none()) {
         match request.operands() {

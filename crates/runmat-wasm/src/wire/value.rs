@@ -515,7 +515,7 @@ mod tests {
 
     #[test]
     fn transient_output_sequence_is_not_projected_as_a_portable_value() {
-        let json = value_to_json(&Value::OutputList(vec![Value::Num(1.0)]), 0);
+        let json = value_to_json(&Value::output_list(vec![Value::Num(1.0)]), 0);
         assert_eq!(json["kind"], "unavailable");
         assert_eq!(json["identifier"], "TransientSequenceNotPortable");
         assert!(json.get("items").is_none());

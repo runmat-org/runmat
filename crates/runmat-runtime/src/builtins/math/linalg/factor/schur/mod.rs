@@ -202,9 +202,9 @@ fn output_pair(
     };
     match crate::output_count::current_output_count() {
         None => one(default_first),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![one(default_first)?])),
-        Some(2) => Ok(Value::OutputList(vec![one(true)?, one(false)?])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![one(default_first)?])),
+        Some(2) => Ok(Value::output_list(vec![one(true)?, one(false)?])),
         Some(_) => Err(invalid(name, "at most two outputs are supported")),
     }
 }
@@ -343,9 +343,9 @@ async fn ordeig_builtin(
         )?
     };
     if crate::output_count::current_output_count() == Some(0) {
-        Ok(Value::OutputList(Vec::new()))
+        Ok(Value::output_list(Vec::new()))
     } else if crate::output_count::current_output_count() == Some(1) {
-        Ok(Value::OutputList(vec![output]))
+        Ok(Value::output_list(vec![output]))
     } else {
         Ok(output)
     }

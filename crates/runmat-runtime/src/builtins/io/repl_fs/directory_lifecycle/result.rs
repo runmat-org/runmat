@@ -88,5 +88,5 @@ fn complete_without_outputs(
                 .build())
         }
     }
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }

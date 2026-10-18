@@ -53,19 +53,19 @@ pub(super) fn evaluate_rvalue(
                 arguments.push(materialize_operand(state, step)?);
             }
             arguments.push(materialize_operand(state, end)?);
-            super::call::builtin(state, "colon", arguments, 1).map(|values| {
-                values
+            super::call::builtin(state, "colon", arguments, 1).and_then(|values| {
+                Ok(super::call_suspension::own_output_storage(values)?
                     .into_iter()
                     .map(|value| state.arena.insert(value))
-                    .collect()
+                    .collect())
             })
         }
         MirRvalue::Call(call) => {
-            super::call::evaluate(state, call, requested_outputs).map(|values| {
-                values
+            super::call::evaluate(state, call, requested_outputs).and_then(|values| {
+                Ok(super::call_suspension::own_output_storage(values)?
                     .into_iter()
                     .map(|value| state.arena.insert(value))
-                    .collect()
+                    .collect())
             })
         }
         MirRvalue::Aggregate {
@@ -82,11 +82,11 @@ pub(super) fn evaluate_rvalue(
                 .map(|value| vec![state.arena.insert(value)])
         }
         MirRvalue::Index { base, indexing } => {
-            super::indexing::read(state, base, indexing, requested_outputs).map(|values| {
-                values
+            super::indexing::read(state, base, indexing, requested_outputs).and_then(|values| {
+                Ok(super::call_suspension::own_output_storage(values)?
                     .into_iter()
                     .map(|value| state.arena.insert(value))
-                    .collect()
+                    .collect())
             })
         }
         MirRvalue::SubscriptChain(chain) => {
@@ -136,11 +136,11 @@ pub(super) fn evaluate_rvalue(
                 )?
             };
             values.with_owned_sequence(|sequence| {
-                Ok(sequence
-                    .resolve(
-                        *sequence_use,
-                        sequence_resolution_context(*sequence_use, requested_outputs),
-                    )?
+                let values = sequence.resolve(
+                    *sequence_use,
+                    sequence_resolution_context(*sequence_use, requested_outputs),
+                )?;
+                Ok(super::call_suspension::own_output_storage(values)?
                     .into_iter()
                     .map(|value| state.arena.insert(value))
                     .collect())
@@ -191,11 +191,11 @@ pub(super) fn evaluate_rvalue(
                 )?
             };
             values.with_owned_sequence(|sequence| {
-                Ok(sequence
-                    .resolve(
-                        *sequence_use,
-                        sequence_resolution_context(*sequence_use, requested_outputs),
-                    )?
+                let values = sequence.resolve(
+                    *sequence_use,
+                    sequence_resolution_context(*sequence_use, requested_outputs),
+                )?;
+                Ok(super::call_suspension::own_output_storage(values)?
                     .into_iter()
                     .map(|value| state.arena.insert(value))
                     .collect())

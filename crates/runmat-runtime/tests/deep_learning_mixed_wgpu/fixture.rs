@@ -80,13 +80,15 @@ pub(super) fn forward(
     )
     .unwrap();
     let count = layers.values().len();
-    let network = layers.with_owned_values(|layers| {
-        call_builtin(
-            "dlnetwork",
-            &[Value::Cell(CellArray::new(layers, count, 1).unwrap())],
-        )
-        .unwrap()
-    });
+    let network = layers
+        .with_unbounded_values(|layers| {
+            call_builtin(
+                "dlnetwork",
+                &[Value::Cell(CellArray::new(layers, count, 1).unwrap())],
+            )
+            .unwrap()
+        })
+        .expect("fixture layer batch is unbounded");
     provider.reset_telemetry();
     let output = network.with_owned(|network| {
         input_value

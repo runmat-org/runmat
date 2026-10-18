@@ -14,7 +14,7 @@ pub(crate) fn evaluate_step(
     time: TimeSpec,
     caller: StepSimulationCaller,
 ) -> SimulationResult<StepResponse> {
-    if model.sample_time > 0.0 {
+    if model.sample_time() > 0.0 {
         evaluate_discrete_step(model, time, caller)
     } else {
         evaluate_continuous_step(model, time, caller)
@@ -133,7 +133,7 @@ fn evaluate_discrete_step(
     time: TimeSpec,
     caller: StepSimulationCaller,
 ) -> SimulationResult<StepResponse> {
-    let t = discrete_time_vector(model.sample_time, time)?;
+    let t = discrete_time_vector(model.sample_time(), time)?;
     if t.len() > MAX_DISCRETE_SAMPLES {
         return Err(simulation_error(
             SimulationErrorKind::DiscreteLimit,
@@ -142,7 +142,7 @@ fn evaluate_discrete_step(
     }
     let sample_indices = t
         .iter()
-        .map(|&value| checked_discrete_sample_index(model.sample_time, value))
+        .map(|&value| checked_discrete_sample_index(model.sample_time(), value))
         .collect::<SimulationResult<Vec<_>>>()?;
     let max_k = sample_indices.iter().copied().max().unwrap_or(0);
     let count = max_k.checked_add(1).ok_or_else(|| {

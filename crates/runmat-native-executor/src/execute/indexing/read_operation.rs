@@ -56,11 +56,14 @@ pub(super) fn read_paren(
                 sequence.with_owned_sequence(|sequence| {
                     let values = normalize_sequence_outputs(sequence, requested_outputs)
                         .map_err(|error| *error)?;
-                    RootedValues::new(values).map_err(|error| error.into_runtime_error())
+                    RootedValues::from_output_storage(values)
+                        .map_err(|error| error.into_runtime_error())
                 })
             }),
         )
-        .map(IndexedReadOutcome::Ordinary);
+        .map(|values| {
+            IndexedReadOutcome::Ordinary(runmat_value::OutputListStorage::unbounded(values))
+        });
     }
     if matches!(
         base,
@@ -93,11 +96,14 @@ pub(super) fn read_paren(
                     sequence.with_owned_sequence(|sequence| {
                         let values = normalize_sequence_outputs(sequence, requested_outputs)
                             .map_err(|error| *error)?;
-                        RootedValues::new(values).map_err(|error| error.into_runtime_error())
+                        RootedValues::from_output_storage(values)
+                            .map_err(|error| error.into_runtime_error())
                     })
                 }),
             )
-            .map(IndexedReadOutcome::Ordinary);
+            .map(|values| {
+                IndexedReadOutcome::Ordinary(runmat_value::OutputListStorage::unbounded(values))
+            });
         }
     }
     let direct_host = host_read_eligible(&base) && direct_host_indexing_allowed(state)?;
@@ -108,7 +114,7 @@ pub(super) fn read_paren(
         if let Some(plan) = plan_for_host(&base, &selectors)? {
             let value = read_with_plan(base, &plan)?;
             let outputs = normalize_outputs(value, requested_outputs)?;
-            let rooted = RootedValues::in_context(outputs, &state.runtime)
+            let rooted = RootedValues::from_output_storage_in_context(outputs, &state.runtime)
                 .map_err(NativeExecutorError::from)?;
             drop(roots);
             return Ok(IndexedReadOutcome::Host(rooted));
@@ -124,7 +130,8 @@ pub(super) fn read_paren(
                 normalize_outputs(value, requested_outputs)
             })
             .await?;
-        RootedValues::in_context(outputs, &runtime).map_err(NativeExecutorError::from)
+        RootedValues::from_output_storage_in_context(outputs, &runtime)
+            .map_err(NativeExecutorError::from)
     };
     let values = call_suspension::begin_semantic_operation(
         state,
@@ -134,7 +141,7 @@ pub(super) fn read_paren(
         future,
     )?;
     Ok(IndexedReadOutcome::Ordinary(
-        values.with_owned_values(|values| values),
+        values.with_owned_output_storage(|values| values),
     ))
 }
 

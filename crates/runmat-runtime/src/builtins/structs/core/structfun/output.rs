@@ -48,14 +48,14 @@ impl Collector {
             Self::Structure { names, values } => values
                 .finish()
                 .map_err(|error| error.into_runtime_error())?
-                .with_owned_values(|values| {
+                .with_unbounded_values(|values| {
                     let mut structure = StructValue::new();
                     for (name, value) in names.into_iter().zip(values) {
                         structure.insert(&name, value);
                     }
                     RootedValue::new(Value::Struct(structure))
                         .map_err(|error| error.into_runtime_error())
-                }),
+                })?,
         }
     }
 }
@@ -66,20 +66,27 @@ pub(super) fn normalize(
 ) -> crate::BuiltinResult<Vec<RootedValue>> {
     value.with_owned(|value| {
         normalize_raw(value, requested)?
+            .try_into_owned()
+            .map_err(|_| {
+                error::function("structfun: shared callback outputs require separate admission")
+            })?
             .into_iter()
             .map(|value| RootedValue::new(value).map_err(|error| error.into_runtime_error()))
             .collect()
     })
 }
 
-fn normalize_raw(value: Value, requested: usize) -> crate::BuiltinResult<Vec<Value>> {
+fn normalize_raw(
+    value: Value,
+    requested: usize,
+) -> crate::BuiltinResult<runmat_value::OutputListStorage> {
     match value {
         Value::OutputList(values) if values.len() == requested => Ok(values),
         Value::OutputList(values) => Err(error::function(format!(
             "structfun: callback returned {} outputs but {requested} were requested",
             values.len()
         ))),
-        value if requested == 1 => Ok(vec![value]),
+        value if requested == 1 => Ok(runmat_value::OutputListStorage::unbounded(vec![value])),
         _ => Err(error::function(
             "structfun: callback did not return the requested number of outputs",
         )),

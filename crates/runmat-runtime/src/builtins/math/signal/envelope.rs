@@ -236,7 +236,7 @@ async fn envelope_builtin(
         let eval = evaluate(input, &options, &mut cooperation).await?;
         render_envelope_plot(&eval).await?;
         cooperation.completed(0).await?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     if let Some(out_count) = crate::output_count::current_output_count() {
@@ -245,7 +245,7 @@ async fn envelope_builtin(
             let eval = evaluate(input, &options, &mut cooperation).await?;
             render_envelope_plot(&eval).await?;
             cooperation.completed(0).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if let Value::GpuTensor(handle) = &x {
             if let Some(value) =
@@ -257,7 +257,7 @@ async fn envelope_builtin(
         let input = value_to_signal_input(prepared_integer.take().unwrap_or(x)).await?;
         let eval = evaluate(input, &options, &mut cooperation).await?;
         if out_count == 1 {
-            return restore(Value::OutputList(vec![eval.upper_value()?]));
+            return restore(Value::output_list(vec![eval.upper_value()?]));
         }
         return restore(crate::output_count::output_list_with_padding(
             out_count,
@@ -403,7 +403,7 @@ fn gpu_envelope_value(
         }
         Some(1) => {
             drop(lower);
-            Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+            Ok(Value::output_list(vec![gpu_helpers::resident_gpu_value(
                 upper,
             )?]))
         }

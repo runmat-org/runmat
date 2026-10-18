@@ -30,9 +30,9 @@ pub(in crate::execute) fn settle_completed_semantic_values(
     state: &mut HostState,
     embedded: Option<&EmbeddedOperationIdentity>,
     values: RootedValues,
-) -> NativeExecutorResult<Vec<runmat_value::Value>> {
-    values.with_owned_values(|values| {
-        let cached = state.cache_embedded_call(embedded, &values);
+) -> NativeExecutorResult<runmat_value::OutputListStorage> {
+    values.with_owned_output_storage(|values| {
+        let cached = state.cache_embedded_call(embedded, values.as_slice());
         let finished = state.finish_embedded_call(embedded);
         match (cached, finished) {
             (Err(error), _) => Err(error),

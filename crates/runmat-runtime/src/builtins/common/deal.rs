@@ -26,17 +26,17 @@ pub async fn deal_builtin_registered(rest: Vec<Value>) -> crate::BuiltinResult<V
         )?;
     }
     if out_count == 0 {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     if rest.len() == 1 {
         let value = rest.into_iter().next().expect("one deal input");
         return if out_count == 1 {
             Ok(value)
         } else {
-            Ok(Value::OutputList(vec![value; out_count]))
+            Ok(Value::output_list(vec![value; out_count]))
         };
     }
-    Ok(Value::OutputList(rest))
+    Ok(Value::output_list(rest))
 }
 
 #[cfg(all(test, feature = "wgpu"))]
@@ -79,7 +79,7 @@ mod tests {
             let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
             assert_eq!(
                 call(vec![nested.clone()], 2).unwrap(),
-                Value::OutputList(vec![nested.clone(), nested])
+                Value::output_list(vec![nested.clone(), nested])
             );
             runmat_gc::gc_collect_major().unwrap();
             assert_eq!(allocation.probe.retirements(), 1);
@@ -161,12 +161,15 @@ mod tests {
                 .expect("nested resident input"),
         );
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let Value::OutputList(mut outputs) = call(vec![input.clone()], 2).expect("replicate")
-        else {
+        let Value::OutputList(outputs) = call(vec![input.clone()], 2).expect("replicate") else {
             panic!("two resident outputs");
         };
-        let first = outputs.remove(0);
-        let second = outputs.remove(0);
+        let mut outputs = outputs
+            .try_into_owned()
+            .expect("unique unbounded fixture outputs")
+            .into_iter();
+        let first = outputs.next().expect("first replicated output");
+        let second = outputs.next().expect("second replicated output");
         drop(outputs);
         drop(input);
         assert_eq!(
@@ -207,7 +210,7 @@ mod tests {
                 .expect("nested managed input"),
             );
             let result = call(vec![nested.clone()], 3).expect("replicate managed input");
-            assert_eq!(result, Value::OutputList(vec![nested.clone(); 3]));
+            assert_eq!(result, Value::output_list(vec![nested.clone(); 3]));
             let output_roots =
                 crate::execution::RootedValueHandles::for_values(std::iter::once(&result))
                     .expect("root returned aliases");
@@ -266,8 +269,7 @@ mod tests {
             runmat_value::CellArray::new(vec![Value::Foreign(reference)], 1, 1)
                 .expect("nested foreign input"),
         );
-        let Value::OutputList(mut outputs) = call(vec![input], 3).expect("foreign replication")
-        else {
+        let Value::OutputList(outputs) = call(vec![input], 3).expect("foreign replication") else {
             panic!("expected replicated outputs");
         };
         assert_eq!(outputs.len(), 3);
@@ -284,8 +286,12 @@ mod tests {
                 assert!(alias.shares_managed_lease(&original));
             }
         }
-        drop(outputs.pop());
-        drop(outputs.pop());
+        let mut outputs = outputs
+            .try_into_owned()
+            .expect("unique unbounded fixture outputs")
+            .into_iter();
+        drop(outputs.next_back());
+        drop(outputs.next_back());
         assert!(weak.upgrade().is_some());
         assert!(releases.0.lock().expect("release observations").is_empty());
         drop(outputs);
@@ -302,11 +308,11 @@ mod tests {
     fn deal_distributes_matching_inputs_and_replicates_one_input() {
         assert_eq!(
             call(vec![Value::Num(3.0)], 3).unwrap(),
-            Value::OutputList(vec![Value::Num(3.0); 3])
+            Value::output_list(vec![Value::Num(3.0); 3])
         );
         assert_eq!(
             call(vec![Value::Num(2.0), Value::from("x")], 2).unwrap(),
-            Value::OutputList(vec![Value::Num(2.0), Value::from("x")])
+            Value::output_list(vec![Value::Num(2.0), Value::from("x")])
         );
         assert_eq!(call(vec![Value::Num(4.0)], 1).unwrap(), Value::Num(4.0));
     }
@@ -324,10 +330,10 @@ mod tests {
                 Some("RunMat:deal:InputOutputCountMismatch")
             );
         }
-        assert_eq!(call(Vec::new(), 0).unwrap(), Value::OutputList(Vec::new()));
+        assert_eq!(call(Vec::new(), 0).unwrap(), Value::output_list(Vec::new()));
         assert_eq!(
             call(vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))], 0).unwrap(),
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         );
     }
 
@@ -391,7 +397,10 @@ mod tests {
                     panic!("resident replicated outputs");
                 };
                 assert_eq!(outputs.len(), 2);
-                for output in outputs {
+                for output in outputs
+                    .try_into_owned()
+                    .expect("unique unbounded fixture outputs")
+                {
                     let Value::GpuTensor(output) = output else {
                         panic!("resident output");
                     };

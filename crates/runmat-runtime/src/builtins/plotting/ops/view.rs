@@ -197,8 +197,8 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 fn view_outputs(az: f64, el: f64, outputs: Option<usize>) -> Value {
     match outputs {
-        Some(0) => Value::OutputList(vec![]),
-        Some(2) => Value::OutputList(vec![Value::Num(az), Value::Num(el)]),
+        Some(0) => Value::output_list(vec![]),
+        Some(2) => Value::output_list(vec![Value::Num(az), Value::Num(el)]),
         _ => Value::Tensor(Tensor::new(vec![az, el], vec![1, 2]).expect("view vector")),
     }
 }

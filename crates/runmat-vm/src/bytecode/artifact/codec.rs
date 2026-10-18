@@ -19,6 +19,8 @@ pub fn encode_interpreter_script_v2(
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    crate::bytecode::validate_stack_geometry(&bytecode.instructions, bytecode.stack_geometry)
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     bytecode
         .statement_pc_ranges()
         .map_err(|error| invalid(InterpreterPayloadForm::ScriptV2, error.to_string()))?;
@@ -53,6 +55,8 @@ pub fn decode_interpreter_script_v2(bytes: &[u8]) -> Result<Bytecode, Interprete
         .validate_catch_scope_metadata()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    crate::bytecode::validate_stack_geometry(&bytecode.instructions, bytecode.stack_geometry)
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     bytecode
         .statement_pc_ranges()

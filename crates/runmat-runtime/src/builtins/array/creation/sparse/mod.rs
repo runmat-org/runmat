@@ -1162,8 +1162,8 @@ fn spdiags_value(args: Vec<Value>) -> BuiltinResult<Value> {
                 let bout = extract_integer_diagonals(&matrix, &offsets)?;
                 let id = tensor_column(offsets.iter().map(|&d| d as f64).collect(), "spdiags")?;
                 return match crate::output_count::current_output_count() {
-                    Some(0) => Ok(Value::OutputList(Vec::new())),
-                    Some(1) => Ok(Value::OutputList(vec![bout])),
+                    Some(0) => Ok(Value::output_list(Vec::new())),
+                    Some(1) => Ok(Value::output_list(vec![bout])),
                     Some(out_count) => Ok(crate::output_count::output_list_with_padding(
                         out_count,
                         vec![bout, id],
@@ -1176,8 +1176,8 @@ fn spdiags_value(args: Vec<Value>) -> BuiltinResult<Value> {
             let bout = extract_diagonals(&matrix, &offsets)?;
             let id = tensor_column(offsets.iter().map(|&d| d as f64).collect(), "spdiags")?;
             match crate::output_count::current_output_count() {
-                Some(0) => Ok(Value::OutputList(Vec::new())),
-                Some(1) => Ok(Value::OutputList(vec![bout])),
+                Some(0) => Ok(Value::output_list(Vec::new())),
+                Some(1) => Ok(Value::output_list(vec![bout])),
                 Some(out_count) => Ok(crate::output_count::output_list_with_padding(
                     out_count,
                     vec![bout, id],

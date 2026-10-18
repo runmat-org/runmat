@@ -318,7 +318,7 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -327,7 +327,7 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
                 vec![eval.into_values_value()],
                 union_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         if out_count == 2 {
             let (values, ia) = eval.into_pair();
@@ -337,7 +337,7 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
                 vec![values, ia],
                 union_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia, ib) = eval.into_triple();
         let outputs = super::restore_set_outputs(
@@ -346,7 +346,7 @@ async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             vec![values, ia, ib],
             union_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,

@@ -52,7 +52,8 @@ fn deal_replication_executes_in_submitted_parfor_iterations() {
     assert!(
         region
             .input_variables()
-            .all(|variable| variable.contract.transferable),
+            .all(|variable| variable.contract.transferability
+                != runmat_types::ParallelTransferability::NonTransferable),
         "parallel deal inputs: {:?}",
         region.variables
     );

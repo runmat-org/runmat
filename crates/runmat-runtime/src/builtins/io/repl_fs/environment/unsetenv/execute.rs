@@ -33,8 +33,8 @@ pub(super) fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     };
     Ok(match requested {
         None => Value::Num(f64::from(status)),
-        Some(0) => Value::OutputList(Vec::new()),
-        Some(1) => Value::OutputList(vec![Value::Num(f64::from(status))]),
+        Some(0) => Value::output_list(Vec::new()),
+        Some(1) => Value::output_list(vec![Value::Num(f64::from(status))]),
         Some(_) => unreachable!("output count validated"),
     })
 }

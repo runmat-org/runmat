@@ -147,6 +147,7 @@ fn public_histogram_restoration_preserves_causes_classes_and_partial_ownership()
                             panic!("two requested outputs must be retained");
                         };
                         assert_eq!(outputs.len(), 2);
+                        let outputs = outputs.try_into_owned().expect("unique histogram outputs");
                         for (output, expected) in outputs
                             .into_iter()
                             .zip([vec![2., 1., 1.], vec![0., 0.5, 1.]])

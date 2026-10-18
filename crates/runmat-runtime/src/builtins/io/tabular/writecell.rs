@@ -175,8 +175,8 @@ async fn writecell_builtin(
     })?;
 
     match requested_outputs {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Num(bytes_written as f64)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Num(bytes_written as f64)])),
         Some(_) => Err(writecell_error(&WRITECELL_ERROR_ARG_CONFIG)),
         None => Ok(Value::Num(bytes_written as f64)),
     }

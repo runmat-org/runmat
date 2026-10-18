@@ -288,7 +288,7 @@ impl<'a> QzWork<'a> {
                 .map_err(|source| allocation_error(self.name, source))?;
         }
         let value = result.with_owned(|sequence| {
-            let mut outputs = sequence.into_values();
+            let outputs = sequence.into_output_storage();
             // The QZ-family owner checks every physical output before
             // publication. These numeric values carry no managed GC handles.
             if !outputs.iter().all(|value| output_rule.accepts(value)) {
@@ -300,9 +300,16 @@ impl<'a> QzWork<'a> {
             if explicit_output_count {
                 Ok(Value::OutputList(outputs))
             } else {
-                outputs.pop().ok_or_else(|| {
-                    ExecutionServiceError::InvalidOutputContract.into_runtime_error()
-                })
+                outputs
+                    .try_into_first()
+                    .map_err(|_| {
+                        crate::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        ExecutionServiceError::InvalidOutputContract.into_runtime_error()
+                    })
             }
         })?;
         if let Some(receipt) = transport_receipt.as_ref() {

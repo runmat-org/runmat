@@ -1041,7 +1041,7 @@ mod tests {
         object
             .properties
             .insert("cleanup".to_string(), cleanup_b.value().clone());
-        let composite = RootedValue::new(Value::OutputList(vec![
+        let composite = RootedValue::new(Value::output_list(vec![
             Value::Struct(struct_value),
             Value::Object(object),
             cleanup_c.value().clone(),

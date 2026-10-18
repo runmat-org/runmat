@@ -84,7 +84,7 @@ fn nanmax_output_count_returns_indices_and_zero_output_list() {
 
     let _guard = crate::output_count::push_output_count(Some(0));
     let result = nanmax_builtin(Value::Num(1.0), Vec::new()).expect("nanmax zero outputs");
-    assert_eq!(result, Value::OutputList(Vec::new()));
+    assert_eq!(result, Value::output_list(Vec::new()));
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

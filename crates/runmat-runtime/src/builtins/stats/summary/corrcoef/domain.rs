@@ -57,7 +57,7 @@ impl CorrcoefEvaluation {
         match self {
             Self::Complex(r) => match requested_outputs {
                 None => Ok(Value::ComplexTensor(r)),
-                Some(1) => Ok(Value::OutputList(vec![Value::ComplexTensor(r)])),
+                Some(1) => Ok(Value::output_list(vec![Value::ComplexTensor(r)])),
                 Some(_) => Err(corrcoef_error(&CORRCOEF_ERROR_COMPLEX_OUTPUTS)),
             },
             Self::Real(evaluation) => evaluation.outputs(requested_outputs, alpha),
@@ -91,7 +91,7 @@ impl RealEvaluation {
                 outputs.push(Value::Tensor(upper));
             }
         }
-        Ok(Value::OutputList(outputs))
+        Ok(Value::output_list(outputs))
     }
 }
 

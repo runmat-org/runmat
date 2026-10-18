@@ -355,7 +355,7 @@ fn revision_exhaustion_is_transactional() {
 fn transient_values_are_rejected_before_state_changes() {
     let workspace = BaseWorkspaceOwner::new();
     let transient =
-        Value::Cell(CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1).unwrap());
+        Value::Cell(CellArray::new(vec![Value::output_list(vec![Value::Num(1.0)])], 1, 1).unwrap());
     let mut delta = WorkspaceDelta::new();
     assert!(matches!(
         delta.assign("bad", transient),
@@ -389,7 +389,7 @@ fn canonical_service_keeps_direct_and_nested_transient_value_sources() {
     use std::error::Error;
 
     let service = BaseWorkspaceService::new(BaseWorkspaceOwner::new());
-    let direct = Value::OutputList(vec![Value::Num(1.0)]);
+    let direct = Value::output_list(vec![Value::Num(1.0)]);
     let nested = Value::Cell(CellArray::new(vec![direct.clone()], 1, 1).unwrap());
 
     for (name, value) in [("direct", direct), ("nested", nested)] {

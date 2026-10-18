@@ -285,7 +285,7 @@ async fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builtin
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -294,7 +294,7 @@ async fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builtin
                 vec![eval.into_values_value()],
                 setdiff_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia) = eval.into_pair();
         let outputs = super::restore_set_outputs(
@@ -303,7 +303,7 @@ async fn setdiff_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builtin
             vec![values, ia],
             setdiff_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,

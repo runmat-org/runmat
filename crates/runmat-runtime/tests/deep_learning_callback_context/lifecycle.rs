@@ -289,8 +289,12 @@ fn pending_dlfeval_retains_borrowed_resident_until_result_is_released() {
         };
         assert_eq!(sequence.kind(), runmat_value::ValueSequenceKind::Single);
         sequence.with_owned(|sequence| {
-            let values: [Value; 1] = sequence.into_values().try_into().unwrap();
-            let [Value::GpuTensor(output)] = values else {
+            let Value::GpuTensor(output) = sequence
+                .into_output_storage()
+                .try_into_first()
+                .expect("unique callback output")
+                .expect("one callback output")
+            else {
                 panic!("callback must publish one resident alias");
             };
             assert_eq!(calls(), vec![(id, Some(1))]);
@@ -400,12 +404,14 @@ fn pending_dlupdate_network_traverses_canonical_learnables_without_replay() {
     layer_batch.push_owned(layers);
     layer_batch.push_owned(dense);
     let layer_batch = layer_batch.finish().expect("root layer batch");
-    let source = layer_batch.with_owned_values(|layers| {
-        runmat_runtime::execution::RootedValue::new(Value::Cell(
-            CellArray::new(layers, 2, 1).unwrap(),
-        ))
-        .expect("root source layers")
-    });
+    let source = layer_batch
+        .with_unbounded_values(|layers| {
+            runmat_runtime::execution::RootedValue::new(Value::Cell(
+                CellArray::new(layers, 2, 1).unwrap(),
+            ))
+            .expect("root source layers")
+        })
+        .expect("fixture layer batch is unbounded");
     let network = block_on(
         source
             .with_owned_async(|source| async { call_builtin_async("dlnetwork", &[source]).await }),

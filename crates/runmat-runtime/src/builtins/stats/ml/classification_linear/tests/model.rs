@@ -16,12 +16,16 @@ async fn fitclinear_logistic_returns_fitinfo_and_probability_scores() {
     .await
     .unwrap();
     let (object, info) = match value {
-        Value::OutputList(mut outputs) => {
-            let info = outputs.pop().unwrap();
-            let object = match outputs.pop().unwrap() {
+        Value::OutputList(outputs) => {
+            let mut outputs = outputs
+                .try_into_owned()
+                .expect("unique outputs")
+                .into_iter();
+            let object = match outputs.next().unwrap() {
                 Value::Object(object) => object,
                 other => panic!("expected object, got {other:?}"),
             };
+            let info = outputs.next().unwrap();
             (object, info)
         }
         other => panic!("expected outputs, got {other:?}"),

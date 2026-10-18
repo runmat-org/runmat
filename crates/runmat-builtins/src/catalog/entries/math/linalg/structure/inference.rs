@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn seven_structure_entries_have_distinct_catalog_contracts_and_original_example_counts() {
         for (entry, examples) in [
-            (&super::super::bandwidth::BANDWIDTH_CATALOG_ENTRY, 6),
+            (&super::super::bandwidth::BANDWIDTH_CATALOG_ENTRY, 7),
             (&super::super::ishermitian::ISHERMITIAN_CATALOG_ENTRY, 6),
             (&super::super::issymmetric::ISSYMMETRIC_CATALOG_ENTRY, 6),
             (&super::super::isdiag::ISDIAG_CATALOG_ENTRY, 4),

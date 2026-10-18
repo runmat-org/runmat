@@ -1476,8 +1476,8 @@ pub mod datasample {
         let mut turn = random::acquire_turn(None, "datasample").await?;
         let (sample, idx) = super::datasample_compute(&mut turn, args)?;
         match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![sample])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![sample])),
             Some(out_count) => Ok(crate::output_count::output_list_with_padding(
                 out_count,
                 vec![sample, idx],
@@ -2024,10 +2024,10 @@ pub mod dividerand {
         let mut turn = random::acquire_turn(None, "dividerand").await?;
         let [train, val, test] = super::dividerand_compute(&mut turn, parsed)?;
         match crate::output_count::current_output_count() {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![train])),
-            Some(2) => Ok(Value::OutputList(vec![train, val])),
-            Some(3) => Ok(Value::OutputList(vec![train, val, test])),
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![train])),
+            Some(2) => Ok(Value::output_list(vec![train, val])),
+            Some(3) => Ok(Value::output_list(vec![train, val, test])),
             None => Ok(train),
             Some(_) => Err(super::sampling_error(
                 "dividerand",
@@ -2293,7 +2293,9 @@ impl BootstatRow {
 async fn bootstat_row(value: Value) -> BuiltinResult<BootstatRow> {
     // Adapt callback output arity before passing a scalar value to gathering.
     let value = match value {
-        Value::OutputList(mut values) if values.len() == 1 => values.remove(0),
+        Value::OutputList(values) if values.len() == 1 => {
+            crate::sequence::into_first_output(values)?.expect("one bootstat output")
+        }
         Value::OutputList(_) => {
             return Err(sampling_error(
                 "bootstrp",
@@ -2502,7 +2504,7 @@ pub mod bootstrp {
     pub(crate) async fn bootstrp_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         let requested_outputs = crate::output_count::current_output_count();
         match requested_outputs {
-            Some(0) => return Ok(Value::OutputList(Vec::new())),
+            Some(0) => return Ok(Value::output_list(Vec::new())),
             Some(count) if count > 2 => {
                 return Err(super::sampling_error(
                     "bootstrp",
@@ -2516,8 +2518,8 @@ pub mod bootstrp {
         let args = super::parse_bootstrp_args(args).await?;
         let eval = super::bootstrp_compute(args, include_bootsam).await?;
         match requested_outputs {
-            Some(1) => Ok(Value::OutputList(vec![eval.bootstat])),
-            Some(2) => Ok(Value::OutputList(vec![
+            Some(1) => Ok(Value::output_list(vec![eval.bootstat])),
+            Some(2) => Ok(Value::output_list(vec![
                 eval.bootstat,
                 eval.bootsam.unwrap_or(Value::Num(0.0)),
             ])),
@@ -2579,7 +2581,7 @@ mod tests {
         let exact = u64::MAX;
         for value in [
             Value::Int(IntValue::U64(exact)),
-            Value::OutputList(vec![Value::Int(IntValue::U64(exact))]),
+            Value::output_list(vec![Value::Int(IntValue::U64(exact))]),
         ] {
             let row = block_on(bootstat_row(value)).expect("one exact callback value");
             let BootstatRow::Numeric(NumericStorage::U64(values)) = row else {
@@ -2590,9 +2592,9 @@ mod tests {
         for values in [
             Vec::new(),
             vec![Value::Num(1.0), Value::Num(2.0)],
-            vec![Value::OutputList(vec![Value::Num(1.0)])],
+            vec![Value::output_list(vec![Value::Num(1.0)])],
         ] {
-            let error = match block_on(bootstat_row(Value::OutputList(values))) {
+            let error = match block_on(bootstat_row(Value::output_list(values))) {
                 Ok(_) => panic!("invalid callback arity must fail"),
                 Err(error) => error,
             };

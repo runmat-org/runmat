@@ -96,6 +96,11 @@ pub(super) fn project(value: &mut Value, explicit: bool) -> Result<(), RuntimeEr
             result?;
         }
         Value::OutputList(values) => {
+            let values = values.try_as_mut_slice_unique().ok_or_else(|| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
             for value in values {
                 project(value, explicit)?;
             }

@@ -151,10 +151,10 @@ async fn qr_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Valu
     let eval = evaluate_requested(value, &rest, request).await?;
     match count {
         None => Ok(eval.r()),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![eval.r()])),
-        Some(2) => Ok(Value::OutputList(vec![eval.q(), eval.r()])),
-        Some(3) => Ok(Value::OutputList(vec![
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![eval.r()])),
+        Some(2) => Ok(Value::output_list(vec![eval.q(), eval.r()])),
+        Some(3) => Ok(Value::output_list(vec![
             eval.q(),
             eval.r(),
             eval.permutation(),

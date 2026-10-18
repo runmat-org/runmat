@@ -29,7 +29,13 @@ pub(super) async fn groups(
         let outputs = result
             .with_owned_async(|result| async move {
                 let outputs = normalize(result, requested_outputs)?;
-                let mut rooted = Vec::with_capacity(outputs.len());
+                let outputs = outputs.try_into_owned().map_err(|_| {
+                    error::callback(
+                        "splitapply: shared callback outputs require separate admission",
+                        None,
+                    )
+                })?;
+                let mut rooted = Vec::with_capacity(outputs.as_slice().len());
                 for output in outputs {
                     rooted.push(
                         crate::execution::RootedValue::new(gather_if_needed_async(&output).await?)
@@ -55,7 +61,7 @@ pub(super) async fn groups(
         .collect()
 }
 
-fn normalize(value: Value, requested: usize) -> BuiltinResult<Vec<Value>> {
+fn normalize(value: Value, requested: usize) -> BuiltinResult<runmat_value::OutputListStorage> {
     match value {
         Value::OutputList(values) if values.len() == requested => Ok(values),
         Value::OutputList(values) => Err(error::callback(
@@ -65,7 +71,7 @@ fn normalize(value: Value, requested: usize) -> BuiltinResult<Vec<Value>> {
             ),
             None,
         )),
-        value if requested == 1 => Ok(vec![value]),
+        value if requested == 1 => Ok(runmat_value::OutputListStorage::unbounded(vec![value])),
         _ => Err(error::callback(
             "splitapply: group function did not return the requested outputs",
             None,

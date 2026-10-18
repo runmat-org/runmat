@@ -59,12 +59,12 @@ async fn mode_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let eval = mode_evaluate(value, parsed, output_class)?;
     let result = if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         } else if out_count == 1 {
-            Value::OutputList(vec![eval.into_values_value()?])
+            Value::output_list(vec![eval.into_values_value()?])
         } else if out_count == 2 {
             let (values, freq) = eval.into_pair()?;
-            Value::OutputList(vec![values, freq])
+            Value::output_list(vec![values, freq])
         } else {
             let (values, freq, cells) = eval.into_triple()?;
             crate::output_count::output_list_with_padding(out_count, vec![values, freq, cells])
@@ -135,11 +135,13 @@ fn upload_mode_value(
                 .map(Value::Cell)
                 .map_err(mode_internal_error)
         }
-        Value::OutputList(values) => values
-            .into_iter()
-            .map(|entry| upload_mode_value(provider, entry, protected))
-            .collect::<BuiltinResult<Vec<_>>>()
-            .map(Value::OutputList),
+        Value::OutputList(values) => runmat_value::ValueSequence::from_output_storage(values)
+            .map_err(crate::sequence::sequence_error_to_runtime)?
+            .try_map(
+                |entry| upload_mode_value(provider, entry, protected),
+                crate::sequence::sequence_error_to_runtime,
+            )
+            .map(|sequence| Value::OutputList(sequence.into_output_storage())),
         other => Ok(other),
     }
 }
@@ -1323,7 +1325,21 @@ pub(crate) mod tests {
         let _guard = crate::output_count::push_output_count(Some(out_count));
         let result = mode_call(value, rest)?;
         match result {
-            Value::OutputList(list) => Ok(list),
+            Value::OutputList(list) => list
+                .try_into_owned()
+                .map_err(|_| {
+                    crate::runtime_error::semantic_error(
+                        "SharedOutputStorage",
+                        "mode test output list was shared",
+                    )
+                })?
+                .try_into_unbounded_vec()
+                .map_err(|_| {
+                    crate::runtime_error::semantic_error(
+                        "SharedOutputStorage",
+                        "mode test output list retained a managed claim",
+                    )
+                }),
             other => Ok(vec![other]),
         }
     }

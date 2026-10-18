@@ -281,7 +281,7 @@ impl VariableContractContext<'_> {
             value,
             role,
             access,
-            transferable: facts::transferable(&fact),
+            transferability: facts::transferability(&fact),
             fact,
         })
     }

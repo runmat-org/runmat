@@ -42,11 +42,13 @@ pub fn enter_try(
     scope: usize,
     catch_pc: usize,
     catch_var: Option<usize>,
+    stack_depth: usize,
 ) {
     try_stack.push(crate::interpreter::state::ActiveTryHandler {
         scope,
         catch_pc,
         catch_var,
+        stack_depth,
     });
 }
 
@@ -65,9 +67,11 @@ pub fn enter_scope(locals: &mut Vec<Value>, local_count: usize) {
 }
 
 #[inline]
-pub fn return_value(stack: &mut Vec<Value>) -> Result<ControlFlowAction, RuntimeError> {
+pub fn return_value(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+) -> Result<ControlFlowAction, RuntimeError> {
     let value = pop_value(stack)?;
-    stack.push(value);
+    stack.try_push(value)?;
     Ok(ControlFlowAction::Return)
 }
 

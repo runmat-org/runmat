@@ -21,7 +21,7 @@ fn zero_outputs_returns_empty_output_list() {
     let input = structure(&[("a", 1.0.into())]);
     assert_eq!(
         call(Value::Struct(input), Vec::new()).unwrap(),
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     );
 }
 

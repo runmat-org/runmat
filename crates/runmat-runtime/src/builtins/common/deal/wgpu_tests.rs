@@ -52,9 +52,9 @@ fn check_wgpu_resident_aliases(require_device: bool) {
             .expect("resident aliases");
         assert_eq!(
             result,
-            Value::OutputList(vec![nested.clone(), nested.clone()])
+            Value::output_list(vec![nested.clone(), nested.clone()])
         );
-        let Value::OutputList(mut outputs) = result else {
+        let Value::OutputList(outputs) = result else {
             panic!("two resident outputs");
         };
         assert_eq!(outputs.len(), 2);
@@ -83,8 +83,12 @@ fn check_wgpu_resident_aliases(require_device: bool) {
             transfers_after.download_bytes,
             transfers_before.download_bytes
         );
-        let first_output = outputs.remove(0);
-        let second_output = outputs.remove(0);
+        let mut outputs = outputs
+            .try_into_owned()
+            .expect("unique unbounded fixture outputs")
+            .into_iter();
+        let first_output = outputs.next().expect("first replicated output");
+        let second_output = outputs.next().expect("second replicated output");
         drop(outputs);
         drop(nested);
         assert_eq!(

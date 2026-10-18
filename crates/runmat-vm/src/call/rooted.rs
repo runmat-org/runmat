@@ -80,11 +80,12 @@ pub(crate) async fn call_builtin_async(
         runmat_runtime::call_builtin_sequence_async_in_context(runtime, name, args).await?;
     sequence.try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 runmat_runtime::sequence::SequenceResolutionContext::default(),
             )?;
-            Ok(values.remove(0))
+            Ok(runmat_runtime::sequence::into_first_output(values)?
+                .expect("one required call output was resolved"))
         },
         |error| error.into_runtime_error(),
     )

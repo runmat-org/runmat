@@ -132,9 +132,12 @@ impl RuntimeAccelerationService for ManagedReplacementService {
             .expect("allocate service replacement");
         let handle = allocation.handle();
         *self.published.borrow_mut() = Some(handle);
-        let prepared = request.into_operands().with_owned_values(|_| {
-            PreparedBuiltinOperands::new(vec![managed_operand(handle)], None)
-        });
+        let prepared = request
+            .into_operands()
+            .with_unbounded_values(|_| {
+                PreparedBuiltinOperands::new(vec![managed_operand(handle)], None)
+            })
+            .and_then(std::convert::identity);
         allocation.unroot().expect("retire service allocation root");
         Box::pin(async move { prepared })
     }
@@ -320,9 +323,12 @@ impl RuntimeAccelerationService for OutputCountService {
         self.events.borrow_mut().push("prepare");
         let observation = Observation(self.events.clone());
         Box::pin(async move {
-            request.into_operands().with_owned_values(|operands| {
-                PreparedBuiltinOperands::new(operands, Some(Box::new(observation)))
-            })
+            request
+                .into_operands()
+                .with_unbounded_values(|operands| {
+                    PreparedBuiltinOperands::new(operands, Some(Box::new(observation)))
+                })
+                .and_then(std::convert::identity)
         })
     }
 }
@@ -353,7 +359,7 @@ fn admitted_zero_and_padded_outputs_execute_body_once_with_and_without_service()
             // The domain, not preparation, owns output construction/padding.
             // Zero outputs must still invoke its effectful admitted body once.
             let domain_result =
-                Value::OutputList(vec![Value::Num(3.0); requested_outputs.unwrap_or(1)]);
+                Value::output_list(vec![Value::Num(3.0); requested_outputs.unwrap_or(1)]);
             let expected = domain_result.clone();
             let body_events = events.clone();
             let result = block_on(execute_request(

@@ -14,7 +14,7 @@ fn linkaxes_output_admission_preserves_existing_link_and_empty_arrays_are_noop()
     let handles = tensor(vec![first, second], vec![1, 1, 2]);
     assert_eq!(
         linkaxes_builtin(vec![handles.clone()]).unwrap(),
-        Value::OutputList(vec![])
+        Value::output_list(vec![])
     );
     {
         let _outputs = crate::output_count::push_output_count(Some(1));
@@ -29,7 +29,7 @@ fn linkaxes_output_admission_preserves_existing_link_and_empty_arrays_are_noop()
     assert_eq!(get_limits(second, "XLim"), vec![2., 7.]);
     assert_eq!(
         linkaxes_builtin(vec![tensor(vec![], vec![0, 0])]).unwrap(),
-        Value::OutputList(vec![])
+        Value::output_list(vec![])
     );
     assert!(linkaxes_builtin(vec![Value::Int(runmat_value::IntValue::U64(u64::MAX))]).is_err());
     assert!(linkaxes_builtin(vec![

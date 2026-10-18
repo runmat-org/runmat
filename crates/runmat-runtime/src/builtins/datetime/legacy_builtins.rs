@@ -113,7 +113,7 @@ pub(super) async fn datevec_builtin(value: Value) -> crate::BuiltinResult<Value>
     if let Some(out_count) = crate::output_count::current_output_count().filter(|count| *count != 1)
     {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let mut outputs = Vec::with_capacity(out_count.min(6));
         let matrix_values = tensor::tensor_values_f64_cow(&matrix);

@@ -85,7 +85,7 @@ async fn model_response(system: Value) -> BuiltinResult<(Vec<f64>, Vec<f64>, f64
     preflight_host_time(None, StepSimulationCaller::StepInfo)?;
     let time = admit_time(
         None,
-        parsed.real.sample_time,
+        parsed.real.sample_time(),
         StepSimulationCaller::StepInfo,
     )?;
     let response = simulate(&parsed.real, time, StepSimulationCaller::StepInfo)?;

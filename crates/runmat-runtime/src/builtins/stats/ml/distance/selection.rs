@@ -16,7 +16,7 @@ pub(super) fn selected_distance_outputs(
 ) -> BuiltinResult<Value> {
     let (selected_distances, selected_indices) = select_distances(distances, selection)?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![
@@ -79,7 +79,7 @@ pub(super) fn knnsearch_outputs(
         for query in 0..observation_matrix_dimensions(y).0 {
             sorted_neighbors(x, y, metric, query)?;
         }
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let include_distances = requested.is_some_and(|count| count >= 2);
     if options.include_ties {

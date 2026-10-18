@@ -271,7 +271,7 @@ async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builti
     let eval = evaluate(a, b, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -280,7 +280,7 @@ async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builti
                 vec![eval.into_mask_value()],
                 ismember_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (mask, loc) = eval.into_pair();
         let outputs = super::restore_set_outputs(
@@ -289,7 +289,7 @@ async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::Builti
             vec![mask, loc],
             ismember_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,
@@ -1171,7 +1171,7 @@ pub(crate) mod tests {
         .expect("rank-zero rows membership") else {
             panic!("expected two outputs");
         };
-        assert_eq!(outputs, vec![Value::Bool(true), Value::Num(1.0)]);
+        assert_eq!(outputs.as_slice(), &[Value::Bool(true), Value::Num(1.0)]);
 
         let rank_one = Tensor::new(vec![1.0, 2.0], vec![2]).expect("rank-one input");
         let set = Tensor::new(vec![2.0], vec![1]).expect("rank-one set");

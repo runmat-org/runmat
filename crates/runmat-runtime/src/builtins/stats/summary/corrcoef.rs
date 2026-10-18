@@ -103,12 +103,12 @@ async fn corrcoef_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value
     let precision = CovariancePrecision::observations(&args.first, args.second.as_ref());
     let requested_outputs = crate::output_count::current_output_count();
     if requested_outputs == Some(0) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     if requested_outputs.is_none() || requested_outputs == Some(1) {
         if let Some(result) = corrcoef_try_gpu(&args).await? {
             return Ok(match requested_outputs {
-                Some(1) => Value::OutputList(vec![result]),
+                Some(1) => Value::output_list(vec![result]),
                 _ => result,
             });
         }

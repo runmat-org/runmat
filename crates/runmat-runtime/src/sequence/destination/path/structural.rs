@@ -126,10 +126,18 @@ pub(super) async fn read_step(
                 Some(1),
             )
             .await?;
-            values.with_owned_values(|mut values| match values.as_slice() {
-                [_] => {
-                    RootedValue::new(values.remove(0)).map_err(|error| error.into_runtime_error())
-                }
+            values.with_owned_output_storage(|values| match values.as_slice() {
+                [_] => RootedValue::new(
+                    values
+                        .try_into_first()
+                        .map_err(|_| {
+                            crate::sequence::sequence_error_to_runtime(
+                                runmat_value::ValueSequenceError::SharedOutputStorage,
+                            )
+                        })?
+                        .expect("one chained brace value"),
+                )
+                .map_err(|error| error.into_runtime_error()),
                 _ => Err(semantic_error(
                     "CommaSeparatedListRequiresSingleValue",
                     "a chained brace destination must select exactly one value",
@@ -203,11 +211,12 @@ async fn read_parentheses(
         };
         return sequence.try_map_owned(
             |sequence| {
-                let mut values = sequence.resolve(
+                let values = sequence.resolve(
                     runmat_types::SequenceUse::RequireSingle,
                     crate::sequence::SequenceResolutionContext::default(),
                 )?;
-                Ok(values.remove(0))
+                Ok(crate::sequence::into_first_output(values)?
+                    .expect("one required output was resolved"))
             },
             |error| error.into_runtime_error(),
         );

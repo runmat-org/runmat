@@ -58,8 +58,9 @@ fn unsupported_complex_geometry_deopts_before_effects_and_restores_stack() {
         runmat_value::ComplexTensor::new(vec![(1.0, 2.0), (2.0, 1.0)], vec![1, 2]).unwrap(),
     );
     let original = vec![Value::Num(17.0), operand.clone()];
-    let mut stack = original.clone();
-    let guard = super::super::StackSliceGuard::new(&mut stack, 1);
+    let mut stack = crate::interpreter::stack::InterpreterStack::from_unbounded(original.clone());
+    let guard = super::super::StackSliceGuard::new(&mut stack, 1)
+        .expect("the unbounded test stack has a unique operand slice");
     let result = futures::executor::block_on(super::super::execute_fusion_reduction(
         &plan,
         FusionExecutionRequest {
@@ -75,7 +76,7 @@ fn unsupported_complex_geometry_deopts_before_effects_and_restores_stack() {
         result,
         Err(super::super::FusionAttemptError::Deopt(_))
     ));
-    assert_eq!(stack, original);
+    assert_eq!(stack.as_slice(), original.as_slice());
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), test)]

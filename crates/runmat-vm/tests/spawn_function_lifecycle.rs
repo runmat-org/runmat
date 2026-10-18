@@ -134,11 +134,18 @@ mod tests {
     ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
         sequence.try_map_owned(
             |sequence| {
-                let mut values = sequence.resolve(
+                let values = sequence.resolve(
                     runmat_types::SequenceUse::RequireSingle,
                     runmat_runtime::sequence::SequenceResolutionContext::default(),
                 )?;
-                Ok(values.remove(0))
+                values
+                    .try_into_first()
+                    .map_err(|_| {
+                        runmat_runtime::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?
+                    .ok_or_else(|| RuntimeError::new("expected one function output"))
             },
             |error| error.into_runtime_error(),
         )

@@ -224,10 +224,11 @@ impl OriginMexBoundaryAdapter {
             } => {
                 capture_async(stdout, stderr, async move {
                     let sequence = arguments
-                        .with_owned_values_async(|arguments| {
+                        .with_unbounded_values_async(|arguments| {
                             host.call_rooted(&function, arguments, requested_outputs)
                         })
                         .await
+                        .map_err(runtime_diagnostic)?
                         .map_err(runtime_diagnostic)?;
                     let output = Box::new(RuntimeMexCallOutput {
                         sequence,

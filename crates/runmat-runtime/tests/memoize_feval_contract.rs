@@ -122,9 +122,12 @@ fn memoized_public_feval_validates_count_and_never_replays_or_caches_shortage() 
     }
     for _ in 0..2 {
         for (count, expected) in [
-            (0, Value::OutputList(vec![])),
+            (0, Value::output_list(vec![])),
             (1, Value::Num(2.0)),
-            (2, Value::OutputList(vec![Value::Num(2.0), Value::Num(4.0)])),
+            (
+                2,
+                Value::output_list(vec![Value::Num(2.0), Value::Num(4.0)]),
+            ),
         ] {
             assert_eq!(
                 block_on(call_feval_async_with_outputs_in_context(

@@ -69,15 +69,21 @@ impl RuntimeAccelerationService for Service {
             }
         );
         self.events.borrow_mut().push("prepare");
-        let prepared = request.into_operands().with_owned_values(|mut operands| {
-            if let Some(replacement) = &self.replacement {
-                operands[0] = replacement.clone();
-            }
-            if let Some(replacement) = &self.map_replacement {
-                operands[1] = replacement.clone();
-            }
-            PreparedBuiltinOperands::new(operands, Some(Box::new(Observer(self.events.clone()))))
-        });
+        let prepared = request
+            .into_operands()
+            .with_unbounded_values(|mut operands| {
+                if let Some(replacement) = &self.replacement {
+                    operands[0] = replacement.clone();
+                }
+                if let Some(replacement) = &self.map_replacement {
+                    operands[1] = replacement.clone();
+                }
+                PreparedBuiltinOperands::new(
+                    operands,
+                    Some(Box::new(Observer(self.events.clone()))),
+                )
+            })
+            .and_then(std::convert::identity);
         let pause = self.pause;
         Box::pin(async move {
             if pause {

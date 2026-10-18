@@ -64,11 +64,11 @@ fn view_two_outputs_share_query_and_set_state_in_matlab_mode() {
     let _outputs = crate::output_count::push_output_count(Some(2));
     assert_eq!(
         view_builtin(vec![Value::Num(45.), Value::Num(20.)]).unwrap(),
-        Value::OutputList(vec![Value::Num(45.), Value::Num(20.)])
+        Value::output_list(vec![Value::Num(45.), Value::Num(20.)])
     );
     assert_eq!(
         view_builtin(vec![]).unwrap(),
-        Value::OutputList(vec![Value::Num(45.), Value::Num(20.)])
+        Value::output_list(vec![Value::Num(45.), Value::Num(20.)])
     );
 }
 
@@ -100,7 +100,7 @@ fn view_output_and_numeric_admission_precedes_default_axes_creation() {
         assert!(state::current_figure_handle_if_exists().is_none());
         assert_eq!(
             view_builtin(vec![Value::Num(2.)]).unwrap(),
-            Value::OutputList(vec![])
+            Value::output_list(vec![])
         );
         assert!(state::current_figure_handle_if_exists().is_some());
     }

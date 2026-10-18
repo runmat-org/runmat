@@ -1,31 +1,31 @@
 use runmat_runtime::RuntimeError;
-use runmat_value::Value;
 
 use super::{SequenceRegister, SequenceState};
 
 impl SequenceState {
     fn stage_window(
         slot: &mut Option<SequenceRegister>,
-        stack: &mut Vec<Value>,
+        stack: &mut crate::interpreter::stack::InterpreterStack,
         sequence: runmat_value::ValueSequence,
         overwrite_message: &'static str,
     ) -> Result<(), RuntimeError> {
         if slot.is_some() {
             return Err(state_error(overwrite_message));
         }
-        let values = sequence.into_values();
+        let values = sequence.into_output_storage();
+        let output_count = values.as_slice().len();
         let window = SequenceRegister {
             start: stack.len(),
-            len: values.len(),
+            len: output_count,
         };
-        stack.extend(values);
+        stack.try_extend_output(values)?;
         *slot = Some(window);
         Ok(())
     }
 
     pub(super) fn stage_call_output_sequence(
         &mut self,
-        stack: &mut Vec<Value>,
+        stack: &mut crate::interpreter::stack::InterpreterStack,
         sequence: runmat_value::ValueSequence,
     ) -> Result<(), RuntimeError> {
         Self::stage_window(
@@ -38,7 +38,7 @@ impl SequenceState {
 
     pub(super) fn stage_rooted_call_output_sequence(
         &mut self,
-        stack: &mut Vec<Value>,
+        stack: &mut crate::interpreter::stack::InterpreterStack,
         sequence: runmat_runtime::execution::RootedValueSequence,
     ) -> Result<(), RuntimeError> {
         sequence.with_owned_sequence(|sequence| self.stage_call_output_sequence(stack, sequence))
@@ -73,15 +73,16 @@ mod tests {
     #[test]
     fn capture_quarantines_zero_one_and_many_outputs() {
         let cases = [
-            (Value::OutputList(Vec::new()), Vec::new()),
+            (Value::output_list(Vec::new()), Vec::new()),
             (Value::Num(7.0), vec![Value::Num(7.0)]),
             (
-                Value::OutputList(vec![Value::Num(1.0), Value::Num(2.0)]),
+                Value::output_list(vec![Value::Num(1.0), Value::Num(2.0)]),
                 vec![Value::Num(1.0), Value::Num(2.0)],
             ),
         ];
         for (legacy, expected) in cases {
-            let mut stack = vec![Value::Num(99.0)];
+            let mut stack = crate::interpreter::stack::InterpreterStack::unbounded();
+            stack.try_push(Value::Num(99.0)).expect("seed test operand");
             let mut state = SequenceState::default();
             let sequence = runmat_runtime::call::arguments::adapt_legacy_builtin_result(legacy)
                 .expect("adapt builtin result");
@@ -93,18 +94,18 @@ mod tests {
                 .all(|value| !matches!(value, Value::OutputList(_))));
             state.capture_call_outputs().expect("capture call outputs");
             let sequence = take_sequence_register(&mut stack, &mut state).expect("take sequence");
-            assert_eq!(sequence.into_values(), expected);
-            assert_eq!(stack, vec![Value::Num(99.0)]);
+            assert_eq!(sequence.as_slice(), expected.as_slice());
+            assert_eq!(stack.as_slice(), &[Value::Num(99.0)]);
         }
     }
 
     #[test]
     fn nested_legacy_carrier_never_enters_the_register() {
-        let stack: Vec<Value> = Vec::new();
+        let stack = crate::interpreter::stack::InterpreterStack::unbounded();
         let mut state = SequenceState::default();
         let error =
-            runmat_runtime::call::arguments::adapt_legacy_builtin_result(Value::OutputList(vec![
-                Value::OutputList(vec![Value::Num(1.0)]),
+            runmat_runtime::call::arguments::adapt_legacy_builtin_result(Value::output_list(vec![
+                Value::output_list(vec![Value::Num(1.0)]),
             ]))
             .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:NestedLegacyOutputList"));

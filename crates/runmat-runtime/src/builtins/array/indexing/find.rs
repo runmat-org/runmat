@@ -138,7 +138,7 @@ async fn find_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count <= 1 {
             let linear = eval.linear_value()?;

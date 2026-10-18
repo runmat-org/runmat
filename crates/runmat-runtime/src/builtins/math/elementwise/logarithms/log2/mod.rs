@@ -28,13 +28,13 @@ async fn log2_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
     match crate::output_count::current_output_count().unwrap_or(1) {
         0 => {
             super::engine::execute(runtime.as_ref(), OPERATION, value).await?;
-            RootedValue::new(Value::OutputList(Vec::new()))
+            RootedValue::new(Value::output_list(Vec::new()))
                 .map_err(|cause| cause.into_runtime_error())
         }
         1 => super::engine::execute(runtime.as_ref(), OPERATION, value).await,
         2 => {
             let (fraction, exponent) = dissection::execute(value).await?;
-            RootedValue::new(Value::OutputList(vec![
+            RootedValue::new(Value::output_list(vec![
                 fraction.value().clone(),
                 exponent.value().clone(),
             ]))

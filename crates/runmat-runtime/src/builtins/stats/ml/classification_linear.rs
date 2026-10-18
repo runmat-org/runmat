@@ -273,8 +273,8 @@ pub(crate) async fn fitclinear_builtin(first: Value, rest: Vec<Value>) -> Builti
     let spec = build_fit_spec(first, rest, arguments)?;
     let result = fit_models(&spec)?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![Value::Object(result.object)])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![Value::Object(result.object)])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![Value::Object(result.object), result.fit_info],

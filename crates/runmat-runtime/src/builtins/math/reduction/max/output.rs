@@ -50,10 +50,10 @@ pub(super) fn evaluation_to_value(
 ) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.into_value()]));
+            return Ok(Value::output_list(vec![eval.into_value()]));
         }
         let (values, indices) = eval.into_pair(super::extrema_provider::ExtremaKind::Max)?;
         return Ok(crate::output_count::output_list_with_padding(

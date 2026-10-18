@@ -105,7 +105,7 @@ pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         Ok(if runmat {
             Value::Bool(false)
         } else {
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         })
     }
 }

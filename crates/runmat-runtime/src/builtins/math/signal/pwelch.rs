@@ -399,7 +399,7 @@ async fn ensure_pwelch_integer_boundary(
 
 fn output_eval(eval: PwelchEvaluation, precision: SignalPrecision) -> BuiltinResult<Value> {
     if statement_form_call() {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let freq_len = eval.f.len();
     let pxx = precision
@@ -412,7 +412,7 @@ fn output_eval(eval: PwelchEvaluation, precision: SignalPrecision) -> BuiltinRes
         .map_err(|e| pwelch_error_with_detail(&PWELCH_ERROR_INTERNAL, e))?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![pxx]));
+            return Ok(Value::output_list(vec![pxx]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,

@@ -102,7 +102,7 @@ async fn regress_builtin(y: Value, x: Value, rest: Vec<Value>) -> BuiltinResult<
         0.05
     };
     match outputs {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(out_count) => {
             let outputs = regress_compute(y, x, alpha, out_count)?;
             Ok(crate::output_count::output_list_with_padding(

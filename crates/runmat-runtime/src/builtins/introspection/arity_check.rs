@@ -225,7 +225,7 @@ fn dispatch_narginchk_with_outputs(
     if !max.permits(actual_inputs) {
         return Err(descriptor_error(builtin, &NARGINCHK_ERROR_TOO_MANY_INPUTS));
     }
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 pub fn dispatch_nargoutchk(args: Vec<Value>) -> crate::BuiltinResult<Value> {
@@ -284,7 +284,7 @@ fn dispatch_nargoutchk_with_outputs(
             ));
         }
         return Ok(if requested_outputs == Some(0) {
-            Value::OutputList(Vec::new())
+            Value::output_list(Vec::new())
         } else {
             legacy_nargout_result(arity_violation(actual_outputs, min, max), structured)
         });
@@ -308,7 +308,7 @@ fn dispatch_nargoutchk_with_outputs(
         }
         None => {}
     }
-    Ok(Value::OutputList(Vec::new()))
+    Ok(Value::output_list(Vec::new()))
 }
 
 #[runmat_macros::runtime_builtin(

@@ -153,7 +153,7 @@ async fn drawnow_in_context(
         ));
     }
     if requested_outputs == Some(0) {
-        Ok(Value::OutputList(Vec::new()))
+        Ok(Value::output_list(Vec::new()))
     } else {
         // The historical direct Rust entrypoint returned a boolean. Public
         // MATLAB-compatible calls request zero outputs; one is a gated RunMat

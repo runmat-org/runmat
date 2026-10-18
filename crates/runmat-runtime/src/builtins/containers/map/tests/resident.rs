@@ -34,7 +34,7 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
             source_file: None,
             captures: vec![resident.clone()],
         })),
-        Value::OutputList(vec![resident.clone()]),
+        Value::output_list(vec![resident.clone()]),
     ];
     for value in nested {
         assert!(contains_resident_value(&value));

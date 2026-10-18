@@ -70,8 +70,8 @@ async fn strtok_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let (tokens, remainders) =
         map_text_pair_preserve(text, "strtok", |s| strtok_pair(s, &delimiters))?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![tokens])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![tokens])),
         Some(n) => Ok(crate::output_count::output_list_with_padding(
             n,
             vec![tokens, remainders],
@@ -155,8 +155,8 @@ fn str2num_evaluation_method(
 
 fn str2num_outputs(value: Value, ok: bool) -> Value {
     match crate::output_count::current_output_count() {
-        Some(0) => Value::OutputList(Vec::new()),
-        Some(1) => Value::OutputList(vec![value]),
+        Some(0) => Value::output_list(Vec::new()),
+        Some(1) => Value::output_list(vec![value]),
         Some(n) => crate::output_count::output_list_with_padding(n, vec![value, Value::Bool(ok)]),
         None => value,
     }
@@ -347,8 +347,8 @@ async fn sscanf_builtin(text: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     };
     let scan = sscanf_scan(&text, &format, size)?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![scan.value])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![scan.value])),
         Some(n) => Ok(crate::output_count::output_list_with_padding(
             n,
             vec![
@@ -1605,7 +1605,7 @@ mod tests {
                 vec![Value::CharArray(CharArray::new_row("b"))],
             ))
             .unwrap(),
-            Value::OutputList(outputs) if outputs == vec![Value::String("a".into()), Value::String("b".into())]
+            Value::OutputList(outputs) if outputs.as_slice() == [Value::String("a".into()), Value::String("b".into())]
         ));
         assert!(matches!(
             block(convert_contained_strings_to_chars_builtin(
@@ -1613,7 +1613,7 @@ mod tests {
                 vec![Value::String("b".into())],
             ))
             .unwrap(),
-            Value::OutputList(outputs) if outputs == vec![Value::CharArray(CharArray::new_row("a")), Value::CharArray(CharArray::new_row("b"))]
+            Value::OutputList(outputs) if outputs.as_slice() == [Value::CharArray(CharArray::new_row("a")), Value::CharArray(CharArray::new_row("b"))]
         ));
         drop(_guard);
         assert_eq!(
@@ -1665,7 +1665,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 result,
-                Value::OutputList(vec![
+                Value::output_list(vec![
                     Value::CharArray(CharArray::new_row("a")),
                     Value::CharArray(CharArray::new_row("b")),
                     Value::Num(0.0),
@@ -1679,7 +1679,7 @@ mod tests {
                 vec![Value::CharArray(CharArray::new_row("b"))],
             ))
             .unwrap();
-            assert_eq!(result, Value::OutputList(Vec::new()));
+            assert_eq!(result, Value::output_list(Vec::new()));
         }
     }
 

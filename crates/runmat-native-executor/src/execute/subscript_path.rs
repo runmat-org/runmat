@@ -181,7 +181,8 @@ fn read_inner(
                 .await?;
             sequence.with_owned_sequence(|sequence| {
                 let values = sequence.resolve(selection, sequence_context)?;
-                RootedValues::new(values).map_err(|error| error.into_runtime_error())
+                RootedValues::from_output_storage(values)
+                    .map_err(|error| error.into_runtime_error())
             })
         }),
     )

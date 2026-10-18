@@ -230,10 +230,10 @@ pub(super) async fn output_gpu(
     let pxx = crate::builtins::common::gpu_helpers::resident_gpu_value(pxx)?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Some(Value::OutputList(Vec::new())));
+            return Ok(Some(Value::output_list(Vec::new())));
         }
         if out_count == 1 {
-            return Ok(Some(Value::OutputList(vec![pxx])));
+            return Ok(Some(Value::output_list(vec![pxx])));
         }
         let f_values = frequency_vector(nfft, options.fs, options.range, cooperation).await?;
         let f_shape = [estimate.rows, 1usize];

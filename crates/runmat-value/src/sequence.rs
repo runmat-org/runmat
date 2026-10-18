@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::{validate_no_transient_sequence, TransientValueError, Value};
+use crate::{validate_no_transient_sequence, OutputListStorage, TransientValueError, Value};
 
 /// Maximum number of values carried by one execution result sequence.
 pub const MAX_VALUE_SEQUENCE_OUTPUTS: usize = u16::MAX as usize;
@@ -15,6 +15,7 @@ pub enum ValueSequenceKind {
 pub enum ValueSequenceError {
     TooManyOutputs { actual: usize, maximum: usize },
     TransientValue(TransientValueError),
+    SharedOutputStorage,
 }
 
 impl fmt::Display for ValueSequenceError {
@@ -25,6 +26,9 @@ impl fmt::Display for ValueSequenceError {
                 "an output sequence contains {actual} values, but the maximum is {maximum}"
             ),
             Self::TransientValue(error) => error.fmt(formatter),
+            Self::SharedOutputStorage => formatter.write_str(
+                "shared exact output storage cannot be materialized without separate admission",
+            ),
         }
     }
 }
@@ -40,7 +44,7 @@ impl From<TransientValueError> for ValueSequenceError {
 #[derive(Debug, Clone, PartialEq)]
 enum ValueSequenceStorage {
     Single(Value),
-    CommaSeparated(Vec<Value>),
+    CommaSeparated(OutputListStorage),
 }
 
 /// Values produced by one source expression before its surrounding context
@@ -54,7 +58,9 @@ pub struct ValueSequence(ValueSequenceStorage);
 impl ValueSequence {
     /// Constructs an empty comma-separated sequence.
     pub const fn empty() -> Self {
-        Self(ValueSequenceStorage::CommaSeparated(Vec::new()))
+        Self(ValueSequenceStorage::CommaSeparated(
+            OutputListStorage::empty(),
+        ))
     }
 
     /// Constructs the result of an ordinary single-valued expression.
@@ -70,6 +76,18 @@ impl ValueSequence {
     pub fn comma_separated(values: Vec<Value>) -> Result<Self, ValueSequenceError> {
         validate_output_count(values.len())?;
         for value in &values {
+            validate_no_transient_sequence(value)?;
+        }
+        Ok(Self(ValueSequenceStorage::CommaSeparated(
+            OutputListStorage::unbounded(values),
+        )))
+    }
+
+    /// Adopt the canonical output backing without copying its children or
+    /// discarding an exact physical claim.
+    pub fn from_output_storage(values: OutputListStorage) -> Result<Self, ValueSequenceError> {
+        validate_output_count(values.len())?;
+        for value in values.iter() {
             validate_no_transient_sequence(value)?;
         }
         Ok(Self(ValueSequenceStorage::CommaSeparated(values)))
@@ -100,14 +118,27 @@ impl ValueSequence {
         }
     }
 
+    /// Whether a comma-separated sequence retains an exact claim for its
+    /// physical output collection (independent of child Value claims).
+    pub fn has_retained_output_claim(&self) -> bool {
+        matches!(&self.0, ValueSequenceStorage::CommaSeparated(values) if values.has_retained_claim())
+    }
+
     pub fn iter(&self) -> std::slice::Iter<'_, Value> {
         self.as_slice().iter()
     }
 
-    pub fn into_values(self) -> Vec<Value> {
+    pub fn into_output_storage(self) -> OutputListStorage {
         match self.0 {
-            ValueSequenceStorage::Single(value) => vec![value],
+            ValueSequenceStorage::Single(value) => OutputListStorage::unbounded(vec![value]),
             ValueSequenceStorage::CommaSeparated(values) => values,
+        }
+    }
+
+    pub fn into_legacy_value(self) -> Value {
+        match self.0 {
+            ValueSequenceStorage::Single(value) => value,
+            ValueSequenceStorage::CommaSeparated(values) => Value::OutputList(values),
         }
     }
 
@@ -127,18 +158,19 @@ impl ValueSequence {
                     .map_err(&mut sequence_error)?;
                 ValueSequenceStorage::Single(value)
             }
-            ValueSequenceStorage::CommaSeparated(values) => ValueSequenceStorage::CommaSeparated(
-                values
-                    .into_iter()
-                    .map(|value| {
-                        let value = map(value)?;
-                        validate_no_transient_sequence(&value)
-                            .map_err(ValueSequenceError::from)
-                            .map_err(&mut sequence_error)?;
-                        Ok(value)
-                    })
-                    .collect::<Result<Vec<_>, E>>()?,
-            ),
+            ValueSequenceStorage::CommaSeparated(mut values) => {
+                let slots = values
+                    .try_as_mut_slice_unique()
+                    .ok_or_else(|| sequence_error(ValueSequenceError::SharedOutputStorage))?;
+                for slot in slots {
+                    let value = map(std::mem::replace(slot, Value::Num(0.0)))?;
+                    validate_no_transient_sequence(&value)
+                        .map_err(ValueSequenceError::from)
+                        .map_err(&mut sequence_error)?;
+                    *slot = value;
+                }
+                ValueSequenceStorage::CommaSeparated(values)
+            }
         };
         Ok(Self(storage))
     }
@@ -191,7 +223,7 @@ mod tests {
         ] {
             let error = sequence
                 .try_map::<ValueSequenceError>(
-                    |_| Ok(Value::OutputList(Vec::new())),
+                    |_| Ok(Value::output_list(Vec::new())),
                     std::convert::identity,
                 )
                 .unwrap_err();
@@ -236,7 +268,7 @@ mod tests {
         let error = ValueSequence::single(Value::Num(2.0))
             .unwrap()
             .try_map(
-                |_| Ok(Value::OutputList(Vec::new())),
+                |_| Ok(Value::output_list(Vec::new())),
                 |error| {
                     conversions += 1;
                     MappingError::Invalid(error)
@@ -274,15 +306,13 @@ mod tests {
         assert_eq!(
             ValueSequence::single(Value::Num(3.0))
                 .unwrap()
-                .into_values(),
-            vec![Value::Num(3.0)]
+                .into_legacy_value(),
+            Value::Num(3.0)
         );
-        assert_eq!(
-            ValueSequence::comma_separated(vec![Value::Num(1.0), Value::Num(2.0)])
-                .unwrap()
-                .into_values(),
-            vec![Value::Num(1.0), Value::Num(2.0)]
-        );
+        let values = ValueSequence::comma_separated(vec![Value::Num(1.0), Value::Num(2.0)])
+            .unwrap()
+            .into_output_storage();
+        assert_eq!(values.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
     }
 
     #[test]
@@ -299,7 +329,7 @@ mod tests {
 
     #[test]
     fn rejects_transient_sequences_nested_in_supported_aggregate_kinds() {
-        let transient = || Value::OutputList(vec![Value::Num(1.0)]);
+        let transient = || Value::output_list(vec![Value::Num(1.0)]);
         assert_eq!(
             ValueSequence::comma_separated(vec![transient()]).unwrap_err(),
             ValueSequenceError::TransientValue(TransientValueError::LegacyOutputList)

@@ -24,7 +24,7 @@ async fn gcd_builtin(left: Value, right: Value) -> BuiltinResult<Value> {
         ));
     }
     if requested == Some(0) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     let left = BinaryInput::from_value(left, &GCD_CONTEXT).await?;
@@ -94,7 +94,7 @@ fn assemble_outputs(
         return Ok(divisor);
     };
     if count == 1 {
-        return Ok(Value::OutputList(vec![divisor]));
+        return Ok(Value::output_list(vec![divisor]));
     }
     let first = coefficient_value(
         first.expect("extended output"),
@@ -103,7 +103,7 @@ fn assemble_outputs(
         &GCD_CONTEXT,
     )?;
     if count == 2 {
-        return Ok(Value::OutputList(vec![divisor, first]));
+        return Ok(Value::output_list(vec![divisor, first]));
     }
     let second = coefficient_value(
         second.expect("extended output"),
@@ -111,7 +111,7 @@ fn assemble_outputs(
         output,
         &GCD_CONTEXT,
     )?;
-    Ok(Value::OutputList(vec![divisor, first, second]))
+    Ok(Value::output_list(vec![divisor, first, second]))
 }
 
 #[cfg(test)]

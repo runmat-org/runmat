@@ -118,7 +118,7 @@ fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
     let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
     let time_spec = admit_time(
         Some(&time),
-        parsed.real.sample_time,
+        parsed.real.sample_time(),
         StepSimulationCaller::StepInfo,
     )
     .expect("time admission");
@@ -131,7 +131,7 @@ fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
     let bad_time = Value::Num(-1.0);
     let error = admit_time(
         Some(&bad_time),
-        parsed.real.sample_time,
+        parsed.real.sample_time(),
         StepSimulationCaller::StepInfo,
     )
     .expect_err("invalid stepinfo time");
@@ -139,7 +139,7 @@ fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
 
     let mut delayed = parsed.real.clone();
     delayed.input_delay = 0.25;
-    let automatic = admit_time(None, delayed.sample_time, StepSimulationCaller::StepInfo)
+    let automatic = admit_time(None, delayed.sample_time(), StepSimulationCaller::StepInfo)
         .expect("automatic time");
     let error = simulate(&delayed, automatic, StepSimulationCaller::StepInfo)
         .expect_err("shared simulation must reject delay");

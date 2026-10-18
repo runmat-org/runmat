@@ -38,8 +38,13 @@ pub(super) fn root_struct(
     builder
         .finish()
         .map_err(|error| error.into_runtime_error())?
-        .with_owned_values(|values| {
+        .with_owned_output_storage(|values| {
             let mut structure = StructValue::new();
+            let values = values.try_into_owned().map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
             for (name, value) in names.into_iter().zip(values) {
                 structure.insert(name, value);
             }
@@ -60,7 +65,7 @@ pub(super) fn root_cell(
     builder
         .finish()
         .map_err(|error| error.into_runtime_error())?
-        .with_owned_values(|values| {
+        .with_unbounded_values(|values| {
             let cell = CellArray::new_with_shape(values, shape).map_err(|error| {
                 serialization_error(
                     phase.method(),
@@ -72,7 +77,7 @@ pub(super) fn root_cell(
                 )
             })?;
             root_value(Value::Cell(cell))
-        })
+        })?
 }
 
 pub(super) fn root_struct_array(
@@ -89,7 +94,7 @@ pub(super) fn root_struct_array(
     builder
         .finish()
         .map_err(|error| error.into_runtime_error())?
-        .with_owned_values(|values| {
+        .with_unbounded_values(|values| {
             let value = runmat_value::StructArray::normalize_field_major(names, values, shape)
                 .map_err(|error| {
                     serialization_error(
@@ -102,5 +107,5 @@ pub(super) fn root_struct_array(
                     )
                 })?;
             root_value(value)
-        })
+        })?
 }

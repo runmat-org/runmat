@@ -629,15 +629,14 @@ async fn call_memoized(
     use crate::sequence::ResolveValueSequence;
     output.try_map_owned(
         |output| {
-            let mut outputs = crate::call::arguments::adapt_legacy_builtin_result(output)?
-                .resolve(
-                    runmat_types::SequenceUse::SelectPrefix {
-                        count: requested_outputs,
-                    },
-                    crate::sequence::SequenceResolutionContext::default(),
-                )?;
+            let outputs = crate::call::arguments::adapt_legacy_builtin_result(output)?.resolve(
+                runmat_types::SequenceUse::SelectPrefix {
+                    count: requested_outputs,
+                },
+                crate::sequence::SequenceResolutionContext::default(),
+            )?;
             let output = if requested_outputs == 1 {
-                outputs.remove(0)
+                crate::sequence::into_first_output(outputs)?.expect("one memoized output")
             } else {
                 Value::OutputList(outputs)
             };
@@ -967,7 +966,12 @@ fn nonnegative_platform_usize(value: f64) -> Option<usize> {
 
 fn output_value_to_cell(value: &Value, requested_outputs: usize) -> BuiltinResult<CellArray> {
     let values = match value {
-        Value::OutputList(values) => values.clone(),
+        Value::OutputList(values) if values.has_retained_claim() => {
+            return Err(crate::sequence::sequence_error_to_runtime(
+                runmat_value::ValueSequenceError::SharedOutputStorage,
+            ));
+        }
+        Value::OutputList(values) => values.as_slice().to_vec(),
         _ if requested_outputs == 0 => Vec::new(),
         value => vec![value.clone()],
     };
@@ -1736,8 +1740,11 @@ mod tests {
         for _ in 0..2 {
             for (count, expected) in [
                 (1, Value::Num(3.0)),
-                (2, Value::OutputList(vec![Value::Num(3.0), Value::Num(4.0)])),
-                (0, Value::OutputList(Vec::new())),
+                (
+                    2,
+                    Value::output_list(vec![Value::Num(3.0), Value::Num(4.0)]),
+                ),
+                (0, Value::output_list(Vec::new())),
             ] {
                 let output = call_feval_fixture(&runtime, f.clone(), &[Value::Num(2.0)], count)
                     .expect("requested outputs");

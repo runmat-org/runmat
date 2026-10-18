@@ -234,7 +234,7 @@ fn variable_contract(
         value,
         role,
         access,
-        transferable: facts::transferable(&fact),
+        transferability: facts::transferability(&fact),
         fact,
     })
 }

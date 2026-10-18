@@ -20,7 +20,7 @@ mod tests {
     #[test]
     fn nested_transient_sequence_is_not_storable() {
         let value = Value::Cell(
-            runmat_value::CellArray::new(vec![Value::OutputList(vec![Value::Num(1.0)])], 1, 1)
+            runmat_value::CellArray::new(vec![Value::output_list(vec![Value::Num(1.0)])], 1, 1)
                 .unwrap(),
         );
         assert_eq!(
@@ -35,7 +35,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::OutputList(Vec::new())],
+                captures: vec![Value::output_list(Vec::new())],
             },
         ));
         assert_eq!(

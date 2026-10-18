@@ -15,7 +15,7 @@ pub(super) async fn apply(
     let values = numeric::values(&inputs.x, "X")?;
     let plan = edges::plan(&values, inputs.edges_or_count, inputs.rest)?;
     if crate::output_count::current_output_count() == Some(0) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     let bins = values
         .iter()
@@ -53,10 +53,10 @@ pub(super) async fn apply(
 fn select_outputs(output: Value, edges: Option<Value>) -> BuiltinResult<Value> {
     match crate::output_count::current_output_count() {
         None => Ok(output),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![output])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![output])),
         Some(2) => edges
-            .map(|edges| Value::OutputList(vec![output, edges]))
+            .map(|edges| Value::output_list(vec![output, edges]))
             .ok_or_else(|| {
                 error::invalid("discretize: the second edge output requires a scalar bin count")
             }),

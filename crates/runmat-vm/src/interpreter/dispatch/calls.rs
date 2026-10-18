@@ -83,7 +83,7 @@ pub(super) fn root_sequence(
 }
 
 pub(super) fn publish_fixed_outputs(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence: runmat_value::ValueSequence,
     requested_outputs: impl std::borrow::Borrow<usize>,
 ) -> Result<(), RuntimeError> {
@@ -96,12 +96,12 @@ pub(super) fn publish_fixed_outputs(
         },
         runmat_runtime::sequence::SequenceResolutionContext::default(),
     )?;
-    stack.extend(values);
+    stack.try_extend_output(values)?;
     Ok(())
 }
 
 pub(super) fn publish_rooted_fixed_outputs(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence: runmat_runtime::execution::RootedValueSequence,
     requested_outputs: impl std::borrow::Borrow<usize>,
 ) -> Result<(), RuntimeError> {
@@ -128,7 +128,7 @@ pub struct ExceptionRouteContext<'a> {
 pub struct BuiltinCallContext<'a> {
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
-    pub stack: &'a mut Vec<Value>,
+    pub stack: &'a mut crate::interpreter::stack::InterpreterStack,
     pub name: &'a str,
     pub arg_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
@@ -141,7 +141,7 @@ pub struct BuiltinCallContext<'a> {
 }
 
 pub struct UserCallContext<'a> {
-    pub stack: &'a mut Vec<Value>,
+    pub stack: &'a mut crate::interpreter::stack::InterpreterStack,
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
     pub identity: CallableIdentity,
@@ -174,7 +174,7 @@ fn descriptor_needs_continuation(descriptor: &CallableDescriptor) -> bool {
 }
 
 pub struct WorkspaceFirstCallContext<'a> {
-    pub stack: &'a mut Vec<Value>,
+    pub stack: &'a mut crate::interpreter::stack::InterpreterStack,
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
     pub workspace_name: &'a str,
@@ -246,7 +246,7 @@ fn imported_static_method_owner(
 }
 
 pub async fn build_builtin_expand_multi_args(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     specs: &[ArgumentSpec],
     sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
@@ -255,7 +255,7 @@ pub async fn build_builtin_expand_multi_args(
 }
 
 pub async fn build_feval_expand_multi_args(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     specs: &[ArgumentSpec],
     sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
@@ -264,7 +264,7 @@ pub async fn build_feval_expand_multi_args(
 }
 
 pub async fn build_user_function_expand_multi_args(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     specs: &[ArgumentSpec],
     sequence_state: &mut super::SequenceState,
     runtime: &runmat_runtime::context::RuntimeContext,
@@ -276,7 +276,7 @@ pub fn handle_builtin_outcome(
     result: Result<runmat_runtime::execution::RootedValueSequence, RuntimeError>,
     imported: ImportedBuiltinResolution,
     _output_hint: usize,
-    _stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     ctx: ExceptionRouteContext<'_>,
 ) -> Result<BuiltinHandling, RuntimeError> {
     let ExceptionRouteContext {
@@ -293,7 +293,7 @@ pub fn handle_builtin_outcome(
             }
             ImportedBuiltinResolution::Ambiguous(err) => Err(err),
             ImportedBuiltinResolution::NotFound => Ok(
-                match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
+                match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc, stack) {
                     ExceptionHandling::Caught => BuiltinHandling::Caught,
                     ExceptionHandling::Uncaught(err) => BuiltinHandling::Uncaught(err),
                 },
@@ -402,7 +402,7 @@ pub async fn handle_prepared_user_function_call(
 ) -> Result<UserCallHandling, RuntimeError> {
     let _roots = root_values(&args)?;
     let UserCallContext {
-        stack: _,
+        stack,
         runtime,
         process_driver,
         identity,
@@ -499,7 +499,7 @@ pub async fn handle_prepared_user_function_call(
     match result {
         Ok(result) => Ok(UserCallHandling::Completed(result)),
         Err(err) => Ok(
-            match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
+            match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc, stack) {
                 ExceptionHandling::Caught => UserCallHandling::Caught,
                 ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
             },
@@ -564,7 +564,7 @@ pub async fn handle_workspace_first_prepared_call(
         return match result {
             Ok(sequence) => Ok(UserCallHandling::Completed(sequence)),
             Err(err) => Ok(
-                match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
+                match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc, stack) {
                     ExceptionHandling::Caught => UserCallHandling::Caught,
                     ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
                 },
@@ -574,7 +574,7 @@ pub async fn handle_workspace_first_prepared_call(
 
     if let CallableIdentity::Builtin(id) = &identity {
         if call_builtins::is_vm_dynamic_workspace_builtin(&id.0) {
-            let mut temp_stack = args;
+            let mut temp_stack = crate::interpreter::stack::InterpreterStack::from_unbounded(args);
             let arg_count = temp_stack.len();
             let result = call_builtins::vm_dynamic_workspace_builtin_with_driver(
                 runtime,
@@ -602,7 +602,14 @@ pub async fn handle_workspace_first_prepared_call(
                     |error| error.into_runtime_error(),
                 )?)),
                 Err(err) => Ok(
-                    match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
+                    match redirect_exception_to_catch(
+                        err,
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                        stack,
+                    ) {
                         ExceptionHandling::Caught => UserCallHandling::Caught,
                         ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
                     },
@@ -634,7 +641,7 @@ pub async fn handle_workspace_first_prepared_call(
 
 pub async fn handle_method_or_member_index_multi_call(
     runtime: &runmat_runtime::context::RuntimeContext,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
     arg_count: usize,
@@ -655,7 +662,7 @@ pub async fn handle_method_or_member_index_multi_call(
 
 async fn handle_method_or_member_index_call_inner(
     runtime: &runmat_runtime::context::RuntimeContext,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     identity: CallableIdentity,
     fallback_policy: CallableFallbackPolicy,
     arg_count: usize,
@@ -685,7 +692,7 @@ async fn handle_method_or_member_index_call_inner(
 }
 
 pub async fn handle_method_or_member_index_expand_multi_call(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence_state: &mut super::SequenceState,
     context: MethodExpandCallContext<'_>,
 ) -> Result<MethodHandling, RuntimeError> {
@@ -709,7 +716,7 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let _access_guard = current_class_context
         .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
     let outputs = args
-        .with_owned_values_async(|mut args| async move {
+        .with_unbounded_values_async(|mut args| async move {
             let base = args.remove(0);
             Box::pin(
                 runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
@@ -725,12 +732,12 @@ pub async fn handle_method_or_member_index_expand_multi_call(
             )
             .await
         })
-        .await?;
+        .await??;
     Ok(Some(outputs))
 }
 
 pub fn handle_load_method(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     name: String,
     current_function_name: &str,
 ) -> Result<MethodHandling, RuntimeError> {
@@ -740,12 +747,12 @@ pub fn handle_load_method(
         name,
         (!current_function_name.is_empty()).then_some(current_function_name),
     )?;
-    stack.push(value);
+    stack.try_push(value)?;
     Ok(None)
 }
 
 pub fn handle_create_closure(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     func_name: String,
     capture_count: usize,
 ) -> Result<MethodHandling, RuntimeError> {
@@ -754,7 +761,7 @@ pub fn handle_create_closure(
 }
 
 pub fn handle_create_semantic_closure(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     function: runmat_hir::FunctionId,
     display_name: String,
     capture_count: usize,
@@ -773,12 +780,12 @@ pub fn handle_create_semantic_closure(
 }
 
 pub fn handle_load_static_property(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     class_identity: &runmat_types::ClassIdentity,
     prop: &str,
 ) -> Result<MethodHandling, RuntimeError> {
     let value = obj_resolve::load_static_member(class_identity, prop, None)?;
-    stack.push(value);
+    stack.try_push(value)?;
     Ok(None)
 }
 
@@ -842,19 +849,19 @@ mod tests {
 
     #[test]
     fn fixed_outputs_publish_values_without_a_transient_carrier() {
-        let mut stack = Vec::new();
+        let mut stack = crate::interpreter::stack::InterpreterStack::unbounded();
         publish_fixed_outputs(
             &mut stack,
             runmat_value::ValueSequence::comma_separated(vec![Value::Num(7.0)]).unwrap(),
             1,
         )
         .unwrap();
-        assert_eq!(stack, vec![Value::Num(7.0)]);
+        assert_eq!(stack.as_slice(), &[Value::Num(7.0)]);
     }
 
     #[test]
     fn fixed_zero_outputs_leave_no_stack_value() {
-        let mut stack = Vec::new();
+        let mut stack = crate::interpreter::stack::InterpreterStack::unbounded();
         publish_fixed_outputs(
             &mut stack,
             runmat_value::ValueSequence::single(Value::Num(7.0)).unwrap(),
@@ -866,7 +873,7 @@ mod tests {
 
     #[test]
     fn checked_sequence_rejects_nested_legacy_carriers_before_publication() {
-        let error = runmat_value::ValueSequence::comma_separated(vec![Value::OutputList(vec![
+        let error = runmat_value::ValueSequence::comma_separated(vec![Value::output_list(vec![
             Value::Num(7.0),
         ])])
         .unwrap_err();
@@ -882,7 +889,7 @@ mod tests {
         let mut vars = InterpreterVars::from_owned(Vec::new());
         let mut last_exception = None;
         let mut pc = 0usize;
-        let mut stack: Vec<Value> = Vec::new();
+        let mut stack = crate::interpreter::stack::InterpreterStack::unbounded();
 
         let outcome = handle_builtin_outcome(
             Err("primary builtin failure".into()),

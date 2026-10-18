@@ -195,11 +195,15 @@ impl Default for ExecutionOutcome {
 pub enum RuntimeFlow {
     NoValue,
     Single(Value),
-    OutputList(Vec<Value>),
+    OutputList(runmat_value::OutputListStorage),
     DynamicList(DynamicListHandle),
 }
 
 impl RuntimeFlow {
+    pub fn output_list(values: Vec<Value>) -> Self {
+        Self::OutputList(runmat_value::OutputListStorage::unbounded(values))
+    }
+
     pub fn is_no_value(&self) -> bool {
         matches!(self, Self::NoValue)
     }
@@ -378,7 +382,7 @@ mod tests {
         assert!(RuntimeFlow::Single(value)
             .durable_workspace_value()
             .is_some());
-        assert!(RuntimeFlow::OutputList(vec![Value::Num(1.0)])
+        assert!(RuntimeFlow::output_list(vec![Value::Num(1.0)])
             .durable_workspace_value()
             .is_none());
     }

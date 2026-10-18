@@ -171,10 +171,10 @@ pub(super) fn zplane_limits(data: &ZeroPoleData) -> (f64, f64) {
 fn handles_value(handles: Vec<f64>) -> BuiltinResult<Value> {
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![handles_tensor(handles)?]));
+            return Ok(Value::output_list(vec![handles_tensor(handles)?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,

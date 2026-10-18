@@ -2,6 +2,140 @@ use super::*;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
+fn inverse_discrete_basis_roundtrips_and_uses_physical_z_poles() {
+    let inverse = TfModel::new(
+        vec![Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)],
+        vec![Complex64::new(1.0, 0.0)],
+        TfOptions {
+            variable: "z^-1".into(),
+            sample_time: 0.25,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        inverse.frequency_response(Complex64::new(2.0, 0.0)),
+        Complex64::new(0.5, 0.0)
+    );
+    assert_eq!(inverse.poles().unwrap(), vec![Complex64::new(0.0, 0.0)]);
+    assert!(inverse.is_stable().unwrap());
+    let restored = TfModel::from_value(inverse.to_value("tf").unwrap(), "tf").unwrap();
+    assert_eq!(restored.variable, TfVariable::ZInverse);
+    assert_eq!(restored.sample_domain(), inverse.sample_domain());
+    assert_eq!(restored.numerator, inverse.numerator);
+    assert_eq!(restored.denominator, inverse.denominator);
+
+    let unspecified = TfModel::discrete_variable("q^-1", -1.0).unwrap();
+    assert!(unspecified.is_discrete());
+    assert_eq!(
+        unspecified.frequency_response(Complex64::new(2.0, 0.0)),
+        Complex64::new(0.5, 0.0)
+    );
+    assert_eq!(unspecified.dc_gain().unwrap(), Complex64::new(1.0, 0.0));
+
+    let inverse_quadratic = TfModel::new(
+        vec![Complex64::new(1.0, 0.0)],
+        vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(2.0, 0.0),
+            Complex64::new(3.0, 0.0),
+        ],
+        TfOptions {
+            variable: "q^-1".into(),
+            sample_time: 0.5,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        inverse_quadratic.numerator,
+        vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.0, 0.0),
+            Complex64::new(0.0, 0.0)
+        ]
+    );
+    assert_eq!(
+        inverse_quadratic.denominator,
+        vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(2.0, 0.0),
+            Complex64::new(3.0, 0.0)
+        ]
+    );
+    assert_eq!(
+        inverse_quadratic.frequency_response(Complex64::new(2.0, 0.0)),
+        Complex64::new(4.0 / 11.0, 0.0)
+    );
+    let (num, den) = inverse_quadratic.coefficient_values("tf").unwrap();
+    let roundtrip = TfModel::from_value(inverse_quadratic.to_value("tf").unwrap(), "tf").unwrap();
+    assert_eq!(roundtrip.numerator, inverse_quadratic.numerator);
+    assert_eq!(roundtrip.denominator, inverse_quadratic.denominator);
+    let (num_again, den_again) = roundtrip.coefficient_values("tf").unwrap();
+    assert_eq!(num_again, num);
+    assert_eq!(den_again, den);
+
+    let forward_z = TfModel::new(
+        vec![Complex64::new(1.0, 0.0)],
+        vec![Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)],
+        TfOptions {
+            variable: "z^-1".into(),
+            sample_time: 1.0,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        forward_z.frequency_response(Complex64::new(0.0, 0.0)),
+        Complex64::new(0.0, 0.0)
+    );
+    assert_eq!(forward_z.zeros().unwrap(), vec![Complex64::new(0.0, 0.0)]);
+    let restored_z = TfModel::from_value(forward_z.to_value("tf").unwrap(), "tf").unwrap();
+    assert_eq!(restored_z.numerator, forward_z.numerator);
+    assert_eq!(restored_z.denominator, forward_z.denominator);
+
+    let removable = TfModel::new(
+        vec![Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)],
+        vec![Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)],
+        TfOptions {
+            variable: "q^-1".into(),
+            sample_time: 1.0,
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        removable.frequency_response(Complex64::new(0.0, 0.0)),
+        Complex64::new(1.0, 0.0)
+    );
+
+    let one = TfModel::scalar(
+        Complex64::new(1.0, 0.0),
+        TfOptions {
+            variable: "z^-1".into(),
+            sample_time: 1.0,
+        },
+    )
+    .unwrap();
+    let inverse_unit = TfModel::new(
+        vec![Complex64::new(0.0, 0.0), Complex64::new(1.0, 0.0)],
+        vec![Complex64::new(1.0, 0.0)],
+        TfOptions {
+            variable: "z^-1".into(),
+            sample_time: 1.0,
+        },
+    )
+    .unwrap();
+    let sum = inverse_unit.add(&one).unwrap();
+    assert_eq!(
+        sum.frequency_response(Complex64::new(2.0, 0.0)),
+        Complex64::new(1.5, 0.0)
+    );
+    let restored_sum = TfModel::from_value(sum.to_value("tf").unwrap(), "tf").unwrap();
+    assert_eq!(
+        restored_sum.frequency_response(Complex64::new(2.0, 0.0)),
+        Complex64::new(1.5, 0.0)
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
 fn state_matrix_properties_preserve_dense_rank_boundaries() {
     let mut object = ObjectInstance::new(SS_CLASS.to_string());
     object.properties.insert(
@@ -209,7 +343,7 @@ fn response_real_admission_does_not_erase_tiny_imaginary_parts_or_delays() {
             let delayed = RealTfModel {
                 numerator: vec![1.0],
                 denominator: vec![1.0],
-                sample_time: 0.0,
+                sample_domain: TfSampleDomain::Continuous,
                 input_delay,
                 output_delay,
             };

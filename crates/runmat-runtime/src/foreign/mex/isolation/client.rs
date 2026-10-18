@@ -982,10 +982,13 @@ async fn execute_callback(
         } => {
             let arguments = decode_value_transfers_rooted(&arguments, snapshots)?;
             let values = arguments
-                .with_owned_values_async(|arguments| {
+                .with_unbounded_values_async(|arguments| {
                     services.call_rooted(&function, arguments, requested_outputs as usize)
                 })
                 .await
+                .map_err(|error| {
+                    diagnostic_error(super::super::services::runtime_diagnostic(error))
+                })?
                 .map_err(|error| {
                     diagnostic_error(super::super::services::runtime_diagnostic(error))
                 })?
@@ -998,7 +1001,7 @@ async fn execute_callback(
                             },
                             crate::sequence::SequenceResolutionContext::default(),
                         )?;
-                        runmat_value::ValueSequence::comma_separated(values)
+                        runmat_value::ValueSequence::from_output_storage(values)
                             .map_err(crate::sequence::sequence_error_to_runtime)
                     },
                     |error| error.into_runtime_error(),

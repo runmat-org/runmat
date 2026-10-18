@@ -325,7 +325,7 @@ fn adamupdate_single_resident_inputs_fall_back_without_widening_class() {
             panic!("expected three optimizer outputs");
         };
         assert_eq!(values.len(), 3);
-        for value in values {
+        for value in values.try_into_owned().expect("unique adam outputs") {
             let Value::Tensor(tensor) = value else {
                 panic!("the fallback returns host tensors");
             };

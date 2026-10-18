@@ -1932,6 +1932,9 @@ impl runmat_runtime::call::descriptor::FunctionNameResolver for FunctionRegistry
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bytecode {
     pub instructions: Vec<Instr>,
+    /// Compiler-derived operand-stack capacity. Artifact decoders validate
+    /// this claim against the same CFG used by bytecode verification.
+    pub stack_geometry: super::BytecodeStackGeometry,
     /// Innermost lexical catch at each instruction, derived from MIR.
     pub catch_scopes: Vec<Option<runmat_mir::CatchScopeId>>,
     #[serde(skip)]
@@ -2149,6 +2152,7 @@ impl Bytecode {
     pub fn empty() -> Self {
         Self {
             instructions: Vec::new(),
+            stack_geometry: super::BytecodeStackGeometry::default(),
             catch_scopes: Vec::new(),
             active_function: None,
             active_class_method_owner: None,
@@ -2184,12 +2188,15 @@ impl Bytecode {
     }
 
     pub fn with_instructions(instructions: Vec<Instr>, var_count: usize) -> Self {
+        let stack_geometry = super::derive_stack_geometry(&instructions)
+            .unwrap_or(super::BytecodeStackGeometry::Dynamic);
         let instr_spans = vec![runmat_hir::Span::default(); instructions.len()];
         let call_arg_spans = vec![None; instructions.len()];
         let coverage_sites = vec![Vec::new(); instructions.len()];
         let catch_scopes = vec![None; instructions.len()];
         Self {
             instructions,
+            stack_geometry,
             catch_scopes,
             instr_spans,
             call_arg_spans,

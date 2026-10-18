@@ -1962,7 +1962,8 @@ fn parfor_and_spmd_fixtures_lower_as_structured_suspend_resume_ir() {
                     role: ParallelVariableRole::Loop,
                     access: ParallelAccess::ReadWrite,
                     fact: ValueFact::unknown(DynamicReason::RuntimeValue),
-                    transferable: true,
+                    transferability:
+                        runmat_types::ParallelTransferability::RequiresRuntimeValidation,
                 }],
                 maximum_workers: Some(LabCount(4)),
                 effects: Default::default(),

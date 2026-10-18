@@ -10,6 +10,7 @@ mod collective;
 mod distributed;
 mod parfor;
 mod spmd;
+mod task_group;
 mod tasks;
 pub(crate) use distributed::encode_spmd_interpreter_output;
 
@@ -22,7 +23,7 @@ pub(super) struct ParallelDispatchContext<'a> {
 
 pub(super) async fn dispatch(
     instr: &Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
     pc: &mut usize,
     sequence_state: &mut super::SequenceState,
@@ -37,11 +38,11 @@ pub(super) async fn dispatch(
     match instr {
         Instr::CreateSemanticFuture(function, arg_count, out_count) => {
             let arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
-            stack.push(Value::Future(tasks::create_future(
+            stack.try_push(Value::Future(tasks::create_future(
                 execution,
                 tasks::semantic_descriptor(*function, *out_count, arguments),
                 function_registry,
-            )?));
+            )?))?;
         }
         Instr::CreateSemanticFutureExpandMultiOutput(function, specs, out_count) => {
             let arguments = build_user_function_expand_multi_args(
@@ -51,14 +52,14 @@ pub(super) async fn dispatch(
                 &execution.runtime,
             )
             .await?;
-            arguments.with_owned_values(|arguments| {
-                stack.push(Value::Future(tasks::create_future(
+            arguments.with_unbounded_values(|arguments| {
+                stack.try_push(Value::Future(tasks::create_future(
                     execution,
                     tasks::semantic_descriptor(*function, *out_count, arguments),
                     function_registry,
-                )?));
+                )?))?;
                 Ok::<_, RuntimeError>(())
-            })?;
+            })??;
         }
         Instr::ScheduleFeval { arg_count, on_all } => {
             tasks::schedule_feval(stack, execution, function_registry, *arg_count, *on_all)?;
@@ -69,7 +70,7 @@ pub(super) async fn dispatch(
             let value = pop(stack, "await instruction expected a value on the stack")?;
             tasks::await_value(execution, value)
                 .await?
-                .with_owned(|value| stack.push(value));
+                .with_owned(|value| stack.try_push(value))?;
         }
         Instr::FetchOutputs {
             arg_count,
@@ -103,17 +104,17 @@ pub(super) async fn dispatch(
         }
         Instr::EnsurePool(arg_count) => {
             let arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
-            stack.push(runmat_runtime::parallel::pool::ensure(
+            stack.try_push(runmat_runtime::parallel::pool::ensure(
                 &execution.runtime,
                 &arguments,
-            )?);
+            )?)?;
         }
         Instr::CurrentPool(arg_count) => {
             let arguments = crate::call::builtins::collect_call_args(stack, *arg_count)?;
-            stack.push(runmat_runtime::parallel::pool::current(
+            stack.try_push(runmat_runtime::parallel::pool::current(
                 &execution.runtime,
                 &arguments,
-            )?);
+            )?)?;
         }
         Instr::ExecuteParfor {
             region,
@@ -227,7 +228,10 @@ fn value_codec_error(error: ValueCodecError) -> RuntimeError {
     runmat_runtime::runtime_error::semantic_error("RunMat:ParallelValueEncoding", error.to_string())
 }
 
-fn pop(stack: &mut Vec<Value>, message: &str) -> Result<Value, RuntimeError> {
+fn pop(
+    stack: &mut crate::interpreter::stack::InterpreterStack,
+    message: &str,
+) -> Result<Value, RuntimeError> {
     stack
         .pop()
         .ok_or_else(|| crate::interpreter::errors::mex("StackUnderflow", message))

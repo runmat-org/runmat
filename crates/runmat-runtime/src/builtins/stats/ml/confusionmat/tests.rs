@@ -103,6 +103,10 @@ fn confusionmat(group: Value, grouphat: Value, rest: Vec<Value>, outputs: usize)
             panic!("expected output list");
         };
         values
+            .try_into_owned()
+            .expect("unique output list")
+            .try_into_unbounded_vec()
+            .expect("unbounded output list")
     })
 }
 

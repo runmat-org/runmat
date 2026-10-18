@@ -1,11 +1,10 @@
 use super::{take_sequence_register, ObjectDispatchContext};
 use runmat_runtime::object::resolve as obj_resolve;
 use runmat_runtime::RuntimeError;
-use runmat_value::Value;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence_register: &mut super::super::SequenceState,
     context: ObjectDispatchContext<'_>,
 ) -> Result<bool, RuntimeError> {
@@ -33,7 +32,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberOrInit(field) => {
@@ -56,7 +55,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberDynamic => {
@@ -84,7 +83,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberDynamicOrInit => {
@@ -112,11 +111,14 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberSequence(field) => {
-            let values = take_sequence_register(stack, sequence_register)?.into_values();
+            let values = runmat_runtime::sequence::into_unbounded_values(take_sequence_register(
+                stack,
+                sequence_register,
+            )?)?;
             let _values_roots = crate::call::root_values(&values)?;
             let base = stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
@@ -131,11 +133,14 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            updated.with_owned(|value| stack.push(value));
+            updated.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::StoreMemberDynamicSequence => {
-            let values = take_sequence_register(stack, sequence_register)?.into_values();
+            let values = runmat_runtime::sequence::into_unbounded_values(take_sequence_register(
+                stack,
+                sequence_register,
+            )?)?;
             let _values_roots = crate::call::root_values(&values)?;
             let name: String = (&stack.pop().ok_or(crate::interpreter::errors::mex(
                 "StackUnderflow",
@@ -155,7 +160,7 @@ pub(super) async fn dispatch(
                 caller_function_name,
             )
             .await?;
-            updated.with_owned(|value| stack.push(value));
+            updated.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         _ => Ok(false),

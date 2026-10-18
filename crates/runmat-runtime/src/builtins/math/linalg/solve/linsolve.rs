@@ -109,13 +109,13 @@ async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinRe
     let eval = evaluate_args(lhs, rhs, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.solution()]));
+            return Ok(Value::output_list(vec![eval.solution()]));
         }
         if out_count == 2 {
-            return Ok(Value::OutputList(vec![
+            return Ok(Value::output_list(vec![
                 eval.solution(),
                 eval.reciprocal_condition(),
             ]));
@@ -1255,6 +1255,15 @@ pub(crate) mod tests {
         assert!((actual - expected).abs() < 1e-7);
     }
 
+    fn first_output(outputs: runmat_value::OutputListStorage) -> Value {
+        outputs
+            .try_into_owned()
+            .expect("unique output list")
+            .into_iter()
+            .next()
+            .expect("one output")
+    }
+
     fn evaluate_args(a: Value, b: Value, rest: &[Value]) -> Result<LinsolveEval, RuntimeError> {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         block_on(super::evaluate_args(a, b, rest))
@@ -2169,7 +2178,7 @@ pub(crate) mod tests {
         )
         .expect("gpu square linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2373,7 +2382,7 @@ pub(crate) mod tests {
         )
         .expect("gpu square linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2441,7 +2450,7 @@ pub(crate) mod tests {
         )
         .expect("gpu tall linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2523,15 +2532,19 @@ pub(crate) mod tests {
             vec![Value::Struct(gpu_opts)],
         )
         .expect("gpu posdef linsolve");
-        let mut outputs = match gpu_value {
+        let outputs = match gpu_value {
             Value::OutputList(outputs) => outputs,
             other => panic!("expected output list, got {other:?}"),
         };
-        let gpu_rcond = match outputs.remove(1) {
+        let mut outputs = outputs
+            .try_into_owned()
+            .expect("unique output list")
+            .into_iter();
+        let gpu_solution = outputs.next().expect("solution output");
+        let gpu_rcond = match outputs.next().expect("condition output") {
             Value::Num(value) => value,
             other => panic!("unexpected rcond value {other:?}"),
         };
-        let gpu_solution = outputs.remove(0);
         let gathered = test_support::gather(gpu_solution).expect("gather");
         ha.release().expect("release caller A");
         hb.release().expect("release caller B");
@@ -2618,7 +2631,7 @@ pub(crate) mod tests {
         )
         .expect("gpu transposed posdef linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2691,7 +2704,7 @@ pub(crate) mod tests {
         )
         .expect("gpu symmetric linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2768,7 +2781,7 @@ pub(crate) mod tests {
         )
         .expect("gpu transposed square linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2845,7 +2858,7 @@ pub(crate) mod tests {
         )
         .expect("gpu conjugate square linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2929,7 +2942,7 @@ pub(crate) mod tests {
         )
         .expect("gpu transposed rectangular linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -2999,7 +3012,7 @@ pub(crate) mod tests {
         )
         .expect("gpu triangular linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");
@@ -3079,7 +3092,7 @@ pub(crate) mod tests {
         )
         .expect("gpu transposed triangular linsolve");
         let gpu_solution = match gpu_value {
-            Value::OutputList(mut outputs) => outputs.remove(0),
+            Value::OutputList(outputs) => first_output(outputs),
             other => other,
         };
         let gathered = test_support::gather(gpu_solution).expect("gather");

@@ -17,7 +17,7 @@ pub async fn saveas_builtin_registered(
 ) -> BuiltinResult<Value> {
     let status = super::execute_saveas(runtime, requested_outputs, args).await?;
     Ok(if requested_outputs == Some(0) {
-        Value::OutputList(Vec::new())
+        Value::output_list(Vec::new())
     } else {
         Value::Bool(status)
     })

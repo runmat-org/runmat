@@ -18,9 +18,9 @@ pub(super) enum VariableKind {
 pub(super) fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
     let raw = match value {
         Value::Object(object) if object.class_name.is(OPTIMIZABLE_VARIABLE_CLASS) => {
-            vec![Value::Object(object)]
+            runmat_value::OutputListStorage::unbounded(vec![Value::Object(object)])
         }
-        Value::Cell(cell) => cell.data,
+        Value::Cell(cell) => runmat_value::OutputListStorage::unbounded(cell.data),
         Value::OutputList(values) => values,
         other => {
             return Err(bayesopt_error(
@@ -35,8 +35,13 @@ pub(super) fn parse_variables(value: Value) -> BuiltinResult<Vec<Variable>> {
             &ERROR_INVALID_ARGUMENT,
         ));
     }
-    let mut names = HashSet::with_capacity(raw.len());
-    let mut vars = Vec::with_capacity(raw.len());
+    let raw = raw.try_into_owned().map_err(|_| {
+        crate::sequence::sequence_error_to_runtime(
+            runmat_value::ValueSequenceError::SharedOutputStorage,
+        )
+    })?;
+    let mut names = HashSet::with_capacity(raw.as_slice().len());
+    let mut vars = Vec::with_capacity(raw.as_slice().len());
     for value in raw {
         let Value::Object(object) = value else {
             return Err(bayesopt_error(

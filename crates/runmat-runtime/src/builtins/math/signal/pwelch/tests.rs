@@ -600,7 +600,7 @@ fn pwelch_preserves_single_output_class() {
     let Value::OutputList(outputs) = output else {
         panic!("expected two outputs")
     };
-    for output in outputs {
+    for output in outputs.try_into_owned().expect("unique output list") {
         let Value::Tensor(output) = output else {
             panic!("expected tensor output")
         };

@@ -16,8 +16,8 @@ pub(super) fn finalize(
     let result = result_object(outcome)?;
     match requested_outputs {
         None => Ok(result),
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![result])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![result])),
         Some(requested) => Err(bayesopt_error(
             format!("bayesopt: requested {requested} outputs, but only one is supported"),
             &ERROR_INVALID_ARGUMENT,

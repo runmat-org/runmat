@@ -125,6 +125,19 @@ pub(super) fn restore(
             input, value, builtin, protected,
         );
     };
+    let values = values
+        .try_into_owned()
+        .map_err(|_| {
+            crate::sequence::sequence_error_to_runtime(
+                runmat_value::ValueSequenceError::SharedOutputStorage,
+            )
+        })?
+        .try_into_unbounded_vec()
+        .map_err(|_| {
+            crate::sequence::sequence_error_to_runtime(
+                runmat_value::ValueSequenceError::SharedOutputStorage,
+            )
+        })?;
     let mut outputs = Vec::with_capacity(values.len());
     for value in values {
         let borrowed = protected
@@ -143,7 +156,7 @@ pub(super) fn restore(
         )?;
         outputs.push(output);
     }
-    Ok(Value::OutputList(outputs))
+    Ok(Value::output_list(outputs))
 }
 
 /// Surplus ABI padding is not a computed spectral output. Keep its existing
@@ -155,17 +168,47 @@ pub(super) fn restore_named(
     builtin: &str,
     protected: &[&GpuTensorHandle],
 ) -> BuiltinResult<Value> {
-    let Value::OutputList(mut values) = value else {
+    let Value::OutputList(values) = value else {
         return restore(input, value, builtin, protected);
     };
+    let mut values = values
+        .try_into_owned()
+        .map_err(|_| {
+            crate::runtime_error::semantic_error(
+                "SharedOutputStorage",
+                "resident signal output storage is shared and cannot be rewritten implicitly",
+            )
+        })?
+        .try_into_unbounded_vec()
+        .map_err(|_| {
+            crate::runtime_error::semantic_error(
+                "SharedOutputStorage",
+                "resident signal output storage is shared and cannot be rewritten implicitly",
+            )
+        })?;
     let padding = values.split_off(values.len().min(named_outputs));
-    let Value::OutputList(mut outputs) =
-        restore(input, Value::OutputList(values), builtin, protected)?
+    let Value::OutputList(outputs) =
+        restore(input, Value::output_list(values), builtin, protected)?
     else {
         unreachable!("list restoration preserves its carrier")
     };
+    let mut outputs = outputs
+        .try_into_owned()
+        .map_err(|_| {
+            crate::runtime_error::semantic_error(
+                "SharedOutputStorage",
+                "restored signal output storage is shared and cannot be extended implicitly",
+            )
+        })?
+        .try_into_unbounded_vec()
+        .map_err(|_| {
+            crate::runtime_error::semantic_error(
+                "SharedOutputStorage",
+                "restored signal output storage is shared and cannot be extended implicitly",
+            )
+        })?;
     outputs.extend(padding);
-    Ok(Value::OutputList(outputs))
+    Ok(Value::output_list(outputs))
 }
 
 /// Validate both members before any consumer can reshape, reduce, or publish

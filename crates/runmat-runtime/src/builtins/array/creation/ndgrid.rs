@@ -62,7 +62,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn ndgrid_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
     if matches!(out_count, Some(0)) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
 
     let eval = evaluate(&rest, out_count).await?;
@@ -71,7 +71,7 @@ async fn ndgrid_builtin(rest: Vec<Value>) -> BuiltinResult<Value> {
         for dim in 0..count {
             outputs.push(eval.output(dim).await?);
         }
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
 
     eval.output(0).await
@@ -1362,7 +1362,7 @@ mod tests {
     fn ndgrid_zero_requested_outputs_returns_empty_list() {
         let x = tensor(vec![1.0, 2.0], vec![1, 2]);
         let value = call(vec![Value::Tensor(x)], Some(0)).expect("ndgrid");
-        assert_eq!(value, Value::OutputList(Vec::new()));
+        assert_eq!(value, Value::output_list(Vec::new()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

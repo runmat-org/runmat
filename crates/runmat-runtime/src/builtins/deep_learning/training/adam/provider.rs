@@ -35,15 +35,15 @@ impl AdamUpdateGpuEval {
     pub(super) fn output(self) -> BuiltinResult<Value> {
         match crate::output_count::current_output_count() {
             None => gpu_helpers::resident_gpu_value(self.parameters),
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![gpu_helpers::resident_gpu_value(
                 self.parameters,
             )?])),
-            Some(2) => Ok(Value::OutputList(vec![
+            Some(2) => Ok(Value::output_list(vec![
                 gpu_helpers::resident_gpu_value(self.parameters)?,
                 gpu_helpers::resident_gpu_value(self.average_grad)?,
             ])),
-            Some(3) => Ok(Value::OutputList(vec![
+            Some(3) => Ok(Value::output_list(vec![
                 gpu_helpers::resident_gpu_value(self.parameters)?,
                 gpu_helpers::resident_gpu_value(self.average_grad)?,
                 gpu_helpers::resident_gpu_value(self.average_sq_grad)?,

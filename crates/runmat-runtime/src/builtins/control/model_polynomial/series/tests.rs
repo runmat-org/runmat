@@ -57,8 +57,8 @@ fn scalar_gain_inherits_discrete_model_sample_time() {
     let SeriesModel::Tf(gain) = first else {
         panic!("scalar gain should become tf")
     };
-    assert_eq!(gain.sample_time, 0.25);
-    assert_eq!(gain.variable, "z");
+    assert_eq!(gain.sample_time(), 0.25);
+    assert_eq!(gain.variable.as_str(), "z");
 }
 
 #[test]

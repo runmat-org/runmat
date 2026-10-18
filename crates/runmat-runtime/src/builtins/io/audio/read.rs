@@ -84,7 +84,7 @@ async fn read_staged(
         cooperation.completed(0).await?;
         if outputs == Some(0) {
             validate_prepared_wave_stream_discarded(prepared, &input.path, cooperation).await?;
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         let permit = receipt.output_allocation_permit().ok_or_else(|| {
             build_runtime_error("audioread: exact output allocation authority is unavailable")
@@ -106,9 +106,9 @@ async fn read_staged(
 fn present_decoded(decoded: DecodedAudio, outputs: Option<usize>) -> Value {
     match outputs {
         None => Value::Tensor(decoded.samples),
-        Some(0) => Value::OutputList(Vec::new()),
-        Some(1) => Value::OutputList(vec![Value::Tensor(decoded.samples)]),
-        Some(2) => Value::OutputList(vec![
+        Some(0) => Value::output_list(Vec::new()),
+        Some(1) => Value::output_list(vec![Value::Tensor(decoded.samples)]),
+        Some(2) => Value::output_list(vec![
             Value::Tensor(decoded.samples),
             Value::Num(decoded.sample_rate),
         ]),

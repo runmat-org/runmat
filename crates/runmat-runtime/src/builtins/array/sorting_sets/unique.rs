@@ -326,7 +326,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
     let eval = evaluate(value, &rest).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         if out_count == 1 {
             let outputs = super::restore_set_outputs(
@@ -335,7 +335,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 vec![eval.into_values_value()],
                 unique_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         if out_count == 2 {
             let (values, ia) = eval.into_pair();
@@ -345,7 +345,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
                 vec![values, ia],
                 unique_internal_error,
             )?;
-            return Ok(Value::OutputList(outputs));
+            return Ok(Value::output_list(outputs));
         }
         let (values, ia, ic) = eval.into_triple();
         let outputs = super::restore_set_outputs(
@@ -354,7 +354,7 @@ async fn unique_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             vec![values, ia, ic],
             unique_internal_error,
         )?;
-        return Ok(Value::OutputList(outputs));
+        return Ok(Value::output_list(outputs));
     }
     let mut outputs = super::restore_set_outputs(
         provider,

@@ -43,11 +43,12 @@ pub(crate) fn resolve_single_sequence(
 ) -> Result<crate::execution::RootedValue, RuntimeError> {
     sequence.try_map_owned(
         |sequence| {
-            let mut values = sequence.resolve(
+            let values = sequence.resolve(
                 runmat_types::SequenceUse::RequireSingle,
                 crate::sequence::SequenceResolutionContext::default(),
             )?;
-            Ok(values.remove(0))
+            Ok(crate::sequence::into_first_output(values)?
+                .expect("one required output was resolved"))
         },
         |error| error.into_runtime_error(),
     )
@@ -587,7 +588,7 @@ async fn try_distributed_builtin(
             materialized
                 .finish()
                 .map_err(|error| error.into_runtime_error())?
-                .with_owned_values_async(|materialized| async move {
+                .with_owned_output_storage_async(|materialized| async move {
                     call_builtin_sequence_async_impl(
                         name,
                         &materialized,
@@ -2087,7 +2088,7 @@ mod tests {
 
     #[test]
     fn value_contains_gpu_detects_output_list_entries() {
-        let value = Value::OutputList(vec![
+        let value = Value::output_list(vec![
             Value::Num(1.0),
             Value::GpuTensor(gpu_fixture(vec![1])),
         ]);
@@ -2098,7 +2099,7 @@ mod tests {
     fn gather_if_needed_rejects_nested_output_list_before_provider_access() {
         runmat_accelerate_api::clear_provider();
         let _provider_guard = ThreadProviderGuard::set(None);
-        let value = Value::OutputList(vec![Value::GpuTensor(gpu_fixture(vec![1]))]);
+        let value = Value::output_list(vec![Value::GpuTensor(gpu_fixture(vec![1]))]);
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("transient sequence must fail before provider access");
         assert_eq!(

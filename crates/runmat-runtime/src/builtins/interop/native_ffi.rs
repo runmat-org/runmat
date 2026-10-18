@@ -158,7 +158,7 @@ async fn loadlibrary_builtin(
     let requested = requested_outputs.unwrap_or(0);
     report.try_map_owned(
         |report| {
-            let Value::OutputList(mut report) = report else {
+            let Value::OutputList(report) = report else {
                 return Err(invalid_builtin_call(
                     "native library loader returned an invalid preparation report",
                 ));
@@ -169,8 +169,9 @@ async fn loadlibrary_builtin(
                 ));
             }
             Ok(match requested {
-                0 => Value::OutputList(Vec::new()),
-                1 => report.remove(0),
+                0 => Value::output_list(Vec::new()),
+                1 => crate::sequence::into_first_output(report)?
+                    .expect("validated preparation report"),
                 _ => Value::OutputList(report),
             })
         },
@@ -221,7 +222,7 @@ async fn unloadlibrary_builtin(
     )?;
     text_argument(&alias, "unloadlibrary alias")?;
     invoke_native(context, NativeFfiOperation::Unload, vec![alias], 1).await?;
-    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
+    RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -321,7 +322,7 @@ async fn setdatatype_builtin(
     text_argument(&arguments[1], "setdatatype pointer type")?;
     arguments.insert(1, Value::String("setdatatype".into()));
     invoke_native(context, NativeFfiOperation::InvokeMember, arguments, 1).await?;
-    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
+    RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(

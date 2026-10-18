@@ -2,6 +2,11 @@ use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
+        heading: "Transfer-function frequency bandwidth",
+        paragraphs: &["For a zero-delay scalar SISO `tf` model, `bandwidth(sys)` returns the first physical frequency where the response falls below its nonzero finite DC magnitude by 3 dB. `bandwidth(sys, dbdrop)` selects a finite negative dB drop. The result is a host double scalar in rad/s; `Inf` means no downward crossing in the supported domain.",
+            "Continuous models and discrete models with a known positive sample period are supported. An unspecified discrete sample period, state-space or MIMO model, delay, or zero/infinite DC gain is not yet supported. The host evaluator uses the model's physical s/z polynomial view; finite managed calls require a complete output owner and otherwise fail before evaluation. This overload never invokes the matrix/GPU structure hook."],
+    },
+    BuiltinDocumentationSection {
         heading: "Behavior and supported arrays",
         paragraphs: &["`bandwidth(A)` inspects the nonzero pattern of matrix `A` and returns the lower bandwidth as its first output and the upper bandwidth as its optional second output. A `'lower'` or `'upper'` selector returns one side.",
             "`lower = bandwidth(A)` returns the lower bandwidth. `[lower, upper] = bandwidth(A)` returns separate lower and upper double scalars. A diagonal matrix has zero for both, and each side counts the furthest nonzero from the main diagonal.",
@@ -20,6 +25,19 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
 ];
 
 const EXAMPLES: &[BuiltinExample] = &[
+    BuiltinExample {
+        id: "tf-lowpass",
+        title: "Frequency bandwidth of a low-pass model",
+        program: "H = tf(1, [1 1]); w = bandwidth(H); fprintf(\"%.2f\\n\", w);",
+        display_output: Some("1.00"),
+        compatibility: BuiltinExampleCompatibility::Matlab,
+        harness: BuiltinExampleHarness::Portable,
+        fixture: BuiltinExampleFixture::None,
+        requirements: BuiltinExampleRequirements::NONE,
+        verification: BuiltinExampleVerification::Assertions {
+            source: "assert(abs(w-1) < 0.01);",
+        },
+    },
     BuiltinExample {
         id: "example-1",
         title: "Checking the bandwidth of a diagonal matrix",
@@ -100,6 +118,7 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
 ];
 const FAQS: &[BuiltinDocumentationFaq] = &[
+    BuiltinDocumentationFaq { question: "How does `bandwidth` distinguish a matrix from a control model?", answer: "A canonical `tf` object selects frequency bandwidth; numeric, logical, sparse and GPU matrices retain the lower/upper structural-bandwidth forms." },
     BuiltinDocumentationFaq { question: "What do lower and upper bandwidths of zero mean?", answer: "Separate lower and upper outputs of zero indicate that all nonzero elements are on the main diagonal." },
     BuiltinDocumentationFaq { question: "How are rows or columns full of zeros handled?", answer: "Zero rows or columns do not increase the bandwidth; only nonzero entries affect the result." },
     BuiltinDocumentationFaq { question: "Does `bandwidth` treat `NaN` values as nonzero?", answer: "Yes. Any value that is not exactly zero—including `NaN` or `Inf`—counts as nonzero." },
@@ -128,9 +147,9 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
     title: Some("bandwidth"),
     slug: Some("bandwidth"),
-    summary: "Compute matrix lower and upper bandwidth in MATLAB and RunMat.",
-    description: "`bandwidth(A)` inspects the nonzero pattern of matrix `A` and returns the lower bandwidth as its first output and the upper bandwidth as its optional second output. A `'lower'` or `'upper'` selector returns one side.",
-    keywords: &["bandwidth", "lower bandwidth", "upper bandwidth", "banded matrix", "structure", "gpu"],
+    summary: "Compute matrix structural bandwidth or SISO transfer-function frequency bandwidth.",
+    description: "For a matrix, `bandwidth(A)` returns lower and optional upper structural bandwidth. For a scalar SISO `tf` model, `bandwidth(sys, dbdrop)` returns the first downward frequency-response gain-drop crossing in rad/s.",
+    keywords: &["bandwidth", "frequency response", "transfer function", "lower bandwidth", "upper bandwidth", "banded matrix", "structure", "gpu"],
     related: &["diag", "tril", "triu", "issymmetric", "find", "gpuarray", "gather", "ishermitian", "symrcm"],
     sections: SECTIONS,
     examples: EXAMPLES,

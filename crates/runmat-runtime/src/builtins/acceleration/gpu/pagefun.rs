@@ -87,7 +87,7 @@ async fn pagefun_builtin(
         // Discard our owning result, not the allocation behind a borrowed
         // handle. Any independently published aliases keep their own leases.
         drop(result);
-        Ok(Value::OutputList(Vec::new()))
+        Ok(Value::output_list(Vec::new()))
     } else {
         Ok(result)
     }

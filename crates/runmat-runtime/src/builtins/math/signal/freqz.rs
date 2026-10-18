@@ -195,13 +195,13 @@ async fn evaluate_with_cooperation(
     #[cfg(feature = "plot-core")]
     if plot_requested {
         presentation::plot_response(&eval, fs.is_some())?;
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     #[cfg(not(feature = "plot-core"))]
     let _ = plot_requested;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 1 {
-            return Ok(Value::OutputList(vec![eval.h_value()?]));
+            return Ok(Value::output_list(vec![eval.h_value()?]));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
@@ -543,7 +543,7 @@ mod tests {
             Some(0),
         )
         .unwrap();
-        assert_eq!(output, Value::OutputList(Vec::new()));
+        assert_eq!(output, Value::output_list(Vec::new()));
         let plotted = clone_figure(figure).expect("figure");
         assert_eq!(plotted.len(), 2);
         assert_eq!(

@@ -429,9 +429,9 @@ fn decode_owned_outputs(
         .map_err(|error| ExecutionServiceError::Infrastructure(error.to_string()))?;
         builder.push_owned(rooted);
     }
-    builder.finish()?.with_owned_values(|values| {
-        let sequence = runmat_value::ValueSequence::comma_separated(values)
-            .map_err(|error| ExecutionServiceError::InvalidOutputContract)?;
+    builder.finish()?.with_owned_output_storage(|values| {
+        let sequence = runmat_value::ValueSequence::from_output_storage(values)
+            .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
         runmat_runtime::execution::RootedValueSequence::new(sequence)
     })
 }

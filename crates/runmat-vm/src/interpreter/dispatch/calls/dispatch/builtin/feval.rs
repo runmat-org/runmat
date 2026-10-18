@@ -66,7 +66,7 @@ pub(super) async fn dispatch(
         call_arg_spans.as_ref().cloned(),
     );
     let crate::call::feval::FevalDispatch::Completed(sequence) = args
-        .with_owned_values_async(|args| {
+        .with_unbounded_values_async(|args| {
             crate::call::feval::execute_feval(
                 &context.runtime,
                 func_val,
@@ -75,7 +75,7 @@ pub(super) async fn dispatch(
                 function_registry,
             )
         })
-        .await?;
+        .await??;
     match publication {
         OutputPublication::Fixed(count) => {
             calls::publish_rooted_fixed_outputs(stack, sequence, count)?

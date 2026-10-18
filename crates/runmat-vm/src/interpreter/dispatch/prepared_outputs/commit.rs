@@ -4,13 +4,12 @@ use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::execution::{RootedValue, RootedValueLease, RootedValueSequence};
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
-use runmat_value::Value;
 
 use super::super::{PreparedOutputTarget, SequenceState};
 use super::support::{empty_cell_root, root};
 
 pub(super) async fn commit(
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     vars: &mut InterpreterVars,
     state: &mut SequenceState,
     retained_outputs: usize,
@@ -41,7 +40,9 @@ pub(super) async fn commit(
                 layout.total(),
             ),
         )?;
-        let partitions = layout.distribute(values)?;
+        let partitions = layout.distribute(
+            runmat_runtime::sequence::into_unbounded_output_values(values)?,
+        )?;
         let roots = RootedValueLease::for_values(partitions.iter().flatten())
             .map_err(|error| error.into_runtime_error())?;
         Ok::<_, RuntimeError>((partitions, roots))
@@ -127,6 +128,6 @@ pub(super) async fn commit(
             Ok::<_, RuntimeError>(())
         })?;
     }
-    stack.extend(retained);
+    stack.try_extend(retained)?;
     Ok(())
 }

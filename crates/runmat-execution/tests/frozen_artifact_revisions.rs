@@ -99,7 +99,7 @@ fn revision_admission_does_not_decode_component_payloads() {
 
     let admission = ExecutableUnitEnvelope::admission(hostile.as_bytes())
         .expect("the bounded revision header does not decode opaque components");
-    assert_eq!(admission.schema_version, 3);
+    assert_eq!(admission.schema_version, 4);
     assert_eq!(admission.revisions.mir_schema, 2);
     assert_eq!(admission.revisions.analysis_schema, 2);
     assert_eq!(admission.revisions.bytecode_schema, 6);

@@ -3,11 +3,10 @@ use super::{
     write_rooted_sequence_register, ObjectDispatchContext, SubscriptPathReadContext,
 };
 use runmat_runtime::RuntimeError;
-use runmat_value::Value;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
-    stack: &mut Vec<Value>,
+    stack: &mut crate::interpreter::stack::InterpreterStack,
     sequence_register: &mut super::super::SequenceState,
     context: ObjectDispatchContext<'_>,
 ) -> Result<bool, RuntimeError> {
@@ -23,7 +22,8 @@ pub(super) async fn dispatch(
             let start = stack.len().checked_sub(operand_count + 1).ok_or_else(|| {
                 crate::interpreter::errors::mex("StackUnderflow", "subscript path stack underflow")
             })?;
-            let (root, path) = materialize_subscript_path(stack[start..].to_vec(), prefix)?;
+            let (root, path) =
+                materialize_subscript_path(stack.as_slice()[start..].to_vec(), prefix)?;
             let prepared = runmat_runtime::object::protocol::prepare_subscript_receiver_in_context(
                 runtime,
                 root,
@@ -32,7 +32,7 @@ pub(super) async fn dispatch(
             )
             .await?;
             let stack_index = stack.len();
-            stack.push(prepared.receiver().clone());
+            stack.try_push(prepared.receiver().clone())?;
             sequence_register.push_subscript_receiver(prepared, start, stack_index);
             Ok(true)
         }
@@ -47,7 +47,7 @@ pub(super) async fn dispatch(
                 *component_count,
             )
             .await?;
-            value.with_owned(|value| stack.push(value));
+            value.with_owned(|value| stack.try_push(value))?;
             Ok(true)
         }
         crate::bytecode::Instr::FinishSubscriptEndReceiver {
@@ -82,7 +82,7 @@ pub(super) async fn dispatch(
                 ));
             }
             stack.drain(prefix_start..receiver);
-            stack.insert(prefix_start, prepared.receiver().clone());
+            stack.try_insert(prefix_start, prepared.receiver().clone())?;
             Ok(true)
         }
         crate::bytecode::Instr::FinishDottedInvokeReceiver {
@@ -118,7 +118,7 @@ pub(super) async fn dispatch(
             if *to_sequence_register {
                 write_rooted_sequence_register(stack, sequence_register, values)?;
             } else {
-                values.with_owned_values(|values| stack.extend(values));
+                values.with_owned_output_storage(|values| stack.try_extend_output(values))?;
             }
             Ok(true)
         }
@@ -140,9 +140,9 @@ pub(super) async fn dispatch(
                 sequence_register,
             )
             .await?;
-            values.with_owned_values(|values| {
+            values.with_unbounded_values(|values| {
                 sequence_register.capture(*sequence_slot, stack, values)
-            })?;
+            })??;
             Ok(true)
         }
         _ => Ok(false),

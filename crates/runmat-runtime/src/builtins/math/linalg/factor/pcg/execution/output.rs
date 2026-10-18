@@ -17,7 +17,7 @@ fn response(
 ) -> Value {
     match requested {
         None | Some(1) => x,
-        Some(0) => Value::OutputList(Vec::new()),
+        Some(0) => Value::output_list(Vec::new()),
         Some(count) => {
             let mut output = Vec::with_capacity(count);
             output.push(x);
@@ -33,7 +33,7 @@ fn response(
             if count > 4 {
                 output.push(residuals.expect("five outputs prepare residual history"));
             }
-            Value::OutputList(output)
+            Value::output_list(output)
         }
     }
 }

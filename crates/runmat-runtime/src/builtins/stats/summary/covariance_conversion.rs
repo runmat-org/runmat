@@ -119,7 +119,7 @@ async fn covariance_conversion_builtin(
         ));
     }
     if matches!(crate::output_count::current_output_count(), Some(0)) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     if let Some(eval) = try_covariance_gpu(name, &value)? {
         return eval.output(kind, name);

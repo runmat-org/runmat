@@ -41,7 +41,7 @@ pub enum Value {
     /// Event listener handle for events
     Listener(Listener),
     /// Multiple outputs captured as a list (internal destructuring helper)
-    OutputList(Vec<Value>),
+    OutputList(OutputListStorage),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(NamedFunctionHandle),
     // Function handle whose resolution must stay at the external boundary.
@@ -72,6 +72,10 @@ pub enum Value {
 }
 
 impl Value {
+    pub fn output_list(values: impl Into<OutputListStorage>) -> Self {
+        Self::OutputList(values.into())
+    }
+
     pub fn function_handle(name: String) -> Self {
         Self::FunctionHandle(NamedFunctionHandle::new(name))
     }

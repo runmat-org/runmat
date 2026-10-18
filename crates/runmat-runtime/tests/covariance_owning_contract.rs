@@ -198,7 +198,7 @@ fn conversion_public_arity_retains_only_returned_physical_allocations() {
                 );
                 assert!(provider.trace.lock().unwrap().is_empty());
             } else if count == 0 {
-                assert_eq!(result.unwrap(), Value::OutputList(vec![]));
+                assert_eq!(result.unwrap(), Value::output_list(vec![]));
                 assert!(provider.trace.lock().unwrap().is_empty());
             } else {
                 let result = result.unwrap();

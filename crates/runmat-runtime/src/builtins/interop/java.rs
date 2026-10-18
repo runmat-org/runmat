@@ -153,7 +153,7 @@ async fn java_add_path_builtin(
         )
         .await?;
     }
-    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
+    RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -174,7 +174,7 @@ async fn java_remove_path_builtin(
         )
         .await?;
     }
-    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
+    RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(
@@ -213,7 +213,7 @@ async fn java_class_path_builtin(
                     .await;
                 }
                 runmat_builtins::JavaClasspathControl::Verbosity => {
-                    return RootedValue::new(Value::OutputList(Vec::new()))
+                    return RootedValue::new(Value::output_list(Vec::new()))
                         .map_err(|error| error.into_runtime_error());
                 }
                 runmat_builtins::JavaClasspathControl::Path => {}
@@ -225,7 +225,7 @@ async fn java_class_path_builtin(
         .map(Value::String)
         .collect();
     invoke_java(context, JavaOperation::SetClasspath, entries).await?;
-    RootedValue::new(Value::OutputList(Vec::new())).map_err(|error| error.into_runtime_error())
+    RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())
 }
 
 #[runtime_builtin(

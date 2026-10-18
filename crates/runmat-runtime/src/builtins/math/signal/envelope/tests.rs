@@ -40,6 +40,10 @@ fn output_list(value: Value) -> Vec<Value> {
         panic!("expected output list, got {value:?}");
     };
     values
+        .try_into_owned()
+        .expect("unique output list")
+        .try_into_unbounded_vec()
+        .expect("unbounded output list")
 }
 
 #[test]
@@ -354,7 +358,7 @@ fn output_count_zero_returns_empty_output_list() {
     crate::builtins::plotting::tests::ensure_plot_test_env();
     let _plot_lock = crate::builtins::plotting::tests::lock_plot_registry();
     let out = call(col(vec![1.0, 0.0, -1.0, 0.0]), Vec::new(), Some(0)).expect("envelope");
-    assert_eq!(out, Value::OutputList(Vec::new()));
+    assert_eq!(out, Value::output_list(Vec::new()));
 }
 
 #[cfg(not(feature = "plot-core"))]
@@ -447,7 +451,7 @@ fn matrix_statement_form_plots_each_channel_without_length_mismatch() {
     let matrix =
         Tensor::new(vec![1.0, 0.0, -1.0, 0.0, 2.0, 3.0, 2.0, 1.0], vec![4, 2]).expect("matrix");
     let out = call(Value::Tensor(matrix), Vec::new(), Some(0)).expect("envelope");
-    assert_eq!(out, Value::OutputList(Vec::new()));
+    assert_eq!(out, Value::output_list(Vec::new()));
 }
 
 #[test]

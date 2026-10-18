@@ -201,7 +201,9 @@ fn pending_semantic_completion_reconciles_once_before_nested_reads() {
         )
         .unwrap()
         .unwrap();
-        output.with_owned_values(|values| assert_eq!(values, vec![Value::Num(1.0)]));
+        output.with_owned_output_storage(|values| {
+            assert_eq!(values.as_slice(), &[Value::Num(1.0)]);
+        });
         assert_eq!(writes.get(), 1, "resumption must not replay the write");
         assert_nested_read(&mut state, 11.0);
     });

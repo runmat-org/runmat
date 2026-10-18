@@ -115,8 +115,8 @@ async fn mnrfit_in_runtime(
     let result = fit(x, response, options, &mut cooperation).await?;
     cooperation.check()?;
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
-        Some(1) => Ok(Value::OutputList(vec![result.b])),
+        Some(0) => Ok(Value::output_list(Vec::new())),
+        Some(1) => Ok(Value::output_list(vec![result.b])),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             vec![result.b, result.dev, result.stats],

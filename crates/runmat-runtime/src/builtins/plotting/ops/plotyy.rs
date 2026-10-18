@@ -299,7 +299,7 @@ async fn parse_plot_line(
 fn outputs(ax: Value, h1: Value, h2: Value) -> BuiltinResult<Value> {
     let values = vec![ax, h1, h2];
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(count) => {
             if count > 3 {
                 return Err(invalid("requested more than three outputs"));

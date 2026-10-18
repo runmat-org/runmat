@@ -125,7 +125,12 @@ async fn mod_builtin(
                 right_values,
             } = plan;
             right_values
-                .with_owned_values_async(|rights| async move {
+                .with_owned_output_storage_async(|rights| async move {
+                    let rights = rights.try_into_owned().map_err(|_| {
+                        crate::sequence::sequence_error_to_runtime(
+                            runmat_value::ValueSequenceError::SharedOutputStorage,
+                        )
+                    })?;
                     let mut names = Vec::with_capacity(variables.len());
                     let mut output = RootedValuesBuilder::with_capacity(variables.len());
                     for ((name, left), right) in variables.into_iter().zip(rights) {

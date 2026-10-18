@@ -65,7 +65,7 @@ async fn fopen_builtin(
     let eval = evaluate_in(runtime.as_ref(), &args).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
         return Ok(crate::output_count::output_list_with_padding(
             out_count,

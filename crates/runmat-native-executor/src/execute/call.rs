@@ -6,7 +6,7 @@ use runmat_runtime::call::descriptor::{CallableCallKind, CallableDescriptor};
 use runmat_runtime::callsite::CallsiteInfo;
 use runmat_runtime::execution::RootedValueLease;
 use runmat_runtime::sequence::ResolveValueSequence;
-use runmat_value::Value;
+use runmat_value::{OutputListStorage, Value};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
@@ -24,10 +24,10 @@ pub(super) fn evaluate(
     state: &mut HostState,
     call: &MirCall,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<OutputListStorage> {
     let embedded = state.enter_embedded_call()?;
     let result = evaluate_inner(state, call, requested_outputs, embedded.as_ref());
-    state.settle_embedded_result(embedded.as_ref(), result, Vec::as_slice)
+    state.settle_embedded_result(embedded.as_ref(), result, OutputListStorage::as_slice)
 }
 
 fn evaluate_inner(
@@ -35,9 +35,9 @@ fn evaluate_inner(
     call: &MirCall,
     requested_outputs: usize,
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<OutputListStorage> {
     if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
-        return Ok(outputs);
+        return Ok(OutputListStorage::unbounded(outputs));
     }
     let mut arguments = materialize_arguments(state, &call.args)?;
     let source_id = state
@@ -133,7 +133,8 @@ fn evaluate_inner(
                         embedded.cloned(),
                         future,
                         requested_outputs,
-                    );
+                    )
+                    .map(OutputListStorage::unbounded);
                 }
             }
             let descriptor = CallableDescriptor::resolved(
@@ -368,7 +369,7 @@ pub(super) fn capture_sequence(
                 runmat_types::SequenceUse::ExpandAll,
                 runmat_runtime::sequence::SequenceResolutionContext::default(),
             )?;
-            runmat_runtime::execution::RootedValues::new(values)
+            runmat_runtime::execution::RootedValues::from_output_storage(values)
                 .map_err(|error| error.into_runtime_error())
         })?
     };
@@ -391,12 +392,14 @@ pub(super) fn capture_sequence(
     u32::try_from(existing_roots).map_err(|_| {
         NativeExecutorError::Host("native sequence root cardinality exceeds the ABI".into())
     })?;
-    let references = values.with_owned_values(|values| {
-        values
-            .into_iter()
-            .map(|value| state.arena.insert(value))
-            .collect()
-    });
+    let references = values.with_owned_output_storage(|values| {
+        Ok::<_, NativeExecutorError>(
+            super::call_suspension::own_output_storage(values)?
+                .into_iter()
+                .map(|value| state.arena.insert(value))
+                .collect(),
+        )
+    })?;
     state.captured_sequences.insert(destination, references);
     Ok(())
 }
@@ -482,10 +485,10 @@ pub(super) fn builtin(
     name: &str,
     arguments: Vec<Value>,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<OutputListStorage> {
     let embedded = state.enter_embedded_call()?;
     let result = builtin_inner(state, name, arguments, requested_outputs, embedded.as_ref());
-    state.settle_embedded_result(embedded.as_ref(), result, Vec::as_slice)
+    state.settle_embedded_result(embedded.as_ref(), result, OutputListStorage::as_slice)
 }
 
 fn builtin_inner(
@@ -494,9 +497,9 @@ fn builtin_inner(
     arguments: Vec<Value>,
     requested_outputs: usize,
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<OutputListStorage> {
     if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
-        return Ok(outputs);
+        return Ok(OutputListStorage::unbounded(outputs));
     }
     complete_rooted_call(
         state,
@@ -544,17 +547,17 @@ async fn with_class_access_context<T>(
 pub(super) fn normalize_sequence_outputs(
     sequence: runmat_value::ValueSequence,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
-    let values = sequence.into_values();
+) -> NativeExecutorResult<OutputListStorage> {
+    let values = sequence.into_output_storage();
     if requested_outputs == 0 {
-        return Ok(Vec::new());
+        return Ok(OutputListStorage::empty());
     }
-    if values.len() == requested_outputs {
+    if values.as_slice().len() == requested_outputs {
         Ok(values)
     } else {
         Err(NativeExecutorError::Host(format!(
             "runtime returned {} outputs for a {}-output call",
-            values.len(),
+            values.as_slice().len(),
             requested_outputs
         )))
     }
@@ -570,7 +573,7 @@ fn complete_rooted_call(
             >,
         > + 'static,
     requested_outputs: usize,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<OutputListStorage> {
     let runtime = state.runtime.clone();
     super::call_suspension::begin_rooted_sequence(
         state,
@@ -578,4 +581,5 @@ fn complete_rooted_call(
         Box::pin(async move { runtime.scope(future).await }),
         requested_outputs,
     )
+    .map(OutputListStorage::unbounded)
 }

@@ -83,7 +83,7 @@ fn no_output_removal_executes_and_reports_missing_target() {
     let _outputs = crate::output_count::push_output_count(Some(0));
     assert_eq!(
         super::invoke(args.clone()).unwrap(),
-        Value::OutputList(vec![])
+        Value::output_list(vec![])
     );
     assert!(!path.exists());
     assert!(super::invoke(args).is_err());

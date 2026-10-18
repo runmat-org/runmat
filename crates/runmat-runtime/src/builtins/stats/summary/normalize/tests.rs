@@ -222,7 +222,7 @@ fn normalize_single_input_preserves_single_outputs() {
     let Value::OutputList(values) = call(input, Vec::new()).unwrap() else {
         panic!("expected three outputs");
     };
-    for value in values {
+    for value in values.try_into_owned().expect("unique outputs") {
         let Value::Tensor(tensor) = value else {
             panic!("single normalize outputs must be tensors");
         };
@@ -246,7 +246,7 @@ fn normalize_restores_only_requested_resident_output_forms() {
                 panic!("normalize must return the selected output list");
             };
             assert_eq!(outputs.len(), requested);
-            for output in outputs {
+            for output in outputs.try_into_owned().expect("unique outputs") {
                 let Value::GpuTensor(result) = output else {
                     panic!("selected normalize output must retain explicit residency");
                 };

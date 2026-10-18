@@ -16,11 +16,11 @@ pub(super) struct BlsPriceGpuEval {
 impl BlsPriceGpuEval {
     pub(super) fn output(self, requested: Option<usize>) -> BuiltinResult<Value> {
         match requested {
-            Some(0) => Ok(Value::OutputList(Vec::new())),
-            Some(1) => Ok(Value::OutputList(vec![gpu_helpers::resident_gpu_value(
+            Some(0) => Ok(Value::output_list(Vec::new())),
+            Some(1) => Ok(Value::output_list(vec![gpu_helpers::resident_gpu_value(
                 self.call,
             )?])),
-            Some(2) => Ok(Value::OutputList(vec![
+            Some(2) => Ok(Value::output_list(vec![
                 gpu_helpers::resident_gpu_value(self.call)?,
                 gpu_helpers::resident_gpu_value(self.put)?,
             ])),

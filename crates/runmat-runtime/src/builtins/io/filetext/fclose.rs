@@ -68,10 +68,13 @@ async fn fclose_builtin(
     let eval = evaluate_in(runtime.as_ref(), &args).await?;
     if let Some(out_count) = crate::output_count::current_output_count() {
         if out_count == 0 {
-            return Ok(Value::OutputList(Vec::new()));
+            return Ok(Value::output_list(Vec::new()));
         }
-        return Ok(Value::OutputList(
-            eval.outputs().into_iter().take(out_count).collect(),
+        return Ok(Value::output_list(
+            eval.outputs()
+                .into_iter()
+                .take(out_count)
+                .collect::<Vec<_>>(),
         ));
     }
     Ok(eval.first_output())

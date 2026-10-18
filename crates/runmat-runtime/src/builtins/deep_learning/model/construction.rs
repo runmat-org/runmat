@@ -25,7 +25,19 @@ pub(in crate::builtins) fn layers_from_network_value(
         }
         Value::Object(object) => Ok(vec![Value::Object(object)]),
         Value::Cell(cell) => Ok(cell.data),
-        Value::OutputList(values) => Ok(values),
+        Value::OutputList(values) => values
+            .try_into_owned()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?
+            .try_into_unbounded_vec()
+            .map_err(|_| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            }),
         other => Err(deep_learning_error(
             function,
             format!("{function}: layers must be a layer object or cell collection, got {other:?}"),
@@ -62,7 +74,7 @@ pub(super) fn layer_slice<'a>(
     match value {
         Value::Object(_) => Ok(std::slice::from_ref(value)),
         Value::Cell(cell) => Ok(&cell.data),
-        Value::OutputList(values) => Ok(values),
+        Value::OutputList(values) => Ok(values.as_slice()),
         other => Err(deep_learning_error(
             function,
             format!("{function}: layers must be a layer object or cell collection, got {other:?}"),

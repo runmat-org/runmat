@@ -232,7 +232,7 @@ pub async fn plotmatrix_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     ];
 
     match crate::output_count::current_output_count() {
-        Some(0) => Ok(Value::OutputList(Vec::new())),
+        Some(0) => Ok(Value::output_list(Vec::new())),
         Some(out_count) => Ok(crate::output_count::output_list_with_padding(
             out_count,
             all_outputs,

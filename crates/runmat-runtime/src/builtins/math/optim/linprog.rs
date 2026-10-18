@@ -767,7 +767,7 @@ fn finalize(outcome: LinprogOutcome) -> Value {
 
     match crate::output_count::current_output_count() {
         None => x,
-        Some(0) => Value::OutputList(Vec::new()),
+        Some(0) => Value::output_list(Vec::new()),
         Some(1) => crate::output_count::output_list_with_padding(1, vec![x]),
         Some(2) => crate::output_count::output_list_with_padding(2, vec![x, fval]),
         Some(3) => crate::output_count::output_list_with_padding(3, vec![x, fval, exitflag]),
@@ -896,7 +896,11 @@ mod tests {
         let _guard = crate::output_count::push_output_count(Some(outputs));
         let value = block_on(linprog_builtin(f, a, b, rest)).expect("linprog");
         match value {
-            V::OutputList(values) => values,
+            V::OutputList(values) => values
+                .try_into_owned()
+                .expect("unique output list")
+                .try_into_unbounded_vec()
+                .expect("unbounded output list"),
             other => vec![other],
         }
     }

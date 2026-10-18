@@ -96,7 +96,7 @@ async fn blsprice_builtin(
 ) -> BuiltinResult<Value> {
     let requested_outputs = crate::output_count::current_output_count();
     if matches!(requested_outputs, Some(0)) {
-        return Ok(Value::OutputList(Vec::new()));
+        return Ok(Value::output_list(Vec::new()));
     }
     if matches!(requested_outputs, Some(count) if count > 2) {
         return Err(error(
@@ -151,8 +151,8 @@ async fn blsprice_builtin(
     let call = output_value(call, inputs.shape.clone(), result_class, BLSPRICE)?;
     let put = output_value(put, inputs.shape, result_class, BLSPRICE)?;
     match requested_outputs {
-        Some(1) => Ok(Value::OutputList(vec![call])),
-        Some(2) => Ok(Value::OutputList(vec![call, put])),
+        Some(1) => Ok(Value::output_list(vec![call])),
+        Some(2) => Ok(Value::output_list(vec![call, put])),
         Some(_) => Err(error(
             BLSPRICE,
             "blsprice: too many output arguments",

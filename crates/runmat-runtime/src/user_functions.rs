@@ -318,7 +318,7 @@ mod lexical_tests {
         .expect("lexical call succeeds");
         assert_eq!(result.captures[0].value, Value::Num(5.0));
         result.with_owned(|result| {
-            assert_eq!(result.outputs.into_values(), vec![Value::Num(7.0)]);
+            assert_eq!(result.outputs.as_slice(), &[Value::Num(7.0)]);
         });
         drop(guard);
         assert!(current_lexical_function_invoker().is_none());
