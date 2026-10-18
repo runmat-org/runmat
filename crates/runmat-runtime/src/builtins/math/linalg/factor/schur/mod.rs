@@ -12,7 +12,7 @@ use num_complex::Complex64;
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, NumericDType, Tensor, Value};
 
-use form::SchurForm;
+pub(crate) use form::SchurForm;
 
 #[derive(Clone, Copy)]
 enum SchurMode {

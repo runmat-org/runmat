@@ -1,18 +1,19 @@
 //! Ownership of one current-source overlay within an invocation projection.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::rc::Rc;
 
 use super::{SourceCurrentProjection, SourceInfo};
+use crate::context::poll_projection::PollProjection;
 
 pub(super) struct CurrentSourceOverlay {
-    current: Rc<RefCell<SourceCurrentProjection>>,
+    current: PollProjection<SourceCurrentProjection>,
     live: Rc<Cell<bool>>,
 }
 
 impl CurrentSourceOverlay {
     pub(super) fn push(
-        current: Rc<RefCell<SourceCurrentProjection>>,
+        current: PollProjection<SourceCurrentProjection>,
         source: Option<SourceInfo>,
     ) -> Self {
         let live = current.borrow_mut().push(source);

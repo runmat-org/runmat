@@ -4,6 +4,7 @@
 //! remain borrowed from their existing owners until Runtime prepares its transaction.
 
 use super::{HashMap, RuntimeContext, RuntimeError, WorkspaceAssignedReport};
+use crate::interpreter::vars::InterpreterVarsRead;
 use crate::runtime::workspace::{FrameVec, WorkspaceValueSnapshot};
 use runmat_runtime::context::host_allocation::{
     collection_block_retained_bytes, HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
@@ -17,6 +18,7 @@ use std::alloc::Layout;
 pub(super) struct BaseCompletionSource<'a> {
     names: FrameVec<CompletionEntry<'a>>,
     snapshot: &'a WorkspaceValueSnapshot,
+    values: InterpreterVarsRead<'a>,
     previous_globals: &'a HashMap<String, GlobalBindingTarget>,
 }
 
@@ -124,6 +126,7 @@ impl<'a> BaseCompletionSource<'a> {
         Ok(Self {
             names,
             snapshot,
+            values: snapshot.vars.read(),
             previous_globals,
         })
     }
@@ -141,14 +144,17 @@ impl WorkspaceCompletionSource for BaseCompletionSource<'_> {
             return Some(WorkspaceCompletionAction::BindGlobal { name, target });
         }
         if self.snapshot.assigned.contains(name) {
-            Some(WorkspaceCompletionAction::AssignLocal {
-                name,
-                value: WorkspaceCompletionValue::Retained(
-                    self.snapshot
-                        .vars
-                        .retained_lease(*self.snapshot.names.get(name)?)?,
-                ),
-            })
+            let slot = *self.snapshot.names.get(name)?;
+            let value = self
+                .values
+                .retained_lease(slot)
+                .map(WorkspaceCompletionValue::Retained)
+                .or_else(|| {
+                    self.values
+                        .value(slot)
+                        .map(WorkspaceCompletionValue::Borrowed)
+                })?;
+            Some(WorkspaceCompletionAction::AssignLocal { name, value })
         } else if self.previous_globals.contains_key(name) {
             Some(WorkspaceCompletionAction::UnbindGlobal { name })
         } else {

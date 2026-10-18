@@ -1,4 +1,5 @@
 pub mod api;
+pub mod bytecode_owner;
 mod completion;
 pub use completion::CompletedFrameProjection;
 pub mod debug;

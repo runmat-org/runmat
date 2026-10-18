@@ -1,8 +1,8 @@
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use crate::context::output_projection::{InvocationOutputProjection, PresentationOutputToken};
+use crate::context::poll_projection::PollProjection;
 
 runmat_thread_local! {
     static PRESENTATION_OUTPUT_PROJECTION: RefCell<InvocationOutputProjection> =
@@ -11,7 +11,7 @@ runmat_thread_local! {
 
 pub struct OutputCountGuard {
     token: PresentationOutputToken,
-    owner: Option<Rc<RefCell<InvocationOutputProjection>>>,
+    owner: Option<PollProjection<InvocationOutputProjection>>,
 }
 
 impl Drop for OutputCountGuard {
@@ -46,8 +46,8 @@ pub fn requested_output_count() -> Option<usize> {
     PRESENTATION_OUTPUT_PROJECTION.with(|projection| projection.borrow().current_presentation())
 }
 
-fn active_projection() -> Option<Rc<RefCell<InvocationOutputProjection>>> {
-    crate::context::legacy::active().map(|context| Rc::clone(context.output_projection()))
+fn active_projection() -> Option<PollProjection<InvocationOutputProjection>> {
+    crate::context::legacy::active().map(|context| context.output_projection().clone())
 }
 
 #[cfg(test)]

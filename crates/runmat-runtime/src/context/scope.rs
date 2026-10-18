@@ -1,4 +1,9 @@
 use super::RuntimeContext;
+use crate::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationPolicy,
+    HostAllocationReceipt,
+};
+use crate::RuntimeError;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::future::Future;
@@ -154,6 +159,7 @@ impl Drop for RuntimeContextGuard {
 pub struct ContextFuture<F> {
     context: RuntimeContext,
     future: Option<Pin<Box<F>>>,
+    _future_scratch: Option<std::sync::Arc<super::host_effect::ManagedHostEffectStageReservation>>,
 }
 
 impl<F> ContextFuture<F> {
@@ -166,8 +172,185 @@ impl<F> ContextFuture<F> {
                 .with_poll_console_capture_projection()
                 .with_poll_output_projection(),
             future: Some(future),
+            _future_scratch: None,
         }
     }
+
+    fn from_prepared(
+        context: RuntimeContext,
+        future: Pin<Box<F>>,
+        future_scratch: Option<
+            std::sync::Arc<super::host_effect::ManagedHostEffectStageReservation>,
+        >,
+    ) -> Self {
+        Self {
+            context,
+            future: Some(future),
+            _future_scratch: future_scratch,
+        }
+    }
+}
+
+/// A complete poll-local context snapshot prepared before a queued future is
+/// constructed. Managed snapshots retain exact owners, but conversion into a
+/// future remains unavailable until overlay growth has its own admitted
+/// control; no managed future factory runs through this interim boundary.
+pub struct PreparedRuntimeScope {
+    context: RuntimeContext,
+}
+
+impl PreparedRuntimeScope {
+    /// Admit the concrete future owner before its factory is invoked.
+    pub fn prepare_future<F: Future>(self) -> Result<PreparedRuntimeFutureScope<F>, RuntimeError> {
+        if HostAllocationReceipt::policy(Some(&self.context)).map_err(|source| {
+            scope_allocation_error(
+                &self.context,
+                "poll future authority is unavailable",
+                source,
+            )
+        })? == HostAllocationPolicy::Managed
+        {
+            return Err(crate::execution::ExecutionServiceError::Infrastructure(
+                "managed poll-local overlay growth requires an admitted continuation control owner"
+                    .to_owned(),
+            )
+            .into_runtime_error());
+        }
+        let bytes = u64::try_from(std::mem::size_of::<F>()).map_err(|_| {
+            scope_allocation_error(
+                &self.context,
+                "poll future allocation geometry overflowed",
+                HostAllocationError::Overflow,
+            )
+        })?;
+        let receipt = HostAllocationReceipt::admit(
+            Some(&self.context),
+            HostAllocationPlan::new(bytes, 0).map_err(|source| {
+                scope_allocation_error(
+                    &self.context,
+                    "poll future allocation geometry overflowed",
+                    source,
+                )
+            })?,
+        )
+        .map_err(|source| {
+            scope_allocation_error(&self.context, "poll future admission failed", source)
+        })?;
+        let scratch = receipt
+            .as_ref()
+            .map(HostAllocationReceipt::retain_scratch_for_cpu_work);
+        if let Some(receipt) = &receipt {
+            receipt.checkpoint(&self.context).map_err(|source| {
+                scope_allocation_error(&self.context, "poll future authority changed", source)
+            })?;
+        }
+        Ok(PreparedRuntimeFutureScope {
+            context: self.context,
+            scratch,
+            _future: std::marker::PhantomData,
+        })
+    }
+}
+
+/// Exact preparation for one concrete scoped future allocation.
+pub struct PreparedRuntimeFutureScope<F> {
+    context: RuntimeContext,
+    scratch: Option<std::sync::Arc<super::host_effect::ManagedHostEffectStageReservation>>,
+    _future: std::marker::PhantomData<fn() -> F>,
+}
+
+impl<F: Future> PreparedRuntimeFutureScope<F> {
+    pub fn scope(self, future: F) -> ContextFuture<F> {
+        ContextFuture::from_prepared(self.context, Box::pin(future), self.scratch)
+    }
+}
+
+impl RuntimeContext {
+    /// Prepare every mutable poll-local projection before a child future can
+    /// be published. Unbounded execution preserves the legacy snapshot path;
+    /// managed execution owns exact projection claims and scratch headroom.
+    pub fn prepare_poll_scope(&self) -> Result<PreparedRuntimeScope, RuntimeError> {
+        let policy = HostAllocationReceipt::policy(Some(self)).map_err(|source| {
+            scope_allocation_error(self, "poll scope authority is unavailable", source)
+        })?;
+        if policy == HostAllocationPolicy::Unbounded {
+            return Ok(PreparedRuntimeScope {
+                context: self
+                    .clone()
+                    .with_poll_source_catalog()
+                    .with_poll_debug_frames()
+                    .with_poll_call_projection()
+                    .with_poll_console_capture_projection()
+                    .with_poll_output_projection(),
+            });
+        }
+
+        let quote = self
+            .poll_source_debug_quote()
+            .and_then(|source| {
+                self.poll_local_projection_quote()
+                    .and_then(|local| source.checked_add(local))
+            })
+            .ok_or_else(|| {
+                scope_allocation_error(
+                    self,
+                    "poll scope allocation geometry overflowed",
+                    HostAllocationError::Overflow,
+                )
+            })?;
+        let retained = HostAllocationPlan::retained_exact_output_bytes(
+            quote.retained_bytes,
+            quote.retained_claims,
+        )
+        .map_err(|source| {
+            scope_allocation_error(self, "poll scope allocation geometry overflowed", source)
+        })?;
+        let plan = HostAllocationPlan::new(quote.scratch_bytes, retained).map_err(|source| {
+            scope_allocation_error(self, "poll scope allocation geometry overflowed", source)
+        })?;
+        let receipt = HostAllocationReceipt::admit(Some(self), plan)
+            .map_err(|source| scope_allocation_error(self, "poll scope admission failed", source))?
+            .ok_or_else(|| {
+                scope_allocation_error(
+                    self,
+                    "managed poll scope lost its allocation authority",
+                    HostAllocationError::MissingManagedOwner,
+                )
+            })?;
+        let permit = receipt.output_permit(self).map_err(|source| {
+            scope_allocation_error(self, "poll scope output authority changed", source)
+        })?;
+        let scratch = receipt.retain_scratch_for_cpu_work();
+        let context = self
+            .clone()
+            .with_admitted_poll_source_catalog(&permit, scratch.clone())
+            .and_then(|context| context.with_admitted_poll_debug_frames(&permit, scratch.clone()))
+            .and_then(|context| context.with_admitted_poll_local_projections(&permit, scratch))
+            .map_err(|source| {
+                scope_allocation_error(
+                    self,
+                    "poll scope projection allocation failed",
+                    HostAllocationError::Numeric(source),
+                )
+            })?;
+        receipt.checkpoint(self).map_err(|source| {
+            scope_allocation_error(self, "poll scope authority changed", source)
+        })?;
+        Ok(PreparedRuntimeScope { context })
+    }
+}
+
+fn scope_allocation_error(
+    context: &RuntimeContext,
+    message: &'static str,
+    source: HostAllocationError,
+) -> RuntimeError {
+    host_allocation_runtime_error(
+        Some(context),
+        "RunMat:Runtime:PollScopeAllocation",
+        message,
+        source,
+    )
 }
 
 impl<F: Future> Future for ContextFuture<F> {

@@ -50,6 +50,10 @@ impl<T> CscOperator<'_, T> {
     pub fn nnz(&self) -> usize {
         self.values.len()
     }
+
+    pub fn as_slice(&self) -> &[T] {
+        self.values
+    }
 }
 
 pub enum SparseLinearOperator<'a> {

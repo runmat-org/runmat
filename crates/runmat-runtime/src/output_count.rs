@@ -1,9 +1,9 @@
 use runmat_thread_local::runmat_thread_local;
 use runmat_value::Value;
 use std::cell::RefCell;
-use std::rc::Rc;
 
 use crate::context::output_projection::{InvocationOutputProjection, RequestedOutputToken};
+use crate::context::poll_projection::PollProjection;
 
 mod validation;
 pub(crate) use validation::{
@@ -17,7 +17,7 @@ runmat_thread_local! {
 
 pub struct OutputCountGuard {
     token: RequestedOutputToken,
-    owner: Option<Rc<RefCell<InvocationOutputProjection>>>,
+    owner: Option<PollProjection<InvocationOutputProjection>>,
 }
 
 /// Output request scoped to the current runtime builtin dispatch. `Implicit`
@@ -78,8 +78,8 @@ pub fn current_output_scope() -> InvocationOutputScope {
     })
 }
 
-fn active_projection() -> Option<Rc<RefCell<InvocationOutputProjection>>> {
-    crate::context::legacy::active().map(|context| Rc::clone(context.output_projection()))
+fn active_projection() -> Option<PollProjection<InvocationOutputProjection>> {
+    crate::context::legacy::active().map(|context| context.output_projection().clone())
 }
 
 pub fn output_list_with_padding(out_count: usize, mut outputs: Vec<Value>) -> Value {

@@ -1330,10 +1330,16 @@ async fn eval_workspace_source(
     // native and WASM. Submit the whole parse/compile/admit/interpret request
     // to that driver, not merely its final interpreter phase. Bare callers
     // retain the existing canonical local-host/direct placement.
-    let work = target.scope(work);
     let completed = if let Some(driver) = driver {
-        driver.enqueue_owned(work_runtime.scope(work))?.await?
+        let queued_scope = work_runtime.prepare_poll_scope()?;
+        let queued_target = target.clone();
+        driver
+            .enqueue_owned_scoped_in_context(&work_runtime, queued_scope, move || {
+                queued_target.scope(work)
+            })?
+            .await?
     } else {
+        let work = target.scope(work);
         runmat_runtime::context::run_owned_request_continuation(&continuation_runtime, work).await?
     };
     let Some(DynamicEvalWorkResult {

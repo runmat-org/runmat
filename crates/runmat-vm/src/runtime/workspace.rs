@@ -1350,6 +1350,7 @@ pub(crate) fn commit_workspace_slot_value(
     compiler_name: Option<&str>,
     value: Value,
 ) -> Result<(), runmat_runtime::RuntimeError> {
+    runmat_runtime::execution::validate_storable_value(&value)?;
     let existing = workspace_slot_name_handle(index);
     let selected_name = compiler_name
         .filter(|name| compiler_workspace_slot_matches(index, name))

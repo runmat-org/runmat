@@ -634,11 +634,19 @@ fn revoked_selected_headroom_reports_stale_authority_with_cause() {
 
 #[test]
 fn managed_claims_retain_physical_output_and_one_stage_envelope_across_receipt() {
-    let output_bytes = runmat_value::ExactHostNumericAllocation::requested_bytes(
+    let physical_output_bytes = runmat_value::ExactHostNumericAllocation::requested_bytes(
         runmat_value::NumericDType::F32,
         1,
     )
     .expect("canonical exact float owner layout") as u64;
+    // `new` obtains an owned exact claim. Its managed claim-control owner is
+    // distinct from the numeric backing and remains live with that backing.
+    let output_bytes =
+        crate::context::host_allocation::HostAllocationPlan::retained_exact_output_bytes(
+            physical_output_bytes,
+            1,
+        )
+        .expect("one physical output and its claim-control owner");
     let capacity = 8 + output_bytes;
     let ledger = ManagedHostEffectLedger::new(capacity);
     let (runtime, placement) = managed_runtime_with_output(&ledger, capacity, output_bytes);

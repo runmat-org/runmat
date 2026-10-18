@@ -1,5 +1,6 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Bytecode;
+use crate::interpreter::bytecode_owner::{BytecodeLease, BytecodeOwner};
 use crate::interpreter::vars::InterpreterVars;
 use log::debug;
 #[cfg(feature = "native-accel")]
@@ -130,7 +131,7 @@ impl VmFusionPublicationFault {
 
 #[derive(Debug)]
 pub struct InterpreterState {
-    pub bytecode: Bytecode,
+    pub bytecode: BytecodeOwner,
     pub stack: crate::interpreter::stack::InterpreterStack,
     pub vars: InterpreterVars,
     pub pc: usize,
@@ -143,7 +144,6 @@ pub struct InterpreterState {
     pub global_aliases: FrameGlobalBindings,
     pub persistent_aliases: crate::interpreter::persistent::PersistentAliases,
     pub missing_input_slots: HashSet<usize>,
-    pub current_function_name: String,
     pub initial_assigned_var_count: usize,
     #[cfg(feature = "native-accel")]
     pub fusion_plan: Option<FusionPlanRef>,
@@ -207,10 +207,9 @@ impl InterpreterState {
             vars.resize_owned(bytecode.var_count, Value::Num(0.0));
         }
         Self::from_prepared_vars_in_context(
-            bytecode,
+            BytecodeOwner::direct(bytecode, display_name(current_function_name)),
             vars,
             initial_assigned_var_count,
-            current_function_name,
             invocation_arity,
             runtime,
         )
@@ -232,10 +231,42 @@ impl InterpreterState {
             .into_runtime_error());
         }
         let mut state = Self::from_prepared_vars_in_context(
-            bytecode,
+            BytecodeOwner::direct(bytecode, display_name(current_function_name)),
             vars,
             initial_assigned_var_count,
-            current_function_name,
+            invocation_arity,
+            runtime,
+        );
+        state.prepare_operand_stack()?;
+        Ok(state)
+    }
+
+    pub(crate) fn from_shared_vars_in_context(
+        bytecode: BytecodeLease,
+        vars: InterpreterVars,
+        initial_assigned_var_count: usize,
+        current_function_name: Option<&str>,
+        invocation_arity: RuntimeInvocationArity,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<Self, runmat_runtime::RuntimeError> {
+        if current_function_name.is_some_and(|name| name != bytecode.display_name()) {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Infrastructure(
+                "RunMat:Interpreter:BytecodeOwner: queued frame name differs from its retained compiler product"
+                    .to_owned(),
+            )
+            .into_runtime_error());
+        }
+        if vars.len() < bytecode.var_count {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Infrastructure(
+                "RunMat:Interpreter:RetainedFrameExtent: retained interpreter frame extent was not prepared before execution"
+                    .to_owned(),
+            )
+            .into_runtime_error());
+        }
+        let mut state = Self::from_prepared_vars_in_context(
+            BytecodeOwner::shared(bytecode),
+            vars,
+            initial_assigned_var_count,
             invocation_arity,
             runtime,
         );
@@ -244,10 +275,9 @@ impl InterpreterState {
     }
 
     fn from_prepared_vars_in_context(
-        bytecode: Bytecode,
+        bytecode: BytecodeOwner,
         vars: InterpreterVars,
         initial_assigned_var_count: usize,
-        current_function_name: Option<&str>,
         invocation_arity: RuntimeInvocationArity,
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Self {
@@ -277,6 +307,7 @@ impl InterpreterState {
                 inherited_storage_slots: Vec::new(),
                 graph_program,
                 process_driver: None,
+                bytecode_owner: None,
                 dynamic_eval_admission: None,
             },
             try_stack: Vec::new(),
@@ -290,9 +321,6 @@ impl InterpreterState {
             completion_boundary: None,
             completion_assigned_slots: None,
             initial_assigned_var_count,
-            current_function_name: current_function_name
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "<main>".to_string()),
             #[cfg(feature = "native-accel")]
             fusion_plan,
             #[cfg(feature = "native-accel")]
@@ -311,6 +339,12 @@ impl InterpreterState {
     }
 
     pub(crate) fn prepare_operand_stack(&mut self) -> Result<(), runmat_runtime::RuntimeError> {
+        // Only a compiled parfor region can queue a child that outlives this
+        // frame's poll. Ordinary VM runs keep the original inline code owner
+        // and incur no shared-control allocation or admission claim.
+        if !self.bytecode.parfor_regions.is_empty() {
+            self.bytecode.promote_shared(&self.context.runtime)?;
+        }
         let prepared = crate::interpreter::stack::InterpreterStack::prepare(
             &self.context.runtime,
             self.bytecode.stack_geometry,
@@ -318,6 +352,10 @@ impl InterpreterState {
         self.stack = prepared;
         Ok(())
     }
+}
+
+fn display_name(name: Option<&str>) -> String {
+    name.unwrap_or("<main>").to_owned()
 }
 
 #[cfg(all(test, feature = "native-accel"))]
@@ -347,12 +385,18 @@ mod tests {
         }];
 
         let mut initial_vars = Vec::new();
-        let state = InterpreterState::new(
+        let mut state = InterpreterState::new(
             bytecode,
             &mut initial_vars,
             Some("<main>"),
             RuntimeInvocationArity::Script,
         );
+        let original_code = &*state.bytecode as *const Bytecode;
+        state
+            .prepare_operand_stack()
+            .expect("prepare ordinary frame");
+        assert!(state.bytecode.shared_lease().is_none());
+        assert_eq!(original_code, &*state.bytecode as *const Bytecode);
         assert!(
             state.fusion_plan.is_some(),
             "expected runtime fusion plan when semantic windows exist"

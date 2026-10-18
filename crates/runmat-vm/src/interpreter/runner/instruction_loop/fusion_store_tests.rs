@@ -42,11 +42,13 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
     );
     ordinary.fusion_plan = None;
     ordinary.fusion_accel_graph = None;
+    let ordinary_runtime = ordinary.context.runtime.clone();
+    let (ordinary_runtime, ordinary_workspace) =
+        crate::runtime::workspace_service::VmWorkspaceService::install(ordinary_runtime, None);
     let crate::interpreter::api::InterpreterOutcome::Completed(expected) =
-        futures::executor::block_on(super::super::run_interpreter(
-            Box::new(ordinary),
-            &mut ordinary_vars,
-        ))
+        futures::executor::block_on(ordinary_workspace.scope(ordinary_runtime.scope(
+            super::super::run_interpreter(Box::new(ordinary), &mut ordinary_vars),
+        )))
         .expect("independent ordinary selected image source");
     let expected = &expected.values;
     let publication_slots: Vec<_> = ["mu", "sigma", "out"]
@@ -83,11 +85,13 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
     state.completion_assigned_slots = Some(HashSet::new());
     state.fusion_plan = Some(Rc::new(FusionPlan::from_graph(&graph, &[group])));
     state.fusion_accel_graph = Some(graph);
+    let selected_runtime = state.context.runtime.clone();
+    let (selected_runtime, selected_workspace) =
+        crate::runtime::workspace_service::VmWorkspaceService::install(selected_runtime, None);
     FUSION_EXECUTION_ENTRIES.with(|entries| entries.set(0));
-    let outcome = futures::executor::block_on(super::super::run_interpreter(
-        Box::new(state),
-        &mut initial_vars,
-    ))
+    let outcome = futures::executor::block_on(selected_workspace.scope(selected_runtime.scope(
+        super::super::run_interpreter(Box::new(state), &mut initial_vars),
+    )))
     .expect("observable stores must take the ordinary interpreter path");
     assert_eq!(
         FUSION_EXECUTION_ENTRIES.with(std::cell::Cell::get),

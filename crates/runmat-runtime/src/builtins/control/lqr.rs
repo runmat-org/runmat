@@ -1,11 +1,10 @@
-//! MATLAB-compatible `lqr` state-feedback gain synthesis.
+//! Standard real `lqr` state-feedback gain synthesis.
 
-use nalgebra::{DMatrix, SymmetricEigen};
+use nalgebra::DMatrix;
 use num_complex::Complex64;
 use runmat_builtins::{
     BuiltinErrorDescriptor, LQR_ERROR_INTERNAL, LQR_ERROR_INVALID_ARGUMENT,
-    LQR_ERROR_INVALID_DIMENSIONS, LQR_ERROR_INVALID_MODEL, LQR_ERROR_SOLVER_FAILED,
-    LQR_ERROR_UNSUPPORTED_INPUT, LQR_ERROR_UNSUPPORTED_MODEL, LQR_INTEGER_MATRIX_EXTENSION,
+    LQR_ERROR_INVALID_MODEL, LQR_ERROR_UNSUPPORTED_MODEL, LQR_INTEGER_MATRIX_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{ObjectInstance, Tensor, Value};
@@ -20,12 +19,20 @@ use crate::builtins::common::{
 use crate::builtins::control::tf_model::{
     output_complex_column, state_matrix_dimensions, validate_sample_time, SS_CLASS,
 };
+use crate::context::host_allocation::{
+    HostAllocationError, HostAllocationPolicy, HostAllocationReceipt,
+};
 use crate::{build_runtime_error, dispatcher, BuiltinResult};
 
 const BUILTIN_NAME: &str = "lqr";
-const EPS: f64 = 1.0e-10;
-const SIGN_MAX_ITERS: usize = 100;
-const DARE_MAX_ITERS: usize = 1000;
+
+mod error;
+mod standard_matrix;
+mod validation;
+mod weights;
+
+pub(in crate::builtins::control) use error::RiccatiApi;
+use error::RiccatiIssue;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::lqr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -57,9 +64,14 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 #[runtime_builtin(
     name = "lqr",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::control::lqr"
 )]
-async fn lqr_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+async fn lqr_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    first: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
     if let Some(out_count) = out_count {
         if out_count > 3 {
@@ -67,9 +79,6 @@ async fn lqr_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
                 &LQR_ERROR_INVALID_ARGUMENT,
                 "lqr supports at most three outputs",
             ));
-        }
-        if out_count == 0 {
-            return Ok(crate::output_count::output_list_with_padding(0, Vec::new()));
         }
     }
     // Preserve call-shape errors ahead of compatibility admission, without
@@ -91,17 +100,31 @@ async fn lqr_builtin(first: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
             BUILTIN_NAME,
         )?;
     }
-    let requested_outputs = out_count.unwrap_or(1);
-    let eval = LqrRequest::parse(first, rest)
+    // The current matrix parser and ordered-pencil work still use opaque
+    // nalgebra/faer allocations. A managed invocation must not execute them
+    // without a complete retained scratch/output owner.
+    if HostAllocationReceipt::policy(runtime.as_ref())
+        .map_err(|error| RiccatiApi::Lqr.admission(runtime.as_ref(), error))?
+        == HostAllocationPolicy::Managed
+    {
+        return Err(
+            RiccatiApi::Lqr.admission(runtime.as_ref(), HostAllocationError::MissingManagedOwner)
+        );
+    }
+    let eval = LqrRequest::parse(first, rest, runtime.as_ref())
         .await?
-        .solve(requested_outputs >= 3)?;
+        .solve(runtime.as_ref())
+        .await?;
     if let Some(out_count) = out_count {
         return Ok(crate::output_count::output_list_with_padding(
             out_count,
-            eval.outputs(out_count)?,
+            eval.into_outputs(out_count)?,
         ));
     }
-    eval.k_value()
+    eval.into_outputs(1)?
+        .into_iter()
+        .next()
+        .ok_or_else(|| lqr_error(&LQR_ERROR_INTERNAL, "LQR produced no gain output"))
 }
 
 fn integer_matrix_extension_required(first: &Value, rest: &[Value]) -> bool {
@@ -137,97 +160,111 @@ struct RealMatrix {
 }
 
 impl RealMatrix {
-    fn preflight(label: &'static str, value: &Value) -> BuiltinResult<()> {
+    fn preflight(
+        label: &'static str,
+        value: &Value,
+        api: RiccatiApi,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<()> {
+        HostAllocationReceipt::policy(runtime).map_err(|error| api.admission(runtime, error))?;
         match value {
             Value::GpuTensor(handle)
                 if runmat_accelerate_api::handle_storage(handle)
                     == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved =>
             {
-                Err(lqr_error(
-                    &LQR_ERROR_UNSUPPORTED_INPUT,
+                Err(api.error(
+                    RiccatiIssue::UnsupportedInput,
                     format!("{label} must contain real numeric values"),
                 ))
             }
             Value::GpuTensor(_) => Ok(()),
-            Value::Tensor(tensor) => Self::validate_tensor(label, tensor),
+            Value::Tensor(tensor) => Self::validate_tensor(label, tensor, api, runtime),
             Value::Num(value) if value.is_finite() => Ok(()),
             Value::Int(_) => Ok(()),
-            Value::Num(_) => Err(lqr_error(
-                &LQR_ERROR_UNSUPPORTED_INPUT,
+            Value::Num(_) => Err(api.error(
+                RiccatiIssue::UnsupportedInput,
                 format!("{label} must contain finite real values"),
             )),
-            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(lqr_error(
-                &LQR_ERROR_UNSUPPORTED_INPUT,
+            Value::Complex(_, _) | Value::ComplexTensor(_) => Err(api.error(
+                RiccatiIssue::UnsupportedInput,
                 format!("{label} must contain real numeric values"),
             )),
-            other => Err(lqr_error(
-                &LQR_ERROR_UNSUPPORTED_INPUT,
+            other => Err(api.error(
+                RiccatiIssue::UnsupportedInput,
                 format!("{label} must be a real numeric matrix, got {other:?}"),
             )),
         }
     }
 
-    async fn parse(label: &'static str, value: Value) -> BuiltinResult<Self> {
+    async fn parse(
+        label: &'static str,
+        value: Value,
+        api: RiccatiApi,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
         if matches!(value, Value::Complex(_, _) | Value::ComplexTensor(_))
             || matches!(&value, Value::GpuTensor(handle) if runmat_accelerate_api::handle_storage(handle) == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved)
         {
-            return Err(lqr_error(
-                &LQR_ERROR_UNSUPPORTED_INPUT,
+            return Err(api.error(
+                RiccatiIssue::UnsupportedInput,
                 format!("{label} must contain real numeric values"),
             ));
         }
-        let gathered = dispatcher::gather_if_needed_async(&value)
-            .await
-            .map_err(|err| {
-                lqr_error(
-                    &LQR_ERROR_UNSUPPORTED_INPUT,
-                    format!(
-                        "{BUILTIN_NAME}: failed to gather {label}: {}",
-                        err.message()
-                    ),
-                )
-            })?;
-        Self::parse_host(label, gathered)
+        // A provider/cancellation failure is operational, not a malformed
+        // Riccati matrix. Preserve its typed source across host gathering.
+        let gathered = dispatcher::gather_if_needed_async(&value).await?;
+        Self::parse_host(label, gathered, api, runtime)
     }
 
-    fn parse_host(label: &'static str, gathered: Value) -> BuiltinResult<Self> {
+    fn parse_host(
+        label: &'static str,
+        gathered: Value,
+        api: RiccatiApi,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
         let tensor = match gathered {
             Value::Tensor(tensor) => tensor::integer_tensor_to_f64(tensor).map_err(|err| {
-                lqr_error(
-                    &LQR_ERROR_INTERNAL,
+                api.error(
+                    RiccatiIssue::Internal,
                     format!("failed to normalize {label}: {err}"),
                 )
             })?,
             Value::Num(n) => Tensor::new(vec![n], vec![1, 1]).map_err(|err| {
-                lqr_error(
-                    &LQR_ERROR_INTERNAL,
+                api.error(
+                    RiccatiIssue::Internal,
                     format!("failed to build scalar tensor: {err}"),
                 )
             })?,
             Value::Int(i) => Tensor::new(vec![i.to_f64()], vec![1, 1]).map_err(|err| {
-                lqr_error(
-                    &LQR_ERROR_INTERNAL,
+                api.error(
+                    RiccatiIssue::Internal,
                     format!("failed to build scalar tensor: {err}"),
                 )
             })?,
             Value::Complex(_, _) | Value::ComplexTensor(_) => {
-                return Err(lqr_error(
-                    &LQR_ERROR_UNSUPPORTED_INPUT,
+                return Err(api.error(
+                    RiccatiIssue::UnsupportedInput,
                     format!("{label} must contain real numeric values"),
                 ));
             }
             other => {
-                return Err(lqr_error(
-                    &LQR_ERROR_UNSUPPORTED_INPUT,
+                return Err(api.error(
+                    RiccatiIssue::UnsupportedInput,
                     format!("{label} must be a real numeric matrix, got {other:?}"),
                 ));
             }
         };
-        Self::from_tensor(label, tensor)
+        Self::from_tensor(label, tensor, api, runtime)
     }
 
-    fn from_tensor(label: &'static str, tensor: Tensor) -> BuiltinResult<Self> {
-        Self::validate_tensor(label, &tensor)?;
+    fn from_tensor(
+        label: &'static str,
+        tensor: Tensor,
+        api: RiccatiApi,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
+        Self::validate_tensor(label, &tensor, api, runtime)?;
+        HostAllocationReceipt::policy(runtime).map_err(|error| api.admission(runtime, error))?;
         let values = tensor::tensor_values_f64_cow(&tensor);
         let (rows, cols) = state_matrix_dimensions(&tensor);
         Ok(Self {
@@ -235,10 +272,15 @@ impl RealMatrix {
         })
     }
 
-    fn validate_tensor(label: &'static str, tensor: &Tensor) -> BuiltinResult<()> {
+    fn validate_tensor(
+        label: &'static str,
+        tensor: &Tensor,
+        api: RiccatiApi,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<()> {
         if tensor.shape().len() > 2 {
-            return Err(lqr_error(
-                &LQR_ERROR_INVALID_DIMENSIONS,
+            return Err(api.error(
+                RiccatiIssue::InvalidDimensions,
                 format!(
                     "{label} must be a 2-D matrix, got shape {:?}",
                     tensor.shape()
@@ -246,11 +288,15 @@ impl RealMatrix {
             ));
         }
         let values = tensor::tensor_values_f64_cow(tensor);
-        if values.iter().any(|value| !value.is_finite()) {
-            return Err(lqr_error(
-                &LQR_ERROR_UNSUPPORTED_INPUT,
-                format!("{label} must contain finite real values"),
-            ));
+        for chunk in values.chunks(4096) {
+            HostAllocationReceipt::policy(runtime)
+                .map_err(|error| api.admission(runtime, error))?;
+            if chunk.iter().any(|value| !value.is_finite()) {
+                return Err(api.error(
+                    RiccatiIssue::UnsupportedInput,
+                    format!("{label} must contain finite real values"),
+                ));
+            }
         }
         Ok(())
     }
@@ -264,71 +310,72 @@ impl RealMatrix {
     }
 }
 
-struct LqrRequest {
+pub(in crate::builtins::control) struct LqrRequest {
     a: RealMatrix,
     b: RealMatrix,
     q: RealMatrix,
     r: RealMatrix,
     n: Option<RealMatrix>,
     domain: LqrDomain,
+    api: RiccatiApi,
 }
 
 #[derive(Clone, Copy)]
-enum LqrDomain {
+pub(in crate::builtins::control) enum LqrDomain {
     Continuous,
     Discrete,
 }
 
 impl LqrRequest {
-    async fn parse(first: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
+    async fn parse(
+        first: Value,
+        rest: Vec<Value>,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
         match first {
             Value::Object(object) if object.is_class(SS_CLASS) => {
-                Self::from_state_space_object(object, rest).await
+                Self::from_state_space_object(object, rest, runtime).await
             }
             Value::Object(_) => Err(lqr_error(
                 &LQR_ERROR_UNSUPPORTED_MODEL,
                 "lqr(sys,Q,R) requires a state-space ss model",
             )),
-            a => Self::from_matrices(a, rest).await,
+            a => Self::from_matrices(a, rest, runtime).await,
         }
     }
 
-    async fn from_matrices(a: Value, rest: Vec<Value>) -> BuiltinResult<Self> {
-        let [b, q, r, tail @ ..] = rest.as_slice() else {
+    async fn from_matrices(
+        a: Value,
+        rest: Vec<Value>,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<Self> {
+        if !(3..=4).contains(&rest.len()) {
             return Err(lqr_error(
                 &LQR_ERROR_INVALID_ARGUMENT,
                 "expected lqr(A,B,Q,R) or lqr(A,B,Q,R,N)",
             ));
-        };
-        if tail.len() > 1 {
-            return Err(lqr_error(
-                &LQR_ERROR_INVALID_ARGUMENT,
-                "lqr(A,B,Q,R,N) accepts at most five inputs",
-            ));
         }
-        for (label, value) in [("A", &a), ("B", b), ("Q", q), ("R", r)] {
-            RealMatrix::preflight(label, value)?;
-        }
-        if let [n] = tail {
-            RealMatrix::preflight("N", n)?;
-        }
-        Ok(Self {
-            a: RealMatrix::parse("A", a).await?,
-            b: RealMatrix::parse("B", b.clone()).await?,
-            q: RealMatrix::parse("Q", q.clone()).await?,
-            r: RealMatrix::parse("R", r.clone()).await?,
-            n: match tail {
-                [] => None,
-                [n] => Some(RealMatrix::parse("N", n.clone()).await?),
-                _ => unreachable!(),
-            },
-            domain: LqrDomain::Continuous,
-        })
+        let mut values = rest.into_iter();
+        let b = values.next().expect("validated B");
+        let q = values.next().expect("validated Q");
+        let r = values.next().expect("validated R");
+        Self::prepare_standard_matrix(
+            a,
+            b,
+            q,
+            Some(r),
+            values.next(),
+            LqrDomain::Continuous,
+            RiccatiApi::Lqr,
+            runtime,
+        )
+        .await
     }
 
     async fn from_state_space_object(
-        object: ObjectInstance,
+        mut object: ObjectInstance,
         rest: Vec<Value>,
+        runtime: Option<&crate::context::RuntimeContext>,
     ) -> BuiltinResult<Self> {
         let [q, r, tail @ ..] = rest.as_slice() else {
             return Err(lqr_error(
@@ -353,31 +400,39 @@ impl LqrRequest {
             .get("B")
             .ok_or_else(|| lqr_error(&LQR_ERROR_INVALID_MODEL, "ss object missing B property"))?;
         for (label, value) in [("A", a_value), ("B", b_value), ("Q", q), ("R", r)] {
-            RealMatrix::preflight(label, value)?;
+            RealMatrix::preflight(label, value, RiccatiApi::Lqr, runtime)?;
         }
         if let [n] = tail {
-            RealMatrix::preflight("N", n)?;
+            RealMatrix::preflight("N", n, RiccatiApi::Lqr, runtime)?;
         }
-        Ok(Self {
-            a: RealMatrix::parse("A", a_value.clone()).await?,
-            b: RealMatrix::parse("B", b_value.clone()).await?,
-            q: RealMatrix::parse("Q", q.clone()).await?,
-            r: RealMatrix::parse("R", r.clone()).await?,
-            n: match tail {
-                [] => None,
-                [n] => Some(RealMatrix::parse("N", n.clone()).await?),
-                _ => unreachable!(),
-            },
-            domain: if sample_time > 0.0 {
+        let a = object.properties.remove("A").expect("preflighted A");
+        let b = object.properties.remove("B").expect("preflighted B");
+        let mut values = rest.into_iter();
+        let q = values.next().expect("validated Q");
+        let r = values.next().expect("validated R");
+        Self::prepare_standard_matrix(
+            a,
+            b,
+            q,
+            Some(r),
+            values.next(),
+            if sample_time > 0.0 {
                 LqrDomain::Discrete
             } else {
                 LqrDomain::Continuous
             },
-        })
+            RiccatiApi::Lqr,
+            runtime,
+        )
+        .await
     }
 
-    fn solve(self, include_poles: bool) -> BuiltinResult<LqrEval> {
+    pub(in crate::builtins::control) async fn solve(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> BuiltinResult<LqrEval> {
         validate_dimensions(&self)?;
+        let api = self.api;
         let a = self.a.matrix;
         let b = self.b.matrix;
         let q = symmetric_part(self.q.matrix);
@@ -386,87 +441,98 @@ impl LqrRequest {
             .n
             .map(|matrix| matrix.matrix)
             .unwrap_or_else(|| DMatrix::<f64>::zeros(a.nrows(), b.ncols()));
-        validate_cost_weights(&q, &r, &n)?;
-        let (s, k) = match self.domain {
+        weights::validate(&q, &r, &n, api)?;
+        let domain = match self.domain {
             LqrDomain::Continuous => {
-                let r_inv = r.clone().try_inverse().ok_or_else(|| {
-                    lqr_error(
-                        &LQR_ERROR_INVALID_DIMENSIONS,
-                        "R must be nonsingular for continuous-time LQR",
-                    )
-                })?;
-                let s = solve_care(&a, &b, &q, &r_inv, &n)?;
-                let k = &r_inv * (b.transpose() * &s + n.transpose());
-                (s, k)
+                crate::builtins::math::linalg::factor::qz::riccati::RiccatiTimeDomain::Continuous
             }
             LqrDomain::Discrete => {
-                let s = solve_dare(&a, &b, &q, &r, &n)?;
-                let k = discrete_gain(&a, &b, &r, &n, &s)?;
-                (s, k)
+                crate::builtins::math::linalg::factor::qz::riccati::RiccatiTimeDomain::Discrete
             }
         };
-        let poles = if include_poles {
-            let closed_loop = &a - &b * &k;
-            Some(closed_loop_poles(&closed_loop)?)
-        } else {
-            None
-        };
-        Ok(LqrEval { k, s, poles })
+        let factor = crate::builtins::math::linalg::factor::qz::riccati::stabilizing_subspace(
+            a,
+            b,
+            q,
+            r,
+            n,
+            domain,
+            runtime,
+            api.name(),
+            |message| api.error(RiccatiIssue::SolverFailed, message),
+        )
+        .await?;
+        validation::validate_solution(factor, self.domain, api)
     }
 }
 
-struct LqrEval {
+pub(in crate::builtins::control) struct LqrEval {
     k: DMatrix<f64>,
     s: DMatrix<f64>,
     poles: Option<Vec<Complex64>>,
+    api: RiccatiApi,
 }
 
 impl LqrEval {
-    fn outputs(&self, count: usize) -> BuiltinResult<Vec<Value>> {
+    pub(in crate::builtins::control) fn into_outputs(
+        self,
+        count: usize,
+    ) -> BuiltinResult<Vec<Value>> {
         let mut outputs = Vec::with_capacity(count.min(3));
         if count >= 1 {
-            outputs.push(self.k_value()?);
+            outputs.push(matrix_value_owned("K", self.k, self.api)?);
         }
         if count >= 2 {
-            outputs.push(self.s_value()?);
+            outputs.push(matrix_value_owned("S", self.s, self.api)?);
         }
         if count >= 3 {
-            outputs.push(self.poles_value()?);
+            outputs.push(output_complex_column(
+                self.poles.ok_or_else(|| {
+                    self.api
+                        .error(RiccatiIssue::Internal, "closed-loop poles missing")
+                })?,
+                self.api.name(),
+            )?);
         }
         Ok(outputs)
     }
 
-    fn k_value(&self) -> BuiltinResult<Value> {
-        matrix_value("K", &self.k)
-    }
-
-    fn s_value(&self) -> BuiltinResult<Value> {
-        matrix_value("S", &self.s)
-    }
-
-    fn poles_value(&self) -> BuiltinResult<Value> {
-        let poles = self.poles.as_ref().ok_or_else(|| {
-            lqr_error(
-                &LQR_ERROR_INTERNAL,
-                "closed-loop poles were not computed for this output request",
-            )
-        })?;
-        output_complex_column(poles.clone(), BUILTIN_NAME)
+    pub(in crate::builtins::control) fn into_care_outputs(
+        self,
+        count: usize,
+    ) -> BuiltinResult<Vec<Value>> {
+        let mut outputs = Vec::with_capacity(count.min(3));
+        if count >= 1 {
+            outputs.push(matrix_value_owned("X", self.s, self.api)?);
+        }
+        if count >= 2 {
+            outputs.push(output_complex_column(
+                self.poles.ok_or_else(|| {
+                    self.api
+                        .error(RiccatiIssue::Internal, "closed-loop poles missing")
+                })?,
+                self.api.name(),
+            )?);
+        }
+        if count >= 3 {
+            outputs.push(matrix_value_owned("G", self.k, self.api)?);
+        }
+        Ok(outputs)
     }
 }
-
 fn validate_dimensions(request: &LqrRequest) -> BuiltinResult<()> {
+    let api = request.api;
     let n = request.a.rows();
     let m = request.b.cols();
     if n == 0 {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
+        return Err(api.error(
+            RiccatiIssue::InvalidDimensions,
             "A must have at least one state",
         ));
     }
     if request.a.cols() != n {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
+        return Err(api.error(
+            RiccatiIssue::InvalidDimensions,
             format!(
                 "A must be square, got {}x{}",
                 request.a.rows(),
@@ -475,8 +541,8 @@ fn validate_dimensions(request: &LqrRequest) -> BuiltinResult<()> {
         ));
     }
     if request.b.rows() != n || m == 0 {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
+        return Err(api.error(
+            RiccatiIssue::InvalidDimensions,
             format!(
                 "B must have {n} rows and at least one input, got {}x{}",
                 request.b.rows(),
@@ -485,8 +551,8 @@ fn validate_dimensions(request: &LqrRequest) -> BuiltinResult<()> {
         ));
     }
     if request.q.rows() != n || request.q.cols() != n {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
+        return Err(api.error(
+            RiccatiIssue::InvalidDimensions,
             format!(
                 "Q must be {n}x{n}, got {}x{}",
                 request.q.rows(),
@@ -495,8 +561,8 @@ fn validate_dimensions(request: &LqrRequest) -> BuiltinResult<()> {
         ));
     }
     if request.r.rows() != m || request.r.cols() != m {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
+        return Err(api.error(
+            RiccatiIssue::InvalidDimensions,
             format!(
                 "R must be {m}x{m}, got {}x{}",
                 request.r.rows(),
@@ -506,238 +572,26 @@ fn validate_dimensions(request: &LqrRequest) -> BuiltinResult<()> {
     }
     if let Some(cross) = &request.n {
         if cross.rows() != n || cross.cols() != m {
-            return Err(lqr_error(
-                &LQR_ERROR_INVALID_DIMENSIONS,
+            return Err(api.error(
+                RiccatiIssue::InvalidDimensions,
                 format!("N must be {n}x{m}, got {}x{}", cross.rows(), cross.cols()),
             ));
         }
     }
     if !is_symmetric(&request.q.matrix, 1.0e-8) {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
-            "Q must be symmetric",
-        ));
+        return Err(api.error(RiccatiIssue::InvalidDimensions, "Q must be symmetric"));
     }
     if !is_symmetric(&request.r.matrix, 1.0e-8) {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
-            "R must be symmetric",
-        ));
+        return Err(api.error(RiccatiIssue::InvalidDimensions, "R must be symmetric"));
     }
     Ok(())
 }
 
-fn validate_cost_weights(
-    q: &DMatrix<f64>,
-    r: &DMatrix<f64>,
-    n: &DMatrix<f64>,
-) -> BuiltinResult<()> {
-    if r.clone().cholesky().is_none() {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
-            "R must be symmetric positive definite",
-        ));
-    }
-    let r_inv = r.clone().try_inverse().ok_or_else(|| {
-        lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
-            "R must be nonsingular for LQR",
-        )
-    })?;
-    let schur = symmetric_part(q - n * r_inv * n.transpose());
-    if !is_positive_semidefinite(&schur, 1.0e-8) {
-        return Err(lqr_error(
-            &LQR_ERROR_INVALID_DIMENSIONS,
-            "[Q N; N' R] must be positive semidefinite",
-        ));
-    }
-    Ok(())
-}
-
-fn is_positive_semidefinite(matrix: &DMatrix<f64>, tol: f64) -> bool {
-    let scale = max_abs_matrix(matrix).max(1.0);
-    let eigen = SymmetricEigen::new(matrix.clone());
-    eigen.eigenvalues.iter().all(|value| *value >= -tol * scale)
-}
-
-fn solve_care(
-    a: &DMatrix<f64>,
-    b: &DMatrix<f64>,
-    q: &DMatrix<f64>,
-    r_inv: &DMatrix<f64>,
-    n: &DMatrix<f64>,
-) -> BuiltinResult<DMatrix<f64>> {
-    let state_count = a.nrows();
-    let a_bar = a - b * r_inv * n.transpose();
-    let q_bar = q - n * r_inv * n.transpose();
-    let g = b * r_inv * b.transpose();
-    let mut h = DMatrix::<f64>::zeros(state_count * 2, state_count * 2);
-    h.view_mut((0, 0), (state_count, state_count))
-        .copy_from(&a_bar);
-    h.view_mut((0, state_count), (state_count, state_count))
-        .copy_from(&(-g));
-    h.view_mut((state_count, 0), (state_count, state_count))
-        .copy_from(&(-q_bar));
-    h.view_mut((state_count, state_count), (state_count, state_count))
-        .copy_from(&(-a_bar.transpose()));
-
-    let sign_h = matrix_sign(h)?;
-    let identity = DMatrix::<f64>::identity(state_count * 2, state_count * 2);
-    let projector = (identity - sign_h) * 0.5;
-    let p11 = projector
-        .view((0, 0), (state_count, state_count))
-        .into_owned();
-    let p21 = projector
-        .view((state_count, 0), (state_count, state_count))
-        .into_owned();
-    let p11_inv = p11.try_inverse().ok_or_else(|| {
-        lqr_error(
-            &LQR_ERROR_SOLVER_FAILED,
-            "stable Hamiltonian invariant subspace is singular",
-        )
-    })?;
-    let solution = symmetric_part(p21 * p11_inv);
-    if solution.iter().any(|value| !value.is_finite()) {
-        return Err(lqr_error(
-            &LQR_ERROR_SOLVER_FAILED,
-            "Riccati solution contains non-finite values",
-        ));
-    }
-    let residual = a.transpose() * &solution + &solution * a
-        - (&solution * b + n) * r_inv * (b.transpose() * &solution + n.transpose())
-        + q;
-    let residual_norm = max_abs_matrix(&residual);
-    let scale = 1.0
-        + max_abs_matrix(q)
-        + max_abs_matrix(a)
-        + max_abs_matrix(b)
-        + max_abs_matrix(r_inv)
-        + max_abs_matrix(&solution);
-    if residual_norm > 1.0e-6 * scale {
-        return Err(lqr_error(
-            &LQR_ERROR_SOLVER_FAILED,
-            format!("Riccati residual did not converge: {residual_norm:e}"),
-        ));
-    }
-    Ok(solution)
-}
-
-fn matrix_sign(mut matrix: DMatrix<f64>) -> BuiltinResult<DMatrix<f64>> {
-    for _ in 0..SIGN_MAX_ITERS {
-        let inverse = matrix.clone().try_inverse().ok_or_else(|| {
-            lqr_error(
-                &LQR_ERROR_SOLVER_FAILED,
-                "Hamiltonian matrix sign iteration encountered a singular iterate",
-            )
-        })?;
-        let next = (matrix.clone() + inverse) * 0.5;
-        let delta = max_abs_matrix(&(next.clone() - matrix));
-        let next_norm = max_abs_matrix(&next).max(1.0);
-        matrix = next;
-        if delta <= EPS * next_norm {
-            return Ok(matrix);
-        }
-    }
-    Err(lqr_error(
-        &LQR_ERROR_SOLVER_FAILED,
-        "Hamiltonian matrix sign iteration did not converge",
-    ))
-}
-
-fn solve_dare(
-    a: &DMatrix<f64>,
-    b: &DMatrix<f64>,
-    q: &DMatrix<f64>,
-    r: &DMatrix<f64>,
-    n: &DMatrix<f64>,
-) -> BuiltinResult<DMatrix<f64>> {
-    let mut solution = q.clone();
-    for _ in 0..DARE_MAX_ITERS {
-        let gain_inv = discrete_gain_denominator(b, r, &solution)?;
-        let next = symmetric_part(
-            a.transpose() * &solution * a
-                - (a.transpose() * &solution * b + n)
-                    * gain_inv
-                    * (b.transpose() * &solution * a + n.transpose())
-                + q,
-        );
-        if next.iter().any(|value| !value.is_finite()) {
-            return Err(lqr_error(
-                &LQR_ERROR_SOLVER_FAILED,
-                "discrete Riccati solution contains non-finite values",
-            ));
-        }
-        let delta = max_abs_matrix(&(next.clone() - &solution));
-        let scale = 1.0 + max_abs_matrix(&next);
-        solution = next;
-        if delta <= EPS * scale {
-            validate_dare_residual(a, b, q, r, n, &solution)?;
-            return Ok(solution);
-        }
-    }
-    Err(lqr_error(
-        &LQR_ERROR_SOLVER_FAILED,
-        "discrete Riccati iteration did not converge",
-    ))
-}
-
-fn discrete_gain(
-    a: &DMatrix<f64>,
-    b: &DMatrix<f64>,
-    r: &DMatrix<f64>,
-    n: &DMatrix<f64>,
-    s: &DMatrix<f64>,
-) -> BuiltinResult<DMatrix<f64>> {
-    Ok(discrete_gain_denominator(b, r, s)? * (b.transpose() * s * a + n.transpose()))
-}
-
-fn discrete_gain_denominator(
-    b: &DMatrix<f64>,
-    r: &DMatrix<f64>,
-    s: &DMatrix<f64>,
-) -> BuiltinResult<DMatrix<f64>> {
-    (r + b.transpose() * s * b).try_inverse().ok_or_else(|| {
-        lqr_error(
-            &LQR_ERROR_SOLVER_FAILED,
-            "R + B'*S*B is singular for discrete-time LQR",
-        )
-    })
-}
-
-fn validate_dare_residual(
-    a: &DMatrix<f64>,
-    b: &DMatrix<f64>,
-    q: &DMatrix<f64>,
-    r: &DMatrix<f64>,
-    n: &DMatrix<f64>,
-    s: &DMatrix<f64>,
-) -> BuiltinResult<()> {
-    let gain_inv = discrete_gain_denominator(b, r, s)?;
-    let residual = a.transpose() * s * a
-        - s
-        - (a.transpose() * s * b + n) * gain_inv * (b.transpose() * s * a + n.transpose())
-        + q;
-    let residual_norm = max_abs_matrix(&residual);
-    let scale = 1.0
-        + max_abs_matrix(q)
-        + max_abs_matrix(a)
-        + max_abs_matrix(b)
-        + max_abs_matrix(r)
-        + max_abs_matrix(s);
-    if residual_norm > 1.0e-6 * scale {
-        return Err(lqr_error(
-            &LQR_ERROR_SOLVER_FAILED,
-            format!("discrete Riccati residual did not converge: {residual_norm:e}"),
-        ));
-    }
-    Ok(())
-}
-
-fn closed_loop_poles(closed_loop: &DMatrix<f64>) -> BuiltinResult<Vec<Complex64>> {
+fn closed_loop_poles(closed_loop: &DMatrix<f64>, api: RiccatiApi) -> BuiltinResult<Vec<Complex64>> {
     let complex = closed_loop.map(|value| Complex64::new(value, 0.0));
     let eigenvalues = complex.eigenvalues().ok_or_else(|| {
-        lqr_error(
-            &LQR_ERROR_SOLVER_FAILED,
+        api.error(
+            RiccatiIssue::SolverFailed,
             "failed to compute closed-loop poles",
         )
     })?;
@@ -762,14 +616,18 @@ fn scalar_property(object: &ObjectInstance, name: &'static str) -> BuiltinResult
     }
 }
 
-fn matrix_value(label: &'static str, matrix: &DMatrix<f64>) -> BuiltinResult<Value> {
+fn matrix_value_owned(
+    label: &'static str,
+    matrix: DMatrix<f64>,
+    api: RiccatiApi,
+) -> BuiltinResult<Value> {
     let rows = matrix.nrows();
     let cols = matrix.ncols();
-    Tensor::new(matrix.as_slice().to_vec(), vec![rows, cols])
+    Tensor::new(Vec::from(matrix.data), vec![rows, cols])
         .map(Value::Tensor)
         .map_err(|err| {
-            lqr_error(
-                &LQR_ERROR_INTERNAL,
+            api.error(
+                RiccatiIssue::Internal,
                 format!("failed to build {label} output tensor: {err}"),
             )
         })
@@ -798,6 +656,9 @@ fn is_symmetric(matrix: &DMatrix<f64>, tol: f64) -> bool {
 }
 
 fn max_abs_matrix(matrix: &DMatrix<f64>) -> f64 {
+    if matrix.iter().any(|value| !value.is_finite()) {
+        return f64::INFINITY;
+    }
     matrix
         .iter()
         .fold(0.0_f64, |acc, value| acc.max(value.abs()))
@@ -818,7 +679,9 @@ fn lqr_error(
 mod tests {
     use super::*;
     use futures::executor::block_on;
-    use runmat_builtins::LQR_DESCRIPTOR;
+    use runmat_builtins::{
+        LQR_DESCRIPTOR, LQR_ERROR_INVALID_DIMENSIONS, LQR_ERROR_UNSUPPORTED_INPUT,
+    };
     use runmat_value::{IntValue, IntegerStorage};
 
     fn tensor(data: Vec<f64>, rows: usize, cols: usize) -> Value {
@@ -853,6 +716,7 @@ mod tests {
     fn lqr_double_integrator_matches_known_solution() {
         let _guard = crate::output_count::push_output_count(Some(3));
         let result = block_on(lqr_builtin(
+            None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
             vec![
                 tensor(vec![0.0, 1.0], 2, 1),
@@ -876,6 +740,7 @@ mod tests {
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn lqr_preserves_rank_one_dense_matrix_projection() {
         let error = block_on(lqr_builtin(
+            None,
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2]).unwrap()),
             vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
         ))
@@ -888,6 +753,7 @@ mod tests {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
         let _guard = crate::output_count::push_output_count(Some(2));
         let result = block_on(lqr_builtin(
+            None,
             integer_tensor(IntegerStorage::I16(vec![0, 0, 1, 0]), 2, 2),
             vec![
                 integer_tensor(IntegerStorage::I16(vec![0, 1]), 2, 1),
@@ -909,6 +775,7 @@ mod tests {
     fn strict_mode_rejects_integer_matrix_before_provider_access() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(false);
         let host_error = block_on(lqr_builtin(
+            None,
             integer_tensor(IntegerStorage::I16(vec![-1]), 1, 1),
             vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
         ))
@@ -925,6 +792,7 @@ mod tests {
             )
             .expect("allocate integer handle");
         let error = block_on(lqr_builtin(
+            None,
             Value::GpuTensor(allocation.handle.clone()),
             vec![Value::Num(1.0), Value::Num(1.0), Value::Num(1.0)],
         ))
@@ -941,9 +809,21 @@ mod tests {
     #[test]
     fn invalid_arity_precedes_integer_extension_admission() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(false);
-        let error = block_on(lqr_builtin(Value::Int(IntValue::I16(1)), vec![]))
+        let error = block_on(lqr_builtin(None, Value::Int(IntValue::I16(1)), vec![]))
             .expect_err("invalid call shape");
         assert_eq!(error.identifier(), LQR_ERROR_INVALID_ARGUMENT.identifier);
+    }
+
+    #[test]
+    fn zero_output_request_still_validates_the_riccati_problem() {
+        let _outputs = crate::output_count::push_output_count(Some(0));
+        let error = block_on(lqr_builtin(
+            None,
+            Value::Num(-1.0),
+            vec![Value::Num(1.0), Value::Num(-1.0), Value::Num(1.0)],
+        ))
+        .expect_err("negative Q must not succeed when no output is requested");
+        assert_eq!(error.identifier(), LQR_ERROR_INVALID_DIMENSIONS.identifier);
     }
 
     #[test]
@@ -960,6 +840,7 @@ mod tests {
             IntValue::U64(1),
         ] {
             let result = block_on(lqr_builtin(
+                None,
                 Value::Num(-1.0),
                 vec![Value::Num(1.0), Value::Num(1.0), Value::Int(gain)],
             ))
@@ -978,6 +859,7 @@ mod tests {
                 .expect("upload A");
             provider.reset_telemetry();
             let result = block_on(lqr_builtin(
+                None,
                 Value::GpuTensor(resident),
                 vec![
                     tensor(vec![0.0, 1.0], 2, 1),
@@ -1007,6 +889,7 @@ mod tests {
                 .insert("B".into(), tensor(vec![0.0, 1.0], 2, 1));
             provider.reset_telemetry();
             let result = block_on(lqr_builtin(
+                None,
                 Value::Object(model.clone()),
                 vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
             ))
@@ -1017,6 +900,7 @@ mod tests {
             model.properties.remove("B");
             provider.reset_telemetry();
             let error = block_on(lqr_builtin(
+                None,
                 Value::Object(model),
                 vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
             ))
@@ -1034,6 +918,7 @@ mod tests {
                 crate::builtins::common::gpu_helpers::upload_tensor(provider, &a).unwrap();
             provider.reset_telemetry();
             let error = block_on(lqr_builtin(
+                None,
                 Value::GpuTensor(resident),
                 vec![
                     tensor(vec![0.0, 1.0], 2, 1),
@@ -1051,6 +936,7 @@ mod tests {
     fn lqr_cross_weight_changes_gain_and_satisfies_care() {
         let _guard = crate::output_count::push_output_count(Some(2));
         let result = block_on(lqr_builtin(
+            None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
             vec![
                 tensor(vec![0.0, 1.0], 2, 1),
@@ -1088,6 +974,7 @@ mod tests {
         ))
         .expect("ss");
         let k = block_on(lqr_builtin(
+            None,
             sys,
             vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
         ))
@@ -1109,6 +996,7 @@ mod tests {
         .expect("discrete ss");
         let _guard = crate::output_count::push_output_count(Some(3));
         let result = block_on(lqr_builtin(
+            None,
             sys,
             vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
         ))
@@ -1147,6 +1035,7 @@ mod tests {
         .expect("discrete ss");
         let _guard = crate::output_count::push_output_count(Some(2));
         let result = block_on(lqr_builtin(
+            None,
             sys,
             vec![tensor(vec![1.0, 0.0, 0.0, 1.0], 2, 2), Value::Num(1.0)],
         ))
@@ -1160,6 +1049,7 @@ mod tests {
     #[test]
     fn lqr_rejects_bad_dimensions() {
         let err = block_on(lqr_builtin(
+            None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
             vec![
                 tensor(vec![0.0, 1.0], 2, 1),
@@ -1174,6 +1064,7 @@ mod tests {
     #[test]
     fn lqr_rejects_non_positive_definite_r() {
         let err = block_on(lqr_builtin(
+            None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
             vec![
                 tensor(vec![0.0, 1.0], 2, 1),
@@ -1189,6 +1080,7 @@ mod tests {
     #[test]
     fn lqr_rejects_indefinite_block_cost() {
         let err = block_on(lqr_builtin(
+            None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
             vec![
                 tensor(vec![0.0, 1.0], 2, 1),
@@ -1203,14 +1095,15 @@ mod tests {
     }
 
     #[test]
-    fn lqr_zero_requested_outputs_returns_empty_without_solving() {
+    fn lqr_zero_requested_outputs_still_reject_invalid_call_shape() {
         let _guard = crate::output_count::push_output_count(Some(0));
-        let result = block_on(lqr_builtin(
+        let error = block_on(lqr_builtin(
+            None,
             Value::String("not matrices".to_string()),
             Vec::new(),
         ))
-        .expect("zero-output lqr skips computation");
-        assert!(matches!(result, Value::OutputList(values) if values.is_empty()));
+        .expect_err("zero-output LQR still validates the call");
+        assert_eq!(error.identifier(), LQR_ERROR_INVALID_ARGUMENT.identifier);
     }
 
     #[test]

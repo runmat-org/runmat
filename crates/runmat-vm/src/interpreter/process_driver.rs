@@ -1,123 +1,238 @@
 //! Same-thread, invocation-owned continuation of nested semantic VM calls.
 
 use crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort;
-use futures::channel::oneshot;
+use runmat_execution::resource::ExactShared;
+use runmat_runtime::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationPolicy,
+    HostAllocationReceipt,
+};
+use runmat_runtime::context::{PreparedRuntimeScope, RuntimeContext};
 use runmat_runtime::execution::{RootedValueSequence, RootedValues};
 use runmat_runtime::RuntimeError;
-use std::cell::RefCell;
+use runmat_value::{ExactHostAllocationClaim, ExactHostNumericAllocationError};
+use std::cell::{Cell, RefCell};
 use std::cmp::Ordering as SortOrder;
-use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::future::Future;
+use std::mem::size_of;
 use std::pin::Pin;
 use std::rc::{Rc, Weak as RcWeak};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak as SyncWeak};
 use std::task::{Context, Poll, Wake, Waker};
 
+#[path = "process_driver/exact_waker.rs"]
+mod exact_waker;
+
+#[path = "process_driver/control_owner.rs"]
+mod control_owner;
+use control_owner::{
+    managed_driver_control_bytes, managed_request_control_bytes, prepare_managed_driver,
+    prepare_managed_request, try_box, CompletionOwner, DriverOwner, DriverStateOwner,
+    ManagedDriverPort, ReplyControlOwner,
+};
+
 #[path = "process_driver/typed_request.rs"]
 mod typed_request;
 use typed_request::TypedQueuedRequest;
+
+#[path = "process_driver/queue_storage.rs"]
+mod queue_storage;
+use queue_storage::{PreparedQueueGrowth, QueueGrowthGeometry, ReadyStorage, TaskStorage};
 
 pub(crate) type SemanticReply = Result<(RootedValueSequence, RootedValues), RuntimeError>;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct CallId(u64);
 
+impl CallId {
+    fn managed(index: usize, generation: u32) -> Result<Self, HostAllocationError> {
+        let slot = u32::try_from(index)
+            .map_err(|_| HostAllocationError::Overflow)?
+            .checked_add(1)
+            .ok_or(HostAllocationError::Overflow)?;
+        Ok(Self((u64::from(generation) << 32) | u64::from(slot)))
+    }
+
+    fn managed_parts(self) -> Option<(usize, u32)> {
+        let slot = u32::try_from(self.0 & u64::from(u32::MAX)).ok()?;
+        let index = usize::try_from(slot.checked_sub(1)?).ok()?;
+        Some((index, (self.0 >> 32) as u32))
+    }
+}
+
 struct QueuedCall {
     parent: Option<CallId>,
     depth: u32,
     future: QueuedFuture,
-    reply: QueuedReply,
+    reply: ReplyControlOwner,
+    _wake: WakeOwner,
+    _scratch: Option<Arc<runmat_runtime::context::host_effect::ManagedHostEffectStageReservation>>,
 }
 
-enum QueuedFuture {
-    Semantic(Pin<Box<dyn Future<Output = SemanticReply>>>),
-    Owned(Pin<Box<dyn Future<Output = ()>>>),
-}
+struct QueuedFuture(Pin<Box<dyn Future<Output = ()>>>);
 
-enum QueuedReply {
-    Semantic(oneshot::Sender<SemanticReply>),
-    Owned(Rc<dyn OwnedCancellation>),
-}
-
-trait OwnedCancellation {
+trait ReplyControl {
     fn is_canceled(&self) -> bool;
     fn publish(&self);
 }
 
-struct OwnedCompletion<T> {
-    reply: RefCell<Option<oneshot::Sender<Result<T, RuntimeError>>>>,
+struct ReplyCell<T> {
     result: RefCell<Option<Result<T, RuntimeError>>>,
+    waker: RefCell<Option<Waker>>,
+    canceled: Cell<bool>,
+    published: Cell<bool>,
+    _claim: Option<ExactHostAllocationClaim>,
 }
 
-impl<T> OwnedCancellation for OwnedCompletion<T> {
+impl<T> ReplyControl for ReplyCell<T> {
     fn is_canceled(&self) -> bool {
-        self.reply
-            .borrow()
-            .as_ref()
-            .is_none_or(oneshot::Sender::is_canceled)
+        self.canceled.get()
     }
 
     fn publish(&self) {
-        let result = self.result.borrow_mut().take();
-        let reply = self.reply.borrow_mut().take();
-        if let (Some(result), Some(reply)) = (result, reply) {
-            let _ = reply.send(result);
+        self.published.set(true);
+        let waker = { self.waker.borrow_mut().take() };
+        if let Some(waker) = waker {
+            waker.wake();
         }
     }
 }
 
-// `None` is an owned typed request. The semantic result remains inline in its
-// existing driver-owned completion slot, without a large enum arm or Box.
-struct CompletedReply(Option<SemanticReply>);
-
 impl QueuedCall {
     fn is_cancelled(&self) -> bool {
-        match &self.reply {
-            QueuedReply::Semantic(reply) => reply.is_canceled(),
-            QueuedReply::Owned(completion) => completion.is_canceled(),
-        }
+        self.reply.is_canceled()
     }
 
-    fn poll(&mut self, context: &mut Context<'_>) -> Poll<CompletedReply> {
-        match &mut self.future {
-            QueuedFuture::Semantic(future) => future
-                .as_mut()
-                .poll(context)
-                .map(|result| CompletedReply(Some(result))),
-            QueuedFuture::Owned(future) => {
-                future.as_mut().poll(context).map(|()| CompletedReply(None))
-            }
-        }
+    fn poll(&mut self, context: &mut Context<'_>) -> Poll<()> {
+        self.future.0.as_mut().poll(context)
+    }
+
+    fn deactivate(&self) {
+        self._wake.deactivate();
     }
 }
 
 struct DriverState {
     dynamic_admission: Option<DynamicEvalAdmissionPort>,
-    tasks: HashMap<CallId, QueuedCall>,
+    tasks: TaskStorage,
     current: Option<(CallId, u32)>,
     next_id: u64,
     accepting: bool,
     retiring: bool,
-    wake_hub: Arc<WakeHub>,
+    wake_hub: WakeHubOwner,
+    authority: Option<RuntimeContext>,
+    _scratch: Option<Arc<runmat_runtime::context::host_effect::ManagedHostEffectStageReservation>>,
+    _claim: Option<ExactHostAllocationClaim>,
 }
 
-#[derive(Default)]
 struct WakeHub {
     state: Mutex<WakeHubState>,
+    _claim: Option<ExactHostAllocationClaim>,
 }
 
-#[derive(Default)]
 struct WakeHubState {
-    ready: BinaryHeap<ReadyEntry>,
+    ready: ReadyStorage,
     host: Option<Waker>,
 }
 
-struct ReadyEntry(Arc<TaskWake>);
+#[derive(Clone)]
+enum WakeHubOwner {
+    Legacy(Arc<WakeHub>),
+    Managed(ExactShared<WakeHub>),
+}
+
+impl WakeHubOwner {
+    fn get(&self) -> &WakeHub {
+        match self {
+            Self::Legacy(owner) => owner,
+            Self::Managed(owner) => owner.get(),
+        }
+    }
+}
+
+enum WakeHubReference {
+    Legacy(SyncWeak<WakeHub>),
+    Managed(ExactShared<WakeHub>),
+}
+
+impl WakeHubReference {
+    fn get(&self) -> Option<&WakeHub> {
+        match self {
+            Self::Legacy(owner) => {
+                // Legacy wake dispatch uses `Arc<WakeHub>` through `Wake` and
+                // upgrades separately; this borrowed path is Managed-only.
+                let _ = owner;
+                None
+            }
+            Self::Managed(owner) => Some(owner.get()),
+        }
+    }
+}
+
+impl DriverState {
+    fn ensure_context(&self, context: &RuntimeContext) -> Result<(), RuntimeError> {
+        let Some(authority) = &self.authority else {
+            return Err(driver_unavailable());
+        };
+        if authority.local_identity() != context.local_identity()
+            || !authority
+                .cancellation()
+                .same_generation(&context.cancellation())
+        {
+            return Err(queue_allocation_error(
+                context,
+                HostAllocationError::StaleAuthority,
+            ));
+        }
+        if context.is_cancelled() {
+            return Err(queue_allocation_error(
+                context,
+                HostAllocationError::Cancelled,
+            ));
+        }
+        Ok(())
+    }
+
+    fn register_prepared(&mut self, request: PreparedRegistration, ready: &mut ReadyStorage) {
+        let PreparedRegistration {
+            id,
+            parent,
+            depth,
+            wake,
+            future,
+            reply,
+            scratch,
+        } = request;
+        self.tasks.insert(
+            id,
+            QueuedCall {
+                parent,
+                depth,
+                future,
+                reply,
+                _wake: wake.clone(),
+                _scratch: scratch,
+            },
+        );
+        ready.push(ReadyEntry(wake));
+    }
+}
+
+struct PreparedRegistration {
+    id: CallId,
+    parent: Option<CallId>,
+    depth: u32,
+    wake: WakeOwner,
+    future: QueuedFuture,
+    reply: ReplyControlOwner,
+    scratch: Option<Arc<runmat_runtime::context::host_effect::ManagedHostEffectStageReservation>>,
+}
+
+struct ReadyEntry(WakeOwner);
 
 impl PartialEq for ReadyEntry {
     fn eq(&self, other: &Self) -> bool {
-        self.0.depth == other.0.depth && self.0.id == other.0.id
+        self.0.get().depth == other.0.get().depth && self.0.get().id == other.0.get().id
     }
 }
 
@@ -131,15 +246,17 @@ impl PartialOrd for ReadyEntry {
 
 impl Ord for ReadyEntry {
     fn cmp(&self, other: &Self) -> SortOrder {
-        (self.0.depth, self.0.id.0).cmp(&(other.0.depth, other.0.id.0))
+        (self.0.get().depth, self.0.get().id.0).cmp(&(other.0.get().depth, other.0.get().id.0))
     }
 }
 
-struct TaskWake {
+pub(super) struct TaskWake {
     id: CallId,
     depth: u32,
     ready: AtomicBool,
-    hub: SyncWeak<WakeHub>,
+    active: AtomicBool,
+    hub: WakeHubReference,
+    _claim: Option<ExactHostAllocationClaim>,
 }
 
 impl Wake for TaskWake {
@@ -148,57 +265,162 @@ impl Wake for TaskWake {
     }
 
     fn wake_by_ref(self: &Arc<Self>) {
-        if self.ready.swap(true, Ordering::AcqRel) {
-            return;
-        }
-        let Some(hub) = self.hub.upgrade() else {
+        let Some(hub) = (match &self.hub {
+            WakeHubReference::Legacy(owner) => owner.upgrade(),
+            WakeHubReference::Managed(_) => None,
+        }) else {
             return;
         };
-        let host = {
-            let mut state = hub
-                .state
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            state.ready.push(ReadyEntry(Arc::clone(self)));
-            state.host.take()
+        wake_task(self, &hub);
+    }
+}
+
+impl TaskWake {
+    fn deactivate(&self) {
+        let legacy;
+        let hub = match &self.hub {
+            WakeHubReference::Legacy(owner) => {
+                legacy = owner.upgrade();
+                let Some(owner) = legacy.as_deref() else {
+                    self.active.store(false, Ordering::Release);
+                    return;
+                };
+                owner
+            }
+            WakeHubReference::Managed(owner) => owner.get(),
         };
-        if let Some(host) = host {
-            host.wake();
+        let mut state = hub
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        self.active.store(false, Ordering::Release);
+        self.ready.store(false, Ordering::Release);
+        state.ready.remove(self.id);
+    }
+}
+
+#[derive(Clone)]
+enum WakeOwner {
+    Legacy(Arc<TaskWake>),
+    Managed(ExactShared<TaskWake>),
+}
+
+impl WakeOwner {
+    fn get(&self) -> &TaskWake {
+        match self {
+            Self::Legacy(owner) => owner,
+            Self::Managed(owner) => owner.get(),
         }
+    }
+
+    fn wake_by_ref(&self) {
+        match self {
+            Self::Legacy(owner) => TaskWake::wake_by_ref(owner),
+            Self::Managed(owner) => {
+                if let Some(hub) = owner.get().hub.get() {
+                    wake_task(owner, hub);
+                }
+            }
+        }
+    }
+
+    fn waker(&self) -> Waker {
+        match self {
+            Self::Legacy(owner) => Waker::from(Arc::clone(owner)),
+            Self::Managed(owner) => exact_waker::waker(owner.clone()),
+        }
+    }
+
+    fn deactivate(&self) {
+        self.get().deactivate();
+    }
+}
+
+fn wake_task(owner: impl Into<WakeOwner>, hub: &WakeHub) {
+    let owner = owner.into();
+    let wake = owner.get();
+    if !wake.active.load(Ordering::Acquire) || wake.ready.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let host = {
+        let mut state = hub
+            .state
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        if !wake.active.load(Ordering::Acquire) {
+            wake.ready.store(false, Ordering::Release);
+            return;
+        }
+        state.ready.push(ReadyEntry(owner));
+        state.host.take()
+    };
+    if let Some(host) = host {
+        host.wake();
+    }
+}
+
+pub(super) fn wake_managed(owner: &ExactShared<TaskWake>) {
+    if let Some(hub) = owner.get().hub.get() {
+        wake_task(owner, hub);
+    }
+}
+
+impl From<&Arc<TaskWake>> for WakeOwner {
+    fn from(owner: &Arc<TaskWake>) -> Self {
+        Self::Legacy(Arc::clone(owner))
+    }
+}
+
+impl From<&ExactShared<TaskWake>> for WakeOwner {
+    fn from(owner: &ExactShared<TaskWake>) -> Self {
+        Self::Managed(owner.clone())
     }
 }
 
 impl WakeHub {
-    fn take_ready(&self) -> Option<Arc<TaskWake>> {
+    fn take_ready(&self) -> Option<WakeOwner> {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
         let ready = state.ready.pop()?.0;
-        ready.ready.store(false, Ordering::Release);
+        ready.get().ready.store(false, Ordering::Release);
         Some(ready)
     }
 
     fn clear_host(&self) {
-        self.state
+        let retired = self
+            .state
             .lock()
             .unwrap_or_else(|poison| poison.into_inner())
-            .host = None;
+            .host
+            .take();
+        drop(retired);
     }
 
     fn park(&self, host: &Waker) -> bool {
-        let mut state = self
-            .state
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        state.host = Some(host.clone());
-        !state.ready.is_empty()
+        let (retired, ready) = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let retired = state.host.replace(host.clone());
+            (retired, !state.ready.is_empty())
+        };
+        drop(retired);
+        ready
     }
 }
 
 /// A weak capability: VM invoker closures cannot keep the invocation alive.
 #[derive(Clone)]
-pub(crate) struct ProcessDriverHandle(RcWeak<RefCell<DriverState>>);
+pub(crate) struct ProcessDriverHandle(DriverHandleOwner);
+
+#[derive(Clone)]
+enum DriverHandleOwner {
+    Legacy(RcWeak<RefCell<DriverState>>),
+    Managed(ExactShared<ManagedDriverPort>),
+}
 
 impl std::fmt::Debug for ProcessDriverHandle {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -209,66 +431,272 @@ impl std::fmt::Debug for ProcessDriverHandle {
 }
 
 impl ProcessDriverHandle {
+    fn owner(&self) -> Result<DriverStateOwner, RuntimeError> {
+        match &self.0 {
+            DriverHandleOwner::Legacy(owner) => owner
+                .upgrade()
+                .map(DriverStateOwner::Legacy)
+                .ok_or_else(driver_unavailable),
+            DriverHandleOwner::Managed(port) => port
+                .get()
+                .owner()
+                .map(DriverStateOwner::Managed)
+                .ok_or_else(driver_unavailable),
+        }
+    }
+
     /// The owning invocation keeps this port alive; a queued nested call does
     /// not create another authority or extend the process driver's lifetime.
     pub(crate) fn dynamic_admission(&self) -> Option<DynamicEvalAdmissionPort> {
-        self.0
-            .upgrade()
+        self.owner()
+            .ok()
             .and_then(|owner| owner.borrow().dynamic_admission.clone())
     }
 
+    #[cfg(test)]
     pub(crate) fn enqueue(
         &self,
         future: impl Future<Output = SemanticReply> + 'static,
     ) -> Result<ProcessReplyTicket<(RootedValueSequence, RootedValues)>, RuntimeError> {
-        let (reply, receiver) = oneshot::channel();
+        self.enqueue_typed_unbounded(future)
+    }
+
+    /// Queue a future whose polls must run under `scope`. `RuntimeContext::scope`
+    /// owns the inner future in a separate box, so this entry admits that
+    /// concrete allocation before invoking either factory.
+    pub(crate) fn enqueue_scoped_in_context<F, M>(
+        &self,
+        context: &RuntimeContext,
+        scope: PreparedRuntimeScope,
+        make_future: M,
+    ) -> Result<ProcessReplyTicket<(RootedValueSequence, RootedValues)>, RuntimeError>
+    where
+        F: Future<Output = SemanticReply> + 'static,
+        M: FnOnce() -> F,
+    {
+        let scope = scope.prepare_future::<F>()?;
+        self.enqueue_typed_in_context(context, 0, move || scope.scope(make_future()))
+    }
+
+    fn enqueue_typed_unbounded<T: 'static>(
+        &self,
+        future: impl Future<Output = Result<T, RuntimeError>> + 'static,
+    ) -> Result<ProcessReplyTicket<T>, RuntimeError> {
+        let completion = Rc::new(ReplyCell {
+            result: RefCell::new(None),
+            waker: RefCell::new(None),
+            canceled: Cell::new(false),
+            published: Cell::new(false),
+            _claim: None,
+        });
+        let control: Rc<dyn ReplyControl> = completion.clone();
+        let completion = CompletionOwner::Legacy(completion);
+        let queued = TypedQueuedRequest::new(future, completion.clone());
         let wake = self.register(
-            QueuedFuture::Semantic(Box::pin(future)),
-            QueuedReply::Semantic(reply),
+            QueuedFuture(Box::pin(queued)),
+            ReplyControlOwner::Legacy(control),
+            None,
         )?;
         Ok(ProcessReplyTicket {
-            receiver: Some(receiver),
+            completion,
             wake,
+            _scratch: None,
         })
     }
 
     /// One exact invocation-owned request, with a typed result rather than a
     /// second driver or an untyped payload. Dropping its ticket retires the
     /// request and descendants through the existing queue owner.
+    #[cfg(test)]
     pub(crate) fn enqueue_owned<T: 'static>(
         &self,
         future: impl Future<Output = Result<T, RuntimeError>> + 'static,
     ) -> Result<ProcessReplyTicket<T>, RuntimeError> {
-        let (reply, receiver) = oneshot::channel();
-        // The same reply channel is the cancellation authority for this cold
-        // typed request. Its original future is inline in the one queued Box.
-        let completion = Rc::new(OwnedCompletion {
-            reply: RefCell::new(Some(reply)),
-            result: RefCell::new(None),
-        });
-        // The pinned envelope keeps `future` alive after Poll::Ready. Its
-        // captured roots and nested-call state retire only with the queued
-        // parent, after descendants and before the reply is observable.
-        let queued = TypedQueuedRequest::new(future, Rc::clone(&completion));
-        let wake = self.register(
-            QueuedFuture::Owned(Box::pin(queued)),
-            QueuedReply::Owned(completion),
-        )?;
+        self.enqueue_typed_unbounded(future)
+    }
+
+    pub(crate) fn enqueue_owned_in_context<T, F, M>(
+        &self,
+        context: &RuntimeContext,
+        make_future: M,
+    ) -> Result<ProcessReplyTicket<T>, RuntimeError>
+    where
+        T: 'static,
+        F: Future<Output = Result<T, RuntimeError>> + 'static,
+        M: FnOnce() -> F,
+    {
+        self.enqueue_typed_in_context(context, 0, make_future)
+    }
+
+    pub(crate) fn enqueue_owned_scoped_in_context<T, F, M>(
+        &self,
+        context: &RuntimeContext,
+        scope: PreparedRuntimeScope,
+        make_future: M,
+    ) -> Result<ProcessReplyTicket<T>, RuntimeError>
+    where
+        T: 'static,
+        F: Future<Output = Result<T, RuntimeError>> + 'static,
+        M: FnOnce() -> F,
+    {
+        let scope = scope.prepare_future::<F>()?;
+        self.enqueue_typed_in_context(context, 0, move || scope.scope(make_future()))
+    }
+
+    fn enqueue_typed_in_context<T, F, M>(
+        &self,
+        context: &RuntimeContext,
+        additional_scratch_bytes: u64,
+        make_future: M,
+    ) -> Result<ProcessReplyTicket<T>, RuntimeError>
+    where
+        T: 'static,
+        F: Future<Output = Result<T, RuntimeError>> + 'static,
+        M: FnOnce() -> F,
+    {
+        let owner = self.owner()?;
+        {
+            let state = owner.borrow();
+            state.ensure_context(context)?;
+            if !state.accepting || state.retiring {
+                return Err(driver_unavailable());
+            }
+            if !state.tasks.is_managed() {
+                drop(state);
+                return self.enqueue_typed_unbounded(make_future());
+            }
+        }
+        let (geometry, expected_id, parent, depth, wake_hub) = {
+            let state = owner.borrow();
+            state.ensure_context(context)?;
+            if !state.accepting || state.retiring {
+                return Err(driver_unavailable());
+            }
+            let hub = state
+                .wake_hub
+                .get()
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let (parent, depth) = state.current.map_or((None, 1), |(parent, depth)| {
+                (Some(parent), depth.saturating_add(1))
+            });
+            let geometry = QueueGrowthGeometry {
+                task_capacity: state.tasks.capacity(),
+                task_index: Some(state.tasks.required_index()),
+                ready_capacity: hub.ready.capacity(),
+                ready_len: hub.ready.len(),
+            };
+            (
+                geometry,
+                state
+                    .tasks
+                    .next_id(state.next_id)
+                    .map_err(|_| driver_overflow())?,
+                parent,
+                depth,
+                state.wake_hub.clone(),
+            )
+        };
+        let scratch_bytes = request_scratch_bytes::<F, T>()?
+            .checked_add(additional_scratch_bytes)
+            .ok_or_else(driver_overflow)?;
+        let mut prepared = PreparedQueueGrowth::prepare(
+            context,
+            geometry,
+            scratch_bytes,
+            managed_request_control_bytes::<T>()?,
+            3,
+        )
+        .map_err(|error| queue_allocation_error(context, error))?;
+        let scratch = Some(prepared.retained_scratch());
+
+        // Only after the complete request and queue capacity are admitted may
+        // caller-owned child state enter the queued future.
+        let (completion, control, wake, queued) = prepared
+            .with_output_allocation(context, |permit| {
+                prepare_managed_request(permit, wake_hub.clone(), expected_id, depth, make_future())
+            })
+            .map_err(|error| queue_allocation_error(context, error))?;
+        prepared
+            .checkpoint(context)
+            .map_err(|error| queue_allocation_error(context, error))?;
+        let (wake, retirement) = {
+            let mut state = owner.borrow_mut();
+            state.ensure_context(context)?;
+            if state
+                .tasks
+                .next_id(state.next_id)
+                .map_err(|_| driver_overflow())?
+                != expected_id
+                || !state.accepting
+                || state.retiring
+            {
+                return Err(driver_unavailable());
+            }
+            let mut hub = wake_hub
+                .get()
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let retirement = prepared.install(&mut state.tasks, &mut hub.ready);
+            if hub.ready.len() >= hub.ready.capacity() {
+                (None, retirement)
+            } else {
+                state.register_prepared(
+                    PreparedRegistration {
+                        id: expected_id,
+                        parent,
+                        depth,
+                        wake: wake.clone(),
+                        future: queued,
+                        reply: control,
+                        scratch: scratch.clone(),
+                    },
+                    &mut hub.ready,
+                );
+                (Some(wake.clone()), retirement)
+            }
+        };
+        drop(retirement);
+        let wake = wake.ok_or_else(driver_unavailable)?;
+        let host = {
+            let state = owner.borrow();
+            let mut hub = state
+                .wake_hub
+                .get()
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            // `register_prepared` installed the ready entry after the exact
+            // backing replacement was committed.
+            hub.host.take()
+        };
+        if let Some(host) = host {
+            host.wake();
+        }
         Ok(ProcessReplyTicket {
-            receiver: Some(receiver),
+            completion,
             wake,
+            _scratch: scratch,
         })
     }
 
     fn register(
         &self,
         future: QueuedFuture,
-        reply: QueuedReply,
-    ) -> Result<Arc<TaskWake>, RuntimeError> {
-        let owner = self.0.upgrade().ok_or_else(driver_unavailable)?;
+        reply: ReplyControlOwner,
+        scratch: Option<
+            Arc<runmat_runtime::context::host_effect::ManagedHostEffectStageReservation>,
+        >,
+    ) -> Result<WakeOwner, RuntimeError> {
+        let owner = self.owner()?;
         let wake = {
             let mut state = owner.borrow_mut();
             if !state.accepting || state.retiring {
+                return Err(driver_unavailable());
+            }
+            if state.tasks.is_managed() {
                 return Err(driver_unavailable());
             }
             let id = CallId(state.next_id);
@@ -283,8 +711,14 @@ impl ProcessDriverHandle {
                 id,
                 depth,
                 ready: AtomicBool::new(false),
-                hub: Arc::downgrade(&state.wake_hub),
+                active: AtomicBool::new(true),
+                hub: match &state.wake_hub {
+                    WakeHubOwner::Legacy(hub) => WakeHubReference::Legacy(Arc::downgrade(hub)),
+                    WakeHubOwner::Managed(hub) => WakeHubReference::Managed(hub.clone()),
+                },
+                _claim: None,
             });
+            let wake = WakeOwner::Legacy(wake);
             state.tasks.insert(
                 id,
                 QueuedCall {
@@ -292,11 +726,13 @@ impl ProcessDriverHandle {
                     depth,
                     future,
                     reply,
+                    _wake: wake.clone(),
+                    _scratch: scratch,
                 },
             );
             wake
         };
-        TaskWake::wake_by_ref(&wake);
+        wake.wake_by_ref();
         Ok(wake)
     }
 }
@@ -308,42 +744,73 @@ fn driver_unavailable() -> RuntimeError {
     )
 }
 
+fn driver_overflow() -> RuntimeError {
+    crate::interpreter::errors::mex(
+        "ProcessContinuationOverflow",
+        "the selected VM invocation queue capacity overflowed",
+    )
+}
+
+fn queue_allocation_error(context: &RuntimeContext, error: HostAllocationError) -> RuntimeError {
+    host_allocation_runtime_error(
+        Some(context),
+        &format!(
+            "RunMat:Interpreter:ProcessContinuation:{}",
+            error.runtime_identifier_suffix()
+        ),
+        "continuation queue admission failed",
+        error,
+    )
+}
+
+fn request_scratch_bytes<F, T>() -> Result<u64, RuntimeError> {
+    u64::try_from(size_of::<TypedQueuedRequest<F, T>>()).map_err(|_| driver_overflow())
+}
+
 pub(crate) struct ProcessReplyTicket<T> {
-    receiver: Option<oneshot::Receiver<Result<T, RuntimeError>>>,
-    wake: Arc<TaskWake>,
+    completion: CompletionOwner<T>,
+    wake: WakeOwner,
+    _scratch: Option<Arc<runmat_runtime::context::host_effect::ManagedHostEffectStageReservation>>,
 }
 
 impl<T> Future for ProcessReplyTicket<T> {
     type Output = Result<T, RuntimeError>;
 
-    fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        let result = Pin::new(
-            self.receiver
-                .as_mut()
-                .expect("VM reply ticket polled after completion"),
-        )
-        .poll(context);
-        if result.is_ready() {
-            drop(self.receiver.take());
+    fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
+        if self.completion.get().published.get() {
+            return Poll::Ready(
+                self.completion
+                    .get()
+                    .result
+                    .borrow_mut()
+                    .take()
+                    .unwrap_or_else(|| Err(driver_unavailable())),
+            );
         }
-        result.map(|result| result.unwrap_or_else(|_| Err(driver_unavailable())))
+        *self.completion.get().waker.borrow_mut() = Some(context.waker().clone());
+        if self.completion.get().published.get() {
+            context.waker().wake_by_ref();
+        }
+        Poll::Pending
     }
 }
 
 impl<T> Drop for ProcessReplyTicket<T> {
     fn drop(&mut self) {
-        if let Some(receiver) = self.receiver.take() {
-            drop(receiver);
-            TaskWake::wake_by_ref(&self.wake);
+        if !self.completion.get().published.get() {
+            self.completion.get().canceled.set(true);
+            self.wake.wake_by_ref();
         }
     }
 }
 
 pub(crate) struct ProcessContinuationDriver {
-    state: Rc<RefCell<DriverState>>,
+    owner: DriverOwner,
+    transferred: Cell<bool>,
 }
 
 impl ProcessContinuationDriver {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self::new_with_dynamic_admission(None)
     }
@@ -351,47 +818,227 @@ impl ProcessContinuationDriver {
     pub(crate) fn new_with_dynamic_admission(
         dynamic_admission: Option<DynamicEvalAdmissionPort>,
     ) -> Self {
-        let wake_hub = Arc::new(WakeHub::default());
+        let wake_hub = Arc::new(WakeHub {
+            state: Mutex::new(WakeHubState {
+                ready: ReadyStorage::unbounded(),
+                host: None,
+            }),
+            _claim: None,
+        });
         Self {
-            state: Rc::new(RefCell::new(DriverState {
+            owner: DriverOwner::Legacy(Rc::new(RefCell::new(DriverState {
                 dynamic_admission,
-                tasks: HashMap::new(),
+                tasks: TaskStorage::unbounded(),
                 current: None,
                 next_id: 1,
                 accepting: true,
                 retiring: false,
-                wake_hub,
-            })),
+                wake_hub: WakeHubOwner::Legacy(wake_hub),
+                authority: None,
+                _scratch: None,
+                _claim: None,
+            }))),
+            transferred: Cell::new(false),
+        }
+    }
+
+    pub(crate) fn new_with_dynamic_admission_in_context(
+        context: &RuntimeContext,
+        dynamic_admission: Option<DynamicEvalAdmissionPort>,
+    ) -> Result<Self, RuntimeError> {
+        match HostAllocationReceipt::policy(Some(context))
+            .map_err(|error| queue_allocation_error(context, error))?
+        {
+            HostAllocationPolicy::Unbounded => {
+                let driver = Self::new_with_dynamic_admission(dynamic_admission);
+                driver.owner.state().borrow_mut().authority = Some(context.clone());
+                Ok(driver)
+            }
+            HostAllocationPolicy::Managed => {
+                let raw_bytes = managed_driver_control_bytes()
+                    .map_err(|error| queue_allocation_error(context, error))?;
+                let retained = HostAllocationPlan::retained_exact_output_bytes(raw_bytes, 3)
+                    .map_err(|error| queue_allocation_error(context, error))?;
+                let plan = HostAllocationPlan::new(0, retained)
+                    .map_err(|error| queue_allocation_error(context, error))?;
+                let receipt = HostAllocationReceipt::admit(Some(context), plan)
+                    .map_err(|error| queue_allocation_error(context, error))?
+                    .ok_or_else(|| {
+                        queue_allocation_error(context, HostAllocationError::MissingManagedOwner)
+                    })?;
+                let allocator = receipt
+                    .collection_allocator(context)
+                    .map_err(|error| queue_allocation_error(context, error))?;
+                let scratch = Some(receipt.retain_scratch_for_cpu_work());
+                let owner = receipt
+                    .with_output_allocation(context, |permit| {
+                        prepare_managed_driver(
+                            permit,
+                            allocator,
+                            context.clone(),
+                            dynamic_admission,
+                            scratch,
+                        )
+                    })
+                    .map_err(|error| queue_allocation_error(context, error))?;
+                Ok(Self {
+                    owner,
+                    transferred: Cell::new(false),
+                })
+            }
         }
     }
 
     pub(crate) fn handle(&self) -> ProcessDriverHandle {
-        ProcessDriverHandle(Rc::downgrade(&self.state))
+        ProcessDriverHandle(self.owner.handle())
     }
 
     pub(crate) fn drive<F: Future>(&self, root: F) -> DrivenInvocation<F> {
-        let hub = Arc::clone(&self.state.borrow().wake_hub);
+        let state = self.owner.state();
+        let hub = state.borrow().wake_hub.clone();
+        let WakeHubOwner::Legacy(legacy_hub) = &hub else {
+            unreachable!("legacy drive requires legacy hub")
+        };
         let root_wake = Arc::new(TaskWake {
             id: CallId(0),
             depth: 0,
             ready: AtomicBool::new(false),
-            hub: Arc::downgrade(&hub),
+            active: AtomicBool::new(true),
+            hub: WakeHubReference::Legacy(Arc::downgrade(legacy_hub)),
+            _claim: None,
         });
         TaskWake::wake_by_ref(&root_wake);
+        self.transferred.set(true);
         DrivenInvocation {
-            state: Rc::clone(&self.state),
+            state,
+            hub,
+            root_wake: WakeOwner::Legacy(root_wake),
+            root: Some(Box::pin(root)),
+            _scratch: None,
+            managed_port: None,
+        }
+    }
+
+    pub(crate) fn drive_in_context<F, M>(
+        &self,
+        context: &RuntimeContext,
+        make_root: M,
+    ) -> Result<DrivenInvocation<F>, RuntimeError>
+    where
+        F: Future,
+        M: FnOnce() -> F,
+    {
+        {
+            let state = self.owner.state();
+            let state = state.borrow();
+            state.ensure_context(context)?;
+            if !state.accepting || state.retiring {
+                return Err(driver_unavailable());
+            }
+            if !state.tasks.is_managed() {
+                drop(state);
+                return Ok(self.drive(make_root()));
+            }
+        }
+        let state_owner = self.owner.state();
+        let (geometry, hub) = {
+            let state = state_owner.borrow();
+            state.ensure_context(context)?;
+            let hub = state
+                .wake_hub
+                .get()
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let geometry = QueueGrowthGeometry {
+                task_capacity: state.tasks.capacity(),
+                task_index: None,
+                ready_capacity: hub.ready.capacity(),
+                ready_len: hub.ready.len(),
+            };
+            (geometry, state.wake_hub.clone())
+        };
+        let scratch_bytes = u64::try_from(size_of::<F>()).map_err(|_| driver_overflow())?;
+        let mut prepared = PreparedQueueGrowth::prepare(
+            context,
+            geometry,
+            scratch_bytes,
+            u64::try_from(ExactShared::<TaskWake>::requested_bytes())
+                .map_err(|_| driver_overflow())?,
+            1,
+        )
+        .map_err(|error| queue_allocation_error(context, error))?;
+        let scratch = Some(prepared.retained_scratch());
+        let (root, root_wake) = prepared
+            .with_output_allocation(context, |permit| {
+                let root = try_box(make_root())?;
+                let claim =
+                    permit.reserve_exact_claim(ExactShared::<TaskWake>::requested_bytes())?;
+                let managed_hub = match &hub {
+                    WakeHubOwner::Managed(hub) => hub.clone(),
+                    WakeHubOwner::Legacy(_) => {
+                        return Err(ExactHostNumericAllocationError::AllocationFailed)
+                    }
+                };
+                let wake = ExactShared::try_new(TaskWake {
+                    id: CallId(0),
+                    depth: 0,
+                    ready: AtomicBool::new(true),
+                    active: AtomicBool::new(true),
+                    hub: WakeHubReference::Managed(managed_hub),
+                    _claim: Some(claim),
+                })
+                .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?;
+                Ok((Some(Box::into_pin(root)), WakeOwner::Managed(wake)))
+            })
+            .map_err(|error| queue_allocation_error(context, error))?;
+        prepared
+            .checkpoint(context)
+            .map_err(|error| queue_allocation_error(context, error))?;
+        let retirement = {
+            let mut state = state_owner.borrow_mut();
+            state.ensure_context(context)?;
+            let mut hub_state = hub
+                .get()
+                .state
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            let retirement = prepared.install(&mut state.tasks, &mut hub_state.ready);
+            hub_state.ready.push(ReadyEntry(root_wake.clone()));
+            retirement
+        };
+        drop(retirement);
+        self.transferred.set(true);
+        let managed_port = match &self.owner {
+            DriverOwner::Managed { port, .. } => Some(port.clone()),
+            DriverOwner::Legacy(_) => None,
+        };
+        Ok(DrivenInvocation {
+            state: state_owner,
             hub,
             root_wake,
-            root: Some(Box::pin(root)),
+            root,
+            _scratch: scratch,
+            managed_port,
+        })
+    }
+}
+
+impl Drop for ProcessContinuationDriver {
+    fn drop(&mut self) {
+        if !self.transferred.get() {
+            self.owner.revoke();
         }
     }
 }
 
 pub(crate) struct DrivenInvocation<F: Future> {
-    state: Rc<RefCell<DriverState>>,
-    hub: Arc<WakeHub>,
-    root_wake: Arc<TaskWake>,
+    state: DriverStateOwner,
+    hub: WakeHubOwner,
+    root_wake: WakeOwner,
     root: Option<Pin<Box<F>>>,
+    _scratch: Option<Arc<runmat_runtime::context::host_effect::ManagedHostEffectStageReservation>>,
+    managed_port: Option<ExactShared<ManagedDriverPort>>,
 }
 
 impl<F: Future> Future for DrivenInvocation<F> {
@@ -399,25 +1046,25 @@ impl<F: Future> Future for DrivenInvocation<F> {
 
     fn poll(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
-        this.hub.clear_host();
+        this.hub.get().clear_host();
         const POLL_BUDGET: usize = 1024;
         let mut polls = 0;
         loop {
-            let Some(ready) = this.hub.take_ready() else {
-                if this.hub.park(context.waker()) {
-                    this.hub.clear_host();
+            let Some(ready) = this.hub.get().take_ready() else {
+                if this.hub.get().park(context.waker()) {
+                    this.hub.get().clear_host();
                     continue;
                 }
                 return Poll::Pending;
             };
             polls += 1;
             if polls > POLL_BUDGET {
-                TaskWake::wake_by_ref(&ready);
+                ready.wake_by_ref();
                 context.waker().wake_by_ref();
                 return Poll::Pending;
             }
-            if ready.id == CallId(0) {
-                let root_waker = Waker::from(Arc::clone(&this.root_wake));
+            if ready.get().id == CallId(0) {
+                let root_waker = this.root_wake.waker();
                 let mut root_context = Context::from_waker(&root_waker);
                 match this
                     .root
@@ -433,22 +1080,22 @@ impl<F: Future> Future for DrivenInvocation<F> {
                     Poll::Pending => continue,
                 }
             }
-            let id = ready.id;
-            let Some(mut task) = this.state.borrow_mut().tasks.remove(&id) else {
+            let id = ready.get().id;
+            let Some(mut task) = this.state.borrow_mut().tasks.take(&id) else {
                 continue;
             };
             if task.is_cancelled() {
-                this.retire_subtree(id, task, None);
+                this.retire_subtree(id, task, false);
                 continue;
             }
             this.state.borrow_mut().current = Some((id, task.depth));
-            let task_waker = Waker::from(ready);
+            let task_waker = ready.waker();
             let mut task_context = Context::from_waker(&task_waker);
             let result = task.poll(&mut task_context);
             this.state.borrow_mut().current = None;
             match result {
-                Poll::Ready(result) => {
-                    this.retire_subtree(id, task, Some(result));
+                Poll::Ready(()) => {
+                    this.retire_subtree(id, task, true);
                 }
                 Poll::Pending => {
                     this.state.borrow_mut().tasks.insert(id, task);
@@ -459,58 +1106,91 @@ impl<F: Future> Future for DrivenInvocation<F> {
 }
 
 impl<F: Future> DrivenInvocation<F> {
-    fn retire_subtree(&mut self, id: CallId, task: QueuedCall, result: Option<CompletedReply>) {
-        let descendants = {
+    fn retire_subtree(&mut self, id: CallId, task: QueuedCall, publish: bool) {
+        task.deactivate();
+        {
             let mut state = self.state.borrow_mut();
             state.retiring = true;
-            let mut ids = HashSet::from([id]);
-            loop {
-                let next = state
+            state.tasks.release(id);
+        }
+        // Retire deepest descendants first. The parent chain remains intact
+        // while it is needed, and no cancellation-side scratch collection is
+        // allocated after effects have begun.
+        loop {
+            let descendant = {
+                let state = self.state.borrow();
+                state
                     .tasks
-                    .iter()
-                    .filter_map(|(candidate, task)| {
-                        task.parent.filter(|parent| ids.contains(parent))?;
-                        (!ids.contains(candidate)).then_some(*candidate)
-                    })
-                    .collect::<Vec<_>>();
-                if next.is_empty() {
-                    break;
-                }
-                ids.extend(next);
+                    .ids()
+                    .filter(|candidate| task_descends_from(&state.tasks, *candidate, id))
+                    .max_by_key(|candidate| state.tasks.get(candidate).map_or(0, |task| task.depth))
+            };
+            let Some(descendant) = descendant else {
+                break;
+            };
+            let retired = self.state.borrow_mut().tasks.retire(&descendant);
+            if let Some(retired) = retired.as_ref() {
+                retired.deactivate();
             }
-            ids.remove(&id);
-            ids.into_iter()
-                .filter_map(|descendant| state.tasks.remove(&descendant))
-                .collect::<Vec<_>>()
-        };
-        let mut retired = descendants;
-        retired.sort_by_key(|task| task.depth);
-        while retired.pop().is_some() {}
-        let QueuedCall { future, reply, .. } = task;
+            drop(retired);
+        }
+        let QueuedCall {
+            future,
+            reply,
+            _scratch: scratch,
+            ..
+        } = task;
         drop(future);
         self.state.borrow_mut().retiring = false;
-        match (reply, result) {
-            (QueuedReply::Semantic(reply), Some(CompletedReply(Some(result)))) => {
-                let _ = reply.send(result);
-            }
-            (QueuedReply::Owned(completion), Some(CompletedReply(None))) => completion.publish(),
-            _ => {}
+        if publish {
+            reply.publish();
         }
+        drop(scratch);
     }
 
     fn retire_all(&mut self) {
-        let tasks = {
+        {
             let mut state = self.state.borrow_mut();
             state.accepting = false;
             state.retiring = true;
-            std::mem::take(&mut state.tasks)
-        };
-        self.hub.clear_host();
-        let mut tasks = tasks.into_values().collect::<Vec<_>>();
-        tasks.sort_by_key(|task| task.depth);
-        while tasks.pop().is_some() {}
+        }
+        self.hub.get().clear_host();
+        loop {
+            let id = {
+                let state = self.state.borrow();
+                state
+                    .tasks
+                    .ids()
+                    .max_by_key(|id| state.tasks.get(id).map_or(0, |task| task.depth))
+            };
+            let Some(id) = id else {
+                break;
+            };
+            let retired = self.state.borrow_mut().tasks.retire(&id);
+            if let Some(retired) = retired.as_ref() {
+                retired.deactivate();
+            }
+            drop(retired);
+        }
+        self.root_wake.deactivate();
         drop(self.root.take());
+        if let Some(port) = self.managed_port.take() {
+            if let DriverStateOwner::Managed(state) = &self.state {
+                port.get().revoke(state);
+            }
+            drop(port);
+        }
     }
+}
+
+fn task_descends_from(tasks: &TaskStorage, mut candidate: CallId, ancestor: CallId) -> bool {
+    while let Some(parent) = tasks.get(&candidate).and_then(|task| task.parent) {
+        if parent == ancestor {
+            return true;
+        }
+        candidate = parent;
+    }
+    false
 }
 
 impl<F: Future> Drop for DrivenInvocation<F> {

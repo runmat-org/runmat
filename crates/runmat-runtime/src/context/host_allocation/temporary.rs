@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use runmat_accelerate_api::HostNumericDataView;
 use runmat_value::{
-    ComplexElement, ExactHostAllocationClaim, ExactHostAllocationPermit,
+    exact_capacity_vec, ComplexElement, ExactHostAllocationClaim, ExactHostAllocationPermit,
     ExactHostAllocationReservation, ExactHostNumericAllocation, ExactHostNumericAllocationError,
     NumericDType, NumericScalar,
 };
@@ -113,6 +113,67 @@ pub struct HostNumericWorkspace {
 pub struct HostComplexWorkspace {
     numeric: HostNumericWorkspace,
     len: usize,
+}
+
+mod typed_element {
+    pub trait Sealed {}
+    impl Sealed for f32 {}
+    impl Sealed for f64 {}
+    impl Sealed for usize {}
+    impl Sealed for num_complex::Complex32 {}
+    impl Sealed for num_complex::Complex64 {}
+}
+
+/// A scratch vector whose exact physical backing and live stage claim remain
+/// one owner. The sealed element set excludes `Value` and other language
+/// payloads; this owner cannot be converted into a published result.
+pub trait HostTypedElement: typed_element::Sealed + Copy + Default {}
+impl<T: typed_element::Sealed + Copy + Default> HostTypedElement for T {}
+
+pub struct HostTypedWorkspace<T: HostTypedElement> {
+    values: Vec<T>,
+    _claim: HostEffectLiveAllocationClaim,
+}
+
+impl<T: HostTypedElement> HostTypedWorkspace<T> {
+    /// Exact backing and claim metadata to include in a stage peak plan.
+    pub fn quoted_bytes(len: usize) -> Result<u64, HostAllocationError> {
+        let layout = Layout::array::<T>(len).map_err(|_| HostAllocationError::Overflow)?;
+        let bytes = layout
+            .size()
+            .checked_add(ManagedHostEffectStageReservation::exact_temporary_claim_metadata_bytes())
+            .ok_or(HostAllocationError::Overflow)?;
+        u64::try_from(bytes).map_err(|_| HostAllocationError::Overflow)
+    }
+
+    pub(super) fn new(
+        len: usize,
+        stage: Arc<ManagedHostEffectStageReservation>,
+        fence: AllocationFence,
+    ) -> Result<Self, HostAllocationError> {
+        fence.check()?;
+        let layout = Layout::array::<T>(len).map_err(|_| HostAllocationError::Overflow)?;
+        let claim = stage.reserve_live_exact_claim(
+            HostEffectLiveAllocationKind::TemporaryResult,
+            layout.size(),
+        )?;
+        fence.check()?;
+        let mut values = exact_capacity_vec(len).map_err(HostAllocationError::Numeric)?;
+        values.resize(len, T::default());
+        fence.check()?;
+        Ok(Self {
+            values,
+            _claim: claim,
+        })
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        &self.values
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [T] {
+        &mut self.values
+    }
 }
 
 impl HostComplexWorkspace {

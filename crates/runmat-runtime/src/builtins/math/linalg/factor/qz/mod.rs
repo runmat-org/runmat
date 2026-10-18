@@ -8,6 +8,7 @@ mod ordqz;
 mod real_eigenvectors;
 mod real_reorder;
 mod reorder;
+pub(crate) mod riccati;
 mod work;
 #[cfg(test)]
 mod tests;

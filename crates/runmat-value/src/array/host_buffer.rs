@@ -50,6 +50,15 @@ impl<T: Clone> HostBuffer<T> {
         self.payload.get()
     }
 
+    /// Borrow an exclusively owned payload without copying or allocating.
+    pub(crate) fn try_get_mut_unique(&mut self) -> Option<&mut T> {
+        if self.payload.is_unique() {
+            Some(self.payload.get_mut_unique())
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn make_mut(&mut self) -> &mut T {
         if !self.payload.is_unique() {
             self.payload = ExactShared::new(self.get().clone());
@@ -84,7 +93,9 @@ mod tests {
         let second = first.clone();
         assert!(first.shares_allocation_with(&second));
         assert!(first.is_shared());
+        assert!(first.try_get_mut_unique().is_none());
         first.make_mut()[0] = 9;
+        assert!(first.try_get_mut_unique().is_some());
         assert!(!first.shares_allocation_with(&second));
         assert_eq!(first.get(), &[9, 2]);
         assert_eq!(second.get(), &[1, 2]);

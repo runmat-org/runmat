@@ -123,6 +123,38 @@ enum InterpreterValueRefInner<'a> {
     Shared(Ref<'a, Value>),
 }
 
+/// One stable read of an interpreter frame's physical slot owner.
+///
+/// Workspace completion keeps this guard for the complete borrowed-source
+/// transaction. Shared frames therefore never expose a reference past their
+/// `RefCell` borrow, while direct frames retain their allocation-free path.
+pub(crate) struct InterpreterVarsRead<'a>(InterpreterVarsReadInner<'a>);
+
+enum InterpreterVarsReadInner<'a> {
+    Direct(&'a InterpreterVarsStorage),
+    Shared(Ref<'a, InterpreterVarsStorage>),
+}
+
+impl InterpreterVarsRead<'_> {
+    pub(crate) fn value(&self, slot: usize) -> Option<&Value> {
+        match &self.0 {
+            InterpreterVarsReadInner::Direct(storage) => storage.value(slot),
+            InterpreterVarsReadInner::Shared(storage) => storage.value(slot),
+        }
+    }
+
+    pub(crate) fn retained_lease(&self, slot: usize) -> Option<WorkspaceSlotReadLease> {
+        match &self.0 {
+            InterpreterVarsReadInner::Direct(storage) => storage
+                .value_slot(slot)
+                .and_then(InterpreterSlot::retained_lease),
+            InterpreterVarsReadInner::Shared(storage) => storage
+                .value_slot(slot)
+                .and_then(InterpreterSlot::retained_lease),
+        }
+    }
+}
+
 impl Deref for InterpreterValueRef<'_> {
     type Target = Value;
 
@@ -367,6 +399,17 @@ impl InterpreterVars {
                     }),
                 )))
             }
+        }
+    }
+
+    pub(crate) fn read(&self) -> InterpreterVarsRead<'_> {
+        match &self.storage {
+            InterpreterVarsOwner::Direct(storage) => {
+                InterpreterVarsRead(InterpreterVarsReadInner::Direct(storage))
+            }
+            InterpreterVarsOwner::Shared(shared) => InterpreterVarsRead(
+                InterpreterVarsReadInner::Shared(shared.get().storage.borrow()),
+            ),
         }
     }
 

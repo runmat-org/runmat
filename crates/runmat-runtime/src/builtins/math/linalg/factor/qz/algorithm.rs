@@ -4,12 +4,14 @@
 //! generalized Hessenberg reduction are required preconditions of faer's QZ
 //! kernel; calling that kernel on an arbitrary pair is not a QZ factorization.
 
+use faer::col::ColMut;
 use faer::dyn_stack::{MemBuffer, MemStack};
 use faer::linalg::evd::ComputeEigenvectors;
 use faer::linalg::gevd::{self, GevdParams};
-use faer::mat::AsMatMut;
+use faer::mat::{AsMatMut, MatMut};
 use faer::prelude::{Reborrow, ReborrowMut};
 use faer::{c64, Col, Mat, Par, Spec};
+use std::mem::MaybeUninit;
 
 pub(super) struct ComplexQz {
     pub aa: Mat<c64>,
@@ -19,6 +21,18 @@ pub(super) struct ComplexQz {
     pub right: Mat<c64>,
     pub alpha: Col<c64>,
     pub beta: Col<c64>,
+}
+
+/// The same QZ factor authority over caller-owned, exact scratch matrices.
+/// Both the ordinary Mat wrapper and admitted Riccati storage use this view;
+/// there is one low-level QZ algorithm, not two solver implementations.
+pub(super) struct ComplexQzView<'a> {
+    pub aa: MatMut<'a, c64>,
+    pub bb: MatMut<'a, c64>,
+    pub left: MatMut<'a, c64>,
+    pub right: MatMut<'a, c64>,
+    pub alpha: ColMut<'a, c64>,
+    pub beta: ColMut<'a, c64>,
 }
 
 pub(super) struct RealQz {
@@ -191,17 +205,89 @@ pub(super) fn complex_qz(mut aa: Mat<c64>, mut bb: Mat<c64>) -> Result<ComplexQz
         });
     }
 
+    let scratch = complex_qz_scratch(n);
+    let mut memory =
+        MemBuffer::try_new(scratch).map_err(|_| "generalized Schur workspace allocation failed")?;
+    let mut view = ComplexQzView {
+        aa: aa.as_mut(),
+        bb: bb.as_mut(),
+        left: left.as_mut(),
+        right: right.as_mut(),
+        alpha: alpha.as_mut(),
+        beta: beta.as_mut(),
+    };
+    complex_qz_in_place(&mut view, &mut memory)?;
+    Ok(ComplexQz {
+        aa,
+        bb,
+        left,
+        right,
+        alpha,
+        beta,
+    })
+}
+
+pub(super) fn complex_qz_scratch(n: usize) -> faer::dyn_stack::StackReq {
     let params: GevdParams = faer::auto!(c64);
-    let scratch = gevd::gevd_scratch::<c64>(
+    gevd::gevd_scratch::<c64>(
         n,
         ComputeEigenvectors::Yes,
         ComputeEigenvectors::Yes,
         Par::Seq,
         Spec::new(params),
+    )
+}
+
+pub(super) fn complex_qz_in_place(
+    form: &mut ComplexQzView<'_>,
+    memory: &mut [MaybeUninit<u8>],
+) -> Result<(), &'static str> {
+    let n = form.aa.nrows();
+    if form.aa.ncols() != n
+        || form.bb.nrows() != n
+        || form.bb.ncols() != n
+        || form.left.nrows() != n
+        || form.left.ncols() != n
+        || form.right.nrows() != n
+        || form.right.ncols() != n
+        || form.alpha.nrows() != n
+        || form.beta.nrows() != n
+    {
+        return Err("generalized Schur factor dimensions are invalid");
+    }
+    let (aa, bb, left, right, alpha, beta) = (
+        &mut form.aa,
+        &mut form.bb,
+        &mut form.left,
+        &mut form.right,
+        &mut form.alpha,
+        &mut form.beta,
     );
-    let mut memory =
-        MemBuffer::try_new(scratch).map_err(|_| "generalized Schur workspace allocation failed")?;
-    let stack = MemStack::new(&mut memory);
+    if !(0..n).all(|j| {
+        (0..n).all(|i| {
+            let a = aa[(i, j)];
+            let b = bb[(i, j)];
+            a.re.is_finite() && a.im.is_finite() && b.re.is_finite() && b.im.is_finite()
+        })
+    }) {
+        return Err("generalized Schur inputs must be finite");
+    }
+    for col in 0..n {
+        for row in 0..n {
+            let diagonal = if row == col {
+                c64::new(1.0, 0.0)
+            } else {
+                c64::new(0.0, 0.0)
+            };
+            left[(row, col)] = diagonal;
+            right[(row, col)] = diagonal;
+        }
+    }
+    if n == 0 {
+        return Ok(());
+    }
+    let params: GevdParams = faer::auto!(c64);
+    let stack = MemStack::new(memory);
     let block_size = faer::linalg::qr::no_pivoting::factor::recommended_block_size::<c64>(n, n);
     {
         let (mut householder, stack) =
@@ -284,12 +370,5 @@ pub(super) fn complex_qz(mut aa: Mat<c64>, mut bb: Mat<c64>) -> Result<ComplexQz
             }
         }
     }
-    Ok(ComplexQz {
-        aa,
-        bb,
-        left,
-        right,
-        alpha,
-        beta,
-    })
+    Ok(())
 }

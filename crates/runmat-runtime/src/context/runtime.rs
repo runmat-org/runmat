@@ -140,14 +140,22 @@ pub struct RuntimeContext {
     native_resolution_scope: crate::user_functions::NativeResolutionScope,
     program_revision: Option<runmat_execution::ProgramRevision>,
     program_sources: Option<Rc<crate::source_context::ProgramSourceBinding>>,
-    source_current: Option<Rc<RefCell<crate::source_context::SourceCurrentProjection>>>,
+    source_current: Option<
+        super::poll_projection::PollProjection<crate::source_context::SourceCurrentProjection>,
+    >,
     source_selection: InvocationSourceSelection,
-    source_catalog_view: Option<Rc<RefCell<crate::source_context::SourceCatalogProjection>>>,
-    debug_projection: Rc<RefCell<crate::debug_context::DebugFrameProjection>>,
-    output_projection: Rc<RefCell<super::output_projection::InvocationOutputProjection>>,
-    call_projection: Rc<RefCell<super::call_projection::CallProjection>>,
+    source_catalog_view: Option<
+        super::poll_projection::PollProjection<crate::source_context::SourceCatalogProjection>,
+    >,
+    debug_projection:
+        super::poll_projection::PollProjection<crate::debug_context::DebugFrameProjection>,
+    output_projection: super::poll_projection::PollProjection<
+        super::output_projection::InvocationOutputProjection,
+    >,
+    call_projection: super::poll_projection::PollProjection<super::call_projection::CallProjection>,
     call_projection_lineage: Rc<()>,
-    console_capture_projection: Rc<RefCell<crate::console::ConsoleCaptureProjection>>,
+    console_capture_projection:
+        super::poll_projection::PollProjection<crate::console::ConsoleCaptureProjection>,
     #[cfg(feature = "plot-core")]
     plot_receipts: crate::builtins::plotting::state::FigureReceiptOwner,
     // Clones admitted for one command share this exact origin. The next
@@ -263,11 +271,13 @@ impl RuntimeContext {
             source_current: None,
             source_selection: InvocationSourceSelection::Inherited,
             source_catalog_view: None,
-            debug_projection: Rc::new(RefCell::new(Default::default())),
-            output_projection: Rc::new(RefCell::new(Default::default())),
-            call_projection: Rc::new(RefCell::new(Default::default())),
+            debug_projection: super::poll_projection::PollProjection::legacy(Default::default()),
+            output_projection: super::poll_projection::PollProjection::legacy(Default::default()),
+            call_projection: super::poll_projection::PollProjection::legacy(Default::default()),
             call_projection_lineage: Rc::new(()),
-            console_capture_projection: Rc::new(RefCell::new(Default::default())),
+            console_capture_projection: super::poll_projection::PollProjection::legacy(
+                Default::default(),
+            ),
             #[cfg(feature = "plot-core")]
             plot_receipts: Default::default(),
             command_profiling: None,
@@ -1174,15 +1184,15 @@ impl RuntimeContext {
         binding: Rc<crate::source_context::ProgramSourceBinding>,
     ) -> Self {
         self.program_sources = Some(binding);
-        self.source_current = Some(Rc::new(RefCell::new(
+        self.source_current = Some(super::poll_projection::PollProjection::legacy(
             crate::source_context::SourceCurrentProjection::new(None),
-        )));
+        ));
         self.source_selection = InvocationSourceSelection::Inherited;
-        self.source_catalog_view = Some(Rc::new(RefCell::new(
+        self.source_catalog_view = Some(super::poll_projection::PollProjection::legacy(
             crate::source_context::SourceCatalogProjection::new(
                 self.state.source.borrow().catalog.clone(),
             ),
-        )));
+        ));
         self
     }
 
@@ -1220,7 +1230,9 @@ impl RuntimeContext {
 
     pub(crate) fn source_catalog_view(
         &self,
-    ) -> Option<&Rc<RefCell<crate::source_context::SourceCatalogProjection>>> {
+    ) -> Option<
+        &super::poll_projection::PollProjection<crate::source_context::SourceCatalogProjection>,
+    > {
         self.source_catalog_view.as_ref()
     }
 
@@ -1236,33 +1248,124 @@ impl RuntimeContext {
 
     pub(super) fn with_poll_debug_frames(mut self) -> Self {
         let snapshot = self.debug_projection.borrow().snapshot();
-        self.debug_projection = Rc::new(RefCell::new(snapshot));
+        self.debug_projection = super::poll_projection::PollProjection::legacy(snapshot);
         self
+    }
+
+    pub(in crate::context) fn poll_source_debug_quote(
+        &self,
+    ) -> Option<super::poll_projection::PollProjectionQuote> {
+        use super::poll_projection::{PollProjection, PollProjectionQuote};
+        let frames = self.debug_projection.borrow();
+        let node_bytes = u64::try_from(frames.snapshot_requested_bytes()?).ok()?;
+        let node_claims = frames.snapshot_retained_claims()?;
+        let source =
+            PollProjection::<crate::source_context::SourceCurrentProjection>::quote(0).ok()?;
+        let catalog =
+            PollProjection::<crate::source_context::SourceCatalogProjection>::quote(0).ok()?;
+        let debug = PollProjection::<crate::debug_context::DebugFrameProjection>::quote(0).ok()?;
+        source
+            .checked_add(catalog)?
+            .checked_add(debug)?
+            .checked_add(PollProjectionQuote {
+                scratch_bytes: 0,
+                retained_bytes: node_bytes,
+                retained_claims: node_claims,
+            })
+    }
+
+    pub(in crate::context) fn with_admitted_poll_debug_frames(
+        mut self,
+        permit: &super::host_allocation::HostOutputPermit,
+        scratch: Arc<super::host_effect::ManagedHostEffectStageReservation>,
+    ) -> Result<Self, runmat_value::ExactHostNumericAllocationError> {
+        let snapshot = self
+            .debug_projection
+            .borrow()
+            .snapshot_with_permit(permit)?;
+        self.debug_projection =
+            super::poll_projection::PollProjection::prepare(snapshot, permit, scratch)?;
+        Ok(self)
     }
 
     pub(super) fn with_poll_output_projection(mut self) -> Self {
         let owner = super::scope::active_runtime_context()
             .filter(|active| Rc::ptr_eq(active.state(), self.state()))
-            .map(|active| Rc::clone(active.output_projection()))
-            .unwrap_or_else(|| Rc::clone(&self.output_projection));
+            .map(|active| active.output_projection().clone())
+            .unwrap_or_else(|| self.output_projection.clone());
         let snapshot = owner.borrow().snapshot();
-        self.output_projection = Rc::new(RefCell::new(snapshot));
+        self.output_projection = super::poll_projection::PollProjection::legacy(snapshot);
         self
+    }
+
+    pub(super) fn poll_local_projection_quote(
+        &self,
+    ) -> Option<super::poll_projection::PollProjectionQuote> {
+        let call_scratch = self
+            .selected_call_projection()
+            .borrow()
+            .poll_snapshot_scratch_bytes()?;
+        let console_scratch = self
+            .selected_console_capture_projection()
+            .borrow()
+            .poll_snapshot_scratch_bytes()?;
+        let scratch = call_scratch.checked_add(console_scratch)?;
+        let output = super::poll_projection::PollProjection::<
+            super::output_projection::InvocationOutputProjection,
+        >::quote(0)
+        .ok()?;
+        let call = super::poll_projection::PollProjection::<
+            super::call_projection::CallProjection,
+        >::quote(0)
+        .ok()?;
+        let console = super::poll_projection::PollProjection::<
+            crate::console::ConsoleCaptureProjection,
+        >::quote(0)
+        .ok()?;
+        output.checked_add(call)?.checked_add(console)?.checked_add(
+            super::poll_projection::PollProjectionQuote {
+                scratch_bytes: scratch,
+                ..Default::default()
+            },
+        )
+    }
+
+    pub(super) fn with_admitted_poll_local_projections(
+        mut self,
+        permit: &super::host_allocation::HostOutputPermit,
+        scratch: std::sync::Arc<super::host_effect::ManagedHostEffectStageReservation>,
+    ) -> Result<Self, runmat_value::ExactHostNumericAllocationError> {
+        let output = self.output_projection.borrow().poll_snapshot();
+        let call = self.selected_call_projection().borrow().poll_snapshot()?;
+        let console = self
+            .selected_console_capture_projection()
+            .borrow()
+            .poll_snapshot()?;
+        self.output_projection =
+            super::poll_projection::PollProjection::prepare(output, permit, scratch.clone())?;
+        self.call_projection =
+            super::poll_projection::PollProjection::prepare(call, permit, scratch.clone())?;
+        self.console_capture_projection =
+            super::poll_projection::PollProjection::prepare(console, permit, scratch)?;
+        Ok(self)
     }
 
     pub(crate) fn output_projection(
         &self,
-    ) -> &Rc<RefCell<super::output_projection::InvocationOutputProjection>> {
+    ) -> &super::poll_projection::PollProjection<super::output_projection::InvocationOutputProjection>
+    {
         &self.output_projection
     }
 
-    pub(crate) fn call_projection(&self) -> &Rc<RefCell<super::call_projection::CallProjection>> {
+    pub(crate) fn call_projection(
+        &self,
+    ) -> &super::poll_projection::PollProjection<super::call_projection::CallProjection> {
         &self.call_projection
     }
 
     pub(crate) fn console_capture_projection(
         &self,
-    ) -> &Rc<RefCell<crate::console::ConsoleCaptureProjection>> {
+    ) -> &super::poll_projection::PollProjection<crate::console::ConsoleCaptureProjection> {
         &self.console_capture_projection
     }
 
@@ -1271,13 +1374,13 @@ impl RuntimeContext {
             .selected_console_capture_projection()
             .borrow()
             .snapshot();
-        self.console_capture_projection = Rc::new(RefCell::new(snapshot));
+        self.console_capture_projection = super::poll_projection::PollProjection::legacy(snapshot);
         self
     }
 
     pub(crate) fn selected_console_capture_projection(
         &self,
-    ) -> Rc<RefCell<crate::console::ConsoleCaptureProjection>> {
+    ) -> super::poll_projection::PollProjection<crate::console::ConsoleCaptureProjection> {
         super::scope::active_runtime_context()
             .filter(|active| {
                 Rc::ptr_eq(active.state(), &self.state)
@@ -1286,19 +1389,19 @@ impl RuntimeContext {
                         &self.call_projection_lineage,
                     )
             })
-            .map(|active| Rc::clone(active.console_capture_projection()))
-            .unwrap_or_else(|| Rc::clone(&self.console_capture_projection))
+            .map(|active| active.console_capture_projection().clone())
+            .unwrap_or_else(|| self.console_capture_projection.clone())
     }
 
     pub(super) fn with_poll_call_projection(mut self) -> Self {
         let snapshot = self.selected_call_projection().borrow().snapshot();
-        self.call_projection = Rc::new(RefCell::new(snapshot));
+        self.call_projection = super::poll_projection::PollProjection::legacy(snapshot);
         self
     }
 
     pub(crate) fn selected_call_projection(
         &self,
-    ) -> Rc<RefCell<super::call_projection::CallProjection>> {
+    ) -> super::poll_projection::PollProjection<super::call_projection::CallProjection> {
         super::scope::active_runtime_context()
             .filter(|active| {
                 Rc::ptr_eq(active.state(), &self.state)
@@ -1307,13 +1410,13 @@ impl RuntimeContext {
                         &self.call_projection_lineage,
                     )
             })
-            .map(|active| Rc::clone(active.call_projection()))
-            .unwrap_or_else(|| Rc::clone(&self.call_projection))
+            .map(|active| active.call_projection().clone())
+            .unwrap_or_else(|| self.call_projection.clone())
     }
 
     pub(crate) fn debug_projection(
         &self,
-    ) -> &Rc<RefCell<crate::debug_context::DebugFrameProjection>> {
+    ) -> &super::poll_projection::PollProjection<crate::debug_context::DebugFrameProjection> {
         &self.debug_projection
     }
 
@@ -1321,13 +1424,15 @@ impl RuntimeContext {
     /// pending siblings keep their own linked frame heads.
     pub fn with_debug_frame(mut self, frame: crate::debug_context::DebugFrame) -> Self {
         let projection = self.debug_projection.borrow().with_frame(frame);
-        self.debug_projection = Rc::new(RefCell::new(projection));
+        self.debug_projection = super::poll_projection::PollProjection::legacy(projection);
         self
     }
 
     pub(crate) fn source_current(
         &self,
-    ) -> Option<&Rc<RefCell<crate::source_context::SourceCurrentProjection>>> {
+    ) -> Option<
+        &super::poll_projection::PollProjection<crate::source_context::SourceCurrentProjection>,
+    > {
         self.source_current.as_ref()
     }
 
@@ -1626,25 +1731,25 @@ impl RuntimeContext {
             child.program_sources = Some(Rc::new(sources.fork_snapshot()));
         }
         if let Some(current) = &self.source_current {
-            child.source_current = Some(Rc::new(RefCell::new(
+            child.source_current = Some(super::poll_projection::PollProjection::legacy(
                 crate::source_context::SourceCurrentProjection::new(current.borrow().snapshot()),
-            )));
+            ));
         }
         if let Some(view) = &self.source_catalog_view {
-            child.source_catalog_view = Some(Rc::new(RefCell::new(
+            child.source_catalog_view = Some(super::poll_projection::PollProjection::legacy(
                 view.borrow()
                     .fork_with_inherited_sources(&child.state.source.borrow()),
-            )));
+            ));
         }
         *child.state.call.borrow_mut() = self.state.call.borrow().clone();
-        child.call_projection = Rc::new(RefCell::new(
+        child.call_projection = super::poll_projection::PollProjection::legacy(
             self.selected_call_projection().borrow().snapshot(),
-        ));
-        child.console_capture_projection = Rc::new(RefCell::new(
+        );
+        child.console_capture_projection = super::poll_projection::PollProjection::legacy(
             self.selected_console_capture_projection()
                 .borrow()
                 .snapshot(),
-        ));
+        );
         *child.state.classes.borrow_mut() = self.state.classes.borrow().clone();
         self.state.session_global_mutation.ensure_idle()?;
         *child.state.session_variables.borrow_mut() =

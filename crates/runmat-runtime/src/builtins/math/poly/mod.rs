@@ -1,4 +1,5 @@
 mod normalization;
+mod characteristic;
 pub mod polyder;
 pub mod polyfit;
 pub mod polyint;

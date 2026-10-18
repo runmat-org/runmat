@@ -1,8 +1,12 @@
 use super::*;
 use crate::context::call_projection::{self, CallProjectionGuard};
 
-fn active_projection() -> Option<Rc<RefCell<crate::context::call_projection::CallProjection>>> {
-    crate::context::legacy::active().map(|runtime| Rc::clone(runtime.call_projection()))
+fn active_projection() -> Option<
+    crate::context::poll_projection::PollProjection<
+        crate::context::call_projection::CallProjection,
+    >,
+> {
+    crate::context::legacy::active().map(|runtime| runtime.call_projection().clone())
 }
 
 pub struct FunctionInvokerGuard {

@@ -104,13 +104,19 @@ impl RuntimeContext {
             source_current: self.source_current.clone(),
             source_selection: self.source_selection.clone(),
             source_catalog_view: self.source_catalog_view.clone(),
-            debug_projection: Rc::new(RefCell::new(Default::default())),
-            output_projection: Rc::new(RefCell::new(Default::default())),
-            call_projection: Rc::new(RefCell::new(
+            debug_projection: super::super::poll_projection::PollProjection::legacy(
+                Default::default(),
+            ),
+            output_projection: super::super::poll_projection::PollProjection::legacy(
+                Default::default(),
+            ),
+            call_projection: super::super::poll_projection::PollProjection::legacy(
                 self.selected_call_projection().borrow().snapshot(),
-            )),
+            ),
             call_projection_lineage: Rc::new(()),
-            console_capture_projection: Rc::new(RefCell::new(Default::default())),
+            console_capture_projection: super::super::poll_projection::PollProjection::legacy(
+                Default::default(),
+            ),
             #[cfg(feature = "plot-core")]
             plot_receipts: self.plot_receipts.clone(),
             command_profiling: None,

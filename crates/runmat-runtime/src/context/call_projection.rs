@@ -1,12 +1,13 @@
 //! Exact invocation-local call overlays. Session loader configuration stays in `CallState`.
 
 use crate::callsite::CallsiteInfo;
+use crate::context::poll_projection::PollProjection;
 use crate::user_functions::{
     BoundFunctionInvoker, ExecutionSourceResolver, FunctionInvoker, FunctionResolver,
     ScopedNameTargetResolver, SemanticNameCandidates, SourceFunctionInfo,
 };
 use runmat_types::ClassIdentity;
-use std::cell::RefCell;
+use runmat_value::{exact_capacity_vec, ExactHostNumericAllocationError};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -42,18 +43,26 @@ impl<T: Clone> Selection<T> {
 }
 
 impl<T> Selection<T> {
+    fn current_ref(&self) -> Option<&T> {
+        self.overlays
+            .last()
+            .map(|(_, value)| value)
+            .or(self.baseline.as_ref())
+    }
+
     fn push(&mut self, token: u64, value: T) {
         self.overlays.push((token, value));
     }
 
-    fn remove(&mut self, token: u64) {
+    fn remove(&mut self, token: u64) -> Option<T> {
         if let Some(index) = self
             .overlays
             .iter()
             .position(|(candidate, _)| *candidate == token)
         {
-            self.overlays.remove(index);
+            return Some(self.overlays.remove(index).1);
         }
+        None
     }
 }
 
@@ -91,6 +100,42 @@ pub(crate) struct CallProjection {
 }
 
 impl CallProjection {
+    pub(crate) fn poll_snapshot_scratch_bytes(&self) -> Option<u64> {
+        let span_bytes = [&self.callsite, &self.function_input_callsite]
+            .into_iter()
+            .filter_map(|selection| selection.current_ref())
+            .map(|callsite| callsite.arg_spans.len())
+            .try_fold(0_usize, usize::checked_add)?
+            .checked_mul(std::mem::size_of::<runmat_types::Span>())?;
+        let class_bytes = self
+            .class_access
+            .current_ref()
+            .and_then(Option::as_ref)
+            .map_or(0, |identity| identity.display_name().len());
+        span_bytes
+            .checked_add(class_bytes)
+            .and_then(|bytes| u64::try_from(bytes).ok())
+    }
+
+    pub(crate) fn poll_snapshot(&self) -> Result<Self, ExactHostNumericAllocationError> {
+        // Construct variable-sized fields once after their exact scratch has
+        // been admitted; `snapshot` would clone both callsite vectors first.
+        Ok(Self {
+            next_token: 0,
+            semantic_invoker: self.semantic_invoker.snapshot(),
+            bound_invoker: self.bound_invoker.snapshot(),
+            semantic_resolver: self.semantic_resolver.snapshot(),
+            scoped_name_resolver: self.scoped_name_resolver.snapshot(),
+            semantic_candidates: self.semantic_candidates.snapshot(),
+            source_functions: self.source_functions.snapshot(),
+            execution_source_resolver: self.execution_source_resolver.snapshot(),
+            active_function: self.active_function.snapshot(),
+            callsite: snapshot_callsite(&self.callsite)?,
+            function_input_callsite: snapshot_callsite(&self.function_input_callsite)?,
+            class_access: snapshot_class_access(&self.class_access)?,
+        })
+    }
+
     pub(crate) fn snapshot(&self) -> Self {
         // A child inherits selected facts, not the parent's guard history.
         // Baselines have no retirement token and require no overlay allocation.
@@ -152,39 +197,152 @@ impl CallProjection {
         self.class_access.current()
     }
 
-    fn retire(&mut self, field: Field, token: u64) {
+    fn retire(&mut self, field: Field, token: u64) -> Option<CallProjectionRetirement> {
         match field {
-            Field::SemanticInvoker => self.semantic_invoker.remove(token),
-            Field::BoundInvoker => self.bound_invoker.remove(token),
-            Field::SemanticResolver => self.semantic_resolver.remove(token),
-            Field::ScopedNameResolver => self.scoped_name_resolver.remove(token),
-            Field::SemanticCandidates => self.semantic_candidates.remove(token),
-            Field::SourceFunctions => self.source_functions.remove(token),
-            Field::ExecutionSourceResolver => self.execution_source_resolver.remove(token),
-            Field::ActiveFunction => self.active_function.remove(token),
-            Field::Callsite => self.callsite.remove(token),
-            Field::FunctionInputCallsite => self.function_input_callsite.remove(token),
-            Field::ClassAccess => self.class_access.remove(token),
+            Field::SemanticInvoker => self
+                .semantic_invoker
+                .remove(token)
+                .map(CallProjectionRetirement::SemanticInvoker),
+            Field::BoundInvoker => self
+                .bound_invoker
+                .remove(token)
+                .map(CallProjectionRetirement::BoundInvoker),
+            Field::SemanticResolver => self
+                .semantic_resolver
+                .remove(token)
+                .map(CallProjectionRetirement::SemanticResolver),
+            Field::ScopedNameResolver => self
+                .scoped_name_resolver
+                .remove(token)
+                .map(CallProjectionRetirement::ScopedNameResolver),
+            Field::SemanticCandidates => self
+                .semantic_candidates
+                .remove(token)
+                .map(CallProjectionRetirement::SemanticCandidates),
+            Field::SourceFunctions => self
+                .source_functions
+                .remove(token)
+                .map(CallProjectionRetirement::SourceFunctions),
+            Field::ExecutionSourceResolver => self
+                .execution_source_resolver
+                .remove(token)
+                .map(CallProjectionRetirement::ExecutionSourceResolver),
+            Field::ActiveFunction => self
+                .active_function
+                .remove(token)
+                .map(CallProjectionRetirement::ActiveFunction),
+            Field::Callsite => self
+                .callsite
+                .remove(token)
+                .map(CallProjectionRetirement::Callsite),
+            Field::FunctionInputCallsite => self
+                .function_input_callsite
+                .remove(token)
+                .map(CallProjectionRetirement::FunctionInputCallsite),
+            Field::ClassAccess => self
+                .class_access
+                .remove(token)
+                .map(CallProjectionRetirement::ClassAccess),
         }
     }
 }
 
+enum CallProjectionRetirement {
+    SemanticInvoker(Option<Rc<FunctionInvoker>>),
+    BoundInvoker(Option<Rc<BoundFunctionInvoker>>),
+    SemanticResolver(Option<Arc<FunctionResolver>>),
+    ScopedNameResolver(Option<Rc<ScopedNameTargetResolver>>),
+    SemanticCandidates(Option<Arc<SemanticNameCandidates>>),
+    SourceFunctions(Option<Arc<Vec<SourceFunctionInfo>>>),
+    ExecutionSourceResolver(Option<Rc<ExecutionSourceResolver>>),
+    ActiveFunction(usize),
+    Callsite(CallsiteInfo),
+    FunctionInputCallsite(CallsiteInfo),
+    ClassAccess(Option<ClassIdentity>),
+}
+
+impl Drop for CallProjectionRetirement {
+    fn drop(&mut self) {
+        match self {
+            Self::SemanticInvoker(value) => _ = value,
+            Self::BoundInvoker(value) => _ = value,
+            Self::SemanticResolver(value) => _ = value,
+            Self::ScopedNameResolver(value) => _ = value,
+            Self::SemanticCandidates(value) => _ = value,
+            Self::SourceFunctions(value) => _ = value,
+            Self::ExecutionSourceResolver(value) => _ = value,
+            Self::ActiveFunction(value) => _ = value,
+            Self::Callsite(value) => _ = value,
+            Self::FunctionInputCallsite(value) => _ = value,
+            Self::ClassAccess(value) => _ = value,
+        }
+    }
+}
+
+fn snapshot_callsite(
+    source: &Selection<CallsiteInfo>,
+) -> Result<Selection<CallsiteInfo>, ExactHostNumericAllocationError> {
+    let baseline = source
+        .current_ref()
+        .map(|callsite| {
+            let mut arg_spans = exact_capacity_vec(callsite.arg_spans.len())?;
+            arg_spans.extend_from_slice(&callsite.arg_spans);
+            Ok(CallsiteInfo {
+                source_id: callsite.source_id,
+                arg_spans,
+            })
+        })
+        .transpose()?;
+    Ok(Selection {
+        baseline,
+        overlays: Vec::new(),
+    })
+}
+
+fn snapshot_class_access(
+    source: &Selection<Option<ClassIdentity>>,
+) -> Result<Selection<Option<ClassIdentity>>, ExactHostNumericAllocationError> {
+    let baseline = source
+        .current_ref()
+        .map(|identity| {
+            identity
+                .as_ref()
+                .map(|identity| {
+                    let bytes = identity.display_name().as_bytes();
+                    let mut owned = exact_capacity_vec(bytes.len())?;
+                    owned.extend_from_slice(bytes);
+                    let name = String::from_utf8(owned)
+                        .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?;
+                    ClassIdentity::new(name)
+                        .map(Some)
+                        .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
+                })
+                .unwrap_or(Ok(None))
+        })
+        .transpose()?;
+    Ok(Selection {
+        baseline,
+        overlays: Vec::new(),
+    })
+}
+
 pub(crate) struct CallProjectionGuard {
-    owner: Rc<RefCell<CallProjection>>,
+    owner: PollProjection<CallProjection>,
     field: Field,
     token: u64,
 }
 
 impl Drop for CallProjectionGuard {
     fn drop(&mut self) {
-        self.owner.borrow_mut().retire(self.field, self.token);
+        let retired = self.owner.borrow_mut().retire(self.field, self.token);
+        drop(retired);
     }
 }
 
 macro_rules! push_overlay {
     ($name:ident, $field:ident, $kind:ident, $value:ty) => {
         pub(crate) fn $name(
-            owner: &Rc<RefCell<CallProjection>>,
+            owner: &PollProjection<CallProjection>,
             value: $value,
         ) -> CallProjectionGuard {
             let token = {
@@ -194,7 +352,7 @@ macro_rules! push_overlay {
                 token
             };
             CallProjectionGuard {
-                owner: Rc::clone(owner),
+                owner: owner.clone(),
                 field: Field::$kind,
                 token,
             }
@@ -276,7 +434,7 @@ mod tests {
 
     #[test]
     fn exact_overlay_tokens_survive_out_of_order_retirement() {
-        let owner = Rc::new(RefCell::new(CallProjection::default()));
+        let owner = PollProjection::legacy(CallProjection::default());
         let first = push_class_access(&owner, Some(ClassIdentity::from("First")));
         let second = push_class_access(&owner, Some(ClassIdentity::from("Second")));
         drop(first);
@@ -290,12 +448,12 @@ mod tests {
 
     #[test]
     fn inherited_snapshot_keeps_only_effective_fact() {
-        let owner = Rc::new(RefCell::new(CallProjection::default()));
+        let owner = PollProjection::legacy(CallProjection::default());
         let mut guards = Vec::new();
         for ordinal in 0..128 {
             guards.push(push_active_function(&owner, ordinal));
         }
-        let child = Rc::new(RefCell::new(owner.borrow().snapshot()));
+        let child = PollProjection::legacy(owner.borrow().snapshot());
         assert!(child.borrow().active_function.overlays.is_empty());
         assert_eq!(child.borrow().active_function.baseline, Some(127));
         assert_eq!(child.borrow().active_function(), Some(127));

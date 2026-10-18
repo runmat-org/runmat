@@ -118,7 +118,7 @@ macro_rules! solve_columns {
     }};
 }
 
-pub(super) fn try_solve(
+pub(in super::super) fn try_solve(
     lhs: &Value,
     rhs: &Value,
     context: &RuntimeContext,

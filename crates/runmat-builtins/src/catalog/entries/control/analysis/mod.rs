@@ -14,13 +14,21 @@ mod stepinfo;
 #[cfg(test)]
 mod tests;
 mod zero;
+mod ctrb;
+mod care;
+mod dlqr;
+mod pade;
 
+pub use self::care::*;
+pub use self::ctrb::*;
 pub use self::damp::*;
 pub use self::db::*;
 pub use self::dcgain::*;
+pub use self::dlqr::*;
 pub use self::feedback::*;
 pub use self::isstable::*;
 pub use self::lqr::*;
+pub use self::pade::*;
 pub use self::pole::*;
 pub use self::pzmap::*;
 pub use self::rlocus::*;
@@ -39,4 +47,8 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(rlocus::ENTRIES.iter().copied());
     values.extend(stepinfo::ENTRIES.iter().copied());
     values.extend(zero::ENTRIES.iter().copied());
+    values.extend(ctrb::ENTRIES.iter().copied());
+    values.extend(care::ENTRIES.iter().copied());
+    values.extend(dlqr::ENTRIES.iter().copied());
+    values.extend(pade::ENTRIES.iter().copied());
 }

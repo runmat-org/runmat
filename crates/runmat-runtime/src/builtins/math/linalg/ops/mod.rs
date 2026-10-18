@@ -11,6 +11,7 @@ pub(crate) mod pagemtimes;
 pub(crate) mod pagetranspose;
 /// Borrowed typed CSC operator boundary shared by sparse solvers and providers.
 pub mod sparse_operator;
+pub(crate) mod sparse_factor;
 pub(crate) mod triangular_operator;
 pub(crate) mod trace;
 pub(crate) mod transpose;

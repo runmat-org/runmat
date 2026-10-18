@@ -121,10 +121,12 @@ fn task_results_retain_managed_members_through_collecting_root_retirement() {
             let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
             let outputs = block_on(inputs.with_unbounded_values_async(|inputs| {
                 interpret_parfor_task_in_context(ParforTaskExecution {
+                    bytecode_owner: None,
                     bytecode: &bytecode,
                     region,
                     inputs,
                     iterations: vec![Value::Num(1.0), Value::Num(2.0)],
+                    input_roots: None,
                     randomness: runmat_execution::ParallelRandomnessContext::Inherit,
                     mode,
                     current_function_name: "<task>",

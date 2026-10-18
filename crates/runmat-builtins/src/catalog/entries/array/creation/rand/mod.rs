@@ -15,9 +15,9 @@ pub const RAND_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     descriptor: &RAND_DESCRIPTOR,
     contract: BuiltinContractDeclaration {
         maturity: BuiltinContractMaturity::Incomplete,
-        inference_rule: BuiltinInferenceRule::Identity(IdentityInferenceRule::new(
-            inference::infer,
-        )),
+        inference_rule: BuiltinInferenceRule::Identity(
+            IdentityInferenceRule::with_structural_dimensions(inference::infer),
+        ),
         compatibility: BuiltinCompatibility::Matlab,
         async_behavior: BuiltinAsyncBehavior::MaySuspend,
         purity: BuiltinPurity::Impure,

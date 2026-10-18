@@ -46,6 +46,9 @@ pub(in crate::builtins::math::linalg) async fn evaluate_with_context(
         if let Some(result) = host::try_sparse_triangular(lhs, rhs, context)? {
             return Ok(result);
         }
+        if let Some(result) = host::try_general_sparse(lhs, rhs, context)? {
+            return Ok(result);
+        }
     }
     let lhs = crate::dispatcher::gather_if_needed_async(lhs)
         .await

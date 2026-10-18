@@ -1,6 +1,10 @@
 use super::RuntimeContext;
-use std::cell::RefCell;
+use crate::context::host_allocation::HostOutputPermit;
+use crate::context::host_effect::ManagedHostEffectStageReservation;
+use crate::context::poll_projection::PollProjection;
+use runmat_value::ExactHostNumericAllocationError;
 use std::rc::Rc;
+use std::sync::Arc;
 
 /// A selected invocation cannot execute a source ordinal absent from its
 /// admitted program binding, or one whose issued lease is no longer live.
@@ -72,9 +76,9 @@ impl RuntimeContext {
         let current = self
             .admitted_program_source_id(ordinal)?
             .and_then(|source| crate::source_context::source_info_in_context(&self, source));
-        self.source_current = Some(Rc::new(RefCell::new(
+        self.source_current = Some(PollProjection::legacy(
             crate::source_context::SourceCurrentProjection::new(current),
-        )));
+        ));
         self.source_selection = if self.program_sources.is_some() {
             InvocationSourceSelection::Selected(Rc::new(()))
         } else {
@@ -83,9 +87,14 @@ impl RuntimeContext {
         Ok(self)
     }
 
-    pub(in crate::context) fn with_poll_source_catalog(mut self) -> Self {
+    fn poll_source_catalog_snapshots(
+        &self,
+    ) -> (
+        Option<crate::source_context::SourceInfo>,
+        Rc<std::collections::HashMap<runmat_types::SourceId, crate::source_context::SourceInfo>>,
+    ) {
         let active = super::super::scope::active_runtime_context()
-            .filter(|active| active.same_source_projection_owner(&self));
+            .filter(|active| active.same_source_projection_owner(self));
         let current = match &self.source_selection {
             InvocationSourceSelection::Selected(_) | InvocationSourceSelection::Unbound(_) => {
                 active
@@ -108,9 +117,6 @@ impl RuntimeContext {
                 })
                 .unwrap_or_else(|| self.state.source.borrow().current.clone()),
         };
-        self.source_current = Some(Rc::new(RefCell::new(
-            crate::source_context::SourceCurrentProjection::new(current),
-        )));
         let snapshot = active
             .as_ref()
             .and_then(|active| {
@@ -124,9 +130,38 @@ impl RuntimeContext {
                     .map(|view| view.borrow().snapshot_catalog())
             })
             .unwrap_or_else(|| self.state.source.borrow().catalog.clone());
-        self.source_catalog_view = Some(Rc::new(RefCell::new(
+        (current, snapshot)
+    }
+
+    pub(in crate::context) fn with_poll_source_catalog(mut self) -> Self {
+        let (current, snapshot) = self.poll_source_catalog_snapshots();
+        self.source_current = Some(PollProjection::legacy(
+            crate::source_context::SourceCurrentProjection::new(current),
+        ));
+        self.source_catalog_view = Some(PollProjection::legacy(
             crate::source_context::SourceCatalogProjection::new(snapshot),
-        )));
+        ));
         self
+    }
+
+    pub(in crate::context) fn with_admitted_poll_source_catalog(
+        mut self,
+        permit: &HostOutputPermit,
+        scratch: Arc<ManagedHostEffectStageReservation>,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let (current, snapshot) = self.poll_source_catalog_snapshots();
+        let current = PollProjection::prepare(
+            crate::source_context::SourceCurrentProjection::new(current),
+            permit,
+            Arc::clone(&scratch),
+        )?;
+        let catalog = PollProjection::prepare(
+            crate::source_context::SourceCatalogProjection::new(snapshot),
+            permit,
+            scratch,
+        )?;
+        self.source_current = Some(current);
+        self.source_catalog_view = Some(catalog);
+        Ok(self)
     }
 }

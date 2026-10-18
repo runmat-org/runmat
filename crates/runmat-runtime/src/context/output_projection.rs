@@ -6,7 +6,7 @@ pub(crate) struct PresentationOutputToken(u64);
 
 #[derive(Clone, Debug, Default)]
 struct ChannelProjection<T> {
-    inherited: Vec<T>,
+    inherited: Option<T>,
     overlays: Vec<(u64, T)>,
     next_token: u64,
 }
@@ -14,17 +14,15 @@ struct ChannelProjection<T> {
 impl<T: Copy> ChannelProjection<T> {
     const fn new() -> Self {
         Self {
-            inherited: Vec::new(),
+            inherited: None,
             overlays: Vec::new(),
             next_token: 0,
         }
     }
 
     fn snapshot(&self) -> Self {
-        let mut inherited = self.inherited.clone();
-        inherited.extend(self.overlays.iter().map(|(_, value)| *value));
         Self {
-            inherited,
+            inherited: self.current(),
             overlays: Vec::new(),
             next_token: 0,
         }
@@ -54,7 +52,7 @@ impl<T: Copy> ChannelProjection<T> {
         self.overlays
             .last()
             .map(|(_, value)| *value)
-            .or_else(|| self.inherited.last().copied())
+            .or(self.inherited)
     }
 }
 
@@ -81,6 +79,10 @@ impl InvocationOutputProjection {
             requested: self.requested.snapshot(),
             presentation: self.presentation.snapshot(),
         }
+    }
+
+    pub(crate) fn poll_snapshot(&self) -> Self {
+        self.snapshot()
     }
 
     pub(crate) fn push_requested(&mut self, value: Option<usize>) -> RequestedOutputToken {

@@ -1,4 +1,6 @@
 use super::ConsoleEntry;
+use crate::context::poll_projection::PollProjection;
+use runmat_value::{exact_capacity_vec, ExactHostNumericAllocationError};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -16,16 +18,53 @@ pub(crate) struct ConsoleCaptureProjection {
 }
 
 impl ConsoleCaptureProjection {
+    pub(crate) fn poll_snapshot_scratch_bytes(&self) -> Option<u64> {
+        let count = self
+            .frames
+            .iter()
+            .filter(|(_, frame)| frame.active.get())
+            .count();
+        count
+            .checked_mul(std::mem::size_of::<(u64, Rc<CaptureFrame>)>())
+            .and_then(|bytes| u64::try_from(bytes).ok())
+    }
+
     pub(crate) fn snapshot(&self) -> Self {
-        Self {
-            next_token: 0,
-            frames: self
-                .frames
+        let count = self
+            .frames
+            .iter()
+            .filter(|(_, frame)| frame.active.get())
+            .count();
+        let mut frames = Vec::with_capacity(count);
+        frames.extend(
+            self.frames
                 .iter()
                 .filter(|(_, frame)| frame.active.get())
-                .map(|(_, frame)| (0, Rc::clone(frame)))
-                .collect(),
+                .map(|(_, frame)| (0, Rc::clone(frame))),
+        );
+        Self {
+            next_token: 0,
+            frames,
         }
+    }
+
+    pub(crate) fn poll_snapshot(&self) -> Result<Self, ExactHostNumericAllocationError> {
+        let count = self
+            .frames
+            .iter()
+            .filter(|(_, frame)| frame.active.get())
+            .count();
+        let mut frames = exact_capacity_vec(count)?;
+        frames.extend(
+            self.frames
+                .iter()
+                .filter(|(_, frame)| frame.active.get())
+                .map(|(_, frame)| (0, Rc::clone(frame))),
+        );
+        Ok(Self {
+            next_token: 0,
+            frames,
+        })
     }
 
     pub(crate) fn record(&self, entry: ConsoleEntry) -> bool {
@@ -42,7 +81,7 @@ impl ConsoleCaptureProjection {
         true
     }
 
-    pub(crate) fn begin(owner: &Rc<RefCell<Self>>) -> CaptureLease {
+    pub(crate) fn begin(owner: &PollProjection<Self>) -> CaptureLease {
         let frame = Rc::new(CaptureFrame {
             active: Cell::new(true),
             entries: RefCell::new(Vec::new()),
@@ -57,7 +96,7 @@ impl ConsoleCaptureProjection {
             token
         };
         CaptureLease {
-            owner: Rc::clone(owner),
+            owner: owner.clone(),
             token,
             frame,
         }
@@ -65,7 +104,7 @@ impl ConsoleCaptureProjection {
 }
 
 pub(crate) struct CaptureLease {
-    owner: Rc<RefCell<ConsoleCaptureProjection>>,
+    owner: PollProjection<ConsoleCaptureProjection>,
     token: u64,
     frame: Rc<CaptureFrame>,
 }
@@ -107,9 +146,9 @@ mod tests {
 
     #[test]
     fn inherited_outer_capture_survives_child_overlay_but_closure_is_exact() {
-        let parent = Rc::new(RefCell::new(ConsoleCaptureProjection::default()));
+        let parent = PollProjection::legacy(ConsoleCaptureProjection::default());
         let outer = ConsoleCaptureProjection::begin(&parent);
-        let child = Rc::new(RefCell::new(parent.borrow().snapshot()));
+        let child = PollProjection::legacy(parent.borrow().snapshot());
         let inner = ConsoleCaptureProjection::begin(&child);
         assert!(child.borrow().record(entry("inner")));
         assert_eq!(inner.finish()[0].text, "inner");

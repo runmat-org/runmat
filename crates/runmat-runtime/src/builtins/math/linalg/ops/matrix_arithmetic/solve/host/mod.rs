@@ -1,5 +1,6 @@
 mod complex;
 mod conversion;
+mod general_sparse;
 mod real;
 mod solver;
 mod sparse_triangular;
@@ -9,18 +10,12 @@ use runmat_value::{ComplexTensor, Tensor, Value};
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::tensor::tensor_into_value;
-use crate::context::RuntimeContext;
 use crate::BuiltinResult;
 
 use super::SolveOrientation;
 
-pub(super) fn try_sparse_triangular(
-    lhs: &Value,
-    rhs: &Value,
-    context: &RuntimeContext,
-) -> BuiltinResult<Option<Value>> {
-    sparse_triangular::try_solve(lhs, rhs, context)
-}
+pub(super) use general_sparse::try_solve as try_general_sparse;
+pub(super) use sparse_triangular::try_solve as try_sparse_triangular;
 
 pub(super) enum NumericInput {
     Real(Tensor),

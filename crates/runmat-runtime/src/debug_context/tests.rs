@@ -1,6 +1,7 @@
 use super::*;
 use futures::channel::oneshot;
 use futures::future::{select, Either};
+use std::rc::Rc;
 
 #[test]
 fn debug_frame_snapshot_uses_source_catalog() {
@@ -34,6 +35,33 @@ fn out_of_order_guard_drop_preserves_the_other_selected_frame() {
     assert_eq!(current_frames().len(), 1);
     drop(inner);
     assert!(current_frames().is_empty());
+}
+
+#[test]
+fn poll_snapshot_retains_active_frame_after_parent_guard_retires() {
+    let mut parent = DebugFrameProjection::default();
+    let outer = parent.push(DebugFrame {
+        function: "outer".into(),
+        source_id: None,
+        span: None,
+    });
+    let inner = parent.push(DebugFrame {
+        function: "inner".into(),
+        source_id: None,
+        span: None,
+    });
+    let snapshot = parent.snapshot();
+    parent.remove(outer);
+    parent.remove(inner);
+    assert!(parent.frames().is_empty());
+    assert_eq!(
+        snapshot
+            .frames()
+            .iter()
+            .map(|frame| frame.function.as_str())
+            .collect::<Vec<_>>(),
+        vec!["inner", "outer"]
+    );
 }
 
 #[test]

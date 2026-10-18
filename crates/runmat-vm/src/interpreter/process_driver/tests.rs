@@ -1,9 +1,34 @@
 use super::*;
 use futures::task::noop_waker;
+use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+use runmat_runtime::context::{
+    ParallelCapability, RuntimeParallelResources, RuntimeParallelService, RuntimeServicePorts,
+};
 use runmat_value::{HandleRef, Value};
 use std::cell::RefCell;
 
 struct Retired(&'static str, Rc<RefCell<Vec<&'static str>>>);
+
+struct ManagedParallel(ManagedHostEffectLedger);
+
+impl RuntimeParallelService for ManagedParallel {
+    fn supports(&self, _: ParallelCapability) -> bool {
+        false
+    }
+
+    fn placement_resources(&self) -> RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        RuntimeParallelResources {
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+            ..RuntimeParallelResources::default()
+        }
+    }
+
+    fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
 
 impl Drop for Retired {
     fn drop(&mut self) {
@@ -232,4 +257,44 @@ fn queued_arguments_are_rooted_before_the_first_child_poll() {
     drop(owner);
     runmat_gc::gc_collect_major().expect("collect after queued call retirement");
     assert!(runmat_gc::gc_clone_value(&handle).is_err());
+}
+
+#[test]
+fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
+    let ledger = ManagedHostEffectLedger::new(8 * 1024 * 1024);
+    let runtime = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let owner = ProcessContinuationDriver::new_with_dynamic_admission_in_context(&runtime, None)
+        .expect("admit managed process driver");
+    let handle = owner.handle();
+    let child_runtime = runtime.clone();
+    futures::executor::block_on(
+        owner
+            .drive_in_context(&runtime, move || async move {
+                let pending = handle.enqueue_owned_in_context(&child_runtime, || async move {
+                    futures::future::pending::<Result<usize, RuntimeError>>().await
+                })?;
+                for expected in 0..64_usize {
+                    let actual = handle
+                        .enqueue_owned_in_context(
+                            &child_runtime,
+                            move || async move { Ok(expected) },
+                        )?
+                        .await?;
+                    assert_eq!(actual, expected);
+                }
+                drop(pending);
+                Ok::<_, RuntimeError>(())
+            })
+            .expect("admit managed root"),
+    )
+    .expect("all sequential children complete");
+    assert!(owner.owner.state().borrow().tasks.capacity() <= 2);
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(owner);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
 }

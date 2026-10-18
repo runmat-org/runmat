@@ -1,8 +1,11 @@
 use crate::source_context;
+use runmat_execution::resource::ExactShared;
 use runmat_thread_local::runmat_thread_local;
 use runmat_types::SourceId;
+use runmat_value::{
+    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError,
+};
 use std::cell::RefCell;
-use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugFrame {
@@ -21,7 +24,9 @@ pub struct DebugFrameInfo {
 #[derive(Debug)]
 struct FrameNode {
     frame: DebugFrame,
-    parent: Option<Rc<FrameNode>>,
+    parent: Option<ExactShared<FrameNode>>,
+    _header_claim: Option<ExactHostAllocationClaim>,
+    _name_claim: Option<ExactHostAllocationClaim>,
 }
 
 /// One invocation's immutable async frames and exact-owner synchronous frames.
@@ -29,21 +34,74 @@ struct FrameNode {
 /// session stack while suspended.
 #[derive(Debug, Default)]
 pub(crate) struct DebugFrameProjection {
-    head: Option<Rc<FrameNode>>,
+    head: Option<ExactShared<FrameNode>>,
     overlays: Vec<(u64, DebugFrame)>,
     next_overlay: u64,
 }
 
 impl DebugFrameProjection {
-    fn linked_head(&self) -> Option<Rc<FrameNode>> {
+    fn linked_head(&self) -> Option<ExactShared<FrameNode>> {
         let mut head = self.head.clone();
         for (_, frame) in &self.overlays {
-            head = Some(Rc::new(FrameNode {
+            head = Some(ExactShared::new(FrameNode {
                 frame: frame.clone(),
                 parent: head,
+                _header_claim: None,
+                _name_claim: None,
             }));
         }
         head
+    }
+
+    /// Exact physical allocations made when materializing active synchronous
+    /// overlays for one managed poll snapshot. Existing immutable ancestors
+    /// are retained without copying their names or nodes.
+    pub(crate) fn snapshot_requested_bytes(&self) -> Option<usize> {
+        self.overlays.iter().try_fold(0usize, |bytes, (_, frame)| {
+            bytes
+                .checked_add(ExactShared::<FrameNode>::requested_bytes())?
+                .checked_add(frame.function.len())
+        })
+    }
+
+    pub(crate) fn snapshot_retained_claims(&self) -> Option<usize> {
+        self.overlays.len().checked_mul(2)
+    }
+
+    pub(crate) fn snapshot_with_permit(
+        &self,
+        permit: &crate::context::host_allocation::HostOutputPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let mut head = self.head.clone();
+        for (_, frame) in &self.overlays {
+            let header_claim =
+                permit.reserve_exact_claim(ExactShared::<FrameNode>::requested_bytes())?;
+            let name_claim = permit.reserve_exact_claim(frame.function.len())?;
+            let mut function = String::new();
+            function
+                .try_reserve_exact(frame.function.len())
+                .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?;
+            function.push_str(&frame.function);
+            let frame = DebugFrame {
+                function,
+                source_id: frame.source_id,
+                span: frame.span,
+            };
+            head = Some(
+                ExactShared::try_new(FrameNode {
+                    frame,
+                    parent: head,
+                    _header_claim: Some(header_claim),
+                    _name_claim: Some(name_claim),
+                })
+                .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)?,
+            );
+        }
+        Ok(Self {
+            head,
+            overlays: Vec::new(),
+            next_overlay: 0,
+        })
     }
 
     pub(crate) fn snapshot(&self) -> Self {
@@ -56,9 +114,11 @@ impl DebugFrameProjection {
 
     pub(crate) fn with_frame(&self, frame: DebugFrame) -> Self {
         Self {
-            head: Some(Rc::new(FrameNode {
+            head: Some(ExactShared::new(FrameNode {
                 frame,
                 parent: self.linked_head(),
+                _header_claim: None,
+                _name_claim: None,
             })),
             overlays: Vec::new(),
             next_overlay: 0,
@@ -85,7 +145,11 @@ impl DebugFrameProjection {
         self.overlays
             .last()
             .map(|(_, frame)| frame.function.clone())
-            .or_else(|| self.head.as_ref().map(|node| node.frame.function.clone()))
+            .or_else(|| {
+                self.head
+                    .as_ref()
+                    .map(|node| node.get().frame.function.clone())
+            })
     }
 
     fn frames(&self) -> Vec<DebugFrame> {
@@ -95,10 +159,10 @@ impl DebugFrameProjection {
             .rev()
             .map(|(_, frame)| frame.clone())
             .collect::<Vec<_>>();
-        let mut current = self.head.as_deref();
+        let mut current = self.head.as_ref().map(ExactShared::get);
         while let Some(node) = current {
             frames.push(node.frame.clone());
-            current = node.parent.as_deref();
+            current = node.parent.as_ref().map(ExactShared::get);
         }
         frames
     }
@@ -114,7 +178,7 @@ runmat_thread_local! {
 }
 
 enum GuardOwner {
-    Selected(Rc<RefCell<DebugFrameProjection>>),
+    Selected(crate::context::poll_projection::PollProjection<DebugFrameProjection>),
     Direct,
 }
 
@@ -147,7 +211,7 @@ pub fn push_frame(
         span,
     };
     if let Some(context) = crate::context::legacy::active() {
-        let projection = Rc::clone(context.debug_projection());
+        let projection = context.debug_projection().clone();
         let token = projection.borrow_mut().push(frame);
         DebugFrameGuard {
             owner: GuardOwner::Selected(projection),

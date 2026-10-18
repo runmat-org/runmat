@@ -12,11 +12,20 @@ use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 use std::collections::{HashMap, HashSet};
 
+pub enum InitialFrameAssignment<'a> {
+    Compiled {
+        count: usize,
+        unassigned: &'a HashSet<usize>,
+    },
+    Resumed {
+        assigned: &'a HashSet<usize>,
+    },
+}
+
 pub fn prepare_workspace_guard(
     var_names: &HashMap<usize, String>,
     vars: &mut InterpreterVars,
-    initial_assigned_var_count: usize,
-    initially_unassigned_slots: &HashSet<usize>,
+    initial_assignment: InitialFrameAssignment<'_>,
     global_aliases: runmat_runtime::workspace::bindings::FrameGlobalBindings,
 ) -> Result<Option<WorkspaceStateGuard>, RuntimeError> {
     let pending_state = take_pending_workspace_state();
@@ -71,7 +80,13 @@ pub fn prepare_workspace_guard(
     let mut assigned = HashSet::new();
     for (slot, name) in var_names {
         names.insert(name.clone(), *slot);
-        if *slot < initial_assigned_var_count && !initially_unassigned_slots.contains(slot) {
+        let is_assigned = match &initial_assignment {
+            InitialFrameAssignment::Compiled { count, unassigned } => {
+                *slot < *count && !unassigned.contains(slot)
+            }
+            InitialFrameAssignment::Resumed { assigned } => assigned.contains(slot),
+        };
+        if is_assigned {
             assigned.insert(name.clone());
         }
     }

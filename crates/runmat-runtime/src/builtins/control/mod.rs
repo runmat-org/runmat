@@ -27,3 +27,7 @@ pub mod tf;
 pub mod tfdata;
 pub mod tf_model;
 pub mod zero;
+pub mod ctrb;
+pub mod care;
+pub mod dlqr;
+pub mod pade;

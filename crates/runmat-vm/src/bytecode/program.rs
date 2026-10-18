@@ -121,6 +121,8 @@ pub struct ExecutionContext {
     /// execution cannot infer it from ambient or latest-session state.
     pub(crate) graph_program: Option<runmat_runtime::execution::DeferredGraphProgram>,
     pub(crate) process_driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
+    /// The exact active compiler product, retained for queued child VM work.
+    pub(crate) bytecode_owner: Option<crate::interpreter::bytecode_owner::BytecodeLease>,
     /// Only an explicitly admitted Core invocation may install this port.
     pub(crate) dynamic_eval_admission:
         Option<crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort>,
@@ -140,6 +142,7 @@ impl Default for ExecutionContext {
             inherited_storage_slots: Vec::new(),
             graph_program: None,
             process_driver: None,
+            bytecode_owner: None,
             dynamic_eval_admission: None,
         }
     }

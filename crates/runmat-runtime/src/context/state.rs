@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
@@ -144,7 +145,9 @@ impl Drop for RuntimeContextState {
 #[derive(Debug)]
 pub(crate) struct SourceState {
     pub current: Option<SourceInfo>,
-    pub catalog: HashMap<SourceId, SourceInfo>,
+    /// One immutable catalog generation. Poll-local projections retain this
+    /// owner rather than copying the source table at every suspension.
+    pub catalog: Rc<HashMap<SourceId, SourceInfo>>,
     pub(crate) active_imports: HashMap<SourceId, usize>,
     pub(crate) imported_identities: HashMap<SourceId, runmat_execution::identity::Digest>,
     pub(crate) leased_catalog: HashMap<SourceId, crate::source_context::LeasedSource>,
@@ -157,7 +160,7 @@ impl Default for SourceState {
     fn default() -> Self {
         Self {
             current: None,
-            catalog: HashMap::new(),
+            catalog: Rc::new(HashMap::new()),
             active_imports: HashMap::new(),
             imported_identities: HashMap::new(),
             leased_catalog: HashMap::new(),

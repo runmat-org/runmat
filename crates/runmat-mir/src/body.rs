@@ -89,6 +89,9 @@ impl MirBody {
                             | crate::MirRvalue::DynamicMember { sequence_use, .. } => {
                                 *sequence_use != runmat_types::SequenceUse::Discard
                             }
+                            crate::MirRvalue::SubscriptChain(chain) => {
+                                chain.sequence_use != runmat_types::SequenceUse::Discard
+                            }
                             _ => true,
                         };
                         let direct_binding = match value {

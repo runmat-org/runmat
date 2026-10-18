@@ -127,15 +127,38 @@ fn catalog_numerical_effects_agree_with_mir_and_instruction_admission() {
             "{name} instruction"
         );
     }
-    for name in ["acosh", "atanh"] {
+    for (name, predicate) in [
+        ("acosh", runmat_types::RealUnaryPredicate::AtLeastOne),
+        (
+            "atanh",
+            runmat_types::RealUnaryPredicate::ClosedUnitInterval,
+        ),
+    ] {
         let entry = builtin_catalog_entry_by_name(name).expect("canonical numerical entry");
-        assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Never);
+        assert_eq!(entry.placement.fusion, BuiltinFusionPolicy::Candidate);
+        let [binding] = entry.bindings else {
+            panic!("{name}: expected one selected binding");
+        };
+        let declaration = runmat_runtime::builtins::common::spec::canonical_fusion_declaration(
+            entry.binding_identity(binding),
+        )
+        .expect("selected fusion declaration");
+        let semantics = declaration.semantics.expect("selected numerical admission");
+        assert_eq!(
+            semantics.required_real_unary.map(|(actual, _)| actual),
+            Some(predicate)
+        );
+        assert!(semantics.admit.is_some(), "{name}: runtime domain proof");
         assert!(
-            !mir_call_has_fusion_signal(&catalog_call(name)),
+            semantics.admit_static.is_none(),
+            "{name}: no speculative static proof"
+        );
+        assert!(
+            mir_call_has_fusion_signal(&catalog_call(name)),
             "{name} MIR"
         );
         assert!(
-            instr_fusion_signal_kind(&Instr::CallBuiltinMulti(name.into(), 1, 1)).is_none(),
+            instr_fusion_signal_kind(&Instr::CallBuiltinMulti(name.into(), 1, 1)).is_some(),
             "{name} instruction"
         );
     }

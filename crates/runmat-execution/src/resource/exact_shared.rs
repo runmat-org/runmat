@@ -91,6 +91,30 @@ impl<T> ExactShared<T> {
         self.pointer == other.pointer
     }
 
+    /// Transfer one strong reference into an opaque ownership token without
+    /// changing its count or allocating. This supports executor interfaces
+    /// that retain a data pointer, such as a raw waker.
+    pub fn into_raw(self) -> *const () {
+        let owner = ManuallyDrop::new(self);
+        owner.pointer.as_ptr().cast()
+    }
+
+    /// Recover the strong reference transferred by `into_raw`.
+    ///
+    /// # Safety
+    /// `pointer` must be the unmodified token returned by `ExactShared<T>`
+    /// with this exact `T`. Each transferred reference may be recovered only
+    /// once, and its allocation must still be live. A temporary borrowed
+    /// reconstruction must be wrapped in `ManuallyDrop` so it does not consume
+    /// the transferred reference. The token is not a pointer to `T` and must
+    /// not be dereferenced or used to infer an external owner's layout.
+    pub unsafe fn from_raw(pointer: *const ()) -> Self {
+        Self {
+            pointer: NonNull::new(pointer.cast_mut().cast::<Inner<T>>())
+                .expect("exact shared ownership token must be non-null"),
+        }
+    }
+
     /// Move a uniquely owned payload out without cloning its allocation
     /// claims. A shared payload remains owned by the returned handle.
     pub fn try_unwrap(self) -> Result<T, Self> {
@@ -205,6 +229,18 @@ mod tests {
         // its claim must move it, and a shared extraction must preserve it.
         live.store(7, Ordering::SeqCst);
         let owner = ExactShared::new(Claim(live.clone()));
+        let token = owner.into_raw();
+        assert_eq!(live.load(Ordering::SeqCst), 7);
+        // SAFETY: this is the original token with the same non-Clone Claim
+        // type. ManuallyDrop borrows its count; only the later recovery owns
+        // that transferred reference.
+        let borrowed = ManuallyDrop::new(unsafe { ExactShared::<Claim>::from_raw(token) });
+        let alias_from_token = ExactShared::clone(&borrowed);
+        // SAFETY: the token's original transferred count is still live and
+        // has not been consumed by the borrowed reconstruction.
+        let owner = unsafe { ExactShared::<Claim>::from_raw(token) };
+        assert!(owner.ptr_eq(&alias_from_token));
+        drop(alias_from_token);
         let alias = owner.clone();
         let owner = owner.try_unwrap().err().expect("still shared");
         assert_eq!(live.load(Ordering::SeqCst), 7);

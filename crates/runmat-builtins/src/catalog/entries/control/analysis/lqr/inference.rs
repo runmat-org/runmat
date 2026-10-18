@@ -1,18 +1,14 @@
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
     infer_call, standard, CallContract, CallInference, CallRequest, CertaintyFact, ContiguityFact,
-    DynamicReason, EffectSet, InferenceDiagnostic, LayoutFact, MutationFact, NumericClass,
-    NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
-    ViewFact,
+    DynamicReason, InferenceDiagnostic, LayoutFact, MutationFact, NumericClass, NumericDomain,
+    NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact, ViewFact,
 };
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     let args = &request.arguments;
-    let zero_outputs = request.outputs.requested.known_count() == Some(0);
     let mut diagnostics = Vec::new();
-    let (n, m) = if zero_outputs {
-        (None, None)
-    } else {
+    let (n, m) = {
         let object_form = matches!(
             args.first().map(|arg| &arg.kind),
             Some(ValueKindFact::Object(_))
@@ -57,11 +53,7 @@ pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
         fact
     };
     let mut contract = CallContract::fixed(vec![k, s, poles]);
-    contract.effects = if zero_outputs {
-        EffectSet::default()
-    } else {
-        entry.contract.effect_set()
-    };
+    contract.effects = entry.contract.effect_set();
     contract.capabilities = entry.contract.capability_set();
     let mut result = infer_call(&contract, request);
     result.diagnostics.extend(diagnostics);

@@ -68,7 +68,7 @@ num-bigint = "0.4"
 num-rational = "=0.4.2"
 num-traits = "0.2"
 nalgebra = "0.32"
-faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg"] }
+faer = { version = "=0.24.4", default-features = false, features = ["std", "linalg", "sparse-linalg"] }
 rustfft = "6.2"
 futures = "0.3"
 pin-project-lite = "0.2.17"

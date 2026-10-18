@@ -1,5 +1,5 @@
 use runmat_gc::{GcHandle, PreparedRootPlan, Trace, Tracer};
-use runmat_value::{OutputListStorage, Value, ValueSequence};
+use runmat_value::{LexicalEnvironment, OutputListStorage, Value, ValueSequence};
 
 use super::ExecutionServiceError;
 
@@ -45,19 +45,60 @@ impl RootedValueLease {
         handle: GcHandle,
         runtime: &crate::context::RuntimeContext,
     ) -> Result<Self, RootedValueAdmissionError> {
-        use crate::context::host_allocation::{
-            HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
-        };
-
         struct Handle(GcHandle);
         impl Trace for Handle {
             fn trace(&self, tracer: &mut dyn Tracer) {
                 tracer.mark(self.0);
             }
         }
-
         let source = Handle(handle);
-        let plan = PreparedRootPlan::for_traced(&source).map_err(|error| {
+        Self::for_handle_source_in_context(&source, runtime)
+    }
+
+    /// Retain every activation in one lexical parent chain as a single exact
+    /// root lease. This metadata-only trace marks handles directly; unlike
+    /// language `Value::trace`, it cannot allocate an unbounded traversal
+    /// workspace while operating under a managed admission policy.
+    pub fn for_lexical_environment_in_context(
+        environment: &LexicalEnvironment,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        struct ActivationChain<'a>(&'a LexicalEnvironment);
+        impl Trace for ActivationChain<'_> {
+            fn trace(&self, tracer: &mut dyn Tracer) {
+                self.0.for_each_handle(|handle| tracer.mark(handle));
+            }
+        }
+        Self::for_handle_source_in_context(&ActivationChain(environment), runtime).map_err(
+            |source| match source {
+                RootedValueAdmissionError::Host(source) => {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Lexical:RootLease",
+                        "lexical environment root admission failed",
+                        source,
+                    )
+                }
+                RootedValueAdmissionError::Gc(source) => {
+                    crate::runtime_error::semantic_error_with_source(
+                        "RunMat:Lexical:RootLease",
+                        "lexical environment root admission failed",
+                        source,
+                    )
+                }
+            },
+        )
+    }
+
+    fn for_handle_source_in_context(
+        source: &impl Trace,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, RootedValueAdmissionError> {
+        use crate::context::host_allocation::{
+            HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+        };
+
+        let plan = PreparedRootPlan::for_traced(source).map_err(|error| {
             RootedValueAdmissionError::Gc(runmat_gc::GcError::RootRegistrationFailed(
                 error.to_string(),
             ))
@@ -70,7 +111,7 @@ impl RootedValueLease {
             HostAllocationReceipt::admit(Some(runtime), HostAllocationPlan::new(0, retained)?)?
         {
             let permit = receipt.output_permit(runtime)?;
-            let roots = plan.prepare(&source, &permit).map_err(|error| {
+            let roots = plan.prepare(source, &permit).map_err(|error| {
                 RootedValueAdmissionError::Gc(runmat_gc::GcError::RootRegistrationFailed(
                     error.to_string(),
                 ))
@@ -80,7 +121,7 @@ impl RootedValueLease {
                 _roots: RootedValueHandles::from_prepared(roots),
             })
         } else {
-            let roots = plan.prepare_unbounded(&source).map_err(|error| {
+            let roots = plan.prepare_unbounded(source).map_err(|error| {
                 RootedValueAdmissionError::Gc(runmat_gc::GcError::RootRegistrationFailed(
                     error.to_string(),
                 ))
@@ -132,6 +173,38 @@ impl RootedValueLease {
                         crate::runtime_error::semantic_error_with_source(
                             "RunMat:Call:Arguments",
                             "call argument root admission failed",
+                            source,
+                        )
+                    }
+                }
+            })?;
+        Ok(Self { _roots })
+    }
+
+    /// Root several already-owned Value slices as one exact operation before
+    /// transferring them to queued work. The root plan replays the same
+    /// borrowed slices through one admitted trace workspace; no Value forest
+    /// or reference vector is copied. Keep the returned lease with the queued
+    /// owner until its inputs are independently rooted or retired.
+    pub fn for_value_slices_in_context(
+        slices: &[&[Value]],
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let _roots =
+            RootedValueHandles::for_value_slices_in_context(slices, runtime).map_err(|source| {
+                match source {
+                    RootedValueAdmissionError::Host(source) => {
+                        crate::context::host_allocation::host_allocation_runtime_error(
+                            Some(runtime),
+                            "RunMat:Execution:RootLease",
+                            "queued value root admission failed",
+                            source,
+                        )
+                    }
+                    RootedValueAdmissionError::Gc(source) => {
+                        crate::runtime_error::semantic_error_with_source(
+                            "RunMat:Execution:RootLease",
+                            "queued value root admission failed",
                             source,
                         )
                     }

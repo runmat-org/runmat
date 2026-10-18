@@ -188,6 +188,7 @@ pub async fn invoke_semantic_function_value_with_dynamic_admission_in_context(
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
     dynamic_admission: impl Into<Option<DynamicEvalAdmissionPort>>,
 ) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let driver_runtime = runtime.clone();
     let invocation = |driver| {
         invoke_semantic_function_with_captures(
             function,
@@ -200,9 +201,14 @@ pub async fn invoke_semantic_function_value_with_dynamic_admission_in_context(
         )
     };
     let (values, _) = if let Some(port) = dynamic_admission.into() {
-        let owner = ProcessContinuationDriver::new_with_dynamic_admission(Some(port));
+        let owner = ProcessContinuationDriver::new_with_dynamic_admission_in_context(
+            &driver_runtime,
+            Some(port),
+        )?;
         let driver = owner.handle();
-        owner.drive(invocation(Some(driver))).await?
+        owner
+            .drive_in_context(&driver_runtime, || invocation(Some(driver)))?
+            .await?
     } else {
         invocation(None).await?
     };
@@ -220,6 +226,7 @@ pub async fn invoke_semantic_function_with_rooted_arguments_and_dynamic_admissio
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
     dynamic_admission: impl Into<Option<DynamicEvalAdmissionPort>>,
 ) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let driver_runtime = runtime.clone();
     let invocation = |driver| {
         invoke_semantic_function_with_rooted_captures(
             function,
@@ -232,9 +239,14 @@ pub async fn invoke_semantic_function_with_rooted_arguments_and_dynamic_admissio
         )
     };
     let (values, _) = if let Some(port) = dynamic_admission.into() {
-        let owner = ProcessContinuationDriver::new_with_dynamic_admission(Some(port));
+        let owner = ProcessContinuationDriver::new_with_dynamic_admission_in_context(
+            &driver_runtime,
+            Some(port),
+        )?;
         let driver = owner.handle();
-        owner.drive(invocation(Some(driver))).await?
+        owner
+            .drive_in_context(&driver_runtime, || invocation(Some(driver)))?
+            .await?
     } else {
         invocation(None).await?
     };
@@ -319,19 +331,32 @@ async fn invoke_semantic_function_with_rooted_captures(
             .get(runmat_hir::FunctionId(function))
             .and_then(|function| function.class_method_owner.as_ref()),
     )?;
-    let _lexical_roots = lexical_environment
+    let lexical_roots = lexical_environment
         .as_ref()
-        .map(runmat_runtime::call::lexical::root_environment)
+        .map(|environment| {
+            runmat_runtime::execution::RootedValueLease::for_lexical_environment_in_context(
+                environment,
+                &runtime,
+            )
+        })
         .transpose()?;
     let registry = function_registry.clone();
     let runtime = with_default_acceleration_service(runtime);
-    let owner = driver.is_none().then(ProcessContinuationDriver::new);
+    let owner = if driver.is_none() {
+        Some(ProcessContinuationDriver::new_with_dynamic_admission_in_context(&runtime, None)?)
+    } else {
+        None
+    };
     let handle = driver.unwrap_or_else(|| owner.as_ref().expect("new VM driver").handle());
     let selected_handle = handle.clone();
     let scoped_runtime = runtime.clone();
-    // Construct the scoped owner while the caller's invocation is active. The
-    // queued child is later polled as a sibling, not beneath that caller.
-    let child = scoped_runtime.scope_pinned(Box::pin(async move {
+    let queue_runtime = runtime.clone();
+    let queued_scope = scoped_runtime.prepare_poll_scope()?;
+    let make_child = move || async move {
+        // Construct the scoped owner only after the queue has admitted its
+        // future. The lexical guard travels with an unpolled child rather
+        // than remaining in a suspended caller that may be canceled.
+        let _lexical_roots = lexical_roots;
         invoke_semantic_function_with_captures_inner(
             function,
             arguments,
@@ -342,13 +367,20 @@ async fn invoke_semantic_function_with_rooted_captures(
             lexical_environment,
         )
         .await
-    }));
+    };
     if let Some(owner) = owner {
+        let drive_runtime = queue_runtime.clone();
         owner
-            .drive(async move { handle.enqueue(child)?.await })
+            .drive_in_context(&drive_runtime, move || async move {
+                handle
+                    .enqueue_scoped_in_context(&queue_runtime, queued_scope, make_child)?
+                    .await
+            })?
             .await
     } else {
-        handle.enqueue(child)?.await
+        handle
+            .enqueue_scoped_in_context(&queue_runtime, queued_scope, make_child)?
+            .await
     }
 }
 
@@ -798,13 +830,15 @@ async fn await_prior_semantic_invoker(
     }
     // The prior invoker may itself be another VM owner. Select its call and
     // source projections before yielding this frame to the queue.
-    let child = runtime.scope(async move {
-        let outputs = future.await?;
-        let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
-            .map_err(|error| error.into_runtime_error())?;
-        Ok((outputs, captures))
-    });
-    let (outputs, _) = driver.enqueue(child)?.await?;
+    let queued_scope = runtime.prepare_poll_scope()?;
+    let (outputs, _) = driver
+        .enqueue_scoped_in_context(&runtime, queued_scope, move || async move {
+            let outputs = future.await?;
+            let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
+                .map_err(|error| error.into_runtime_error())?;
+            Ok((outputs, captures))
+        })?
+        .await?;
     Ok(outputs)
 }
 
@@ -834,14 +868,16 @@ async fn await_prior_bound_invoker(
         })
         .await;
     }
-    let child = runtime.scope(async move {
-        let _environment_roots = environment_roots;
-        let outputs = factory().await?;
-        let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
-            .map_err(|error| error.into_runtime_error())?;
-        Ok((outputs, captures))
-    });
-    let (outputs, _) = driver.enqueue(child)?.await?;
+    let queued_scope = runtime.prepare_poll_scope()?;
+    let (outputs, _) = driver
+        .enqueue_scoped_in_context(&runtime, queued_scope, move || async move {
+            let _environment_roots = environment_roots;
+            let outputs = factory().await?;
+            let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
+                .map_err(|error| error.into_runtime_error())?;
+            Ok((outputs, captures))
+        })?
+        .await?;
     Ok(outputs)
 }
 
@@ -1043,13 +1079,49 @@ pub async fn interpret_resume_with_dynamic_admission_in_context(
     runtime: runmat_runtime::context::RuntimeContext,
     selected: DynamicResumeSelection,
 ) -> VmResult<InterpreterOutcome> {
-    let DynamicResumeSelection {
-        lexical_environment,
-        lexical_binding_slots,
-        inherited_storage_slots,
-        dynamic_admission,
-    } = selected;
-    let _environment_roots = lexical_environment
+    interpret_resume_with_owner_in_context(
+        bytecode,
+        None,
+        resume,
+        current_function_name,
+        runtime,
+        selected,
+    )
+    .await
+}
+
+pub(crate) async fn interpret_resume_shared_in_context(
+    owner: crate::interpreter::bytecode_owner::BytecodeLease,
+    resume: InterpreterResumeState,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> VmResult<InterpreterOutcome> {
+    interpret_resume_with_owner_in_context(
+        &owner,
+        Some(owner.clone()),
+        resume,
+        current_function_name,
+        runtime,
+        DynamicResumeSelection {
+            lexical_environment: None,
+            lexical_binding_slots: Vec::new(),
+            inherited_storage_slots: Vec::new(),
+            dynamic_admission: None,
+        },
+    )
+    .await
+}
+
+async fn interpret_resume_with_owner_in_context(
+    bytecode: &Bytecode,
+    owner: Option<crate::interpreter::bytecode_owner::BytecodeLease>,
+    resume: InterpreterResumeState,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    selected: DynamicResumeSelection,
+) -> VmResult<InterpreterOutcome> {
+    let _environment_roots = selected
+        .lexical_environment
         .as_ref()
         .map(runmat_runtime::call::lexical::root_environment)
         .transpose()?;
@@ -1058,7 +1130,8 @@ pub async fn interpret_resume_with_dynamic_admission_in_context(
     let selected_authority = runtime.session_variable_authority();
     let selected_function = current_function_name.unwrap_or("<main>");
     for (slot, binding) in &resume.persistent_aliases {
-        let owner = inherited_storage_slots
+        let owner = selected
+            .inherited_storage_slots
             .iter()
             .find(|entry| {
                 entry.slot == *slot
@@ -1085,12 +1158,11 @@ pub async fn interpret_resume_with_dynamic_admission_in_context(
             runtime.scope(runmat_runtime::data::with_tx_registry_scope(scope_vm_pc(
                 interpret_resume_inner(
                     bytecode,
+                    owner,
                     resume,
                     current_function_name,
                     runtime.clone(),
-                    lexical_environment,
-                    lexical_binding_slots,
-                    dynamic_admission,
+                    selected,
                 ),
             ))),
         )
@@ -1122,13 +1194,18 @@ pub use native_metadata::{
 
 async fn interpret_resume_inner(
     bytecode: &Bytecode,
+    owner: Option<crate::interpreter::bytecode_owner::BytecodeLease>,
     resume: InterpreterResumeState,
     current_function_name: Option<&str>,
     runtime: runmat_runtime::context::RuntimeContext,
-    lexical_environment: Option<runmat_value::LexicalEnvironment>,
-    lexical_binding_slots: Vec<crate::bytecode::program::LexicalBindingSlot>,
-    dynamic_admission: Option<DynamicEvalAdmissionPort>,
+    selected: DynamicResumeSelection,
 ) -> VmResult<InterpreterOutcome> {
+    let DynamicResumeSelection {
+        lexical_environment,
+        lexical_binding_slots,
+        dynamic_admission,
+        ..
+    } = selected;
     if resume.pc > bytecode.instructions.len() {
         return Err(mex(
             "NativeResumePoint",
@@ -1150,29 +1227,31 @@ async fn interpret_resume_inner(
             "materialized native locals do not match the VM frame layout",
         ));
     }
-    let mut resumed_bytecode = bytecode.clone();
-    resumed_bytecode.initially_unassigned_slots.clear();
     let vars = resume.vars;
     let assigned_slots = resume.assigned_slots;
-    for slot in 0..vars.len() {
-        if !assigned_slots.contains(&slot) {
-            resumed_bytecode.initially_unassigned_slots.insert(slot);
-        }
-    }
     let invocation_arity =
         RuntimeInvocationArity::function(resume.supplied_inputs, resume.requested_outputs);
     // The count describes the dense frame extent; the exact sparse assignment
-    // set is encoded by `initially_unassigned_slots` above. Using the number
-    // of assigned slots here would incorrectly unassign a live high slot.
+    // set stays in the resumed frame instead of modifying the compiler product.
     let initial_assigned_var_count = vars.len();
-    let mut state = InterpreterState::from_vars_in_context(
-        resumed_bytecode,
-        vars,
-        initial_assigned_var_count,
-        current_function_name,
-        invocation_arity,
-        runtime,
-    )?;
+    let mut state = match owner {
+        Some(owner) => InterpreterState::from_shared_vars_in_context(
+            owner,
+            vars,
+            initial_assigned_var_count,
+            current_function_name,
+            invocation_arity,
+            runtime,
+        )?,
+        None => InterpreterState::from_vars_in_context(
+            bytecode.clone(),
+            vars,
+            initial_assigned_var_count,
+            current_function_name,
+            invocation_arity,
+            runtime,
+        )?,
+    };
     state.context.lexical_environment = lexical_environment;
     state.context.dynamic_eval_admission = dynamic_admission;
     state.context.lexical_binding_slots = lexical_binding_slots;
@@ -1255,7 +1334,10 @@ async fn interpret_with_vars_inner(
         invocation_arity,
         runtime,
     ));
-    state.prepare_operand_stack()?;
+    if let Err(error) = state.prepare_operand_stack() {
+        restore_unstarted_vars(state, initial_vars);
+        return Err(error);
+    }
     state.context.dynamic_eval_admission = dynamic_admission;
     match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
@@ -1393,50 +1475,120 @@ fn runtime_with_bytecode_debug_frame(
 }
 
 fn run_interpreter<'a>(
-    mut state: Box<InterpreterState>,
+    state: Box<InterpreterState>,
     initial_vars: &'a mut Vec<Value>,
 ) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> + 'a {
-    let owner = if state.context.process_driver.is_none() {
-        let owner = ProcessContinuationDriver::new_with_dynamic_admission(
-            state.context.dynamic_eval_admission.clone(),
-        );
-        state.context.process_driver = Some(owner.handle());
-        Some(owner)
-    } else {
-        None
+    let mut pending = PendingInitialVars {
+        state: Some(state),
+        initial_vars: Some(initial_vars),
     };
-    let mut state = Some(state);
-    let mut initial_vars = Some(initial_vars);
-    let mut active = None;
-    let interpreter = futures::future::poll_fn(move |cx| {
-        if active.is_none() {
-            let state = state
-                .take()
-                .expect("interpreter future polled after completion");
-            let vars = initial_vars
-                .take()
-                .expect("interpreter variables taken before first poll");
-            active = match prepare_run_interpreter(state, vars) {
-                Ok(future) => Some(future),
-                Err(error) => return std::task::Poll::Ready(Err(error)),
-            };
-        }
-        let result = std::future::Future::poll(
-            std::pin::Pin::new(active.as_mut().expect("interpreter future initialized")),
-            cx,
-        );
-        if result.is_ready() {
-            active.take();
-        }
-        result
-    });
     async move {
-        if let Some(owner) = owner {
-            owner.drive(interpreter).await
+        let runtime = pending
+            .state
+            .as_ref()
+            .expect("unstarted interpreter has a frame")
+            .context
+            .runtime
+            .clone();
+        let owner = if pending
+            .state
+            .as_ref()
+            .is_some_and(|state| state.context.process_driver.is_none())
+        {
+            let owner = ProcessContinuationDriver::new_with_dynamic_admission_in_context(
+                &runtime,
+                pending
+                    .state
+                    .as_ref()
+                    .and_then(|state| state.context.dynamic_eval_admission.clone()),
+            )?;
+            pending
+                .state
+                .as_mut()
+                .expect("unstarted interpreter has a frame")
+                .context
+                .process_driver = Some(owner.handle());
+            Some(owner)
         } else {
-            interpreter.await
+            None
+        };
+        // The factory is invoked only after a managed driver has admitted its
+        // root future and queue control. The first VM poll remains separate.
+        let make_interpreter = move || {
+            let mut active = None;
+            futures::future::poll_fn(move |cx| {
+                if active.is_none() {
+                    let frame = pending
+                        .state
+                        .as_ref()
+                        .expect("interpreter future polled after completion");
+                    if let Err(error) = frame
+                        .bytecode
+                        .validate_catch_scope_metadata()
+                        .map_err(RuntimeError::new)
+                    {
+                        return std::task::Poll::Ready(Err(error));
+                    }
+                    if let Err(error) = frame
+                        .bytecode
+                        .validate_selected_source_owners(&frame.context.runtime)
+                        .map_err(RuntimeError::new)
+                    {
+                        return std::task::Poll::Ready(Err(error));
+                    }
+                    let state = pending
+                        .state
+                        .take()
+                        .expect("interpreter future polled after completion");
+                    let vars = pending
+                        .initial_vars
+                        .take()
+                        .expect("interpreter variables taken before first poll");
+                    active = Some(prepare_run_interpreter(state, vars));
+                }
+                let result = std::future::Future::poll(
+                    std::pin::Pin::new(active.as_mut().expect("interpreter future initialized")),
+                    cx,
+                );
+                if result.is_ready() {
+                    active.take();
+                }
+                result
+            })
+        };
+        if let Some(owner) = owner {
+            owner.drive_in_context(&runtime, make_interpreter)?.await
+        } else {
+            make_interpreter().await
         }
     }
+}
+
+/// Until the first VM poll takes the frame, all failures are admission or
+/// validation failures. Move the original values back without a payload copy.
+struct PendingInitialVars<'a> {
+    state: Option<Box<InterpreterState>>,
+    initial_vars: Option<&'a mut Vec<Value>>,
+}
+
+impl Drop for PendingInitialVars<'_> {
+    fn drop(&mut self) {
+        if let (Some(state), Some(initial_vars)) = (self.state.take(), self.initial_vars.take()) {
+            restore_unstarted_vars(state, initial_vars);
+        }
+    }
+}
+
+fn restore_unstarted_vars(state: Box<InterpreterState>, initial_vars: &mut Vec<Value>) {
+    let InterpreterState {
+        mut vars,
+        initial_assigned_var_count,
+        ..
+    } = *state;
+    vars.truncate(initial_assigned_var_count);
+    *initial_vars = vars
+        .into_owned()
+        .expect("unstarted interpreter retains unique original variables");
 }
 
 // This constructor runs on the first poll, then returns before the inner
@@ -1446,7 +1598,33 @@ fn run_interpreter<'a>(
 fn prepare_run_interpreter<'a>(
     state: Box<InterpreterState>,
     initial_vars: &'a mut Vec<Value>,
-) -> VmResult<impl std::future::Future<Output = VmResult<InterpreterOutcome>> + Unpin + 'a> {
+) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> + Unpin + 'a {
+    // The caller validates before moving the original vars into this future,
+    // so a pre-execution failure can still restore them without cloning.
+    let catch_runtime = state.context.runtime.clone();
+    let inherited_catch = catch_runtime.active_catch_exception_shared();
+    let run_span = info_span!("interpreter.run", function = state.bytecode.display_name());
+    #[cfg(feature = "native-accel")]
+    let fusion_plan = state.fusion_plan.clone();
+    let state = *state;
+    let future = run_interpreter_inner(state, Some(initial_vars)).instrument(run_span);
+    #[cfg(feature = "native-accel")]
+    let future = runmat_accelerate::scope_fusion_plan(fusion_plan, future);
+    catch_runtime.scope_active_catch_shared(inherited_catch, future)
+}
+
+async fn run_interpreter_owned(mut state: Box<InterpreterState>) -> VmResult<InterpreterOutcome> {
+    let runtime = state.context.runtime.clone();
+    let owner = if state.context.process_driver.is_none() {
+        let owner = ProcessContinuationDriver::new_with_dynamic_admission_in_context(
+            &runtime,
+            state.context.dynamic_eval_admission.clone(),
+        )?;
+        state.context.process_driver = Some(owner.handle());
+        Some(owner)
+    } else {
+        None
+    };
     state
         .bytecode
         .validate_catch_scope_metadata()
@@ -1457,59 +1635,22 @@ fn prepare_run_interpreter<'a>(
         .map_err(RuntimeError::new)?;
     let catch_runtime = state.context.runtime.clone();
     let inherited_catch = catch_runtime.active_catch_exception_shared();
-    let run_span = info_span!(
-        "interpreter.run",
-        function = state.current_function_name.as_str()
-    );
+    let run_span = info_span!("interpreter.run", function = state.bytecode.display_name());
     #[cfg(feature = "native-accel")]
     let fusion_plan = state.fusion_plan.clone();
-    let state = *state;
-    let future = run_interpreter_inner(state, Some(initial_vars)).instrument(run_span);
-    #[cfg(feature = "native-accel")]
-    let future = runmat_accelerate::scope_fusion_plan(fusion_plan, future);
-    Ok(catch_runtime.scope_active_catch_shared(inherited_catch, future))
-}
-
-fn run_interpreter_owned(
-    mut state: Box<InterpreterState>,
-) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> {
-    let owner = if state.context.process_driver.is_none() {
-        let owner = ProcessContinuationDriver::new_with_dynamic_admission(
-            state.context.dynamic_eval_admission.clone(),
-        );
-        state.context.process_driver = Some(owner.handle());
-        Some(owner)
-    } else {
-        None
-    };
-    #[cfg(feature = "native-accel")]
-    let fusion_plan = state.fusion_plan.clone();
-    async move {
-        state
-            .bytecode
-            .validate_catch_scope_metadata()
-            .map_err(RuntimeError::new)?;
-        state
-            .bytecode
-            .validate_selected_source_owners(&state.context.runtime)
-            .map_err(RuntimeError::new)?;
-        let catch_runtime = state.context.runtime.clone();
-        let inherited_catch = catch_runtime.active_catch_exception_shared();
-        let run_span = info_span!(
-            "interpreter.run",
-            function = state.current_function_name.as_str()
-        );
+    let make_interpreter = move || {
         let interpreter = catch_runtime.scope_active_catch_shared(
             inherited_catch,
             run_interpreter_inner(*state, None).instrument(run_span),
         );
         #[cfg(feature = "native-accel")]
         let interpreter = runmat_accelerate::scope_fusion_plan(fusion_plan, interpreter);
-        if let Some(owner) = owner {
-            owner.drive(interpreter).await
-        } else {
-            interpreter.await
-        }
+        interpreter
+    };
+    if let Some(owner) = owner {
+        owner.drive_in_context(&runtime, make_interpreter)?.await
+    } else {
+        make_interpreter().await
     }
 }
 
@@ -1532,7 +1673,6 @@ async fn run_interpreter_inner(
         global_aliases,
         mut persistent_aliases,
         mut missing_input_slots,
-        current_function_name,
         initial_assigned_var_count,
         #[cfg(feature = "native-accel")]
         fusion_plan,
@@ -1549,6 +1689,8 @@ async fn run_interpreter_inner(
         mut fusion_publication_fault,
         bytecode,
     } = state;
+    context.bytecode_owner = bytecode.shared_lease();
+    let current_function_name = bytecode.display_name();
     let _source_context_guard = runmat_runtime::source_context::replace_current_source_id(
         bytecode
             .source_id
@@ -1842,11 +1984,17 @@ async fn run_interpreter_inner(
         &function_registry,
         &execution_sources,
     )?;
+    let initial_assignment = match completion_assigned_slots.as_ref() {
+        Some(assigned) => interp_engine::InitialFrameAssignment::Resumed { assigned },
+        None => interp_engine::InitialFrameAssignment::Compiled {
+            count: initial_assigned_var_count,
+            unassigned: &bytecode.initially_unassigned_slots,
+        },
+    };
     let _workspace_guard = interp_engine::prepare_workspace_guard(
         &bytecode.var_names,
         &mut vars,
-        initial_assigned_var_count,
-        &bytecode.initially_unassigned_slots,
+        initial_assignment,
         global_aliases.clone(),
     )?;
     let inherited_storage = std::mem::take(&mut context.inherited_storage_slots);
@@ -1948,7 +2096,7 @@ async fn run_interpreter_inner(
         global_aliases: &global_aliases,
         persistent_aliases: &mut persistent_aliases,
         missing_input_slots: &mut missing_input_slots,
-        current_function_name: &current_function_name,
+        current_function_name,
         invocation_arity,
         function_registry: &function_registry,
         catch_runtime: &catch_runtime,
@@ -1995,7 +2143,7 @@ async fn run_interpreter_inner(
         &persistent_aliases,
         &mut vars,
         &context.runtime.session_variable_authority(),
-        &current_function_name,
+        current_function_name,
     )?;
     crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
     if let Some(initial_vars) = initial_vars {
@@ -2040,6 +2188,7 @@ pub(crate) enum ParforTaskMode {
 
 pub(crate) struct ParforTaskExecution<'a> {
     pub bytecode: &'a Bytecode,
+    pub bytecode_owner: Option<crate::interpreter::bytecode_owner::BytecodeLease>,
     pub region: &'a crate::BytecodeParforRegion,
     pub inputs: Vec<Value>,
     pub iterations: Vec<Value>,
@@ -2047,25 +2196,35 @@ pub(crate) struct ParforTaskExecution<'a> {
     pub mode: ParforTaskMode,
     pub current_function_name: &'a str,
     pub runtime: runmat_runtime::context::RuntimeContext,
+    pub input_roots: Option<runmat_runtime::execution::RootedValueLease>,
 }
 
 pub(crate) async fn interpret_parfor_task_in_context(
-    execution: ParforTaskExecution<'_>,
+    mut execution: ParforTaskExecution<'_>,
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
+    // Bind the lease before splitting its Value owners into locals, a frame,
+    // or an iterator. On every validation error those later owners retire
+    // before this registration; an unpolled queued task retains the struct's
+    // last-field lease independently.
+    let _input_roots = match execution.input_roots.take() {
+        Some(roots) => roots,
+        None => runmat_runtime::execution::RootedValueLease::for_value_slices_in_context(
+            &[execution.inputs.as_slice(), execution.iterations.as_slice()],
+            &execution.runtime,
+        )?,
+    };
     let ParforTaskExecution {
         bytecode,
+        bytecode_owner,
         region,
         inputs,
         iterations,
+        input_roots: _,
         randomness,
         mode,
         current_function_name,
         runtime,
     } = execution;
-    let _input_roots = runmat_runtime::execution::RootedValueLease::for_values(
-        inputs.iter().chain(iterations.iter()),
-    )
-    .map_err(|error| error.into_runtime_error())?;
     randomness
         .validate_for_iterations(iterations.len())
         .map_err(|error| mex("ParallelRandomness", &error.to_string()))?;
@@ -2186,14 +2345,27 @@ pub(crate) async fn interpret_parfor_task_in_context(
             persistent_aliases: HashMap::new(),
             side_effect_epoch: 0,
         };
-        let (next_frame, next_assigned) = match Box::pin(interpret_resume_in_context(
-            bytecode,
-            resume,
-            Some(current_function_name),
-            runtime.clone(),
-        ))
-        .await?
-        {
+        let resumed = match &bytecode_owner {
+            Some(owner) => {
+                interpret_resume_shared_in_context(
+                    owner.clone(),
+                    resume,
+                    Some(current_function_name),
+                    runtime.clone(),
+                )
+                .await?
+            }
+            None => {
+                interpret_resume_in_context(
+                    bytecode,
+                    resume,
+                    Some(current_function_name),
+                    runtime.clone(),
+                )
+                .await?
+            }
+        };
+        let (next_frame, next_assigned) = match resumed {
             InterpreterOutcome::Completed(completion) => completion.with_owned(|completion| {
                 let next_frame = completion.values;
                 let next_assigned = completion.assigned_slots;
@@ -2542,11 +2714,24 @@ mod tests {
             &mut vars,
             None,
             RuntimeInvocationArity::Script,
-            runtime,
+            runtime.clone(),
         ));
         let future = run_interpreter(state, &mut vars);
         drop(future);
         assert!(vars.is_empty(), "an unpolled interpreter has no effects");
+
+        // The borrowed call boundary has already moved its original values
+        // into the frame. Dropping before poll must move them back verbatim.
+        let mut moved_caller = Vec::new();
+        let moved_state = Box::new(InterpreterState::from_owned_in_context(
+            Bytecode::empty(),
+            vec![Value::Num(17.0)],
+            None,
+            RuntimeInvocationArity::Script,
+            runtime.clone(),
+        ));
+        drop(run_interpreter(moved_state, &mut moved_caller));
+        assert_eq!(moved_caller, vec![Value::Num(17.0)]);
 
         let state = Box::new(InterpreterState::new_in_context(
             Bytecode::with_instructions(
@@ -2881,7 +3066,7 @@ mod tests {
 
     #[test]
     fn resumed_legacy_global_slot_keeps_its_typed_binding_and_store() {
-        let bytecode = Bytecode::with_instructions(
+        let mut bytecode = Bytecode::with_instructions(
             vec![
                 Instr::DeclareGlobal(vec![0]),
                 Instr::LoadVar(0),
@@ -2894,6 +3079,7 @@ mod tests {
             ],
             3,
         );
+        bytecode.var_names.insert(0, "var_0".to_owned());
         let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
@@ -3190,7 +3376,7 @@ mod tests {
 
             let err = block_on(interpret_with_vars(&bytecode, &mut vars, Some("<main>")))
                 .expect_err("cancelled execution should return error");
-            assert_eq!(err.identifier(), Some("RunMat:ExecutionCancelled"));
+            assert_eq!(err.identifier(), Some("RunMat:Cancelled"));
             assert!(
                 fusion_residency::is_resident(&handle),
                 "cancellation must not invalidate a retained external view"

@@ -14,7 +14,10 @@ use runmat_value::{
     ExactHostTensorAllocation, NumericDType,
 };
 
-use super::{HostAllocationPlan, HostComplexWorkspace, HostNumericWorkspace};
+use super::{
+    HostAllocationPlan, HostComplexWorkspace, HostNumericWorkspace, HostTypedElement,
+    HostTypedWorkspace,
+};
 use crate::context::host_effect::{
     HostEffectAllocationError, HostEffectOutputHeadroom, ManagedHostEffectLedger,
     ManagedHostEffectStageReservation,
@@ -485,6 +488,19 @@ impl HostAllocationReceipt {
     ) -> Result<HostComplexWorkspace, HostAllocationError> {
         self.checkpoint(runtime)?;
         let result = HostComplexWorkspace::new(len, self.stage.clone(), self.fence.clone());
+        self.checkpoint(runtime)?;
+        result
+    }
+
+    /// Admit one exact, non-growing typed numeric scratch backing. The
+    /// returned owner keeps the physical allocation and stage charge coupled.
+    pub fn temporary_typed<T: HostTypedElement>(
+        &self,
+        runtime: &RuntimeContext,
+        len: usize,
+    ) -> Result<HostTypedWorkspace<T>, HostAllocationError> {
+        self.checkpoint(runtime)?;
+        let result = HostTypedWorkspace::new(len, self.stage.clone(), self.fence.clone());
         self.checkpoint(runtime)?;
         result
     }

@@ -86,6 +86,32 @@ fn matrix_and_ss_forms_infer_requested_host_output_shapes() {
         ));
         assert!(result.effects.0.contains(&EffectKind::MaySuspend));
     }
+
+    // CARE and DLQR use different public output orders over the same
+    // standard matrix geometry. Check the canonical entry dispatch as well
+    // as the shared inference helper.
+    for (entry, shapes) in [
+        (&crate::CARE_CATALOG_ENTRY, [[2, 2], [2, 1], [1, 2]]),
+        (&crate::DLQR_CATALOG_ENTRY, [[1, 2], [2, 2], [2, 1]]),
+    ] {
+        let result = crate::infer_catalog_call(
+            entry,
+            &CallRequest {
+                arguments: matrices(),
+                literals: LiteralContext::default(),
+                outputs: OutputSelection::new(RequestedOutputCount::Exactly(3)),
+            },
+        );
+        assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
+        assert_eq!(result.outputs.len(), 3);
+        for (output, [rows, columns]) in result.outputs.iter().zip(shapes) {
+            assert_eq!(
+                output.shape,
+                ShapeFact::from(vec![Some(rows), Some(columns)])
+            );
+            assert_eq!(output.residency, ResidencyFact::Host);
+        }
+    }
 }
 
 #[test]
@@ -172,12 +198,12 @@ fn invalid_dimensions_class_and_output_count_are_diagnosed() {
 }
 
 #[test]
-fn zero_requested_outputs_skip_validation_and_effects() {
+fn zero_requested_outputs_still_validate_and_may_throw() {
     let result = call(
         vec![ValueFact::scalar(ValueKindFact::String)],
         RequestedOutputCount::Exactly(0),
     );
     assert!(result.outputs.is_empty());
-    assert!(result.diagnostics.is_empty(), "{:?}", result.diagnostics);
-    assert!(result.effects.0.is_empty());
+    assert!(!result.diagnostics.is_empty());
+    assert!(!result.effects.0.is_empty());
 }

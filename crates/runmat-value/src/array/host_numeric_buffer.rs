@@ -205,6 +205,22 @@ impl HostNumericBuffer {
         }
     }
 
+    /// Borrow a unique native payload without implicit copy-on-write.
+    pub fn try_as_f64_slice_mut_unique(&mut self) -> Option<&mut [f64]> {
+        match self.storage.try_get_mut_unique()? {
+            HostNumericStorage::F64(values) => Some(values.as_mut_slice()),
+            HostNumericStorage::F32(_) | HostNumericStorage::Integer(_) => None,
+        }
+    }
+
+    /// Borrow a unique native payload without implicit copy-on-write.
+    pub fn try_as_f32_slice_mut_unique(&mut self) -> Option<&mut [f32]> {
+        match self.storage.try_get_mut_unique()? {
+            HostNumericStorage::F32(values) => Some(values.as_mut_slice()),
+            HostNumericStorage::F64(_) | HostNumericStorage::Integer(_) => None,
+        }
+    }
+
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
         match self.storage.get() {
             HostNumericStorage::F64(values) => Some(values.as_slice()),

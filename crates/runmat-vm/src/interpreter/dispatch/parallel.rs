@@ -130,7 +130,6 @@ pub(super) async fn dispatch(
                 .parfor_regions
                 .iter()
                 .find(|candidate| candidate.contract.id == *region)
-                .cloned()
                 .ok_or_else(|| {
                     crate::interpreter::errors::mex(
                         "ParallelExecutableMissing",
@@ -139,7 +138,7 @@ pub(super) async fn dispatch(
                 })?;
             parfor::execute(
                 bytecode,
-                &executable,
+                executable,
                 iterable,
                 maximum_workers,
                 vars,

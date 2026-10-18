@@ -74,7 +74,15 @@ fn general_elementwise_function_keeps_one_chain_through_portable_admission() {
         let body = registry.get(function).unwrap();
         body.validate_fusion_scaffold().unwrap();
         let executable = body.execution_bytecode(registry);
-        assert!(executable.layout.is_none(), "no borrowed entrypoint layout");
+        let layout = executable
+            .layout
+            .as_ref()
+            .expect("selected function layout");
+        assert!(
+            layout.entrypoints.is_empty(),
+            "no borrowed entrypoint layout"
+        );
+        assert!(layout.functions.contains_key(&function));
         let signals = body
             .instructions
             .iter()

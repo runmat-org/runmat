@@ -13,7 +13,27 @@ pub struct DenseOperator<'a, T> {
     values: &'a [T],
 }
 
-impl<T> DenseOperator<'_, T> {
+impl<'a, T> DenseOperator<'a, T> {
+    /// Borrow an existing column-major payload without allocating metadata.
+    pub fn from_column_major(
+        values: &'a [T],
+        rows: usize,
+        cols: usize,
+    ) -> Result<Self, LinearOperatorError> {
+        if rows
+            .checked_mul(cols)
+            .ok_or(LinearOperatorError::Overflow)?
+            != values.len()
+        {
+            return Err(LinearOperatorError::DimensionMismatch);
+        }
+        Ok(Self { rows, cols, values })
+    }
+
+    pub fn as_slice(&self) -> &'a [T] {
+        self.values
+    }
+
     pub fn rows(&self) -> usize {
         self.rows
     }

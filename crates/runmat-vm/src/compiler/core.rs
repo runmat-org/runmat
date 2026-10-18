@@ -1063,7 +1063,11 @@ impl Compiler {
                     | MirRvalue::DynamicMember {
                         sequence_use: runmat_types::SequenceUse::Discard,
                         ..
-                    } => true,
+                    }
+                    | MirRvalue::SubscriptChain(runmat_mir::MirSubscriptChain {
+                        sequence_use: runmat_types::SequenceUse::Discard,
+                        ..
+                    }) => true,
                     _ => false,
                 };
                 if !produces_no_value

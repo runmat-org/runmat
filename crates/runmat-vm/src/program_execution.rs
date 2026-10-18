@@ -791,10 +791,12 @@ async fn execute_parallel_region_values(
     let callable_name = callable.display_name();
     let result = crate::interpreter::runner::interpret_parfor_task_in_context(
         crate::interpreter::runner::ParforTaskExecution {
+            bytecode_owner: None,
             bytecode,
             region: executable,
             inputs: arguments,
             iterations: iterations.data,
+            input_roots: None,
             randomness: task.randomness.clone(),
             mode: crate::interpreter::runner::ParforTaskMode::IndependentIterations,
             current_function_name: &callable_name,
@@ -1103,6 +1105,18 @@ mod tests {
         envelope.canonical_bytes().expect("schema-lifted envelope")
     }
 
+    fn with_stale_envelope_schema(frozen: &[u8]) -> Vec<u8> {
+        let mut envelope: runmat_execution::ExecutableUnitEnvelope =
+            serde_json::from_slice(frozen).expect("frozen envelope shape");
+        let stale = runmat_execution::EXECUTABLE_UNIT_SCHEMA_VERSION
+            .checked_sub(1)
+            .expect("current envelope has a predecessor");
+        envelope.schema_version = stale;
+        envelope.manifest.schema_version = stale;
+        // Deliberately invalid input cannot use the validating canonical encoder.
+        serde_json::to_vec(&envelope).expect("encode stale-header fixture")
+    }
+
     #[test]
     fn exact_script_program_executes_top_level_bytecode() {
         let mut bytecode = Bytecode::with_instructions(
@@ -1220,7 +1234,7 @@ mod tests {
             "../../runmat-execution/tests/fixtures/executable-unit-stale-components.json"
         );
         assert!(matches!(
-            admit_executable_unit(stale_components),
+            admit_executable_unit(&with_stale_envelope_schema(stale_components)),
             Err(ExecutableUnitAdmissionError::InvalidHeader(_))
         ));
         let stale_components = with_current_envelope_schema(stale_components);
@@ -1245,7 +1259,7 @@ mod tests {
         let compiler_one =
             include_bytes!("../../runmat-execution/tests/fixtures/executable-unit-compiler-1.json");
         assert!(matches!(
-            admit_executable_unit(compiler_one),
+            admit_executable_unit(&with_stale_envelope_schema(compiler_one)),
             Err(ExecutableUnitAdmissionError::InvalidHeader(_))
         ));
         let compiler_one = with_current_envelope_schema(compiler_one);

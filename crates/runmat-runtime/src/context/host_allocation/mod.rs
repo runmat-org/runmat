@@ -31,7 +31,9 @@ pub use receipt::{
     HostAllocationError, HostAllocationPolicy, HostAllocationReceipt, HostRetainedViewPermit,
 };
 pub(crate) use session::HostRetainedSessionAllocation;
-pub use temporary::{HostComplexWorkspace, HostNumericWorkspace};
+pub use temporary::{
+    HostComplexWorkspace, HostNumericWorkspace, HostTypedElement, HostTypedWorkspace,
+};
 pub(crate) use trace_scratch::HostTraceScratchPermit;
 
 #[cfg(test)]

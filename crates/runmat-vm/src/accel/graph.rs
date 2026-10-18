@@ -1285,6 +1285,7 @@ fn tensor_dimension_at(tensor: &runmat_value::Tensor, index: usize) -> Option<us
 
 fn canonical_array_constructor_shape_tag(rule: BuiltinInferenceRule) -> bool {
     match rule {
+        BuiltinInferenceRule::Identity(identity) => identity.has_structural_dimensions(),
         BuiltinInferenceRule::Array(ArrayInferenceRule::Creation(creation)) => match creation {
             // Zeros takes structural dimensions or a prototype. Full instead
             // materializes its input; treating that input as dimensions would

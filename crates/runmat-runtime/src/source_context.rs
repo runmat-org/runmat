@@ -70,13 +70,13 @@ impl SourceCurrentProjection {
 /// own overlay, even when another guard finishes first.
 #[derive(Debug)]
 pub(crate) struct SourceCatalogProjection {
-    base: HashMap<SourceId, SourceInfo>,
-    overlays: Vec<(usize, HashMap<SourceId, SourceInfo>)>,
+    base: Rc<HashMap<SourceId, SourceInfo>>,
+    overlays: Vec<(usize, Rc<HashMap<SourceId, SourceInfo>>)>,
     next_token: Option<usize>,
 }
 
 impl SourceCatalogProjection {
-    pub(crate) fn new(base: HashMap<SourceId, SourceInfo>) -> Self {
+    pub(crate) fn new(base: Rc<HashMap<SourceId, SourceInfo>>) -> Self {
         Self {
             base,
             overlays: Vec::new(),
@@ -84,8 +84,10 @@ impl SourceCatalogProjection {
         }
     }
 
-    pub(crate) fn snapshot_catalog(&self) -> HashMap<SourceId, SourceInfo> {
-        self.current().clone()
+    pub(crate) fn snapshot_catalog(&self) -> Rc<HashMap<SourceId, SourceInfo>> {
+        self.overlays
+            .last()
+            .map_or_else(|| Rc::clone(&self.base), |(_, catalog)| Rc::clone(catalog))
     }
 
     /// A parallel lab has its own catalog, not the parent's weak leases. The
@@ -97,7 +99,7 @@ impl SourceCatalogProjection {
             if let Some(info) = source.catalog.get(id) {
                 // An issued identity cannot be replaced by an untyped
                 // foreground row, even if a caller reused its integer.
-                catalog.insert(*id, info.clone());
+                Rc::make_mut(&mut catalog).insert(*id, info.clone());
             }
         }
         Self::new(catalog)
@@ -106,7 +108,7 @@ impl SourceCatalogProjection {
     fn current(&self) -> &HashMap<SourceId, SourceInfo> {
         self.overlays
             .last()
-            .map_or(&self.base, |(_, catalog)| catalog)
+            .map_or_else(|| self.base.as_ref(), |(_, catalog)| catalog.as_ref())
     }
 
     fn push(
@@ -117,7 +119,7 @@ impl SourceCatalogProjection {
             .next_token
             .ok_or(SourceCatalogAdmissionError::ProjectionExhausted)?;
         self.next_token = token.checked_add(1);
-        self.overlays.push((token, catalog));
+        self.overlays.push((token, Rc::new(catalog)));
         Ok(token)
     }
 
@@ -191,7 +193,7 @@ impl RuntimeSourceRef {
         let catalog = catalog.as_ref().map(|catalog| catalog.borrow());
         let catalog = catalog
             .as_ref()
-            .map_or(&sources.catalog, |view| view.current());
+            .map_or(sources.catalog.as_ref(), |view| view.current());
         if sources
             .leased_catalog
             .get(&self.id)
@@ -552,8 +554,8 @@ impl crate::context::SourceState {
         };
         for (id, entry) in &self.leased_catalog {
             if let Some(info) = entry.live_info() {
-                if snapshot.catalog.remove(id).is_none() {
-                    snapshot.catalog.insert(*id, info);
+                if Rc::make_mut(&mut snapshot.catalog).remove(id).is_none() {
+                    Rc::make_mut(&mut snapshot.catalog).insert(*id, info);
                 }
             }
         }
@@ -648,22 +650,28 @@ impl Drop for SourceContextGuard {
 }
 
 pub struct SourceCatalogGuard {
-    prev: HashMap<SourceId, SourceInfo>,
-    invocation_catalog: Option<(Rc<RefCell<SourceCatalogProjection>>, usize)>,
+    prev: Option<Rc<HashMap<SourceId, SourceInfo>>>,
+    invocation_catalog: Option<(
+        crate::context::poll_projection::PollProjection<SourceCatalogProjection>,
+        usize,
+    )>,
     state: Option<std::rc::Rc<crate::context::RuntimeContextState>>,
     registered_ids: Vec<SourceId>,
 }
 
 impl Drop for SourceCatalogGuard {
     fn drop(&mut self) {
-        let prev = std::mem::take(&mut self.prev);
+        let prev = self.prev.take();
         if let Some((catalog, token)) = &self.invocation_catalog {
             catalog.borrow_mut().remove(*token);
         } else if let Some(state) = &self.state {
-            state.source.borrow_mut().catalog = prev;
+            state.source.borrow_mut().catalog =
+                prev.expect("session catalog guard owns prior generation");
         } else {
             SOURCE_CATALOG.with(|catalog| {
-                *catalog.borrow_mut() = prev;
+                let prev = prev.expect("direct catalog guard owns prior generation");
+                *catalog.borrow_mut() =
+                    Rc::try_unwrap(prev).unwrap_or_else(|shared| shared.as_ref().clone());
             });
         }
         if let Some(state) = &self.state {
@@ -744,7 +752,7 @@ pub fn replace_current_source_context(
     });
     if let Some(runtime) = crate::context::legacy::active() {
         if let Some(current) = runtime.source_current() {
-            let current = Rc::clone(current);
+            let current = current.clone();
             let overlay = CurrentSourceOverlay::push(current, next);
             return SourceContextGuard {
                 prev: None,
@@ -808,7 +816,7 @@ pub fn replace_current_source_id_in_context(
         .and_then(crate::context::RuntimeContext::source_current)
         .or_else(|| runtime.source_current());
     if let Some(current) = current {
-        let current = Rc::clone(current);
+        let current = current.clone();
         let overlay = CurrentSourceOverlay::push(current, next);
         SourceContextGuard {
             prev: None,
@@ -865,8 +873,8 @@ pub fn replace_source_catalog_with_fullpaths(
             return Err(SourceCatalogAdmissionError::DuplicateSourceId(source_id));
         }
     }
-    let projection = crate::context::legacy::active()
-        .and_then(|runtime| runtime.source_catalog_view().map(Rc::clone));
+    let projection =
+        crate::context::legacy::active().and_then(|runtime| runtime.source_catalog_view().cloned());
     if projection
         .as_ref()
         .is_some_and(|catalog| catalog.borrow().next_token.is_none())
@@ -916,16 +924,16 @@ pub fn replace_source_catalog_with_fullpaths(
     if let Some(catalog) = projection {
         let token = catalog.borrow_mut().push(next)?;
         return Ok(SourceCatalogGuard {
-            prev: HashMap::new(),
+            prev: None,
             invocation_catalog: Some((catalog, token)),
             state,
             registered_ids,
         });
     }
     if let Some(state) = state {
-        let prev = std::mem::replace(&mut state.source.borrow_mut().catalog, next);
+        let prev = std::mem::replace(&mut state.source.borrow_mut().catalog, Rc::new(next));
         Ok(SourceCatalogGuard {
-            prev,
+            prev: Some(prev),
             invocation_catalog: None,
             state: Some(state),
             registered_ids,
@@ -934,7 +942,7 @@ pub fn replace_source_catalog_with_fullpaths(
         let prev =
             SOURCE_CATALOG.with(|catalog| std::mem::replace(&mut *catalog.borrow_mut(), next));
         Ok(SourceCatalogGuard {
-            prev,
+            prev: Some(Rc::new(prev)),
             invocation_catalog: None,
             state: None,
             registered_ids: Vec::new(),
@@ -1045,7 +1053,7 @@ pub fn inherit_legacy_source_context(context: &crate::context::RuntimeContext) {
         .iter()
         .map(|(id, info)| (*id, imported_identity(info)))
         .collect();
-    state.catalog = catalog;
+    state.catalog = Rc::new(catalog);
 }
 
 fn active_state() -> Option<std::rc::Rc<crate::context::RuntimeContextState>> {
@@ -1087,9 +1095,37 @@ mod lease_tests {
     }
 
     #[test]
+    fn poll_catalog_snapshot_retains_exact_map_generation() {
+        let id = SourceId(11);
+        let mut map = HashMap::new();
+        map.insert(
+            id,
+            SourceInfo {
+                source_id: Some(id),
+                name: Arc::from("snapshot.m"),
+                fullpath_name: None,
+                text: Arc::from("one"),
+                lexical_file: None,
+                portable_identity: None,
+            },
+        );
+        let mut view = SourceCatalogProjection::new(Rc::new(map));
+        let first = view.snapshot_catalog();
+        assert!(Rc::ptr_eq(&first, &view.snapshot_catalog()));
+        let token = view.push(HashMap::new()).expect("overlay token");
+        assert!(view.current().is_empty());
+        view.remove(token);
+        assert_eq!(
+            first.get(&id).expect("retained source").text.as_ref(),
+            "one"
+        );
+        assert!(Rc::ptr_eq(&first, &view.snapshot_catalog()));
+    }
+
+    #[test]
     fn imported_large_ids_cannot_poison_the_session_issuer() {
         let runtime = runtime();
-        runtime.state().source.borrow_mut().catalog.insert(
+        Rc::make_mut(&mut runtime.state().source.borrow_mut().catalog).insert(
             SourceId(usize::MAX - 1),
             SourceInfo {
                 source_id: Some(SourceId(usize::MAX - 1)),

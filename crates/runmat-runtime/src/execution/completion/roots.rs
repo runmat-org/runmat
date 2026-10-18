@@ -199,13 +199,25 @@ impl RootedValueHandles {
         values: &[Value],
         runtime: &RuntimeContext,
     ) -> Result<Self, RootedValueAdmissionError> {
+        Self::for_value_slices_in_context(&[values], runtime)
+    }
+
+    /// One admitted traversal and root lease over disjoint borrowed batches.
+    /// The source slices remain owned by their caller; no Value references or
+    /// payloads are collected into a second buffer.
+    pub(crate) fn for_value_slices_in_context(
+        slices: &[&[Value]],
+        runtime: &RuntimeContext,
+    ) -> Result<Self, RootedValueAdmissionError> {
         let Some(scratch) = HostAllocationReceipt::dynamic_trace_scratch(runtime)? else {
-            return Self::for_traced(&ValuesSlice(values)).map_err(RootedValueAdmissionError::Gc);
+            return Self::for_traced(&ValuesSlices(slices)).map_err(RootedValueAdmissionError::Gc);
         };
         let mut workspace = ValueTraceWorkspace::admitted(&scratch);
         let mut trace = |tracer: &mut dyn Tracer| {
-            for value in values {
-                workspace.try_trace(value, tracer)?;
+            for values in slices {
+                for value in *values {
+                    workspace.try_trace(value, tracer)?;
+                }
             }
             Ok(())
         };
@@ -267,12 +279,14 @@ impl RootedValueHandles {
     }
 }
 
-struct ValuesSlice<'a>(&'a [Value]);
+struct ValuesSlices<'s, 'v>(&'s [&'v [Value]]);
 
-impl Trace for ValuesSlice<'_> {
+impl Trace for ValuesSlices<'_, '_> {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        for value in self.0 {
-            value.trace(tracer);
+        for values in self.0 {
+            for value in *values {
+                value.trace(tracer);
+            }
         }
     }
 }

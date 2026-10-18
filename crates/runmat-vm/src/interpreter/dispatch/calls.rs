@@ -455,19 +455,19 @@ pub async fn handle_prepared_user_function_call(
             .then_some(current_class_context)
             .flatten();
         let selected_runtime = runtime.clone();
-        let scoped_runtime = selected_runtime.clone();
-        let descriptor_future =
-            execute_callable_descriptor_owned(selected_runtime, prepared.descriptor);
+        let prepared_scope = selected_runtime.prepare_poll_scope()?;
         // The descriptor owns its target and arguments. Polling it as a sibling
         // keeps a nested semantic callback off the caller's interpreter stack.
-        let child = scoped_runtime.scope(async move {
+        match driver.enqueue_scoped_in_context(runtime, prepared_scope, move || async move {
+            let descriptor_future =
+                execute_callable_descriptor_owned(selected_runtime, prepared.descriptor);
             let call = async move {
                 let output = descriptor_future.await?;
                 let captures = runmat_runtime::execution::RootedValues::new(Vec::new())
                     .map_err(|error| error.into_runtime_error())?;
                 Ok((output, captures))
             };
-            let mut call = Box::pin(runmat_runtime::callsite::with_function_input_callsite(
+            let mut call = std::pin::pin!(runmat_runtime::callsite::with_function_input_callsite(
                 callsite, call,
             ));
             std::future::poll_fn(move |context| {
@@ -477,8 +477,7 @@ pub async fn handle_prepared_user_function_call(
                 std::future::Future::poll(call.as_mut(), context)
             })
             .await
-        });
-        match driver.enqueue(child) {
+        }) {
             Ok(ticket) => ticket.await.map(|(output, _captures)| output),
             Err(error) => Err(error),
         }

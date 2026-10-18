@@ -230,6 +230,22 @@ impl ComplexTensor {
         }
     }
 
+    /// Borrow native single-precision elements without an implicit COW copy.
+    pub fn try_as_f32_slice_mut_unique(&mut self) -> Option<&mut [ComplexElement<f32>]> {
+        match &mut self.storage {
+            ComplexStorage::F32(values) => values.try_as_mut_slice_unique(),
+            ComplexStorage::F64(_) | ComplexStorage::Integer(_) => None,
+        }
+    }
+
+    /// Borrow native double-precision elements without an implicit COW copy.
+    pub fn try_as_f64_slice_mut_unique(&mut self) -> Option<&mut [ComplexElement<f64>]> {
+        match &mut self.storage {
+            ComplexStorage::F64(values) => values.try_as_mut_slice_unique(),
+            ComplexStorage::F32(_) | ComplexStorage::Integer(_) => None,
+        }
+    }
+
     /// Explicitly materializes complex values in the `f64` computation domain.
     ///
     /// Integer components outside the exact binary64 range may lose precision.

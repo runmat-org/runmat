@@ -1,3 +1,4 @@
+mod characteristic;
 mod polyder;
 mod polyfit;
 mod polyint;
@@ -5,6 +6,10 @@ mod polyval;
 mod roots;
 mod statistics;
 
+pub use characteristic::{
+    POLY_CATALOG_ENTRY, POLY_DESCRIPTOR, POLY_ERROR_INVALID_INPUT, POLY_ERROR_NUMERICAL,
+    POLY_ERROR_UNSUPPORTED_PROVIDER, POLY_INTEGER_CAPABILITIES,
+};
 pub use polyder::{
     POLYDER_CATALOG_ENTRY, POLYDER_DESCRIPTOR, POLYDER_ERROR_INTERNAL,
     POLYDER_ERROR_INVALID_ARGUMENT, POLYDER_ERROR_INVALID_INPUT, POLYDER_EXTENSIONS,
@@ -33,6 +38,7 @@ pub use roots::{
 pub use statistics::PolyfitStatField;
 
 pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntry>) {
+    values.extend(characteristic::ENTRIES.iter().copied());
     values.extend(polyder::ENTRIES.iter().copied());
     values.extend(polyfit::ENTRIES.iter().copied());
     values.extend(polyint::ENTRIES.iter().copied());

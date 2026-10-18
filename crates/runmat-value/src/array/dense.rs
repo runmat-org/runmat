@@ -130,6 +130,16 @@ impl Tensor {
     }
 
     /// Borrows native double storage when this tensor's authoritative class is double.
+    /// Borrow unique native storage without growing it or triggering a COW copy.
+    pub fn try_as_f64_slice_mut_unique(&mut self) -> Option<&mut [f64]> {
+        self.storage.try_as_f64_slice_mut_unique()
+    }
+
+    /// Borrow unique native storage without growing it or triggering a COW copy.
+    pub fn try_as_f32_slice_mut_unique(&mut self) -> Option<&mut [f32]> {
+        self.storage.try_as_f32_slice_mut_unique()
+    }
+
     pub fn as_f64_slice(&self) -> Option<&[f64]> {
         self.storage.as_f64_slice()
     }

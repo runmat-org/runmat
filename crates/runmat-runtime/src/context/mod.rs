@@ -29,6 +29,7 @@ mod local_tasks;
 mod local_task_admission;
 mod native_continuation;
 mod preferences;
+pub(crate) mod poll_projection;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod process_invocation;
 mod user_path;
@@ -132,7 +133,9 @@ pub use runtime::{
     RuntimeContext, RuntimeContextLocalId, RuntimeExecutionStack, RuntimeExecutionStackGuard,
     RuntimeLanguageMode, RuntimeLanguagePolicy, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
-pub use scope::{ContextFuture, RuntimeContextGuard};
+pub use scope::{
+    ContextFuture, PreparedRuntimeFutureScope, PreparedRuntimeScope, RuntimeContextGuard,
+};
 pub(crate) use services::complete_process_output_requires_evidence;
 #[cfg(test)]
 pub(crate) use services::test_managed_selection;

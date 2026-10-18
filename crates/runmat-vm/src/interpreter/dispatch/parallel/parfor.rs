@@ -15,9 +15,11 @@ struct ParforExecution<'a> {
 
 struct ParforTaskPayload {
     inputs: Vec<Value>,
-    input_roots: Option<runmat_runtime::execution::RootedValueLease>,
     iterations: Vec<Value>,
     randomness: runmat_execution::ParallelRandomnessContext,
+    // Last field: its registration must outlive both owned Value buffers if
+    // an unpolled child is canceled and the queued payload is dropped.
+    input_roots: Option<runmat_runtime::execution::RootedValueLease>,
 }
 
 pub(super) async fn execute(
@@ -64,7 +66,7 @@ pub(super) async fn execute(
         current_function_name,
     };
     if maximum_workers == Some(0) {
-        return prepare_parfor_serial(
+        return execute_parfor_serial(
             execution,
             ParforTaskPayload {
                 inputs,
@@ -73,7 +75,7 @@ pub(super) async fn execute(
                 randomness,
             },
             vars,
-        )?
+        )
         .await;
     }
     let pool = context
@@ -141,7 +143,7 @@ pub(super) async fn execute(
             tracing::debug!(reason = %reason, effects = ?executable.contract.effects, "using serial parfor correctness backend");
         }
     }
-    prepare_parfor_serial(
+    execute_parfor_serial(
         execution,
         ParforTaskPayload {
             inputs,
@@ -150,23 +152,9 @@ pub(super) async fn execute(
             randomness,
         },
         vars,
-    )?
+    )
     .await
     }).await?
-}
-
-/// A serial region still invokes a child VM interpreter. Admit that one child
-/// continuation before constructing its future so the outer interpreter does
-/// not carry both concrete poll frames on the process stack.
-fn prepare_parfor_serial<'a>(
-    execution: ParforExecution<'a>,
-    task: ParforTaskPayload,
-    vars: &'a mut InterpreterVars,
-) -> Result<runmat_runtime::execution::RuntimeContinuationFuture<'a, ()>, RuntimeError> {
-    runmat_runtime::execution::admit_domain_continuation_with(
-        &execution.context.runtime,
-        move || execute_parfor_serial(execution, task, vars),
-    )
 }
 
 async fn execute_parfor_serial(
@@ -180,19 +168,85 @@ async fn execute_parfor_serial(
         iterations,
         randomness,
     } = task;
-    let outputs = crate::interpreter::runner::interpret_parfor_task_in_context(
-        crate::interpreter::runner::ParforTaskExecution {
-            bytecode: execution.bytecode,
-            region: execution.executable,
+    let runtime = execution.context.runtime.clone();
+    // A queued child may be canceled before its first poll. Root the exact
+    // input and iteration graphs before queue publication, not in its body.
+    let queued_roots = runmat_runtime::execution::RootedValueLease::for_value_slices_in_context(
+        &[inputs.as_slice(), iterations.as_slice()],
+        &runtime,
+    )?;
+    drop(input_roots);
+    let task = ParforTaskPayload {
+        inputs,
+        iterations,
+        randomness,
+        input_roots: Some(queued_roots),
+    };
+    let owner = execution.context.bytecode_owner.clone().ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "ParallelExecutableOwner",
+            "serial parfor lost its retained compiler product",
+        )
+    })?;
+    if !std::ptr::eq(execution.bytecode, &*owner) {
+        return Err(crate::interpreter::errors::mex(
+            "ParallelExecutableOwner",
+            "serial parfor bytecode differs from its retained compiler product",
+        ));
+    }
+    let region = execution.executable.contract.id;
+    let driver = execution.context.process_driver.as_ref().ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "ParallelProcessDriver",
+            "serial parfor requires its invocation continuation owner",
+        )
+    })?;
+    if owner.display_name() != execution.current_function_name {
+        return Err(crate::interpreter::errors::mex(
+            "ParallelExecutableOwner",
+            "serial parfor display context differs from its retained compiler product",
+        ));
+    }
+    let child_runtime = runtime.clone();
+    let ticket = driver.enqueue_owned_in_context(&runtime, move || async move {
+        let executable = owner
+            .parfor_regions
+            .iter()
+            .find(|candidate| candidate.contract.id == region)
+            .ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "ParallelExecutableMissing",
+                    "queued parfor has no matching region in its retained compiler product",
+                )
+            })?;
+        // Keep the payload intact through fail-closed region lookup. Its root
+        // lease is the last field to retire if this future is canceled or the
+        // lookup fails before the child VM takes ownership.
+        let ParforTaskPayload {
             inputs,
             iterations,
             randomness,
-            mode: crate::interpreter::runner::ParforTaskMode::Sequential,
-            current_function_name: execution.current_function_name,
-            runtime: execution.context.runtime.clone(),
-        },
-    )
-    .await?;
+            input_roots,
+        } = task;
+        crate::interpreter::runner::interpret_parfor_task_in_context(
+            crate::interpreter::runner::ParforTaskExecution {
+                bytecode: &owner,
+                bytecode_owner: Some(owner.clone()),
+                region: executable,
+                inputs,
+                iterations,
+                input_roots,
+                randomness,
+                mode: crate::interpreter::runner::ParforTaskMode::Sequential,
+                current_function_name: owner.display_name(),
+                runtime: child_runtime,
+            },
+        )
+        .await
+    })?;
+    // Awaiting this ticket yields the outer VM poll. The invocation driver
+    // polls the child independently, so two interpreter stacks never nest.
+    let outputs = ticket.await?;
     outputs.with_owned_output_storage(|outputs| {
         let outputs = outputs.try_into_owned().map_err(|_| {
             runmat_runtime::sequence::sequence_error_to_runtime(
@@ -219,7 +273,6 @@ async fn execute_parfor_serial(
         }
         Ok::<(), RuntimeError>(())
     })?;
-    drop(input_roots);
     Ok(())
 }
 

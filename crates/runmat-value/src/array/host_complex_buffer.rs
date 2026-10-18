@@ -58,6 +58,14 @@ impl<T: Clone + Copy> HostComplexBuffer<T> {
         self.storage.shares_allocation_with(&other.storage)
     }
 
+    /// Return a non-growing mutable view only when no other owner aliases it.
+    /// Unlike copy-on-write mutation, this never allocates a replacement.
+    pub fn try_as_mut_slice_unique(&mut self) -> Option<&mut [ComplexElement<T>]> {
+        self.storage
+            .try_get_mut_unique()
+            .map(HostData::as_mut_slice)
+    }
+
     pub fn make_unique(&mut self) {
         if self.storage.is_shared() {
             record_host_copy(HostCopyReason::CopyOnWriteMutation, self.byte_len());
