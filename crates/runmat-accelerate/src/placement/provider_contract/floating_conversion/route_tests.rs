@@ -139,6 +139,7 @@ fn placement_derives_route_only_from_admitted_program_not_legacy_workload() {
                 observation_contract:
                     crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup,
                 prepared_authority: None,
+                source_decline: crate::placement::LocalSourceDecline::None,
                 family: ProviderOperationFamily::Elementwise,
                 provider_kind: ExecutionCandidateKind::ProviderOperation,
                 inputs: &[&input],

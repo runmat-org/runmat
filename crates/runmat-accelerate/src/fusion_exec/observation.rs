@@ -6,6 +6,9 @@ use runmat_runtime::context::{RuntimeContext, VmFusionCompletionRight, VmFusionH
 use runmat_time::{duration_ns_saturating, Instant};
 use runmat_value::Value;
 
+mod host_preparation;
+use host_preparation::{prepare_selected_host_inputs, prepare_vm_outputs};
+
 /// Linear selected-provider receipt held until the VM has published all
 /// ordered stores, adopted the result, and advanced beyond the fused span.
 /// Dropping it on catch/deopt/cancellation never reports success or a fake
@@ -76,6 +79,7 @@ struct VmCpuCompletion {
     host_route: Option<VmFusionHostRoute>,
     runtime: Option<RuntimeContext>,
     readback: Option<CpuReadbackPlan>,
+    outputs: Option<Vec<super::elementwise::host_readback::HostOutputSpec>>,
     prepared: Option<super::host_readback::PreparedVmHostInputs>,
 }
 
@@ -105,7 +109,7 @@ impl FusionCpuObservation {
         runtime: Option<&RuntimeContext>,
         operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
     ) -> Self {
-        self.with_vm_host_operations_readback(right, runtime, operations, None)
+        self.with_vm_host_operations_readback(right, runtime, operations, None, None)
     }
 
     pub(crate) fn with_vm_host_operations_readback(
@@ -114,6 +118,7 @@ impl FusionCpuObservation {
         runtime: Option<&RuntimeContext>,
         operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
         readback: Option<CpuReadbackPlan>,
+        outputs: Option<Vec<super::elementwise::host_readback::HostOutputSpec>>,
     ) -> Self {
         // The VM right authenticates execution. A missing price/measurement
         // permit suppresses feedback, not an already admitted host readback.
@@ -129,8 +134,9 @@ impl FusionCpuObservation {
         self.vm_completion = Some(Box::new(VmCpuCompletion {
             right,
             host_route,
-            runtime: readback.as_ref().and_then(|_| runtime.cloned()),
+            runtime: runtime.cloned(),
             readback,
+            outputs,
             prepared: None,
         }));
         self
@@ -157,6 +163,7 @@ impl FusionCpuObservation {
             host_route,
             runtime: readback.as_ref().and_then(|_| runtime.cloned()),
             readback,
+            outputs: None,
             prepared: None,
         }));
         self
@@ -203,7 +210,7 @@ impl FusionCpuObservation {
         let Some(vm) = self.vm_completion.as_mut() else {
             return Ok(None);
         };
-        if vm.readback.is_none() {
+        if vm.readback.is_none() && vm.outputs.is_none() {
             return Ok(None);
         }
         let feedback = self.feedback.as_deref();
@@ -215,8 +222,12 @@ impl FusionCpuObservation {
                 .build(),
             ));
         }
+        prepare_vm_outputs(vm).map_err(|error| *error)?;
+        if vm.readback.is_none() {
+            return Ok(None);
+        }
         let plan = vm.readback.take().expect("checked readback plan");
-        let mut inputs = plan.prepare_inputs(stack).await?;
+        let mut inputs = prepare_selected_host_inputs(plan, stack, vm.runtime.as_ref()).await?;
         if !vm_readback_current(vm, feedback) {
             return Err(CpuReadbackFailure::AfterEffect(
                 runmat_runtime::build_runtime_error(
@@ -231,15 +242,15 @@ impl FusionCpuObservation {
     }
 
     pub async fn prepare_vm_host_slice(
-        &self,
+        &mut self,
         stack: &[Value],
     ) -> Result<Option<Vec<(usize, Value)>>, CpuReadbackFailure> {
-        let Some(vm) = self.vm_completion.as_ref() else {
+        let Some(vm) = self.vm_completion.as_mut() else {
             return Ok(None);
         };
-        let Some(plan) = vm.readback.as_ref() else {
+        if vm.readback.is_none() && vm.outputs.is_none() {
             return Ok(None);
-        };
+        }
         if !vm_readback_current(vm, self.feedback.as_deref()) {
             return Err(CpuReadbackFailure::BeforeEffect(
                 runmat_runtime::build_runtime_error(
@@ -249,7 +260,12 @@ impl FusionCpuObservation {
                 .build(),
             ));
         }
-        let replacements = plan.prepare(stack).await?;
+        prepare_vm_outputs(vm).map_err(|error| *error)?;
+        if vm.readback.is_none() {
+            return Ok(None);
+        }
+        let plan = vm.readback.take().expect("checked readback plan");
+        let mut inputs = prepare_selected_host_inputs(plan, stack, vm.runtime.as_ref()).await?;
         if !vm_readback_current(vm, self.feedback.as_deref()) {
             return Err(CpuReadbackFailure::AfterEffect(
                 runmat_runtime::build_runtime_error(
@@ -259,7 +275,9 @@ impl FusionCpuObservation {
                 .build(),
             ));
         }
-        Ok(Some(replacements))
+        let entry = std::mem::take(&mut inputs.entry);
+        vm.prepared = Some(inputs);
+        Ok(Some(entry))
     }
 
     /// VM-owned FullCall host completion begins before placement planning and
@@ -274,6 +292,7 @@ impl FusionCpuObservation {
             host_route,
             runtime: _,
             readback,
+            outputs: _,
             prepared,
         } = *vm;
         // The following ordinary store may have overwritten the last

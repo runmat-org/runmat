@@ -649,6 +649,7 @@ fn select_fusion_provider_with_implementation(
                 crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
             },
             prepared_authority: None,
+            source_decline: crate::placement::LocalSourceDecline::None,
             family: ProviderOperationFamily::Fusion,
             provider_kind: ExecutionCandidateKind::ProviderFusion,
             inputs: &input_refs,

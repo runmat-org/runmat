@@ -26,7 +26,7 @@ pub enum VmFusionHostInstruction {
 
 /// Numeric intrinsic execution is not a named builtin binding. Keep its
 /// language operator identity distinct from canonical dispatch dependencies.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub enum VmFusionHostOperation {
     Builtin(BuiltinBindingIdentity),
     Intrinsic(runmat_types::OperatorKind),
@@ -55,6 +55,7 @@ struct RouteState {
     invalid: bool,
     next_pc: usize,
     terminal_confirmed: bool,
+    numerical_outputs: Option<super::VmFusionHostOutputs>,
 }
 
 impl VmFusionHostRoute {
@@ -71,6 +72,7 @@ impl VmFusionHostRoute {
                 invalid: false,
                 next_pc: origin.registration.span_start(),
                 terminal_confirmed: false,
+                numerical_outputs: None,
             })),
             origin,
             expected_operations: expected_operations.into(),
@@ -97,6 +99,98 @@ impl VmFusionHostRoute {
             && !runtime.is_cancelled()
             && self.origin.issuer_live.upgrade().is_some()
             && self.origin.generation.is_current()
+    }
+
+    pub fn install_numerical_outputs(
+        &self,
+        runtime: &RuntimeContext,
+        outputs: super::VmFusionHostOutputs,
+    ) -> Result<(), crate::RuntimeError> {
+        if !self.current_for(runtime) {
+            return Err(super::vm_fusion_host_outputs::missing_output(runtime));
+        }
+        let mut state = self.state.borrow_mut();
+        if state.pending.is_some()
+            || state.next_pc != self.origin.registration.span_start()
+            || state.numerical_outputs.is_some()
+        {
+            state.invalid = true;
+            return Err(crate::build_runtime_error(
+                "VM host numerical outputs were installed outside their selected region boundary",
+            )
+            .with_identifier("RunMat:Placement:InvalidDecision")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
+        }
+        state.numerical_outputs = Some(outputs);
+        Ok(())
+    }
+
+    pub fn take_numerical_output(
+        &self,
+        runtime: &RuntimeContext,
+        instruction: VmFusionHostInstruction,
+        binding: BuiltinBindingIdentity,
+    ) -> Result<Option<crate::context::preparation::PreparedHostNumericalOutput>, crate::RuntimeError>
+    {
+        if !self.current_for(runtime) {
+            return Err(super::vm_fusion_host_outputs::missing_output(runtime));
+        }
+        let mut state = self.state.borrow_mut();
+        if !state
+            .pending
+            .is_some_and(|(_, expected, _)| self.instruction_matches(expected, instruction))
+            || !self
+                .expected_operations
+                .contains(&VmFusionHostOperation::Builtin(binding))
+        {
+            state.invalid = true;
+            return Err(crate::build_runtime_error(
+                "VM host numerical output request differs from its selected instruction",
+            )
+            .with_identifier("RunMat:Placement:InvalidDecision")
+            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+            .build());
+        }
+        match state.numerical_outputs.as_mut() {
+            Some(outputs) => match outputs.take_builtin(runtime, instruction, binding) {
+                Ok(output) => Ok(Some(output)),
+                Err(error) => {
+                    state.invalid = true;
+                    Err(error)
+                }
+            },
+            None => match super::host_allocation::HostAllocationReceipt::policy(Some(runtime)) {
+                Ok(super::host_allocation::HostAllocationPolicy::Unbounded) => Ok(None),
+                _ => Err(super::vm_fusion_host_outputs::missing_output(runtime)),
+            },
+        }
+    }
+
+    pub fn take_intrinsic_numerical_output(
+        &self,
+        runtime: &RuntimeContext,
+        operator: runmat_types::OperatorKind,
+    ) -> Result<Option<crate::context::preparation::PreparedHostNumericalOutput>, crate::RuntimeError>
+    {
+        let instruction = VmFusionHostInstruction::Intrinsic(operator);
+        if !self.allows_intrinsic_host(runtime, operator) {
+            return Err(super::vm_fusion_host_outputs::missing_output(runtime));
+        }
+        let mut state = self.state.borrow_mut();
+        match state.numerical_outputs.as_mut() {
+            Some(outputs) => match outputs.take_intrinsic(runtime, instruction, operator) {
+                Ok(output) => Ok(Some(output)),
+                Err(error) => {
+                    state.invalid = true;
+                    Err(error)
+                }
+            },
+            None => match super::host_allocation::HostAllocationReceipt::policy(Some(runtime)) {
+                Ok(super::host_allocation::HostAllocationPolicy::Unbounded) => Ok(None),
+                _ => Err(super::vm_fusion_host_outputs::missing_output(runtime)),
+            },
+        }
     }
 
     pub fn begin_instruction(&self, pc: usize, instruction: VmFusionHostInstruction) {
@@ -149,6 +243,10 @@ impl VmFusionHostRoute {
             && state.terminal_confirmed
             && self.origin.registration.span_end().checked_add(1) == Some(state.next_pc)
             && self.origin.generation.is_current()
+            && state
+                .numerical_outputs
+                .as_ref()
+                .is_none_or(super::VmFusionHostOutputs::complete)
     }
 
     pub fn allows_host_promotion(&self, runtime: &RuntimeContext) -> bool {

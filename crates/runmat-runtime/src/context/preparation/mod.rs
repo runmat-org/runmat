@@ -6,6 +6,7 @@
 mod owned;
 mod request;
 mod host_resources;
+mod host_numerical_output;
 mod real_unary;
 mod real_power;
 mod real_power_scalar;
@@ -16,6 +17,7 @@ pub use crate::dispatcher::direct_call_observation::{
     PreparedBindingAuthority, PreparedCompletionRight, PreparedHostExecution,
 };
 pub use compound::AdmittedBuiltinCompound;
+pub use host_numerical_output::PreparedHostNumericalOutput;
 pub use host_resources::AdmittedHostResources;
 pub use owned::{
     BuiltinPreparationObservation, PreparedBuiltinOperands, PreparedCallCompletion,
@@ -75,20 +77,27 @@ where
     F: FnOnce(Vec<Value>) -> Fut,
     Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    execute_prepared_compound(prepared, |values, compound| async move {
+    execute_prepared_resources(prepared, |values, compound, host_cast_output| async move {
         if compound.is_some() {
             return Err(missing_compound_consumer());
+        }
+        if host_cast_output.is_some() {
+            return Err(missing_host_numerical_consumer());
         }
         execute(values).await
     })
 }
 
-fn execute_prepared_compound<F, Fut>(
+fn execute_prepared_resources<F, Fut>(
     mut prepared: PreparedBuiltinOperands,
     execute: F,
 ) -> impl Future<Output = Result<RootedValue, RuntimeError>>
 where
-    F: FnOnce(Vec<Value>, Option<AdmittedBuiltinCompound>) -> Fut,
+    F: FnOnce(
+        Vec<Value>,
+        Option<AdmittedBuiltinCompound>,
+        Option<PreparedHostNumericalOutput>,
+    ) -> Fut,
     Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     let recorder = prepared.provider_recorder();
@@ -96,7 +105,8 @@ where
     runmat_accelerate_api::observation::observe_provider_future(recorder, async move {
         prepared.begin_execution();
         let compound = prepared.take_compound();
-        let result = execute(prepared.take_operands(), compound).await;
+        let host_cast_output = prepared.take_host_numerical_output();
+        let result = execute(prepared.take_operands(), compound, host_cast_output).await;
         let cleanup = prepared.finish(result.as_ref().map(|value| value.value()));
         let mut result = crate::runtime_error::complete_with_cleanup(result, cleanup);
         if no_replay {
@@ -133,12 +143,57 @@ where
     F: FnOnce(Vec<Value>) -> Fut,
     Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
-    execute_request_compound(context, request, |values, compound| async move {
-        if compound.is_some() {
-            return Err(missing_compound_consumer());
-        }
-        execute(values).await
-    })
+    execute_request_resources(
+        context,
+        request,
+        |values, compound, host_cast_output| async move {
+            if compound.is_some() {
+                return Err(missing_compound_consumer());
+            }
+            if host_cast_output.is_some() {
+                return Err(missing_host_numerical_consumer());
+            }
+            execute(values).await
+        },
+    )
+    .await
+}
+
+pub(crate) async fn execute_request_numerical<F, Fut>(
+    context: Option<&RuntimeContext>,
+    request: AdmittedBuiltinPreparation,
+    execute: F,
+) -> Result<RootedValue, RuntimeError>
+where
+    F: FnOnce(
+        Vec<Value>,
+        Option<AdmittedBuiltinCompound>,
+        Option<PreparedHostNumericalOutput>,
+    ) -> Fut,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
+{
+    execute_request_resources(context, request, execute).await
+}
+
+pub(crate) async fn execute_request_host_numerical<F, Fut>(
+    context: Option<&RuntimeContext>,
+    request: AdmittedBuiltinPreparation,
+    execute: F,
+) -> Result<RootedValue, RuntimeError>
+where
+    F: FnOnce(Vec<Value>, Option<PreparedHostNumericalOutput>) -> Fut,
+    Fut: Future<Output = Result<RootedValue, RuntimeError>>,
+{
+    execute_request_resources(
+        context,
+        request,
+        |values, compound, numerical_output| async move {
+            if compound.is_some() {
+                return Err(missing_compound_consumer());
+            }
+            execute(values, numerical_output).await
+        },
+    )
     .await
 }
 
@@ -149,21 +204,32 @@ fn missing_compound_consumer() -> RuntimeError {
     error
 }
 
-pub(crate) async fn execute_request_compound<F, Fut>(
+fn missing_host_numerical_consumer() -> RuntimeError {
+    let mut error =
+        request::invalid("selected host numerical route requires its exact output domain consumer");
+    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+    error
+}
+
+async fn execute_request_resources<F, Fut>(
     context: Option<&RuntimeContext>,
     request: AdmittedBuiltinPreparation,
     execute: F,
 ) -> Result<RootedValue, RuntimeError>
 where
-    F: FnOnce(Vec<Value>, Option<AdmittedBuiltinCompound>) -> Fut,
+    F: FnOnce(
+        Vec<Value>,
+        Option<AdmittedBuiltinCompound>,
+        Option<PreparedHostNumericalOutput>,
+    ) -> Fut,
     Fut: Future<Output = Result<RootedValue, RuntimeError>>,
 {
     match context {
         Some(context) => {
-            execute_prepared_compound(prepare_admitted(context, request).await?, execute).await
+            execute_prepared_resources(prepare_admitted(context, request).await?, execute).await
         }
         None => {
-            execute_prepared_compound(
+            execute_prepared_resources(
                 request
                     .into_operands()
                     .with_unbounded_values(PreparedBuiltinOperands::passthrough)??,

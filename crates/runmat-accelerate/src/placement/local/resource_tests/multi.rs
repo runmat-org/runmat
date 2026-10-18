@@ -105,7 +105,7 @@ fn quote_availability_does_not_bypass_physical_admission_or_erase_receipts() {
 struct MultiProvider {
     device: u32,
     owner: Option<TestAllocationOwner>,
-    reject: Option<u64>,
+    reject: Option<(u64, ProviderRejectionCode)>,
     queries: AtomicUsize,
 }
 
@@ -138,14 +138,10 @@ impl AccelProvider for MultiProvider {
     }
     fn query_feasibility(&self, query: &ProviderFeasibilityQuery) -> ProviderFeasibility {
         self.queries.fetch_add(1, Ordering::SeqCst);
-        if self
-            .reject
-            .is_some_and(|marker| query.workload.elements == Some(marker))
-        {
-            return ProviderFeasibility::rejected(
-                ProviderRejectionCode::UnsupportedOperation,
-                "fixture strategy unavailable",
-            );
+        if let Some((marker, code)) = &self.reject {
+            if query.workload.elements == Some(*marker) {
+                return ProviderFeasibility::rejected(*code, "fixture strategy unavailable");
+            }
         }
         let output_bytes = query.outputs.iter().try_fold(0_u64, |total, output| {
             total.checked_add(output.checked_byte_len()?)
@@ -281,6 +277,7 @@ fn try_plan_physical_set_with_context<'a>(
             prepared_authority: None,
             vm_right: None,
             vm_decline: None,
+            source_decline: LocalSourceDecline::None,
             family: ProviderOperationFamily::Fusion,
             cpu: LocalCpuCandidate::host(
                 "cpu.shared.fusion.reduction".into(),
@@ -300,6 +297,92 @@ fn try_plan_physical_set_with_context<'a>(
         PlacementPolicy::default(),
         implementation,
     )
+}
+
+#[test]
+fn plain_cast_source_decline_requires_typed_provider_feasibility_rejection() {
+    for rejected_code in [
+        None,
+        Some(ProviderRejectionCode::UnsupportedOperation),
+        Some(ProviderRejectionCode::UnsupportedElementType),
+        Some(ProviderRejectionCode::UnsupportedStorage),
+        Some(ProviderRejectionCode::UnsupportedLayout),
+        Some(ProviderRejectionCode::UnsupportedRank),
+        Some(ProviderRejectionCode::InvalidShape),
+        Some(ProviderRejectionCode::ResourceLimit),
+        Some(ProviderRejectionCode::ProviderUnavailable),
+        Some(ProviderRejectionCode::UnknownResourceEstimate),
+    ] {
+        let provider = MultiProvider {
+            device: 7,
+            owner: None,
+            reject: rejected_code.map(|code| (19, code)),
+            queries: AtomicUsize::new(0),
+        };
+        for source_decline in [
+            LocalSourceDecline::None,
+            LocalSourceDecline::PlainFloatingCast,
+        ] {
+            let outcome = plan_local_multi_with_provider(
+                &provider,
+                LocalMultiPlacementRequest {
+                    operation: "single",
+                    semantic_identity: None,
+                    observation_contract: TotalCandidateObservationContract::PreparationBodyCleanup,
+                    prepared_authority: None,
+                    vm_right: None,
+                    vm_decline: None,
+                    source_decline,
+                    family: ProviderOperationFamily::Elementwise,
+                    cpu: LocalCpuCandidate::host(
+                        "cpu.unavailable.cast".into(),
+                        runmat_execution::CandidateCostEvidence::Estimated(cost(1000, 0)),
+                    ),
+                    cpu_admission: LocalCpuAdmission::Unavailable,
+                    publication: LocalPublicationSemantics::Atomic,
+                    physical: vec![physical(19, 10, CandidatePreparationState::Ready)],
+                    compare_profitability: true,
+                    runtime: None,
+                },
+                PlacementPolicy::default(),
+                LocalProviderAdmission::Available,
+            );
+            if rejected_code.is_none() {
+                assert!(matches!(
+                    outcome.unwrap(),
+                    LocalPlacementOutcome::Selected {
+                        provider_index: Some(0),
+                        ..
+                    }
+                ));
+            } else if source_decline == LocalSourceDecline::PlainFloatingCast
+                && matches!(
+                    &rejected_code,
+                    Some(
+                        ProviderRejectionCode::UnsupportedOperation
+                            | ProviderRejectionCode::UnsupportedElementType
+                            | ProviderRejectionCode::UnsupportedStorage
+                            | ProviderRejectionCode::UnsupportedLayout
+                            | ProviderRejectionCode::UnsupportedRank
+                    )
+                )
+            {
+                match outcome.unwrap() {
+                    LocalPlacementOutcome::ProviderRejected {
+                        code,
+                        feedback: None,
+                        ..
+                    } => assert_eq!(Some(code), rejected_code),
+                    other => panic!("expected exact provider rejection, got {other:?}"),
+                }
+            } else {
+                assert_eq!(
+                    outcome.unwrap_err().identifier(),
+                    Some("RunMat:Placement:NoLegalCandidate")
+                );
+            }
+        }
+    }
 }
 
 #[test]
@@ -476,7 +559,7 @@ fn source_unavailability_and_provider_rejection_preserve_exact_host_demand_and_i
             let provider = MultiProvider {
                 device: 0,
                 owner: None,
-                reject: Some(7),
+                reject: Some((7, ProviderRejectionCode::UnsupportedOperation)),
                 queries: AtomicUsize::new(0),
             };
             let capture = Rc::new(Capture {
@@ -608,7 +691,7 @@ fn one_service_graph_compares_cpu_and_both_physical_strategies() {
     ));
 
     let selective = MultiProvider {
-        reject: Some(1),
+        reject: Some((1, ProviderRejectionCode::UnsupportedOperation)),
         device: 0,
         owner: None,
         queries: AtomicUsize::new(0),

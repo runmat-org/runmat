@@ -48,16 +48,7 @@ fn evaluate_f64(values: Vec<f64>, shape: Vec<usize>) -> BuiltinResult<Value> {
             .map_err(errors::internal)?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let output = values
-        .into_iter()
-        .map(|value| {
-            if value < 0.0 {
-                (0.0, super::complex::zero_f64((-value).sqrt()))
-            } else {
-                (super::complex::zero_f64(value.sqrt()), 0.0)
-            }
-        })
-        .collect();
+    let output = values.into_iter().map(real_parts_f64).collect();
     let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F64(output), shape)
         .map_err(errors::internal)?;
     Ok(complex_tensor_into_value(tensor))
@@ -73,17 +64,24 @@ fn evaluate_f32(values: Vec<f32>, shape: Vec<usize>) -> BuiltinResult<Value> {
             .map_err(errors::internal)?;
         return Ok(tensor::tensor_into_value(tensor));
     }
-    let output = values
-        .into_iter()
-        .map(|value| {
-            if value < 0.0 {
-                (0.0, super::complex::zero_f32((-value).sqrt()))
-            } else {
-                (super::complex::zero_f32(value.sqrt()), 0.0)
-            }
-        })
-        .collect();
+    let output = values.into_iter().map(real_parts_f32).collect();
     let tensor = ComplexTensor::from_complex_storage(ComplexStorage::F32(output), shape)
         .map_err(errors::internal)?;
     Ok(complex_tensor_into_value(tensor))
+}
+
+pub(super) fn real_parts_f64(value: f64) -> (f64, f64) {
+    if value < 0.0 {
+        (0.0, super::complex::zero_f64((-value).sqrt()))
+    } else {
+        (super::complex::zero_f64(value.sqrt()), 0.0)
+    }
+}
+
+pub(super) fn real_parts_f32(value: f32) -> (f32, f32) {
+    if value < 0.0 {
+        (0.0, super::complex::zero_f32((-value).sqrt()))
+    } else {
+        (super::complex::zero_f32(value.sqrt()), 0.0)
+    }
 }

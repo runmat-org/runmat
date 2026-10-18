@@ -1,6 +1,9 @@
 //! Async execution of a selected private host preparation. The existing
 //! dispatcher retains the outer FullCall clock and final publication fence.
 use super::*;
+use runmat_runtime::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
+};
 
 pub(in crate::native_auto::builtin_call) async fn prepare_async(
     auto: &NativeAutoOffload,
@@ -19,6 +22,13 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         .has_prepared_completion_right()
         .then(|| super::super::host_readback::admit(auto, context, &request))
         .flatten();
+    // A host-only selected call has no resident-source Admission, but its
+    // canonical resource envelope is still authenticated by this request.
+    let host_only_envelope = if admission.is_none() && complete_host {
+        request.host_resource_bound(context)
+    } else {
+        None
+    };
     // A newly eligible promoting resident call has no provider-domain proof
     // yet. Without an executable private-host envelope this optional route is
     // not applicable: leave the original domain-owned implementation intact.
@@ -75,10 +85,52 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         observation.preparation_failed();
         return Err(failed("prepared host authority expired before readback"));
     }
+    let managed = HostAllocationReceipt::policy(Some(context)).map_err(|cause| {
+        Box::new(host_allocation_runtime_error(
+            Some(context),
+            "RunMat:Placement:HostCastOutput",
+            "selected host allocation policy changed",
+            cause,
+        ))
+    })? == HostAllocationPolicy::Managed;
+    if managed {
+        let Some(envelope) = admission
+            .as_ref()
+            .map(|admission| &admission.envelope)
+            .or(host_only_envelope.as_ref())
+        else {
+            observation.preparation_failed();
+            return Err(failed(
+                "selected host call has no exact numerical output envelope",
+            ));
+        };
+        prepared.host_numerical_output = Some(
+            runmat_runtime::context::preparation::PreparedHostNumericalOutput::prepare_admitted(
+                context, envelope,
+            )
+            .map_err(|cause| {
+                Box::new(host_allocation_runtime_error(
+                    Some(context),
+                    "RunMat:Placement:HostNumericalOutput",
+                    "selected host numerical output admission failed",
+                    cause,
+                ))
+            })?
+            .ok_or_else(|| failed("selected host call lost its finite output owner"))?,
+        );
+    }
     let Some(admission) = admission else {
         return Ok(prepared);
     };
-    let mut inputs = match admission.plan.prepare_inputs(&prepared.args).await {
+    let readback = if managed {
+        admission
+            .plan
+            .prepare_inputs_managed(&prepared.args, context)
+            .await
+    } else {
+        admission.plan.prepare_inputs(&prepared.args).await
+    };
+    let mut inputs = match readback {
         Ok(inputs) => inputs,
         Err(cause) => {
             observation.preparation_failed();

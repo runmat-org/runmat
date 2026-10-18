@@ -6,13 +6,10 @@ use crate::builtins::common::spec::{
     FusionHostResourceQuery,
 };
 use runmat_types::{NumericClass, NumericDomain, OperatorKind};
+use runmat_value::NumericDType;
 
 mod envelope;
 pub use envelope::{promoting_output, PromotingOutput};
-
-/// BroadcastPlan's existing typed shape/stride preparation bound. Reused by
-/// fusion's pre-selection receipt so the same temporary is not guessed twice.
-pub const BROADCAST_METADATA_VECTORS_UPPER: u64 = 10;
 
 fn width(class: NumericClass) -> Option<u64> {
     match class {
@@ -38,6 +35,41 @@ fn payload(input: FusionHostResourceInput<'_>) -> Option<u64> {
     elements(input.shape)?.checked_mul(width(input.class)?)
 }
 
+pub fn broadcast_metadata_bytes(rank: usize) -> Option<u64> {
+    crate::builtins::common::broadcast::PreparedBroadcastPlan::quoted_bytes(rank).ok()
+}
+
+fn dtype(class: NumericClass) -> Option<NumericDType> {
+    match class {
+        NumericClass::Single => Some(NumericDType::F32),
+        NumericClass::Double => Some(NumericDType::F64),
+        _ => None,
+    }
+}
+
+fn retained_output(query: &FusionHostResourceQuery<'_>) -> Option<u64> {
+    let dtype = dtype(query.output.class)?;
+    let real = || {
+        crate::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+            dtype,
+            query.output.shape,
+        )
+        .ok()
+    };
+    let complex = || {
+        crate::context::host_allocation::HostAllocationPlan::retained_complex_tensor_bytes(
+            dtype,
+            query.output.shape,
+        )
+        .ok()
+    };
+    match query.output_domain {
+        FusionHostOutputDomain::Exact(NumericDomain::Real) => real(),
+        FusionHostOutputDomain::Exact(NumericDomain::Complex) => complex(),
+        FusionHostOutputDomain::RealOrComplex => real()?.checked_add(complex()?),
+    }
+}
+
 /// Direct maps retain one native output. Consuming exponential maps may clone
 /// the COW input, and the argument/shape-to-tensor adapters clone shape metadata.
 /// Borrowing trigonometric maps use no more than this same bound.
@@ -48,13 +80,41 @@ pub fn real_map(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourc
     map_bound(query)
 }
 
+/// Plain single/double conversion keeps the input shape but may change its
+/// native element width. The conversion consumes the downloaded tensor,
+/// retaining at most one COW input copy while constructing one output vector.
+pub fn real_cast(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
+    if query.output_domain != FusionHostOutputDomain::Exact(NumericDomain::Real) {
+        return None;
+    }
+    let [input] = query.inputs else { return None };
+    if input.shape != query.output.shape {
+        return None;
+    }
+    let output_dtype = match query.output.class {
+        NumericClass::Single => NumericDType::F32,
+        NumericClass::Double => NumericDType::F64,
+        _ => return None,
+    };
+    let retained_bytes =
+        crate::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+            output_dtype,
+            query.output.shape,
+        )
+        .ok()?;
+    Some(FusionHostResourceBound {
+        retained_bytes,
+        scratch_bytes: payload(*input)?.checked_add(metadata(input.shape)?.checked_mul(2)?)?,
+    })
+}
+
 fn map_bound(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourceBound> {
     let [input] = query.inputs else { return None };
     if input.shape != query.output.shape || input.class != query.output.class {
         return None;
     }
     Some(FusionHostResourceBound {
-        retained_bytes: payload(query.output)?.checked_add(metadata(query.output.shape)?)?,
+        retained_bytes: retained_output(query)?,
         scratch_bytes: payload(*input)?.checked_add(metadata(input.shape)?.checked_mul(2)?)?,
     })
 }
@@ -67,9 +127,7 @@ pub fn real_promoting_map(query: &FusionHostResourceQuery<'_>) -> Option<FusionH
         FusionHostOutputDomain::Exact(NumericDomain::Real | NumericDomain::Complex)
         | FusionHostOutputDomain::RealOrComplex => map_bound(query)?,
     };
-    // Pair -> real collection may reuse the wider pair allocation. Bound
-    // returned allocation capacity, not just the real vector's logical len.
-    bound.retained_bytes = bound.retained_bytes.checked_add(payload(query.output)?)?;
+    bound.retained_bytes = retained_output(query)?;
     bound.scratch_bytes = bound
         .scratch_bytes
         .checked_add(payload(query.inputs[0])?.checked_mul(2)?)?;
@@ -101,12 +159,9 @@ fn binary_bound(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResourc
         .max(right.shape.len())
         .max(query.output.shape.len())
         .max(2);
-    let vectors = u64::try_from(rank)
-        .ok()?
-        .checked_mul(std::mem::size_of::<usize>() as u64)?
-        .checked_mul(BROADCAST_METADATA_VECTORS_UPPER)?;
+    let vectors = broadcast_metadata_bytes(rank)?;
     Some(FusionHostResourceBound {
-        retained_bytes: payload(query.output)?.checked_add(metadata(query.output.shape)?)?,
+        retained_bytes: retained_output(query)?,
         scratch_bytes: payload(*left)?
             .checked_add(payload(*right)?)?
             .checked_add(vectors)?,
@@ -129,26 +184,51 @@ pub fn real_power(query: &FusionHostResourceQuery<'_>) -> Option<FusionHostResou
         FusionHostOutputDomain::Exact(NumericDomain::Real | NumericDomain::Complex)
         | FusionHostOutputDomain::RealOrComplex => binary_bound(query)?,
     };
-    // finish_real_power may retain the wider pair allocation after extracting
-    // its real components; do not assume collection shrinks its capacity.
-    bound.retained_bytes = bound.retained_bytes.checked_add(payload(query.output)?)?;
+    bound.retained_bytes = retained_output(query)?;
     bound.scratch_bytes = bound
         .scratch_bytes
         .checked_add(payload(query.output)?.checked_mul(2)?)?;
     Some(bound)
 }
 
-/// VM numeric intrinsics do not borrow named builtin authority. Negation's
-/// numeric branch delegates to canonical times(-1,input); matrix multiply is
-/// admitted only for its existing scalar physical route.
+/// VM numeric intrinsics do not borrow named builtin authority. Ordinary
+/// negation delegates to canonical times(-1,input), while the
+/// selected Managed VM branch writes through the same preallocated binary
+/// recipe. Matrix multiply is admitted only for its scalar physical route.
 pub fn intrinsic(
     operator: OperatorKind,
     query: &FusionHostResourceQuery<'_>,
 ) -> Option<FusionHostResourceBound> {
     match operator {
-        OperatorKind::UnaryPlus => real_map(query),
+        OperatorKind::UnaryPlus => {
+            let [input] = query.inputs else { return None };
+            if query.output_domain != FusionHostOutputDomain::Exact(NumericDomain::Real)
+                || input.shape != query.output.shape
+                || input.class != query.output.class
+                || width(input.class).is_none()
+            {
+                return None;
+            }
+            // Unary plus returns the owned input unchanged, so no numerical
+            // output is born. The selected caller must separately verify
+            // that input ownership survives the VM region boundary.
+            Some(FusionHostResourceBound {
+                retained_bytes: 0,
+                scratch_bytes: 0,
+            })
+        }
         OperatorKind::UnaryMinus => {
             let [input] = query.inputs else { return None };
+            if runmat_types::RealFloatingRecipe::for_classes(
+                OperatorKind::ElementwiseMultiply,
+                NumericClass::Double,
+                input.class,
+            )?
+            .result_class()
+                != query.output.class
+            {
+                return None;
+            }
             let operands = [
                 FusionHostResourceInput {
                     shape: &[1, 1],
@@ -168,6 +248,19 @@ pub fn intrinsic(
                 .iter()
                 .any(|input| elements(input.shape) == Some(1)) =>
         {
+            let [left, right] = query.inputs else {
+                return None;
+            };
+            if runmat_types::RealFloatingRecipe::for_classes(
+                OperatorKind::ElementwiseMultiply,
+                left.class,
+                right.class,
+            )?
+            .result_class()
+                != query.output.class
+            {
+                return None;
+            }
             real_binary(query)
         }
         _ => None,
@@ -177,6 +270,50 @@ pub fn intrinsic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::context::host_allocation::HostAllocationPlan;
+
+    #[test]
+    fn real_cast_bounds_both_precision_directions_without_aliasing_widths() {
+        let shape = [2, 3];
+        for (source, target) in [
+            (NumericClass::Double, NumericClass::Single),
+            (NumericClass::Single, NumericClass::Double),
+        ] {
+            let input = FusionHostResourceInput {
+                shape: &shape,
+                class: source,
+            };
+            let output = FusionHostResourceInput {
+                shape: &shape,
+                class: target,
+            };
+            let query = FusionHostResourceQuery {
+                inputs: &[input],
+                output,
+                output_domain: FusionHostOutputDomain::Exact(NumericDomain::Real),
+            };
+            let bound = real_cast(&query).expect("native floating cast has an exact bound");
+            let dtype = match target {
+                NumericClass::Single => NumericDType::F32,
+                NumericClass::Double => NumericDType::F64,
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                bound.retained_bytes,
+                crate::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+                    dtype, &shape,
+                )
+                .unwrap()
+            );
+            assert_eq!(bound.scratch_bytes, payload(input).unwrap() + 32);
+            assert!(real_map(&query).is_none());
+            assert!(real_cast(&FusionHostResourceQuery {
+                output_domain: FusionHostOutputDomain::Exact(NumericDomain::Complex),
+                ..query
+            })
+            .is_none());
+        }
+    }
 
     #[test]
     fn real_owner_bounds_keep_class_broadcast_pairs_and_overflow_explicit() {
@@ -194,21 +331,27 @@ mod tests {
                 };
                 let direct = real_map(&unary).unwrap();
                 let promoting = real_promoting_map(&unary).unwrap();
-                for domain in [
-                    FusionHostOutputDomain::Exact(NumericDomain::Complex),
-                    FusionHostOutputDomain::RealOrComplex,
-                ] {
-                    let alternative = FusionHostResourceQuery {
-                        output_domain: domain,
-                        ..unary
-                    };
-                    assert_eq!(real_promoting_map(&alternative), Some(promoting));
-                    assert!(real_map(&alternative).is_none());
-                }
-                assert_eq!(
-                    promoting.retained_bytes - direct.retained_bytes,
-                    payload(input).unwrap()
-                );
+                let identity = intrinsic(OperatorKind::UnaryPlus, &unary).unwrap();
+                assert_eq!(identity.retained_bytes, 0);
+                assert_eq!(identity.scratch_bytes, 0);
+                let dtype = dtype(class).unwrap();
+                let real = HostAllocationPlan::retained_tensor_bytes(dtype, &shape).unwrap();
+                let complex =
+                    HostAllocationPlan::retained_complex_tensor_bytes(dtype, &shape).unwrap();
+                assert_eq!(direct.retained_bytes, real);
+                assert_eq!(promoting.retained_bytes, real);
+                let complex_bound = real_promoting_map(&FusionHostResourceQuery {
+                    output_domain: FusionHostOutputDomain::Exact(NumericDomain::Complex),
+                    ..unary
+                })
+                .unwrap();
+                let dual_bound = real_promoting_map(&FusionHostResourceQuery {
+                    output_domain: FusionHostOutputDomain::RealOrComplex,
+                    ..unary
+                })
+                .unwrap();
+                assert_eq!(complex_bound.retained_bytes, complex);
+                assert_eq!(dual_bound.retained_bytes, real + complex);
                 assert_eq!(
                     promoting.scratch_bytes - direct.scratch_bytes,
                     payload(input).unwrap() * 2
@@ -224,21 +367,20 @@ mod tests {
                 };
                 let native = real_binary(&binary).unwrap();
                 let power = real_power(&binary).unwrap();
-                for domain in [
-                    FusionHostOutputDomain::Exact(NumericDomain::Complex),
-                    FusionHostOutputDomain::RealOrComplex,
-                ] {
-                    let alternative = FusionHostResourceQuery {
-                        output_domain: domain,
-                        ..binary
-                    };
-                    assert_eq!(real_power(&alternative), Some(power));
-                    assert!(real_binary(&alternative).is_none());
-                }
-                assert_eq!(
-                    power.retained_bytes - native.retained_bytes,
-                    payload(input).unwrap()
-                );
+                assert_eq!(native.retained_bytes, real);
+                assert_eq!(power.retained_bytes, real);
+                let complex_power = real_power(&FusionHostResourceQuery {
+                    output_domain: FusionHostOutputDomain::Exact(NumericDomain::Complex),
+                    ..binary
+                })
+                .unwrap();
+                let dual_power = real_power(&FusionHostResourceQuery {
+                    output_domain: FusionHostOutputDomain::RealOrComplex,
+                    ..binary
+                })
+                .unwrap();
+                assert_eq!(complex_power.retained_bytes, complex);
+                assert_eq!(dual_power.retained_bytes, real + complex);
                 assert_eq!(
                     power.scratch_bytes - native.scratch_bytes,
                     payload(input).unwrap() * 2

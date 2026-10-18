@@ -1332,6 +1332,8 @@ impl NativeAutoOffload {
         } else {
             LocalCpuAdmission::Legacy
         };
+        let original_cast_decline = matches!(&cpu_admission, LocalCpuAdmission::Unavailable)
+            && planning.source_decline == crate::placement::LocalSourceDecline::PlainFloatingCast;
         Ok(
             match plan_local_vm_cpu_with_provider(
                 self.provider,
@@ -1345,6 +1347,7 @@ impl NativeAutoOffload {
                         crate::placement::TotalCandidateObservationContract::PreparationBodyCleanup
                     },
                     prepared_authority: planning.prepared_authority,
+                    source_decline: planning.source_decline,
                     family,
                     provider_kind,
                     inputs: values,
@@ -1389,6 +1392,7 @@ impl NativeAutoOffload {
                         Some(code),
                         builtin_call::observation::BuiltinObservationPlan {
                             feedback,
+                            source_declined: original_cast_decline,
                             ..Default::default()
                         },
                     )
@@ -1430,6 +1434,7 @@ impl NativeAutoOffload {
                             feedback,
                             provider_query: Some(provider_query),
                             provider_observation,
+                            source_declined: false,
                         },
                     )
                 }

@@ -113,10 +113,12 @@ async fn sinh_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
         "X",
     )
     .await?;
-    super::inverse_helpers::preparation::unary(
+    super::inverse_helpers::preparation::unary_real(
         runtime.as_ref(),
         runmat_builtins::SINH_CATALOG_ENTRY.identity,
         value,
+        |value: f32| Ok(value.sinh()),
+        |value: f64| Ok(value.sinh()),
         |value| async move {
             let output = sinh_admitted(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())

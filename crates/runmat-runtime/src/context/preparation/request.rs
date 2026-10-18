@@ -108,6 +108,18 @@ impl AdmittedBuiltinPreparation {
     ) -> Option<super::AdmittedHostResources> {
         super::host_resources::bound(self, Some(context))
     }
+    pub fn prepare_host_numerical_output(
+        &self,
+        context: &super::RuntimeContext,
+    ) -> Result<
+        Option<super::PreparedHostNumericalOutput>,
+        crate::context::host_allocation::HostAllocationError,
+    > {
+        let Some(resources) = self.host_resource_bound(context) else {
+            return Ok(None);
+        };
+        super::PreparedHostNumericalOutput::prepare_admitted(context, &resources)
+    }
     pub(crate) fn with_real_unary(
         mut self,
         operation: runmat_types::ScalarUnaryMath,

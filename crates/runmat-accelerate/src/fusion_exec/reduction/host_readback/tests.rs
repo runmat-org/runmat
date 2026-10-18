@@ -137,7 +137,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             provider_scratch: ResourceByteBound::Known(0),
             queue_slots: 0,
         };
-        let plan = CpuReadbackPlan {
+        let plan = || CpuReadbackPlan {
             sources: vec![source(first.clone(), 0), source(second.clone(), 1)],
             stack_len: 2,
             resident_offsets: vec![0, 1],
@@ -147,10 +147,10 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             Value::GpuTensor(second.clone()),
         ];
 
-        let published =
-            block_on(plan.prepare(&stack)).unwrap_or_else(|_| panic!("owned native F32 readbacks"));
-        assert_eq!(published.len(), 2);
-        for (offset, value) in &published {
+        let published = block_on(plan().prepare_inputs(&stack))
+            .unwrap_or_else(|_| panic!("owned native F32 readbacks"));
+        assert_eq!(published.entry.len(), 2);
+        for (offset, value) in &published.entry {
             assert!(matches!(value, Value::Tensor(tensor)
                 if tensor.numeric_dtype() == runmat_value::NumericDType::F32
                     && tensor.shape() == [1, 1]
@@ -158,6 +158,9 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
             assert!(*offset < 2);
         }
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 2);
+        published
+            .cleanup()
+            .expect("retire published source references");
         // A missing comparative price must not revoke an independently
         // authenticated VM route or turn its retained readback into feedback.
         for operations in [false, true] {
@@ -198,6 +201,7 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
                     Some(&runtime),
                     Some(vec![VmFusionHostOperation::Builtin(binding)]),
                     Some(readback),
+                    None,
                 )
             } else {
                 observation.with_vm_host_route_readback(
@@ -319,28 +323,53 @@ fn changed_evidence_and_late_source_retirement_never_publish_private_downloads()
         };
         assert!(!incomplete.covers_resident_slice(&uncovered));
         assert!(matches!(
-            block_on(incomplete.prepare(&uncovered)),
+            block_on(incomplete.prepare_inputs(&uncovered)),
             Err(CpuReadbackFailure::BeforeEffect(_))
         ));
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
         owner.workspace.store(8, Ordering::SeqCst);
         assert!(matches!(
-            block_on(plan.prepare(&stack)),
+            block_on(plan().prepare_inputs(&stack)),
             Err(CpuReadbackFailure::BeforeEffect(_))
         ));
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 0);
         owner.workspace.store(4, Ordering::SeqCst);
         owner.pending_second.store(true, Ordering::SeqCst);
-        let mut pending = Box::pin(plan.prepare(&stack));
+        let cancel_first = owner.resident();
+        let cancel_second = owner.resident();
+        let cancel_probes = {
+            let probes = owner.probes.lock().unwrap();
+            [
+                probes[probes.len() - 2].1.clone(),
+                probes[probes.len() - 1].1.clone(),
+            ]
+        };
+        let cancel_stack = [
+            Value::GpuTensor(cancel_first.clone()),
+            Value::GpuTensor(cancel_second.clone()),
+        ];
+        let cancel_plan = CpuReadbackPlan {
+            sources: vec![
+                source(cancel_first.clone(), 0),
+                source(cancel_second.clone(), 1),
+            ],
+            stack_len: 2,
+            resident_offsets: vec![0, 1],
+        };
+        drop((cancel_first, cancel_second));
+        let mut pending = Box::pin(cancel_plan.prepare_inputs(&cancel_stack));
         let waker = futures::task::noop_waker();
         let mut context = Context::from_waker(&waker);
         assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));
         drop(pending);
         assert_eq!(owner.downloads.load(Ordering::SeqCst), 2);
+        drop(cancel_stack);
+        assert_eq!(cancel_probes[0].retirements(), 1);
+        assert_eq!(cancel_probes[1].retirements(), 1);
         assert!(matches!(&stack[0], Value::GpuTensor(_)));
         assert!(matches!(&stack[1], Value::GpuTensor(_)));
         owner.downloads.store(0, Ordering::SeqCst);
-        let mut pending = Box::pin(plan.prepare(&stack));
+        let mut pending = Box::pin(plan().prepare_inputs(&stack));
         assert!(matches!(pending.as_mut().poll(&mut context), Poll::Pending));
         owner.probes.lock().unwrap()[0].1.mark_unavailable();
         owner.release_second.store(true, Ordering::SeqCst);

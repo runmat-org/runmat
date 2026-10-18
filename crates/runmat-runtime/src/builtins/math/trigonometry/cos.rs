@@ -126,12 +126,14 @@ async fn cos_builtin(
         _ => None,
     };
     let signature = usize::from(!rest.is_empty());
-    super::inverse_helpers::preparation::unary_form(
+    super::inverse_helpers::preparation::unary_form_real(
         runtime.as_ref(),
         runmat_builtins::COS_CATALOG_ENTRY.identity,
         value,
         signature,
         1 + rest.len(),
+        |value: f32| Ok(value.cos()),
+        |value: f64| Ok(value.cos()),
         |value| async move {
             super::inverse_helpers::like::evaluate(
                 value,

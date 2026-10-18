@@ -61,6 +61,9 @@ pub(super) async fn execute_non_table(
             },
         },
         value,
+        true,
+        |value: f32| Ok(operation.complex_f32(value, 0.0)),
+        |value: f64| Ok(operation.complex_f64(value, 0.0)),
         |value| async move {
             let output = match value {
                 Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,

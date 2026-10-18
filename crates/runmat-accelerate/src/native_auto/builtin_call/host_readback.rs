@@ -8,6 +8,7 @@ use runmat_runtime::context::preparation::AdmittedBuiltinPreparation;
 pub(super) struct Admission {
     pub plan: CpuReadbackPlan,
     pub resources: CpuHostResources,
+    pub envelope: runmat_runtime::context::preparation::AdmittedHostResources,
     pub identity: Digest,
 }
 
@@ -40,11 +41,23 @@ pub(super) fn admit(
     if sources.is_empty() {
         return None;
     }
+    let managed =
+        runmat_runtime::context::host_allocation::HostAllocationReceipt::policy(Some(context))
+            .ok()?
+            == runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed;
+    if managed
+        && sources
+            .iter()
+            .any(|source| !matches!(&source.capabilities, std::borrow::Cow::Borrowed(_)))
+    {
+        return None;
+    }
     let resources = crate::fusion_exec::host_readback::resources(
         &sources,
         envelope.bound.retained_bytes,
         envelope.bound.scratch_bytes,
         envelope.operand_metadata,
+        managed,
     )?;
     let identity = Digest::sha256_serialized(&(
         "prepared-host-envelope-v2",
@@ -63,6 +76,7 @@ pub(super) fn admit(
             resident_offsets,
         },
         resources,
+        envelope,
         identity,
     })
 }

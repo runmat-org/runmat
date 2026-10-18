@@ -137,6 +137,12 @@ async fn power_builtin(
             RootedValue::new(base_result).map_err(|cause| cause.into_runtime_error())
         },
         |base| async move {
+            if matches!(
+                &template,
+                super::output_prototype::ResolvedOutputTemplate::Default
+            ) {
+                return Ok(base);
+            }
             let value =
                 apply_output_template(OUTPUT_PROTOTYPE_CONTEXT, base.value().clone(), &template)
                     .await?;

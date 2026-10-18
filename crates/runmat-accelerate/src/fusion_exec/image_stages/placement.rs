@@ -235,6 +235,7 @@ fn select_image_candidate(
         prepared_authority: None,
         vm_right: original.map(|(_, right, _)| right),
         vm_decline: decline,
+        source_decline: crate::placement::LocalSourceDecline::None,
         family: ProviderOperationFamily::Fusion,
         cpu,
         cpu_admission,

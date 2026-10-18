@@ -30,6 +30,7 @@ pub(crate) mod provider_restore;
 pub mod random;
 pub mod random_args;
 pub(crate) mod real_unary_preparation;
+pub(crate) mod host_unary_output;
 pub mod residency;
 pub mod resident_output;
 pub mod shape;

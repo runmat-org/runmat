@@ -130,7 +130,12 @@ where
                 crate::context::VmFusionHostInstruction::ElementwiseCall,
                 std::iter::once(&host),
             );
-            let numerical = super::classify_value(&host, plan.physical().predicate());
+            let numerical = super::classify_value(
+                &host,
+                plan.physical().predicate(),
+                runtime,
+                plan.admission().binding.builtin.name,
+            )?;
             let output = body(host).await?;
             if let (Some(route), Some(runtime)) = (route, runtime) {
                 route.confirm_numerical_host_branch(

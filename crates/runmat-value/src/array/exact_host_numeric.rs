@@ -237,6 +237,16 @@ pub struct ExactHostTensorAllocation {
 }
 
 impl ExactHostTensorAllocation {
+    /// Borrow the immutable dimensions owned by this exact allocation.
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    /// Native class of the exact payload.
+    pub fn numeric_dtype(&self) -> NumericDType {
+        self.numeric.dtype
+    }
+
     /// Exact backing bytes for an ordinary Rust-owned tensor constructed
     /// without retained allocation claims. This includes the typed payload,
     /// its shared host owner, and the independently shared shape owner.

@@ -290,6 +290,11 @@ fn preparation_error(error: ProviderExecutionError) -> RuntimeError {
 }
 
 impl BuiltinPreparationObservation for BuiltinCallGuard {
+    fn take_host_numerical_output(
+        &mut self,
+    ) -> Option<runmat_runtime::context::preparation::PreparedHostNumericalOutput> {
+        self.host_numerical_output.take()
+    }
     fn take_compound(
         &mut self,
     ) -> Option<runmat_runtime::context::preparation::AdmittedBuiltinCompound> {

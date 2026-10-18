@@ -59,6 +59,7 @@ mod timer;
 mod tcp;
 mod vm_fusion_completion;
 mod vm_fusion_host_route;
+mod vm_fusion_host_outputs;
 mod vm_fusion_host_resources;
 pub use vm_fusion_host_resources::checked_single_add_min_host_scratch;
 #[cfg(test)]
@@ -187,6 +188,7 @@ pub use vm_fusion_completion::{
     VmFusionFeedbackLease, VmFusionInstalledRegion, VmFusionRegionRegistration,
     VmFusionSemanticIdentity, VmFusionSessionRegistration,
 };
+pub use vm_fusion_host_outputs::{VmFusionHostOutputEntry, VmFusionHostOutputs};
 pub use vm_fusion_host_route::{VmFusionHostInstruction, VmFusionHostOperation, VmFusionHostRoute};
 
 #[cfg(test)]

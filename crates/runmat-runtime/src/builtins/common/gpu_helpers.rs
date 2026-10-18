@@ -475,7 +475,7 @@ pub(crate) async fn download_value_preserving_residency_admitted_async(
 
 /// A provider-issued stage proves selected physical scratch/queue ownership
 /// before download. This shares the ordinary decoder and source checks.
-pub(crate) async fn download_value_preserving_residency_staged_async(
+pub async fn download_value_preserving_residency_staged_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
     stage: PreparedNumericDownloadStage,

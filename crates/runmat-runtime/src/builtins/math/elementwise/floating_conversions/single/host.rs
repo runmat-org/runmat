@@ -1,15 +1,57 @@
 use super::storage::{
     char_array_to_tensor, numeric_scalar_to_f32, single_complex_tensor_to_host,
-    single_tensor_to_host,
+    single_tensor_to_host, single_tensor_to_prepared_host,
 };
 use super::{conversion_error, single_error_with_detail};
 
-pub(super) fn convert(value: Value) -> BuiltinResult<Value> {
+pub(super) fn convert(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    host_cast_output: Option<crate::context::preparation::PreparedHostNumericalOutput>,
+) -> BuiltinResult<Value> {
+    if host_cast_output.is_some() && !matches!(&value, Value::Num(_) | Value::Tensor(_)) {
+        return Err(single_error_with_detail(
+            &SINGLE_ERROR_INTERNAL,
+            "selected exact single output received an unsupported operand",
+        ));
+    }
     match value {
-        Value::Num(value) => single_scalar_value(value as f32),
+        Value::Num(value) => match host_cast_output {
+            Some(output) => {
+                let runtime = runtime.ok_or_else(|| {
+                    single_error_with_detail(
+                        &SINGLE_ERROR_INTERNAL,
+                        "selected exact single output has no runtime authority",
+                    )
+                })?;
+                if !output.matches_floating_cast(
+                    runmat_types::NumericClass::Single,
+                    runmat_value::NumericDType::F32,
+                    &[1, 1],
+                ) {
+                    return Err(single_error_with_detail(
+                        &SINGLE_ERROR_INTERNAL,
+                        "selected exact single scalar output does not match its cast authority",
+                    ));
+                }
+                output.generate_real_f32(runtime, |_| Ok(value as f32))
+            }
+            None => single_scalar_value(value as f32),
+        },
         Value::Int(value) => single_scalar_value(super::storage::int_value_to_f32(&value)),
         Value::Bool(value) => single_scalar_value(if value { 1.0 } else { 0.0 }),
-        Value::Tensor(value) => single_from_tensor(value),
+        Value::Tensor(value) => match host_cast_output {
+            Some(output) => {
+                let runtime = runtime.ok_or_else(|| {
+                    single_error_with_detail(
+                        &SINGLE_ERROR_INTERNAL,
+                        "selected exact single output has no runtime authority",
+                    )
+                })?;
+                single_tensor_to_prepared_host(runtime, value, output).map(Value::Tensor)
+            }
+            None => single_from_tensor(value),
+        },
         Value::SparseTensor(value) => single_from_sparse_tensor(value),
         Value::Complex(real, imag) => single_complex_scalar_value(real as f32, imag as f32),
         Value::ComplexTensor(value) => single_from_complex_tensor(value),

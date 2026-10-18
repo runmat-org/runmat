@@ -1,4 +1,7 @@
 use super::*;
+use runmat_builtins::{
+    BuiltinOperandPreparation, BuiltinPreparationOperation, BuiltinPreparationProviderRequirement,
+};
 
 /// Invocation-owned completion and borrowed host/provider preparation evidence.
 #[derive(Default)]
@@ -182,9 +185,16 @@ impl NativeAutoOffload {
         args: &[Value],
         runtime: Option<&RuntimeContext>,
     ) -> ProviderExecutionResult<PreparedBuiltinCall> {
+        let requires_double_provider = runmat_builtins::builtin_catalog_primary_entry_by_name(name)
+            .is_some_and(|entry| {
+                matches!(entry.placement.preparation, BuiltinOperandPreparation::Forms(forms)
+                    if forms.iter().any(|form| {
+                        form.operation == BuiltinPreparationOperation::FloatingCast(runmat_types::NumericClass::Double)
+                            && form.provider_requirement == BuiltinPreparationProviderRequirement::F64
+                    }))
+            });
         if !self.enabled
-            || (name.eq_ignore_ascii_case("double")
-                && self.provider.precision() != ProviderPrecision::F64)
+            || (requires_double_provider && self.provider.precision() != ProviderPrecision::F64)
         {
             return Ok(PreparedBuiltinCall::unobserved(args.to_vec()));
         }
@@ -253,6 +263,11 @@ impl NativeAutoOffload {
             super::observation::BuiltinPlanningContext {
                 compound,
                 runtime,
+                source_decline: if matches!(&operation, ArgumentOperation::FloatingCast(_)) {
+                    crate::placement::LocalSourceDecline::PlainFloatingCast
+                } else {
+                    crate::placement::LocalSourceDecline::None
+                },
                 preparation_program: compound
                     .map(|plan| plan.preparation_program())
                     .or_else(|| operation.preparation_program()),
@@ -270,6 +285,9 @@ impl NativeAutoOffload {
         let mut observation =
             BuiltinCallObservation::new(plan.feedback, trace, evaluation.recommend_gpu, args)
                 .with_completion(completion);
+        if plan.source_declined {
+            observation.preparation_fallback();
+        }
         let query = plan
             .provider_query
             .as_deref()
@@ -328,6 +346,7 @@ impl NativeAutoOffload {
                     uploads,
                     request_input_root: None,
                     readbacks: None,
+                    host_numerical_output: None,
                 }),
                 Err(error) => {
                     // A completed preparation error is an operational failure;

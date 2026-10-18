@@ -1,9 +1,11 @@
 use super::*;
 
 pub(super) async fn convert(
+    runtime: Option<&crate::context::RuntimeContext>,
     value: Value,
     template: OutputTemplate,
     mut borrowed: Vec<runmat_accelerate_api::GpuTensorHandle>,
+    host_cast_output: Option<crate::context::preparation::PreparedHostNumericalOutput>,
 ) -> BuiltinResult<RootedValue> {
     // Services may transform the operand; protect both originals and the
     // actual prepared resident payload, and re-admit through the domain body.
@@ -17,7 +19,7 @@ pub(super) async fn convert(
         .collect();
     let converted = match value {
         Value::GpuTensor(handle) => double_from_gpu(handle, &protected).await?,
-        host => host::convert(host)?,
+        host => host::convert(runtime, host, host_cast_output)?,
     };
     let intermediate = match &converted {
         Value::GpuTensor(handle) => Some(handle.clone()),

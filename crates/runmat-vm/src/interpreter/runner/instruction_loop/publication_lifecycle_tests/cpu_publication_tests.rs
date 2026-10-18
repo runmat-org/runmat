@@ -97,12 +97,19 @@ fn one_host_fault(case: FaultCase) {
             selected.signature.revision.authority,
             PlacementExecutionAuthorityRevision::RuntimeBindingSession(_)
         ));
-        let delivered = capture.delivered.lock().unwrap();
-        let receipts = delivered[delivered_before..]
-            .iter()
-            .filter(|feedback| feedback.signature.operation == "fusion.reduction")
-            .collect::<Vec<_>>();
+        // Keep assertions outside the capture mutex. An authentic placement
+        // failure must report its first cause rather than poison feedback
+        // delivery during the session's destructor.
+        let new_receipts = || {
+            let delivered = capture.delivered.lock().unwrap();
+            delivered[delivered_before..]
+                .iter()
+                .filter(|feedback| feedback.signature.operation == "fusion.reduction")
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         if selected.kind == ExecutionCandidateKind::SharedRuntime {
+            let receipts = new_receipts();
             assert!(
                 reached.get(),
                 "host fault must reach the exact checked StoreVar"
@@ -142,6 +149,27 @@ fn one_host_fault(case: FaultCase) {
         result
             .expect("provider trial completes rather than host-suspending")
             .expect("normal provider trial succeeds");
+        // Provider completion is asynchronous after the VM has published the
+        // selected output. The scope exit performs only one nonblocking drain;
+        // wait for this exact receipt rather than racing the device callback.
+        // Each prior provider trial is drained before starting the next one.
+        let started_waiting = std::time::Instant::now();
+        let receipts = loop {
+            runmat_runtime::context::RuntimePlacementService::drain_feedback(placement.as_ref());
+            let receipts = new_receipts();
+            if receipts.iter().any(|receipt| {
+                receipt.signature == selected.signature
+                    && receipt.candidate == selected.candidate
+                    && receipt.kind == selected.kind
+            }) {
+                break receipts;
+            }
+            assert!(
+                started_waiting.elapsed() < std::time::Duration::from_secs(5),
+                "selected provider receipt did not complete: {receipts:?}"
+            );
+            std::thread::yield_now();
+        };
         assert_eq!(receipts.len(), 1, "normal provider trial has one receipt");
         assert_eq!(receipts[0].signature, selected.signature);
         assert_eq!(receipts[0].candidate, selected.candidate);

@@ -27,6 +27,10 @@ pub trait BuiltinPreparationObservation {
     fn take_compound(&mut self) -> Option<super::AdmittedBuiltinCompound> {
         None
     }
+    /// Transfer the authenticated exact numerical result owner.
+    fn take_host_numerical_output(&mut self) -> Option<super::PreparedHostNumericalOutput> {
+        None
+    }
     /// A completed private preparation effect may forbid retry of the body.
     /// This can only strengthen to Never; it never requests a new replay.
     fn gpu_gather_retry_policy(&self) -> crate::GpuGatherRetry {
@@ -59,6 +63,13 @@ impl PreparedBuiltinOperands {
         self.observation
             .as_mut()
             .and_then(|observation| observation.take_compound())
+    }
+    pub(super) fn take_host_numerical_output(
+        &mut self,
+    ) -> Option<super::PreparedHostNumericalOutput> {
+        self.observation
+            .as_mut()
+            .and_then(|observation| observation.take_host_numerical_output())
     }
     pub(super) fn forbids_gpu_gather_retry(&self) -> bool {
         self.observation.as_ref().is_some_and(|observation| {

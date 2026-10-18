@@ -14,7 +14,9 @@ pub struct AdmittedHostResources {
     pub output_class: NumericClass,
     pub output_domain: FusionHostOutputDomain,
     pub operand_metadata: u64,
+    pub operand_shapes: Vec<Vec<usize>>,
     pub identity: runmat_execution::Digest,
+    pub operation: runmat_builtins::BuiltinPreparationOperation,
 }
 
 /// Missing canonical allocation contracts remain unavailable. In particular,
@@ -164,6 +166,8 @@ pub(super) fn bound(
         output_class,
         output_domain,
         operand_metadata,
+        operand_shapes: shapes,
         identity,
+        operation: request.form().operation,
     })
 }

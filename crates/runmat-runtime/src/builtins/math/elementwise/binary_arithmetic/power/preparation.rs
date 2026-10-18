@@ -1,6 +1,6 @@
 //! Value-domain evidence belongs to this admitted pair, not a cached name.
 use crate::context::preparation::{
-    execute_request_compound, AdmittedBuiltinCompound, AdmittedBuiltinPreparation,
+    execute_request_numerical, AdmittedBuiltinCompound, AdmittedBuiltinPreparation,
     BuiltinPreparationAdmission,
 };
 use crate::context::RuntimeContext;
@@ -32,10 +32,29 @@ where
             crate::context::VmFusionHostInstruction::ElementwiseBinary,
             [&left, &right].into_iter(),
         ) {
-            // The canonical power body still owns domain/class arithmetic;
-            // only operand promotion is bypassed for the selected host route.
-            let evidence = classify_operands(&left, &right)?;
-            let output = publish(body(left, right).await?).await?;
+            let numerical_output = route.take_numerical_output(
+                runtime.unwrap(),
+                crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                BuiltinBindingIdentity {
+                    builtin: POWER_CATALOG_ENTRY.identity,
+                    variant: "default",
+                },
+            )?;
+            let (output, evidence) = match numerical_output {
+                Some(output) => {
+                    let (output, domain) =
+                        managed::execute(runtime.unwrap(), output, &left, &right)?;
+                    (
+                        output,
+                        runmat_accelerate_api::NumericalDomainEvidence::RealPower(domain),
+                    )
+                }
+                None => {
+                    let evidence = classify_operands(&left, &right)?;
+                    (body(left, right).await?, evidence)
+                }
+            };
+            let output = publish(output).await?;
             route.confirm_numerical_host_branch(
                 runtime.unwrap(),
                 crate::context::VmFusionHostInstruction::ElementwiseBinary,
@@ -90,72 +109,107 @@ where
     } else {
         None
     };
-    execute_request_compound(runtime, request, |mut values, compound| async move {
-        if let Some(compound) = compound.or(direct) {
-            let right = values.remove(1);
-            let left = values.remove(0);
-            let output = match compound {
-                AdmittedBuiltinCompound::RealPower(compound) => {
-                    super::compound::execute(runtime, *compound, left, right).await?
+    execute_request_numerical(
+        runtime,
+        request,
+        |mut values, compound, numerical_output| async move {
+            if let Some(output) = numerical_output {
+                if compound.is_some() || direct.is_some() {
+                    return Err(super::super::preparation::managed::invalid());
                 }
-                AdmittedBuiltinCompound::RealPowerScalar(compound) => {
-                    super::scalar_compound::execute(runtime, *compound, left, right).await?
-                }
-                AdmittedBuiltinCompound::RealUnary(_) => {
-                    let mut error =
-                        super::builtin_error("power: received another admitted compound authority");
-                    error.gpu_gather_retry = crate::GpuGatherRetry::Never;
-                    return Err(error);
-                }
-            };
-            return publish(output).await;
-        }
-        let route = crate::builtins::math::host_route::canonical(
-            runtime,
-            crate::context::VmFusionHostInstruction::ElementwiseBinary,
-            values.iter(),
-        );
-        if route.is_none() {
-            // Missing complete physical recipe is not a certified no-attempt
-            // hook result. Validate each actual owner before legacy probe or
-            // scalar-staging effects; never invent an owner for unknown views.
-            let mut owners: Vec<&'static dyn runmat_accelerate_api::AccelProvider> = Vec::new();
-            for value in &values {
-                let Value::GpuTensor(source) = value else {
-                    continue;
-                };
-                let Some(owner) =
-                    crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
-                else {
-                    continue;
-                };
-                if owners
-                    .iter()
-                    .any(|previous| runmat_accelerate_api::same_provider_instance(*previous, owner))
-                {
-                    continue;
-                }
-                owners.push(owner);
-                crate::context::provider_operation::unavailable_provider_route::<()>(
-                    runtime, owner,
+                let right = values.remove(1);
+                let left = values.remove(0);
+                let route = crate::builtins::math::host_route::canonical(
+                    runtime,
+                    crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                    [&left, &right].into_iter(),
+                );
+                let (output, domain) = managed::execute(
+                    runtime.ok_or_else(super::super::preparation::managed::invalid)?,
+                    output,
+                    &left,
+                    &right,
                 )?;
+                let output = publish(output).await?;
+                if let Some(route) = route {
+                    route.confirm_numerical_host_branch(
+                        runtime.unwrap(),
+                        crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                        runmat_accelerate_api::NumericalDomainEvidence::RealPower(domain),
+                    );
+                }
+                return Ok(output);
             }
-        }
-        let evidence = route.as_ref().map(|_| classify(&values)).transpose()?;
-        let right = values.remove(1);
-        let output = publish(body(values.remove(0), right).await?).await?;
-        if let (Some(route), Some(evidence)) = (route, evidence) {
-            route.confirm_numerical_host_branch(
-                runtime.unwrap(),
+            if let Some(compound) = compound.or(direct) {
+                let right = values.remove(1);
+                let left = values.remove(0);
+                let output = match compound {
+                    AdmittedBuiltinCompound::RealPower(compound) => {
+                        super::compound::execute(runtime, *compound, left, right).await?
+                    }
+                    AdmittedBuiltinCompound::RealPowerScalar(compound) => {
+                        super::scalar_compound::execute(runtime, *compound, left, right).await?
+                    }
+                    AdmittedBuiltinCompound::RealUnary(_) => {
+                        let mut error = super::builtin_error(
+                            "power: received another admitted compound authority",
+                        );
+                        error.gpu_gather_retry = crate::GpuGatherRetry::Never;
+                        return Err(error);
+                    }
+                };
+                return publish(output).await;
+            }
+            let route = crate::builtins::math::host_route::canonical(
+                runtime,
                 crate::context::VmFusionHostInstruction::ElementwiseBinary,
-                evidence,
+                values.iter(),
             );
-        }
-        Ok(output)
-    })
+            if let (Some(_), Some(runtime)) = (&route, runtime) {
+                super::super::preparation::managed::require_unbounded_host_output(runtime)?;
+            }
+            if route.is_none() {
+                // Missing complete physical recipe is not a certified no-attempt
+                // hook result. Validate each actual owner before legacy probe or
+                // scalar-staging effects; never invent an owner for unknown views.
+                let mut owners: Vec<&'static dyn runmat_accelerate_api::AccelProvider> = Vec::new();
+                for value in &values {
+                    let Value::GpuTensor(source) = value else {
+                        continue;
+                    };
+                    let Some(owner) =
+                        crate::builtins::common::gpu_helpers::exact_provider_for_handle(source)
+                    else {
+                        continue;
+                    };
+                    if owners.iter().any(|previous| {
+                        runmat_accelerate_api::same_provider_instance(*previous, owner)
+                    }) {
+                        continue;
+                    }
+                    owners.push(owner);
+                    crate::context::provider_operation::unavailable_provider_route::<()>(
+                        runtime, owner,
+                    )?;
+                }
+            }
+            let evidence = route.as_ref().map(|_| classify(&values)).transpose()?;
+            let right = values.remove(1);
+            let output = publish(body(values.remove(0), right).await?).await?;
+            if let (Some(route), Some(evidence)) = (route, evidence) {
+                route.confirm_numerical_host_branch(
+                    runtime.unwrap(),
+                    crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                    evidence,
+                );
+            }
+            Ok(output)
+        },
+    )
     .await
 }
 
 #[path = "preparation/domain.rs"]
 mod domain;
 use domain::{classify, classify_operands};
+mod managed;

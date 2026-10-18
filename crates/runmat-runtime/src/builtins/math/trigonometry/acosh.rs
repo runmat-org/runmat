@@ -145,6 +145,9 @@ async fn acosh_builtin(
             &runmat_builtins::ACOSH_ERROR_INTERNAL,
         ),
         value,
+        true,
+        |value: f32| Ok(acosh_real_parts_f32(value)),
+        |value: f64| Ok(acosh_real_parts(value)),
         |value| async move {
             let output = acosh_execute(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())

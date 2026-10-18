@@ -10,8 +10,10 @@ pub(crate) fn resources(
     retained_outputs: u64,
     active_scratch: u64,
     operand_metadata: u64,
+    managed: bool,
 ) -> Option<CpuHostResources> {
     let mut retained_mirrors = 0_u64;
+    let mut base_mirror_bytes = 0_u64;
     let mut host_peak = 0_u64;
     let mut download_bytes = 0_u64;
     let mut demands = Vec::with_capacity(sources.len());
@@ -20,6 +22,7 @@ pub(crate) fn resources(
             .ok()?
             .checked_mul(std::mem::size_of::<usize>() as u64)?;
         let value_bytes = source.payload_bytes.checked_add(metadata)?;
+        base_mirror_bytes = base_mirror_bytes.checked_add(value_bytes)?;
         host_peak = host_peak.max(
             retained_mirrors
                 .checked_add(value_bytes)?
@@ -42,8 +45,32 @@ pub(crate) fn resources(
     let body_extra = retained_mirrors
         .checked_add(active_scratch)?
         .checked_add(operand_metadata)?;
-    let scratch_bytes =
-        crate::fusion_exec::checked_extra_host_scratch(retained_outputs, host_peak, body_extra)?;
+    let (scratch_bytes, retained_bytes) = if managed {
+        let readback = super::managed_readback::quote(sources)?;
+        let body_structural = readback.body_live_bytes.checked_sub(base_mirror_bytes)?;
+        let body_peak = body_extra.checked_add(body_structural)?;
+        // Output/body receipts remain live while the separate source receipt
+        // stages downloads. Their scratch reservations therefore overlap,
+        // even though numerical body execution follows the last readback.
+        // Callback claims survive the provider frame and join retained demand.
+        (
+            readback
+                .plan
+                .scratch_peak_bytes()
+                .checked_add(active_scratch)?
+                .max(body_peak),
+            retained_outputs.checked_add(readback.plan.retained_output_bytes())?,
+        )
+    } else {
+        (
+            crate::fusion_exec::checked_extra_host_scratch(
+                retained_outputs,
+                host_peak,
+                body_extra,
+            )?,
+            retained_outputs,
+        )
+    };
     let presentation = if sources.is_empty() {
         CandidateOutputPresentation::Direct
     } else {
@@ -54,7 +81,7 @@ pub(crate) fn resources(
     Some(CpuHostResources {
         resources: CandidateResourceDemand {
             cpu_millicores: 1000,
-            retained_bytes: ResourceByteBound::Known(retained_outputs),
+            retained_bytes: ResourceByteBound::Known(retained_bytes),
             scratch_bytes: ResourceByteBound::Known(scratch_bytes),
             queue_slots: 0,
             provider_host_workspace: None,

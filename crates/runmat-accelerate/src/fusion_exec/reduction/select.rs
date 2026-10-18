@@ -175,6 +175,7 @@ pub(super) fn choose(
             prepared_authority: None,
             vm_right,
             vm_decline,
+            source_decline: crate::placement::LocalSourceDecline::None,
             family: ProviderOperationFamily::Fusion,
             cpu: cpu.into(),
             cpu_admission,

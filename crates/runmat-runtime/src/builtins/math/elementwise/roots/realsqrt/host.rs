@@ -45,6 +45,26 @@ pub(super) fn evaluate_tensor(tensor: Tensor) -> BuiltinResult<Value> {
     Ok(tensor_into_value(output))
 }
 
+pub(super) fn admitted_scalar_f64(value: f64) -> BuiltinResult<f64> {
+    if value < 0.0 {
+        return Err(errors::with_detail(
+            &REALSQRT_ERROR_DOMAIN,
+            "input contains negative values",
+        ));
+    }
+    Ok(canonical_zero(value.sqrt()))
+}
+
+pub(super) fn admitted_scalar_f32(value: f32) -> BuiltinResult<f32> {
+    if value < 0.0 {
+        return Err(errors::with_detail(
+            &REALSQRT_ERROR_DOMAIN,
+            "input contains negative values",
+        ));
+    }
+    Ok(canonical_zero(value.sqrt()))
+}
+
 pub(super) fn evaluate_sparse(sparse: SparseTensor) -> BuiltinResult<Value> {
     if sparse.integer_storage().is_some() || sparse.is_logical() || sparse.is_complex() {
         return Err(errors::with_detail(

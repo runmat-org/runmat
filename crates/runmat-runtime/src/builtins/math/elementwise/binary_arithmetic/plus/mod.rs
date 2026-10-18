@@ -163,6 +163,7 @@ async fn plus_builtin(
     super::preparation::execute_in_context(
         runtime.as_ref(),
         PLUS_CATALOG_ENTRY.identity,
+        runmat_types::OperatorKind::Add,
         2 + rest.len(),
         lhs,
         rhs,

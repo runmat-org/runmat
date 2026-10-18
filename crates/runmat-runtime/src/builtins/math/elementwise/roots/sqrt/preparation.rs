@@ -37,6 +37,9 @@ pub(super) async fn execute(
             },
         },
         value,
+        true,
+        |value: f32| Ok(host::real_parts_f32(value)),
+        |value: f64| Ok(host::real_parts_f64(value)),
         |value| async move {
             let output = evaluation::evaluate_admitted(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())

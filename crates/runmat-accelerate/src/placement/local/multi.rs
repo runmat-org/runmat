@@ -194,6 +194,36 @@ pub(crate) enum LocalProviderAdmission {
     ImplementationUnavailable,
 }
 
+/// The admitted floating-conversion body can execute the original resident
+/// input after a provider feasibility refusal. This grants no host candidate
+/// and never turns an execution or resource failure into a fallback.
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+pub(crate) enum LocalSourceDecline {
+    #[default]
+    None,
+    PlainFloatingCast,
+}
+
+impl LocalSourceDecline {
+    fn permits_provider_rejection(self, code: &ProviderRejectionCode) -> bool {
+        self == Self::PlainFloatingCast
+            && match code {
+                ProviderRejectionCode::UnsupportedOperation
+                | ProviderRejectionCode::UnsupportedElementType
+                | ProviderRejectionCode::UnsupportedStorage
+                | ProviderRejectionCode::UnsupportedLayout
+                | ProviderRejectionCode::UnsupportedRank => true,
+                // Invalid shape can be a malformed request rather than a
+                // provider capability. Resource and availability failures
+                // likewise must not become a source fallback.
+                ProviderRejectionCode::InvalidShape
+                | ProviderRejectionCode::ResourceLimit
+                | ProviderRejectionCode::ProviderUnavailable
+                | ProviderRejectionCode::UnknownResourceEstimate => false,
+            }
+    }
+}
+
 pub(crate) struct LocalMultiPlacementRequest<'a> {
     pub(crate) operation: &'a str,
     pub(crate) semantic_identity: Option<Digest>,
@@ -202,6 +232,7 @@ pub(crate) struct LocalMultiPlacementRequest<'a> {
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
     pub(crate) vm_right: Option<&'a runmat_runtime::context::VmFusionCompletionRight>,
     pub(crate) vm_decline: Option<&'a runmat_runtime::context::VmFusionDeclineRight>,
+    pub(crate) source_decline: LocalSourceDecline,
     pub(crate) family: ProviderOperationFamily,
     pub(crate) cpu: LocalCpuCandidate,
     pub(crate) cpu_admission: LocalCpuAdmission,
@@ -290,6 +321,7 @@ fn plan_local_multi_with_provider_mode(
         prepared_authority,
         vm_right,
         vm_decline,
+        source_decline,
         family,
         mut cpu,
         cpu_admission,
@@ -381,6 +413,7 @@ fn plan_local_multi_with_provider_mode(
     let cpu_cost = cpu.route.cost;
     let mut admitted = Vec::new();
     let mut rejected = Vec::new();
+    let mut only_source_decline_rejections = true;
     admitted.try_reserve_exact(physical.len()).map_err(|_| {
         Box::new(
             runmat_runtime::build_runtime_error("admitted physical record allocation failed")
@@ -464,6 +497,8 @@ fn plan_local_multi_with_provider_mode(
         let estimate = match feasibility {
             ProviderFeasibility::Supported { estimate } => estimate,
             ProviderFeasibility::Rejected { rejection } => {
+                only_source_decline_rejections &=
+                    source_decline.permits_provider_rejection(&rejection.code);
                 rejected.push((candidate.physical_identity, query, rejection.code));
                 continue;
             }
@@ -472,6 +507,7 @@ fn plan_local_multi_with_provider_mode(
             && estimate.output_bytes.is_none()
             && query.workload.typed_reduction.is_none()
         {
+            only_source_decline_rejections = false;
             rejected.push((
                 candidate.physical_identity,
                 query,
@@ -638,12 +674,15 @@ fn plan_local_multi_with_provider_mode(
     rejected.sort_by(|left, right| left.0.cmp(&right.0));
     if admitted.is_empty() {
         if cpu_resources.is_none() {
-            // A VM-owned fusion window can decline this optimization and run
-            // its original instructions. That is not a host candidate for
-            // this whole group and must not receive a completion receipt.
+            // A VM-owned region can resume its original instructions. An
+            // admitted plain cast can likewise use its original resident
+            // conversion body, but only after typed provider feasibility
+            // rejection. Neither is a host candidate or a completion receipt.
             if vm_right.is_some()
                 || vm_decline
                     .is_some_and(|right| runtime.is_some_and(|context| right.is_current(context)))
+                || (source_decline == LocalSourceDecline::PlainFloatingCast
+                    && only_source_decline_rejections)
             {
                 if let Some((_, _, code)) = rejected.first() {
                     return Ok(LocalPlacementOutcome::ProviderRejected {

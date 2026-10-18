@@ -10,6 +10,39 @@ pub(crate) enum NumericHostRoute {
 }
 
 impl NumericHostRoute {
+    pub(crate) fn take_numerical_output(
+        &self,
+        runtime: &RuntimeContext,
+        instruction: VmFusionHostInstruction,
+        binding: runmat_builtins::BuiltinBindingIdentity,
+    ) -> crate::BuiltinResult<Option<crate::context::preparation::PreparedHostNumericalOutput>>
+    {
+        match self {
+            Self::Vm(route) => route.take_numerical_output(runtime, instruction, binding),
+            Self::Prepared(_) => {
+                match crate::context::host_allocation::HostAllocationReceipt::policy(Some(runtime))
+                {
+                    Ok(crate::context::host_allocation::HostAllocationPolicy::Unbounded) => Ok(None),
+                    Ok(crate::context::host_allocation::HostAllocationPolicy::Managed) => Err(
+                        crate::context::host_allocation::host_allocation_runtime_error(
+                            Some(runtime),
+                            "RunMat:Placement:HostNumericalOutput",
+                            "selected host numerical output",
+                            crate::context::host_allocation::HostAllocationError::MissingManagedOwner,
+                        ),
+                    ),
+                    Err(error) => Err(
+                        crate::context::host_allocation::host_allocation_runtime_error(
+                            Some(runtime),
+                            "RunMat:Placement:HostNumericalOutput",
+                            "selected host numerical output",
+                            error,
+                        ),
+                    ),
+                }
+            }
+        }
+    }
     pub(crate) fn confirm_numerical_host_branch(
         &self,
         runtime: &RuntimeContext,

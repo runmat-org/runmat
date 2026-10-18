@@ -9,7 +9,7 @@ mod effects;
 use effects::ElementwiseEffects;
 mod abi;
 #[path = "elementwise/host_readback.rs"]
-mod host_readback;
+pub(super) mod host_readback;
 #[path = "elementwise/host_candidate.rs"]
 mod host_candidate;
 
@@ -20,6 +20,7 @@ mod effect_tests;
 struct ElementwiseHostContinuation {
     operations: Option<Vec<runmat_runtime::context::VmFusionHostOperation>>,
     readback: Option<super::host_readback::CpuReadbackPlan>,
+    outputs: Option<Vec<host_readback::HostOutputSpec>>,
 }
 
 struct TypedProducerPreparation {
@@ -525,10 +526,21 @@ async fn execute_elementwise_outputs(
         .iter()
         .chain(unbound_constant_values(request.plan))
         .any(runmat_runtime::dispatcher::value_contains_gpu);
+    let managed_host = runmat_runtime::context::host_allocation::HostAllocationReceipt::policy(
+        request.runtime.as_ref(),
+    )
+    .ok()
+        == Some(runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed);
     let admission = vm_right
         .and(input_uses)
         .filter(|_| has_host_operations)
-        .and_then(|uses| host_readback::admit(request, &bindings, provider, uses));
+        .and_then(|uses| {
+            if managed_host {
+                host_readback::admit_host(request, &bindings, provider, uses)
+            } else {
+                host_readback::admit(request, &bindings, provider, uses)
+            }
+        });
     let original_host_program = admission
         .is_none()
         .then(|| bindings.host_facts(request, provider.precision()))
@@ -552,7 +564,7 @@ async fn execute_elementwise_outputs(
         scalar_work_units,
     ))
     .map_err(anyhow::Error::from)?;
-    let host = if has_resident && vm_right.is_some() {
+    let host = if (has_resident || managed_host) && vm_right.is_some() {
         admission.as_ref().map_or(
             super::host_readback::CpuHostPlacement::Unavailable,
             |admission| super::host_readback::CpuHostPlacement::Readbacks(&admission.resources),
@@ -608,9 +620,18 @@ async fn execute_elementwise_outputs(
         FusionExecutionOutcome::Executed(selection) => selection,
         FusionExecutionOutcome::SharedRuntime(observation) => {
             if vm_right.is_some() {
+                let (readback, outputs) = admission
+                    .map(|admission| {
+                        let outputs = (!admission.outputs.is_empty()).then_some(admission.outputs);
+                        let readback =
+                            (!admission.plan.sources.is_empty()).then_some(admission.plan);
+                        (readback, outputs)
+                    })
+                    .unwrap_or((None, None));
                 *host_continuation = Some(ElementwiseHostContinuation {
                     operations: bindings.host_operations(request.runtime.as_ref()),
-                    readback: admission.map(|admission| admission.plan),
+                    readback,
+                    outputs,
                 });
             }
             return Ok(FusionExecutionOutcome::SharedRuntime(observation));
@@ -1032,12 +1053,14 @@ async fn execute_elementwise_placed_inner(
                 let continuation = host_continuation.unwrap_or(ElementwiseHostContinuation {
                     operations: None,
                     readback: None,
+                    outputs: None,
                 });
                 observation.with_vm_host_operations_readback(
                     right,
                     request.runtime.as_ref(),
                     continuation.operations,
                     continuation.readback,
+                    continuation.outputs,
                 )
             } else {
                 observation

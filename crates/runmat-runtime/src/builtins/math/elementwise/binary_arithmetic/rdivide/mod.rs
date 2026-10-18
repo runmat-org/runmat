@@ -129,6 +129,7 @@ async fn rdivide_builtin(
     super::preparation::execute(
         runtime.as_ref(),
         RDIVIDE_CATALOG_ENTRY.identity,
+        runmat_types::OperatorKind::ElementwiseDivide,
         2 + rest.len(),
         lhs,
         rhs,

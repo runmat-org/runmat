@@ -37,6 +37,23 @@ pub(crate) async fn evaluate_in_context(
             && route.allows_intrinsic_host(runtime, runmat_types::OperatorKind::MatrixMultiply))
         .then(|| route.clone())
     });
+    if let (Some(runtime), Some(route)) = (context, route.as_ref()) {
+        if let Some(output) = route
+            .take_intrinsic_numerical_output(runtime, runmat_types::OperatorKind::MatrixMultiply)
+            .map_err(errors::map_control_flow)?
+        {
+            let result = crate::builtins::math::elementwise::binary_arithmetic::preparation::managed::execute_value(
+                runtime,
+                output,
+                runmat_types::OperatorKind::ElementwiseMultiply,
+                lhs,
+                rhs,
+            )
+            .map_err(errors::map_control_flow)?;
+            route.confirm_intrinsic_host(runtime, runmat_types::OperatorKind::MatrixMultiply);
+            return Ok(result);
+        }
+    }
     let output = host::evaluate(lhs.clone(), rhs.clone()).await?;
     if let Some(route) = route {
         route.confirm_intrinsic_host(context.unwrap(), runmat_types::OperatorKind::MatrixMultiply);

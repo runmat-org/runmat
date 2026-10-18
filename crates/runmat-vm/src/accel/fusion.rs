@@ -807,7 +807,7 @@ async fn execute_fusion_reduction_vm(
                     completion: result.completion,
                 }))
             }
-            Ok(FusionExecutionOutcome::SharedRuntime(observation)) => {
+            Ok(FusionExecutionOutcome::SharedRuntime(mut observation)) => {
                 match observation.prepare_vm_host_slice(stack_guard.slice()).await {
                     Ok(Some(replacements)) => stack_guard
                         .replace_host_operands(replacements)

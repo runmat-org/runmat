@@ -43,6 +43,32 @@ pub(crate) fn binding_storage_bytes(count: usize) -> Option<u64> {
 }
 
 impl AdmittedBindings {
+    /// Numerical output ownership follows the actual VM consumer. Unary plus
+    /// returns its input unchanged, so it has no output carrier to consume.
+    pub(crate) fn host_numerical_operations(
+        &self,
+        runtime: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> Option<Vec<runmat_runtime::context::VmFusionHostOperation>> {
+        use runmat_runtime::context::VmFusionHostOperation as HostOperation;
+        let mut operations = Vec::with_capacity(self.operations.len());
+        for operation in &self.operations {
+            operations.push(match &operation.identity {
+                Identity::Primitive(
+                    op @ (PrimitiveOp::UPlus | PrimitiveOp::Neg | PrimitiveOp::Mul),
+                ) => HostOperation::Intrinsic(op.operator_kind()),
+                Identity::Primitive(op) => {
+                    HostOperation::Builtin(selected_host_binding_for_primitive(*op, runtime)?)
+                }
+                Identity::Call {
+                    binding: SelectedFusionIdentity::Canonical(binding),
+                    ..
+                } => HostOperation::Builtin(*binding),
+                Identity::Call { .. } => return None,
+            });
+        }
+        Some(operations)
+    }
+
     pub(super) fn host_facts(
         &self,
         request: &FusionExecutionRequest<'_>,

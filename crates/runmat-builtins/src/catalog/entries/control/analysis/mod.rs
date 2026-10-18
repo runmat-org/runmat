@@ -18,6 +18,7 @@ mod ctrb;
 mod care;
 mod dlqr;
 mod pade;
+mod minreal;
 
 pub use self::care::*;
 pub use self::ctrb::*;
@@ -28,6 +29,7 @@ pub use self::dlqr::*;
 pub use self::feedback::*;
 pub use self::isstable::*;
 pub use self::lqr::*;
+pub use self::minreal::*;
 pub use self::pade::*;
 pub use self::pole::*;
 pub use self::pzmap::*;
@@ -51,4 +53,5 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(care::ENTRIES.iter().copied());
     values.extend(dlqr::ENTRIES.iter().copied());
     values.extend(pade::ENTRIES.iter().copied());
+    values.extend(minreal::ENTRIES.iter().copied());
 }

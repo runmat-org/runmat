@@ -15,6 +15,7 @@ pub enum CpuReadbackFailure {
 }
 
 mod resources;
+mod managed_readback;
 pub(crate) use resources::resources;
 
 pub(crate) struct CpuHostResources {
@@ -105,6 +106,17 @@ pub(crate) fn candidate_preparation_bytes(
     add(vector::<runmat_builtins::BuiltinBindingIdentity>(
         operations,
     )?)?;
+    // Managed VM output envelopes retain every reached instruction's input
+    // and output shapes until their carrier set is installed, before readback.
+    add(vector::<super::elementwise::host_readback::HostOutputSpec>(
+        operations,
+    )?)?;
+    add(vector::<Vec<usize>>(operand_occurrences)?)?;
+    add(vector::<usize>(
+        operand_occurrences
+            .checked_add(operations)?
+            .checked_mul(max_rank)?,
+    )?)?;
     // Every occurrence may retain a shape during resource calculation. The
     // current operation also owns its Vec-of-shapes, argument vector and a
     // temporary known-dims projection while constructing the next shape.
@@ -120,14 +132,7 @@ pub(crate) fn candidate_preparation_bytes(
     >(2)?)?;
     // The canonical host binary calculator constructs a BroadcastPlan while
     // pricing its body. Its ten-vector geometry comes from that owner.
-    add(vector::<usize>(
-        max_rank.checked_mul(
-            usize::try_from(
-                runmat_runtime::builtins::math::host_resources::BROADCAST_METADATA_VECTORS_UPPER,
-            )
-            .ok()?,
-        )?,
-    )?)?;
+    add(runmat_runtime::builtins::math::host_resources::broadcast_metadata_bytes(max_rank)?)?;
     Some(bytes)
 }
 
@@ -243,6 +248,9 @@ fn source_matches(source: &Source, stack: &[Value]) -> bool {
 pub struct PreparedVmHostInputs {
     pub entry: Vec<(usize, Value)>,
     mirrors: Vec<(Source, Value)>,
+    // The selected finite readback's native payload and wrapper remain live
+    // through the prepared body, including aliases in its argument vector.
+    _managed_readback: Option<runmat_runtime::context::host_allocation::HostAllocationReceipt>,
 }
 
 impl PreparedVmHostInputs {
@@ -296,24 +304,6 @@ impl CpuReadbackPlan {
             })
     }
 
-    pub(crate) async fn prepare(
-        &self,
-        stack: &[Value],
-    ) -> Result<Vec<(usize, Value)>, CpuReadbackFailure> {
-        self.download_sources(stack).await.map(|values| {
-            self.sources
-                .iter()
-                .zip(values)
-                .flat_map(|(source, value)| {
-                    source
-                        .offsets
-                        .iter()
-                        .map(move |&offset| (offset, value.clone()))
-                })
-                .collect()
-        })
-    }
-
     pub(crate) async fn prepare_inputs(
         self,
         stack: &[Value],
@@ -325,7 +315,11 @@ impl CpuReadbackPlan {
             entry.extend(source.offsets.iter().map(|&offset| (offset, value.clone())));
             mirrors.push((source, value));
         }
-        Ok(PreparedVmHostInputs { entry, mirrors })
+        Ok(PreparedVmHostInputs {
+            entry,
+            mirrors,
+            _managed_readback: None,
+        })
     }
 
     async fn download_sources(&self, stack: &[Value]) -> Result<Vec<Value>, CpuReadbackFailure> {

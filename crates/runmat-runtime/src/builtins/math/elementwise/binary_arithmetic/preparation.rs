@@ -1,16 +1,20 @@
 //! Preparation of an admitted dense floating pair. Controls stay with the caller.
 use crate::builtins::common::broadcast::BroadcastPlan;
-use crate::context::preparation::{execute_invocation, BuiltinPreparationAdmission};
+use crate::context::preparation::{
+    execute_request_host_numerical, AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
+};
 use crate::context::RuntimeContext;
 use crate::execution::{RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 use runmat_builtins::{BuiltinBindingIdentity, BuiltinCatalogIdentity, BuiltinPreparationFormId};
 use runmat_value::Value;
 use std::future::Future;
+pub(crate) mod managed;
 
 pub(super) async fn execute<F, Fut>(
     context: Option<&RuntimeContext>,
     identity: BuiltinCatalogIdentity,
+    operator: runmat_types::OperatorKind,
     input_count: usize,
     left: Value,
     right: Value,
@@ -20,7 +24,7 @@ where
     F: FnOnce(Value, Value) -> Fut,
     Fut: Future<Output = BuiltinResult<RootedValue>>,
 {
-    execute_in_context(context, identity, input_count, left, right, body).await
+    execute_in_context(context, identity, operator, input_count, left, right, body).await
 }
 
 /// Explicit context-bearing version for canonical bindings. The preparation
@@ -28,6 +32,7 @@ where
 pub(super) async fn execute_in_context<F, Fut>(
     context: Option<&RuntimeContext>,
     identity: BuiltinCatalogIdentity,
+    operator: runmat_types::OperatorKind,
     input_count: usize,
     left: Value,
     right: Value,
@@ -45,9 +50,20 @@ where
             crate::context::VmFusionHostInstruction::ElementwiseBinary,
             [&left, &right].into_iter(),
         ) {
-            // Every owner using this adapter branches only on these operands;
-            // an unqualified real host pair runs its existing host-only body.
-            let output = body(left, right).await?;
+            let numerical_output = route.take_numerical_output(
+                context.unwrap(),
+                crate::context::VmFusionHostInstruction::ElementwiseBinary,
+                BuiltinBindingIdentity {
+                    builtin: identity,
+                    variant: "default",
+                },
+            )?;
+            let output = match numerical_output {
+                Some(output) => {
+                    managed::execute(context.unwrap(), output, operator, &left, &right)?
+                }
+                None => body(left, right).await?,
+            };
             route.confirm_host_branch(
                 context.unwrap(),
                 crate::context::VmFusionHostInstruction::ElementwiseBinary,
@@ -76,7 +92,7 @@ where
         input_count,
         requested_outputs: crate::output_count::current_output_count(),
     };
-    let execute = |mut values: Vec<Value>| {
+    let execute = |mut values: Vec<Value>, numerical_output| {
         let right = values.remove(1);
         let left = values.remove(0);
         let route = crate::builtins::math::host_route::canonical(
@@ -85,7 +101,21 @@ where
             [&left, &right].into_iter(),
         );
         async move {
-            let output = body(left, right).await?;
+            let output = match numerical_output {
+                Some(output) => managed::execute(
+                    context.ok_or_else(managed::invalid)?,
+                    output,
+                    operator,
+                    &left,
+                    &right,
+                )?,
+                None => {
+                    if let (Some(_), Some(context)) = (&route, context) {
+                        managed::require_unbounded_host_output(context)?;
+                    }
+                    body(left, right).await?
+                }
+            };
             if let Some(route) = route {
                 route.confirm_host_branch(
                     context.unwrap(),
@@ -95,5 +125,6 @@ where
             Ok(output)
         }
     };
-    execute_invocation(context, admission, vec![left, right], execute).await
+    let request = AdmittedBuiltinPreparation::new(admission, vec![left, right])?;
+    execute_request_host_numerical(context, request, execute).await
 }

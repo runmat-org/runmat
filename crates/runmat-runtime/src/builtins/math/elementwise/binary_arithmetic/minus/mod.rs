@@ -161,6 +161,7 @@ async fn minus_builtin(
     super::preparation::execute(
         runtime.as_ref(),
         MINUS_CATALOG_ENTRY.identity,
+        runmat_types::OperatorKind::Subtract,
         2 + rest.len(),
         lhs,
         rhs,

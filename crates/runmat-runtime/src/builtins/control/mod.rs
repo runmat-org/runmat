@@ -31,3 +31,4 @@ pub mod ctrb;
 pub mod care;
 pub mod dlqr;
 pub mod pade;
+pub mod minreal;

@@ -91,7 +91,8 @@ pub(super) fn without_shader(
         FusionExecutionOutcome::SharedRuntime(observation) => {
             *continuation = Some(ElementwiseHostContinuation {
                 operations: Some(operations),
-                readback: Some(admission.plan),
+                readback: (!admission.plan.sources.is_empty()).then_some(admission.plan),
+                outputs: (!admission.outputs.is_empty()).then_some(admission.outputs),
             });
             Ok(FusionExecutionOutcome::SharedRuntime(observation))
         }

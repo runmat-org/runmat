@@ -2,6 +2,7 @@ use crate::build_runtime_error;
 use futures::executor::block_on;
 use runmat_value::{HostNumericBuffer, LogicalArray, NumericStorage, Tensor, Value};
 use std::cell::Cell;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
 #[cfg(test)]
@@ -136,6 +137,122 @@ where
         std::thread::yield_now();
     }
     panic!("test provider registered");
+}
+
+/// Exact native integer transfer is available, but this owner deliberately
+/// withholds physical publication evidence. It keeps pre-effect fallback
+/// refusal tests meaningful now that InProcessProvider certifies uploads.
+pub struct UncertifiedIntegerProvider {
+    inner: runmat_accelerate::simple_provider::InProcessProvider,
+    upload_evidence_queries: AtomicUsize,
+}
+
+impl UncertifiedIntegerProvider {
+    pub fn upload_evidence_queries(&self) -> usize {
+        self.upload_evidence_queries.load(Ordering::Relaxed)
+    }
+}
+
+impl runmat_accelerate_api::AccelProvider for UncertifiedIntegerProvider {
+    fn device_id(&self) -> u32 {
+        self.inner.device_id()
+    }
+
+    fn device_info(&self) -> String {
+        "uncertified native integer publication fixture".into()
+    }
+
+    fn precision(&self) -> runmat_accelerate_api::ProviderPrecision {
+        self.inner.precision()
+    }
+
+    fn spawn_handle_concurrency(&self) -> runmat_accelerate_api::SpawnHandleConcurrency {
+        self.inner.spawn_handle_concurrency()
+    }
+
+    fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
+        self.inner.capability_snapshot()
+    }
+
+    fn capability_snapshot_ref(
+        &self,
+    ) -> Option<&runmat_accelerate_api::ProviderCapabilitySnapshot> {
+        self.inner.capability_snapshot_ref()
+    }
+
+    fn query_feasibility(
+        &self,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> runmat_accelerate_api::ProviderFeasibility {
+        self.inner.query_feasibility(query)
+    }
+
+    fn upload(
+        &self,
+        host: &runmat_accelerate_api::HostTensorView<'_>,
+    ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        self.inner.upload(host)
+    }
+
+    fn download<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+        self.inner.download(handle)
+    }
+
+    fn upload_numeric_raw(
+        &self,
+        host: &runmat_accelerate_api::HostNumericTensorView<'_>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<runmat_accelerate_api::GpuTensorHandle>
+    {
+        self.inner.upload_numeric_raw(host)
+    }
+
+    fn download_numeric<'a>(
+        &'a self,
+        handle: &'a runmat_accelerate_api::GpuTensorHandle,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.inner.download_numeric(handle)
+    }
+
+    fn upload_physical_evidence(
+        &self,
+        _query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+    ) -> Option<runmat_accelerate_api::ProviderUploadPhysicalEvidence> {
+        self.upload_evidence_queries.fetch_add(1, Ordering::Relaxed);
+        None
+    }
+
+    fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
+        self.inner.telemetry_snapshot()
+    }
+
+    fn reset_telemetry(&self) {
+        self.inner.reset_telemetry();
+        self.upload_evidence_queries.store(0, Ordering::Relaxed);
+    }
+}
+
+pub fn with_uncertified_integer_provider<F, R>(f: F) -> R
+where
+    F: FnOnce(
+        &'static dyn runmat_accelerate_api::AccelProvider,
+        &'static UncertifiedIntegerProvider,
+    ) -> R,
+{
+    let _guard = accel_test_lock();
+    let fixture: &'static UncertifiedIntegerProvider =
+        Box::leak(Box::new(UncertifiedIntegerProvider {
+            inner: runmat_accelerate::simple_provider::InProcessProvider::new(),
+            upload_evidence_queries: AtomicUsize::new(0),
+        }));
+    let provider: &'static dyn runmat_accelerate_api::AccelProvider = fixture;
+    // SAFETY: the leaked fixture has a fresh device identity and lives for
+    // the process lifetime; no unrelated device owner is replaced.
+    unsafe { runmat_accelerate_api::register_device_provider(provider) };
+    let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+    f(provider, fixture)
 }
 
 /// In-process owner that declares F32 as its physical storage precision while retaining exact

@@ -1,11 +1,61 @@
 use super::{conversion_error, double_error_with_detail};
 
-pub(super) fn convert(value: Value) -> BuiltinResult<Value> {
+mod prepared;
+
+pub(super) fn convert(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: Value,
+    host_cast_output: Option<crate::context::preparation::PreparedHostNumericalOutput>,
+) -> BuiltinResult<Value> {
+    if host_cast_output.is_some() && !matches!(&value, Value::Num(_) | Value::Tensor(_)) {
+        return Err(double_error_with_detail(
+            &DOUBLE_ERROR_INTERNAL,
+            "selected exact double output received an unsupported operand",
+        ));
+    }
     match value {
-        Value::Num(value) => Ok(Value::Num(value)),
+        Value::Num(value) => match host_cast_output {
+            Some(output) => {
+                let runtime = runtime.ok_or_else(|| {
+                    double_error_with_detail(
+                        &DOUBLE_ERROR_INTERNAL,
+                        "selected exact double output has no runtime authority",
+                    )
+                })?;
+                if !output.matches_floating_cast(
+                    runmat_types::NumericClass::Double,
+                    runmat_value::NumericDType::F64,
+                    &[1, 1],
+                ) {
+                    return Err(double_error_with_detail(
+                        &DOUBLE_ERROR_INTERNAL,
+                        "selected exact double scalar output does not match its cast authority",
+                    ));
+                }
+                match output.generate_real_f64(runtime, |_| Ok(value))? {
+                    Value::Tensor(tensor) => Ok(tensor::tensor_into_value(tensor)),
+                    _ => Err(double_error_with_detail(
+                        &DOUBLE_ERROR_INTERNAL,
+                        "selected exact double scalar output did not publish a tensor",
+                    )),
+                }
+            }
+            None => Ok(Value::Num(value)),
+        },
         Value::Int(value) => Ok(Value::Num(value.to_f64())),
         Value::Bool(value) => Ok(Value::Num(if value { 1.0 } else { 0.0 })),
-        Value::Tensor(value) => double_from_tensor(value),
+        Value::Tensor(value) => match host_cast_output {
+            Some(output) => {
+                let runtime = runtime.ok_or_else(|| {
+                    double_error_with_detail(
+                        &DOUBLE_ERROR_INTERNAL,
+                        "selected exact double output has no runtime authority",
+                    )
+                })?;
+                prepared::from_tensor(runtime, value, output)
+            }
+            None => double_from_tensor(value),
+        },
         Value::SparseTensor(value) => double_from_sparse_tensor(value),
         Value::Complex(real, imag) => Ok(Value::Complex(real, imag)),
         Value::ComplexTensor(value) => double_from_complex_tensor(value),

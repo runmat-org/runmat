@@ -1,7 +1,7 @@
 use super::super::*;
 #[test]
 fn ldivide_uncertified_integer_scalar_refuses_before_upload() {
-    test_support::with_test_provider(|provider| {
+    test_support::with_uncertified_integer_provider(|provider, fixture| {
         let divisor =
             Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).expect("divisor");
         let source = gpu_helpers::upload_tensor(provider, &divisor).expect("upload");
@@ -21,6 +21,10 @@ fn ldivide_uncertified_integer_scalar_refuses_before_upload() {
         );
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(
+            fixture.upload_evidence_queries() > 0,
+            "upload evidence gate queried"
+        );
         source
             .allocation_lease()
             .validate_live()
@@ -35,7 +39,7 @@ fn ldivide_uncertified_integer_scalar_refuses_before_upload() {
 
 #[test]
 fn ldivide_uncertified_mixed_integer_fallback_refuses_before_download() {
-    test_support::with_test_provider(|provider| {
+    test_support::with_uncertified_integer_provider(|provider, fixture| {
         let scalar = Tensor::new(vec![2.0], vec![1, 1]).expect("scalar");
         let automatic = gpu_helpers::upload_tensor(provider, &scalar).expect("automatic");
         let automatic = automatic
@@ -61,6 +65,10 @@ fn ldivide_uncertified_mixed_integer_fallback_refuses_before_download() {
         );
         assert_eq!(provider.telemetry_snapshot().upload_bytes, 0);
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
+        assert!(
+            fixture.upload_evidence_queries() > 0,
+            "upload evidence gate queried"
+        );
         explicit
             .allocation_lease()
             .validate_live()

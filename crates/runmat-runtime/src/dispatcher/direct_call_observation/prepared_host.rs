@@ -60,6 +60,7 @@ impl PreparedHostExecution {
                 VmFusionHostInstruction::ElementwiseBinary
             }
             BuiltinPreparationOperation::Unary
+            | BuiltinPreparationOperation::FloatingCast(_)
             | BuiltinPreparationOperation::RealUnary(_)
             | BuiltinPreparationOperation::RoundDigits => VmFusionHostInstruction::ElementwiseCall,
             _ => return None,

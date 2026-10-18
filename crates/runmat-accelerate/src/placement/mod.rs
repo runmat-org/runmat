@@ -68,7 +68,8 @@ pub(crate) use local::{
     plan_local_multi, plan_local_multi_bounded, plan_local_vm_cpu_with_provider, LocalCpuAdmission,
     LocalCpuCandidate, LocalMultiPlacementRequest, LocalPhysicalCandidate, LocalPlacementFeedback,
     LocalPlacementOutcome, LocalPlacementRequest, LocalProviderAdmission,
-    LocalPublicationSemantics, PreparedPhysicalAuthority, TotalCandidateObservationContract,
+    LocalPublicationSemantics, LocalSourceDecline, PreparedPhysicalAuthority,
+    TotalCandidateObservationContract,
 };
 pub use session::{
     ExplorationMode, ManagedPlacementCapacity, PlacementFeedbackSeries, PlacementPlanError,

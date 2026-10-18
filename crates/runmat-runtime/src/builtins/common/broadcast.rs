@@ -3,6 +3,9 @@
 //! The helpers in this module mirror MATLAB's implicit expansion rules and
 //! operate on column-major shapes expressed as `[usize]` vectors.
 
+mod prepared;
+pub(crate) use prepared::PreparedBroadcastPlan;
+
 /// Compute the broadcasted shape for two operands using MATLAB implicit
 /// expansion rules.
 pub fn broadcast_shapes(

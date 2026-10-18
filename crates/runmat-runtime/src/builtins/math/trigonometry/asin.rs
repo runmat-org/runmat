@@ -102,6 +102,9 @@ async fn asin_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
             &runmat_builtins::ASIN_ERROR_INTERNAL,
         ),
         value,
+        true,
+        |value: f32| Ok(asin_real_parts_f32(value)),
+        |value: f64| Ok(asin_real_parts(value)),
         |value| async move {
             let output = asin_execute(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())
@@ -216,21 +219,25 @@ fn asin_tensor_real(tensor: Tensor) -> BuiltinResult<Value> {
     super::inverse_helpers::map_real_tensor_promoting(
         tensor,
         BUILTIN_NAME,
-        |value| {
-            if value.is_nan() || (-1.0..=1.0).contains(&value) {
-                return (value.asin(), 0.0);
-            }
-            let result = Complex64::new(value, 0.0).asin();
-            (result.re, result.im)
-        },
-        |value| {
-            if value.is_nan() || (-1.0..=1.0).contains(&value) {
-                return (value.asin(), 0.0);
-            }
-            let result = num_complex::Complex32::new(value, 0.0).asin();
-            (result.re, result.im)
-        },
+        asin_real_parts,
+        asin_real_parts_f32,
     )
+}
+
+fn asin_real_parts(value: f64) -> (f64, f64) {
+    if value.is_nan() || (-1.0..=1.0).contains(&value) {
+        return (value.asin(), 0.0);
+    }
+    let result = Complex64::new(value, 0.0).asin();
+    (result.re, result.im)
+}
+
+fn asin_real_parts_f32(value: f32) -> (f32, f32) {
+    if value.is_nan() || (-1.0..=1.0).contains(&value) {
+        return (value.asin(), 0.0);
+    }
+    let result = num_complex::Complex32::new(value, 0.0).asin();
+    (result.re, result.im)
 }
 
 fn asin_complex_value(re: f64, im: f64) -> Value {

@@ -102,6 +102,9 @@ async fn acos_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
             &runmat_builtins::ACOS_ERROR_INTERNAL,
         ),
         value,
+        true,
+        |value: f32| Ok(acos_real_matlab_f32(value)),
+        |value: f64| Ok(acos_real_matlab(value)),
         |value| async move {
             let output = acos_execute(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())

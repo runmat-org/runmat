@@ -3,6 +3,53 @@ use crate::BuiltinResult;
 use runmat_builtins::SINGLE_ERROR_INTERNAL;
 use runmat_value::{CharArray, ComplexTensor, IntValue, NumericScalar, NumericStorage, Tensor};
 
+pub(super) fn single_tensor_to_prepared_host(
+    runtime: &crate::context::RuntimeContext,
+    tensor: Tensor,
+    mut output: crate::context::preparation::PreparedHostNumericalOutput,
+) -> BuiltinResult<Tensor> {
+    if !output.matches_floating_cast(
+        runmat_types::NumericClass::Single,
+        runmat_value::NumericDType::F32,
+        tensor.shape(),
+    ) {
+        return Err(single_error_with_detail(
+            &SINGLE_ERROR_INTERNAL,
+            "selected exact single output does not match the prepared source",
+        ));
+    }
+    let copied = match (tensor.as_f32_slice(), tensor.as_f64_slice()) {
+        (Some(source), _) => output.copy_f32_from_f32(runtime, source),
+        (_, Some(source)) => output.copy_f32_from_f64(runtime, source),
+        _ => {
+            return Err(single_error_with_detail(
+                &SINGLE_ERROR_INTERNAL,
+                "selected exact single source has an unsupported native class",
+            ));
+        }
+    };
+    copied.map_err(|error| {
+        crate::context::host_allocation::host_allocation_runtime_error(
+            Some(runtime),
+            SINGLE_ERROR_INTERNAL
+                .identifier
+                .unwrap_or("RunMat:single:Internal"),
+            "selected exact single output authority changed",
+            error,
+        )
+    })?;
+    output.into_tensor(runtime).map_err(|error| {
+        crate::context::host_allocation::host_allocation_runtime_error(
+            Some(runtime),
+            SINGLE_ERROR_INTERNAL
+                .identifier
+                .unwrap_or("RunMat:single:Internal"),
+            "selected exact single output could not be published",
+            error,
+        )
+    })
+}
+
 pub(super) fn single_tensor_to_host(tensor: Tensor) -> BuiltinResult<Tensor> {
     let shape = tensor.shape().to_vec();
     let storage = tensor

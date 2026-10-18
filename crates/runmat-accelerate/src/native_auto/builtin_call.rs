@@ -23,6 +23,8 @@ pub(super) struct PreparedBuiltinCall {
     uploads: Option<ownership::OwnedUploads>,
     request_input_root: Option<runmat_runtime::execution::RootedValueLease>,
     readbacks: Option<crate::fusion_exec::host_readback::PreparedVmHostInputs>,
+    host_numerical_output:
+        Option<runmat_runtime::context::preparation::PreparedHostNumericalOutput>,
 }
 
 /// One call owns both its measurement and its fresh operand allocations.
@@ -32,6 +34,8 @@ struct BuiltinCallGuard {
     uploads: Option<ownership::OwnedUploads>,
     _request_input_root: Option<runmat_runtime::execution::RootedValueLease>,
     readbacks: Option<crate::fusion_exec::host_readback::PreparedVmHostInputs>,
+    host_numerical_output:
+        Option<runmat_runtime::context::preparation::PreparedHostNumericalOutput>,
 }
 
 impl BuiltinCallGuard {
@@ -82,6 +86,7 @@ impl PreparedBuiltinCall {
             uploads: None,
             request_input_root: None,
             readbacks: None,
+            host_numerical_output: None,
         }
     }
 
@@ -108,6 +113,7 @@ impl PreparedBuiltinCall {
                 uploads: self.uploads,
                 _request_input_root: self.request_input_root,
                 readbacks: self.readbacks,
+                host_numerical_output: self.host_numerical_output,
             },
         )
     }

@@ -242,10 +242,22 @@ pub const TF_ERROR_DENOMINATOR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDes
 pub const TF_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.TF.INTERNAL",
     identifier: Some("RunMat:tf:Internal"),
-    when: "Internal tensor/object construction failed.",
+    when: "Internal tensor/object construction or a shared transfer-function numerical operation failed.",
     message: "tf: internal error",
 };
-const TF_ERRORS: [BuiltinErrorDescriptor; 7] = [
+pub const TF_ERROR_INVALID_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TF.INVALID_MODEL",
+    identifier: Some("RunMat:tf:InvalidModel"),
+    when: "A transfer-function object has missing or invalid model properties.",
+    message: "tf: invalid model",
+};
+pub const TF_ERROR_UNSUPPORTED_MODEL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.TF.UNSUPPORTED_MODEL",
+    identifier: Some("RunMat:tf:UnsupportedModel"),
+    when: "The shared transfer-function parser receives an unsupported model representation.",
+    message: "tf: unsupported model",
+};
+const TF_ERRORS: [BuiltinErrorDescriptor; 9] = [
     TF_ERROR_INVALID_ARGUMENT,
     TF_ERROR_INVALID_OPTION,
     TF_ERROR_INVALID_SAMPLE_TIME,
@@ -253,6 +265,8 @@ const TF_ERRORS: [BuiltinErrorDescriptor; 7] = [
     TF_ERROR_INVALID_COEFFICIENTS,
     TF_ERROR_DENOMINATOR_INVALID,
     TF_ERROR_INTERNAL,
+    TF_ERROR_INVALID_MODEL,
+    TF_ERROR_UNSUPPORTED_MODEL,
 ];
 pub const TF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &TF_SIGNATURES,

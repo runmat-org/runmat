@@ -15,6 +15,7 @@ pub(in crate::native_auto) struct BuiltinPlanningContext<'a> {
         Option<runmat_accelerate_api::ProviderPreparationProgram<'a>>,
     pub(in crate::native_auto) prepared_authority:
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
+    pub(in crate::native_auto) source_decline: crate::placement::LocalSourceDecline,
     pub(in crate::native_auto) host: Option<(
         &'a crate::fusion_exec::host_readback::CpuHostResources,
         runmat_execution::Digest,
@@ -27,6 +28,7 @@ pub(in crate::native_auto) struct BuiltinObservationPlan {
     pub(in crate::native_auto) provider_query:
         Option<Box<runmat_accelerate_api::ProviderFeasibilityQuery>>,
     pub(in crate::native_auto) provider_observation: bool,
+    pub(in crate::native_auto) source_declined: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

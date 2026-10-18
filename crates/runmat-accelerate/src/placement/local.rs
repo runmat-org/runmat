@@ -14,7 +14,7 @@ mod cpu;
 pub(crate) use cpu::LocalCpuCandidate;
 pub(crate) use multi::{
     plan_local_multi, plan_local_multi_bounded, LocalCpuAdmission, LocalMultiPlacementRequest,
-    LocalPhysicalCandidate, LocalProviderAdmission, LocalPublicationSemantics,
+    LocalPhysicalCandidate, LocalProviderAdmission, LocalPublicationSemantics, LocalSourceDecline,
     PreparedPhysicalAuthority,
 };
 mod rejected;
@@ -43,6 +43,9 @@ pub(crate) struct LocalPlacementRequest<'a> {
     pub(crate) observation_contract: TotalCandidateObservationContract,
     pub(crate) prepared_authority:
         Option<runmat_runtime::context::preparation::PreparedBindingAuthority>,
+    /// The selected source implementation may handle a typed provider
+    /// feasibility refusal without manufacturing a CPU placement candidate.
+    pub(crate) source_decline: LocalSourceDecline,
     pub(crate) family: ProviderOperationFamily,
     pub(crate) provider_kind: ExecutionCandidateKind,
     pub(crate) inputs: &'a [&'a Value],
@@ -373,6 +376,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
         semantic_identity,
         observation_contract,
         prepared_authority,
+        source_decline,
         family,
         provider_kind,
         inputs,
@@ -398,6 +402,7 @@ pub(crate) fn plan_local_vm_cpu_with_provider(
             prepared_authority,
             vm_right,
             vm_decline,
+            source_decline,
             family,
             cpu,
             cpu_admission,

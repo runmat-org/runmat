@@ -2,7 +2,8 @@
 use super::*;
 use runmat_accelerate_api::{
     allocation::WeakGpuTensorHandle, GpuTensorHandle, GpuTensorStorage, HostNumericTensorView,
-    NumericElementType, ThreadProviderGuard,
+    NumericDownloadStageLease, NumericElementType, PreparedNumericDownloadStage,
+    ThreadProviderGuard,
 };
 use runmat_runtime::context::preparation::{
     AdmittedBuiltinPreparation, BuiltinPreparationAdmission,
@@ -12,14 +13,61 @@ use std::sync::{
     Mutex,
 };
 
+struct ManagedCastOwner(runmat_runtime::context::host_effect::ManagedHostEffectLedger);
+
+struct FixtureNumericStage;
+
+impl NumericDownloadStageLease for FixtureNumericStage {
+    fn clone_for_callback(&self) -> Box<dyn NumericDownloadStageLease> {
+        Box::new(Self)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+async fn fixture_numeric_stage_future(
+    owner: &Owner,
+    source: &GpuTensorHandle,
+    stage: Option<PreparedNumericDownloadStage>,
+) -> anyhow::Result<runmat_accelerate_api::HostNumericTensorOwned> {
+    let native = owner.inner.download_numeric(source).await;
+    drop(stage);
+    native
+}
+
+impl runmat_runtime::context::RuntimeParallelService for ManagedCastOwner {
+    fn supports(&self, _: runmat_runtime::context::ParallelCapability) -> bool {
+        false
+    }
+
+    fn placement_resources(&self) -> runmat_runtime::context::RuntimeParallelResources {
+        let snapshot = self.0.snapshot();
+        runmat_runtime::context::RuntimeParallelResources {
+            cpu_millicores_available: 1_000,
+            memory_available_bytes: Some(snapshot.free_bytes()),
+            epoch: snapshot.epoch,
+        }
+    }
+
+    fn managed_host_effect_ledger(
+        &self,
+    ) -> Option<runmat_runtime::context::host_effect::ManagedHostEffectLedger> {
+        Some(self.0.clone())
+    }
+}
+
 pub(super) struct Owner {
     inner: crate::simple_provider::InProcessProvider,
     uploads: AtomicUsize,
     downloads: AtomicUsize,
+    staged_downloads: AtomicUsize,
     allocations: Mutex<Vec<WeakGpuTensorHandle>>,
     reject_upload: bool,
     execution_ns: u64,
     unsupported_trig: bool,
+    reject_cast_preparation: bool,
     cancel_download: Mutex<Option<runmat_execution::cancellation::CancellationSource>>,
 }
 impl Owner {
@@ -61,6 +109,11 @@ impl AccelProvider for Owner {
     fn capability_snapshot(&self) -> runmat_accelerate_api::ProviderCapabilitySnapshot {
         self.inner.capability_snapshot()
     }
+    fn capability_snapshot_ref(
+        &self,
+    ) -> Option<&runmat_accelerate_api::ProviderCapabilitySnapshot> {
+        self.inner.capability_snapshot_ref()
+    }
     fn placement_resources(&self) -> runmat_execution::ProviderResourceSnapshot {
         self.inner.placement_resources()
     }
@@ -94,6 +147,17 @@ impl AccelProvider for Owner {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
+        if self.reject_cast_preparation
+            && matches!(
+                query.workload.preparation_route,
+                Some(runmat_accelerate_api::ProviderPreparationRoute::FloatingCast { .. })
+            )
+        {
+            return runmat_accelerate_api::ProviderFeasibility::rejected(
+                runmat_accelerate_api::ProviderRejectionCode::UnsupportedOperation,
+                "fixture cast preparation unavailable",
+            );
+        }
         // This fixture tests ownership before planning, not hook availability.
         known_fixture_resources(query)
     }
@@ -122,6 +186,45 @@ impl AccelProvider for Owner {
             }
             result
         })
+    }
+    fn download_numeric_completion_host_bound(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        let native = self.inner.download_numeric(handle);
+        let native_bytes = std::mem::size_of_val(native.as_ref().get_ref());
+        let stage = fixture_numeric_stage_future(self, handle, None);
+        native_bytes
+            .checked_add(std::mem::size_of_val(&stage))
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .map(runmat_execution::ResourceByteBound::Known)
+            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+            ))
+    }
+    fn prepare_numeric_download_stage(
+        &self,
+        source: &GpuTensorHandle,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+    ) -> anyhow::Result<PreparedNumericDownloadStage> {
+        anyhow::ensure!(query.matches_numeric_download(source));
+        anyhow::ensure!(source.allocation_lease().validate_live().is_ok());
+        Ok(PreparedNumericDownloadStage::issued(
+            Box::new(FixtureNumericStage),
+            claim,
+            source,
+            0,
+            0,
+        ))
+    }
+    fn download_numeric_admitted_stage<'a>(
+        &'a self,
+        source: &'a GpuTensorHandle,
+        stage: PreparedNumericDownloadStage,
+    ) -> runmat_accelerate_api::AccelNumericDownloadFuture<'a> {
+        self.staged_downloads.fetch_add(1, Ordering::Relaxed);
+        Box::pin(fixture_numeric_stage_future(self, source, Some(stage)))
     }
     fn query_numeric_download_feasibility(
         &self,
@@ -197,14 +300,25 @@ fn owner_with_quote_and_failure(
     reject_upload: bool,
     unsupported_trig: bool,
 ) -> &'static Owner {
+    owner_with_cast_preparation(execution_ns, reject_upload, unsupported_trig, false)
+}
+
+fn owner_with_cast_preparation(
+    execution_ns: u64,
+    reject_upload: bool,
+    unsupported_trig: bool,
+    reject_cast_preparation: bool,
+) -> &'static Owner {
     let provider = Box::leak(Box::new(Owner {
         inner: crate::simple_provider::InProcessProvider::new(),
         uploads: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
+        staged_downloads: AtomicUsize::new(0),
         allocations: Mutex::new(Vec::new()),
         reject_upload,
         execution_ns,
         unsupported_trig,
+        reject_cast_preparation,
         cancel_download: Mutex::new(None),
     }));
     // SAFETY: leaked owners have process lifetime and unique monotonically allocated IDs.
@@ -595,6 +709,336 @@ fn explicit_resident_call_keeps_provider_route_despite_a_cheaper_host_estimate()
     );
     assert!(source.allocation_lease().validate_live().is_ok());
     drop((output, args, source));
+    assert_eq!(provider.live_count(), 0);
+}
+
+#[test]
+fn explicit_plain_cast_feasibility_refusal_retains_the_domain_fallback() {
+    let provider = owner_with_cast_preparation(1, false, false, true);
+    let source = provider
+        .input(&[0.25, 0.5])
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+        .unwrap();
+    let session = Rc::new(crate::placement::PlacementSession::default());
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_placement(session.clone())
+            .with_acceleration(Rc::new(Adapter(provider, 1))),
+    );
+    let request = AdmittedBuiltinPreparation::new(
+        BuiltinPreparationAdmission {
+            binding: runmat_builtins::BuiltinBindingIdentity {
+                builtin: runmat_builtins::SINGLE_CATALOG_ENTRY.identity,
+                variant: "default",
+            },
+            form: runmat_builtins::BuiltinPreparationFormId(1),
+            signature: 0,
+            input_count: 1,
+            requested_outputs: None,
+        },
+        vec![Value::GpuTensor(source.clone())],
+    )
+    .unwrap();
+    let auto = NativeAutoOffload::new(provider, ThresholdConfig::default());
+    let prepared = futures::executor::block_on(super::super::admitted::prepare_async(
+        &auto, &context, request,
+    ))
+    .expect("typed feasibility refusal leaves the original cast body available");
+    assert!(prepared
+        .observation
+        .as_ref()
+        .is_some_and(BuiltinCallObservation::shared_fallback_selected));
+    assert!(
+        matches!(prepared.args(), [Value::GpuTensor(handle)] if handle.view_identity() == source.view_identity())
+    );
+    assert!(session.ordinary_feedback_for_test().is_empty());
+    drop(prepared);
+
+    let args = [Value::GpuTensor(source.clone())];
+    let output = futures::executor::block_on(context.scope(
+        runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "single", &args),
+    ))
+    .expect("single owns the unsupported provider cast fallback");
+    let Value::GpuTensor(result) = output.value() else {
+        panic!("explicit source must retain resident conversion output")
+    };
+    assert!(runmat_accelerate_api::handle_is_explicit(result));
+    assert_eq!(result.shape(), source.shape());
+    assert_eq!(provider.downloads.load(Ordering::Relaxed), 1);
+    assert_eq!(provider.uploads.load(Ordering::Relaxed), 1);
+    assert!(session.ordinary_feedback_for_test().is_empty());
+}
+
+#[test]
+fn managed_plain_cast_retains_exact_output_and_refuses_before_underfunded_readback() {
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+
+    for (name, input, expected_dtype, expected_shape, expected_values) in [
+        (
+            "single",
+            Value::Tensor(runmat_value::Tensor::new(vec![0.25, 0.5], vec![1, 2]).unwrap()),
+            Some(runmat_value::NumericDType::F32),
+            vec![1, 2],
+            vec![0.25, 0.5],
+        ),
+        (
+            "double",
+            Value::Tensor(runmat_value::Tensor::from_f32(vec![0.25, 0.5], vec![1, 2]).unwrap()),
+            Some(runmat_value::NumericDType::F64),
+            vec![1, 2],
+            vec![0.25, 0.5],
+        ),
+        (
+            "single",
+            Value::Num(0.25),
+            Some(runmat_value::NumericDType::F32),
+            vec![1, 1],
+            vec![0.25],
+        ),
+        ("double", Value::Num(0.25), None, vec![1, 1], vec![0.25]),
+    ] {
+        // Make the provider cast authentically unavailable. A high cost alone
+        // does not select host execution: the legal resident implementation
+        // may still win and correctly return a GpuTensor, which does not test
+        // this witness's exact host-output owner.
+        let provider = owner_with_cast_preparation(1_000_000_000, false, false, true);
+        let ledger = ManagedHostEffectLedger::new_with_epoch(1 << 20, 31);
+        let context = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            RuntimeServicePorts::default()
+                .with_parallel(Rc::new(ManagedCastOwner(ledger.clone())))
+                .with_placement(Rc::new(crate::placement::PlacementSession::default()))
+                .with_acceleration(Rc::new(Adapter(provider, 1))),
+        );
+        let output = futures::executor::block_on(context.scope(
+            runmat_runtime::dispatcher::call_builtin_async_in_context(&context, name, &[input]),
+        ))
+        .expect("managed host cast has an exact output or scalar identity");
+        if let Some(expected_dtype) = expected_dtype {
+            let Value::Tensor(tensor) = output.value() else {
+                panic!(
+                    "managed {name} cast expected {expected_dtype:?} Tensor {expected_shape:?}, got {:?}; live claims={}, staged downloads={}",
+                    output.value(),
+                    ledger.snapshot().live_claimed_bytes,
+                    provider.staged_downloads.load(Ordering::Relaxed),
+                )
+            };
+            assert_eq!(tensor.numeric_dtype(), expected_dtype);
+            assert_eq!(tensor.shape(), expected_shape);
+            assert_eq!(tensor.materialize_f64(), expected_values);
+        } else {
+            assert_eq!(expected_shape, [1, 1]);
+            assert_eq!(expected_values, [0.25]);
+            assert!(
+                matches!(output.value(), Value::Num(value) if value.to_bits() == 0.25_f64.to_bits()),
+                "managed {name} scalar identity returned {:?}",
+                output.value(),
+            );
+        }
+        let retained = ledger.snapshot().live_claimed_bytes;
+        if expected_dtype.is_some() {
+            assert!(retained > 0, "published output must retain physical claims");
+        } else {
+            assert_eq!(retained, 0, "scalar identity retains no output allocation");
+        }
+        drop(output);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
+
+    let provider = owner_with_cast_preparation(1_000_000_000, false, false, true);
+    let source = provider
+        .input(&[0.25, 0.5])
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(1 << 20, 32);
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_parallel(Rc::new(ManagedCastOwner(ledger.clone())))
+            .with_placement(Rc::new(crate::placement::PlacementSession::default()))
+            .with_acceleration(Rc::new(Adapter(provider, 1))),
+    );
+    let output = futures::executor::block_on(context.scope(
+        runmat_runtime::dispatcher::call_builtin_async_in_context(
+            &context,
+            "single",
+            &[Value::GpuTensor(source)],
+        ),
+    ))
+    .expect("managed automatic resident cast uses admitted staged readback");
+    let Value::Tensor(tensor) = output.value() else {
+        panic!("managed automatic resident cast publishes a host tensor")
+    };
+    assert_eq!(tensor.numeric_dtype(), runmat_value::NumericDType::F32);
+    assert_eq!(tensor.shape(), [1, 2]);
+    assert_eq!(tensor.materialize_f64(), [0.25, 0.5]);
+    assert_eq!(provider.staged_downloads.load(Ordering::Relaxed), 1);
+    assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(output);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+    let provider = owner_with_cast_preparation(1_000_000_000, false, false, true);
+    let source = provider
+        .input(&[0.25, 0.5])
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(0, 32);
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_parallel(Rc::new(ManagedCastOwner(ledger)))
+            .with_placement(Rc::new(crate::placement::PlacementSession::default()))
+            .with_acceleration(Rc::new(Adapter(provider, 1))),
+    );
+    let result = futures::executor::block_on(context.scope(
+        runmat_runtime::dispatcher::call_builtin_async_in_context(
+            &context,
+            "single",
+            &[Value::GpuTensor(source)],
+        ),
+    ));
+    assert!(
+        result.is_err(),
+        "unfunded cast cannot reach provider readback"
+    );
+    assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+    assert_eq!(provider.staged_downloads.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn managed_named_numerical_hosts_retain_outputs_and_stage_each_native_source() {
+    use runmat_accelerate_api::{GpuHandleProvenance, HostNumericDataView};
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+
+    // One source, a promoting complex result, a genuinely two-source
+    // broadcast, and mixed-class power exercise the common selected owner.
+    // The expected values are produced by the ordinary domain owners.
+    for (name, operands, complex) in [
+        ("sin", vec![(vec![0.0, 0.5], vec![1, 2], true)], false),
+        ("log", vec![(vec![-0.5, 0.5], vec![1, 2], false)], true),
+        (
+            "plus",
+            vec![
+                (vec![1.0, 2.0], vec![1, 2], true),
+                (vec![3.5], vec![1, 1], true),
+            ],
+            false,
+        ),
+        (
+            "power",
+            vec![
+                (vec![-4.0, 9.0], vec![1, 2], true),
+                (vec![0.5], vec![1, 1], false),
+            ],
+            true,
+        ),
+    ] {
+        let provider = owner_with_quote_and_failure(1_000_000_000, false, false);
+        let ledger = ManagedHostEffectLedger::new_with_epoch(1 << 22, 33);
+        let session = Rc::new(crate::placement::PlacementSession::default());
+        let ordinary = RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let context = ordinary.clone().with_service_ports(
+            RuntimeServicePorts::default()
+                .with_parallel(Rc::new(ManagedCastOwner(ledger.clone())))
+                .with_placement(session.clone())
+                .with_acceleration(Rc::new(Adapter(provider, 0))),
+        );
+        let mut host_args = Vec::new();
+        let mut resident_args = Vec::new();
+        for (data, shape, single) in operands {
+            let native = data.iter().map(|&value| value as f32).collect::<Vec<_>>();
+            let host = if single {
+                runmat_value::Tensor::from_f32(native.clone(), shape.clone()).unwrap()
+            } else {
+                runmat_value::Tensor::new(data.clone(), shape.clone()).unwrap()
+            };
+            host_args.push(Value::Tensor(host));
+            let source = provider
+                .upload_numeric_raw(&HostNumericTensorView {
+                    data: if single {
+                        HostNumericDataView::F32(&native)
+                    } else {
+                        HostNumericDataView::F64(&data)
+                    },
+                    shape: &shape,
+                    storage: GpuTensorStorage::Real,
+                })
+                .unwrap()
+                .with_provenance(GpuHandleProvenance::Automatic)
+                .unwrap();
+            resident_args.push(Value::GpuTensor(source));
+        }
+        let expected = futures::executor::block_on(ordinary.scope(
+            runmat_runtime::dispatcher::call_builtin_async_in_context(&ordinary, name, &host_args),
+        ))
+        .unwrap();
+        let actual = futures::executor::block_on(context.scope(
+            runmat_runtime::dispatcher::call_builtin_async_in_context(
+                &context,
+                name,
+                &resident_args,
+            ),
+        ))
+        .expect("selected managed numerical host body");
+        assert_native_result(actual.value(), expected.value());
+        assert_eq!(matches!(actual.value(), Value::ComplexTensor(_)), complex);
+        assert_eq!(provider.downloads.load(Ordering::Relaxed), 0, "{name}");
+        assert_eq!(
+            provider.staged_downloads.load(Ordering::Relaxed),
+            resident_args.len(),
+            "{name} stages every distinct source without ordinary readback"
+        );
+        assert_eq!(session.ordinary_feedback_for_test().len(), 1, "{name}");
+        assert!(ledger.snapshot().live_claimed_bytes > 0, "{name}");
+        drop(actual);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0, "{name}");
+        drop((expected, host_args, resident_args));
+        assert_eq!(provider.live_count(), 0, "{name}");
+    }
+
+    let provider = owner_with_quote_and_failure(1_000_000_000, false, false);
+    let left = provider
+        .input(&[1.0, 2.0])
+        .with_provenance(GpuHandleProvenance::Automatic)
+        .unwrap();
+    let right = provider
+        .input(&[3.5])
+        .with_provenance(GpuHandleProvenance::Automatic)
+        .unwrap();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(0, 34);
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default()
+            .with_parallel(Rc::new(ManagedCastOwner(ledger.clone())))
+            .with_placement(Rc::new(crate::placement::PlacementSession::default()))
+            .with_acceleration(Rc::new(Adapter(provider, 0))),
+    );
+    let args = [Value::GpuTensor(left), Value::GpuTensor(right)];
+    assert!(
+        futures::executor::block_on(context.scope(
+            runmat_runtime::dispatcher::call_builtin_async_in_context(&context, "plus", &args),
+        ))
+        .is_err(),
+        "two-source managed host route must refuse an unfunded output/readback"
+    );
+    assert_eq!(provider.staged_downloads.load(Ordering::Relaxed), 0);
+    assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    drop(args);
     assert_eq!(provider.live_count(), 0);
 }
 

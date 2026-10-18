@@ -42,7 +42,8 @@ const FUSION_SEMANTICS: crate::builtins::common::spec::FusionSemanticDeclaration
 
 #[runmat_macros::register_fusion_spec(
     builtin_path = "crate::builtins::math::elementwise::floating_conversions::single",
-    semantics = FUSION_SEMANTICS
+    semantics = FUSION_SEMANTICS,
+    host_resources = crate::builtins::math::host_resources::real_cast
 )]
 pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     name: "single",

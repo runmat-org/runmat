@@ -161,6 +161,7 @@ async fn times_builtin(
     super::preparation::execute(
         runtime.as_ref(),
         TIMES_CATALOG_ENTRY.identity,
+        runmat_types::OperatorKind::ElementwiseMultiply,
         2 + rest.len(),
         lhs,
         rhs,

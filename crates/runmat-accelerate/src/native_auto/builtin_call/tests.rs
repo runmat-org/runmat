@@ -286,6 +286,7 @@ fn observed(probe: &Rc<Probe>, provider: bool, args: Vec<Value>) -> PreparedBuil
         uploads: None,
         request_input_root: None,
         readbacks: None,
+        host_numerical_output: None,
     }
 }
 

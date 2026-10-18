@@ -17,6 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut output = None;
     let mut check_only = false;
     let mut transition = false;
+    let mut identities = BTreeSet::new();
     let mut arguments = env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
         if argument == "--check" {
@@ -26,6 +27,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else if argument == "--output" {
             let path = arguments.next().ok_or("--output requires a path")?;
             output = Some(PathBuf::from(path));
+        } else if argument == "--identity" {
+            let name = arguments.next().ok_or("--identity requires a name")?;
+            let name = name.into_string().map_err(|_| "identity must be UTF-8")?;
+            if !identities.insert(name.to_ascii_lowercase()) {
+                return Err(format!("duplicate documentation identity: {name}").into());
+            }
         } else {
             return Err(
                 format!("unexpected argument: {}", PathBuf::from(argument).display()).into(),
@@ -39,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let legacy_directory = repository.join("docs/builtins/reference");
-    let export = build_export(&legacy_directory, transition)?;
+    let export = build_export(&legacy_directory, transition, &identities)?;
     if check_only {
         return Ok(());
     }
@@ -59,9 +66,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn build_export(
     legacy_directory: &Path,
     transition: bool,
+    identities: &BTreeSet<String>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let mut legacy = read_legacy_documents(legacy_directory)?;
-    let legacy_sidecar_count = legacy.len();
     for entry in builtin_catalog_entries()
         .iter()
         .filter(|entry| entry.audience == BuiltinCatalogAudience::Fixture)
@@ -96,6 +103,19 @@ fn build_export(
         )
         .chain(legacy.keys().cloned())
         .collect::<BTreeSet<_>>();
+    if let Some(name) = identities.difference(&complete_names).next() {
+        return Err(format!("unknown documentation identity: {name}").into());
+    }
+    // A scoped export remains strict about duplicate ownership and missing
+    // documentation within its scope. Links resolve against the full catalog.
+    // Unrelated unfinished cutovers cannot block field-conservation checks.
+    if !identities.is_empty() {
+        legacy.retain(|name, _| identities.contains(name));
+        catalog_entries
+            .retain(|entry| identities.contains(&entry.identity.name.to_ascii_lowercase()));
+    }
+    let legacy_sidecar_count = legacy.len();
+    let selected_catalog_count = catalog_entries.len();
     let mut documents = BTreeMap::new();
     let mut slugs = BTreeMap::new();
     let mut missing_legacy = Vec::new();
@@ -135,6 +155,9 @@ fn build_export(
     }
 
     for entry in builtin_constant_catalog_entries() {
+        if !identities.is_empty() && !identities.contains(&entry.name.to_ascii_lowercase()) {
+            continue;
+        }
         let Some(documentation) = &entry.documentation else {
             continue;
         };
@@ -183,7 +206,7 @@ fn build_export(
         "schema_version": EXPORT_SCHEMA_VERSION,
         "inventory": {
             "documents": documents.len(),
-            "catalog_identities": catalog_names.len(),
+            "catalog_identities": selected_catalog_count,
             "legacy_sidecars": legacy_sidecar_count,
             "missing_catalog_documentation": missing_legacy,
         },
@@ -504,11 +527,28 @@ mod tests {
     }
 
     #[test]
+    fn scoped_export_validates_ownership_and_identity_without_unrelated_cutovers() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let directory = repository.join("docs/builtins/reference");
+        let selected = BTreeSet::from(["minreal".to_string()]);
+        let export = build_export(&directory, false, &selected).expect("canonical minreal");
+        assert_eq!(export["inventory"]["documents"], 1);
+        assert_eq!(export["inventory"]["legacy_sidecars"], 0);
+        assert_eq!(export["builtins"][0]["key"], "minreal");
+        assert_eq!(export["builtins"][0]["authority"], "catalog");
+        let unknown = BTreeSet::from(["missing_documentation_identity".to_string()]);
+        assert!(build_export(&directory, true, &unknown)
+            .expect_err("unknown identity")
+            .to_string()
+            .contains("unknown documentation identity"));
+    }
+
+    #[test]
     fn current_transition_export_is_complete_and_deterministic() {
         let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let directory = repository.join("docs/builtins/reference");
-        let first = build_export(&directory, true).expect("first export");
-        let second = build_export(&directory, true).expect("second export");
+        let first = build_export(&directory, true, &BTreeSet::new()).expect("first export");
+        let second = build_export(&directory, true, &BTreeSet::new()).expect("second export");
         assert_eq!(first, second);
         let expected_documents = read_legacy_documents(&directory)
             .expect("legacy documents")
@@ -557,7 +597,10 @@ mod tests {
         let has_missing = first["inventory"]["missing_catalog_documentation"]
             .as_array()
             .is_some_and(|missing| !missing.is_empty());
-        assert_eq!(build_export(&directory, false).is_err(), has_missing);
+        assert_eq!(
+            build_export(&directory, false, &BTreeSet::new()).is_err(),
+            has_missing
+        );
     }
 
     #[test]

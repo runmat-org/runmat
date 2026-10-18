@@ -116,10 +116,12 @@ async fn asinh_builtin(
         runmat_builtins::ASINH_CATALOG_ENTRY.identity,
         &runmat_builtins::ASINH_ERROR_INVALID_INPUT,
     )?;
-    super::inverse_helpers::preparation::unary(
+    super::inverse_helpers::preparation::unary_real(
         runtime.as_ref(),
         runmat_builtins::ASINH_CATALOG_ENTRY.identity,
         value,
+        |value: f32| Ok(value.asinh()),
+        |value: f64| Ok(value.asinh()),
         |value| async move {
             let output = asinh_admitted(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())

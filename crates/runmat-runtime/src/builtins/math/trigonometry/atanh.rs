@@ -145,6 +145,9 @@ async fn atanh_builtin(
             &runmat_builtins::ATANH_ERROR_INTERNAL,
         ),
         value,
+        true,
+        |value: f32| Ok(atanh_real_parts_f32(value)),
+        |value: f64| Ok(atanh_real_parts(value)),
         |value| async move {
             let output = atanh_execute(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())

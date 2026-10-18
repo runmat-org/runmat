@@ -43,35 +43,42 @@ fn explicit_floating_decline_is_not_host_authority() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn exact_integer_form_requires_provider_publication_before_download() {
-    crate::builtins::common::test_support::with_test_provider(|provider| {
-        let source = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).unwrap();
-        let resident = gpu_helpers::upload_tensor(provider, &source)
-            .unwrap()
-            .with_provenance(GpuHandleProvenance::Explicit)
-            .unwrap();
-        let scalar = Value::Num(2.0);
-        for entry in [
-            &runmat_builtins::PLUS_CATALOG_ENTRY,
-            &runmat_builtins::MINUS_CATALOG_ENTRY,
-        ] {
-            assert_eq!(
-                integer_materialization(entry, &Value::GpuTensor(resident.clone()), &scalar)
-                    .unwrap(),
-                Some((BuiltinIntegerClass::Int32, vec![2, 1]))
-            );
-            assert_eq!(
-                integer_materialization(entry, &scalar, &Value::GpuTensor(resident.clone()))
-                    .unwrap(),
-                Some((BuiltinIntegerClass::Int32, vec![2, 1]))
-            );
-            let error =
-                HostFallbackAdmission::new(entry, &Value::GpuTensor(resident.clone()), &scalar)
-                    .err()
-                    .expect("in-process provider lacks exact integer upload evidence");
-            assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
-            resident.allocation_lease().validate_live().unwrap();
-        }
-    });
+    crate::builtins::common::test_support::with_uncertified_integer_provider(
+        |provider, fixture| {
+            let source = Tensor::new_integer(IntegerStorage::I32(vec![2, 4]), vec![2, 1]).unwrap();
+            let resident = gpu_helpers::upload_tensor(provider, &source)
+                .unwrap()
+                .with_provenance(GpuHandleProvenance::Explicit)
+                .unwrap();
+            let scalar = Value::Num(2.0);
+            provider.reset_telemetry();
+            for entry in [
+                &runmat_builtins::PLUS_CATALOG_ENTRY,
+                &runmat_builtins::MINUS_CATALOG_ENTRY,
+            ] {
+                assert_eq!(
+                    integer_materialization(entry, &Value::GpuTensor(resident.clone()), &scalar)
+                        .unwrap(),
+                    Some((BuiltinIntegerClass::Int32, vec![2, 1]))
+                );
+                assert_eq!(
+                    integer_materialization(entry, &scalar, &Value::GpuTensor(resident.clone()))
+                        .unwrap(),
+                    Some((BuiltinIntegerClass::Int32, vec![2, 1]))
+                );
+                let error =
+                    HostFallbackAdmission::new(entry, &Value::GpuTensor(resident.clone()), &scalar)
+                        .err()
+                        .expect("fixture lacks exact integer upload evidence");
+                assert_eq!(error.gpu_gather_retry, GpuGatherRetry::Never);
+                assert!(
+                    fixture.upload_evidence_queries() > 0,
+                    "upload evidence gate queried"
+                );
+                resident.allocation_lease().validate_live().unwrap();
+            }
+        },
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

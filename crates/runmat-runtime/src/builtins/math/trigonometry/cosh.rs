@@ -115,10 +115,12 @@ async fn cosh_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinR
         "X",
     )
     .await?;
-    super::inverse_helpers::preparation::unary(
+    super::inverse_helpers::preparation::unary_real(
         runtime.as_ref(),
         runmat_builtins::COSH_CATALOG_ENTRY.identity,
         value,
+        |value: f32| Ok(value.cosh()),
+        |value: f64| Ok(value.cosh()),
         |value| async move {
             let output = cosh_admitted(value).await?;
             RootedValue::new(output).map_err(|cause| cause.into_runtime_error())

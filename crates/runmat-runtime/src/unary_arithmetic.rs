@@ -67,13 +67,42 @@ pub async fn evaluate_in_context(
             }
             RootedValue::new(value).map_err(|error| error.into_runtime_error())
         }
-        UnaryArithmeticOperation::Minus => match context {
-            Some(context) => {
-                crate::call_builtin_async_in_context(context, "times", &[value, Value::Num(-1.0)])
-                    .await
+        UnaryArithmeticOperation::Minus => {
+            if crate::builtins::math::host_route::real_floating_host(&value) {
+                if let Some((context, route)) = context.and_then(|runtime| {
+                    runtime
+                        .vm_fusion_host_route()
+                        .filter(|route| route.allows_intrinsic_host(runtime, operator))
+                        .map(|route| (runtime, route))
+                }) {
+                    if let Some(output) =
+                        route.take_intrinsic_numerical_output(context, operator)?
+                    {
+                        let result = crate::builtins::math::elementwise::binary_arithmetic::preparation::managed::execute_value(
+                            context,
+                            output,
+                            runmat_types::OperatorKind::ElementwiseMultiply,
+                            &Value::Num(-1.0),
+                            &value,
+                        )?;
+                        route.confirm_intrinsic_host(context, operator);
+                        return RootedValue::new(result)
+                            .map_err(|error| error.into_runtime_error());
+                    }
+                }
             }
-            None => crate::call_builtin_async("times", &[value, Value::Num(-1.0)]).await,
-        },
+            match context {
+                Some(context) => {
+                    crate::call_builtin_async_in_context(
+                        context,
+                        "times",
+                        &[value, Value::Num(-1.0)],
+                    )
+                    .await
+                }
+                None => crate::call_builtin_async("times", &[value, Value::Num(-1.0)]).await,
+            }
+        }
     }
 }
 

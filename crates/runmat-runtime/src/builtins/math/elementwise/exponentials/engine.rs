@@ -38,10 +38,12 @@ pub(super) async fn execute_non_table(
             "operations involving complex numbers with integer types are not supported",
         ));
     }
-    let output = crate::builtins::math::trigonometry::inverse_helpers::preparation::unary(
+    let output = crate::builtins::math::trigonometry::inverse_helpers::preparation::unary_real(
         runtime,
         operation.catalog_entry().identity,
         value,
+        |value: f32| Ok(operation.apply_f32(value)),
+        |value: f64| Ok(operation.apply_f64(value)),
         |value| async move {
             let value = match value {
                 Value::GpuTensor(handle) => super::provider::evaluate(operation, handle).await,

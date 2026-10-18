@@ -51,7 +51,8 @@ const roots = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates", SIDE
 const before = sourceSnapshot(repository, roots);
 let invocation;
 const exported = runDocumentationExport((executable, args, settings) => {
-    const actualArgs = [args[0], "--locked", "--offline", ...args.slice(1)];
+    const actualArgs = [args[0], "--locked", "--offline", ...args.slice(1),
+        ...options.identities.flatMap(name => ["--identity", name])];
     invocation = { executable, arguments: actualArgs, cwd: repository };
     return spawnSync(executable, actualArgs, { ...settings, cwd: repository });
 });

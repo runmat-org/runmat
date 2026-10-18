@@ -19,6 +19,14 @@ pub struct ExactHostComplexTensorAllocation {
 }
 
 impl ExactHostComplexTensorAllocation {
+    pub fn shape(&self) -> &[usize] {
+        &self.shape
+    }
+
+    pub fn numeric_dtype(&self) -> NumericDType {
+        self.dtype
+    }
+
     /// Exact backing bytes for an ordinary Rust-owned complex tensor. No
     /// release authority or retained-claim header exists on this path.
     pub fn unmanaged_requested_bytes(

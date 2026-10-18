@@ -50,7 +50,9 @@ pub(super) async fn execute(
         } else {
             2
         }),
-        |value| execution::convert(value, template, borrowed),
+        |value, host_cast_output| {
+            execution::convert(runtime, value, template, borrowed, host_cast_output)
+        },
     )
     .await
 }
