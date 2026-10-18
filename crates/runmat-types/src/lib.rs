@@ -3,6 +3,8 @@ pub mod convolution;
 pub mod contract;
 pub mod declaration;
 pub mod dimension;
+mod exception;
+pub use exception::ExceptionProperty;
 pub mod fact;
 pub mod geometry;
 pub mod identity;

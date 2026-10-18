@@ -161,7 +161,8 @@ fn workspace_introspection_is_session_scoped_and_excludes_persistents() {
 
     {
         let _scope = first.enter();
-        runmat_runtime::workspace::session::store_global_named("first_global", Value::Num(3.0));
+        runmat_runtime::workspace::session::store_global_named("first_global", Value::Num(3.0))
+            .expect("scoped global write should succeed");
         runmat_runtime::workspace::session::store_persistent_named(
             "worker",
             "hidden_persistent",

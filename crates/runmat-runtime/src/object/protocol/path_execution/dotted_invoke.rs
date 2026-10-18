@@ -19,11 +19,27 @@ pub(super) async fn try_execute(
     request: &SubscriptReadRequest,
     caller_function_name: Option<&str>,
 ) -> Result<Option<RootedValueSequence>, RuntimeError> {
-    let Some((member, components, semantic_fallback)) = prefix(steps) else {
+    if !is_prefix(steps) {
         return Ok(None);
+    }
+    let member_step = steps.pop_front().ok_or_else(|| {
+        semantic_error(
+            "InvalidObjectSubscriptPath",
+            "dotted invocation has no member",
+        )
+    })?;
+    let (ObjectIndexSelector::Member(member), semantic_fallback) = member_step.into_parts() else {
+        unreachable!("validated dotted invocation has a member selector")
     };
-    steps.pop_front();
-    steps.pop_front();
+    let paren_step = steps.pop_front().ok_or_else(|| {
+        semantic_error(
+            "InvalidObjectSubscriptPath",
+            "dotted invocation has no arguments",
+        )
+    })?;
+    let (ObjectIndexSelector::IndexValues { components }, _) = paren_step.into_parts() else {
+        unreachable!("validated dotted invocation has index-value arguments")
+    };
     let requested_outputs = if steps.is_empty() {
         request.known_requested_outputs()?.ok_or_else(|| {
             semantic_error(
@@ -113,24 +129,15 @@ pub(super) async fn try_execute(
         )
         .await?;
         let member_value = resolve_single(member_sequence)?;
-        if is_callable_value(&member_value) {
+        if super::callable::is_callable_value(&member_value) {
             let arguments = call_arguments(components)?;
-            let resolver = RuntimeFunctionResolver;
-            let descriptor = crate::call::descriptor::CallableDescriptor::from_feval_value(
+            super::callable::invoke(
+                runtime,
                 member_value.value().clone(),
                 arguments,
                 requested_outputs,
-                &resolver,
-            );
-            match runtime {
-                Some(runtime) => {
-                    crate::call::descriptor::execute_callable_descriptor_in_context(
-                        runtime, descriptor,
-                    )
-                    .await?
-                }
-                None => crate::call::descriptor::execute_callable_descriptor(descriptor).await?,
-            }
+            )
+            .await?
         } else {
             let step =
                 ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components });
@@ -152,33 +159,19 @@ pub(super) async fn try_execute(
     Ok(Some(result))
 }
 
-fn prefix(
-    steps: &VecDeque<ObjectSubscript>,
-) -> Option<(
-    runmat_types::MemberName,
-    Vec<ObjectIndexComponent>,
-    Option<runmat_types::CallableIdentity>,
-)> {
+fn is_prefix(steps: &VecDeque<ObjectSubscript>) -> bool {
     let (Some(member_step), Some(paren_step)) = (steps.front(), steps.get(1)) else {
-        return None;
+        return false;
     };
-    let (ObjectIndexSelector::Member(member), ObjectIndexSelector::IndexValues { components }) =
+    let (ObjectIndexSelector::Member(_), ObjectIndexSelector::IndexValues { .. }) =
         (member_step.selector(), paren_step.selector())
     else {
-        return None;
+        return false;
     };
-    if member_step.kind() != ObjectIndexKind::Member
-        || paren_step.kind() != ObjectIndexKind::Paren
-        || member_step.origin() != ObjectSubscriptOrigin::DottedInvokeMember
-        || paren_step.origin() != ObjectSubscriptOrigin::DottedInvokeArguments
-    {
-        return None;
-    }
-    Some((
-        member.clone(),
-        components.clone(),
-        member_step.semantic_fallback().cloned(),
-    ))
+    member_step.kind() == ObjectIndexKind::Member
+        && paren_step.kind() == ObjectIndexKind::Paren
+        && member_step.origin() == ObjectSubscriptOrigin::DottedInvokeMember
+        && paren_step.origin() == ObjectSubscriptOrigin::DottedInvokeArguments
 }
 
 // The syntax is ambiguous until member resolution: `obj.data(:)` indexes a
@@ -194,23 +187,4 @@ fn call_arguments(components: Vec<ObjectIndexComponent>) -> Result<Vec<Value>, R
             )),
         })
         .collect()
-}
-
-struct RuntimeFunctionResolver;
-
-impl crate::call::descriptor::FunctionNameResolver for RuntimeFunctionResolver {
-    fn resolve_function(&self, name: &str) -> Option<runmat_types::FunctionId> {
-        crate::user_functions::resolve_semantic_function_by_name(name).map(runmat_types::FunctionId)
-    }
-}
-
-fn is_callable_value(value: &Value) -> bool {
-    matches!(
-        value,
-        Value::FunctionHandle(_)
-            | Value::ExternalFunctionHandle(_)
-            | Value::MethodFunctionHandle(_)
-            | Value::BoundFunctionHandle(_)
-            | Value::Closure(_)
-    )
 }

@@ -16,6 +16,7 @@ use runmat_types::{
 mod expression_regions;
 mod initialization;
 mod subscript_chain;
+use super::workspace_effect::{current_scope_bindings, exposes_current_workspace};
 use expression_regions::{diagnose_expression_steps, diagnose_subscript_chain_reads};
 use initialization::compute_init_dataflow;
 pub(crate) use subscript_chain::{SubscriptChainInference, SubscriptPathDisposition};
@@ -429,7 +430,7 @@ pub(crate) fn index_selectors(
         .map(|component| match component {
             MirIndexComponent::Colon => IndexSelectorFact::Colon,
             MirIndexComponent::Expr(operand) => index_selector_for_operand(operand, facts),
-            MirIndexComponent::ContextualExpr(_) => {
+            MirIndexComponent::ContextualExpr(_) | MirIndexComponent::PreparedExpr(_) => {
                 IndexSelectorFact::Numeric(ValueFact::unknown(DynamicReason::Unspecified))
             }
         })
@@ -529,13 +530,14 @@ pub(super) fn diagnose_uninitialized_reads(
     constructor_instance: Option<MirLocalId>,
 ) -> Vec<MirDiagnostic> {
     let result = compute_init_dataflow(body, constructor_instance);
+    let current_bindings = current_scope_bindings(body);
     let mut diagnostics = Vec::new();
 
     for (idx, block) in body.blocks.iter().enumerate() {
         let Some(mut state) = result.in_states[idx].clone() else {
             continue;
         };
-        diagnose_block(block, &mut state, &mut diagnostics);
+        diagnose_block(block, &mut state, &current_bindings, &mut diagnostics);
     }
 
     diagnostics
@@ -658,10 +660,11 @@ fn hir_diagnostic(
 fn diagnose_block(
     block: &BasicBlock,
     state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     for stmt in &block.statements {
-        diagnose_stmt(stmt, state, diagnostics);
+        diagnose_stmt(stmt, state, current_bindings, diagnostics);
     }
 
     match &block.terminator.kind {
@@ -677,7 +680,13 @@ fn diagnose_block(
         MirTerminatorKind::For {
             binding, iterable, ..
         } => {
-            diagnose_rvalue_reads(iterable, state, block.terminator.span, diagnostics);
+            diagnose_rvalue_reads(
+                iterable,
+                state,
+                current_bindings,
+                block.terminator.span,
+                diagnostics,
+            );
             state[binding.0] = InitFact::DefinitelyAssigned;
         }
         MirTerminatorKind::ParFor {
@@ -686,25 +695,73 @@ fn diagnose_block(
             maximum_workers,
             ..
         } => {
-            diagnose_rvalue_reads(iterable, state, block.terminator.span, diagnostics);
+            diagnose_rvalue_reads(
+                iterable,
+                state,
+                current_bindings,
+                block.terminator.span,
+                diagnostics,
+            );
             if let Some(workers) = maximum_workers.as_deref() {
-                diagnose_rvalue_reads(workers, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    workers,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
             state[binding.0] = InitFact::DefinitelyAssigned;
         }
         MirTerminatorKind::Spmd { header, .. } => match header.as_ref() {
             crate::parallel::MirSpmdHeader::Default => {}
             crate::parallel::MirSpmdHeader::One(value) => {
-                diagnose_rvalue_reads(value, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    value,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
             crate::parallel::MirSpmdHeader::Two(first, second) => {
-                diagnose_rvalue_reads(first, state, block.terminator.span, diagnostics);
-                diagnose_rvalue_reads(second, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    first,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
+                diagnose_rvalue_reads(
+                    second,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
             crate::parallel::MirSpmdHeader::Three(first, second, third) => {
-                diagnose_rvalue_reads(first, state, block.terminator.span, diagnostics);
-                diagnose_rvalue_reads(second, state, block.terminator.span, diagnostics);
-                diagnose_rvalue_reads(third, state, block.terminator.span, diagnostics);
+                diagnose_rvalue_reads(
+                    first,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
+                diagnose_rvalue_reads(
+                    second,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
+                diagnose_rvalue_reads(
+                    third,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
             }
         },
         MirTerminatorKind::Return(outputs) => {
@@ -715,7 +772,13 @@ fn diagnose_block(
         MirTerminatorKind::Await { future, result, .. } => {
             diagnose_operand_read(future, state, block.terminator.span, diagnostics);
             if let Some(place) = result {
-                diagnose_place_reads(place, state, block.terminator.span, diagnostics);
+                diagnose_place_reads(
+                    place,
+                    state,
+                    current_bindings,
+                    block.terminator.span,
+                    diagnostics,
+                );
                 mark_place_assigned(place, state);
             }
         }
@@ -725,23 +788,40 @@ fn diagnose_block(
     }
 }
 
-fn diagnose_stmt(stmt: &MirStmt, state: &mut [InitFact], diagnostics: &mut Vec<MirDiagnostic>) {
+fn diagnose_stmt(
+    stmt: &MirStmt,
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
+    diagnostics: &mut Vec<MirDiagnostic>,
+) {
     match &stmt.kind {
         MirStmtKind::Assign { place, value } => {
-            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
-            diagnose_place_reads(place, state, stmt.span, diagnostics);
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
+            diagnose_place_reads(place, state, current_bindings, stmt.span, diagnostics);
             mark_place_assigned(place, state);
         }
         MirStmtKind::MultiAssign { targets, value } => {
-            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
             for target in &targets.targets {
                 match target {
                     crate::MirOutputTarget::Place(place) => {
-                        diagnose_place_reads(place, state, stmt.span, diagnostics);
+                        diagnose_place_reads(
+                            place,
+                            state,
+                            current_bindings,
+                            stmt.span,
+                            diagnostics,
+                        );
                         mark_place_assigned(place, state);
                     }
                     crate::MirOutputTarget::Sequence(target) => {
-                        diagnose_sequence_target_reads(target, state, stmt.span, diagnostics);
+                        diagnose_sequence_target_reads(
+                            target,
+                            state,
+                            current_bindings,
+                            stmt.span,
+                            diagnostics,
+                        );
                         mark_place_assigned(target.base(), state);
                     }
                     crate::MirOutputTarget::Discard => {}
@@ -749,28 +829,42 @@ fn diagnose_stmt(stmt: &MirStmt, state: &mut [InitFact], diagnostics: &mut Vec<M
             }
         }
         MirStmtKind::SequenceAssign { target, value } => {
-            diagnose_rvalue_reads(value, state, stmt.span, diagnostics);
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics);
             let (base, member) = match target {
                 crate::MirSequenceTarget::Member { base, .. } => (base, None),
                 crate::MirSequenceTarget::DynamicMember { base, member } => (base, Some(member)),
                 crate::MirSequenceTarget::CellContents { base, indexing } => {
-                    diagnose_indexing_reads(indexing, state, stmt.span, diagnostics);
+                    diagnose_indexing_reads(
+                        indexing,
+                        state,
+                        current_bindings,
+                        stmt.span,
+                        diagnostics,
+                    );
                     (base, None)
                 }
             };
-            diagnose_place_reads(base, state, stmt.span, diagnostics);
+            diagnose_place_reads(base, state, current_bindings, stmt.span, diagnostics);
             if let Some(member) = member {
                 diagnose_operand_read(member, state, stmt.span, diagnostics);
             }
             mark_place_assigned(base, state);
         }
         MirStmtKind::CaptureSequence { source, .. } => {
-            diagnose_expansion_source_reads(source, state, stmt.span, diagnostics);
+            diagnose_expansion_source_reads(
+                source,
+                state,
+                current_bindings,
+                stmt.span,
+                diagnostics,
+            );
         }
         MirStmtKind::WorkspaceEffect { effect, bindings } => {
             mark_declared_storage(effect, bindings, state);
         }
-        MirStmtKind::Expr(value) => diagnose_rvalue_reads(value, state, stmt.span, diagnostics),
+        MirStmtKind::Expr(value) => {
+            diagnose_rvalue_reads(value, state, current_bindings, stmt.span, diagnostics)
+        }
         MirStmtKind::StatementOutput(output) => {
             if let crate::MirStatementOutputSource::Local(local) = output.source {
                 diagnose_operand_read(
@@ -802,18 +896,19 @@ fn mark_declared_storage(
 
 fn diagnose_sequence_target_reads(
     target: &crate::MirSequenceTarget,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
-    diagnose_place_reads(target.base(), state, span, diagnostics);
+    diagnose_place_reads(target.base(), state, current_bindings, span, diagnostics);
     match target {
         crate::MirSequenceTarget::Member { .. } => {}
         crate::MirSequenceTarget::DynamicMember { member, .. } => {
             diagnose_operand_read(member, state, span, diagnostics)
         }
         crate::MirSequenceTarget::CellContents { indexing, .. } => {
-            diagnose_indexing_reads(indexing, state, span, diagnostics)
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics)
         }
     }
 }
@@ -821,6 +916,7 @@ fn diagnose_sequence_target_reads(
 fn diagnose_rvalue_reads(
     value: &MirRvalue,
     state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -840,7 +936,7 @@ fn diagnose_rvalue_reads(
         } => {
             diagnose_operand_read(left, state, span, diagnostics);
             for stmt in right_temps {
-                diagnose_stmt(stmt, state, diagnostics);
+                diagnose_stmt(stmt, state, current_bindings, diagnostics);
             }
             diagnose_operand_read(right, state, span, diagnostics);
         }
@@ -853,7 +949,7 @@ fn diagnose_rvalue_reads(
         }
         MirRvalue::Call(call) => {
             for arg in &call.args {
-                diagnose_call_argument_reads(arg, state, span, diagnostics);
+                diagnose_call_argument_reads(arg, state, current_bindings, span, diagnostics);
             }
         }
         MirRvalue::Aggregate { elements, .. } => {
@@ -870,10 +966,10 @@ fn diagnose_rvalue_reads(
         }
         MirRvalue::Index { base, indexing } => {
             diagnose_operand_read(base, state, span, diagnostics);
-            diagnose_indexing_reads(indexing, state, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics);
         }
         MirRvalue::SubscriptChain(chain) => {
-            diagnose_subscript_chain_reads(chain, state, span, diagnostics)
+            diagnose_subscript_chain_reads(chain, state, current_bindings, span, diagnostics)
         }
         MirRvalue::Member { base, .. } => diagnose_operand_read(base, state, span, diagnostics),
         MirRvalue::DynamicMember { base, member, .. } => {
@@ -883,7 +979,7 @@ fn diagnose_rvalue_reads(
         MirRvalue::WorkspaceFirstStaticProperty { .. } => {}
         MirRvalue::Future { args, .. } => {
             for arg in args {
-                diagnose_call_argument_reads(arg, state, span, diagnostics);
+                diagnose_call_argument_reads(arg, state, current_bindings, span, diagnostics);
             }
         }
         MirRvalue::MetaClass(_) | MirRvalue::Colon | MirRvalue::End => {}
@@ -898,11 +994,21 @@ fn diagnose_rvalue_reads(
             }
         }
     }
+    if exposes_current_workspace(value) {
+        mark_runtime_workspace_lookup(state, current_bindings);
+    }
+}
+
+fn mark_runtime_workspace_lookup(state: &mut [InitFact], current_bindings: &[MirLocalId]) {
+    for binding in current_bindings {
+        state[binding.0] = InitFact::RuntimeWorkspaceLookup;
+    }
 }
 
 fn diagnose_call_argument_reads(
     argument: &crate::MirCallArg,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -911,7 +1017,7 @@ fn diagnose_call_argument_reads(
             diagnose_operand_read(operand, state, span, diagnostics)
         }
         crate::MirCallArg::Expansion(source) => {
-            diagnose_expansion_source_reads(source, state, span, diagnostics)
+            diagnose_expansion_source_reads(source, state, current_bindings, span, diagnostics)
         }
         crate::MirCallArg::CapturedSequence(_) => {}
     }
@@ -919,27 +1025,31 @@ fn diagnose_call_argument_reads(
 
 fn diagnose_place_reads(
     place: &MirPlace,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     match place {
         MirPlace::Local(_) | MirPlace::Binding(_) => {}
-        MirPlace::Member(base, _) => diagnose_place_reads(base, state, span, diagnostics),
+        MirPlace::Member(base, _) => {
+            diagnose_place_reads(base, state, current_bindings, span, diagnostics)
+        }
         MirPlace::DynamicMember(base, member) => {
-            diagnose_place_reads(base, state, span, diagnostics);
+            diagnose_place_reads(base, state, current_bindings, span, diagnostics);
             diagnose_operand_read(member, state, span, diagnostics);
         }
         MirPlace::Index(base, indexing) => {
-            diagnose_place_reads(base, state, span, diagnostics);
-            diagnose_indexing_reads(indexing, state, span, diagnostics);
+            diagnose_place_reads(base, state, current_bindings, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics);
         }
     }
 }
 
 fn diagnose_indexing_reads(
     indexing: &MirIndexing,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -950,8 +1060,25 @@ fn diagnose_indexing_reads(
             }
             MirIndexComponent::ContextualExpr(region) => {
                 let mut nested_state = state.to_vec();
-                diagnose_expression_steps(region.steps(), &mut nested_state, diagnostics);
+                diagnose_expression_steps(
+                    region.steps(),
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
                 diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
+            }
+            MirIndexComponent::PreparedExpr(region) => {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    region.steps(),
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
             }
             MirIndexComponent::Colon => {}
         }
@@ -960,17 +1087,18 @@ fn diagnose_indexing_reads(
 
 fn diagnose_expansion_source_reads(
     source: &crate::MirExpansionSource,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     match source {
         crate::MirExpansionSource::SubscriptChain(chain) => {
-            diagnose_subscript_chain_reads(chain, state, span, diagnostics)
+            diagnose_subscript_chain_reads(chain, state, current_bindings, span, diagnostics)
         }
         crate::MirExpansionSource::CellContents { base, indexing } => {
             diagnose_operand_read(base, state, span, diagnostics);
-            diagnose_indexing_reads(indexing, state, span, diagnostics);
+            diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics);
         }
         crate::MirExpansionSource::ReturnedOutputs(base)
         | crate::MirExpansionSource::Member { base, .. } => {
@@ -979,6 +1107,18 @@ fn diagnose_expansion_source_reads(
         crate::MirExpansionSource::DynamicMember { base, member } => {
             diagnose_operand_read(base, state, span, diagnostics);
             diagnose_operand_read(member, state, span, diagnostics);
+        }
+    }
+}
+
+fn transfer_region_workspace_lookup(
+    state: &mut [InitFact],
+    region_state: &[InitFact],
+    current_bindings: &[MirLocalId],
+) {
+    for binding in current_bindings {
+        if region_state[binding.0] == InitFact::RuntimeWorkspaceLookup {
+            state[binding.0] = InitFact::RuntimeWorkspaceLookup;
         }
     }
 }
@@ -993,7 +1133,7 @@ fn diagnose_operand_read(
         return;
     };
     match state[local.0] {
-        InitFact::DefinitelyAssigned => {}
+        InitFact::DefinitelyAssigned | InitFact::RuntimeWorkspaceLookup => {}
         InitFact::Unassigned => diagnostics.push(init_diagnostic(
             "RM-MIR0001",
             "local may be read before it is assigned",

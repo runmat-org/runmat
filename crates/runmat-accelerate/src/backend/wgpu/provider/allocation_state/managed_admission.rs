@@ -3,8 +3,8 @@
 
 use super::*;
 use runmat_execution::resource::{
-    ProviderHostMetadataAdmission, ProviderHostMetadataError, RetainedHostAllocationClaim,
-    RetainedHostViewGrant,
+    ProviderHostMetadataAdmission, ProviderHostMetadataError, ProviderRegistrationSlot,
+    ProviderRegistrationSlotPool, RetainedHostAllocationClaim, RetainedHostViewGrant,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -14,6 +14,7 @@ struct WgpuManagedAdmission {
     underlying: Box<dyn ProviderHostMetadataAdmission>,
     outstanding: Arc<AtomicUsize>,
     remaining: AtomicUsize,
+    reusable: Option<ProviderRegistrationSlotPool>,
 }
 
 impl std::fmt::Debug for WgpuManagedAdmission {
@@ -27,6 +28,7 @@ impl std::fmt::Debug for WgpuManagedAdmission {
 
 impl Drop for WgpuManagedAdmission {
     fn drop(&mut self) {
+        drop(self.reusable.take());
         let remaining = self.remaining.swap(0, Ordering::AcqRel);
         self.outstanding.fetch_sub(remaining, Ordering::AcqRel);
         self.allocations.release_empty_managed();
@@ -34,6 +36,18 @@ impl Drop for WgpuManagedAdmission {
 }
 
 impl ProviderHostMetadataAdmission for WgpuManagedAdmission {
+    fn claim_registration_slot(
+        &self,
+        provider_owner: usize,
+    ) -> Result<Option<ProviderRegistrationSlot>, ProviderHostMetadataError> {
+        if let Some(pool) = &self.reusable {
+            pool.acquire(provider_owner).map(Some)
+        } else {
+            self.commit_registration_slot(provider_owner)?;
+            Ok(None)
+        }
+    }
+
     fn claim_view(
         &self,
         view_bytes: u64,
@@ -52,7 +66,7 @@ impl ProviderHostMetadataAdmission for WgpuManagedAdmission {
         &self,
         provider_owner: usize,
     ) -> Result<(), ProviderHostMetadataError> {
-        if self.provider_owner != provider_owner {
+        if self.provider_owner != provider_owner || self.reusable.is_some() {
             return Err(ProviderHostMetadataError::OwnerFailure);
         }
         self.remaining
@@ -89,9 +103,35 @@ impl AllocationState {
         underlying: Box<dyn ProviderHostMetadataAdmission>,
         count: usize,
     ) -> Result<Box<dyn ProviderHostMetadataAdmission>> {
+        self.prepare_metadata(underlying, count, RegistrationLifetime::OneShot)
+    }
+
+    pub(in super::super) fn prepare_reusable_managed_metadata(
+        self: &super::super::owner_shared::OwnerShared<Self>,
+        underlying: Box<dyn ProviderHostMetadataAdmission>,
+        count: usize,
+    ) -> Result<Box<dyn ProviderHostMetadataAdmission>> {
+        self.prepare_metadata(underlying, count, RegistrationLifetime::Concurrent)
+    }
+
+    fn prepare_metadata(
+        self: &super::super::owner_shared::OwnerShared<Self>,
+        underlying: Box<dyn ProviderHostMetadataAdmission>,
+        count: usize,
+        lifetime: RegistrationLifetime,
+    ) -> Result<Box<dyn ProviderHostMetadataAdmission>> {
         if count == 0 || self.is_lost() {
             return Err(AllocationStateError::Capacity.into());
         }
+        let pool_funding = match lifetime {
+            RegistrationLifetime::OneShot => None,
+            RegistrationLifetime::Concurrent => Some(
+                underlying.claim_record(
+                    ProviderRegistrationSlotPool::requested_host_bytes()
+                        .ok_or(AllocationStateError::Capacity)?,
+                )?,
+            ),
+        };
         let upper = self
             .managed_table_upper_bytes(count)
             .ok_or(AllocationStateError::Capacity)?;
@@ -106,12 +146,36 @@ impl AllocationState {
                 .reserve_managed(count, upper, &backing_claim)?;
         drop(backing_claim);
         drop(retired_claim);
+        let owner = (&**self as *const Self) as usize;
+        let reusable = match pool_funding {
+            Some(funding) => match ProviderRegistrationSlotPool::from_reserved_capacity(
+                owner,
+                count,
+                outstanding.clone(),
+                funding,
+            ) {
+                Ok(pool) => Some(pool),
+                Err(error) => {
+                    outstanding.fetch_sub(count, Ordering::AcqRel);
+                    self.release_empty_managed();
+                    return Err(error.into());
+                }
+            },
+            None => None,
+        };
         Ok(Box::new(WgpuManagedAdmission {
-            provider_owner: (&**self as *const Self) as usize,
+            provider_owner: owner,
             allocations: self.clone(),
             underlying,
             outstanding,
-            remaining: AtomicUsize::new(count),
+            remaining: AtomicUsize::new(if reusable.is_some() { 0 } else { count }),
+            reusable,
         }))
     }
+}
+
+#[derive(Clone, Copy)]
+enum RegistrationLifetime {
+    OneShot,
+    Concurrent,
 }

@@ -107,7 +107,7 @@ async fn admitted_value(
     let left = operand::from_value(contract.name, lhs, contract.invalid).await?;
     let right = operand::from_value(contract.name, rhs, contract.invalid).await?;
     let data = evaluate::binary(&left, &right, &shape, operation);
-    let value = operand::into_value(contract.name, data, shape, contract.invalid)?;
+    let value = operand::into_value(contract.name, data, shape.into(), contract.invalid)?;
     provider::restore_explicit(value, output_source.as_ref(), contract.name)
 }
 

@@ -64,7 +64,7 @@ fn source_shape(storage: &Storage) -> Vec<usize> {
     let shape = match storage {
         Storage::Numeric(value) => value.shape().to_vec(),
         Storage::Complex(value) => value.shape().to_vec(),
-        Storage::Logical(value) => value.shape.clone(),
+        Storage::Logical(value) => value.shape.to_vec(),
         Storage::String(value) if value.shape.is_empty() => vec![1, value.rows()],
         Storage::String(value) => value.shape.clone(),
         Storage::Character(value) => vec![value.rows, value.cols],

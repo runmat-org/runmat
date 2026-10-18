@@ -18,6 +18,7 @@ use crate::analysis::inference::{
     infer_rvalue, infer_rvalue_outputs, operand_fact, rvalue_literal,
     statement_contract_with_facts,
 };
+use crate::analysis::workspace_effect::statement_exposes_current_workspace;
 use crate::analysis::{AssignmentFact, ProgramLocalFact, ProgramPointFacts};
 
 #[path = "flow/call_observations.rs"]
@@ -204,6 +205,9 @@ fn transfer_statement(
             let assigned = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             let literal = rvalue_literal(value, state);
             apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
             assign_place(
                 place,
                 assigned,
@@ -223,6 +227,9 @@ fn transfer_statement(
                 diagnostics,
             );
             apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
             for (index, target) in targets.targets.iter().enumerate() {
                 match target {
                     MirOutputTarget::Place(place) => assign_place(
@@ -243,6 +250,9 @@ fn transfer_statement(
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
             sequence::assign_sequence_target(target, None, state);
         }
         MirStmtKind::CaptureSequence {
@@ -265,11 +275,17 @@ fn transfer_statement(
                 statement_contract_with_facts(statement, summaries, &facts);
             state.effects.0.extend(effects.0);
             state.capabilities.0.extend(capabilities.0);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
         }
         MirStmtKind::Expr(value) => {
             transfer_short_circuit_temps(value, state, summaries, diagnostics);
             let _ = infer_rvalue(value, state, summaries, statement.span, diagnostics);
             apply_rvalue_contract(value, state, summaries);
+            if statement_exposes_current_workspace(&statement.kind) {
+                state.invalidate_current_workspace_bindings();
+            }
         }
         MirStmtKind::StatementOutput(_) => {
             let facts = state.value_facts();
@@ -480,6 +496,7 @@ fn push_point(
                 assignment: match state.assignment {
                     super::super::InitFact::Unassigned => AssignmentFact::Unassigned,
                     super::super::InitFact::MaybeAssigned => AssignmentFact::MaybeAssigned,
+                    super::super::InitFact::RuntimeWorkspaceLookup => AssignmentFact::MaybeAssigned,
                     super::super::InitFact::DefinitelyAssigned => {
                         AssignmentFact::DefinitelyAssigned
                     }

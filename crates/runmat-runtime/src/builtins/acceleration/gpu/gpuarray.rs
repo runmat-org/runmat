@@ -170,7 +170,7 @@ fn gpu_array_value_shape(value: &Value) -> Vec<usize> {
     match value {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
-        Value::LogicalArray(array) => array.shape.clone(),
+        Value::LogicalArray(array) => array.shape.to_vec(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
         Value::String(text) => vec![1, text.chars().count()],
@@ -1604,7 +1604,7 @@ pub(crate) mod tests {
             assert!(runmat_accelerate_api::handle_is_logical(&handle));
             let gathered =
                 test_support::gather(Value::GpuTensor(handle.clone())).expect("gather logical");
-            assert_eq!(gathered.shape(), logical.shape);
+            assert_eq!(gathered.shape(), logical.shape.as_slice());
             assert_eq!(gathered.materialize_f64(), vec![1.0, 0.0, 1.0, 1.0]);
         });
     }

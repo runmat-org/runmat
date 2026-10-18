@@ -63,6 +63,30 @@ pub async fn prepare_function_inputs_async(
     accepts_varargin: bool,
     specs: &[FunctionInputSpec<'_>],
 ) -> Result<PreparedFunctionInputs, RuntimeError> {
+    // Compatibility callers lend a slice. Materialize it once at this
+    // explicit boundary; the selected owned-entry path below never clones
+    // those Values and shares the exact same validation semantics.
+    prepare_function_inputs_owned(
+        function_name,
+        supplied.to_vec(),
+        fixed_input_count,
+        accepts_varargin,
+        specs,
+    )
+    .await
+}
+
+/// Validate an owned function-entry suffix before moving its Values into
+/// fixed inputs and `varargin`. The caller must retain the original input
+/// root lease through this async operation and until the frame is installed.
+/// This avoids copying tensor, closure, and foreign payloads at entry.
+pub async fn prepare_function_inputs_owned(
+    function_name: &str,
+    mut supplied: Vec<Value>,
+    fixed_input_count: usize,
+    accepts_varargin: bool,
+    specs: &[FunctionInputSpec<'_>],
+) -> Result<PreparedFunctionInputs, RuntimeError> {
     if supplied.len() > fixed_input_count && !accepts_varargin {
         return Err(semantic_error(
             "TooManyInputs",
@@ -82,29 +106,37 @@ pub async fn prepare_function_inputs_async(
         ));
     }
 
-    let mut fixed = vec![None; fixed_input_count];
-    for (target, value) in fixed.iter_mut().zip(supplied) {
-        *target = Some(value.clone());
-    }
+    // Keep only default Values here. Every supplied Value remains in its
+    // original vector while potentially asynchronous validators inspect it.
+    let mut defaults = vec![None; fixed_input_count];
     for spec in specs {
-        if fixed[spec.input_index].is_none() {
+        if supplied.get(spec.input_index).is_none() && defaults[spec.input_index].is_none() {
             if let Some(default) = spec.default_value {
-                fixed[spec.input_index] = Some(default_value(default));
+                defaults[spec.input_index] = Some(default_value(default));
             }
         }
-        if let Some(value) = &fixed[spec.input_index] {
+        if let Some(value) = supplied
+            .get(spec.input_index)
+            .or_else(|| defaults[spec.input_index].as_ref())
+        {
             validate_input(function_name, spec.input_index, value, spec).await?;
         }
     }
 
+    let nargin = supplied.len();
+    let supplied_fixed = fixed_input_count.min(nargin);
+    let mut fixed = defaults;
+    for (target, value) in fixed
+        .iter_mut()
+        .take(supplied_fixed)
+        .zip(supplied.drain(..supplied_fixed))
+    {
+        *target = Some(value);
+    }
     let varargin = if accepts_varargin {
-        let values = supplied
-            .get(fixed_input_count..)
-            .unwrap_or_default()
-            .to_vec();
-        let columns = values.len();
+        let columns = supplied.len();
         Some(
-            CellArray::new(values, 1, columns)
+            CellArray::new(supplied, 1, columns)
                 .map_err(|error| semantic_error("VararginPack", format!("varargin: {error}")))?,
         )
     } else {
@@ -113,7 +145,7 @@ pub async fn prepare_function_inputs_async(
     Ok(PreparedFunctionInputs {
         fixed,
         varargin,
-        nargin: supplied.len(),
+        nargin,
     })
 }
 

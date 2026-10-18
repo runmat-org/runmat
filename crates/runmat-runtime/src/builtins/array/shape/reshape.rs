@@ -9,6 +9,11 @@ use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 
+#[path = "reshape/admission.rs"]
+mod admission;
+#[path = "reshape/readback.rs"]
+mod readback;
+
 fn reshape_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("reshape").build()
 }
@@ -39,7 +44,13 @@ async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
                 ArrayShapeTransform::Reshape,
             ))
     {
-        return Err(super::error::declared(reshape_error(format!("reshape: unsupported input type {:?}; expected numeric, logical, char, string, cell, or gpu array", value)), &RESHAPE_ERROR_UNSUPPORTED_INPUT));
+        return Err(super::error::declared(
+            reshape_error(format!(
+                "reshape: unsupported input type {:?}; expected numeric, logical, char, string, cell, or gpu array",
+                value
+            )),
+            &RESHAPE_ERROR_UNSUPPORTED_INPUT,
+        ));
     }
 
     crate::output_count::validate_fixed_outputs(
@@ -65,6 +76,20 @@ async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
             &RESHAPE_ERROR_SIZE_MISSING,
         ));
     }
+    let runtime = crate::context::legacy::active();
+    if matches!(
+        &value,
+        Value::Tensor(_) | Value::ComplexTensor(_) | Value::LogicalArray(_)
+    ) {
+        if let Some(runtime) = runtime.as_ref() {
+            if let Some(mut admitted) = admission::ReshapeDimensions::prepare(runtime, &rest)? {
+                admitted.parse(&rest, runtime).await?;
+                let numel = value_numel(&value).await?;
+                admitted.finalize(numel)?;
+                return admitted.publish(value, runtime);
+            }
+        }
+    }
     let tokens = parse_size_arguments(&rest).await?;
     let numel = value_numel(&value).await?;
     let dims = finalize_dimensions(tokens, numel)?;
@@ -73,12 +98,10 @@ async fn reshape_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
 
 fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Tensor(tensor) => {
-            tensor
-                .reshape(dims.to_vec())
-                .map(Value::Tensor)
-                .map_err(|e| reshape_error(format!("reshape: {e}")))
-        }
+        Value::Tensor(tensor) => tensor
+            .reshape(dims.to_vec())
+            .map(Value::Tensor)
+            .map_err(|e| reshape_error(format!("reshape: {e}"))),
         Value::ComplexTensor(ct) => {
             ComplexTensor::from_complex_storage(ct.into_complex_storage(), dims.to_vec())
                 .map(Value::ComplexTensor)
@@ -116,12 +139,10 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
             })
             .map(Value::StructArray)
             .map_err(|error| reshape_error(format!("reshape: {error}"))),
-        Value::ObjectArray(array) => {
-            array
-                .reshape_preserving_provenance(dims.to_vec())
-                .map(Value::ObjectArray)
-                .map_err(|error| reshape_error(format!("reshape: {error}")))
-        }
+        Value::ObjectArray(array) => array
+            .reshape_preserving_provenance(dims.to_vec())
+            .map(Value::ObjectArray)
+            .map_err(|error| reshape_error(format!("reshape: {error}"))),
         Value::GpuTensor(handle) => reshape_gpu_tensor(handle, dims),
         Value::Num(n) => {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
@@ -348,39 +369,54 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinRes
     }
 
     let mut dims = Vec::with_capacity(tokens.len());
+    let mut auto_index: Option<usize> = None;
+    let mut duplicate_auto = false;
+    for (idx, token) in tokens.iter().enumerate() {
+        match token {
+            DimToken::Known(value) => dims.push(*value),
+            DimToken::Auto => {
+                duplicate_auto |= auto_index.replace(idx).is_some();
+                dims.push(1);
+            }
+        }
+    }
+    finish_dimensions_in_place(&mut dims, auto_index, duplicate_auto, numel)?;
+    Ok(dims)
+}
+
+fn finish_dimensions_in_place(
+    dims: &mut [usize],
+    auto_index: Option<usize>,
+    duplicate_auto: bool,
+    numel: usize,
+) -> crate::BuiltinResult<()> {
+    if duplicate_auto {
+        return Err(reshape_size_error(
+            "reshape: can only specify a single [] dimension",
+        ));
+    }
     // A known zero makes the complete product empty even when an earlier
     // nonzero prefix cannot be represented. All tokens still get validated.
-    let mut known_product: usize = if tokens
+    let mut known_product: usize = if dims
         .iter()
-        .any(|token| matches!(token, DimToken::Known(0)))
+        .enumerate()
+        .any(|(index, &dim)| Some(index) != auto_index && dim == 0)
     {
         0
     } else {
         1
     };
-    let mut auto_index: Option<usize> = None;
 
-    for (idx, token) in tokens.iter().enumerate() {
-        match token {
-            DimToken::Known(value) => {
-                if *value == 0 {
-                    known_product = 0;
-                } else if known_product != 0 {
-                    known_product = known_product.checked_mul(*value).ok_or_else(|| {
-                        reshape_size_error("reshape: product of dimensions exceeds usize range")
-                    })?;
-                }
-                dims.push(*value);
-            }
-            DimToken::Auto => {
-                if auto_index.is_some() {
-                    return Err(reshape_size_error(
-                        "reshape: can only specify a single [] dimension",
-                    ));
-                }
-                auto_index = Some(idx);
-                dims.push(1); // placeholder
-            }
+    for (idx, &value) in dims.iter().enumerate() {
+        if Some(idx) == auto_index {
+            continue;
+        }
+        if value == 0 {
+            known_product = 0;
+        } else if known_product != 0 {
+            known_product = known_product.checked_mul(value).ok_or_else(|| {
+                reshape_size_error("reshape: product of dimensions exceeds usize range")
+            })?;
         }
     }
 
@@ -406,7 +442,7 @@ fn finalize_dimensions(tokens: Vec<DimToken>, numel: usize) -> crate::BuiltinRes
         )));
     }
 
-    Ok(dims)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -460,12 +496,81 @@ pub(crate) mod tests {
         let dims = Tensor::new_integer(IntegerStorage::U64(vec![2, 3]), vec![1, 2])
             .expect("dimension tensor");
 
+        let borrowed = tensor::borrowed_host_shape_dimensions(&Value::Tensor(dims.clone()))
+            .expect("borrowed typed dimensions")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("exact integer dimension values");
+        assert_eq!(borrowed, vec![2, 3]);
+
         let parsed =
             block_on(parse_size_arguments(&[Value::Tensor(dims)])).expect("dimension vector");
         assert!(matches!(
             parsed.as_slice(),
             [DimToken::Known(2), DimToken::Known(3)]
         ));
+    }
+
+    #[test]
+    fn admitted_reshape_shape_outlives_dimension_workspace_and_receipt() {
+        use crate::context::host_allocation::HostAllocationPlan;
+        use crate::context::host_effect::ManagedHostEffectLedger;
+        use crate::context::{
+            ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+            RuntimeServicePorts,
+        };
+        use std::rc::Rc;
+
+        struct FiniteParallel(ManagedHostEffectLedger);
+        impl RuntimeParallelService for FiniteParallel {
+            fn supports(&self, _: ParallelCapability) -> bool {
+                false
+            }
+
+            fn placement_resources(&self) -> RuntimeParallelResources {
+                let snapshot = self.0.snapshot();
+                RuntimeParallelResources {
+                    memory_available_bytes: Some(snapshot.free_bytes()),
+                    epoch: snapshot.epoch,
+                    ..RuntimeParallelResources::default()
+                }
+            }
+
+            fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+                Some(self.0.clone())
+            }
+        }
+
+        let ledger = ManagedHostEffectLedger::new(65_536);
+        let runtime =
+            RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+                .with_service_ports(
+                    RuntimeServicePorts::default()
+                        .with_parallel(Rc::new(FiniteParallel(ledger.clone()))),
+                );
+        let controls = [Value::Num(3.0), Value::Num(2.0)];
+        let mut dimensions = admission::ReshapeDimensions::prepare(&runtime, &controls)
+            .expect("shape admission")
+            .expect("finite shape receipt");
+        block_on(dimensions.parse(&controls, &runtime)).expect("dimension parsing");
+        dimensions.finalize(6).expect("matching element count");
+        let result = dimensions
+            .publish(
+                Value::Tensor(tensor_from_slice(&[1.0; 6], &[6, 1])),
+                &runtime,
+            )
+            .expect("admitted reshape");
+        let shape_charge = HostAllocationPlan::retained_exact_output_bytes(
+            u64::try_from(runmat_value::SharedShape::requested_bytes_for_rank(2).unwrap()).unwrap(),
+            1,
+        )
+        .unwrap();
+        assert_eq!(ledger.snapshot().live_claimed_bytes, shape_charge);
+        let Value::Tensor(tensor) = &result else {
+            panic!("expected tensor result");
+        };
+        assert_eq!(tensor.shape(), &[3, 2]);
+        drop(result);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
     }
 
     fn tensor_from_slice(data: &[f64], shape: &[usize]) -> Tensor {

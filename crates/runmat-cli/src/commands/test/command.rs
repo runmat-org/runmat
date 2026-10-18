@@ -16,7 +16,7 @@ use runmat_test_runner::schedule::RetryPolicy;
 use runmat_test_runner::worker::{RunSubmission, WorkerBackend};
 use runmat_test_runner::{CoordinatedRun, Coordinator, CoordinatorConfig};
 use runmat_test_runner_execution::{ExecutionBackendConfig, ExecutionWorkerBackend};
-use runmat_test_runner_native::artifact::FilesystemArtifactStore;
+use runmat_test_runner_native::artifact::{export_reports, FilesystemArtifactStore};
 use runmat_test_runner_native::host::{NativeCancellation, NativeClock};
 use runmat_test_runner_native::telemetry::NativeTelemetry;
 use runmat_test_runner_native::{
@@ -325,8 +325,9 @@ async fn execute_inner(args: TestArgs, cli: &Cli, runtime: &RunMatRuntimeConfig)
     } else {
         prepared.project_root.join(&args.report_dir)
     };
-    let store = FilesystemArtifactStore::new(report_root);
+    let store = FilesystemArtifactStore::new(report_root.as_path());
     let manifest = persist_reports(&store, &run.result.run_id, &run.reports).await?;
+    export_reports(&report_root, &run.reports).await?;
     if run.result.state.is_success() {
         if run
             .reports
@@ -453,7 +454,12 @@ fn reporters(args: &TestArgs, configured: &[ProjectTestReport]) -> ReporterFanou
         args.reports.clone()
     };
     let mut reporters = ReporterFanout::default();
+    let mut selected = Vec::new();
     for format in requested {
+        if selected.contains(&format) {
+            continue;
+        }
+        selected.push(format);
         match format {
             TestReportArg::Human => reporters.push(HumanReporter),
             TestReportArg::Json => reporters.push(JsonReporter::default()),

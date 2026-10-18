@@ -69,7 +69,9 @@ mod tests {
         );
         assert_eq!(RuntimeInvocationArity::Script.function_counts(), None);
         assert_eq!(RuntimeInvocationArity::Script.intrinsic_counts(), (0, 0));
-        let lab = second.fork_parallel_lab(crate::context::RuntimeServicePorts::default());
+        let lab = second
+            .fork_parallel_lab(crate::context::RuntimeServicePorts::default())
+            .expect("idle session fork");
         assert_eq!(
             lab.invocation_arity(),
             Some(RuntimeInvocationArity::function(3, 0))

@@ -687,14 +687,43 @@ async fn cat_builtin(dim: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value
         return cat_gpu_values(dim_zero, inputs, &like).await;
     }
 
-    let category = determine_category(&inputs, &like)?;
+    cat_host_values(dim_zero, inputs, &like)
+}
+
+/// Prove that the immutable process registry selects this exact legacy body.
+/// A canonical binding with the same name would make dispatcher selection
+/// ambiguous, and duplicate legacy rows may change its priority rule.
+pub(crate) fn has_selected_host_legacy_implementation() -> bool {
+    if !crate::builtin::registration::registered_runtime_builtin_bindings_by_name("cat").is_empty()
+    {
+        return false;
+    }
+    runmat_builtins::with_builtin_functions_by_exact_name("cat", |entries| {
+        entries.len() == 1
+            && entries[0].name == "cat"
+            && std::ptr::fn_addr_eq(
+                entries[0].implementation,
+                __rt_wrap_cat_builtin as fn(&[Value]) -> runmat_builtins::BuiltinFuture,
+            )
+    })
+}
+
+/// The one synchronous host assembly tail shared by `cat` and matrix literals.
+/// Callers have already selected the canonical host route and excluded cell,
+/// struct, resident, and method-dispatched operands.
+pub(crate) fn concatenate_host_values(dim_zero: usize, inputs: Vec<Value>) -> BuiltinResult<Value> {
+    cat_host_values(dim_zero, inputs, &LikeSpec::default())
+}
+
+fn cat_host_values(dim_zero: usize, inputs: Vec<Value>, like: &LikeSpec) -> BuiltinResult<Value> {
+    let category = determine_category(&inputs, like)?;
     match category {
         CatCategory::String => cat_string_arrays(dim_zero, inputs),
         CatCategory::Char => cat_char_arrays(dim_zero, inputs),
         CatCategory::Cell => unreachable!("cell concatenation returned before residency dispatch"),
-        CatCategory::Logical => cat_logical_arrays(dim_zero, inputs, &like),
-        CatCategory::Complex => cat_complex_arrays(dim_zero, inputs, &like),
-        CatCategory::Numeric => cat_numeric_tensors(dim_zero, inputs, &like),
+        CatCategory::Logical => cat_logical_arrays(dim_zero, inputs, like),
+        CatCategory::Complex => cat_complex_arrays(dim_zero, inputs, like),
+        CatCategory::Numeric => cat_numeric_tensors(dim_zero, inputs, like),
     }
 }
 
@@ -1019,7 +1048,7 @@ fn integer_concat_input(
             vec![target.cast_scalar(if value { 1.0 } else { 0.0 })],
         )),
         Value::LogicalArray(array) => Ok((
-            array.shape,
+            array.shape.to_vec(),
             array
                 .data
                 .iter()
@@ -1041,7 +1070,7 @@ fn cat_logical_arrays(
     for value in values {
         arrays.push(value_into_logical(value)?);
     }
-    let shapes: Vec<Vec<usize>> = arrays.iter().map(|a| a.shape.clone()).collect();
+    let shapes: Vec<&[usize]> = arrays.iter().map(|a| a.shape.as_slice()).collect();
     let data_refs: Vec<&[u8]> = arrays.iter().map(|a| a.data.as_slice()).collect();
     let (data, shape) = concat_column_major(dim_zero, &shapes, &data_refs, "cat")?;
     let logical = LogicalArray::new(data, shape).map_err(|e| cat_err(format!("cat: {e}")))?;
@@ -1232,7 +1261,7 @@ fn typed_complex_integer_concat_input(
                 .map(|&value| target.cast_scalar(if value == 0 { 0.0 } else { 1.0 }))
                 .collect();
             let imag = vec![zero(); real.len()];
-            Ok((array.shape, real, imag))
+            Ok((array.shape.to_vec(), real, imag))
         }
         other => Err(cat_err(format!(
             "cat: cannot concatenate typed complex integer arrays with {other:?}"
@@ -1467,9 +1496,9 @@ async fn cat_gpu_values(
     }
 }
 
-fn concat_column_major<T: Clone>(
+fn concat_column_major<T: Clone, S: AsRef<[usize]>>(
     dim_zero: usize,
-    shapes: &[Vec<usize>],
+    shapes: &[S],
     data: &[&[T]],
     context: &str,
 ) -> BuiltinResult<(Vec<T>, Vec<usize>)> {
@@ -1478,14 +1507,14 @@ fn concat_column_major<T: Clone>(
     }
     let rank = shapes
         .iter()
-        .map(|s| s.len())
+        .map(|s| s.as_ref().len())
         .max()
         .unwrap_or(1)
         .max(dim_zero + 1);
 
     let mut padded = Vec::with_capacity(shapes.len());
     for shape in shapes {
-        let mut current = shape.clone();
+        let mut current = shape.as_ref().to_vec();
         while current.len() < rank {
             current.push(1);
         }
@@ -1683,7 +1712,7 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
                 .into_iter()
                 .map(|value| if value == 0 { "0" } else { "1" }.to_string())
                 .collect(),
-            array.shape,
+            array.shape.to_vec(),
         )
         .map_err(|e| cat_err(format!("cat: {e}"))),
         other => Err(cat_err(format!(

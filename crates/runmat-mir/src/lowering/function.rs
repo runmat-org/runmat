@@ -36,6 +36,12 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
         .filter(|binding| binding.role == BindingRole::IncomingWorkspace)
         .map(|binding| binding.id)
         .collect();
+    let external_workspace: HashSet<_> = hir
+        .bindings
+        .iter()
+        .filter(|binding| binding.role == BindingRole::ExternalWorkspace)
+        .map(|binding| binding.id)
+        .collect();
     for function in &hir.functions {
         let module = hir
             .modules
@@ -66,6 +72,7 @@ pub fn lower_assembly(hir: &HirAssembly) -> Result<MirAssembly, HirError> {
                 function,
                 MirLoweringContext::with_async_functions(async_functions.clone(), function.id),
                 &incoming_workspace,
+                &external_workspace,
             )?,
         );
     }
@@ -113,8 +120,9 @@ fn lower_function_with_context(
     function: &HirFunction,
     mut ctx: MirLoweringContext,
     incoming_workspace: &HashSet<runmat_hir::BindingId>,
+    external_workspace: &HashSet<runmat_hir::BindingId>,
 ) -> Result<MirBody, HirError> {
-    let mut locals = ctx.locals_for_function(function, incoming_workspace);
+    let mut locals = ctx.locals_for_function(function, incoming_workspace, external_workspace);
     let returns: Vec<MirOperand> = function
         .outputs
         .iter()

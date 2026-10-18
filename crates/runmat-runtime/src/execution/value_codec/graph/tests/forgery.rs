@@ -8,7 +8,7 @@ fn admitted_callable_metadata_and_capture_arity_are_not_wire_authority() {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let (environment, _roots) = crate::call::lexical::allocate_environment(None).unwrap();
-        assert!(environment.reserve_owned_binding(BindingId(7)));
+        assert!(crate::call::lexical::reserve_owned_binding(&environment, BindingId(7)).unwrap());
         let value = Value::Closure(Closure::new(
             "nested".into(),
             Some(BoundFunctionBinding::portable(2, origin(2))),

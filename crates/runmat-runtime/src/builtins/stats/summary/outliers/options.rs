@@ -382,7 +382,7 @@ pub(super) fn logical_mask(
         Value::Bool(flag) => Ok((vec![u8::from(*flag)], vec![1, 1])),
         Value::LogicalArray(mask) => Ok((
             mask.data.iter().map(|flag| u8::from(*flag != 0)).collect(),
-            mask.shape.clone(),
+            mask.shape.to_vec(),
         )),
         Value::Tensor(tensor) => Ok((
             tensor

@@ -119,14 +119,14 @@ fn execute_inner(
         }
         let outcome = match execute_terminator(state, call, block.id, &block.terminator, exit) {
             Ok(outcome) => {
-                state.finish_contextual_site();
+                state.finish_contextual_site()?;
                 outcome
             }
             Err(NativeExecutorError::CallSuspended) => {
                 return super::call_suspension::publish(state, call, request, exit);
             }
             Err(error) => {
-                state.finish_contextual_site();
+                state.finish_contextual_site()?;
                 return Err(error);
             }
         };
@@ -187,7 +187,7 @@ fn execute_inner(
                 // The region completed this site's work without entering the
                 // ordinary instruction path. Release its expression scope and
                 // publish the updated roots before the next native site.
-                state.finish_contextual_site();
+                state.finish_contextual_site()?;
                 refresh_frame_roots(state, call)?;
                 return Ok(outcome);
             }
@@ -201,17 +201,17 @@ fn execute_inner(
             && matches!(block.terminator.kind, NativeTerminatorKind::For { .. });
         if !retained_for_iterable {
             match execute_instruction(state, &instruction) {
-                Ok(()) => state.finish_contextual_site(),
+                Ok(()) => state.finish_contextual_site()?,
                 Err(NativeExecutorError::CallSuspended) => {
                     return super::call_suspension::publish(state, call, request, exit);
                 }
                 Err(error) => {
-                    state.finish_contextual_site();
+                    state.finish_contextual_site()?;
                     return Err(error);
                 }
             }
         } else {
-            state.finish_contextual_site();
+            state.finish_contextual_site()?;
         }
         refresh_frame_roots(state, call)?;
         Ok(NativeSiteOutcome::continue_execution())
@@ -777,7 +777,7 @@ pub(super) fn redirect_exception(
     state: &mut HostState,
     exception: runmat_runtime::native::NativeException,
 ) -> NativeExecutorResult<Option<runmat_runtime::native::NativeSiteRequest>> {
-    state.abandon_site_continuations();
+    state.abandon_site_continuations()?;
     let Some(handler) = state.take_exception_handler() else {
         return Ok(None);
     };

@@ -115,7 +115,8 @@ pub use local_tasks::{
 pub use local_tasks::{RuntimeLocalTaskChildFactory, RuntimeLocalTaskSupervisor};
 pub use managed_observations::{ManagedObservationLease, ManagedObservationPool};
 pub use native_continuation::{
-    run_native_continuation, run_owned_request_continuation, run_selected_callback_continuation,
+    run_native_continuation, run_owned_request_continuation,
+    run_rooted_function_native_continuation, run_selected_callback_continuation,
     NativeContinuationPlacement,
 };
 #[cfg(target_arch = "wasm32")]
@@ -153,6 +154,7 @@ pub use services::{
     RuntimeWholeWorkProbeLease, RuntimeWholeWorkSelection, RuntimeWorkspaceService,
 };
 pub use source_evaluation::{
+    execute_assignin_effect, execute_selected_dynamic_workspace, DynamicWorkspaceInvocation,
     NumericTextEvaluation, RuntimeSourceEvaluationAuthority, RuntimeSourceEvaluationService,
     SessionSourceEvaluation, SessionSourcePurpose, SourceEvaluationPolicy,
     SourceEvaluationProvenance,

@@ -43,6 +43,32 @@ impl ManagedRoots {
             .map(|id| Self(Some(id)))
             .map_err(|error| error.to_string())
     }
+
+    pub(crate) fn from_traced(value: &impl Trace) -> Result<Self, String> {
+        struct Handles(HashSet<GcHandle>);
+        impl Tracer for Handles {
+            fn mark(&mut self, handle: GcHandle) {
+                self.0.insert(handle);
+            }
+        }
+        let mut handles = Handles(HashSet::new());
+        value.trace(&mut handles);
+        if handles.0.is_empty() {
+            return Ok(Self(None));
+        }
+        struct Root(Vec<GcHandle>);
+        impl GcRoot for Root {
+            fn scan(&self) -> Vec<GcHandle> {
+                self.0.clone()
+            }
+            fn description(&self) -> String {
+                "vm_owned_managed_values".into()
+            }
+        }
+        runmat_gc::gc_register_root(Box::new(Root(handles.0.into_iter().collect())))
+            .map(|id| Self(Some(id)))
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl Drop for ManagedRoots {

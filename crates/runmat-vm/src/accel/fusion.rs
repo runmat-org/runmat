@@ -2,6 +2,7 @@ use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Instr;
 use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;
+use crate::interpreter::vars::InterpreterVars;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
     elementwise_floating_admission, execute_centered_gram_placed, execute_elementwise_placed,
@@ -111,7 +112,8 @@ pub fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> b
     for instr in &instructions[span.start..=span.end] {
         if matches!(
             instr,
-            Instr::StoreIndex(_)
+            Instr::StochasticEvolution { .. }
+                | Instr::StoreIndex(_)
                 | Instr::StoreIndexDelete(_)
                 | Instr::StoreSlice(_, _, _, _)
                 | Instr::StoreSliceDelete(_, _, _, _)
@@ -201,7 +203,7 @@ pub fn gather_fusion_inputs<'a>(
     plan: &'a runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &'a mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
 ) -> Result<
@@ -245,7 +247,7 @@ pub fn gather_fusion_inputs<'a>(
                     match kind {
                         VarKind::Global => vars
                             .get(*index)
-                            .cloned()
+                            .map(|value| (*value).clone())
                             .ok_or_else(|| format!("fusion: global var {index} out of range"))?,
                         VarKind::Local => {
                             if let Some(frame) = context.call_stack.last() {
@@ -254,7 +256,7 @@ pub fn gather_fusion_inputs<'a>(
                                     format!("fusion: local var {index} unavailable")
                                 })?
                             } else {
-                                vars.get(*index).cloned().ok_or_else(|| {
+                                vars.get(*index).map(|value| value.clone()).ok_or_else(|| {
                                     format!("fusion: local var {index} unavailable")
                                 })?
                             }
@@ -365,13 +367,13 @@ pub fn gather_fusion_inputs<'a>(
             match &info.origin {
                 ValueOrigin::Variable { kind, index } => {
                     let value_opt = match kind {
-                        VarKind::Global => vars.get(*index).cloned(),
+                        VarKind::Global => vars.get(*index).map(|value| value.clone()),
                         VarKind::Local => {
                             if let Some(frame) = context.call_stack.last() {
                                 let absolute = frame.locals_start + index;
                                 context.locals.get(absolute).cloned()
                             } else {
-                                vars.get(*index).cloned()
+                                vars.get(*index).map(|value| value.clone())
                             }
                         }
                     };
@@ -392,13 +394,13 @@ pub fn gather_fusion_inputs<'a>(
         if slot.is_none() {
             if let Some(binding) = graph.var_binding(vid) {
                 let value_opt = match binding.kind {
-                    VarKind::Global => vars.get(binding.index).cloned(),
+                    VarKind::Global => vars.get(binding.index).map(|value| value.clone()),
                     VarKind::Local => {
                         if let Some(frame) = context.call_stack.last() {
                             let absolute = frame.locals_start + binding.index;
                             context.locals.get(absolute).cloned()
                         } else {
-                            vars.get(binding.index).cloned()
+                            vars.get(binding.index).map(|value| value.clone())
                         }
                     }
                 };
@@ -413,13 +415,13 @@ pub fn gather_fusion_inputs<'a>(
                 if let ValueOrigin::NodeOutput { node, .. } = info.origin {
                     if let Some(binding) = graph.node_binding(node) {
                         let value_opt = match binding.kind {
-                            VarKind::Global => vars.get(binding.index).cloned(),
+                            VarKind::Global => vars.get(binding.index).map(|value| value.clone()),
                             VarKind::Local => {
                                 if let Some(frame) = context.call_stack.last() {
                                     let absolute = frame.locals_start + binding.index;
                                     context.locals.get(absolute).cloned()
                                 } else {
-                                    vars.get(binding.index).cloned()
+                                    vars.get(binding.index).map(|value| value.clone())
                                 }
                             }
                         };
@@ -481,18 +483,14 @@ pub fn gather_fusion_inputs<'a>(
 /// publication uses the ordinary StoreVar/StoreLocal owner in the runner.
 pub fn write_elementwise_materialized_stores(
     materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     context: &mut ExecutionContext,
 ) -> Result<(), RuntimeError> {
     for (store, value) in materialized_stores {
         match store.binding.kind {
             VarKind::Global => {
                 let i = store.binding.index;
-                if i >= vars.len() {
-                    vars.resize(i + 1, Value::Num(0.0));
-                }
-                crate::runtime::workspace::admit_workspace_slot_write(i, &value)?;
-                vars[i] = value;
+                crate::runtime::workspace::commit_workspace_slot_value(vars, i, None, value)?;
             }
             VarKind::Local => {
                 if let Some(frame) = context.call_stack.last() {
@@ -503,11 +501,7 @@ pub fn write_elementwise_materialized_stores(
                     context.locals[absolute] = value;
                 } else {
                     let i = store.binding.index;
-                    if i >= vars.len() {
-                        vars.resize(i + 1, Value::Num(0.0));
-                    }
-                    crate::runtime::workspace::admit_workspace_slot_write(i, &value)?;
-                    vars[i] = value;
+                    crate::runtime::workspace::commit_workspace_slot_value(vars, i, None, value)?;
                 }
             }
         }
@@ -845,7 +839,7 @@ pub async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
     right: Option<runmat_runtime::context::VmFusionCompletionRight>,
@@ -876,7 +870,7 @@ pub(crate) async fn try_execute_fusion_group_with_inputs(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &InterpreterVars,
     context: &mut ExecutionContext,
     placement: Option<PlacementCorrelationId>,
     invocation: VmFusionInvocation<'_>,
@@ -927,6 +921,7 @@ mod tests {
     };
     use super::{write_elementwise_materialized_stores, StackSliceGuard};
     use crate::bytecode::program::ExecutionContext;
+    use crate::interpreter::vars::InterpreterVars;
     use runmat_accelerate::fusion::FusionStoreMaterialization;
     use runmat_accelerate::fusion_residency;
     use runmat_accelerate::graph::VarBinding;
@@ -1001,7 +996,7 @@ mod tests {
             fusion_residency::mark(&shared);
             fusion_residency::mark(&old_only);
             let stack = Vec::new();
-            let mut vars = vec![Value::Cell(
+            let mut vars = InterpreterVars::from_owned(vec![Value::Cell(
                 runmat_value::CellArray::new_with_shape(
                     vec![
                         Value::GpuTensor(shared.clone()),
@@ -1010,7 +1005,7 @@ mod tests {
                     vec![1, 2],
                 )
                 .unwrap(),
-            )];
+            )]);
             let frame_roots = crate::runtime::gc::InterpretContext::new(&stack, &vars).unwrap();
             drop(frame_roots);
             let old_weak = old_only.downgrade();

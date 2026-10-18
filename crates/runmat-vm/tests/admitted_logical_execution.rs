@@ -133,7 +133,14 @@ fn execute(
     )
     .map_err(Box::new)?;
     completion
-        .with_owned(|completion| runmat_runtime::execution::RootedValues::new(completion.values))
+        .with_owned(|completion| {
+            runmat_runtime::execution::RootedValues::new(
+                completion
+                    .values
+                    .into_owned()
+                    .expect("ordinary logical execution frame is owned"),
+            )
+        })
         .map_err(|error| Box::new(error.into_runtime_error()))
 }
 

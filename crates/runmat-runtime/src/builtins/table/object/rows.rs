@@ -216,7 +216,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     })?);
                 }
             }
-            let mut shape = array.shape.clone();
+            let mut shape = array.shape.to_vec();
             if shape.is_empty() {
                 shape = vec![rows.len(), 1];
             } else {

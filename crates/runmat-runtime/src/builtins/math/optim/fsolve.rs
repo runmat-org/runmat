@@ -322,7 +322,7 @@ impl LeastSquaresEvaluator for FsolveEvaluator<'_> {
                     let (shape, scalar) = match &value {
                         Value::Num(_) | Value::Int(_) | Value::Bool(_) => (vec![1, 1], true),
                         Value::Tensor(tensor) => (tensor.shape().to_vec(), false),
-                        Value::LogicalArray(array) => (array.shape.clone(), false),
+                        Value::LogicalArray(array) => (array.shape.to_vec(), false),
                         _ => (vec![1, 1], false),
                     };
                     let residual = value_to_real_vector_with_cooperation(NAME, value, cooperation).await?;

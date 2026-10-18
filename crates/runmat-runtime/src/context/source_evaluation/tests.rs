@@ -342,3 +342,44 @@ fn pending_sibling_invocations_retain_independent_language_policy() {
     assert!(runtime.top_level_await_enabled());
     assert!(runtime.dynamic_eval_enabled());
 }
+
+#[test]
+fn assignin_arguments_keep_borrowed_names_and_decode_character_rows_without_heap_text() {
+    use crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX;
+    use runmat_value::CharArray;
+
+    let selector = Value::CharArray(CharArray::new_row("CaLlEr"));
+    assert_eq!(
+        assignin_args::selector(&selector).unwrap(),
+        assignin_args::AssigninSelector::Caller
+    );
+    let name = Value::String("shared_name".into());
+    let mut scratch = [0u8; MATLAB_NAME_LENGTH_MAX];
+    let borrowed = assignin_args::name(&name, &mut scratch).unwrap();
+    assert_eq!(borrowed, "shared_name");
+    let Value::String(original) = &name else {
+        unreachable!("constructed a string scalar")
+    };
+    assert_eq!(borrowed.as_ptr(), original.as_ptr());
+
+    let character_name = Value::CharArray(CharArray::new_row("shared_name"));
+    assert_eq!(
+        assignin_args::name(&character_name, &mut scratch).unwrap(),
+        "shared_name"
+    );
+    for invalid in ["for", "éclair", "_leading"] {
+        assert_eq!(
+            assignin_args::name(&Value::CharArray(CharArray::new_row(invalid)), &mut scratch)
+                .unwrap_err()
+                .identifier(),
+            Some("RunMat:DynamicWorkspaceName")
+        );
+    }
+    let overlong = Value::CharArray(CharArray::new_row(&"a".repeat(MATLAB_NAME_LENGTH_MAX + 1)));
+    assert_eq!(
+        assignin_args::name(&overlong, &mut scratch)
+            .unwrap_err()
+            .identifier(),
+        Some("RunMat:DynamicWorkspaceName")
+    );
+}

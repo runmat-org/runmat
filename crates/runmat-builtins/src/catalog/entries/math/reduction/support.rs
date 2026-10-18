@@ -29,8 +29,8 @@ pub(super) use min_inference::{
 };
 pub use min_options::{MinComparisonMethod, MinControl};
 pub use missing_policy::ReductionNaN;
-pub(super) use numeric_inference::is_empty_placeholder;
 pub(super) use numeric_inference::LiteralReductionOutput;
+pub(super) use numeric_inference::{has_literal_zero_axis, is_empty_placeholder};
 pub(super) use sum_inference::{admitted_sum_controls, inferred_sum_shape};
 pub use sum_options::{SumControl, SumOutputClass};
 

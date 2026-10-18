@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
+use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -24,13 +25,26 @@ pub trait HostAllocationRelease: fmt::Debug + Send + Sync {
     /// `pointer` is the exact live allocation registered with this release
     /// authority and is released exactly once.
     unsafe fn release(&self, pointer: NonNull<u8>);
+
+    /// Release a uniquely owned authority. Exact-layout authorities can
+    /// override this to retire their own backing before claim-bearing fields.
+    /// The default preserves the existing contract for external owners.
+    ///
+    /// # Safety
+    ///
+    /// `pointer` must be the exact live allocation governed by this authority
+    /// and must be released exactly once by this call.
+    unsafe fn release_owned(self: Box<Self>, pointer: NonNull<u8>) {
+        // SAFETY: the caller supplies the exact pointer governed by `self`.
+        unsafe { self.release(pointer) };
+    }
 }
 
 /// A host allocation with proven origin, layout, capacity, and release authority.
 pub struct AdoptedHostAllocation {
     pointer: NonNull<u8>,
     provenance: HostAllocationProvenance,
-    release: ReleaseAuthority,
+    release: ManuallyDrop<ReleaseAuthority>,
 }
 
 enum ReleaseAuthority {
@@ -47,10 +61,10 @@ impl fmt::Debug for ReleaseAuthority {
 }
 
 impl ReleaseAuthority {
-    unsafe fn release(&self, pointer: NonNull<u8>) {
+    unsafe fn release(self, pointer: NonNull<u8>) {
         match self {
             Self::Shared(authority) => unsafe { authority.release(pointer) },
-            Self::Owned(authority) => unsafe { authority.release(pointer) },
+            Self::Owned(authority) => unsafe { authority.release_owned(pointer) },
         }
     }
 }
@@ -70,7 +84,7 @@ impl AdoptedHostAllocation {
         Self {
             pointer,
             provenance,
-            release: ReleaseAuthority::Shared(release),
+            release: ManuallyDrop::new(ReleaseAuthority::Shared(release)),
         }
     }
 
@@ -86,7 +100,7 @@ impl AdoptedHostAllocation {
         Self {
             pointer,
             provenance,
-            release: ReleaseAuthority::Owned(release),
+            release: ManuallyDrop::new(ReleaseAuthority::Owned(release)),
         }
     }
 
@@ -112,8 +126,11 @@ impl fmt::Debug for AdoptedHostAllocation {
 impl Drop for AdoptedHostAllocation {
     fn drop(&mut self) {
         // SAFETY: construction transfers the exact allocation to this owner,
-        // and Drop runs once after every typed view has gone away.
-        unsafe { self.release.release(self.pointer) };
+        // Drop runs once after every typed view has gone away, and taking the
+        // ManuallyDrop field transfers its authority exactly once. If release
+        // unwinds, the consumed enum still drops its Arc/Box local normally.
+        let release = unsafe { ManuallyDrop::take(&mut self.release) };
+        unsafe { release.release(self.pointer) };
     }
 }
 

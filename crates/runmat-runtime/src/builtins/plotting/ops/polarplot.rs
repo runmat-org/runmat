@@ -322,11 +322,9 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Polar Plot",
-        x_label: "",
-        y_label: "",
         axis_equal: true,
         grid: true,
+        ..Default::default()
     };
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
         figure.set_axes_kind(axes_index, AxesKind::Polar);

@@ -9,8 +9,8 @@ use std::{rc::Rc, sync::Arc};
 mod edge_global;
 #[path = "workspace_initialization_tests/numeric_region_inputs.rs"]
 mod numeric_region_inputs;
-#[path = "workspace_initialization_tests/sync_completion.rs"]
-mod sync_completion;
+#[path = "workspace_initialization_tests/operation_completion.rs"]
+mod operation_completion;
 
 #[test]
 fn first_global_declaration_replaces_a_stale_local_with_canonical_empty() {
@@ -28,6 +28,44 @@ fn first_global_declaration_replaces_a_stale_local_with_canonical_empty() {
 }
 
 #[test]
+fn lexical_reads_reuse_unchanged_generations_and_preserve_prior_operands() {
+    runmat_gc::gc_test_context(|| {
+        let mut state = omitted_input_state();
+        let (environment, _roots) =
+            runmat_runtime::call::lexical::allocate_environment(None).unwrap();
+        runmat_runtime::call::lexical::reserve_owned_binding(&environment, BindingId(0)).unwrap();
+        state.function.lexical_bindings.push(NativeLexicalBinding {
+            binding: BindingId(0),
+            local: NativeLocalId(0),
+            kind: NativeLexicalBindingKind::Owned,
+        });
+        state.lexical_environment = Some(environment.clone());
+        runmat_runtime::call::lexical::write_owned_binding(
+            &environment,
+            BindingId(0),
+            Value::Num(7.0),
+        )
+        .unwrap();
+        let original = state.local_reference(0).unwrap();
+        assert_eq!(state.local_reference(0).unwrap(), original);
+        runmat_runtime::call::lexical::write_owned_binding(
+            &environment,
+            BindingId(0),
+            Value::Num(9.0),
+        )
+        .unwrap();
+        let replacement = state.local_reference(0).unwrap();
+        assert_ne!(replacement, original);
+        assert_eq!(state.local_reference(0).unwrap(), replacement);
+        assert_eq!(state.arena.get(original).unwrap(), &Value::Num(7.0));
+        assert_eq!(state.arena.get(replacement).unwrap(), &Value::Num(9.0));
+        runmat_runtime::call::lexical::remove_owned_binding(&environment, BindingId(0)).unwrap();
+        assert!(state.local_reference(0).unwrap().is_null());
+        assert_eq!(state.arena.get(original).unwrap(), &Value::Num(7.0));
+    });
+}
+
+#[test]
 fn declared_global_reads_follow_nested_session_writes() {
     runmat_gc::gc_test_context(|| {
         let mut state = omitted_input_state();
@@ -36,7 +74,8 @@ fn declared_global_reads_follow_nested_session_writes() {
         state.declare_global(0, "x".into()).unwrap();
         let unchanged = state.local_reference(0).unwrap();
         assert_eq!(state.local_reference(0).unwrap(), unchanged);
-        runmat_runtime::workspace::session::store_global_named("x", Value::Num(7.0));
+        runmat_runtime::workspace::session::store_global_named("x", Value::Num(7.0))
+            .expect("store nested session global");
         let value = crate::execute::operand::materialize_operand(
             &mut state,
             &runmat_mir::MirOperand::Local(runmat_mir::MirLocalId(0)),
@@ -56,9 +95,28 @@ fn declared_global_reads_follow_nested_session_writes() {
             runmat_runtime::workspace::session::global_value("x"),
             Some(Value::Num(9.0))
         );
+        let authority = runtime.session_variable_authority();
+        authority
+            .store_global_with_context(&runtime, "h", Value::Num(17.0))
+            .unwrap();
+        let target = runmat_runtime::workspace::GlobalBindingTarget::Named(
+            runmat_runtime::workspace::WorkspaceName::unbounded("h"),
+        );
+        let prepared = state
+            .global_bindings
+            .prepare_target(&runtime, 0, &target)
+            .unwrap();
+        prepared.checkpoint().unwrap();
+        prepared.commit();
+        let retargeted = state.local_reference(0).unwrap();
+        assert_eq!(state.arena.get(retargeted).unwrap(), &Value::Num(17.0));
+        let updated = state.arena.insert(Value::Num(19.0));
+        state.set_local(0, updated).unwrap();
+        assert_eq!(authority.global_value("h").unwrap(), Some(Value::Num(19.0)));
+        assert_eq!(authority.global_value("x").unwrap(), Some(Value::Num(9.0)));
         state.set_local(0, NativeValueRef::NULL).unwrap();
         let restored = state.local_reference(0).unwrap();
-        assert_eq!(state.arena.get(restored).unwrap(), &Value::Num(9.0));
+        assert_eq!(state.arena.get(restored).unwrap(), &Value::Num(19.0));
     });
 }
 
@@ -74,6 +132,9 @@ fn missing_canonical_global_replaces_an_old_frame_snapshot_with_empty() {
         let refreshed = state
             .replace_local_from_global(
                 0,
+                runmat_runtime::workspace::GlobalBindingTarget::Named(
+                    runmat_runtime::workspace::WorkspaceName::unbounded("x"),
+                ),
                 None,
                 runmat_runtime::workspace::session::GlobalRevision::default(),
             )
@@ -104,7 +165,8 @@ fn global_deoptimization_refreshes_only_the_alias_not_a_shared_ssa_operand() {
         });
         frame.operands.push(NativeValueId(1));
 
-        runmat_runtime::workspace::session::store_global_named("x", Value::Num(7.0));
+        runmat_runtime::workspace::session::store_global_named("x", Value::Num(7.0))
+            .expect("store deoptimization session global");
         let materialized = state
             .materialize_deoptimization(&frame, &terminator.site)
             .unwrap();
@@ -160,7 +222,9 @@ fn returned_child_capture_cannot_replay_older_canonical_storage() {
         let _scope = runtime.enter();
         let authority = runtime.session_variable_authority();
         global_state.declare_global(0, "G".into()).unwrap();
-        authority.store_global("G", Value::Num(9.0)).unwrap();
+        authority
+            .store_global_with_context(&runtime, "G", Value::Num(9.0))
+            .unwrap();
         global_state
             .apply_lexical_captures(vec![runmat_runtime::call::lexical::LexicalCapture {
                 binding: BindingId(0),
@@ -174,7 +238,7 @@ fn returned_child_capture_cannot_replay_older_canonical_storage() {
             .declare_persistent_for_owner(0, "P".into(), "outer".into())
             .unwrap();
         authority
-            .store_persistent_named("outer", "P", Value::Num(9.0))
+            .store_persistent_named_with_context(&runtime, "outer", "P", Value::Num(9.0))
             .unwrap();
         persistent_state
             .apply_lexical_captures(vec![runmat_runtime::call::lexical::LexicalCapture {
@@ -251,6 +315,11 @@ fn local_state_with(
             implicit_nargout: None,
         },
         argument_validations: vec![],
+        binding_locals: vec![runmat_native_codegen::NativeBindingLocal {
+            binding: BindingId(0),
+            local: NativeLocalId(0),
+        }],
+        closure_captures: vec![],
         locals: vec![NativeLocalMetadata {
             id: NativeLocalId(0),
             binding: Some(BindingId(0)),
@@ -258,6 +327,11 @@ fn local_state_with(
             kind: NativeLocalKind::Binding,
         }],
         entry: NativeBlockId(0),
+        expression_continuation_geometry:
+            runmat_native_codegen::NativeExpressionContinuationGeometry {
+                region_capacity: 16,
+                retained_input_capacity: 16,
+            },
         expected_sites: vec![],
         blocks: vec![NativeBlock {
             id: NativeBlockId(0),
@@ -290,7 +364,7 @@ fn local_state_with(
     HostState::new(HostStateInput {
         functions: Arc::new(vec![function.clone()]),
         function,
-        arguments: vec![],
+        inputs: NativeFunctionInputs::Legacy(vec![]),
         requested_outputs: 0,
         runtime,
         program_capture: None,
@@ -408,7 +482,11 @@ fn workspace_reconciliation_records_initialization_but_not_absence() {
             .workspace
             .as_ref()
             .unwrap()
-            .synchronize_local(0, Value::Struct(runmat_value::StructValue::new()))
+            .synchronize_local_with_context(
+                &state.runtime,
+                0,
+                Value::Struct(runmat_value::StructValue::new()),
+            )
             .unwrap();
         state.reconcile_workspace().unwrap();
         assert!(matches!(
@@ -427,6 +505,7 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
         for fail in [false, true] {
             let mut state = omitted_input_state();
             let service = state.workspace.as_ref().unwrap().service();
+            let call_runtime = state.runtime.clone();
             let request = runmat_runtime::native::NativeSiteRequest {
                 function: 0,
                 block: 0,
@@ -442,7 +521,7 @@ fn suspended_call_completion_reconciles_workspace_on_success_and_error() {
                 embedded: None,
                 retained_roots: Vec::new(),
                 future: Box::pin(async move {
-                    service.assign("x", Value::Num(42.0))?;
+                    service.assign_with_context(&call_runtime, "x", Value::Num(42.0))?;
                     if fail {
                         Err(runmat_runtime::runtime_error::semantic_error(
                             "WorkspaceCompletionFixture",
@@ -488,26 +567,27 @@ fn suspended_contextual_call_reconciles_a_new_canonical_revision() {
             let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
             initial.assign("x", Value::Num(1.0)).unwrap();
             owner.apply(initial).unwrap();
-            let foreground = Rc::new(
-                runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
-                    owner.begin_projection().unwrap(),
-                ),
-            );
-            let canonical: Rc<dyn runmat_runtime::context::RuntimeWorkspaceService> = foreground;
             let runtime = RuntimeContext::new(Rc::new(
                 runmat_runtime::execution::RuntimeExecutionService::new(),
             ));
+            let foreground = Rc::new(
+                runmat_runtime::workspace::BaseWorkspaceProjectionService::new_for_context(
+                    owner.begin_projection().unwrap(),
+                    &runtime,
+                ),
+            );
+            let canonical: Rc<dyn runmat_runtime::context::RuntimeWorkspaceService> = foreground;
             let ports = runtime.service_ports().clone().with_workspace(canonical);
             let runtime = runtime.with_service_ports(ports);
-            let workspace = crate::execute::workspace::NativeWorkspaceInput {
-                values: std::collections::BTreeMap::from([("x".into(), Value::Num(1.0))]),
-                local_names: std::collections::BTreeMap::from([(BindingId(0), "x".into())]),
-                bindings: vec![crate::execute::workspace::NativeWorkspaceBinding {
+            let workspace = crate::execute::workspace::NativeWorkspaceInput::from_test_values(
+                std::collections::BTreeMap::from([("x".into(), Value::Num(1.0))]),
+                std::collections::BTreeMap::from([(BindingId(0), "x".into())]),
+                vec![crate::execute::workspace::NativeWorkspaceBinding {
                     binding: BindingId(0),
                     name: "x".into(),
                 }],
-                global_bindings: Vec::new(),
-            };
+                Vec::new(),
+            );
             let mut state = omitted_input_state_with(runtime, Some(workspace));
 
             let request = runmat_runtime::native::NativeSiteRequest {

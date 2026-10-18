@@ -18,14 +18,14 @@ pub(super) fn evaluate(
     statements: &[MirStmt],
     right: &MirOperand,
 ) -> NativeExecutorResult<Vec<NativeValueRef>> {
-    let (region, next_step, completed) = state.enter_contextual_region();
+    let (region, next_step, completed) = state.enter_contextual_region()?;
     if let Some(result) = completed {
-        return Ok(result);
+        return Ok(result.as_slice().to_vec());
     }
     // The owning site clears region state and captured sequences on errors or
     // cancellation. Suspension retains both until the exact site is resumed.
     if next_step == 0 {
-        state.enter_contextual_step(region, 0);
+        state.enter_contextual_step(region, 0)?;
         let truth = logical_truth(state, left, call_suspension::ShortCircuitTruthStage::Left)?;
         state.finish_contextual_step(region, 0, 1)?;
         let skipped = match operator {
@@ -34,7 +34,7 @@ pub(super) fn evaluate(
         };
         if skipped {
             let result = state.arena.insert(Value::Bool(truth));
-            state.finish_contextual_region(region, vec![result]);
+            state.finish_contextual_region(region, result);
             return Ok(vec![result]);
         }
     }
@@ -46,12 +46,12 @@ pub(super) fn evaluate(
         .skip(next_step.saturating_sub(1))
     {
         let step = index + 1;
-        state.enter_contextual_step(region, step);
+        state.enter_contextual_step(region, step)?;
         execute_statement(state, &statement.kind)?;
         state.finish_contextual_step(region, step, step + 1)?;
     }
     let step = statements.len() + 1;
-    state.enter_contextual_step(region, step);
+    state.enter_contextual_step(region, step)?;
     let truth = logical_truth(
         state,
         right,
@@ -59,7 +59,7 @@ pub(super) fn evaluate(
     )?;
     state.finish_contextual_step(region, step, step + 1)?;
     let result = state.arena.insert(Value::Bool(truth));
-    state.finish_contextual_region(region, vec![result]);
+    state.finish_contextual_region(region, result);
     Ok(vec![result])
 }
 

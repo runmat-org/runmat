@@ -61,7 +61,7 @@ impl HostState {
         slot: usize,
         reference: NativeValueRef,
     ) -> NativeExecutorResult<bool> {
-        if self.global_bindings.binding_for_slot(slot).is_some()
+        if self.global_bindings.has_binding_for_slot(slot)
             || self.persistent_bindings.contains_key(&slot)
         {
             Ok(false)
@@ -97,19 +97,18 @@ impl HostState {
                     NativeExecutorError::Host("native transit local is out of bounds".into())
                 });
             }
-            if let Some(value) =
-                runmat_runtime::call::lexical::read_binding(&environment, binding.binding)?
-            {
-                if let Some(workspace) = &self.workspace {
-                    workspace.observe_shared_local(slot, Some(value.clone()))?;
-                }
-                let refreshed = self.arena.insert(value);
+            if let Some(value) = runmat_runtime::call::lexical::read_binding_lease_with_context(
+                &environment,
+                binding.binding,
+                &self.runtime,
+            )? {
+                let prior = self.locals.get(slot).copied().ok_or_else(|| {
+                    NativeExecutorError::Host("native lexical local is out of bounds".into())
+                })?;
+                let refreshed = self.arena.reuse_or_insert_retained_lease(prior, value)?;
                 self.locals[slot] = refreshed;
                 self.record_local_initialization(slot, refreshed);
                 return Ok(refreshed);
-            }
-            if let Some(workspace) = &self.workspace {
-                workspace.observe_shared_local(slot, None)?;
             }
             self.locals[slot] = NativeValueRef::NULL;
             return Ok(NativeValueRef::NULL);
@@ -119,19 +118,19 @@ impl HostState {
             .get(slot)
             .copied()
             .ok_or_else(|| NativeExecutorError::Host("native local is out of bounds".into()))?;
-        let global_name = self.global_bindings.name_for_slot(slot);
-        if global_name.is_none() && !self.persistent_bindings.contains_key(&slot) {
+        let global_target = self.global_bindings.binding_handle_for_slot(slot);
+        if global_target.is_none() && !self.persistent_bindings.contains_key(&slot) {
             return Ok(reference);
         }
         let authority = self.runtime.session_variable_authority();
-        if let Some(name) = global_name {
+        if let Some(target) = global_target {
             let revision = authority.global_revision()?;
-            if self.global_seen_revision.get(&slot) == Some(&revision) {
+            if self.global_seen_revision.get(&slot) == Some(&(target.clone(), revision)) {
                 return Ok(reference);
             }
             // The session global, not an old SSA/local snapshot, owns this alias.
-            let value = authority.global_value(&name)?;
-            return self.replace_local_from_global(slot, value, revision);
+            let value = super::super::global_target::current_value(&authority, &target)?;
+            return self.replace_local_from_global(slot, target, value, revision);
         }
         if let Some(binding) = self.persistent_bindings.get(&slot) {
             let revision = authority.persistent_revision()?;
@@ -159,11 +158,12 @@ impl HostState {
     fn replace_local_from_global(
         &mut self,
         slot: usize,
+        target: runmat_runtime::workspace::GlobalBindingTarget,
         value: Option<Value>,
         revision: runmat_runtime::workspace::session::GlobalRevision,
     ) -> NativeExecutorResult<NativeValueRef> {
         let refreshed = self.replace_local_from_canonical(slot, value)?;
-        self.global_seen_revision.insert(slot, revision);
+        self.global_seen_revision.insert(slot, (target, revision));
         Ok(refreshed)
     }
 
@@ -175,7 +175,11 @@ impl HostState {
         let value = value.unwrap_or_else(empty_workspace_value);
         let refreshed = self.arena.insert(value);
         if let Some(workspace) = &self.workspace {
-            workspace.refresh_local(slot, self.arena.get(refreshed)?.clone())?;
+            workspace.refresh_local_with_context(
+                &self.runtime,
+                slot,
+                self.arena.get(refreshed)?.clone(),
+            )?;
         }
         self.locals[slot] = refreshed;
         self.record_local_initialization(slot, refreshed);
@@ -186,7 +190,7 @@ impl HostState {
         &mut self,
         slot: usize,
     ) -> NativeExecutorResult<Option<NativeValueRef>> {
-        (self.global_bindings.name_for_slot(slot).is_some()
+        (self.global_bindings.has_binding_for_slot(slot)
             || self.persistent_bindings.contains_key(&slot))
         .then(|| self.local_reference(slot))
         .transpose()
@@ -239,9 +243,33 @@ impl HostState {
                 "native local is out of bounds".into(),
             ));
         }
+        let prepared_global = if !value.is_null() {
+            self.global_bindings
+                .binding_handle_for_slot(slot)
+                .map(|target| {
+                    let prepared = super::super::global_target::prepare_store(
+                        &self.runtime.session_variable_authority(),
+                        &self.runtime,
+                        &target,
+                        self.arena.get(value)?.clone(),
+                    )
+                    .map_err(NativeExecutorError::from)?;
+                    Ok::<_, NativeExecutorError>((target, prepared))
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        if let Some((_, prepared)) = &prepared_global {
+            prepared.checkpoint(&self.runtime)?;
+        }
         if !value.is_null() {
             if let Some(workspace) = &self.workspace {
-                workspace.synchronize_local(slot, self.arena.get(value)?.clone())?;
+                workspace.synchronize_local_with_context(
+                    &self.runtime,
+                    slot,
+                    self.arena.get(value)?.clone(),
+                )?;
             }
         }
         self.locals[slot] = value;
@@ -250,7 +278,19 @@ impl HostState {
             self.persistent_seen_revision.remove(&slot);
         }
         self.record_local_initialization(slot, value);
-        self.synchronize_session_binding(slot, value)?;
+        if let Some((target, prepared)) = prepared_global {
+            prepared.commit();
+            self.global_seen_revision.insert(
+                slot,
+                (
+                    target,
+                    self.runtime
+                        .session_variable_authority()
+                        .global_revision()?,
+                ),
+            );
+        }
+        self.synchronize_persistent_binding(slot, value)?;
         if let (Some(environment), Some(binding)) = (
             self.lexical_environment.as_ref(),
             self.function
@@ -263,26 +303,33 @@ impl HostState {
             }
             if value.is_null() {
                 if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Owned {
-                    runmat_runtime::call::lexical::remove_owned_binding(
+                    runmat_runtime::call::lexical::remove_owned_binding_with_context(
                         environment,
                         binding.binding,
+                        &self.runtime,
                     )?;
                 } else {
-                    runmat_runtime::call::lexical::remove_binding(environment, binding.binding)?;
+                    runmat_runtime::call::lexical::remove_binding_with_context(
+                        environment,
+                        binding.binding,
+                        &self.runtime,
+                    )?;
                 }
             } else {
                 let value = self.arena.get(value)?.clone();
                 if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Owned {
-                    runmat_runtime::call::lexical::write_owned_binding(
+                    runmat_runtime::call::lexical::write_owned_binding_with_context(
                         environment,
                         binding.binding,
                         value,
+                        &self.runtime,
                     )?;
                 } else {
-                    runmat_runtime::call::lexical::write_binding(
+                    runmat_runtime::call::lexical::write_binding_with_context(
                         environment,
                         binding.binding,
                         value,
+                        &self.runtime,
                     )?;
                 }
             }
@@ -300,7 +347,7 @@ impl HostState {
         inherited_snapshot: bool,
     ) -> NativeExecutorResult<NativeValueRef> {
         if inherited_snapshot
-            && (self.global_bindings.name_for_slot(slot).is_some()
+            && (self.global_bindings.has_binding_for_slot(slot)
                 || self.persistent_bindings.contains_key(&slot)
                 || self
                     .function
@@ -318,7 +365,9 @@ impl HostState {
         if self
             .workspace
             .as_ref()
-            .is_some_and(|workspace| workspace.needs_reconciliation())
+            .map(|workspace| workspace.needs_reconciliation_with_context(&self.runtime))
+            .transpose()?
+            .unwrap_or(false)
         {
             self.reconcile_workspace()?;
         }
@@ -329,28 +378,41 @@ impl HostState {
         let Some(workspace) = &self.workspace else {
             return Ok(());
         };
-        for (slot, value) in workspace.local_values() {
-            let reference = value
-                .map(|value| self.arena.insert(value))
-                .unwrap_or(NativeValueRef::NULL);
+        // A callback may update the canonical owner while this frame is
+        // suspended. Record the revision seen before refreshing slots; if a
+        // reentrant effect advances it during the refresh, the next boundary
+        // still sees a mismatch and reconciles again.
+        let observed = workspace.current_revision_with_context(&self.runtime)?;
+        for (slot, _) in workspace.local_slots() {
             let local = self.locals.get_mut(slot).ok_or_else(|| {
                 NativeExecutorError::Host("native workspace local is out of bounds".into())
             })?;
+            let reference = match workspace.lookup_local_lease(&self.runtime, slot)? {
+                Some(value) => self.arena.reuse_or_insert_retained_lease(*local, value)?,
+                None => NativeValueRef::NULL,
+            };
             *local = reference;
             self.global_seen_revision.remove(&slot);
             self.persistent_seen_revision.remove(&slot);
-            self.record_local_initialization(slot, reference);
+            if !reference.is_null() {
+                self.missing_input_locals
+                    .retain(|local| local.0 as usize != slot);
+            }
         }
         if let Some(workspace) = &self.workspace {
+            workspace.record_observed_revision(observed);
             workspace.mark_reconciled();
         }
         Ok(())
     }
 
-    pub fn workspace_snapshot(&self) -> Option<super::super::workspace::NativeWorkspaceSnapshot> {
-        self.workspace
-            .as_ref()
-            .and_then(|workspace| workspace.snapshot())
+    pub fn workspace_snapshot(
+        &self,
+    ) -> NativeExecutorResult<Option<super::super::workspace::NativeWorkspaceSnapshot>> {
+        match &self.workspace {
+            Some(workspace) => workspace.snapshot_with_context(&self.runtime),
+            None => Ok(None),
+        }
     }
 
     pub fn record_expression(&mut self, value: NativeValueRef) {
@@ -374,16 +436,37 @@ impl HostState {
             ));
         }
         if let Some(workspace) = self.runtime.service_ports().workspace().cloned() {
-            workspace.declare_global_binding(slot, &name)?;
+            workspace.declare_global_binding_with_context(&self.runtime, slot, &name)?;
         } else {
-            self.global_bindings.declare_named(slot, name.clone());
+            let authority = self.runtime.session_variable_authority();
+            let prepared_session =
+                authority.prepare_declare_global_with_context(&self.runtime, &name)?;
+            let prepared_alias = self
+                .global_bindings
+                .prepare_named(&self.runtime, slot, &name)
+                .map_err(|cause| {
+                    super::super::global_target::alias_admission_error(&self.runtime, cause)
+                })?;
+            prepared_session.checkpoint(&self.runtime)?;
+            prepared_alias.checkpoint().map_err(|cause| {
+                super::super::global_target::alias_admission_error(&self.runtime, cause)
+            })?;
+            prepared_session.commit();
+            prepared_alias.commit();
         }
-        let value = self
-            .runtime
-            .session_variable_authority()
-            .declare_global(&name)?;
-        let reference = self.arena.insert(value);
-        self.set_local(slot, reference)
+        let target = self
+            .global_bindings
+            .binding_handle_for_slot(slot)
+            .ok_or_else(|| {
+                NativeExecutorError::Host(
+                    "native global declaration did not install its exact target".into(),
+                )
+            })?;
+        let authority = self.runtime.session_variable_authority();
+        let value = super::super::global_target::current_value(&authority, &target)?;
+        let revision = authority.global_revision()?;
+        self.replace_local_from_global(slot, target, value, revision)
+            .map(drop)
     }
 
     pub fn declare_persistent(&mut self, slot: usize, name: String) -> NativeExecutorResult<()> {
@@ -397,7 +480,7 @@ impl HostState {
         name: String,
         owner_function: String,
     ) -> NativeExecutorResult<()> {
-        if self.global_bindings.name_for_slot(slot).is_some() {
+        if self.global_bindings.has_binding_for_slot(slot) {
             return Err(NativeExecutorError::Host(
                 "native local cannot be both global and persistent".into(),
             ));
@@ -421,7 +504,7 @@ impl HostState {
         self.set_local(slot, reference)
     }
 
-    fn synchronize_session_binding(
+    fn synchronize_persistent_binding(
         &mut self,
         slot: usize,
         reference: NativeValueRef,
@@ -430,15 +513,14 @@ impl HostState {
             return Ok(());
         }
         let value = self.arena.get(reference)?.clone();
-        if let Some(name) = self.global_bindings.name_for_slot(slot) {
-            let authority = self.runtime.session_variable_authority();
-            authority.store_global(&name, value.clone())?;
-            self.global_seen_revision
-                .insert(slot, authority.global_revision()?);
-        }
         if let Some(binding) = self.persistent_bindings.get(&slot) {
             let authority = self.runtime.session_variable_authority();
-            authority.store_persistent_named(&binding.function, &binding.name, value)?;
+            authority.store_persistent_named_with_context(
+                &self.runtime,
+                &binding.function,
+                &binding.name,
+                value,
+            )?;
             self.persistent_seen_revision
                 .insert(slot, authority.persistent_revision()?);
             let invalidation = authority.persistent_invalidation_revision(&binding.function)?;

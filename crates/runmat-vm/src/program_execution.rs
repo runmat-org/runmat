@@ -558,14 +558,19 @@ async fn execute_spmd_region_request(
             ),
         };
     }
-    let mut frame = vec![None; bytecode.var_count];
+    let mut frame = crate::interpreter::vars::InterpreterVars::from_owned(vec![
+        runmat_value::Value::Num(0.0);
+        bytecode.var_count
+    ]);
+    let mut assigned_slots = HashSet::new();
     for (capture, value) in executable.captures.iter().zip(arguments) {
-        let Some(slot) = frame.get_mut(capture.slot) else {
+        if frame.get(capture.slot).is_none() {
             return ProgramExecutionResponse::Failure {
                 message: "SPMD capture lies outside its compiler-bound VM frame".into(),
             };
         };
-        *slot = Some(value);
+        let _retired = frame.replace_owned(capture.slot, value);
+        assigned_slots.insert(capture.slot);
     }
     let services = runtime.service_ports().clone().with_collective(collective);
     let runtime = runtime.with_service_ports(services);
@@ -580,6 +585,7 @@ async fn execute_spmd_region_request(
                 ),
             ),
             vars: frame,
+            assigned_slots,
             supplied_inputs: 0,
             requested_outputs: 0,
             missing_input_slots: HashSet::new(),
@@ -605,7 +611,9 @@ async fn execute_spmd_region_request(
                         Some("SPMD output lies outside its compiler-bound VM frame".to_string());
                     break;
                 };
-                match crate::interpreter::dispatch::encode_spmd_output(&runtime, value).await {
+                match crate::interpreter::dispatch::encode_spmd_interpreter_output(&runtime, value)
+                    .await
+                {
                     Ok(value) => outputs.push(Some(value)),
                     Err(error) => {
                         failure = Some(error.to_string());
@@ -941,7 +949,7 @@ async fn execute_unit_script(
     match result {
         Ok(crate::InterpreterOutcome::Completed(completion)) => {
             let value = result_slot
-                .and_then(|slot| completion.values.get(slot).cloned())
+                .and_then(|slot| completion.values.get(slot).map(|value| value.clone()))
                 .unwrap_or(runmat_value::Value::Num(0.0));
             match runmat_runtime::execution::value_codec::encode_inline_value_in_context(
                 &value, &runtime,

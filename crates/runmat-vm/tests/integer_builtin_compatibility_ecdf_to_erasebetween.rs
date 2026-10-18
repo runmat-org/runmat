@@ -25,7 +25,7 @@ fn expected_empty_storage(constructor: &str) -> IntegerStorage {
 fn contains_logical(values: &[Value], shape: &[usize], expected: &[u8]) -> bool {
     values.iter().any(|value| {
         matches!(value, Value::LogicalArray(array)
-            if array.shape == shape && array.data == expected)
+            if array.shape.as_slice() == shape && array.data == expected)
     })
 }
 

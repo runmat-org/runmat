@@ -157,6 +157,26 @@ pub(super) fn validate_pair(
             "user object and runtime archive runtime/catalog identities do not match",
         ));
     }
+    if object
+        .manifest
+        .required_capabilities
+        .0
+        .contains(&runmat_types::CapabilityRequirement::Accelerator)
+    {
+        // Manifest inventory alone cannot grant hardware support. The
+        // unselected planner authenticates the physical archive here; the
+        // selected link stages and authenticates those bytes immediately
+        // after this common pair check.
+        if object.manifest.product.selected().is_none() {
+            runtime.decode()?;
+        }
+        if !runtime.manifest.capabilities.accelerators.has_backend() {
+            return Err(AotError::contract(
+                "aot.link.accelerator",
+                "native object requires an accelerator but the target runtime has no backend",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -252,8 +272,11 @@ mod tests {
             "matlab",
         )
         .unwrap();
+        let bytes = crate::archive::test_archive::archive(
+            runmat_execution::host::NativeAcceleratorProfile::NONE,
+        );
         let archive = build_runtime_archive(
-            b"!<arch>\nfixture",
+            &bytes,
             &environment,
             Vec::new(),
             RuntimeArchiveEncoding::Raw,
@@ -275,6 +298,7 @@ mod tests {
                 catalog_fingerprint: catalog,
                 optimization: NativeOptimization::Speed,
                 runtime_binding_mode: mode,
+                required_capabilities: runmat_types::CapabilitySet::default(),
                 foreign_policy: None,
                 object_digest: Digest::sha256(&bytes),
                 object_bytes: bytes.len() as u64,
@@ -337,5 +361,28 @@ mod tests {
             .response_tokens
             .iter()
             .any(|token| token == "/WHOLEARCHIVE:runtime.lib"));
+    }
+
+    #[test]
+    fn hard_accelerator_call_rejects_cpu_only_runtime_before_link() {
+        let (mut object, runtime) = products(AotRuntimeBindingMode::Dynamic);
+        object
+            .manifest
+            .required_capabilities
+            .0
+            .insert(runmat_types::CapabilityRequirement::Accelerator);
+        let error = build_link_plan(
+            &object,
+            &runtime,
+            LinkerDriver {
+                path: "linker".into(),
+                family: LinkerFamily::Msvc,
+            },
+            "program.obj".as_ref(),
+            "runtime.lib".as_ref(),
+            "program.exe".as_ref(),
+        )
+        .expect_err("CPU-only target must not satisfy a required GPU call");
+        assert!(error.to_string().contains("accelerator"));
     }
 }

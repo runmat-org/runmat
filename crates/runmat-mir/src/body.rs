@@ -33,6 +33,9 @@ pub enum MirLocalKind {
     Output,
     Binding,
     IncomingWorkspace,
+    /// A name made visible by a dynamic workspace effect. Its slot is resolved
+    /// at execution time; unlike IncomingWorkspace, presence is not proven.
+    ExternalWorkspace,
     Temporary,
     Capture,
 }

@@ -139,6 +139,16 @@ fn native_complex_single_preserves_class_after_actual_reduction() {
 #[test]
 fn far_axis_noop_retains_single_and_unknown_rank_does_not_guess() {
     let shape = ShapeFact::from(vec![Some(3), Some(2)]);
+    let zero_axis = call(
+        numeric(NumericClass::Single, shape.clone()),
+        vec![LiteralValue::Number(0.0)],
+        1,
+    );
+    assert!(zero_axis
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-REDUCTION-DIMENSION"));
+
     let far = call(
         numeric(NumericClass::Single, shape.clone()),
         vec![LiteralValue::Integer {

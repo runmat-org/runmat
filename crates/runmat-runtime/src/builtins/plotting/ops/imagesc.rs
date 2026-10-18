@@ -363,9 +363,6 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Image",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };

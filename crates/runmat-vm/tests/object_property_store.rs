@@ -67,11 +67,23 @@ fn strict_dot_store_updates_existing_handle_without_setfield_extension() {
         ))
         .unwrap();
         let runmat_vm::InterpreterOutcome::Completed(completion) = result;
-        assert_eq!(completion.values[slot("result")], Value::Num(9.0));
-        let Value::HandleObject(updated) = &completion.values[slot("obj")] else {
-            panic!("handle result")
-        };
-        assert_eq!(updated.target, handle.target);
+        {
+            let result = completion
+                .values
+                .get(slot("result"))
+                .expect("property result remains in its compiled slot");
+            assert_eq!(*result, Value::Num(9.0));
+        }
+        {
+            let updated = completion
+                .values
+                .get(slot("obj"))
+                .expect("updated handle remains in its compiled slot");
+            let Value::HandleObject(updated) = &*updated else {
+                panic!("handle result")
+            };
+            assert_eq!(updated.target, handle.target);
+        }
         runmat_gc::gc_with_value(&handle.target, |value| {
             let Value::Object(object) = value else {
                 panic!("object target")

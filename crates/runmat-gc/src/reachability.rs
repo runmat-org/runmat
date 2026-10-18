@@ -130,7 +130,7 @@ fn snapshot(
         let children = if let Some(cached) = adjacency.get(&handle) {
             cached.clone()
         } else {
-            let children = crate::gc_with_value(&handle, crate::gc_handles_in_value).ok()?;
+            let children = crate::gc_handles_in_allocation(&handle)?;
             edges = edges.checked_add(children.len())?;
             if edges > MAX_TRACED_EDGES {
                 return None;

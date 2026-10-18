@@ -214,34 +214,69 @@ pub(crate) fn normalize_constructor_shape(mut dimensions: Vec<usize>) -> Vec<usi
 }
 
 fn parse_constructor_numeric_dimension(value: NumericScalar, label: &str) -> Result<usize, String> {
+    checked_constructor_numeric_dimension(value).map_err(|error| error.message(label))
+}
+
+fn parse_constructor_float_dimension(value: f64, label: &str) -> Result<usize, String> {
+    checked_constructor_float_dimension(value).map_err(|error| error.message(label))
+}
+
+fn parse_constructor_integer_dimension(value: &IntValue, label: &str) -> Result<usize, String> {
+    checked_constructor_integer_dimension(value).map_err(|error| error.message(label))
+}
+
+/// The selected-source path can inspect the same dimension policy without
+/// formatting an error before its host metadata admission. The ordinary
+/// constructor remains the owner of the source-level diagnostic text.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ConstructorDimensionFailure {
+    NonIntegral,
+    OutOfRange,
+}
+
+impl ConstructorDimensionFailure {
+    fn message(self, label: &str) -> String {
+        match self {
+            Self::NonIntegral => format!("{label}: dimensions must be finite integer values"),
+            Self::OutOfRange => {
+                format!("{label}: dimension is outside the supported platform range")
+            }
+        }
+    }
+}
+
+pub(crate) fn checked_constructor_numeric_dimension(
+    value: NumericScalar,
+) -> Result<usize, ConstructorDimensionFailure> {
     match value {
-        NumericScalar::F64(value) => parse_constructor_float_dimension(value, label),
-        NumericScalar::F32(value) => parse_constructor_float_dimension(f64::from(value), label),
-        integer => parse_constructor_integer_dimension(
+        NumericScalar::F64(value) => checked_constructor_float_dimension(value),
+        NumericScalar::F32(value) => checked_constructor_float_dimension(f64::from(value)),
+        integer => checked_constructor_integer_dimension(
             &integer
                 .into_int_value()
                 .expect("nonfloating numeric scalar is an integer"),
-            label,
         ),
     }
 }
 
-fn parse_constructor_float_dimension(value: f64, label: &str) -> Result<usize, String> {
+pub(crate) fn checked_constructor_float_dimension(
+    value: f64,
+) -> Result<usize, ConstructorDimensionFailure> {
     if !value.is_finite() || value.fract() != 0.0 {
-        return Err(format!("{label}: dimensions must be finite integer values"));
+        return Err(ConstructorDimensionFailure::NonIntegral);
     }
     if value <= 0.0 {
         return Ok(0);
     }
     if value >= usize::MAX as f64 {
-        return Err(format!(
-            "{label}: dimension is outside the supported platform range"
-        ));
+        return Err(ConstructorDimensionFailure::OutOfRange);
     }
     Ok(value as usize)
 }
 
-fn parse_constructor_integer_dimension(value: &IntValue, label: &str) -> Result<usize, String> {
+pub(crate) fn checked_constructor_integer_dimension(
+    value: &IntValue,
+) -> Result<usize, ConstructorDimensionFailure> {
     let parsed = match value {
         IntValue::I8(value) => usize::try_from((*value).max(0)),
         IntValue::I16(value) => usize::try_from((*value).max(0)),
@@ -252,7 +287,7 @@ fn parse_constructor_integer_dimension(value: &IntValue, label: &str) -> Result<
         IntValue::U32(value) => usize::try_from(*value),
         IntValue::U64(value) => usize::try_from(*value),
     };
-    parsed.map_err(|_| format!("{label}: dimension is outside the supported platform range"))
+    parsed.map_err(|_| ConstructorDimensionFailure::OutOfRange)
 }
 
 /// Extract a lowercased keyword from runtime values such as strings or
@@ -299,7 +334,7 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
     match value {
         Value::Tensor(t) => Ok(t.shape().to_vec()),
         Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
-        Value::LogicalArray(l) => Ok(l.shape.clone()),
+        Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
         Value::Cell(cell) => Ok(cell.shape.clone()),

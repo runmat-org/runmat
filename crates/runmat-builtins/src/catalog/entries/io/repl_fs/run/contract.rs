@@ -17,8 +17,8 @@ const RUN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescrip
 pub const RUN_ERROR_REQUIRES_VM: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.RUN.REQUIRES_VM",
     identifier: Some("RunMat:run:RequiresVm"),
-    when: "`run` is dispatched outside an active VM workspace frame.",
-    message: "run: requires VM workspace context",
+    when: "`run` is dispatched without an active workspace execution context.",
+    message: "run: requires an active workspace execution context",
 };
 
 pub const RUN_ERROR_ARG_TYPE: BuiltinErrorDescriptor = BuiltinErrorDescriptor {

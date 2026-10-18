@@ -4,7 +4,7 @@ impl HostState {
     /// A catch edge abandons the throwing native site, including every
     /// partially prepared mutation. None of these cursors may be replayed at
     /// the handler's next site, even when that site has the same MIR shape.
-    pub fn abandon_site_continuations(&mut self) {
+    pub fn abandon_site_continuations(&mut self) -> NativeExecutorResult<()> {
         self.pending_place_mutation = None;
         self.pending_assign = None;
         self.pending_place_prepare = None;
@@ -20,7 +20,7 @@ impl HostState {
         self.captured_sequences.clear();
         self.contextual_index_extents.clear();
         self.subscript_end_receivers.clear();
-        self.finish_contextual_site();
+        self.finish_contextual_site()
     }
 
     pub fn refresh_roots(&mut self) -> NativeRootSet {
@@ -118,7 +118,7 @@ impl HostState {
                 });
             }
         }
-        let contextual_roots = self.contextual_region_roots().collect::<Vec<_>>();
+        let contextual_roots = self.expression_region_roots().collect::<Vec<_>>();
         for value in contextual_roots {
             let slot = u32::try_from(self.roots.len())
                 .expect("contextual region root cardinality is bounded by native value admission");

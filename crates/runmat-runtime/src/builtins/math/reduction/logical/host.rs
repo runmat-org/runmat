@@ -102,7 +102,7 @@ impl TruthTensor {
 
     fn from_logical(array: LogicalArray) -> Self {
         Self {
-            shape: array.shape.clone(),
+            shape: array.shape.to_vec(),
             data: array
                 .data
                 .iter()

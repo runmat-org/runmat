@@ -15,7 +15,7 @@ fn inherited_alias_uses_ancestor_named_store_without_child_slot_fallback() {
             .unwrap();
 
         let mut aliases = PersistentAliases::new();
-        let mut child_vars = vec![Value::Num(0.0); 10];
+        let mut child_vars = InterpreterVars::from_owned(vec![Value::Num(0.0); 10]);
         declare(
             &mut aliases,
             &mut child_vars,
@@ -25,9 +25,9 @@ fn inherited_alias_uses_ancestor_named_store_without_child_slot_fallback() {
             PersistentAlias::InheritedNamed("P".into()),
         )
         .unwrap();
-        assert_eq!(child_vars[9], Value::Num(5.0));
+        assert_eq!(*child_vars.get(9).unwrap(), Value::Num(5.0));
 
-        child_vars[9] = Value::Num(7.0);
+        let _ = child_vars.replace_owned(9, Value::Num(7.0));
         publish_store(&aliases, &child_vars, &authority, "child", 9).unwrap();
         assert_eq!(
             authority.persistent_named_value("outer", "P").unwrap(),
@@ -43,7 +43,7 @@ fn inherited_alias_uses_ancestor_named_store_without_child_slot_fallback() {
             .store_persistent_named("outer", "P", Value::Num(8.0))
             .unwrap();
         refresh(&aliases, &mut child_vars, &authority, "child", 9).unwrap();
-        assert_eq!(child_vars[9], Value::Num(8.0));
+        assert_eq!(*child_vars.get(9).unwrap(), Value::Num(8.0));
 
         authority.clear_persistent_function("outer").unwrap();
         finish_success(&aliases, &mut child_vars, &authority, "child").unwrap();

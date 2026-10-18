@@ -68,7 +68,7 @@ fn numeric_region_reads_current_global_instead_of_old_local_snapshot() {
         state
             .runtime
             .session_variable_authority()
-            .store_global("x", Value::Num(7.0))
+            .store_global_with_context(&state.runtime, "x", Value::Num(7.0))
             .unwrap();
 
         let plan = crate::region::placement_test_support::plan();

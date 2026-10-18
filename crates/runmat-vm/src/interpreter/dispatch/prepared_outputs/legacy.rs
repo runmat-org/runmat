@@ -1,3 +1,4 @@
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::object::indexing::ObjectIndexComponent;
 use runmat_runtime::sequence::{
     AssignmentStepSpec, PreparedSequenceDestination, SequenceEndpointSpec,
@@ -11,7 +12,7 @@ use super::support::{pop_values, root, stack_underflow};
 pub(super) async fn dispatch(
     instruction: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    vars: &[Value],
+    vars: &InterpreterVars,
     state: &mut SequenceState,
 ) -> Result<bool, RuntimeError> {
     use crate::bytecode::Instr;
@@ -62,8 +63,12 @@ pub(super) async fn dispatch(
         }
         _ => return Ok(false),
     };
-    let endpoint =
-        PreparedSequenceDestination::prepare(root(vars, root_slot)?, steps, endpoint).await?;
+    // Detach the root before object/index preparation can suspend or invoke a
+    // user protocol. A shared InterpreterVars read guard must never span that
+    // boundary. `prepare_owned` consumes this same required snapshot, so this
+    // does not add a second Value clone.
+    let root = root(vars, root_slot)?.clone();
+    let endpoint = PreparedSequenceDestination::prepare_owned(root, steps, endpoint).await?;
     state.push_output_target(PreparedOutputTarget::Sequence {
         root_slot,
         endpoint,

@@ -52,6 +52,7 @@ impl NativeExecutionConfig {
             worker_capabilities: BTreeSet::from([
                 Capability::ProcessIsolation,
                 Capability::GraphSelectedValuesV11,
+                Capability::GraphCallableArgumentsV12,
             ]),
             host_inventory,
             accelerator_devices,

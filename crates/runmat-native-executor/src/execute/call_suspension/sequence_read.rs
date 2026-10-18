@@ -44,7 +44,7 @@ pub(in crate::execute) fn take_completed_sequence_read(
             "completed sequence read has no active site".into(),
         ));
     };
-    let embedded = state.current_embedded_operation();
+    let embedded = state.current_embedded_operation()?;
     if completed.request != request || completed.embedded.as_ref() != embedded.as_ref() {
         let descendant = completed.request == request
             && completed
@@ -79,7 +79,7 @@ pub(in crate::execute) fn begin_sequence_read(
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending sequence read has no active site".into())
     })?;
-    let embedded = state.current_embedded_operation();
+    let embedded = state.current_embedded_operation()?;
     let (continuation, generation) = state.next_suspension_identity()?;
     let future: CompletionFuture = Box::pin(async move {
         future

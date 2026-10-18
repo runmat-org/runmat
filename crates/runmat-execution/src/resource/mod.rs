@@ -5,15 +5,20 @@
 
 mod accelerator;
 mod capability;
+mod exact_shared;
 mod matching;
 mod request;
 mod usage;
+mod registration_slots;
+pub use registration_slots::{ProviderRegistrationSlot, ProviderRegistrationSlotPool};
 
 /// Opaque lifetime claim for host metadata retained by an executable value.
 /// The allocating resource owner, not this neutral contract, decides its size
 /// and when the physical reservation is refunded.
 pub trait RetainedHostAllocationClaim: std::fmt::Debug + Send + Sync {}
 impl<T: std::fmt::Debug + Send + Sync + ?Sized> RetainedHostAllocationClaim for T {}
+
+pub use exact_shared::ExactShared;
 
 /// Move-only funding for one owned view record. A handle clone shares that
 /// record; constructing another view consumes another grant from the issuer.
@@ -47,6 +52,16 @@ pub trait RetainedHostViewIssuer: std::fmt::Debug + Send + Sync {
 /// execution recipe; provider registration cannot obtain it from ambient
 /// state or infer it from a device buffer's size.
 pub trait ProviderHostMetadataAdmission: std::fmt::Debug {
+    /// Legacy admissions consume a one-shot slot. Reusable admissions return
+    /// a move-only token which follows the physical record until removal.
+    fn claim_registration_slot(
+        &self,
+        provider_owner: usize,
+    ) -> Result<Option<ProviderRegistrationSlot>, ProviderHostMetadataError> {
+        self.commit_registration_slot(provider_owner)?;
+        Ok(None)
+    }
+
     fn claim_view(
         &self,
         view_bytes: u64,

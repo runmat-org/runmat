@@ -126,6 +126,13 @@ struct Reservation {
     slot: Slot,
 }
 
+pub(super) fn reservation_host_upper_bytes() -> Option<u64> {
+    std::mem::size_of::<Reservation>()
+        .checked_add(std::mem::align_of::<Reservation>())?
+        .try_into()
+        .ok()
+}
+
 fn commit_job<I>(
     sender: &SyncSender<Job<I>>,
     job: Job<I>,

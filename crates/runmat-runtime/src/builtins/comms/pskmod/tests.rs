@@ -291,7 +291,7 @@ fn pskmod_rejects_default_logical_input() {
     let err = block_on(super::pskmod_builtin(
         Value::LogicalArray(LogicalArray {
             data: vec![0, 1].into(),
-            shape: vec![1, 2],
+            shape: vec![1, 2].into(),
         }),
         Value::Num(2.0),
         vec![],
@@ -305,7 +305,7 @@ fn pskmod_accepts_logical_bit_input() {
     let out = pskmod(
         Value::LogicalArray(LogicalArray {
             data: vec![0, 0, 1, 1].into(),
-            shape: vec![2, 2],
+            shape: vec![2, 2].into(),
         }),
         4,
         vec![Value::from("InputType"), Value::from("bit")],

@@ -41,7 +41,7 @@ impl BufferLease {
             ),
             Value::LogicalArray(value) => (
                 LeasePayload::Logical(value.data.clone()),
-                value.shape.clone(),
+                value.shape.to_vec(),
             ),
             Value::ComplexTensor(value) => match value.complex_storage() {
                 ComplexStorage::F64(values) => (

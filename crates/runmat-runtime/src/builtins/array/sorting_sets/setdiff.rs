@@ -775,9 +775,9 @@ fn setdiff_complex(
 
 fn setdiff_promoted_complex_f64(
     a: ComplexStorage,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: ComplexStorage,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     setdiff_floating_complex(
@@ -791,9 +791,9 @@ fn setdiff_promoted_complex_f64(
 
 fn setdiff_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
     a: A,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: B,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if opts.rows {
@@ -840,9 +840,9 @@ fn setdiff_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequen
 
 fn setdiff_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
     a: A,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: B,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &SetdiffOptions,
 ) -> crate::BuiltinResult<SetdiffEvaluation> {
     if a_shape.len() != 2 || b_shape.len() != 2 {

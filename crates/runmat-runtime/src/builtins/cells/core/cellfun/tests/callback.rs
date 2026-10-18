@@ -16,7 +16,11 @@ fn bound_callback_uses_semantic_identity() {
         move |_runtime, actual, arguments, outputs, _lexical_environment| {
             assert_eq!(actual, expected);
             assert_eq!(outputs, 1);
-            let [Value::Num(seed), Value::Num(value)] = arguments.values() else {
+            assert_eq!(arguments.capture_count(), 1);
+            assert_eq!(arguments.supplied_count(), 1);
+            let (Some(Value::Num(seed)), Some(Value::Num(value))) =
+                (arguments.get(0), arguments.get(1))
+            else {
                 panic!("unexpected callback arguments: {arguments:?}");
             };
             let result = seed + value;

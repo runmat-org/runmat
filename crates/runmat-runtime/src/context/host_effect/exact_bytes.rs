@@ -22,6 +22,7 @@ impl ExactHostEffectBytes {
     pub(crate) fn test_buffer(capacity: usize) -> Self {
         #[derive(Debug)]
         struct TestClaim;
+        impl runmat_async::ManagedDiagnosticAllocationLease for TestClaim {}
         impl HostEffectLiveAllocationReservation for TestClaim {}
         Self::new(
             capacity,
@@ -200,6 +201,7 @@ mod tests {
     fn empty_and_overflow_layouts_have_no_physical_payload() {
         #[derive(Debug)]
         struct Claim;
+        impl runmat_async::ManagedDiagnosticAllocationLease for Claim {}
         impl HostEffectLiveAllocationReservation for Claim {}
         let mut empty =
             ExactHostEffectBytes::new(0, HostEffectLiveAllocationClaim::Shared(Arc::new(Claim)))
@@ -282,6 +284,7 @@ mod tests {
     fn zero_capacity_utf8_transfer_uses_empty_string_without_allocator_pointer() {
         #[derive(Debug)]
         struct Claim;
+        impl runmat_async::ManagedDiagnosticAllocationLease for Claim {}
         impl HostEffectLiveAllocationReservation for Claim {}
         let buffer =
             ExactHostEffectBytes::new(0, HostEffectLiveAllocationClaim::Shared(Arc::new(Claim)))

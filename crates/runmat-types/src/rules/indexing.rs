@@ -1,7 +1,7 @@
 use crate::{
-    CellFact, DynamicReason, FactInference, IndexKind, IndexResultContext, IndexSelectorFact,
-    OutputListFact, SequenceFactInference, ShapeFact, StorageFact, ValueFact, ValueKindFact,
-    ValueSequenceFact,
+    CellFact, CertaintyFact, DynamicReason, FactInference, IndexKind, IndexResultContext,
+    IndexSelectorFact, OutputListFact, SequenceFactInference, ShapeFact, StorageFact, ValueFact,
+    ValueKindFact, ValueSequenceFact,
 };
 
 pub fn infer_index_sequence(
@@ -19,6 +19,9 @@ pub fn infer_index_sequence(
     match (&base.kind, kind) {
         (ValueKindFact::Cell(cell), IndexKind::Brace) => {
             infer_cell_contents_sequence(cell, &base.shape, selectors)
+        }
+        (ValueKindFact::Unknown, IndexKind::Brace) => {
+            SequenceFactInference::exact(ValueSequenceFact::dynamic())
         }
         (_, IndexKind::Brace) => SequenceFactInference {
             sequence: ValueSequenceFact::dynamic(),
@@ -75,6 +78,9 @@ pub fn infer_index(
             result.kind = ValueKindFact::Object(object.clone());
             return FactInference::exact(result);
         }
+        (ValueKindFact::Unknown, IndexKind::Brace) => {
+            return FactInference::exact(ValueFact::unknown(dynamic_reason(base)))
+        }
         (_, IndexKind::Brace) => {
             return FactInference {
                 fact: ValueFact::unknown(DynamicReason::UnsupportedRepresentation),
@@ -112,6 +118,13 @@ pub fn infer_index(
     result.view = crate::ViewFact::ReadOnlyView;
     result.alias = crate::AliasFact::Shared;
     FactInference::exact(result)
+}
+
+fn dynamic_reason(fact: &ValueFact) -> DynamicReason {
+    match &fact.certainty {
+        CertaintyFact::Dynamic(reason) => reason.clone(),
+        CertaintyFact::Proven | CertaintyFact::Symbolic => DynamicReason::RuntimeValue,
+    }
 }
 
 fn infer_cell_contents(

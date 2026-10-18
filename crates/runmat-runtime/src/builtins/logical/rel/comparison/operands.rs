@@ -50,7 +50,7 @@ impl Buffer<f64> {
 
     fn from_logical(value: LogicalArray) -> Self {
         Self {
-            shape: value.shape,
+            shape: value.shape.to_vec(),
             data: value
                 .data
                 .into_iter()

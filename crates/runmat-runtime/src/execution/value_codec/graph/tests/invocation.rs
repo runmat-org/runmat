@@ -1,9 +1,20 @@
 use super::*;
-use crate::call::descriptor::{CallableCallKind, CallableDescriptor};
+use crate::call::descriptor::{
+    CallableCallKind, CallableDescriptor, CallableMetadata, CallableTarget, FunctionNameResolver,
+    RetainedClosureValue,
+};
 use crate::execution::DeferredInvocation;
 use runmat_execution::value::GraphInvocationRoots;
 use runmat_value::{FunctionDefinitionOwner, LocalExport};
 use std::sync::Arc;
+
+struct NoNamedFunction;
+
+impl FunctionNameResolver for NoNamedFunction {
+    fn resolve_function(&self, _: &str) -> Option<runmat_types::FunctionId> {
+        None
+    }
+}
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
@@ -61,6 +72,147 @@ fn typed_bound_target_uses_selected_proof_without_name_redispatch() {
             reconstructed.values().first(),
             Some(Value::BoundFunctionHandle(handle)) if handle.function == 23
         ));
+    });
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn deferred_nested_closure_keeps_one_capture_and_its_selected_source() {
+    runmat_gc::gc_test_context(|| {
+        let runtime = crate::context::RuntimeContext::new(Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let issuer = GraphSourceIssuer::capture_session(&runtime);
+        let (environment, _roots) = crate::call::lexical::allocate_environment(None).unwrap();
+        assert!(crate::call::lexical::reserve_owned_binding(&environment, BindingId(7)).unwrap());
+        let descriptor = CallableDescriptor::from_feval_value(
+            Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                function_name: "nested".into(),
+                binding: Some(BoundFunctionBinding::portable(2, origin(2))),
+                source_role: FunctionSourceRole::Nested,
+                source_file: None,
+                captures: vec![Value::Num(11.0)],
+                lexical_environment: Some(environment),
+            })),
+            vec![Value::Num(17.0)],
+            1,
+            &NoNamedFunction,
+        );
+        assert_eq!(descriptor.args, [Value::Num(17.0)]);
+        let invocation = DeferredInvocation::callable(descriptor);
+        let (prepared, roots) =
+            prepare_deferred_invocation_graph(&invocation, &issuer, ValueLimits::default())
+                .unwrap();
+        let units = prepared
+            .bound_authorities()
+            .iter()
+            .map(|(reference, _, _)| (*reference, GraphProgramUnitId(0)))
+            .collect();
+        let graph = prepared
+            .finish(&issuer, &source_map(), &layouts(), &proofs(), &units)
+            .unwrap();
+        let GraphInvocationRoots::Callable { target, arguments } = roots else {
+            panic!("callable graph roots")
+        };
+        assert_eq!(
+            arguments.len(),
+            1,
+            "capture is not a second supplied argument"
+        );
+        assert_eq!(graph.roots, [target, arguments[0]]);
+        let GraphNode::Callable(callable) = &graph.nodes[target.0 as usize] else {
+            panic!("nested closure node")
+        };
+        assert_eq!(
+            callable.owner,
+            runmat_execution::value::GraphCallableOwner::Bound(owner(2))
+        );
+        assert_eq!(callable.captures.len(), 1);
+        assert_eq!(callable.source_role, FunctionSourceRole::Nested);
+        assert!(callable.activation.is_some());
+
+        let rebuilt = decode_payload_graph_in_context(
+            &graph,
+            &runtime,
+            &source_map(),
+            &layouts(),
+            &proofs(),
+            &bindings(),
+            ValueLimits::default(),
+        )
+        .unwrap();
+        let [Value::Closure(closure), Value::Num(17.0)] = rebuilt.values() else {
+            panic!("one closure target and one supplied argument")
+        };
+        assert_eq!(closure.captures, [Value::Num(11.0)]);
+        assert_eq!(
+            closure.binding,
+            Some(BoundFunctionBinding::portable(2, origin(2)))
+        );
+        assert_eq!(closure.source_role, FunctionSourceRole::Nested);
+        assert!(closure.lexical_environment.is_some());
+
+        // V10/V11 saved graphs can carry a lexical Closure target *and* the
+        // historical flattened capture prefix in their argument roots. The
+        // old root roles remain decodable; only V12 changes their meaning.
+        let legacy = DeferredInvocation::callable(CallableDescriptor {
+            target: CallableTarget::BoundLexical {
+                binding: BoundFunctionBinding::portable(2, origin(2)),
+                closure: RetainedClosureValue::new(closure.clone()),
+            },
+            args: vec![Value::Num(11.0), Value::Num(17.0)],
+            requested_outputs: 1,
+            metadata: CallableMetadata::default(),
+        });
+        let (legacy_prepared, legacy_roots) =
+            prepare_deferred_invocation_graph(&legacy, &issuer, ValueLimits::default()).unwrap();
+        let legacy_units = legacy_prepared
+            .bound_authorities()
+            .iter()
+            .map(|(reference, _, _)| (*reference, GraphProgramUnitId(0)))
+            .collect();
+        let legacy_graph = legacy_prepared
+            .finish(&issuer, &source_map(), &layouts(), &proofs(), &legacy_units)
+            .unwrap();
+        let GraphInvocationRoots::Callable { arguments, .. } = legacy_roots else {
+            panic!("legacy callable roots")
+        };
+        assert_eq!(arguments.len(), 2);
+        let legacy_values = decode_payload_graph_in_context(
+            &legacy_graph,
+            &runtime,
+            &source_map(),
+            &layouts(),
+            &proofs(),
+            &bindings(),
+            ValueLimits::default(),
+        )
+        .unwrap();
+        assert!(matches!(
+            legacy_values.values(),
+            [Value::Closure(_), Value::Num(11.0), Value::Num(17.0)]
+        ));
+
+        // A selected graph worker can only invoke an exact bound owner.
+        // Preserving captures alone must not silently discard the unresolved
+        // target identity and leave a request that fails after scheduling.
+        let unresolved = DeferredInvocation::callable(CallableDescriptor::from_feval_value(
+            Value::Closure(Closure::from_data(runmat_value::ClosureData {
+                function_name: "nested".into(),
+                binding: None,
+                source_role: FunctionSourceRole::Nested,
+                source_file: None,
+                captures: vec![Value::Num(11.0)],
+                lexical_environment: closure.lexical_environment.clone(),
+            })),
+            vec![Value::Num(17.0)],
+            1,
+            &NoNamedFunction,
+        ));
+        assert!(
+            prepare_deferred_invocation_graph(&unresolved, &issuer, ValueLimits::default())
+                .is_err()
+        );
     });
 }
 
@@ -131,7 +283,7 @@ fn builtin_arguments_keep_a_nested_activation_as_graph_roots() {
         ));
         let issuer = GraphSourceIssuer::capture_session(&runtime);
         let (environment, _roots) = crate::call::lexical::allocate_environment(None).unwrap();
-        assert!(environment.reserve_owned_binding(BindingId(7)));
+        assert!(crate::call::lexical::reserve_owned_binding(&environment, BindingId(7)).unwrap());
         let closure = Value::Closure(Closure::from_data(runmat_value::ClosureData {
             function_name: "nested".into(),
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),

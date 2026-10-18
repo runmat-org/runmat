@@ -29,7 +29,7 @@ pub(super) async fn dispatch(
             OutputPublication::Fixed(*out_count),
         ),
         Instr::CallFevalMultiUsingOutputSlot(argc, out_count_slot) => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             (
                 FevalArguments::Plain(*argc),
                 out_count,
@@ -42,7 +42,7 @@ pub(super) async fn dispatch(
             OutputPublication::Fixed(*out_count),
         ),
         Instr::CallFevalExpandMultiOutputUsingOutputSlot(specs, out_count_slot) => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             (
                 FevalArguments::Expanded(specs.as_slice()),
                 out_count,

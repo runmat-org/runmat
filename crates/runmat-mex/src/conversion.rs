@@ -172,7 +172,7 @@ pub(crate) fn value_to_mx_for_interface_in_context(
             MxArray::logical(vec![u8::from(*value)], vec![1, 1]).map_err(MxConversionError::new)
         }
         Value::LogicalArray(value) => {
-            MxArray::logical_buffer(value.data.clone(), value.shape.clone())
+            MxArray::logical_buffer(value.data.clone(), value.shape.to_vec())
                 .map_err(MxConversionError::new)
         }
         Value::String(value) if interface == MxBoundaryInterface::CxxData => {

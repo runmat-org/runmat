@@ -272,7 +272,7 @@ fn fftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<Logica
     let LogicalArray { data, shape } = array;
     let plan = build_shift_plan(&shape, dims, ShiftKind::Fft);
     if data.is_empty() || plan.is_noop() {
-        return LogicalArray::from_host_buffer(data, shape).map_err(|source| {
+        return LogicalArray::from_shared_host_buffer(data, shape).map_err(|source| {
             fftshift_error_with_detail(
                 &FFTSHIFT_ERROR_INTERNAL,
                 format!("logical array reconstruction failed: {source}"),
@@ -280,7 +280,7 @@ fn fftshift_logical(array: LogicalArray, dims: &[usize]) -> BuiltinResult<Logica
         });
     }
     let rotated = apply_shift(BUILTIN_NAME, &data, &plan.ext_shape, &plan.positive)?;
-    LogicalArray::new(rotated, shape).map_err(|source| {
+    LogicalArray::from_shared_host_buffer(rotated.into(), shape).map_err(|source| {
         fftshift_error_with_detail(
             &FFTSHIFT_ERROR_INTERNAL,
             format!("logical array reconstruction failed: {source}"),

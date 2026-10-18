@@ -769,21 +769,9 @@ impl<'window> PlotWindow<'window> {
                     || has_per_axes_grid,
                 show_axes: true,
                 show_title: true,
-                title: self
-                    .plot_renderer
-                    .overlay_title()
-                    .cloned()
-                    .or(Some("Plot".to_string())),
-                x_label: self
-                    .plot_renderer
-                    .overlay_x_label()
-                    .cloned()
-                    .or(Some("X".to_string())),
-                y_label: self
-                    .plot_renderer
-                    .overlay_y_label()
-                    .cloned()
-                    .or(Some("Y".to_string())),
+                title: self.plot_renderer.overlay_title().cloned(),
+                x_label: self.plot_renderer.overlay_x_label().cloned(),
+                y_label: self.plot_renderer.overlay_y_label().cloned(),
                 ..Default::default()
             };
             let overlay_metrics = OverlayMetrics {

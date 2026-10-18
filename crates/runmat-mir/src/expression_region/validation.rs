@@ -1,18 +1,20 @@
-use super::{MirExpressionRegion, MirExpressionStep};
+use super::MirExpressionStep;
 use crate::MirOperand;
 use std::collections::BTreeSet;
 
-pub(super) fn validate(region: &MirExpressionRegion) -> Result<(), String> {
-    let all_locals = region
-        .steps
+pub(super) fn validate(
+    steps: &[MirExpressionStep],
+    result: &MirOperand,
+    require_contextual_result: bool,
+) -> Result<(), String> {
+    let all_locals = steps
         .iter()
         .filter_map(|step| match step {
             MirExpressionStep::Let { local, .. } => Some(*local),
             MirExpressionStep::CaptureSequence { .. } => None,
         })
         .collect::<BTreeSet<_>>();
-    let all_sequences = region
-        .steps
+    let all_sequences = steps
         .iter()
         .filter_map(|step| match step {
             MirExpressionStep::CaptureSequence { destination, .. } => Some(*destination),
@@ -24,7 +26,7 @@ pub(super) fn validate(region: &MirExpressionRegion) -> Result<(), String> {
     let mut contextual_locals = BTreeSet::new();
     let mut contextual_sequences = BTreeSet::new();
     let mut sequence_uses = std::collections::BTreeMap::new();
-    for step in &region.steps {
+    for step in steps {
         let mut invalid_local = None;
         let mut invalid_sequence = None;
         match step {
@@ -55,7 +57,7 @@ pub(super) fn validate(region: &MirExpressionRegion) -> Result<(), String> {
                 });
                 if !locals.insert(*local) {
                     return Err(format!(
-                        "contextual expression local {local:?} is defined more than once"
+                        "expression region local {local:?} is defined more than once"
                     ));
                 }
                 if depends_on_context {
@@ -82,7 +84,7 @@ pub(super) fn validate(region: &MirExpressionRegion) -> Result<(), String> {
                 });
                 if !sequences.insert(*destination) {
                     return Err(format!(
-                        "contextual expression sequence {destination:?} is defined more than once"
+                        "expression region sequence {destination:?} is defined more than once"
                     ));
                 }
                 if depends_on_context {
@@ -92,12 +94,12 @@ pub(super) fn validate(region: &MirExpressionRegion) -> Result<(), String> {
         }
         if let Some(local) = invalid_local {
             return Err(format!(
-                "contextual expression local {local:?} is used before its definition"
+                "expression region local {local:?} is used before its definition"
             ));
         }
         if let Some(sequence) = invalid_sequence {
             return Err(format!(
-                "contextual expression sequence {sequence:?} is used before its capture"
+                "expression region sequence {sequence:?} is used before its capture"
             ));
         }
     }
@@ -105,22 +107,22 @@ pub(super) fn validate(region: &MirExpressionRegion) -> Result<(), String> {
         let uses = sequence_uses.get(&sequence).copied().unwrap_or(0);
         if uses != 1 {
             return Err(format!(
-                "contextual expression sequence {sequence:?} is consumed {uses} times; expected exactly once"
+                "expression region sequence {sequence:?} is consumed {uses} times; expected exactly once"
             ));
         }
     }
-    if let MirOperand::Local(local) = &region.result {
+    if let MirOperand::Local(local) = result {
         if all_locals.contains(local) && !locals.contains(local) {
             return Err(format!(
-                "contextual expression result local {local:?} is not defined"
+                "expression region result local {local:?} is not defined"
             ));
         }
     }
-    let result_depends_on_context = match &region.result {
+    let result_depends_on_context = match result {
         MirOperand::Local(local) => contextual_locals.contains(local),
         _ => false,
     };
-    if !result_depends_on_context {
+    if require_contextual_result && !result_depends_on_context {
         return Err(
             "contextual expression result does not depend on the indexing context".to_owned(),
         );

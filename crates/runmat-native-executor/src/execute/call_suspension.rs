@@ -1,7 +1,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use runmat_runtime::execution::{RootedValueSequence, RootedValues};
+use runmat_runtime::execution::{RootedValue, RootedValueSequence, RootedValues};
 use runmat_runtime::native::{NativeSiteRequest, NativeValueRef};
 use runmat_value::Value;
 
@@ -17,6 +17,7 @@ mod catch_scope_tests;
 mod prepared;
 mod publication;
 mod rooted;
+mod semantic_operation;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod roots_tests;
 mod sequence;
@@ -30,7 +31,13 @@ pub(super) use prepared::{begin_prepared_receiver, take_completed_prepared_recei
 pub(super) use publication::publish;
 use rooted::{adopt_rooted_arguments, adopt_rooted_sequence};
 pub(super) use rooted::{
-    begin_rooted_arguments, begin_rooted_sequence, begin_rooted_sequence_with_roots,
+    begin_lexical_call, begin_rooted_arguments, begin_rooted_sequence,
+    begin_rooted_sequence_with_roots,
+};
+pub(in crate::execute) use semantic_operation::{
+    begin_semantic_operation, begin_semantic_value_operation, settle_completed_semantic_values,
+    take_completed_semantic_operation, take_completed_semantic_value_operation,
+    SemanticOperationKind,
 };
 pub(super) use sequence::{begin_sequence_stage, take_completed_sequence_stage, SequenceStage};
 pub(super) use sequence_read::{
@@ -51,7 +58,10 @@ pub(super) use terminator::{
 pub(super) type CompletionFuture =
     Pin<Box<dyn Future<Output = NativeExecutorResult<CallCompletion>> + 'static>>;
 
-pub(super) fn scope_completion(state: &HostState, future: CompletionFuture) -> CompletionFuture {
+pub(super) fn scope_completion(
+    state: &HostState,
+    future: impl Future<Output = NativeExecutorResult<CallCompletion>> + 'static,
+) -> CompletionFuture {
     Box::pin(
         state
             .runtime
@@ -66,6 +76,14 @@ pub(super) enum CallCompletion {
     },
     RootedArguments(RootedValues),
     RootedExpandedCallArguments(RootedValues),
+    Lexical {
+        result: runmat_runtime::call::lexical::RootedLexicalCallResult,
+        requested_outputs: usize,
+    },
+    SemanticOperation {
+        kind: SemanticOperationKind,
+        output: SemanticOperationOutput,
+    },
     SequenceRead {
         stage: SequenceReadStage,
         sequence: RootedValueSequence,
@@ -93,6 +111,15 @@ pub(super) struct CompletedCall {
     // This root-bearing value is kept outside the tagged payload so ordinary
     // completions do not inherit its large inline enum representation.
     sequence_read: Option<RootedValueSequence>,
+    // Semantic operations return their exactly rooted owned values directly to
+    // the resumed consumer. Keeping them out of the arena avoids a payload
+    // clone merely to cross the native suspension boundary.
+    semantic_output: Option<SemanticOperationOutput>,
+}
+
+pub(super) enum SemanticOperationOutput {
+    Values(RootedValues),
+    Value(RootedValue),
 }
 
 pub(super) enum CompletedPayload {
@@ -109,6 +136,7 @@ pub(super) enum CompletedPayload {
     },
     ShortCircuitTruth(ShortCircuitTruthReady),
     StatementOutput,
+    SemanticOperation(SemanticOperationKind),
     Terminator(Box<TerminatorReady>),
 }
 
@@ -118,10 +146,16 @@ impl CompletedCall {
         embedded: Option<super::state::EmbeddedOperationIdentity>,
         payload: CompletedPayload,
         sequence_read: Option<RootedValueSequence>,
+        semantic_output: Option<SemanticOperationOutput>,
     ) -> NativeExecutorResult<Self> {
         if matches!(&payload, CompletedPayload::SequenceRead(_)) != sequence_read.is_some() {
             return Err(NativeExecutorError::Host(
                 "completed sequence read has no exact rooted value".into(),
+            ));
+        }
+        if matches!(&payload, CompletedPayload::SemanticOperation(_)) != semantic_output.is_some() {
+            return Err(NativeExecutorError::Host(
+                "completed semantic operation has no exact rooted value owner".into(),
             ));
         }
         Ok(Self {
@@ -129,6 +163,7 @@ impl CompletedCall {
             embedded,
             payload,
             sequence_read,
+            semantic_output,
         })
     }
 
@@ -183,6 +218,13 @@ pub(super) fn take_completed(
         state.completed_call = Some(completed);
         return Ok(None);
     }
+    if matches!(&completed.payload, CompletedPayload::SemanticOperation(_)) {
+        // An indexing site may resume either its built-in semantic operation
+        // or an object protocol call. Leave the typed semantic completion for
+        // its exact consumer rather than treating it as call output.
+        state.completed_call = Some(completed);
+        return Ok(None);
+    }
     let CompletedPayload::Values(outputs) = &completed.payload else {
         state.completed_call = Some(completed);
         return Err(NativeExecutorError::Host(
@@ -211,6 +253,7 @@ pub(super) fn completed_roots(state: &HostState) -> impl Iterator<Item = NativeV
             CompletedPayload::SequenceStage { roots, .. } => roots.clone(),
             CompletedPayload::ShortCircuitTruth(_) => Vec::new(),
             CompletedPayload::StatementOutput => Vec::new(),
+            CompletedPayload::SemanticOperation(_) => Vec::new(),
             CompletedPayload::Terminator(stage) => stage.arena_roots(),
         })
 }
@@ -257,6 +300,7 @@ pub(super) async fn complete(
     // HostState across await. Restore that exact record even if workspace
     // reconciliation or column materialization fails.
     let mut sequence_read = None;
+    let mut semantic_output = None;
     let payload = match completion {
         Ok(CallCompletion::Terminator(stage)) if stage.is_for_next() => {
             let reconciliation = state.reconcile_external_workspace();
@@ -267,7 +311,8 @@ pub(super) async fn complete(
             CompletedPayload::Terminator(Box::new(TerminatorReady::for_next(next)))
         }
         completion => {
-            let completion = super::sync::CompletedOperation::new(completion).finish(state)?;
+            let completion =
+                super::operation_completion::CompletedOperation::new(completion).finish(state)?;
             match completion {
                 CallCompletion::RootedSequence {
                     sequence,
@@ -284,6 +329,26 @@ pub(super) async fn complete(
                     CompletedPayload::ExpandedCallArguments(adopt_rooted_arguments(
                         state, arguments,
                     ))
+                }
+                CallCompletion::Lexical {
+                    result,
+                    requested_outputs,
+                } => {
+                    let outputs = result.with_owned(|result| {
+                        state.apply_lexical_captures(result.captures)?;
+                        super::call::normalize_sequence_outputs(result.outputs, requested_outputs)
+                            .map(|values| {
+                                values
+                                    .into_iter()
+                                    .map(|value| state.arena.insert(value))
+                                    .collect()
+                            })
+                    })?;
+                    CompletedPayload::Values(outputs)
+                }
+                CallCompletion::SemanticOperation { kind, output } => {
+                    semantic_output = Some(output);
+                    CompletedPayload::SemanticOperation(kind)
                 }
                 CallCompletion::SequenceRead { stage, sequence } => {
                     sequence_read = Some(sequence);
@@ -315,6 +380,7 @@ pub(super) async fn complete(
         embedded,
         payload,
         sequence_read,
+        semantic_output,
     )?);
     Ok(request)
 }

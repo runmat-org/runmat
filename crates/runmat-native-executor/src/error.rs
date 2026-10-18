@@ -31,3 +31,9 @@ impl From<runmat_runtime::RuntimeError> for NativeExecutorError {
         Self::Runtime(Box::new(error))
     }
 }
+
+impl From<Box<runmat_runtime::RuntimeError>> for NativeExecutorError {
+    fn from(error: Box<runmat_runtime::RuntimeError>) -> Self {
+        Self::Runtime(error)
+    }
+}

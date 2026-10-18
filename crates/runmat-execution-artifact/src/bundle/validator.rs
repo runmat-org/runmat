@@ -465,6 +465,7 @@ fn encode_capability(
 ) -> ArtifactResult<()> {
     match capability {
         Capability::GraphSelectedValuesV11 => encoder.array(1).and_then(|encoder| encoder.u8(5)),
+        Capability::GraphCallableArgumentsV12 => encoder.array(1).and_then(|encoder| encoder.u8(6)),
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),

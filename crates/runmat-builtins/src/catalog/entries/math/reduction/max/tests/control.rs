@@ -1,6 +1,31 @@
 use super::*;
 
 #[test]
+fn literal_zero_is_pairwise_operand_but_not_reduction_axis() {
+    let shape = ShapeFact::from(vec![Some(2), Some(3)]);
+    let pairwise = call(
+        numeric(NumericClass::Double, shape.clone()),
+        vec![LiteralValue::Number(0.0)],
+        1,
+    );
+    assert_eq!(pairwise.outputs[0].shape, shape);
+    assert!(!pairwise
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-REDUCTION-DIMENSION"));
+
+    let invalid = call(
+        numeric(NumericClass::Double, shape),
+        vec![LiteralValue::Empty, LiteralValue::Number(0.0)],
+        1,
+    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-REDUCTION-DIMENSION"));
+}
+
+#[test]
 fn known_empty_placeholder_selects_reduction_and_unknown_rhs_does_not() {
     let shape = ShapeFact::from(vec![Some(3), Some(4)]);
     let reduction = call(

@@ -1,5 +1,5 @@
 use super::{
-    RuntimeCallableArtifactService, RuntimeCapability, RuntimeCapabilityError,
+    RuntimeCallableArtifactService, RuntimeCapability, RuntimeCapabilityError, RuntimeContext,
     RuntimeGraphicsPresentationService, RuntimePreferenceService, RuntimeTcpService,
     RuntimeTimingService, RuntimeUserPathService,
 };
@@ -7,105 +7,17 @@ use crate::builtin::RuntimeBuiltinBinding;
 use crate::class_registry::RuntimeClass;
 use crate::warning_store::RuntimeWarning;
 use crate::RuntimeError;
-use runmat_types::{
-    BuiltinId, CallableFallbackPolicy, CallableIdentity, DistributedValueContract,
-    DistributionScheme, LabRank, SourceId,
-};
+use runmat_types::{BuiltinId, DistributedValueContract, DistributionScheme, LabRank};
 use runmat_value::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
+use std::sync::Arc;
 
 pub type RuntimeServiceFuture<T> = Pin<Box<dyn Future<Output = T> + 'static>>;
 
-#[derive(Debug, Clone)]
-pub struct RuntimeCallRequest {
-    pub identity: CallableIdentity,
-    pub binding: Option<runmat_value::BoundFunctionBinding>,
-    pub arguments: Vec<Value>,
-    pub requested_outputs: usize,
-}
-
-pub trait RuntimeCallService {
-    /// Complete implementation-owned Values; unavailable is not an empty set.
-    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
-        None
-    }
-    fn resolve(&self, name: &str) -> Option<usize>;
-
-    fn invoke(
-        &self,
-        runtime: super::RuntimeContext,
-        request: RuntimeCallRequest,
-    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>>;
-
-    fn source_functions(&self, _source_id: SourceId) -> Vec<(String, usize)> {
-        Vec::new()
-    }
-}
-
-/// Canonical call router for callbacks that re-enter the active RunMat
-/// executor. The executor installs its semantic and external invokers in the
-/// invocation context; this service keeps foreign adapters independent of VM,
-/// JIT, and AOT implementation details.
-#[derive(Debug, Default)]
-pub struct RuntimeCallRouter;
-
-impl RuntimeCallService for RuntimeCallRouter {
-    fn visit_retained_values(&self, _visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
-        // This router has no state; pending requests belong to caller futures.
-        Some(())
-    }
-    fn resolve(&self, name: &str) -> Option<usize> {
-        crate::user_functions::resolve_semantic_function_by_name(name)
-    }
-
-    fn invoke(
-        &self,
-        runtime: super::RuntimeContext,
-        request: RuntimeCallRequest,
-    ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>> {
-        let fallback_policy = match &request.identity {
-            CallableIdentity::DynamicName(_)
-            | CallableIdentity::Imported(_)
-            | CallableIdentity::Method(_) => CallableFallbackPolicy::RuntimeNameResolution,
-            CallableIdentity::ExternalName(_) => CallableFallbackPolicy::ExternalBoundary,
-            _ => CallableFallbackPolicy::None,
-        };
-        Box::pin(async move {
-            if let Some(binding) = request.binding {
-                return crate::call::descriptor::execute_callable_descriptor_in_context(
-                    &runtime,
-                    crate::call::descriptor::CallableDescriptor::bound(
-                        binding,
-                        request.arguments,
-                        request.requested_outputs,
-                        crate::call::descriptor::CallableCallKind::Direct,
-                    ),
-                )
-                .await;
-            }
-            crate::call::descriptor::execute_callable_descriptor_in_context(
-                &runtime,
-                crate::call::descriptor::CallableDescriptor::resolved(
-                    request.identity,
-                    request.arguments,
-                    request.requested_outputs,
-                    fallback_policy,
-                    crate::call::descriptor::CallableCallKind::Direct,
-                ),
-            )
-            .await
-        })
-    }
-
-    fn source_functions(&self, source_id: SourceId) -> Vec<(String, usize)> {
-        crate::user_functions::source_functions_for(source_id)
-            .into_iter()
-            .map(|function| (function.name, function.function))
-            .collect()
-    }
-}
+mod call;
+pub use call::{RuntimeCallRequest, RuntimeCallRouter, RuntimeCallService};
 
 /// Invocation-scoped builtin authority used by exact compiled products.
 /// When installed, the dispatcher must not fall back to process-global
@@ -126,6 +38,90 @@ pub trait RuntimeBuiltinService {
 }
 
 pub trait RuntimeWorkspaceService {
+    /// Retain the current immutable read generation without synchronizing or
+    /// publishing pending workspace effects. The default declines rather than
+    /// constructing a detached Value/name mirror.
+    fn capture_workspace_generation_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<Option<crate::workspace::LogicalWorkspaceGeneration>, RuntimeError> {
+        Ok(None)
+    }
+
+    /// Capture one immutable current target generation and its matching
+    /// completion authority. Implementations must keep the issuing service
+    /// alive in the returned capture and must not construct a detached Value
+    /// mirror. The default refuses before effects.
+    fn capture_dynamic_workspace_target_with_context(
+        self: Rc<Self>,
+        _context: &RuntimeContext,
+    ) -> Result<Option<crate::workspace::DynamicWorkspaceTargetCapture>, RuntimeError> {
+        Ok(None)
+    }
+
+    /// Exact lexical/dynamic caller workspace for `evalin('caller', ...)`.
+    /// Absence is authoritative and must never be replaced by current/base.
+    fn caller_workspace_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<Option<Rc<dyn RuntimeWorkspaceService>>, RuntimeError> {
+        Ok(None)
+    }
+
+    /// Capture the exact transactional identity used by a later whole-target
+    /// completion. Generic adapters do not gain batch authority merely by
+    /// supporting individual assignments.
+    fn capture_workspace_completion_identity_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<Option<crate::workspace::WorkspaceCompletionIdentity>, RuntimeError> {
+        Ok(None)
+    }
+
+    /// Install a normalized whole-target completion as one prepared mutation.
+    /// Implementations must reject an identity they did not issue and must not
+    /// fall back to committing a prefix through the scalar mutation methods.
+    fn apply_workspace_completion_with_context(
+        &self,
+        context: &RuntimeContext,
+        _identity: crate::workspace::WorkspaceCompletionIdentity,
+        source: &dyn crate::workspace::WorkspaceCompletionSource,
+    ) -> Result<(), RuntimeError> {
+        if source.is_empty() {
+            return self.ensure_effect_authority_with_context(context);
+        }
+        Err(crate::runtime_error::semantic_error(
+            "RunMat:Workspace:ExactCompletionUnavailable",
+            "exact transactional workspace completion is unavailable",
+        ))
+    }
+
+    /// Prepare every Base value, name, delta and publication owner before a
+    /// composite Native/lexical completion becomes visible. The returned
+    /// token is bound to this service's exact completion identity; the
+    /// default provides no whole-target authority.
+    fn prepare_workspace_completion_with_context(
+        &self,
+        _context: &RuntimeContext,
+        _identity: crate::workspace::WorkspaceCompletionIdentity,
+        _source: &dyn crate::workspace::WorkspaceCompletionSource,
+    ) -> Result<crate::workspace::PreparedWorkspaceCompletion, RuntimeError> {
+        Err(crate::runtime_error::semantic_error(
+            "RunMat:Workspace:ExactCompletionUnavailable",
+            "exact transactional workspace completion is unavailable",
+        ))
+    }
+
+    /// Operation-bearing retirement keeps publication and callback admission
+    /// attached to the invocation that requested the effect.
+    fn detach_selected_with_context(
+        &self,
+        _context: &RuntimeContext,
+        selection: &crate::workspace::WorkspaceDetachSelection,
+    ) -> Result<crate::workspace::DetachedWorkspaceValues, RuntimeError> {
+        self.detach_selected(selection)
+    }
+
     /// Retire selected bindings from this exact workspace before callbacks.
     /// Legacy adapters without atomic authority fail closed.
     fn detach_selected(
@@ -162,6 +158,28 @@ pub trait RuntimeWorkspaceService {
         Ok(self.global_names())
     }
 
+    fn try_lookup_with_context(
+        &self,
+        _context: &RuntimeContext,
+        name: &str,
+    ) -> Result<Option<Value>, RuntimeError> {
+        self.try_lookup(name)
+    }
+
+    fn try_snapshot_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<Vec<(String, Value)>, RuntimeError> {
+        self.try_snapshot()
+    }
+
+    fn try_global_names_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<Vec<String>, RuntimeError> {
+        self.try_global_names()
+    }
+
     /// Admit an ordered projection for this exact current-workspace service.
     ///
     /// Sequential caller-frame adapters return `None`; a service backed by a
@@ -187,12 +205,28 @@ pub trait RuntimeWorkspaceService {
         Ok(())
     }
 
+    fn ensure_effect_authority_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_effect_authority()
+    }
+
     /// Admit an ordered executor-owned mutation without reconciling an
     /// externally changed workspace view. Executor register stores use this
     /// path after their exact frame lifecycle check; external/reentrant
     /// effects continue to use [`Self::ensure_effect_authority`].
     fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
         self.ensure_effect_authority()
+    }
+
+    /// Check a register mutation under the captured invocation without
+    /// reconciling an external workspace effect.
+    fn ensure_mutation_authority_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_mutation_authority()
     }
 
     /// Revision of an authority-backed workspace after its latest admission
@@ -202,6 +236,13 @@ pub trait RuntimeWorkspaceService {
         &self,
     ) -> Result<Option<crate::workspace::WorkspaceRevision>, RuntimeError> {
         Ok(None)
+    }
+
+    fn workspace_revision_with_context(
+        &self,
+        _context: &RuntimeContext,
+    ) -> Result<Option<crate::workspace::WorkspaceRevision>, RuntimeError> {
+        self.workspace_revision()
     }
 
     /// Names whose base-workspace identity resolves through the separate
@@ -242,6 +283,66 @@ pub trait RuntimeWorkspaceService {
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError>;
 
+    /// Operation-bearing mutation entrypoints. Canonical managed services use
+    /// the current context to admit storage before changing their namespace.
+    /// Defaults retain the behavior of external services without that policy.
+    fn assign_with_context(
+        &self,
+        _context: &RuntimeContext,
+        name: &str,
+        value: Value,
+    ) -> Result<(), RuntimeError> {
+        self.assign(name, value)
+    }
+
+    /// Prepare the publication owner before cloning a register-held value.
+    fn assign_ref_with_context(
+        &self,
+        context: &RuntimeContext,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        self.assign_with_context(context, name, value.clone())
+    }
+
+    fn bind_base_global_with_context(
+        &self,
+        _context: &RuntimeContext,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        self.bind_base_global(name)
+    }
+
+    /// Bind the workspace spelling to its exact session destination. A
+    /// generic adapter may not erase a named alias or legacy slot to a bool.
+    fn bind_base_global_target_with_context(
+        &self,
+        _context: &RuntimeContext,
+        _name: &str,
+        _target: &crate::workspace::GlobalBindingTarget,
+    ) -> Result<(), RuntimeError> {
+        Err(base_namespace_capability_error(
+            "bind a typed base-workspace global",
+        ))
+    }
+
+    fn unbind_base_global_with_context(
+        &self,
+        _context: &RuntimeContext,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        self.unbind_base_global(name)
+    }
+
+    fn assign_base_local_with_context(
+        &self,
+        _context: &RuntimeContext,
+        name: &str,
+        value: Value,
+    ) -> Result<(), RuntimeError> {
+        self.assign_base_local(name, value)
+    }
+
     /// Publish an executor register write whose register file is updated by
     /// the caller immediately after admission. Frame adapters override this to
     /// avoid scheduling the same write for callback reconciliation.
@@ -254,6 +355,33 @@ pub trait RuntimeWorkspaceService {
         self.assign(name, value)
     }
 
+    /// Admit the publication from its borrowed register value before any
+    /// publication alias is cloned. Managed workspace owners override this
+    /// boundary to prepare their storage against the current operation.
+    fn assign_executor_slot_ref(
+        &self,
+        _context: &RuntimeContext,
+        slot: usize,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        self.assign_executor_slot(slot, name, value.clone())
+    }
+
+    /// Publish an executor register generation that was admitted before the
+    /// workspace effect began. Frame services override this boundary to move
+    /// the exact retained generation into their register owner; compatibility
+    /// services may inspect it only through the existing borrowed boundary.
+    fn assign_executor_slot_lease_with_context(
+        &self,
+        context: &RuntimeContext,
+        slot: usize,
+        name: &str,
+        value: crate::workspace::WorkspaceSlotReadLease,
+    ) -> Result<(), RuntimeError> {
+        self.assign_executor_slot_ref(context, slot, name, value.value())
+    }
+
     /// Establish a named session-global alias for one executor slot. The
     /// service owns frame scope and decides whether the declaration also
     /// removes a shadowed base-workspace value.
@@ -264,6 +392,41 @@ pub trait RuntimeWorkspaceService {
     }
     fn clear(&self) -> Result<(), RuntimeError>;
     fn remove(&self, name: &str) -> Result<(), RuntimeError>;
+
+    fn declare_global_binding_with_context(
+        &self,
+        _context: &RuntimeContext,
+        slot: usize,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        self.declare_global_binding(slot, name)
+    }
+
+    /// Establish a legacy slot-addressed global while retaining the compiler
+    /// name used by the current workspace frame. Services without exact slot
+    /// authority must refuse before mutating either namespace.
+    fn declare_legacy_global_binding_with_context(
+        &self,
+        _context: &RuntimeContext,
+        _slot: usize,
+        _name: &str,
+    ) -> Result<(), RuntimeError> {
+        Err(base_namespace_capability_error(
+            "declare a legacy workspace global binding",
+        ))
+    }
+
+    fn clear_with_context(&self, _context: &RuntimeContext) -> Result<(), RuntimeError> {
+        self.clear()
+    }
+
+    fn remove_with_context(
+        &self,
+        _context: &RuntimeContext,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        self.remove(name)
+    }
 }
 
 fn base_namespace_capability_error(operation: &'static str) -> RuntimeError {
@@ -563,7 +726,7 @@ pub struct RuntimeManagedWholeWorkSelection {
     pub selected: runmat_execution::CompactSelectedExecutionCandidate,
     pub kind: runmat_execution::WholeWorkDecisionKind,
     pub predicted_total_ns: Option<u64>,
-    pub observation_lease: super::ManagedObservationLease,
+    pub observation_lease: Arc<super::ManagedObservationLease>,
     /// Retains the synthetic probe until the selection drops; no reads are required.
     #[cfg(test)]
     pub(crate) _test_probe: Option<Box<dyn RuntimeWholeWorkProbeLease>>,
@@ -719,6 +882,16 @@ pub trait RuntimePlacementService {
         _program: Option<runmat_execution::ProgramRevision>,
         _provider: runmat_execution::Digest,
     ) -> Option<runmat_execution::PlacementRevision> {
+        None
+    }
+
+    /// Managed provider revision borrows the installed program facts. The
+    /// portable owned hook above is not a finite-admission fallback.
+    fn whole_work_revision_ref<'a>(
+        &self,
+        _program: Option<&'a runmat_execution::ProgramRevision>,
+        _provider: runmat_execution::Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
         None
     }
 
@@ -1790,6 +1963,9 @@ mod tests {
     #[test]
     fn value_only_workspace_cannot_claim_global_namespace_authority() {
         let workspace = ValueOnlyWorkspace::default();
+        let context = RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
         let failures = [
             workspace.base_global_binding_names().unwrap_err(),
             workspace.is_base_global_binding("g").unwrap_err(),
@@ -1799,6 +1975,21 @@ mod tests {
                 .assign_base_local("g", Value::Num(1.0))
                 .unwrap_err(),
             workspace.declare_global_binding(0, "g").unwrap_err(),
+            workspace
+                .bind_base_global_with_context(&context, "g")
+                .unwrap_err(),
+            workspace
+                .unbind_base_global_with_context(&context, "g")
+                .unwrap_err(),
+            workspace
+                .assign_base_local_with_context(&context, "g", Value::Num(1.0))
+                .unwrap_err(),
+            workspace
+                .declare_global_binding_with_context(&context, 0, "g")
+                .unwrap_err(),
+            workspace
+                .declare_legacy_global_binding_with_context(&context, 0, "g")
+                .unwrap_err(),
         ];
 
         assert!(failures.iter().all(|error| {
@@ -1937,7 +2128,9 @@ mod tests {
                 .with_graphics_presentation(std::rc::Rc::new(ParentGraphics)),
         );
         assert!(parent.service_ports().graphics_presentation().is_some());
-        let lab = parent.fork_parallel_lab(parent.service_ports().clone());
+        let lab = parent
+            .fork_parallel_lab(parent.service_ports().clone())
+            .expect("idle session fork");
         assert!(lab.service_ports().graphics_presentation().is_none());
         assert_eq!(
             lab.service_ports()

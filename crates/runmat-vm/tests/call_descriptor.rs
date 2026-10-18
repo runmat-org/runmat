@@ -4,12 +4,12 @@ use runmat_hir::{
     MethodId, PackageName, QualifiedName, SymbolName,
 };
 use runmat_runtime::call::descriptor::{
-    execute_callable_descriptor, try_execute_callable_descriptor, CallableCallKind,
-    CallableDescriptor, CallableTarget,
+    execute_callable_descriptor, execute_callable_descriptor_in_context,
+    try_execute_callable_descriptor, CallableCallKind, CallableDescriptor, CallableTarget,
 };
 use runmat_runtime::execution::RootedValueSequence;
 use runmat_value::{Closure, StringArray, Tensor, Value, ValueSequence, ValueSequenceKind};
-use runmat_vm::FunctionRegistry;
+use runmat_vm::{FunctionBytecode, FunctionRegistry};
 use std::sync::Arc;
 
 fn imported_identity(name: &str) -> CallableIdentity {
@@ -37,6 +37,20 @@ fn single_sequence(value: Value) -> RootedValueSequence {
 fn assert_single(sequence: &ValueSequence, expected: Value) {
     assert_eq!(sequence.kind(), ValueSequenceKind::Single);
     assert_eq!(sequence.as_slice(), std::slice::from_ref(&expected));
+}
+
+fn publish_named_fixture(registry: &mut FunctionRegistry, name: &str, function: usize) {
+    registry.insert_replacing_name(FunctionBytecode {
+        function: FunctionId(function),
+        display_name: name.to_owned(),
+        ..FunctionBytecode::default()
+    });
+}
+
+fn descriptor_runtime() -> runmat_runtime::context::RuntimeContext {
+    runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
 }
 
 #[test]
@@ -458,7 +472,7 @@ fn feval_function_handle_external_boundary_can_use_semantic_resolver() {
 #[test]
 fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
     let mut registry = FunctionRegistry::default();
-    registry.names.insert("inc".to_string(), FunctionId(4242));
+    publish_named_fixture(&mut registry, "inc", 4242);
 
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
@@ -490,7 +504,7 @@ fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
 #[test]
 fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
     let mut registry = FunctionRegistry::default();
-    registry.names.insert("inc".to_string(), FunctionId(9999));
+    publish_named_fixture(&mut registry, "inc", 9999);
     let binding = runmat_value::BoundFunctionBinding::portable(
         4242,
         runmat_execution::FunctionBindingOrigin {
@@ -500,15 +514,16 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
     );
     let expected = binding.clone();
 
-    let _invoker_guard =
-        runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+    let invoker: std::rc::Rc<runmat_runtime::user_functions::BoundFunctionInvoker> =
+        std::rc::Rc::new(
             move |_runtime, actual, args, requested_outputs, _lexical_environment| {
                 assert_eq!(actual, expected);
                 assert_eq!(requested_outputs, 1);
-                assert_eq!(args.values(), &[Value::Num(10.0), Value::Num(2.0)]);
+                assert_eq!(args.captures(), &[Value::Num(10.0)]);
+                assert_eq!(args.supplied(), &[Value::Num(2.0)]);
                 Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
             },
-        ));
+        );
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::Closure(Closure::new(
@@ -523,8 +538,13 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
         1,
         &registry,
     );
-    let value = block_on(execute_callable_descriptor(descriptor))
-        .expect("embedded semantic identity should take precedence");
+    let runtime = descriptor_runtime();
+    let value = block_on(runtime.scope(async {
+        let _invoker_guard =
+            runmat_runtime::user_functions::install_local_bound_function_invoker(invoker);
+        execute_callable_descriptor_in_context(&runtime, descriptor).await
+    }))
+    .expect("embedded semantic identity should take precedence");
     assert_single(&value, Value::Num(12.0));
 }
 
@@ -728,9 +748,7 @@ fn feval_external_function_handle_prefers_registry_semantic_identity() {
         }),
     ));
     let mut registry = FunctionRegistry::default();
-    registry
-        .names
-        .insert("pkg.remote_inc".to_string(), FunctionId(8181));
+    publish_named_fixture(&mut registry, "pkg.remote_inc", 8181);
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::external_function_handle("pkg.remote_inc".to_string()),
@@ -754,15 +772,16 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
     };
     let binding = runmat_value::BoundFunctionBinding::portable(4242, origin);
     let expected_binding = binding.clone();
-    let _invoker_guard =
-        runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
+    let invoker: std::rc::Rc<runmat_runtime::user_functions::BoundFunctionInvoker> =
+        std::rc::Rc::new(
             move |_runtime, actual, args, requested_outputs, _lexical_environment| {
                 assert_eq!(actual, expected_binding);
                 assert_eq!(requested_outputs, 1);
-                assert_eq!(args.values(), &[Value::Num(2.0)]);
+                assert!(args.captures().is_empty());
+                assert_eq!(args.supplied(), &[Value::Num(2.0)]);
                 Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
             },
-        ));
+        );
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::bound_function_handle(
@@ -776,8 +795,13 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
         1,
         &FunctionRegistry::default(),
     );
-    let value = block_on(execute_callable_descriptor(descriptor))
-        .expect("semantic function handle should use embedded semantic function id");
+    let runtime = descriptor_runtime();
+    let value = block_on(runtime.scope(async {
+        let _invoker_guard =
+            runmat_runtime::user_functions::install_local_bound_function_invoker(invoker);
+        execute_callable_descriptor_in_context(&runtime, descriptor).await
+    }))
+    .expect("semantic function handle should use embedded semantic function id");
     assert_single(&value, Value::Num(3.0));
 }
 

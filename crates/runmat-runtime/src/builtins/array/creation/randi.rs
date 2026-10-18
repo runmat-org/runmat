@@ -6,6 +6,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericDType, Tensor, Value};
 
 mod gpu;
+mod host_output;
 
 #[cfg(all(test, feature = "wgpu", not(target_arch = "wasm32")))]
 #[path = "randi/gpu_integer_batch_tests.rs"]
@@ -352,7 +353,91 @@ async fn build_output(parsed: ParsedRandi) -> crate::BuiltinResult<Value> {
         ));
     }
     if let OutputTemplate::Like(Value::GpuTensor(handle)) = &parsed.template {
-        return gpu::like(handle, &parsed.bounds, &parsed.shape).await;
+        return match random::gpu_like::intent("randi", handle)? {
+            random::gpu_like::GpuLikeIntent::ExplicitGpuStream => {
+                gpu::like(handle, &parsed.bounds, &parsed.shape).await
+            }
+            random::gpu_like::GpuLikeIntent::AutomaticHostStream => {
+                let class = random::gpu_like::class(handle)
+                    .ok_or_else(|| builtin_error("randi: unsupported gpuArray prototype class"))?;
+                if matches!(
+                    class,
+                    random::gpu_like::GpuLikeClass::Floating { complex: true, .. }
+                        | random::gpu_like::GpuLikeClass::Integer { complex: true, .. }
+                ) {
+                    return Err(builtin_error(
+                        "randi: complex prototypes are not supported; expected real-valued arrays",
+                    ));
+                }
+                let len = parsed
+                    .shape
+                    .iter()
+                    .try_fold(1_usize, |count, &dim| count.checked_mul(dim))
+                    .ok_or_else(|| builtin_error("randi: host workspace extent overflow"))?;
+                let host_mode =
+                    random::gpu_like::host_random_mode(crate::context::legacy::active().as_ref());
+                let scratch = random::gpu_like::exact_host_workspace(
+                    "randi",
+                    random::gpu_like::ExactHostRandomWorkspace::IntegerOffsets { count: len },
+                    host_mode,
+                )?;
+                let presentation = random::gpu_like::select_presentation(
+                    "randi",
+                    handle,
+                    &parsed.shape,
+                    class,
+                    random::gpu_like::host_result_bytes("randi", &parsed.shape, class, host_mode)?,
+                    // Quote the exact finite offset workspace; the legacy
+                    // unbounded sampler is not this selected placement route.
+                    scratch,
+                    scratch,
+                    0,
+                    host_mode,
+                )?;
+                let mut turn = random::acquire_turn(presentation.runtime(), "randi").await?;
+                presentation.checkpoint_for_turn(&turn)?;
+                let dtype = match class {
+                    random::gpu_like::GpuLikeClass::Floating {
+                        precision,
+                        complex: false,
+                    } => Some(
+                        if precision == runmat_accelerate_api::ProviderPrecision::F32 {
+                            NumericDType::F32
+                        } else {
+                            NumericDType::F64
+                        },
+                    ),
+                    random::gpu_like::GpuLikeClass::Integer {
+                        class,
+                        complex: false,
+                    } => Some(NumericDType::from(class)),
+                    random::gpu_like::GpuLikeClass::Logical => None,
+                    random::gpu_like::GpuLikeClass::Floating { complex: true, .. }
+                    | random::gpu_like::GpuLikeClass::Integer { complex: true, .. } => {
+                        unreachable!("complex rejected before turn")
+                    }
+                };
+                let result = if let Some(dtype) = dtype {
+                    host_output::numeric(
+                        &mut turn,
+                        &parsed.bounds,
+                        &parsed.shape,
+                        dtype,
+                        presentation.mode(),
+                    )
+                    .map(tensor::tensor_into_value)
+                } else {
+                    host_output::logical(
+                        &mut turn,
+                        &parsed.bounds,
+                        &parsed.shape,
+                        presentation.mode(),
+                    )
+                    .map(Value::LogicalArray)
+                };
+                presentation.finish_result("randi", result, &parsed.shape)
+            }
+        };
     }
     let mut turn = random::acquire_turn(None, "randi").await?;
     match parsed.template {
@@ -768,7 +853,7 @@ fn shape_from_value(value: &Value) -> crate::BuiltinResult<Vec<usize>> {
         Value::ComplexTensor(_) => {
             Err(builtin_error("randi: complex prototypes are not supported"))
         }
-        Value::LogicalArray(l) => Ok(l.shape.clone()),
+        Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
         Value::Cell(cell) => Ok(cell.shape.clone()),
@@ -1355,7 +1440,10 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let cpu_before = random::snapshot().expect("CPU stream before GPU randi");
             let tensor = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
-            let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &tensor)
+                .expect("upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let args = vec![
                 Value::Num(4.0),
                 Value::from("like"),
@@ -1387,12 +1475,57 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn automatic_integer_like_uses_ordered_cpu_stream() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+        test_support::with_test_provider(|provider| {
+            let values = [0_u8; 4];
+            let source = provider
+                .upload_integer(&runmat_accelerate_api::HostIntegerTensorView {
+                    data: runmat_accelerate_api::HostIntegerDataView::U8(&values),
+                    shape: &[2, 2],
+                })
+                .expect("upload prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic prototype");
+            let child_before = random::gpu::snapshot().expect("child before");
+            let expected = block_on(randi_builtin(vec![
+                Value::Num(9.0),
+                Value::Num(2.0),
+                Value::from("uint8"),
+            ]))
+            .expect("host integer");
+            random::reset_rng();
+            let actual = block_on(randi_builtin(vec![
+                Value::Num(9.0),
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(source),
+            ]))
+            .expect("automatic integer");
+            assert_eq!(actual, expected);
+            assert_eq!(random::gpu::snapshot().expect("child after"), child_before);
+            let Value::Tensor(output) = actual else {
+                panic!("integer tensor required");
+            };
+            assert!(matches!(
+                output.integer_storage(),
+                Some(IntegerStorage::U8(_))
+            ));
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn randi_gpu_like_shape_override() {
         let _guard = random::test_guard();
         random::reset_rng();
         test_support::with_test_provider(|provider| {
             let proto = Tensor::new(vec![0.0; 4], vec![2, 2]).unwrap();
-            let handle = gpu_helpers::upload_tensor(provider, &proto).expect("upload");
+            let handle = gpu_helpers::upload_tensor(provider, &proto)
+                .expect("upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let bounds = Tensor::new(vec![1.0, 4.0], vec![1, 2]).unwrap();
             let args = vec![
                 Value::Tensor(bounds),
@@ -1428,7 +1561,9 @@ pub(crate) mod tests {
                     data: runmat_accelerate_api::HostIntegerDataView::I16(&prototype_values),
                     shape: &[1, 2],
                 })
-                .expect("upload int16 prototype");
+                .expect("upload int16 prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
 
             let result = block_on(randi_builtin(vec![
                 Value::Num(9.0),
@@ -1468,7 +1603,9 @@ pub(crate) mod tests {
                     data: runmat_accelerate_api::HostIntegerDataView::U8(&prototype_values),
                     shape: &[1, 1],
                 })
-                .expect("upload uint8 prototype");
+                .expect("upload uint8 prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let bounds = Tensor::new(vec![300.0, 300.0], vec![1, 2]).expect("constant bounds");
 
             let result = block_on(randi_builtin(vec![
@@ -1506,7 +1643,9 @@ pub(crate) mod tests {
                     data: runmat_accelerate_api::HostIntegerDataView::U64(&prototype_values),
                     shape: &[1, 2],
                 })
-                .expect("upload uint64 prototype");
+                .expect("upload uint64 prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let bounds = Tensor::new_integer(IntegerStorage::U64(vec![0, u64::MAX]), vec![1, 2])
                 .expect("full-width uint64 bounds");
 
@@ -1563,7 +1702,10 @@ pub(crate) mod tests {
         };
 
         let proto = Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap();
-        let handle = gpu_helpers::upload_tensor(provider, &proto).expect("upload prototype");
+        let handle = gpu_helpers::upload_tensor(provider, &proto)
+            .expect("upload prototype")
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit gpuArray prototype");
         let bounds = Tensor::new(vec![1.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![
             Value::Tensor(bounds),

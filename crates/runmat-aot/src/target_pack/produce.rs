@@ -16,7 +16,9 @@ use runmat_execution_artifact::{ObjectDescriptor, ObjectNamespace};
 use runmat_types::{CapabilityRequirement, CapabilitySet, EffectSet};
 
 use crate::{
-    archive::{member_matches_probe_target, read_native_abi_probe},
+    archive::{
+        member_matches_probe_target, read_native_abi_probe, read_native_accelerator_profile,
+    },
     AotError, AotResult,
 };
 
@@ -92,10 +94,23 @@ pub fn build_hosted_target_pack(
             "hosted pack declaration is not bounded, sorted or complete",
         ));
     }
-    let runtime_capabilities = BTreeSet::from([
+    let mut runtime_capabilities = BTreeSet::from([
         CapabilityRequirement::HostRuntime,
         CapabilityRequirement::NativeCode,
     ]);
+    let accelerator_profile = read_native_accelerator_profile(&runtime_archive)?;
+    if declaration
+        .available_capabilities
+        .0
+        .contains(&CapabilityRequirement::Accelerator)
+    {
+        if !accelerator_profile.has_backend() {
+            return Err(invalid(
+                "accelerator inventory has no target-built backend implementation",
+            ));
+        }
+        runtime_capabilities.insert(CapabilityRequirement::Accelerator);
+    }
     if !runtime_capabilities.is_subset(&declaration.available_capabilities.0) {
         return Err(invalid(
             "hosted runtime omits its native-code/host-runtime inventory",
@@ -127,12 +142,17 @@ pub fn build_hosted_target_pack(
         ));
     }
     let runtime_id = component_id("runtime.a")?;
+    let notice_id = component_id(runmat_runtime::third_party_notices::FILE_NAME)?;
     let probe_id = component_id("abi.probe")?;
     let numerical_id = component_id("numerical.a")?;
     let evidence_id = component_id("numerical.evidence")?;
     let mut components = BTreeMap::new();
     components.insert(probe_id.clone(), probe_bytes);
     components.insert(runtime_id.clone(), runtime_archive);
+    components.insert(
+        notice_id.clone(),
+        runmat_runtime::third_party_notices::bytes().to_vec(),
+    );
     let backend_id = if let Some(bytes) = numerical_backend {
         components.insert(numerical_id.clone(), bytes);
         numerical_id
@@ -167,6 +187,8 @@ pub fn build_hosted_target_pack(
     for (id, bytes) in &components {
         let kind = if id == &probe_id {
             TargetPackComponentKind::NativeAbiProbe
+        } else if id == &notice_id {
+            TargetPackComponentKind::RuntimeData
         } else if Some(id) == evidence_component.as_ref() {
             TargetPackComponentKind::NumericalEvidence
         } else {
@@ -183,11 +205,19 @@ pub fn build_hosted_target_pack(
             object: ObjectDescriptor::new(
                 ObjectNamespace::ProgramArtifact,
                 id.as_str(),
-                "application/octet-stream",
+                if id == &notice_id {
+                    "text/plain;charset=utf-8"
+                } else {
+                    "application/octet-stream"
+                },
                 bytes,
             )
             .map_err(invalid)?,
-            dependencies: Vec::new(),
+            dependencies: if id == &runtime_id {
+                vec![notice_id.clone()]
+            } else {
+                Vec::new()
+            },
             capabilities,
             effects: EffectSet::default(),
         });
@@ -313,4 +343,84 @@ fn component_id(name: &str) -> AotResult<ComponentId> {
 
 fn invalid(error: impl std::fmt::Display) -> AotError {
     AotError::contract("aot.target_pack.produce", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_execution::host::{NativeAcceleratorProfile, NativeArchitecture};
+    use runmat_execution_artifact::target_pack::{TargetPackProfile, TargetPackRequirements};
+
+    #[test]
+    fn selected_runtime_retains_canonical_notice_as_runtime_data() {
+        let probe = runmat_runtime::native::native_abi_probe();
+        let cpu_baseline = match probe.architecture {
+            NativeArchitecture::X86_64 => runmat_execution::host::NativeCpuBaseline::X86_64V1,
+            NativeArchitecture::Aarch64 => runmat_execution::host::NativeCpuBaseline::ArmV8A,
+        };
+        let capabilities = CapabilitySet(BTreeSet::from([
+            CapabilityRequirement::HostRuntime,
+            CapabilityRequirement::NativeCode,
+        ]));
+        let produced = build_hosted_target_pack(
+            crate::archive::test_archive::archive(NativeAcceleratorProfile::NONE),
+            None,
+            None,
+            HostedPackDeclaration {
+                schema_version: 1,
+                cpu_baseline,
+                numerical_behavior: NativeNumericalBehavior::PlatformAccurate,
+                optimization: NativeOptimization::Speed,
+                available_capabilities: capabilities.clone(),
+                platform_service_abi: Digest::sha256("platform services"),
+                services: Vec::new(),
+                native_inputs: Vec::new(),
+                linker_tree: Digest::sha256("linker"),
+                sysroot_tree: Digest::sha256("sysroot"),
+            },
+        )
+        .unwrap();
+        let notice_id = component_id(runmat_runtime::third_party_notices::FILE_NAME).unwrap();
+        assert_eq!(
+            produced.components[&notice_id],
+            runmat_runtime::third_party_notices::bytes()
+        );
+        let notice = produced
+            .manifest
+            .components
+            .iter()
+            .find(|component| component.id == notice_id)
+            .unwrap();
+        assert_eq!(notice.kind, TargetPackComponentKind::RuntimeData);
+        assert_eq!(notice.object.media_type, "text/plain;charset=utf-8");
+        let runtime = produced
+            .manifest
+            .components
+            .iter()
+            .find(|component| component.id == produced.manifest.runtime_component)
+            .unwrap();
+        assert_eq!(runtime.dependencies, vec![notice_id.clone()]);
+        let required = TargetPackRequirements {
+            profile: TargetPackProfile::HostedNative,
+            target: produced.manifest.target.clone(),
+            abi: produced.manifest.abi.clone(),
+            runtime: produced.manifest.runtime,
+            catalog: produced.manifest.catalog,
+            numerical: produced.manifest.numerical.clone(),
+            optimization: produced.manifest.optimization,
+            reached_capabilities: CapabilitySet::default(),
+            authorized_runtime_capabilities: capabilities,
+            effects: EffectSet::default(),
+            required_services: BTreeSet::new(),
+            components: Vec::new(),
+            platform_service_abi: produced.manifest.platform_service_abi,
+            service_abis: BTreeMap::new(),
+        };
+        let selected = produced.manifest.select(&required, None).unwrap();
+        assert!(selected.runtime_components().contains(&notice_id));
+        produced
+            .manifest
+            .verify_selected_bytes(&selected, &produced.components)
+            .unwrap();
+    }
 }

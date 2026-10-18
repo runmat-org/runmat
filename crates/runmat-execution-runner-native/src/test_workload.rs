@@ -7,6 +7,9 @@ use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
 mod graphics;
+#[cfg(test)]
+#[path = "test_workload/callable_graph_tests.rs"]
+mod callable_graph_tests;
 pub use graphics::{
     execute_host_graph_request_with_graphics, execute_host_program_request_with_graphics,
 };

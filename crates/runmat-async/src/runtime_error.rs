@@ -24,20 +24,12 @@ pub type RuntimeErrorOwner = Arc<RuntimeError>;
 #[cfg(target_arch = "wasm32")]
 pub type RuntimeErrorOwner = Rc<RuntimeError>;
 
-/// An allocation owner that survives with a diagnostic. This is ownership,
-/// not a certificate for the publicly mutable message, context, or later
-/// executor presentation allocations.
-pub trait DiagnosticAllocationLease: std::fmt::Debug + Send + Sync {}
-
-impl<T: std::fmt::Debug + Send + Sync + ?Sized> DiagnosticAllocationLease for T {}
-
-/// Move an already-allocated, domain-charged lease into an error without
-/// allocating a wrapper or changing its typed `source()` chain.
-#[derive(Debug)]
-pub enum RetainedDiagnosticAllocation {
-    Shared(Arc<dyn DiagnosticAllocationLease>),
-    Owned(Box<dyn DiagnosticAllocationLease>),
-}
+#[path = "runtime_error/allocation.rs"]
+mod allocation;
+pub use allocation::{
+    DiagnosticAllocationLease, ManagedDiagnosticAllocation, ManagedDiagnosticAllocationLease,
+    RetainedDiagnosticAllocation,
+};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ErrorContext {

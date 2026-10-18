@@ -5,7 +5,7 @@
 //! compiler, registry, or runtime execution ports ambient capabilities.
 
 use crate::bytecode::{Bytecode, FunctionRegistry, Instr};
-use crate::call::builtins::DynamicEvalCompileProduct;
+use crate::call::builtins::{DynamicEvalCompileProduct, DynamicEvalResult};
 use runmat_runtime::context::RuntimeContext;
 use runmat_runtime::source_context::RuntimeSourceLease;
 use runmat_runtime::RuntimeError;
@@ -118,7 +118,7 @@ pub trait DynamicEvalPublication {}
 pub struct AdmittedDynamicEval {
     pub runtime: RuntimeContext,
     pub execution_bytecode: Bytecode,
-    pub result_slot: Option<usize>,
+    pub result: Option<DynamicEvalResult>,
     pub publication: Box<dyn DynamicEvalPublication>,
 }
 

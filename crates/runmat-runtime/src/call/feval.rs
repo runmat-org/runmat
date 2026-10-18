@@ -181,33 +181,33 @@ pub(crate) async fn invoke(
             ))
         }
         Value::Closure(c) => {
-            let c = c.into_data();
-            if let Some(binding) = c.binding {
+            if let Some(binding) = c.binding.clone() {
                 let function = binding.function;
-                let mut args = c.captures.clone();
-                args.extend(rest);
-                let request = crate::user_functions::CallableRequest::bound(
-                    binding,
-                    args.clone(),
-                    requested_outputs,
-                )
-                .with_lexical_environment(c.lexical_environment.clone())
-                .with_selected_runtime(runtime)
-                .with_function_input_callsite(input_callsite.clone());
+                let function_name = c.function_name.clone();
+                let retained = crate::call::descriptor::RetainedClosureValue::new(c);
                 if let Some(result) =
-                    crate::user_functions::try_call_semantic_descriptor(request).await
+                    crate::call::descriptor::try_execute_retained_bound_closure_in_context(
+                        runtime,
+                        retained,
+                        rest,
+                        requested_outputs,
+                        input_callsite.clone(),
+                    )
+                    .await?
                 {
-                    return result;
+                    return Ok(result);
                 }
                 return Err(runtime_descriptor_error_with_detail(
                     "feval",
                     &FEVAL_ERROR_SEMANTIC_UNAVAILABLE,
                     format!(
                         "semantic closure '{}' ({function}) is unavailable",
-                        c.function_name
+                        function_name
                     ),
                 ));
             }
+
+            let c = c.into_data();
 
             if c.function_name == CALL_METHOD_BUILTIN_NAME && c.captures.len() >= 2 {
                 let base = c.captures[0].clone();

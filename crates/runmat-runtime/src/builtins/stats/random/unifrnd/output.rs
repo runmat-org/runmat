@@ -31,11 +31,9 @@ pub(super) async fn generate(
     shape: &[usize],
 ) -> BuiltinResult<Value> {
     let len = output_len(shape)?;
-    let requested = ExactHostTensorAllocation::requested_bytes(NumericDType::F64, shape)
-        .map_err(|error| unifrnd_internal_error(format!("unifrnd: {error}")))?;
+    let bytes = HostAllocationPlan::retained_tensor_bytes(NumericDType::F64, shape)
+        .map_err(resource_error)?;
     if let Some(runtime) = turn.owner().cloned() {
-        let bytes = u64::try_from(requested)
-            .map_err(|_| unifrnd_internal_error("unifrnd: output allocation size overflow"))?;
         let plan = HostAllocationPlan::new(0, bytes).map_err(resource_error)?;
         if let Some(receipt) =
             HostAllocationReceipt::admit(Some(&runtime), plan).map_err(resource_error)?

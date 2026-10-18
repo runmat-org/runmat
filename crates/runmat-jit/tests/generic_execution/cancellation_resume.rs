@@ -49,7 +49,7 @@ fn deopt_ownership(cancel: bool) {
                 let context = runmat_runtime::context::legacy::active().unwrap();
                 let service = context.service_ports().workspace().unwrap().clone();
                 service
-                    .assign("published", published_value.clone())
+                    .assign_with_context(&context, "published", published_value.clone())
                     .unwrap();
             }
             let result = owned_value.clone();
@@ -67,6 +67,7 @@ fn deopt_ownership(cancel: bool) {
         .nth(1)
         .unwrap();
     let executor = compile_executor(assembly).unwrap();
+    let workspace = NativeWorkspaceInput::empty_for_context(&runtime, BTreeMap::new()).unwrap();
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
             function: ProgramFunctionId(0),
@@ -77,7 +78,7 @@ fn deopt_ownership(cancel: bool) {
             deoptimization: DeoptimizationPolicy::default()
                 .inject(FaultInjection::Safepoint(safepoint)),
             osr_target: None,
-            workspace: Some(NativeWorkspaceInput::default()),
+            workspace: Some(workspace),
         })
         .unwrap();
     let NativeInvocationStep::Deoptimized { target, frame, .. } =

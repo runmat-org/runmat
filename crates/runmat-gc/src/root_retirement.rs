@@ -50,14 +50,28 @@ impl Drop for RootRetirementObserver {
 }
 
 pub(crate) fn notify(event: RootRetirement) {
-    // No GC, observer-list, or root lock is held while a Waker is invoked.
-    let callbacks = OBSERVERS
-        .lock()
-        .iter()
-        .filter_map(|(_, observer)| observer.upgrade())
-        .collect::<Vec<_>>();
-    for callback in callbacks {
-        callback(event);
+    // Capture the finite observer identity frontier for this event. An
+    // observer registered reentrantly by a callback belongs to a later event.
+    let upper = NEXT_ID.load(Ordering::Acquire).saturating_sub(1);
+    let mut cursor = 0;
+    loop {
+        // No GC, observer-list, or root lock is held while a callback runs or
+        // while the callback's last strong owner is dropped.
+        let next = {
+            let observers = OBSERVERS.lock();
+            let next = observers.partition_point(|(id, _)| *id <= cursor);
+            observers
+                .get(next)
+                .filter(|(id, _)| *id <= upper)
+                .map(|(id, observer)| (*id, observer.upgrade()))
+        };
+        let Some((id, callback)) = next else {
+            break;
+        };
+        cursor = id;
+        if let Some(callback) = callback {
+            callback(event);
+        }
     }
 }
 
@@ -72,7 +86,11 @@ mod tests {
             let root = crate::gc_allocate_rooted(crate::Value::Num(1.0)).expect("explicit root");
             let target = (root.handle().addr(), root.handle().epoch());
             let observed = Arc::new(AtomicBool::new(false));
+            let nested_observed = Arc::new(AtomicBool::new(false));
+            let nested_observer = Arc::new(Mutex::new(None));
             let seen = Arc::clone(&observed);
+            let nested_seen = Arc::clone(&nested_observed);
+            let nested_owner = Arc::clone(&nested_observer);
             let _observer = RootRetirementObserver::register(Arc::new(move |event| {
                 let RootRetirement::Explicit(handle) = event else {
                     return;
@@ -81,13 +99,23 @@ mod tests {
                     return;
                 }
                 assert!(crate::ROOT_ADMISSION.try_write().is_some());
-                let _nested = RootRetirementObserver::register(Arc::new(|_| {}))
+                if nested_owner.lock().is_none() {
+                    let nested_seen = Arc::clone(&nested_seen);
+                    let nested = RootRetirementObserver::register(Arc::new(move |_| {
+                        nested_seen.store(true, Ordering::Relaxed);
+                    }))
                     .expect("nested observer identity");
+                    *nested_owner.lock() = Some(nested);
+                }
                 seen.store(true, Ordering::Relaxed);
             }))
             .expect("observer identity");
             root.unroot().expect("retire explicit root");
             assert!(observed.load(Ordering::Relaxed));
+            assert!(!nested_observed.load(Ordering::Relaxed));
+            let second = crate::gc_allocate_rooted(crate::Value::Num(2.0)).expect("second root");
+            second.unroot().expect("retire second explicit root");
+            assert!(nested_observed.load(Ordering::Relaxed));
         });
     }
 }

@@ -39,8 +39,9 @@ fn push_path_state(path: &Path) -> PathStateGuard {
 }
 
 #[test]
-fn runtime_fallback_requires_vm_context() {
-    let err = run_builtin_registered(Vec::new()).expect_err("run fallback should fail");
+fn run_requires_explicit_execution_context() {
+    let err = block_on(run_builtin_registered(None, None, Vec::new()))
+        .expect_err("run execution requires an explicit context");
     assert_eq!(err.identifier(), Some("RunMat:run:RequiresVm"));
 }
 

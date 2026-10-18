@@ -8,14 +8,14 @@ use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::{attach_span_from_pc, mex, scope_vm_pc, set_vm_pc};
 use crate::interpreter::process_driver::{ProcessContinuationDriver, ProcessDriverHandle};
 use crate::interpreter::timing::InterpreterTiming;
+use crate::interpreter::vars::InterpreterVars;
 use crate::runtime::call_stack::attach_call_frames;
 use crate::runtime::globals as runtime_globals;
 use crate::runtime::workspace::{
-    refresh_workspace_state, workspace_assign, workspace_clear, workspace_lookup, workspace_remove,
-    workspace_snapshot,
+    workspace_assign, workspace_clear, workspace_lookup, workspace_remove, workspace_snapshot,
 };
 use runmat_runtime::call::function_abi::{
-    collect_function_outputs, prepare_function_inputs_async, FunctionInputSpec,
+    collect_function_outputs, prepare_function_inputs_owned, FunctionInputSpec,
 };
 use runmat_runtime::context::RuntimeInvocationArity;
 use runmat_runtime::{
@@ -48,9 +48,9 @@ use runmat_time::{duration_ns_saturating, Instant};
 
 type VmResult<T> = Result<T, RuntimeError>;
 
-fn sync_initial_vars(initial: &mut Vec<Value>, vars: &[Value]) {
+fn sync_initial_vars(initial: &mut Vec<Value>, vars: &InterpreterVars) {
     initial.clear();
-    initial.extend_from_slice(vars);
+    vars.for_each(|value| initial.push(value.clone()));
 }
 
 fn ensure_workspace_resolver_registered() {
@@ -159,7 +159,7 @@ pub async fn invoke_semantic_function_value_with_environment_in_context(
 pub(crate) async fn invoke_selected_graph_bound_in_context(
     runtime: runmat_runtime::context::RuntimeContext,
     binding: runmat_value::BoundFunctionBinding,
-    args: runmat_runtime::execution::RootedValues,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     registry: FunctionRegistry,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
@@ -167,7 +167,7 @@ pub(crate) async fn invoke_selected_graph_bound_in_context(
     super_constructor::invoke_selected_bound(
         runtime,
         binding,
-        args,
+        arguments,
         requested_outputs,
         registry,
         None,
@@ -192,6 +192,38 @@ pub async fn invoke_semantic_function_value_with_dynamic_admission_in_context(
         invoke_semantic_function_with_captures(
             function,
             args,
+            requested_outputs,
+            function_registry,
+            runtime,
+            driver,
+            lexical_environment,
+        )
+    };
+    let (values, _) = if let Some(port) = dynamic_admission.into() {
+        let owner = ProcessContinuationDriver::new_with_dynamic_admission(Some(port));
+        let driver = owner.handle();
+        owner.drive(invocation(Some(driver))).await?
+    } else {
+        invocation(None).await?
+    };
+    Ok(values)
+}
+
+/// Invoke an already rooted, possibly segmented callable argument carrier
+/// while preserving invocation-local dynamic source admission.
+pub async fn invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
+    function: usize,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    dynamic_admission: impl Into<Option<DynamicEvalAdmissionPort>>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let invocation = |driver| {
+        invoke_semantic_function_with_rooted_captures(
+            function,
+            arguments,
             requested_outputs,
             function_registry,
             runtime,
@@ -251,8 +283,37 @@ async fn invoke_semantic_function_with_captures(
     ),
     RuntimeError,
 > {
-    let arguments = runmat_runtime::execution::RootedValues::new(args.to_vec())
-        .map_err(|error| error.into_runtime_error())?;
+    let arguments = runmat_runtime::call::RootedFunctionArguments::ordinary(
+        runmat_runtime::execution::RootedValues::new(args.to_vec())
+            .map_err(|error| error.into_runtime_error())?,
+    );
+    invoke_semantic_function_with_rooted_captures(
+        function,
+        arguments,
+        requested_outputs,
+        function_registry,
+        runtime,
+        driver,
+        lexical_environment,
+    )
+    .await
+}
+
+async fn invoke_semantic_function_with_rooted_captures(
+    function: usize,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
+    driver: Option<ProcessDriverHandle>,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<
+    (
+        runmat_runtime::execution::RootedValueSequence,
+        runmat_runtime::execution::RootedValues,
+    ),
+    RuntimeError,
+> {
     let runtime = runtime.with_constructor_receiver_for_method(
         function_registry
             .get(runmat_hir::FunctionId(function))
@@ -273,7 +334,7 @@ async fn invoke_semantic_function_with_captures(
     let child = scoped_runtime.scope_pinned(Box::pin(async move {
         invoke_semantic_function_with_captures_inner(
             function,
-            arguments.values(),
+            arguments,
             requested_outputs,
             &registry,
             runtime,
@@ -293,7 +354,7 @@ async fn invoke_semantic_function_with_captures(
 
 async fn invoke_semantic_function_with_captures_inner(
     function: usize,
-    args: &[Value],
+    arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     function_registry: &FunctionRegistry,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -306,7 +367,6 @@ async fn invoke_semantic_function_with_captures_inner(
     ),
     RuntimeError,
 > {
-    let _arguments = crate::call::root_values(args)?;
     let _inherited_environment_roots = lexical_environment
         .as_ref()
         .map(runmat_runtime::call::lexical::root_environment)
@@ -320,20 +380,102 @@ async fn invoke_semantic_function_with_captures_inner(
     // instruction-site namespace for this invocation's static imports.
     let runtime = runtime.with_selected_static_caller(func.binding_origin);
     lexical_storage::validate_inherited_storage(func, function_registry)?;
-    if args.len() < func.capture_slots.len() {
+    if arguments.len() < func.capture_slots.len() {
         let message = format!(
             "semantic function {} received too few arguments",
             func.display_name
         );
         return Err(mex("SemanticFunctionArity", &message));
     }
-    let runtime_args = &args[func.capture_slots.len()..];
-    let mut vars = vec![Value::Num(0.0); func.var_count];
-    for (slot, value) in func.capture_slots.iter().zip(args.iter()) {
-        if *slot < vars.len() {
-            vars[*slot] = value.clone();
+    if arguments.capture_count() != 0 && arguments.capture_count() != func.capture_slots.len() {
+        return Err(mex(
+            "SemanticFunctionArity",
+            "selected callable capture count does not match its function frame",
+        ));
+    }
+    let mut vars = if arguments.capture_count() == 0 {
+        InterpreterVars::from_owned(vec![Value::Num(0.0); func.var_count])
+    } else {
+        InterpreterVars::prepare_captured_frame(&runtime, func.var_count).map_err(|error| {
+            crate::runtime::workspace::frame_allocation_error_in_context(Some(&runtime), error)
+        })?
+    };
+    for (index, slot) in func.capture_slots.iter().copied().enumerate() {
+        let Some(capture) = arguments.capture_lease(index) else {
+            break;
+        };
+        if vars.replace_captured(slot, capture).is_none() {
+            return Err(mex(
+                "SemanticFunctionArity",
+                "selected callable capture slot is outside its function frame",
+            ));
         }
     }
+    arguments
+        .with_owned_supplied_async(|callable, mut supplied| async move {
+            if callable.is_none() {
+                for (slot, value) in func
+                    .capture_slots
+                    .iter()
+                    .copied()
+                    .zip(supplied.drain(..func.capture_slots.len()))
+                {
+                    if vars.replace_owned(slot, value).is_none() {
+                        return Err(mex(
+                            "SemanticFunctionArity",
+                            "semantic capture slot is outside its function frame",
+                        ));
+                    }
+                }
+            }
+            invoke_semantic_function_with_owned_inputs(
+                OwnedFunctionEntry {
+                    function_id,
+                    function: func,
+                    registry: function_registry,
+                    requested_outputs,
+                    runtime,
+                    driver,
+                    lexical_environment,
+                },
+                supplied,
+                vars,
+            )
+            .await
+        })
+        .await
+}
+
+struct OwnedFunctionEntry<'a> {
+    function_id: runmat_hir::FunctionId,
+    function: &'a crate::FunctionBytecode,
+    registry: &'a FunctionRegistry,
+    requested_outputs: usize,
+    runtime: runmat_runtime::context::RuntimeContext,
+    driver: ProcessDriverHandle,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+}
+
+async fn invoke_semantic_function_with_owned_inputs(
+    entry: OwnedFunctionEntry<'_>,
+    supplied: Vec<Value>,
+    mut vars: InterpreterVars,
+) -> Result<
+    (
+        runmat_runtime::execution::RootedValueSequence,
+        runmat_runtime::execution::RootedValues,
+    ),
+    RuntimeError,
+> {
+    let OwnedFunctionEntry {
+        function_id,
+        function: func,
+        registry: function_registry,
+        requested_outputs,
+        runtime,
+        driver,
+        lexical_environment,
+    } = entry;
     let mut constructor_instance_slot = None;
     if let Some(receiver) = runtime.captured_constructor_receiver().filter(|_| {
         func.class_method_owner
@@ -346,13 +488,13 @@ async fn invoke_semantic_function_with_captures_inner(
                 "constructor has no fixed instance output",
             )
         })?;
-        let output = vars.get_mut(slot).ok_or_else(|| {
+        let retired = vars.replace_owned(slot, receiver.clone()).ok_or_else(|| {
             mex(
                 "ConstructorOutputInvalid",
                 "constructor instance output is out of bounds",
             )
         })?;
-        *output = receiver.clone();
+        drop(retired);
         constructor_instance_slot = Some(slot);
     }
     let input_specs = func
@@ -373,44 +515,52 @@ async fn invoke_semantic_function_with_captures_inner(
             })
         })
         .collect::<Result<Vec<_>, RuntimeError>>()?;
-    let prepared = prepare_function_inputs_async(
+    let prepared = prepare_function_inputs_owned(
         &func.display_name,
-        runtime_args,
+        supplied,
         func.input_slots.len(),
         func.varargin_slot.is_some(),
         &input_specs,
     )
     .await?;
     let mut missing_input_slots = HashSet::new();
-    for (slot, value) in func.input_slots.iter().zip(&prepared.fixed) {
+    for (slot, value) in func.input_slots.iter().copied().zip(prepared.fixed) {
         if let Some(value) = value {
-            if *slot < vars.len() {
-                vars[*slot] = value.clone();
-            }
+            let retired = vars.replace_owned(slot, value).ok_or_else(|| {
+                mex(
+                    "InvalidInputSlot",
+                    "function argument slot is outside its frame",
+                )
+            })?;
+            drop(retired);
         } else {
-            missing_input_slots.insert(*slot);
+            missing_input_slots.insert(slot);
         }
     }
     if let (Some(slot), Some(cell)) = (func.varargin_slot, prepared.varargin) {
         if slot < vars.len() {
-            vars[slot] = Value::Cell(cell);
+            let retired = vars.replace_owned(slot, Value::Cell(cell));
+            drop(retired);
         }
     }
     if let Some(slot) = func.varargout_slot {
         if slot < vars.len() {
             let cell = CellArray::new(Vec::new(), 1, 0)
                 .map_err(|err| mex("VarargoutPack", &format!("varargout: {err}")))?;
-            vars[slot] = Value::Cell(cell);
+            let retired = vars.replace_owned(slot, Value::Cell(cell));
+            drop(retired);
         }
     }
     if let Some(slot) = func.implicit_nargin_slot {
         if slot < vars.len() {
-            vars[slot] = Value::Num(prepared.nargin as f64);
+            let retired = vars.replace_owned(slot, Value::Num(prepared.nargin as f64));
+            drop(retired);
         }
     }
     if let Some(slot) = func.implicit_nargout_slot {
         if slot < vars.len() {
-            vars[slot] = Value::Num(requested_outputs as f64);
+            let retired = vars.replace_owned(slot, Value::Num(requested_outputs as f64));
+            drop(retired);
         }
     }
 
@@ -427,8 +577,8 @@ async fn invoke_semantic_function_with_captures_inner(
     if let Some(slot) = constructor_instance_slot {
         initially_unassigned_slots.remove(&slot);
     }
-    for (slot, value) in func.input_slots.iter().zip(&prepared.fixed) {
-        if value.is_some() {
+    for slot in &func.input_slots {
+        if !missing_input_slots.contains(slot) {
             initially_unassigned_slots.remove(slot);
         }
     }
@@ -471,19 +621,26 @@ async fn invoke_semantic_function_with_captures_inner(
         };
         match binding.kind {
             crate::bytecode::program::LexicalBindingKind::Owned => {
-                if !environment.reserve_owned_binding(binding.binding) {
+                if !runmat_runtime::call::lexical::reserve_owned_binding_with_context(
+                    environment,
+                    binding.binding,
+                    &runtime,
+                )? {
                     return Err(mex(
                         "LexicalEnvironment",
                         "owned shared binding was reserved twice",
                     ));
                 }
                 if !bytecode.initially_unassigned_slots.contains(&binding.slot) {
-                    let value = vars.get(binding.slot).cloned().ok_or_else(|| {
-                        mex(
-                            "LexicalEnvironment",
-                            "shared binding slot is outside its frame",
-                        )
-                    })?;
+                    let value = vars
+                        .get(binding.slot)
+                        .map(|value| value.clone())
+                        .ok_or_else(|| {
+                            mex(
+                                "LexicalEnvironment",
+                                "shared binding slot is outside its frame",
+                            )
+                        })?;
                     runmat_runtime::call::lexical::write_owned_binding(
                         environment,
                         binding.binding,
@@ -492,16 +649,22 @@ async fn invoke_semantic_function_with_captures_inner(
                 }
             }
             crate::bytecode::program::LexicalBindingKind::Inherited => {
-                let slot = vars.get_mut(binding.slot).ok_or_else(|| {
-                    mex(
+                if vars.get(binding.slot).is_none() {
+                    return Err(mex(
                         "LexicalEnvironment",
                         "inherited binding slot is outside its frame",
-                    )
-                })?;
+                    ));
+                }
                 if let Some(value) =
                     runmat_runtime::call::lexical::read_binding(environment, binding.binding)?
                 {
-                    *slot = value;
+                    let retired = vars.replace_owned(binding.slot, value).ok_or_else(|| {
+                        mex(
+                            "LexicalEnvironment",
+                            "inherited binding slot is outside its frame",
+                        )
+                    })?;
+                    drop(retired);
                     bytecode.initially_unassigned_slots.remove(&binding.slot);
                 } else {
                     bytecode.initially_unassigned_slots.insert(binding.slot);
@@ -592,11 +755,13 @@ async fn invoke_semantic_function_with_captures_inner(
         .iter()
         .map(|slot| result_vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)))
         .collect::<Vec<_>>();
-    let varargout = func.varargout_slot.and_then(|slot| result_vars.get(slot));
+    let varargout = func
+        .varargout_slot
+        .and_then(|slot| result_vars.get(slot).cloned());
     let output_values = collect_function_outputs(
         &func.display_name,
         &fixed_outputs,
-        varargout,
+        varargout.as_ref(),
         requested_outputs,
     )?;
     let updated_captures = func
@@ -784,6 +949,44 @@ pub async fn interpret_with_workspace_and_dynamic_admission_in_context(
     WorkspaceInterpreterOutcome { outcome, workspace }
 }
 
+pub(crate) async fn interpret_with_workspace_vars_and_dynamic_admission_in_context(
+    bytecode: &Bytecode,
+    initial_vars: InterpreterVars,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    admission: Option<crate::runtime::workspace::PendingWorkspaceAdmission>,
+    dynamic_admission: Option<DynamicEvalAdmissionPort>,
+) -> WorkspaceInterpreterOutcome {
+    let arity = runtime
+        .invocation_arity()
+        .unwrap_or(RuntimeInvocationArity::Script);
+    let runtime = runtime.with_invocation_arity(arity);
+    let (runtime, workspace_activation) =
+        crate::runtime::workspace_service::VmWorkspaceService::install(runtime, admission);
+    let frame = workspace_activation.frame();
+    let runtime = with_default_acceleration_service(runtime);
+    let runtime = runtime_with_bytecode_debug_frame(
+        runtime,
+        bytecode,
+        current_function_name.unwrap_or("<main>"),
+    );
+    let outcome = workspace_activation
+        .scope(
+            runtime.scope(runmat_runtime::data::with_tx_registry_scope(scope_vm_pc(
+                interpret_with_vars_owner_inner(
+                    bytecode,
+                    initial_vars,
+                    current_function_name,
+                    runtime.clone(),
+                    dynamic_admission,
+                ),
+            ))),
+        )
+        .await;
+    let workspace = crate::runtime::workspace::take_workspace_completion(frame);
+    WorkspaceInterpreterOutcome { outcome, workspace }
+}
+
 pub async fn interpret_resume_in_context(
     bytecode: &Bytecode,
     resume: InterpreterResumeState,
@@ -949,29 +1152,27 @@ async fn interpret_resume_inner(
     }
     let mut resumed_bytecode = bytecode.clone();
     resumed_bytecode.initially_unassigned_slots.clear();
-    let mut vars = Vec::with_capacity(resume.vars.len());
-    let mut assigned_slots = HashSet::new();
-    for (slot, value) in resume.vars.into_iter().enumerate() {
-        match value {
-            Some(value) => {
-                assigned_slots.insert(slot);
-                vars.push(value);
-            }
-            None => {
-                vars.push(Value::Num(0.0));
-                resumed_bytecode.initially_unassigned_slots.insert(slot);
-            }
+    let vars = resume.vars;
+    let assigned_slots = resume.assigned_slots;
+    for slot in 0..vars.len() {
+        if !assigned_slots.contains(&slot) {
+            resumed_bytecode.initially_unassigned_slots.insert(slot);
         }
     }
     let invocation_arity =
         RuntimeInvocationArity::function(resume.supplied_inputs, resume.requested_outputs);
-    let mut state = InterpreterState::new_in_context(
+    // The count describes the dense frame extent; the exact sparse assignment
+    // set is encoded by `initially_unassigned_slots` above. Using the number
+    // of assigned slots here would incorrectly unassign a live high slot.
+    let initial_assigned_var_count = vars.len();
+    let mut state = InterpreterState::from_vars_in_context(
         resumed_bytecode,
-        &mut vars,
+        vars,
+        initial_assigned_var_count,
         current_function_name,
         invocation_arity,
         runtime,
-    );
+    )?;
     state.context.lexical_environment = lexical_environment;
     state.context.dynamic_eval_admission = dynamic_admission;
     state.context.lexical_binding_slots = lexical_binding_slots;
@@ -1002,8 +1203,9 @@ async fn interpret_resume_inner(
             .map_or((None, None), |(owner, diagnostic)| {
                 (Some(owner), Some(diagnostic))
             });
-    let mut output_vars = vars;
-    let result = run_interpreter(Box::new(state), &mut output_vars).await;
+    // Resume already owns its InterpreterVars generation. Unlike the ordinary
+    // Vec-input ABI, it has no caller-owned Vec to synchronize on completion.
+    let result = run_interpreter_owned(Box::new(state)).await;
     match result {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
@@ -1043,15 +1245,68 @@ async fn interpret_with_vars_inner(
         .unwrap_or(RuntimeInvocationArity::Script);
     let _borrowed_inputs =
         crate::runtime::gc::ManagedRoots::new(initial_vars).map_err(RuntimeError::new)?;
-    let mut state = Box::new(InterpreterState::new_in_context(
+    let owned_vars = std::mem::take(initial_vars);
+    let mut state = Box::new(InterpreterState::from_owned_in_context(
         bytecode.clone(),
-        initial_vars,
+        owned_vars,
         current_function_name,
         invocation_arity,
         runtime,
     ));
     state.context.dynamic_eval_admission = dynamic_admission;
     match Box::pin(run_interpreter(state, initial_vars)).await {
+        Ok(outcome) => Ok(outcome),
+        Err(err) => {
+            let err = attach_span_from_pc(bytecode, err);
+            let current_name = current_function_name.unwrap_or("<main>");
+            Err(attach_call_frames(
+                current_name,
+                source_id,
+                source_owner,
+                diagnostic_source,
+                err,
+            ))
+        }
+    }
+}
+
+async fn interpret_with_vars_owner_inner(
+    bytecode: &Bytecode,
+    initial_vars: InterpreterVars,
+    current_function_name: Option<&str>,
+    runtime: runmat_runtime::context::RuntimeContext,
+    dynamic_admission: Option<DynamicEvalAdmissionPort>,
+) -> VmResult<InterpreterOutcome> {
+    bytecode
+        .validate_selected_source_owners(&runtime)
+        .map_err(RuntimeError::new)?;
+    crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
+        .map_err(RuntimeError::new)?;
+    let source_id = bytecode
+        .source_id
+        .and_then(|source| source.resolve_in(&runtime));
+    let (source_owner, diagnostic_source) = selected_frame_source_basis(bytecode, &runtime)
+        .map_or((None, None), |(owner, diagnostic)| {
+            (Some(owner), Some(diagnostic))
+        });
+    let invocation_arity = runtime
+        .invocation_arity()
+        .unwrap_or(RuntimeInvocationArity::Script);
+    let initial_assigned_var_count = initial_vars.len();
+    let borrowed_inputs =
+        crate::runtime::gc::ManagedRoots::from_traced(&initial_vars).map_err(RuntimeError::new)?;
+    let mut state = Box::new(InterpreterState::from_vars_in_context(
+        bytecode.clone(),
+        initial_vars,
+        initial_assigned_var_count,
+        current_function_name,
+        invocation_arity,
+        runtime,
+    )?);
+    state.context.dynamic_eval_admission = dynamic_admission;
+    let result = Box::pin(run_interpreter_owned(state)).await;
+    drop(borrowed_inputs);
+    match result {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let err = attach_span_from_pc(bytecode, err);
@@ -1204,15 +1459,58 @@ fn prepare_run_interpreter<'a>(
     #[cfg(feature = "native-accel")]
     let fusion_plan = state.fusion_plan.clone();
     let state = *state;
-    let future = run_interpreter_inner(state, initial_vars).instrument(run_span);
+    let future = run_interpreter_inner(state, Some(initial_vars)).instrument(run_span);
     #[cfg(feature = "native-accel")]
     let future = runmat_accelerate::scope_fusion_plan(fusion_plan, future);
     Ok(catch_runtime.scope_active_catch_shared(inherited_catch, future))
 }
 
+fn run_interpreter_owned(
+    mut state: Box<InterpreterState>,
+) -> impl std::future::Future<Output = VmResult<InterpreterOutcome>> {
+    let owner = if state.context.process_driver.is_none() {
+        let owner = ProcessContinuationDriver::new_with_dynamic_admission(
+            state.context.dynamic_eval_admission.clone(),
+        );
+        state.context.process_driver = Some(owner.handle());
+        Some(owner)
+    } else {
+        None
+    };
+    #[cfg(feature = "native-accel")]
+    let fusion_plan = state.fusion_plan.clone();
+    async move {
+        state
+            .bytecode
+            .validate_catch_scope_metadata()
+            .map_err(RuntimeError::new)?;
+        state
+            .bytecode
+            .validate_selected_source_owners(&state.context.runtime)
+            .map_err(RuntimeError::new)?;
+        let catch_runtime = state.context.runtime.clone();
+        let inherited_catch = catch_runtime.active_catch_exception_shared();
+        let run_span = info_span!(
+            "interpreter.run",
+            function = state.current_function_name.as_str()
+        );
+        let interpreter = catch_runtime.scope_active_catch_shared(
+            inherited_catch,
+            run_interpreter_inner(*state, None).instrument(run_span),
+        );
+        #[cfg(feature = "native-accel")]
+        let interpreter = runmat_accelerate::scope_fusion_plan(fusion_plan, interpreter);
+        if let Some(owner) = owner {
+            owner.drive(interpreter).await
+        } else {
+            interpreter.await
+        }
+    }
+}
+
 async fn run_interpreter_inner(
     state: InterpreterState,
-    initial_vars: &mut Vec<Value>,
+    initial_vars: Option<&mut Vec<Value>>,
 ) -> VmResult<InterpreterOutcome> {
     ensure_wasm_builtins_registered();
     ensure_workspace_resolver_registered();
@@ -1545,12 +1843,12 @@ async fn run_interpreter_inner(
         initial_assigned_var_count,
         &bytecode.initially_unassigned_slots,
         global_aliases.clone(),
-    );
+    )?;
     let inherited_storage = std::mem::take(&mut context.inherited_storage_slots);
     let mut _storage_roots = Vec::new();
     if !inherited_storage.is_empty() {
         _storage_roots.push(
-            runmat_runtime::execution::RootedValueLease::for_values(vars.iter())
+            runmat_runtime::execution::RootedValueLease::for_traced(&vars)
                 .map_err(|error| error.into_runtime_error())?,
         );
     }
@@ -1564,13 +1862,22 @@ async fn run_interpreter_inner(
         match binding.kind {
             crate::bytecode::program::InheritedStorageKind::Global => {
                 crate::runtime::globals::declare_global_named(
-                    vec![binding.slot],
-                    vec![binding.name],
+                    std::slice::from_ref(&binding.slot),
+                    std::slice::from_ref(&binding.name),
                     &mut vars,
                     &global_aliases,
                 )?;
+                crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
             }
             crate::bytecode::program::InheritedStorageKind::Persistent => {
+                let prepared = crate::runtime::workspace::prepare_workspace_persistent_slot(
+                    context.runtime.local_identity(),
+                    binding.slot,
+                    &context.runtime,
+                )?;
+                if let Some(prepared) = &prepared {
+                    prepared.checkpoint_before_publication()?;
+                }
                 crate::interpreter::persistent::declare(
                     &mut persistent_aliases,
                     &mut vars,
@@ -1579,15 +1886,17 @@ async fn run_interpreter_inner(
                     binding.slot,
                     crate::interpreter::persistent::PersistentAlias::InheritedNamed(binding.name),
                 )?;
-                crate::runtime::workspace::declare_workspace_persistent_slot(
-                    context.runtime.local_identity(),
-                    binding.slot,
-                    &vars[binding.slot],
-                );
+                if let Some(prepared) = prepared {
+                    let value = vars
+                        .get(binding.slot)
+                        .expect("persistent binding slot lies within frame extent")
+                        .clone();
+                    prepared.commit_owned_value(value);
+                }
             }
         }
         _storage_roots.push(
-            runmat_runtime::execution::RootedValueLease::for_values(vars.iter())
+            runmat_runtime::execution::RootedValueLease::for_traced(&vars)
                 .map_err(|error| error.into_runtime_error())?,
         );
     }
@@ -1684,7 +1993,9 @@ async fn run_interpreter_inner(
         &current_function_name,
     )?;
     crate::runtime::workspace::reconcile_workspace_vars(&mut vars);
-    sync_initial_vars(initial_vars, &vars);
+    if let Some(initial_vars) = initial_vars {
+        sync_initial_vars(initial_vars, &vars);
+    }
     Ok(InterpreterOutcome::Completed(
         runmat_runtime::execution::RootedResult::new(
             crate::interpreter::state::InterpreterCompletion {
@@ -1703,7 +2014,13 @@ pub async fn interpret(
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
     match interpret_with_vars(bytecode, &mut vars, Some("<main>")).await {
         Ok(InterpreterOutcome::Completed(completion)) => completion.with_owned(|completion| {
-            runmat_runtime::execution::RootedValues::new(completion.values)
+            let values = completion.values.into_owned().map_err(|_| {
+                mex(
+                    "InterpreterCompletion",
+                    "ordinary script completion retained workspace-backed slots",
+                )
+            })?;
+            runmat_runtime::execution::RootedValues::new(values)
                 .map_err(|error| error.into_runtime_error())
         }),
         Err(e) => Err(e),
@@ -1760,15 +2077,17 @@ pub(crate) async fn interpret_parfor_task_in_context(
             "parallel task inputs do not match the compiler-owned region layout",
         ));
     }
-    let mut frame = vec![None; bytecode.var_count];
+    let mut frame = InterpreterVars::from_owned(vec![Value::Num(0.0); bytecode.var_count]);
+    let mut frame_assigned = HashSet::new();
     for (variable, value) in input_variables.into_iter().zip(inputs) {
-        let Some(slot) = frame.get_mut(variable.slot) else {
+        if frame.get(variable.slot).is_none() {
             return Err(mex(
                 "ParallelFrame",
                 "parallel task input is outside its compiled VM frame",
             ));
         };
-        *slot = Some(value);
+        let _retired = frame.replace_owned(variable.slot, value);
+        frame_assigned.insert(variable.slot);
     }
     if region.loop_slot >= frame.len() {
         return Err(mex(
@@ -1788,7 +2107,8 @@ pub(crate) async fn interpret_parfor_task_in_context(
         .map(|variable| {
             frame
                 .get(variable.slot)
-                .and_then(Clone::clone)
+                .filter(|_| frame_assigned.contains(&variable.slot))
+                .map(|value| (*value).clone())
                 .map(|value| (variable.slot, value))
                 .ok_or_else(|| {
                     mex(
@@ -1808,10 +2128,8 @@ pub(crate) async fn interpret_parfor_task_in_context(
             )
         })
         .collect::<HashMap<_, _>>();
-    let mut frame_roots = runmat_runtime::execution::RootedValueLease::for_values(
-        frame.iter().filter_map(Option::as_ref),
-    )
-    .map_err(|error| error.into_runtime_error())?;
+    let mut frame_roots = runmat_runtime::execution::RootedValueLease::for_traced(&frame)
+        .map_err(|error| error.into_runtime_error())?;
 
     for (iteration_index, iteration) in iterations.into_iter().enumerate() {
         for variable in &region.variables {
@@ -1820,21 +2138,24 @@ pub(crate) async fn interpret_parfor_task_in_context(
                 runmat_types::ParallelVariableRole::Temporary
                     | runmat_types::ParallelVariableRole::Private
             ) {
-                let Some(slot) = frame.get_mut(variable.slot) else {
+                if frame.get(variable.slot).is_none() {
                     return Err(mex(
                         "ParallelFrame",
                         "parallel private value is outside its compiled VM frame",
                     ));
                 };
-                *slot = None;
+                let _retired = frame.replace_owned(variable.slot, Value::Num(0.0));
+                frame_assigned.remove(&variable.slot);
             }
         }
         if mode == ParforTaskMode::IndependentIterations {
             for (slot, identity) in &reduction_inputs {
-                frame[*slot] = Some(identity.clone());
+                let _retired = frame.replace_owned(*slot, identity.clone());
+                frame_assigned.insert(*slot);
             }
         }
-        frame[region.loop_slot] = Some(iteration);
+        let _retired = frame.replace_owned(region.loop_slot, iteration);
+        frame_assigned.insert(region.loop_slot);
         let _random_stream = if let Some(stream) = randomness.deterministic_stream(iteration_index)
         {
             Some(
@@ -1852,6 +2173,7 @@ pub(crate) async fn interpret_parfor_task_in_context(
                 crate::interpreter::state::InterpreterCompletionBoundary::before(region.header.pc),
             ),
             vars: frame,
+            assigned_slots: frame_assigned,
             supplied_inputs: 0,
             requested_outputs: 0,
             missing_input_slots: HashSet::new(),
@@ -1859,7 +2181,7 @@ pub(crate) async fn interpret_parfor_task_in_context(
             persistent_aliases: HashMap::new(),
             side_effect_epoch: 0,
         };
-        frame = match Box::pin(interpret_resume_in_context(
+        let (next_frame, next_assigned) = match Box::pin(interpret_resume_in_context(
             bytecode,
             resume,
             Some(current_function_name),
@@ -1868,23 +2190,29 @@ pub(crate) async fn interpret_parfor_task_in_context(
         .await?
         {
             InterpreterOutcome::Completed(completion) => completion.with_owned(|completion| {
-                let next_frame = completion.values.into_iter().map(Some).collect::<Vec<_>>();
-                let next_roots = runmat_runtime::execution::RootedValueLease::for_values(
-                    next_frame.iter().filter_map(Option::as_ref),
-                )
-                .map_err(|error| error.into_runtime_error())?;
+                let next_frame = completion.values;
+                let next_assigned = completion.assigned_slots;
+                let next_roots =
+                    runmat_runtime::execution::RootedValueLease::for_traced(&next_frame)
+                        .map_err(|error| error.into_runtime_error())?;
                 frame_roots = next_roots;
-                Ok::<_, RuntimeError>(next_frame)
+                Ok::<_, RuntimeError>((next_frame, next_assigned))
             })?,
         };
+        frame = next_frame;
+        frame_assigned = next_assigned;
         if mode == ParforTaskMode::IndependentIterations {
             for (slot, values) in &mut reduction_outputs {
-                let value = frame.get(*slot).and_then(Clone::clone).ok_or_else(|| {
-                    mex(
-                        "ParallelTaskOutput",
-                        "parallel task did not assign a declared reduction output",
-                    )
-                })?;
+                let value = frame
+                    .get(*slot)
+                    .filter(|_| frame_assigned.contains(slot))
+                    .map(|value| (*value).clone())
+                    .ok_or_else(|| {
+                        mex(
+                            "ParallelTaskOutput",
+                            "parallel task did not assign a declared reduction output",
+                        )
+                    })?;
                 values
                     .push(value)
                     .map_err(|error| error.into_runtime_error())?;
@@ -1922,7 +2250,8 @@ pub(crate) async fn interpret_parfor_task_in_context(
         }
         let value = frame
             .get(variable.slot)
-            .and_then(Clone::clone)
+            .filter(|_| frame_assigned.contains(&variable.slot))
+            .map(|value| (*value).clone())
             .ok_or_else(|| {
                 mex(
                     "ParallelTaskOutput",
@@ -1989,7 +2318,7 @@ async fn interpret_function_with_counts_in_context(
             lexical_binding_slots: Vec::new(),
             inherited_storage_slots: Vec::new(),
         },
-        vars,
+        InterpreterVars::from_owned(vars),
     )
     .await
 }
@@ -2010,7 +2339,7 @@ struct FunctionExecutionInvocation<'a> {
 
 async fn interpret_function_with_counts_in_context_with_driver(
     mut invocation: FunctionExecutionInvocation<'_>,
-    vars: Vec<Value>,
+    vars: InterpreterVars,
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     let runtime = invocation.runtime.with_invocation_arity(invocation.arity);
     let (runtime, workspace_activation) =
@@ -2030,7 +2359,7 @@ async fn interpret_function_with_counts_in_context_with_driver(
 
 async fn interpret_function_with_counts_in_context_inner(
     invocation: FunctionExecutionInvocation<'_>,
-    vars: Vec<Value>,
+    vars: InterpreterVars,
 ) -> Result<runmat_runtime::execution::RootedValues, RuntimeError> {
     let FunctionExecutionInvocation {
         bytecode,
@@ -2043,7 +2372,6 @@ async fn interpret_function_with_counts_in_context_inner(
         lexical_binding_slots,
         inherited_storage_slots,
     } = invocation;
-    let mut vars = vars;
     let source_id = bytecode
         .source_id
         .and_then(|source| source.resolve_in(&runtime));
@@ -2051,13 +2379,14 @@ async fn interpret_function_with_counts_in_context_inner(
         .map_or((None, None), |(owner, diagnostic)| {
             (Some(owner), Some(diagnostic))
         });
-    let mut state = InterpreterState::new_in_context(
+    let mut state = InterpreterState::from_vars_in_context(
         bytecode.clone(),
-        &mut vars,
+        vars,
+        bytecode.var_count,
         Some(name),
         invocation_arity,
         runtime,
-    );
+    )?;
     state.context.process_driver = driver;
     state.context.dynamic_eval_admission = state
         .context
@@ -2068,10 +2397,16 @@ async fn interpret_function_with_counts_in_context_inner(
     state.context.lexical_binding_slots = lexical_binding_slots;
     state.context.inherited_storage_slots = inherited_storage_slots;
     state.missing_input_slots = missing_input_slots;
-    let res = Box::pin(run_interpreter(Box::new(state), &mut vars)).await;
+    let res = Box::pin(run_interpreter_owned(Box::new(state))).await;
     let res = match res {
         Ok(InterpreterOutcome::Completed(completion)) => completion.with_owned(|completion| {
-            runmat_runtime::execution::RootedValues::new(completion.values)
+            let values = completion.values.into_owned().map_err(|_| {
+                mex(
+                    "InterpreterCompletion",
+                    "ordinary function completion retained workspace-backed slots",
+                )
+            })?;
+            runmat_runtime::execution::RootedValues::new(values)
                 .map_err(|error| error.into_runtime_error())
         }),
         Err(error) => {
@@ -2123,6 +2458,7 @@ mod tests {
     use crate::bytecode::program::Bytecode;
     use crate::bytecode::Instr;
     use crate::interpreter::api::{InterpreterResumeState, InterpreterState};
+    use crate::interpreter::vars::InterpreterVars;
     use futures::executor::block_on;
     use futures::task::noop_waker;
     use runmat_runtime::builtins::common::validation::{
@@ -2135,6 +2471,7 @@ mod tests {
     use runmat_value::{CellArray, Tensor, Value};
     #[cfg(feature = "native-accel")]
     use runmat_value::{HandleRef, StructValue};
+    use std::collections::HashSet;
     use std::future::Future;
     use std::task::{Context, Poll};
     #[cfg(feature = "native-accel")]
@@ -2252,7 +2589,7 @@ mod tests {
         child.var_names.insert(0, "local".to_string());
 
         block_on(activation.scope(runtime.scope(async {
-            let mut outer = vec![Value::Num(1.0)];
+            let mut outer = InterpreterVars::from_owned(vec![Value::Num(1.0)]);
             let _outer_guard = crate::runtime::workspace::set_transient_workspace_state(
                 std::collections::HashMap::from([("outer".to_string(), 0)]),
                 std::collections::HashSet::from(["outer".to_string()]),
@@ -2282,31 +2619,36 @@ mod tests {
 
     #[test]
     fn zero_variable_nested_function_still_owns_an_exact_transient_workspace_frame() {
+        let base_owner = runmat_runtime::workspace::BaseWorkspaceOwner::new();
         let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
             runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
+        ))
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default().with_base_workspace(
+                std::rc::Rc::new(runmat_runtime::workspace::BaseWorkspaceService::new(
+                    base_owner.clone(),
+                )),
+            ),
+        );
         let (runtime, base_activation) =
             crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
         let base_frame = base_activation.frame();
-        let child = Bytecode::with_instructions(
-            vec![
-                Instr::LoadString("child_local = 13;".to_string()),
-                Instr::CallBuiltinMulti("eval".to_string(), 1, 0),
-                Instr::LoadString("caller".to_string()),
-                Instr::LoadString("caller_mark".to_string()),
-                Instr::LoadConst(17.0),
-                Instr::CallBuiltinMulti("assignin".to_string(), 3, 0),
-                Instr::LoadString("base".to_string()),
-                Instr::LoadString("base_mark".to_string()),
-                Instr::LoadConst(19.0),
-                Instr::CallBuiltinMulti("assignin".to_string(), 3, 0),
-                Instr::Return,
-            ],
-            0,
-        );
+        let child_instructions = vec![
+            Instr::LoadString("child_local = 13;".to_string()),
+            Instr::CallBuiltinMulti("eval".to_string(), 1, 0),
+            Instr::LoadString("caller".to_string()),
+            Instr::LoadString("caller_mark".to_string()),
+            Instr::LoadConst(17.0),
+            Instr::CallBuiltinMulti("assignin".to_string(), 3, 0),
+            Instr::LoadString("base".to_string()),
+            Instr::LoadString("base_mark".to_string()),
+            Instr::LoadConst(19.0),
+            Instr::CallBuiltinMulti("assignin".to_string(), 3, 0),
+            Instr::Return,
+        ];
 
         block_on(base_activation.scope(runtime.scope(async {
-            let mut base = vec![Value::Num(5.0)];
+            let mut base = InterpreterVars::from_owned(vec![Value::Num(5.0)]);
             let _base_guard = crate::runtime::workspace::set_transient_workspace_state(
                 std::collections::HashMap::from([("base_value".to_string(), 0)]),
                 std::collections::HashSet::from(["base_value".to_string()]),
@@ -2322,29 +2664,38 @@ mod tests {
             let outer_frame = outer_activation.frame();
             outer_activation
                 .scope(outer_runtime.scope(async {
-                    let mut outer = vec![Value::Num(7.0)];
+                    let mut outer = InterpreterVars::from_owned(vec![Value::Num(7.0)]);
                     let _outer_guard = crate::runtime::workspace::set_transient_workspace_state(
                         std::collections::HashMap::from([("outer_value".to_string(), 0)]),
                         std::collections::HashSet::from(["outer_value".to_string()]),
                         &mut outer,
                         runmat_runtime::workspace::bindings::FrameGlobalBindings::default(),
                     );
-                    let result = interpret_function_with_counts_in_context(
-                        &child,
-                        Vec::new(),
-                        "zero_variable_workspace_test",
-                        0,
-                        0,
-                        std::collections::HashSet::new(),
-                        outer_runtime.clone(),
-                    )
-                    .await
-                    .expect("zero-variable nested interpreter should own an exact child frame");
-                    assert_eq!(
-                        result,
-                        vec![Value::Num(13.0)],
-                        "dynamic Current assignment should remain in the child frame's completed variables"
-                    );
+                    for (phase, end) in [("current", 2), ("caller", 6), ("base", 11)] {
+                        let mut instructions = child_instructions[..end].to_vec();
+                        if !matches!(instructions.last(), Some(Instr::Return)) {
+                            instructions.push(Instr::Return);
+                        }
+                        let child = Bytecode::with_instructions(instructions, 0);
+                        let result = interpret_function_with_counts_in_context(
+                            &child,
+                            Vec::new(),
+                            "zero_variable_workspace_test",
+                            0,
+                            0,
+                            std::collections::HashSet::new(),
+                            outer_runtime.clone(),
+                        )
+                        .await
+                        .expect(
+                            "zero-variable nested interpreter should own an exact child frame",
+                        );
+                        assert_eq!(
+                            result,
+                            vec![Value::Num(13.0)],
+                            "dynamic {phase} prefix should retain only the Current assignment in the child frame"
+                        );
+                    }
                     assert_eq!(
                         crate::runtime::workspace::workspace_lookup("child_local"),
                         None
@@ -2353,15 +2704,10 @@ mod tests {
                         crate::runtime::workspace::workspace_lookup("caller_mark"),
                         Some(Value::Num(17.0))
                     );
-                    let (_, base) = crate::runtime::workspace::capture_workspace_target(
-                        crate::runtime::workspace::WorkspaceTarget::Base,
-                    )
-                    .expect("nested child should retain its inherited base lineage");
                     assert_eq!(
-                        base.names
-                            .get("base_mark")
-                            .and_then(|slot| base.vars.get(*slot)),
-                        Some(&Value::Num(19.0))
+                        base_owner.snapshot().unwrap().get("base_mark"),
+                        Some(&Value::Num(19.0)),
+                        "base assignment must use the explicit base authority"
                     );
                 }))
                 .await;
@@ -2372,8 +2718,8 @@ mod tests {
                 None
             );
             assert_eq!(
-                crate::runtime::workspace::workspace_lookup("base_mark"),
-                Some(Value::Num(19.0))
+                base_owner.snapshot().unwrap().get("base_mark"),
+                Some(&Value::Num(19.0))
             );
             assert_eq!(
                 crate::runtime::workspace::workspace_lookup("base_value"),
@@ -2407,7 +2753,7 @@ mod tests {
         );
 
         block_on(activation.scope(runtime.scope(async {
-            let mut outer = vec![Value::Num(31.0)];
+            let mut outer = InterpreterVars::from_owned(vec![Value::Num(31.0)]);
             let _outer_guard = crate::runtime::workspace::set_transient_workspace_state(
                 std::collections::HashMap::from([("outer_value".to_string(), 0)]),
                 std::collections::HashSet::from(["outer_value".to_string()]),
@@ -2500,7 +2846,12 @@ mod tests {
         let resume = InterpreterResumeState {
             pc: 2,
             completion_boundary: None,
-            vars: vec![Some(Value::Num(41.0)), None, None],
+            vars: InterpreterVars::from_owned(vec![
+                Value::Num(41.0),
+                Value::Num(0.0),
+                Value::Num(0.0),
+            ]),
+            assigned_slots: HashSet::from([0]),
             supplied_inputs: 1,
             requested_outputs: 1,
             missing_input_slots: Default::default(),
@@ -2516,9 +2867,9 @@ mod tests {
             interpret_resume_in_context(&bytecode, resume, Some("resume_test"), runtime),
         )
         .unwrap();
-        assert_eq!(completion.values[0], Value::Num(41.0));
-        assert_eq!(completion.values[1], Value::Num(2.0));
-        assert_eq!(completion.values[2], Value::Num(0.0));
+        assert_eq!(*completion.values.get(0).unwrap(), Value::Num(41.0));
+        assert_eq!(*completion.values.get(1).unwrap(), Value::Num(2.0));
+        assert_eq!(*completion.values.get(2).unwrap(), Value::Num(0.0));
         assert_eq!(
             completion.assigned_slots,
             std::collections::HashSet::from([0, 1])
@@ -2545,18 +2896,24 @@ mod tests {
             runmat_runtime::execution::RuntimeExecutionService::new(),
         ));
         block_on(runtime.scope(async {
-            runmat_runtime::workspace::session::store_global_slot(0, Value::Num(17.0));
+            runmat_runtime::workspace::session::store_global_slot(0, Value::Num(17.0))
+                .expect("seed global slot");
         }));
         let resume = InterpreterResumeState {
             pc: 1,
             completion_boundary: None,
-            vars: vec![Some(Value::Num(3.0)), None, None],
+            vars: InterpreterVars::from_owned(vec![
+                Value::Num(3.0),
+                Value::Num(0.0),
+                Value::Num(0.0),
+            ]),
+            assigned_slots: HashSet::from([0]),
             supplied_inputs: 0,
             requested_outputs: 3,
             missing_input_slots: Default::default(),
             global_aliases: std::collections::HashMap::from([(
                 0,
-                runmat_runtime::workspace::bindings::FrameGlobalBinding::LegacySlot,
+                runmat_runtime::workspace::bindings::FrameGlobalBinding::LegacySlot(0),
             )]),
             persistent_aliases: Default::default(),
             side_effect_epoch: 0,
@@ -2569,8 +2926,8 @@ mod tests {
                 runtime.clone(),
             ))
             .unwrap();
-        assert_eq!(completion.values[1], Value::Num(17.0));
-        assert_eq!(completion.values[2], Value::Num(29.0));
+        assert_eq!(*completion.values.get(1).unwrap(), Value::Num(17.0));
+        assert_eq!(*completion.values.get(2).unwrap(), Value::Num(29.0));
         block_on(runtime.scope(async {
             assert_eq!(
                 runmat_runtime::workspace::session::global_slot_value(0),
@@ -2596,7 +2953,8 @@ mod tests {
             completion_boundary: Some(
                 crate::interpreter::state::InterpreterCompletionBoundary::before(2),
             ),
-            vars: vec![None, None],
+            vars: InterpreterVars::from_owned(vec![Value::Num(0.0), Value::Num(0.0)]),
+            assigned_slots: HashSet::new(),
             supplied_inputs: 0,
             requested_outputs: 0,
             missing_input_slots: Default::default(),
@@ -2612,7 +2970,10 @@ mod tests {
             interpret_resume_in_context(&bytecode, resume, Some("bounded_resume_test"), runtime),
         )
         .unwrap();
-        assert_eq!(completion.values, vec![Value::Num(7.0), Value::Num(0.0)]);
+        assert_eq!(
+            completion.values.clone_values_for_test(),
+            vec![Value::Num(7.0), Value::Num(0.0)]
+        );
         assert_eq!(
             completion.assigned_slots,
             std::collections::HashSet::from([0])
@@ -2858,11 +3219,11 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.stack.push(Value::GpuTensor(handle.clone()));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
             drop(handle);
 
             let mut result_vars = vec![Value::Num(0.0)];
-            let outcome = block_on(run_interpreter_inner(state, &mut result_vars))
+            let outcome = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("interpreter should complete");
             assert!(matches!(
                 outcome,
@@ -2895,12 +3256,12 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.stack.push(Value::GpuTensor(handle.clone()));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
 
             let mut result_vars = vec![Value::Num(0.0)];
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("interpreter should complete");
             assert!(
                 weak.acquire().is_err(),
@@ -2929,10 +3290,10 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.stack.push(Value::GpuTensor(handle.clone()));
-            state.vars = vec![Value::GpuTensor(handle.clone())];
+            state.vars = vec![Value::GpuTensor(handle.clone())].into();
 
             let mut result_vars = vec![Value::GpuTensor(handle.clone())];
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("interpreter should complete");
             assert!(
                 fusion_residency::is_resident(&handle),
@@ -2971,12 +3332,12 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.context.locals.push(Value::GpuTensor(handle.clone()));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
 
             let mut result_vars = vec![Value::Num(0.0)];
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("exit scope should complete");
             assert!(
                 weak.acquire().is_err(),
@@ -3005,10 +3366,10 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.context.locals.push(Value::GpuTensor(handle.clone()));
-            state.vars = vec![Value::GpuTensor(handle.clone())];
+            state.vars = vec![Value::GpuTensor(handle.clone())].into();
 
             let mut result_vars = vec![Value::GpuTensor(handle.clone())];
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("exit scope should complete");
             assert!(
                 fusion_residency::is_resident(&handle),
@@ -3057,12 +3418,12 @@ mod tests {
                 target,
                 valid: true,
             }));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
 
             let mut result_vars = vec![Value::Num(0.0)];
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("exit scope should complete for nested handle-object local");
             runmat_gc::gc_collect_major().unwrap();
             assert!(
@@ -3103,10 +3464,10 @@ mod tests {
                 valid: true,
             });
             state.context.locals.push(local_value.clone());
-            state.vars = vec![local_value.clone()];
+            state.vars = vec![local_value.clone()].into();
 
             let mut result_vars = vec![local_value];
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("exit scope should complete for aliased nested handle-object local");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -3151,10 +3512,11 @@ mod tests {
             state.vars = vec![
                 Value::GpuTensor(handle.clone()),
                 Value::GpuTensor(handle.clone()),
-            ];
+            ]
+            .into();
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store var should complete");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -3193,11 +3555,11 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.stack.push(Value::Num(0.0));
-            state.vars = vec![Value::GpuTensor(handle.clone())];
+            state.vars = vec![Value::GpuTensor(handle.clone())].into();
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store var should complete when alias lives in locals");
             assert!(
                 fusion_residency::is_resident(&handle),
@@ -3245,13 +3607,14 @@ mod tests {
                 class_name: "Payload".into(),
                 target,
                 valid: true,
-            })];
+            })]
+            .into();
             state.stack.push(Value::Num(0.0));
 
-            let mut result_vars = state.vars.clone();
+            let mut result_vars = state.vars.clone_values_for_test();
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store var overwrite should complete for nested handle-object value");
             runmat_gc::gc_collect_major().unwrap();
             assert!(
@@ -3292,11 +3655,11 @@ mod tests {
                 target,
                 valid: true,
             });
-            state.vars = vec![nested.clone(), nested.clone()];
+            state.vars = vec![nested.clone(), nested.clone()].into();
             state.stack.push(Value::Num(0.0));
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars)).expect(
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars))).expect(
                 "store var overwrite should complete for aliased nested handle-object values",
             );
             assert!(
@@ -3346,12 +3709,12 @@ mod tests {
                 target,
                 valid: true,
             });
-            state.vars = vec![nested.clone()];
+            state.vars = vec![nested.clone()].into();
             state.stack.push(Value::Num(0.0));
             state.context.locals.push(nested);
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store var overwrite should complete when alias lives in locals");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -3391,7 +3754,7 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.stack.push(Value::Num(0.0));
-            state.vars = vec![Value::GpuTensor(handle.clone())];
+            state.vars = vec![Value::GpuTensor(handle.clone())].into();
             state
                 .context
                 .call_stack
@@ -3404,8 +3767,8 @@ mod tests {
                 });
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store local should complete");
             assert!(
                 fusion_residency::is_resident(&handle),
@@ -3445,7 +3808,7 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.stack.push(Value::Num(0.0));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
             state
                 .context
                 .call_stack
@@ -3459,8 +3822,8 @@ mod tests {
             state.context.locals.push(Value::GpuTensor(handle.clone()));
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store local should complete when alias lives in other local");
             assert!(
             fusion_residency::is_resident(&handle),
@@ -3500,7 +3863,7 @@ mod tests {
                 RuntimeInvocationArity::Script,
             );
             state.stack.push(Value::Num(0.0));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
             state
                 .context
                 .call_stack
@@ -3513,10 +3876,10 @@ mod tests {
                 });
             state.context.locals.push(Value::GpuTensor(handle.clone()));
 
-            let mut result_vars = state.vars.clone();
+            let mut result_vars = state.vars.clone_values_for_test();
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store local overwrite should complete");
             assert!(
                 weak.acquire().is_err(),
@@ -3552,7 +3915,7 @@ mod tests {
             let target =
                 runmat_gc::gc_allocate(Value::Struct(payload)).expect("gc allocate payload");
             state.stack.push(Value::Num(0.0));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
             state
                 .context
                 .call_stack
@@ -3569,10 +3932,10 @@ mod tests {
                 valid: true,
             }));
 
-            let mut result_vars = state.vars.clone();
+            let mut result_vars = state.vars.clone_values_for_test();
             let weak = handle.downgrade();
             drop(handle);
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store local overwrite should complete for nested handle-object value");
             runmat_gc::gc_collect_major().unwrap();
             assert!(
@@ -3614,7 +3977,7 @@ mod tests {
                 valid: true,
             });
             state.stack.push(Value::Num(0.0));
-            state.vars = vec![local_value.clone()];
+            state.vars = vec![local_value.clone()].into();
             state
                 .context
                 .call_stack
@@ -3627,8 +3990,8 @@ mod tests {
                 });
             state.context.locals.push(local_value);
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars)).expect(
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars))).expect(
                 "store local overwrite should complete for aliased nested handle-object value",
             );
             assert!(
@@ -3680,7 +4043,7 @@ mod tests {
                 valid: true,
             });
             state.stack.push(Value::Num(0.0));
-            state.vars = vec![Value::Num(0.0)];
+            state.vars = vec![Value::Num(0.0)].into();
             state
                 .context
                 .call_stack
@@ -3694,8 +4057,8 @@ mod tests {
             state.context.locals.push(nested.clone());
             state.context.locals.push(nested);
 
-            let mut result_vars = state.vars.clone();
-            let _ = block_on(run_interpreter_inner(state, &mut result_vars))
+            let mut result_vars = state.vars.clone_values_for_test();
+            let _ = block_on(run_interpreter_inner(state, Some(&mut result_vars)))
                 .expect("store local overwrite should complete when alias lives in other local");
             assert!(
             fusion_residency::is_resident(&handle),

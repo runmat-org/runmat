@@ -4,13 +4,35 @@ use super::*;
 #[test]
 fn getfield_exception_fields() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let ex = MException::new("RunMat:Test".to_string(), "failure".to_string());
+    let ex = MException::new("RunMat:Test".to_string(), "échec ✨".to_string());
     let msg =
         run_getfield(Value::MException(ex.clone()), vec![Value::from("message")]).expect("message");
-    assert_eq!(msg.value(), &Value::String("failure".to_string()));
-    let ident =
-        run_getfield(Value::MException(ex), vec![Value::from("identifier")]).expect("identifier");
-    assert_eq!(ident.value(), &Value::String("RunMat:Test".to_string()));
+    assert_eq!(
+        msg.value(),
+        &Value::CharArray(CharArray::new_row("échec ✨"))
+    );
+    let ident = run_getfield(
+        Value::MException(ex.clone()),
+        vec![Value::from("identifier")],
+    )
+    .expect("identifier");
+    assert_eq!(
+        ident.value(),
+        &Value::CharArray(CharArray::new_row("RunMat:Test"))
+    );
+
+    let empty = MException::new(String::new(), String::new());
+    for property in ["identifier", "message"] {
+        let value = run_getfield(
+            Value::MException(empty.clone()),
+            vec![Value::from(property)],
+        )
+        .expect("empty exception property");
+        assert_eq!(
+            value.value(),
+            &Value::CharArray(CharArray::new(Vec::new(), 0, 0).expect("empty character array"))
+        );
+    }
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

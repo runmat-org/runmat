@@ -6,24 +6,30 @@ use std::collections::{HashMap, HashSet};
 use runmat_runtime::context::RuntimeContext;
 use runmat_runtime::workspace::bindings::FrameGlobalBinding;
 use runmat_runtime::workspace::{
-    base_workspace_error_to_runtime, BaseWorkspaceOwner, WorkspaceDelta, WorkspaceRevision,
+    base_workspace_error_to_runtime, BaseWorkspaceOwner, GlobalBindingTarget,
+    WorkspaceCompletionIdentity,
 };
 use runmat_runtime::RuntimeError;
+#[cfg(test)]
 use runmat_value::Value;
 
 use crate::runtime::workspace::{
-    active_named_global_bindings, WorkspaceAssignedReport, WorkspaceTargetSnapshot,
+    WorkspaceAssignedReport, WorkspaceTargetSnapshot, WorkspaceValueSnapshot,
 };
+
+#[path = "dynamic_base_target/completion.rs"]
+mod completion;
 
 /// The selected service grants the owner; the captured revision owns the
 /// conflict boundary for a later transactional publication.
 pub(super) struct ExplicitBaseTarget {
     owner: BaseWorkspaceOwner,
-    revision: WorkspaceRevision,
-    visible_globals: HashSet<String>,
+    identity: WorkspaceCompletionIdentity,
+    visible_globals: HashMap<String, GlobalBindingTarget>,
 }
 
 impl ExplicitBaseTarget {
+    #[cfg(test)]
     pub(super) fn assign(
         runtime: &RuntimeContext,
         name: &str,
@@ -34,27 +40,13 @@ impl ExplicitBaseTarget {
             .require_base_workspace("assign explicit base workspace value")
             .map_err(runmat_runtime::context::RuntimeCapabilityError::into_runtime_error)?
             .owner();
-        runmat_runtime::execution::validate_storable_value(&value)?;
-        if owner
-            .is_global(name)
-            .map_err(base_workspace_error_to_runtime)?
-        {
-            owner
-                .ensure_effect_authority()
-                .map_err(base_workspace_error_to_runtime)?;
-            runtime
-                .session_variable_authority()
-                .store_global(name, value)
-        } else {
-            let mut delta = WorkspaceDelta::new();
-            delta
-                .assign(name, value)
-                .map_err(base_workspace_error_to_runtime)?;
-            owner
-                .apply(delta)
-                .map(|_| ())
-                .map_err(base_workspace_error_to_runtime)
-        }
+        runmat_runtime::workspace::assign_logical_base_value_with_context(
+            &owner,
+            &runtime.session_variable_authority(),
+            runtime,
+            name,
+            value,
+        )
     }
 
     pub(super) fn capture(
@@ -65,6 +57,9 @@ impl ExplicitBaseTarget {
             .require_base_workspace("evaluate explicit base workspace source")
             .map_err(runmat_runtime::context::RuntimeCapabilityError::into_runtime_error)?
             .owner();
+        let identity = owner
+            .workspace_completion_identity()
+            .map_err(base_workspace_error_to_runtime)?;
         let projection = owner
             .begin_projection()
             .map_err(base_workspace_error_to_runtime)?;
@@ -83,28 +78,47 @@ impl ExplicitBaseTarget {
             .collect::<Vec<_>>();
         global_names.sort();
         let mut global_aliases = HashMap::new();
-        let mut visible_globals = HashSet::new();
+        let mut visible_globals = HashMap::new();
         for name in global_names {
-            let Some(value) = runtime.session_global_value(&name)? else {
+            let Some(target) = projection.global_target(&name).cloned() else {
+                continue;
+            };
+            let value = match &target {
+                GlobalBindingTarget::Named(bound) => {
+                    runtime.session_global_value(bound.as_str())?
+                }
+                GlobalBindingTarget::LegacySlot(slot) => {
+                    runtime.session_global_slot_value(*slot)?
+                }
+            };
+            let Some(value) = value else {
                 continue;
             };
             let slot = vars.len();
             names.insert(name.clone(), slot);
             assigned.insert(name.clone());
             vars.push(value);
-            global_aliases.insert(slot, FrameGlobalBinding::Named(name.clone()));
-            visible_globals.insert(name);
+            match &target {
+                GlobalBindingTarget::Named(bound) => {
+                    global_aliases
+                        .insert(slot, FrameGlobalBinding::Named(bound.as_str().to_owned()));
+                }
+                GlobalBindingTarget::LegacySlot(bound) => {
+                    global_aliases.insert(slot, FrameGlobalBinding::LegacySlot(*bound));
+                }
+            }
+            visible_globals.insert(name, target);
         }
         Ok((
             Self {
                 owner,
-                revision: projection.revision(),
+                identity,
                 visible_globals,
             },
             WorkspaceTargetSnapshot {
                 names,
                 assigned,
-                vars,
+                vars: crate::interpreter::vars::InterpreterVars::from_owned(vars),
                 global_aliases,
             },
         ))
@@ -118,55 +132,18 @@ impl ExplicitBaseTarget {
 
     pub(super) fn commit(
         &self,
-        vars: Vec<Value>,
-        names: HashMap<String, usize>,
-        assigned: HashSet<String>,
-        global_aliases: HashMap<usize, FrameGlobalBinding>,
+        runtime: &RuntimeContext,
+        snapshot: WorkspaceValueSnapshot,
         report: WorkspaceAssignedReport,
     ) -> Result<(), RuntimeError> {
-        let next_globals = active_named_global_bindings(&names, &global_aliases);
-        let mut changed = report.names;
-        changed.extend(report.removed_names);
-        changed.extend(
-            self.visible_globals
-                .symmetric_difference(&next_globals)
-                .cloned(),
-        );
-        let mut changed = changed.into_iter().collect::<Vec<_>>();
-        changed.sort();
-        if changed.is_empty() {
-            return self.ensure_effect_authority();
-        }
-        let mut delta = WorkspaceDelta::new();
-        for name in changed {
-            if next_globals.contains(&name) {
-                delta.bind_global(name);
-            } else if assigned.contains(&name) {
-                let slot = names.get(&name).copied().ok_or_else(|| {
-                    runmat_runtime::runtime_error::semantic_error(
-                        "RunMat:Workspace:TargetState",
-                        "assigned base-workspace name has no execution slot",
-                    )
-                })?;
-                let value = vars.get(slot).cloned().ok_or_else(|| {
-                    runmat_runtime::runtime_error::semantic_error(
-                        "RunMat:Workspace:TargetState",
-                        "assigned base-workspace slot has no value",
-                    )
-                })?;
-                runmat_runtime::execution::validate_storable_value(&value)?;
-                delta
-                    .assign(name, value)
-                    .map_err(base_workspace_error_to_runtime)?;
-            } else if self.visible_globals.contains(&name) {
-                delta.unbind_global(name);
-            } else {
-                delta.remove(name);
-            }
-        }
+        let source = completion::BaseCompletionSource::prepare(
+            runtime,
+            &snapshot,
+            &report,
+            &self.visible_globals,
+        )?;
         self.owner
-            .commit(self.revision, delta)
-            .map(|_| ())
+            .apply_workspace_completion(runtime, self.identity, &source)
             .map_err(base_workspace_error_to_runtime)
     }
 }
@@ -174,6 +151,7 @@ impl ExplicitBaseTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use runmat_runtime::workspace::{bindings::FrameGlobalBindings, WorkspaceDelta};
     use std::rc::Rc;
 
     #[test]
@@ -192,19 +170,18 @@ mod tests {
         );
         let (target, mut snapshot) = ExplicitBaseTarget::capture(&runtime).unwrap();
         let slot = snapshot.names["base_answer"];
-        assert_eq!(snapshot.vars[slot], Value::Num(11.0));
-        snapshot.vars[slot] = Value::Num(12.0);
-        let mut report = WorkspaceAssignedReport::default();
-        report.names.insert("base_answer".to_owned());
-        target
-            .commit(
-                snapshot.vars,
-                snapshot.names,
-                snapshot.assigned,
-                snapshot.global_aliases,
-                report,
-            )
-            .unwrap();
+        assert_eq!(*snapshot.vars.get(slot).unwrap(), Value::Num(11.0));
+        let frame = crate::runtime::workspace::set_workspace_state(
+            snapshot.names,
+            snapshot.assigned,
+            &mut snapshot.vars,
+            FrameGlobalBindings::from_snapshot(snapshot.global_aliases),
+        );
+        crate::runtime::workspace::workspace_assign("base_answer", Value::Num(12.0)).unwrap();
+        drop(frame);
+        let completed = crate::runtime::workspace::take_updated_workspace_state().unwrap();
+        let report = crate::runtime::workspace::take_updated_workspace_assigned_report().unwrap();
+        target.commit(&runtime, completed, report).unwrap();
         assert_eq!(
             owner.snapshot().unwrap().get("base_answer"),
             Some(&Value::Num(12.0))
@@ -221,12 +198,28 @@ mod tests {
         owner.apply(bind).unwrap();
         runtime
             .session_variable_authority()
-            .declare_global("shared_answer")
+            .declare_global_with_context(&runtime, "shared_answer")
             .unwrap();
         ExplicitBaseTarget::assign(&runtime, "shared_answer", Value::Num(14.0)).unwrap();
         assert_eq!(
             runtime.session_global_value("shared_answer").unwrap(),
             Some(Value::Num(14.0))
+        );
+
+        futures::executor::block_on(runtime.scope(async {
+            runmat_runtime::workspace::session::store_global_slot(7, Value::Num(23.0))
+                .expect("seed selected legacy slot");
+        }));
+        let mut legacy = WorkspaceDelta::new();
+        legacy.bind_global_target("legacy_answer", GlobalBindingTarget::LegacySlot(7));
+        owner.apply(legacy).unwrap();
+        let (_, imported) = ExplicitBaseTarget::capture(&runtime).unwrap();
+        let local_slot = imported.names["legacy_answer"];
+        assert_ne!(local_slot, 7);
+        assert_eq!(*imported.vars.get(local_slot).unwrap(), Value::Num(23.0));
+        assert_eq!(
+            imported.global_aliases.get(&local_slot),
+            Some(&FrameGlobalBinding::LegacySlot(7))
         );
     }
 }

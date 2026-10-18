@@ -48,7 +48,7 @@ fn operand_shape(value: &Value) -> Option<Vec<usize>> {
         Value::SparseTensor(sparse) => Some(vec![sparse.rows, sparse.cols]),
         Value::Tensor(tensor) => Some(tensor.shape().to_vec()),
         Value::ComplexTensor(tensor) => Some(tensor.shape().to_vec()),
-        Value::LogicalArray(array) => Some(array.shape.clone()),
+        Value::LogicalArray(array) => Some(array.shape.to_vec()),
         Value::CharArray(array) => Some(vec![array.rows, array.cols]),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Some(vec![1, 1]),
         _ => None,

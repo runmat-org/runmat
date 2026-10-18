@@ -96,7 +96,7 @@ pub(super) fn admit_bit_buffer(
         Value::Tensor(tensor) => tensor_to_bit_buffer(name, tensor, assumed),
         Value::LogicalArray(array) => Ok(BitBuffer {
             data: array.data.into_iter().map(|v| u64::from(v != 0)).collect(),
-            shape: array.shape,
+            shape: array.shape.to_vec(),
             compute_class: assumed,
             output_class: None,
             is_scalar: false,
@@ -137,7 +137,7 @@ pub(super) fn admit_shift_buffer(value: Value) -> BuiltinResult<AdmittedBuffer<S
         Value::Tensor(tensor) => tensor_to_shift_buffer(tensor),
         Value::LogicalArray(array) => Ok(ShiftBuffer {
             data: array.data.into_iter().map(|v| i128::from(v != 0)).collect(),
-            shape: array.shape,
+            shape: array.shape.to_vec(),
         }),
         other => Err(error_with_detail(
             BITSHIFT_NAME,
@@ -177,7 +177,7 @@ pub(super) fn admit_bit_value_buffer(
         Value::Tensor(tensor) => tensor_to_bit_value_buffer(tensor),
         Value::LogicalArray(array) => Ok(BitValueBuffer {
             data: array.data.into_iter().map(|value| value != 0).collect(),
-            shape: array.shape,
+            shape: array.shape.to_vec(),
         }),
         other => Err(error_with_detail(
             BITSET_NAME,

@@ -8,6 +8,7 @@ use crate::memory::ScopedValueRoots;
 use crate::NativeExecutorResult;
 
 use super::super::operand::materialize_operand;
+use super::super::operand::materialize_retained_operand;
 use super::super::state::HostState;
 
 mod receiver;
@@ -35,6 +36,7 @@ pub(super) fn materialize_selectors(
     prefix: &[ObjectSubscript],
     indexing: &runmat_mir::MirIndexing,
     access: &runmat_runtime::object::protocol::ObjectAccessContext,
+    retains_inputs: bool,
 ) -> NativeExecutorResult<MaterializedSelectors> {
     let needs_end = indexing.components.iter().any(|component| {
         matches!(component, MirIndexComponent::ContextualExpr(region) if region.contains_contextual_end())
@@ -65,7 +67,16 @@ pub(super) fn materialize_selectors(
         .map(|(component, selector)| match selector {
             MirIndexComponent::Colon => Ok(ObjectIndexComponent::Colon),
             MirIndexComponent::Expr(operand) => {
-                materialize_operand(state, operand).map(ObjectIndexComponent::Value)
+                if retains_inputs {
+                    materialize_retained_operand(state, operand)
+                        .map(|(_, value)| ObjectIndexComponent::Value(value))
+                } else {
+                    materialize_operand(state, operand).map(ObjectIndexComponent::Value)
+                }
+            }
+            MirIndexComponent::PreparedExpr(region) => {
+                super::super::indexing::materialize_prepared_expression_region(state, region)
+                    .map(ObjectIndexComponent::Value)
             }
             MirIndexComponent::ContextualExpr(region) => {
                 if let Some(prepared) = prepared.as_ref() {

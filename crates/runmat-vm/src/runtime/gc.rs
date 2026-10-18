@@ -6,13 +6,14 @@ use std::marker::PhantomData;
 use std::ptr::NonNull;
 
 mod sequence_roots;
+mod interpreter_vars_root;
 mod managed_roots;
 pub(crate) use managed_roots::ManagedRoots;
 #[cfg(test)]
 mod frame_tests;
 
 type RootLifetime<'roots> = fn(
-    &'roots Vec<Value>,
+    &'roots crate::interpreter::vars::InterpreterVars,
     &'roots Vec<Value>,
     &'roots Vec<Value>,
     &'roots crate::interpreter::dispatch::SequenceState,
@@ -32,7 +33,7 @@ impl<'roots> InterpretContext<'roots> {
     /// while the interpreter mutates the registered owners between scans.
     pub(crate) fn new_frame(
         stack: &'roots Vec<Value>,
-        vars: &'roots Vec<Value>,
+        vars: &'roots crate::interpreter::vars::InterpreterVars,
         locals: &'roots Vec<Value>,
         sequence: &'roots crate::interpreter::dispatch::SequenceState,
     ) -> Result<Self, String> {
@@ -54,13 +55,14 @@ impl<'roots> InterpretContext<'roots> {
         Ok(context)
     }
 
-    pub fn new(stack: &'roots Vec<Value>, vars: &'roots Vec<Value>) -> Result<Self, String> {
+    pub fn new(
+        stack: &'roots Vec<Value>,
+        vars: &'roots crate::interpreter::vars::InterpreterVars,
+    ) -> Result<Self, String> {
         let stack_root = Box::new(unsafe {
             StackRoot::new(NonNull::from(stack), "interpreter_stack".to_string())
         });
-        let vars_root = Box::new(unsafe {
-            VariableArrayRoot::new(NonNull::from(vars), "interpreter_vars".to_string())
-        });
+        let vars_root = Box::new(unsafe { interpreter_vars_root::InterpreterVarsRoot::new(vars) });
 
         let stack_root_id = gc_register_value_root(stack_root)
             .map_err(|e| format!("Failed to register stack root: {e:?}"))?;

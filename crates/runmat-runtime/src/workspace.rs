@@ -2,7 +2,12 @@ use runmat_value::Value;
 
 mod base;
 mod checked;
+mod completion;
 mod detach;
+mod dynamic_target;
+mod logical_generation;
+mod retained;
+mod slot_read_lease;
 #[cfg(test)]
 #[path = "workspace/resolver_tests.rs"]
 mod resolver_tests;
@@ -11,17 +16,32 @@ pub mod bindings;
 
 pub use base::base_workspace_error_to_runtime;
 pub use base::{
-    assign_logical_base_value, lookup_logical_base_value, BaseWorkspaceCommit, BaseWorkspaceError,
-    BaseWorkspaceOwner, BaseWorkspaceProjection, BaseWorkspaceProjectionService,
-    BaseWorkspaceReconciliation, BaseWorkspaceService, BaseWorkspaceSnapshot, WorkspaceChange,
-    WorkspaceChangeKind, WorkspaceDelta, WorkspacePublicationObserver, WorkspacePublicationOrigin,
-    WorkspaceRevision,
+    assign_logical_base_value, assign_logical_base_value_ref_with_context,
+    assign_logical_base_value_with_context, lookup_logical_base_value, BaseWorkspaceBindingNames,
+    BaseWorkspaceCommit, BaseWorkspaceError, BaseWorkspaceOwner, BaseWorkspaceProjection,
+    BaseWorkspaceProjectionService, BaseWorkspaceReconciliation, BaseWorkspaceService,
+    BaseWorkspaceSnapshot, PreparedWorkspaceCompletion, WorkspaceChange, WorkspaceChangeKind,
+    WorkspaceDelta, WorkspacePublicationBatch, WorkspacePublicationMutation,
+    WorkspacePublicationObserver, WorkspacePublicationOrigin, WorkspacePublicationProtocol,
+    WorkspacePublicationStamp, WorkspacePublicationToken, WorkspaceRevision,
 };
+pub use bindings::GlobalBindingTarget;
 pub use checked::{
     base_workspace_owner, begin_base_workspace_projection, try_assign, try_clear,
     try_detach_selected, try_global_names, try_lookup, try_remove, try_snapshot,
 };
+pub use completion::{
+    WorkspaceCompletionAction, WorkspaceCompletionIdentity, WorkspaceCompletionParticipant,
+    WorkspaceCompletionSource, WorkspaceCompletionValue,
+};
 pub use detach::{DetachedWorkspaceValues, WorkspaceDetachSelection};
+pub use dynamic_target::{
+    CapturedWorkspaceReadView, DynamicWorkspaceOverlayEntry, DynamicWorkspaceTargetCapture,
+    DynamicWorkspaceTargetEntry, DynamicWorkspaceTargetOverlay,
+};
+pub use logical_generation::LogicalWorkspaceGeneration;
+pub use retained::{WorkspaceName, WorkspaceValueReadLease};
+pub use slot_read_lease::WorkspaceSlotReadLease;
 
 #[cfg(test)]
 use once_cell::sync::Lazy;

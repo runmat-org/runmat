@@ -90,7 +90,7 @@ pub(in crate::execute) fn assign_sequence(
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("native sequence mutation has no active statement site".into())
     })?;
-    let (region, next_step, _) = state.enter_contextual_region();
+    let (region, next_step, _) = state.enter_contextual_region()?;
     let mut cursor = match state.pending_sequence_assign.take() {
         Some(cursor)
             if cursor.request == request
@@ -120,7 +120,7 @@ pub(in crate::execute) fn assign_sequence(
     };
     loop {
         let step = cursor.step;
-        state.enter_contextual_step(region, step);
+        state.enter_contextual_step(region, step)?;
         let result = cursor.advance(state);
         let next_step = if result.is_ok() { cursor.step } else { step };
         state.finish_contextual_step(region, step, next_step)?;
@@ -129,7 +129,7 @@ pub(in crate::execute) fn assign_sequence(
                 let SequencePhase::Writeback(reference) = cursor.phase else {
                     unreachable!("finished sequence assignment has a writeback result")
                 };
-                state.finish_contextual_region(region, vec![reference]);
+                state.finish_contextual_region(region, reference);
                 return state.set_local(cursor.prepared.destination.writeback.root.0, reference);
             }
             Ok(false) => {}
@@ -148,13 +148,13 @@ pub(in crate::execute) fn assign_prepared_sequence(
     root: Value,
     values: Vec<Value>,
 ) -> NativeExecutorResult<Value> {
-    let (region, next_step, _) = state.enter_contextual_region();
+    let (region, next_step, _) = state.enter_contextual_region()?;
     if next_step != 0 {
         return Err(NativeExecutorError::Host(
             "pending prepared sequence target has invalid phase".into(),
         ));
     }
-    state.enter_contextual_step(region, 0);
+    state.enter_contextual_step(region, 0)?;
     let runtime = state.runtime.clone();
     let caller = state.function.name.clone();
     let result = member_call(
@@ -170,7 +170,7 @@ pub(in crate::execute) fn assign_prepared_sequence(
     state.finish_contextual_step(region, 0, next_step)?;
     if let Ok(value) = &result {
         let reference = state.arena.insert(value.clone());
-        state.finish_contextual_region(region, vec![reference]);
+        state.finish_contextual_region(region, reference);
     }
     result
 }

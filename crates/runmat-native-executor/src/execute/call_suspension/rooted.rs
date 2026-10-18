@@ -10,6 +10,37 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::super::state::HostState;
 use super::{scope_completion, CallCompletion, CompletionFuture, PendingCall};
 
+pub(in crate::execute) fn begin_lexical_call(
+    state: &mut HostState,
+    embedded: Option<super::super::state::EmbeddedOperationIdentity>,
+    future: runmat_runtime::user_functions::LexicalFunctionFuture,
+    requested_outputs: usize,
+) -> NativeExecutorResult<Vec<Value>> {
+    let future: CompletionFuture = Box::pin(async move {
+        future
+            .await
+            .map(|result| CallCompletion::Lexical {
+                result,
+                requested_outputs,
+            })
+            .map_err(NativeExecutorError::from)
+    });
+    let future = scope_completion(state, future);
+    let request = state.current_request.ok_or_else(|| {
+        NativeExecutorError::Host("pending native call has no active site".into())
+    })?;
+    let (continuation, generation) = state.next_suspension_identity()?;
+    state.pending_call = Some(PendingCall {
+        continuation,
+        generation,
+        request,
+        embedded,
+        retained_roots: Vec::new(),
+        future,
+    });
+    Err(NativeExecutorError::CallSuspended)
+}
+
 pub(in crate::execute) fn begin_rooted_sequence(
     state: &mut HostState,
     embedded: Option<super::super::state::EmbeddedOperationIdentity>,

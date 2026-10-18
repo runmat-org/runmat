@@ -225,11 +225,15 @@ fn callable_capabilities(
             })?;
         return Ok(selected);
     }
-    let CallableTarget::Resolved { identity, .. } = &descriptor.target else {
-        return Err(crate::interpreter::errors::mex(
-            "ExecutionProgram",
-            "async execution requires an exact selected callable before capability binding",
-        ));
+    let identity = match &descriptor.target {
+        CallableTarget::Resolved { identity, .. }
+        | CallableTarget::CapturedResolved { identity, .. } => identity,
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "ExecutionProgram",
+                "async execution requires an exact selected callable before capability binding",
+            ));
+        }
     };
     match identity {
         CallableIdentity::BoundFunction(function)
@@ -268,23 +272,36 @@ fn bind_selected_semantic_target(
     use runmat_hir::CallableIdentity;
     use runmat_runtime::call::descriptor::CallableTarget;
 
-    let CallableTarget::Resolved {
-        identity:
-            CallableIdentity::BoundFunction(function)
-            | CallableIdentity::AnonymousFunction(function)
-            | CallableIdentity::ExternalFunction { function, .. },
-        ..
-    } = &descriptor.target
-    else {
-        return Ok(());
+    let function = match &descriptor.target {
+        CallableTarget::Resolved {
+            identity:
+                CallableIdentity::BoundFunction(function)
+                | CallableIdentity::AnonymousFunction(function)
+                | CallableIdentity::ExternalFunction { function, .. },
+            ..
+        }
+        | CallableTarget::CapturedResolved {
+            identity:
+                CallableIdentity::BoundFunction(function)
+                | CallableIdentity::AnonymousFunction(function)
+                | CallableIdentity::ExternalFunction { function, .. },
+            ..
+        } => *function,
+        _ => return Ok(()),
     };
-    let binding = registry.exact_bound_binding(*function).ok_or_else(|| {
+    let binding = registry.exact_bound_binding(function).ok_or_else(|| {
         crate::interpreter::errors::mex(
             "ExecutionProgram",
             "async semantic callable has no exact selected definition and source graph",
         )
     })?;
-    descriptor.target = CallableTarget::Bound(binding);
+    descriptor.target = match &descriptor.target {
+        CallableTarget::CapturedResolved { closure, .. } => CallableTarget::BoundLexical {
+            binding,
+            closure: closure.clone(),
+        },
+        _ => CallableTarget::Bound(binding),
+    };
     Ok(())
 }
 

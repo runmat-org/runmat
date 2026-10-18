@@ -122,15 +122,21 @@ impl GpuTensorView {
         self.logical
     }
 
+    /// Logical cardinality, including empty views with otherwise overflowing
+    /// axes. Physical admission and readback must use the same empty rule.
+    pub fn checked_element_count(&self) -> Result<u64, GpuViewError> {
+        if self.shape.contains(&0) {
+            return Ok(0);
+        }
+        self.shape.iter().try_fold(1_u64, |count, &extent| {
+            count
+                .checked_mul(u64::try_from(extent).map_err(|_| GpuViewError::SizeOverflow)?)
+                .ok_or(GpuViewError::SizeOverflow)
+        })
+    }
+
     pub fn validate(&self, physical: &GpuPhysicalDescriptor) -> Result<(), GpuViewError> {
-        let count = if self.shape.contains(&0) {
-            0
-        } else {
-            self.shape
-                .iter()
-                .try_fold(1_u64, |n, &dim| n.checked_mul(dim as u64))
-                .ok_or(GpuViewError::SizeOverflow)?
-        };
+        let count = self.checked_element_count()?;
         if count > physical.element_capacity {
             return Err(GpuViewError::OutsideAllocation);
         }

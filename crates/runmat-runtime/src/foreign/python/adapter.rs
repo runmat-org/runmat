@@ -47,7 +47,7 @@ use super::conversion::{value_from_python, value_to_python};
 use super::{IsolatedPythonClient, NestedPythonCall, NestedPythonQueue, PythonClientRetirement};
 use crate::builtins::common::validation::value_text_scalar_string;
 use crate::context::{ForeignCall, RuntimeContext};
-use crate::execution::RootedValue;
+use crate::execution::RetainedValueReadLease;
 use crate::{build_runtime_error, RuntimeError};
 
 #[derive(Debug, Default)]
@@ -55,7 +55,7 @@ struct ReleaseQueue(Mutex<Vec<u64>>);
 
 #[derive(Clone)]
 struct PythonCallbackRegistration {
-    callback: RootedValue,
+    callback: RetainedValueReadLease,
     context: RuntimeContext,
     foreign: std::rc::Weak<dyn crate::context::RuntimeForeignService>,
 }
@@ -707,8 +707,7 @@ impl PythonAdapter {
                     .checked_add(1)
                     .ok_or_else(|| invalid_call("Python callback identity space is exhausted"))?,
             );
-            let callback_value =
-                RootedValue::new(value).map_err(|error| error.into_runtime_error())?;
+            let callback_value = RetainedValueReadLease::prepare_owned(value, context)?;
             self.callbacks.borrow_mut().insert(
                 callback,
                 PythonCallbackRegistration {
@@ -1486,9 +1485,12 @@ mod tests {
         adapter.callbacks.borrow_mut().insert(
             1,
             super::PythonCallbackRegistration {
-                callback: crate::execution::RootedValue::new(runmat_value::Value::String(
-                    "nested-capture".into(),
-                ))
+                callback: crate::execution::RetainedValueReadLease::prepare_owned(
+                    runmat_value::Value::String("nested-capture".into()),
+                    &crate::context::RuntimeContext::new(std::rc::Rc::new(
+                        crate::execution::RuntimeExecutionService::new(),
+                    )),
+                )
                 .expect("root callback test value"),
                 context: crate::context::RuntimeContext::new(std::rc::Rc::new(
                     crate::execution::RuntimeExecutionService::new(),
@@ -1543,10 +1545,15 @@ mod tests {
                 .get(&id)
                 .cloned()
                 .expect("registration");
-            let request = foreign_callback_request(registration.callback.value(), vec![], 1)
+            let request = foreign_callback_request(&context, &registration.callback, vec![], 1)
                 .expect("use rooted callable");
+            let crate::call::descriptor::CallableTarget::CapturedResolved { closure, .. } =
+                &request.descriptor().target
+            else {
+                panic!("registered callback lost its closure");
+            };
             assert!(matches!(
-                request.arguments.as_slice(),
+                closure.as_closure().captures.as_slice(),
                 [Value::HandleObject(_)]
             ));
             drop(request);

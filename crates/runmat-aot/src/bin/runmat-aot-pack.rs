@@ -11,6 +11,7 @@ struct Arguments {
     archive: PathBuf,
     payload_out: PathBuf,
     manifest_out: PathBuf,
+    notices_out: PathBuf,
     native_link_tokens: Vec<String>,
 }
 
@@ -33,8 +34,18 @@ fn run() -> Result<(), String> {
         _ => {}
     }
     let arguments = parse_arguments(std::env::args_os().skip(1))?;
+    if arguments.archive == arguments.payload_out
+        || arguments.archive == arguments.manifest_out
+        || arguments.archive == arguments.notices_out
+        || arguments.payload_out == arguments.manifest_out
+        || arguments.payload_out == arguments.notices_out
+        || arguments.manifest_out == arguments.notices_out
+    {
+        return Err("runtime archive inputs and outputs must be distinct paths".to_string());
+    }
     reject_existing(&arguments.payload_out)?;
     reject_existing(&arguments.manifest_out)?;
+    reject_existing(&arguments.notices_out)?;
     let bytes = std::fs::read(&arguments.archive)
         .map_err(|error| format!("read `{}`: {error}", arguments.archive.display()))?;
     let native_link_tokens = arguments.native_link_tokens;
@@ -49,17 +60,28 @@ fn run() -> Result<(), String> {
         (prepared.archive, prepared.native_link_tokens)
     };
     let environment = runmat_core::program_environment(runmat_core::CompatMode::Matlab);
+    let mut capabilities = RuntimeArchiveCapabilities::standalone_host();
+    capabilities.accelerators = runmat_aot::archive::read_native_accelerator_profile(&bytes)
+        .map_err(|error| error.to_string())?;
     let product = build_runtime_archive(
         &bytes,
         &environment,
         native_link_tokens,
         RuntimeArchiveEncoding::Zstd,
-        RuntimeArchiveCapabilities::standalone_host(),
+        capabilities,
     )
     .map_err(|error| error.to_string())?;
     let manifest = canonical_manifest_json(&product.manifest)?;
     write_new(&arguments.payload_out, product.payload())?;
     if let Err(error) = write_new(&arguments.manifest_out, manifest.as_bytes()) {
+        let _ = std::fs::remove_file(&arguments.payload_out);
+        return Err(error);
+    }
+    if let Err(error) = write_new(
+        &arguments.notices_out,
+        runmat_runtime::third_party_notices::bytes(),
+    ) {
+        let _ = std::fs::remove_file(&arguments.manifest_out);
         let _ = std::fs::remove_file(&arguments.payload_out);
         return Err(error);
     }
@@ -331,13 +353,18 @@ fn parse_arguments(
     let mut archive = None;
     let mut payload_out = None;
     let mut manifest_out = None;
+    let mut notices_out = None;
     let mut native_link_tokens = Vec::new();
     while let Some(argument) = arguments.next() {
         let argument = argument
             .into_string()
             .map_err(|_| "arguments must be valid UTF-8".to_string())?;
         let value = match argument.as_str() {
-            "--archive" | "--payload-out" | "--manifest-out" | "--native-link-token" => arguments
+            "--archive"
+            | "--payload-out"
+            | "--manifest-out"
+            | "--notices-out"
+            | "--native-link-token" => arguments
                 .next()
                 .ok_or_else(|| format!("{argument} requires a value"))?,
             _ => return Err(format!("unknown argument `{argument}`")),
@@ -346,6 +373,7 @@ fn parse_arguments(
             "--archive" => archive = Some(PathBuf::from(value)),
             "--payload-out" => payload_out = Some(PathBuf::from(value)),
             "--manifest-out" => manifest_out = Some(PathBuf::from(value)),
+            "--notices-out" => notices_out = Some(PathBuf::from(value)),
             "--native-link-token" => native_link_tokens.push(
                 value
                     .into_string()
@@ -358,6 +386,7 @@ fn parse_arguments(
         archive: archive.ok_or_else(|| "--archive is required".to_string())?,
         payload_out: payload_out.ok_or_else(|| "--payload-out is required".to_string())?,
         manifest_out: manifest_out.ok_or_else(|| "--manifest-out is required".to_string())?,
+        notices_out: notices_out.ok_or_else(|| "--notices-out is required".to_string())?,
         native_link_tokens,
     })
 }
@@ -396,4 +425,32 @@ fn write_new(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     file.write_all(bytes)
         .and_then(|()| file.sync_all())
         .map_err(|error| format!("write `{}`: {error}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn standalone_archive_requires_explicit_notice_output() {
+        let options = [
+            "--archive",
+            "runtime.a",
+            "--payload-out",
+            "runtime.payload",
+            "--manifest-out",
+            "runtime.json",
+        ];
+        assert!(parse_arguments(
+            options
+                .iter()
+                .map(|argument| std::ffi::OsString::from(*argument))
+        )
+        .is_err());
+        let complete = options
+            .into_iter()
+            .chain(["--notices-out", "THIRD_PARTY_NOTICES.txt"]);
+        let parsed = parse_arguments(complete.map(std::ffi::OsString::from)).unwrap();
+        assert_eq!(parsed.notices_out, PathBuf::from("THIRD_PARTY_NOTICES.txt"));
+    }
 }

@@ -174,12 +174,7 @@ pub fn fill_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Filled Polygons",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             for plot in plots_slot.take().expect("fill plots consumed once") {
                 let plot_index = figure.add_patch_plot_on_axes(plot, axes);

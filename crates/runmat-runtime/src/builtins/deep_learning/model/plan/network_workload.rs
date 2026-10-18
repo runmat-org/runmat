@@ -92,7 +92,7 @@ impl PayloadFacts {
             ),
             Value::LogicalArray(array) => (
                 PayloadKind::Logical,
-                array.shape.clone(),
+                array.shape.to_vec(),
                 PayloadOrigin::Host,
             ),
             Value::GpuTensor(handle) => {

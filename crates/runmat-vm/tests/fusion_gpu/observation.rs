@@ -87,7 +87,10 @@ fn automatic_resident_general_chain_uses_one_private_host_mirror_through_full_ca
                 )
                 .expect("ordinary compiled resident-to-host FullCall route");
                 let vars = &completion.values;
-                let Value::Tensor(output) = &vars[fusion_var_index(&bytecode, "y")] else {
+                let output = vars
+                    .get(fusion_var_index(&bytecode, "y"))
+                    .expect("published host result");
+                let Value::Tensor(output) = &*output else {
                     panic!("automatic CPU selection must publish a host result");
                 };
                 assert_eq!(
@@ -103,12 +106,15 @@ fn automatic_resident_general_chain_uses_one_private_host_mirror_through_full_ca
                     assert!((actual - expected).abs() < if single { 2e-6 } else { 1e-12 });
                 }
                 assert!(
-                    matches!(&vars[fusion_var_index(&bytecode, "x")], Value::GpuTensor(actual)
+                    matches!(vars.get(fusion_var_index(&bytecode, "x")).as_deref(), Some(Value::GpuTensor(actual))
                     if actual.view_identity() == handle.view_identity()
                         && actual.wire_descriptor() == handle.wire_descriptor()),
                     "workspace keeps its exact original resident source"
                 );
-                let Value::Tensor(host) = &vars[fusion_var_index(&bytecode, "h")] else {
+                let host = vars
+                    .get(fusion_var_index(&bytecode, "h"))
+                    .expect("ordinary host source");
+                let Value::Tensor(host) = &*host else {
                     panic!("ordinary host source stays host-resident");
                 };
                 assert_eq!(host.numeric_dtype(), runmat_value::NumericDType::F64);
@@ -220,12 +226,13 @@ pub(super) fn resume_after_input_store(
             .all(|group| !(group.span.start < pc && pc <= group.span.end)),
         "resume boundary must not split a fusion region"
     );
-    let mut vars = vec![None; bytecode.var_count];
-    vars[slot] = Some(input);
+    let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+    vars[slot] = input;
     runmat_vm::InterpreterResumeState {
         pc,
         completion_boundary: None,
-        vars,
+        vars: runmat_vm::InterpreterVars::from_owned(vars),
+        assigned_slots: std::collections::HashSet::from([slot]),
         supplied_inputs: 0,
         requested_outputs: 0,
         missing_input_slots: Default::default(),
@@ -235,8 +242,8 @@ pub(super) fn resume_after_input_store(
     }
 }
 
-fn assert_fusion_numeric_output(bytecode: &runmat_vm::Bytecode, vars: &[Value], inputs: &[f64]) {
-    let value = gather_if_needed(&vars[fusion_var_index(bytecode, "y")]).expect("gather result");
+fn assert_fusion_numeric_output(value: &Value, inputs: &[f64]) {
+    let value = gather_if_needed(value).expect("gather result");
     let Value::Tensor(tensor) = value else {
         panic!("expected numeric tensor, got {value:?}");
     };
@@ -300,11 +307,10 @@ fn fusion_execution_records_one_correlated_provider_lifecycle() {
         )
         .expect("fused execution from host input");
         let vars = &completion.values;
-        assert_fusion_numeric_output(
-            &bytecode,
-            vars.as_slice(),
-            &(1..=4096).map(f64::from).collect::<Vec<_>>(),
-        );
+        let output = vars
+            .get(fusion_var_index(&bytecode, "y"))
+            .expect("completed fusion output");
+        assert_fusion_numeric_output(&output, &(1..=4096).map(f64::from).collect::<Vec<_>>());
         assert_provider_fusion_was_submitted();
 
         let report = runmat_accelerate::placement_report();
@@ -389,8 +395,7 @@ fn fusion_submission_does_not_train_completed_provider_execution() {
         ))
         .expect("session-owned fusion execution");
         assert_fusion_numeric_output(
-            &bytecode,
-            &vars,
+            &vars[fusion_var_index(&bytecode, "y")],
             &(1..=4096).map(f64::from).collect::<Vec<_>>(),
         );
         assert_provider_fusion_was_submitted();
@@ -433,7 +438,7 @@ fn fusion_complete_cost_falls_back_before_transfer_for_small_host_inputs() {
             &bytecode, &mut vars, None, runtime,
         ))
         .expect("shared-runtime selection");
-        assert_fusion_numeric_output(&bytecode, &vars, &[0.25, 0.5]);
+        assert_fusion_numeric_output(&vars[fusion_var_index(&bytecode, "y")], &[0.25, 0.5]);
         assert_one_cpu_full_call(&capture);
 
         let report = runmat_accelerate::placement_report();
@@ -503,7 +508,11 @@ fn compiled_general_private_chain_completes_on_shared_cpu_with_one_receipt() {
             runmat_vm::interpret_with_vars_in_context(&bytecode, &mut vars, None, runtime.clone()),
         )
         .expect("ordinary VM shared CPU general chain");
-        let Value::Tensor(output) = &completion.values[fusion_var_index(&bytecode, "y")] else {
+        let output = completion
+            .values
+            .get(fusion_var_index(&bytecode, "y"))
+            .expect("shared CPU output");
+        let Value::Tensor(output) = &*output else {
             panic!("shared CPU output must remain a host tensor");
         };
         assert_eq!(output.shape(), [1, 2]);

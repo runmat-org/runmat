@@ -28,11 +28,23 @@ impl PendingWorkspaceAdmission {
     ) -> Self {
         Self {
             state: PendingWorkspace {
-                names,
-                assigned,
+                input: super::PendingWorkspaceInput::Legacy {
+                    names,
+                    assigned,
+                    global_aliases,
+                },
                 policy,
                 base_target,
-                global_aliases,
+            },
+        }
+    }
+
+    pub(crate) fn admitted(metadata: super::admitted_target::AdmittedWorkspaceMetadata) -> Self {
+        Self {
+            state: PendingWorkspace {
+                input: super::PendingWorkspaceInput::Admitted(metadata),
+                policy: WorkspaceFramePolicy::Transactional,
+                base_target: BaseTargetAuthority::CanonicalService,
             },
         }
     }
@@ -106,7 +118,7 @@ pub(crate) fn transactional_workspace_admission_with_global_bindings(
     )
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct WorkspaceExecutionCompletion {
     pub state: WorkspaceValueSnapshot,
     pub assigned: WorkspaceAssignedReport,

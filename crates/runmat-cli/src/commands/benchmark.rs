@@ -6,7 +6,6 @@ use runmat_core::{
     abi::{DiagnosticSeverity, ExecutionRequest, HostExecutionPolicy, SourceInput},
     TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
-use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -28,8 +27,9 @@ pub async fn execute_benchmark(
     let file = resolve_benchmark_input(file)?;
     info!("Benchmarking script: {file:?} ({iterations} iterations, JIT: {jit})");
 
-    let content = fs::read_to_string(&file)
-        .with_context(|| format!("Failed to read script file: {file:?}"))?;
+    let captured_source = SourceInput::capture_path(file.to_string_lossy().into_owned())
+        .await
+        .with_context(|| format!("Failed to capture benchmark script: {file:?}"))?;
 
     let mut engine = create_session(jit, false, config, "Failed to create execution engine")?;
     let _project_lease = install_project_for_source(&mut engine, &file, cli).await?;
@@ -39,7 +39,6 @@ pub async fn execute_benchmark(
         jit_enabled: jit,
         accelerate_enabled: config.accelerate.enabled,
     });
-    let source_name = file.to_string_lossy().to_string();
 
     let mut total_time = Duration::ZERO;
     let mut jit_executions: u64 = 0;
@@ -48,10 +47,7 @@ pub async fn execute_benchmark(
     println!("{}", presentation::stdout().info("Warming up..."));
     for _ in 0..3 {
         let request = ExecutionRequest::for_source(
-            SourceInput::Text {
-                name: source_name.clone(),
-                text: content.clone(),
-            },
+            captured_source.clone(),
             crate::diagnostics::parser_compat(config.language.compat),
             HostExecutionPolicy::default(),
             engine.workspace_handle(),
@@ -127,10 +123,7 @@ pub async fn execute_benchmark(
     println!("{}", presentation::stdout().info("Running benchmark..."));
     for i in 1..=iterations {
         let request = ExecutionRequest::for_source(
-            SourceInput::Text {
-                name: source_name.clone(),
-                text: content.clone(),
-            },
+            captured_source.clone(),
             crate::diagnostics::parser_compat(config.language.compat),
             HostExecutionPolicy::default(),
             engine.workspace_handle(),

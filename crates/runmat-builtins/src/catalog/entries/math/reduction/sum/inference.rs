@@ -1,10 +1,12 @@
 use super::super::support::{
-    admitted_sum_controls, inferred_sum_shape, LiteralReductionOutput, SumOutputClass,
+    admitted_sum_controls, has_literal_zero_axis, inferred_sum_shape, LiteralReductionOutput,
+    SumOutputClass,
 };
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    infer_call, CallContract, CallInference, CallRequest, DynamicReason, InferenceDiagnostic,
-    NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact, ValueFact, ValueKindFact,
+    infer_call, infer_reduction, CallContract, CallInference, CallRequest, DynamicReason,
+    InferenceDiagnostic, NumericClass, NumericDomain, NumericFact, ResidencyFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 pub(super) fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
@@ -32,6 +34,17 @@ fn infer_output(
     request: &CallRequest,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> ValueFact {
+    if request
+        .literals
+        .literal_args
+        .iter()
+        .skip(1)
+        .take(request.arguments.len().saturating_sub(1))
+        .any(has_literal_zero_axis)
+    {
+        diagnostics.extend(infer_reduction(input, Some(0)).diagnostics);
+        return ValueFact::unknown(DynamicReason::ConflictingControlFlow);
+    }
     if input.storage == StorageFact::Sparse {
         return ValueFact::unknown(DynamicReason::UnsupportedRepresentation);
     }

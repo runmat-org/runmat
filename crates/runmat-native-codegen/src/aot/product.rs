@@ -4,8 +4,8 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 13;
-pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 8;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 14;
+pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 9;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
@@ -68,6 +68,9 @@ pub struct AotProgramManifest {
     pub source_map: runmat_execution::ExecutableSourceMapV2,
     pub functions: Vec<AotProgramFunction>,
     pub runtime_binding_mode: AotRuntimeBindingMode,
+    /// Canonical MIR reachability contains an optional provider placement
+    /// edge. This is intent, not target backend evidence or a runtime grant.
+    pub provider_reachable: bool,
     pub builtin_bindings: Vec<AotBuiltinBinding>,
 }
 
@@ -152,6 +155,7 @@ impl AotProgramManifest {
             source_map,
             functions,
             runtime_binding_mode,
+            provider_reachable: false,
             builtin_bindings,
         };
         manifest.validate()?;
@@ -495,6 +499,9 @@ pub struct NativeObjectManifest {
     pub catalog_fingerprint: Digest,
     pub optimization: NativeOptimization,
     pub runtime_binding_mode: AotRuntimeBindingMode,
+    /// Exact requirements of verified Native IR. Optional provider
+    /// reachability is carried separately by the program manifest.
+    pub required_capabilities: runmat_types::CapabilitySet,
     pub foreign_policy: Option<runmat_execution::ForeignPolicyRef>,
     pub object_digest: Digest,
     pub object_bytes: u64,

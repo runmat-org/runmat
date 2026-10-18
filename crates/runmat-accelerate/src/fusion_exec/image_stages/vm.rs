@@ -51,6 +51,25 @@ pub enum ImageVmSelectedRoute {
     Original(Box<super::ImageVmOriginalRoute>),
 }
 
+/// Feature-neutral classification for a VM that executes the original source
+/// span without retaining the optional original-route observation.
+pub enum ImageVmSourceFallbackRoute {
+    Declined,
+    Provider(Box<ImageVmStages>),
+    OriginalSource,
+}
+
+impl ImageVmSelectedRoute {
+    pub fn into_source_fallback_route(self) -> ImageVmSourceFallbackRoute {
+        match self {
+            Self::Declined => ImageVmSourceFallbackRoute::Declined,
+            Self::Provider(stage) => ImageVmSourceFallbackRoute::Provider(stage),
+            #[cfg(feature = "wgpu")]
+            Self::Original(_) => ImageVmSourceFallbackRoute::OriginalSource,
+        }
+    }
+}
+
 impl ImageVmStages {
     fn decline_after_probe(
         observed: bool,

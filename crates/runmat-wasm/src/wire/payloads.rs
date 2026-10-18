@@ -8,7 +8,7 @@ use crate::wire::value::{value_to_json, MAX_DATA_PREVIEW};
 use runmat_core::{
     abi::{
         DiagnosticSeverity, DisplayEvent, DisplayLabel, ExecutionOutcome, ExecutionSourceContext,
-        RuntimeDiagnostic, RuntimeFlow, WorkspaceBindingKey,
+        RuntimeDiagnostic, RuntimeFlow,
     },
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
     value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
@@ -265,17 +265,13 @@ impl WorkspacePayload {
                 .workspace_delta
                 .upserts
                 .iter()
-                .filter_map(|binding| {
-                    let name = workspace_binding_name(&binding.key)?.to_string();
-                    Some(workspace_entry_from_value(name, &binding.value))
-                })
+                .map(|binding| workspace_entry_from_value(binding.name.0.clone(), &binding.value))
                 .collect(),
             removals: outcome
                 .workspace_delta
                 .removals
                 .iter()
-                .filter_map(workspace_binding_name)
-                .map(ToString::to_string)
+                .map(|binding| binding.name.0.clone())
                 .collect(),
         }
     }
@@ -326,15 +322,6 @@ impl From<WorkspaceEntry> for WorkspaceEntryPayload {
             residency: entry.residency.as_str(),
             preview_token: entry.preview_token.map(|id| id.to_string()),
         }
-    }
-}
-
-fn workspace_binding_name(key: &WorkspaceBindingKey) -> Option<&str> {
-    match key {
-        WorkspaceBindingKey::Interactive { name, .. }
-        | WorkspaceBindingKey::SourceBinding { binding: name, .. }
-        | WorkspaceBindingKey::Global { name, .. }
-        | WorkspaceBindingKey::Persistent { name, .. } => Some(name.0.as_str()),
     }
 }
 
@@ -839,7 +826,10 @@ pub(crate) fn parse_materialize_options(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use runmat_core::abi::{ExecutionSourceContext, WorkspaceBindingValue, WorkspaceDelta};
+    use runmat_core::abi::{
+        ExecutionSourceContext, GlobalScopeKey, WorkspaceBindingKey, WorkspaceBindingRemoval,
+        WorkspaceBindingValue, WorkspaceDelta,
+    };
     use runmat_core::NumericPreviewValue;
     use runmat_hir::BindingName;
 
@@ -904,29 +894,44 @@ mod tests {
 
     #[test]
     fn execution_payload_serializes_workspace_version_and_removals() {
-        let key = WorkspaceBindingKey::Interactive {
-            session: Uuid::nil(),
-            name: BindingName("x".to_string()),
-        };
-        let workspace_delta = WorkspaceDelta {
-            version: 42,
-            upserts: vec![WorkspaceBindingValue {
-                key: key.clone(),
-                value: Value::Num(7.0),
-            }],
-            removals: vec![key],
-            full_snapshot_required: false,
-        };
-        let outcome = ExecutionOutcome {
-            workspace_delta,
-            ..ExecutionOutcome::default()
-        };
+        for key in [
+            WorkspaceBindingKey::Interactive {
+                session: Uuid::nil(),
+                name: BindingName("x".to_string()),
+            },
+            WorkspaceBindingKey::Global {
+                scope: GlobalScopeKey::Session(Uuid::nil()),
+                name: BindingName("target".to_string()),
+            },
+            WorkspaceBindingKey::GlobalSlot {
+                scope: GlobalScopeKey::Session(Uuid::nil()),
+                slot: 4,
+            },
+        ] {
+            let workspace_delta = WorkspaceDelta {
+                version: 42,
+                upserts: vec![WorkspaceBindingValue {
+                    key: key.clone(),
+                    name: BindingName("x".to_string()),
+                    value: Value::Num(7.0),
+                }],
+                removals: vec![WorkspaceBindingRemoval {
+                    key,
+                    name: BindingName("x".to_string()),
+                }],
+                full_snapshot_required: false,
+            };
+            let outcome = ExecutionOutcome {
+                workspace_delta,
+                ..ExecutionOutcome::default()
+            };
 
-        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
-        assert_eq!(payload.workspace.version, 42);
-        assert_eq!(payload.workspace.removals, vec!["x".to_string()]);
-        assert_eq!(payload.workspace.values.len(), 1);
-        assert_eq!(payload.workspace.values[0].name, "x");
+            let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
+            assert_eq!(payload.workspace.version, 42);
+            assert_eq!(payload.workspace.removals, vec!["x".to_string()]);
+            assert_eq!(payload.workspace.values.len(), 1);
+            assert_eq!(payload.workspace.values[0].name, "x");
+        }
     }
 
     #[test]

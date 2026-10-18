@@ -2,7 +2,6 @@ use std::collections::{BTreeSet, HashMap};
 use std::time::Duration;
 
 use runmat_execution::identity::{ArtifactId, PoolId};
-use runmat_execution::resource::Capability;
 use runmat_execution::state::TaskState;
 use runmat_execution::task::{Callable, RetryPolicy, TaskRequest};
 use runmat_execution::value::GraphRequiredSchema;
@@ -198,30 +197,28 @@ pub(super) async fn execute(
         }
     };
     let mut task_resources = task_resources(&resources)?;
-    if let WorkerProgramRequest::Graph(graph) = &request {
+    let required_graph_capability = if let WorkerProgramRequest::Graph(graph) = &request {
         let schema = GraphRequiredSchema::from_version(graph.schema_version)
             .ok_or_else(|| protocol("remote Graph request has an unsupported schema"))?;
-        if schema == GraphRequiredSchema::SelectedValuesV11 {
+        if let Some(capability) = schema.required_capability() {
             task_resources
                 .required_capabilities
-                .insert(Capability::GraphSelectedValuesV11);
+                .insert(capability.clone());
         }
-    }
-    // V10 work proceeds as soon as workers register. Only a request that
-    // actually requires V11 waits under the existing allocation-startup
-    // deadline for an encrypted, binary-issued ReadyV1. Old V5 workers remain
-    // usable for V10 without any negotiation delay.
-    if task_resources
-        .required_capabilities
-        .contains(&Capability::GraphSelectedValuesV11)
-    {
+        schema.required_capability()
+    } else {
+        None
+    };
+    // V10 work proceeds as soon as workers register. Newer graph requests
+    // wait for an encrypted, binary-issued software-capability proof.
+    if let Some(required_graph_capability) = required_graph_capability {
         loop {
             pool.refresh_worker_software_capabilities().await?;
             let supported = pool.snapshot().pools.get(&pool_id).is_some_and(|pool| {
                 pool.spec
                     .resource_limit
                     .capabilities
-                    .contains(&Capability::GraphSelectedValuesV11)
+                    .contains(&required_graph_capability)
             });
             if supported {
                 break;
@@ -232,7 +229,7 @@ pub(super) async fn execute(
             }
             if tokio::time::Instant::now() >= deadline {
                 return Err(protocol(
-                    "no authenticated remote worker advertised selected Graph V11 support",
+                    "no authenticated remote worker advertised the selected Graph schema",
                 ));
             }
             tokio::select! {

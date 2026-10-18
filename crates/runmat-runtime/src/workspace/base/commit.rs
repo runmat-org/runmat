@@ -1,17 +1,196 @@
-use super::delta::WorkspaceChangeData;
+use super::delta::{WorkspaceChangeData, WorkspaceChangeStorage};
 use super::owner::{BaseWorkspaceCommit, BaseWorkspaceState};
-use super::values::RootedWorkspaceEntries;
+use super::storage::{ManagedWorkspaceStorage, WorkspaceNamespaceAction};
+use super::values::RootedWorkspaceEntry;
 use super::{BaseWorkspaceError, WorkspaceDelta, WorkspaceRevision};
-use std::collections::BTreeSet;
+use crate::workspace::retained::WorkspaceName;
+use crate::workspace::GlobalBindingTarget;
+use std::collections::BTreeMap;
+
+/// Final state of one name touched by an explicitly unbounded direct delta.
+/// The authentic input delta remains live until after the Base borrow retires,
+/// so intermediate Foreign values never release during this preparation.
+struct DirectNameState {
+    local: Option<RootedWorkspaceEntry>,
+    global: Option<GlobalBindingTarget>,
+    changed: bool,
+}
+
+/// Off-state direct-owner transaction. The original delta remains alive while
+/// its independently owned canonical effect is normalized; ignored or
+/// intermediate Foreign values therefore cannot retire under a Base borrow.
+pub(super) struct PreparedDirectCommit {
+    base_revision: WorkspaceRevision,
+    expected_revision: WorkspaceRevision,
+    next_revision: WorkspaceRevision,
+    storage: ManagedWorkspaceStorage,
+    effect: WorkspaceDelta,
+}
+
+impl PreparedDirectCommit {
+    pub(super) fn expected_revision(&self) -> WorkspaceRevision {
+        self.expected_revision
+    }
+
+    pub(super) fn canonicalize_effect(&mut self) {
+        if !self.effect.is_prepared_assignments_only() {
+            self.effect.canonicalize_effect(|name| {
+                (
+                    self.storage.entry(name.as_str()),
+                    self.storage.global_target(name.as_str()).cloned(),
+                    WorkspaceChangeStorage::ManagedOverlay,
+                )
+            });
+        }
+    }
+}
 
 impl BaseWorkspaceState {
-    pub(super) fn commit(
-        &mut self,
+    pub(super) fn prepare_projection_commit(
+        &self,
         base_revision: WorkspaceRevision,
-        delta: WorkspaceDelta,
-    ) -> Result<BaseWorkspaceCommit, BaseWorkspaceError> {
-        let next = self.preflight_commit(base_revision, &delta)?;
-        Ok(self.commit_preflighted(base_revision, next, delta))
+        original: &WorkspaceDelta,
+        effect: WorkspaceDelta,
+        storage: ManagedWorkspaceStorage,
+    ) -> Result<PreparedDirectCommit, BaseWorkspaceError> {
+        let next_revision = self.preflight_commit(base_revision, original)?;
+        assert!(self.entries.is_empty() && self.global_bindings.is_empty());
+        Ok(PreparedDirectCommit {
+            base_revision,
+            expected_revision: self.revision,
+            next_revision,
+            storage,
+            effect,
+        })
+    }
+
+    pub(super) fn prepare_direct_commit(
+        &self,
+        base_revision: WorkspaceRevision,
+        original: &WorkspaceDelta,
+    ) -> Result<PreparedDirectCommit, BaseWorkspaceError> {
+        let mut effect = original.clone_unbounded();
+        let expected_revision = self.revision;
+        let next = self.preflight_commit(base_revision, original)?;
+        let mut storage = self
+            .managed_storage
+            .prepare_unbounded_capture(&self.entries, &self.global_bindings)
+            .map_err(BaseWorkspaceError::HostAllocation)?;
+        if !effect.is_empty() {
+            let mut clear = false;
+            let mut names = BTreeMap::<String, DirectNameState>::new();
+            for change in effect.changes_mut() {
+                let name = match change.data() {
+                    WorkspaceChangeData::Clear => {
+                        clear = true;
+                        names.clear();
+                        change.mark_staged_in_managed_overlay();
+                        continue;
+                    }
+                    WorkspaceChangeData::Assign { name, .. }
+                    | WorkspaceChangeData::Remove { name }
+                    | WorkspaceChangeData::BindGlobal { name, .. }
+                    | WorkspaceChangeData::UnbindGlobal { name } => name.as_str(),
+                };
+                let state = names
+                    .entry(name.to_owned())
+                    .or_insert_with(|| DirectNameState {
+                        local: (!clear).then(|| storage.entry(name)).flatten(),
+                        global: (!clear)
+                            .then(|| storage.global_target(name).cloned())
+                            .flatten(),
+                        changed: false,
+                    });
+                let staged = match change.data() {
+                    WorkspaceChangeData::Assign { entry, .. } if state.global.is_none() => {
+                        state.local = Some(entry.clone());
+                        state.changed = true;
+                        true
+                    }
+                    WorkspaceChangeData::Remove { .. } if state.global.is_none() => {
+                        state.local = None;
+                        state.changed = true;
+                        true
+                    }
+                    WorkspaceChangeData::BindGlobal { target, .. } => {
+                        state.local = None;
+                        state.global = Some(target.clone());
+                        state.changed = true;
+                        true
+                    }
+                    WorkspaceChangeData::UnbindGlobal { .. } => {
+                        state.local = None;
+                        state.global = None;
+                        state.changed = true;
+                        true
+                    }
+                    WorkspaceChangeData::Assign { .. } | WorkspaceChangeData::Remove { .. } => {
+                        false
+                    }
+                    WorkspaceChangeData::Clear => unreachable!("handled clear above"),
+                };
+                if staged {
+                    change.mark_staged_in_managed_overlay();
+                }
+            }
+            if clear {
+                storage.stage_unbounded_clear();
+            }
+            for (name, state) in names {
+                if !state.changed {
+                    continue;
+                }
+                let name = WorkspaceName::unbounded(&name);
+                match (state.local, state.global) {
+                    (_, Some(target)) => storage.stage_unbounded_namespace(
+                        name,
+                        WorkspaceNamespaceAction::BindGlobal,
+                        Some(target),
+                    ),
+                    (Some(entry), None) => storage.stage_unbounded_owned_assignment(name, entry),
+                    (None, None) => storage.stage_unbounded_namespace(
+                        name,
+                        WorkspaceNamespaceAction::UnbindGlobal,
+                        None,
+                    ),
+                }
+            }
+            storage.commit_unbounded_pending();
+        }
+        Ok(PreparedDirectCommit {
+            base_revision,
+            expected_revision,
+            next_revision: next,
+            storage,
+            effect,
+        })
+    }
+
+    /// Caller validated the exact revision after off-state normalization.
+    /// Only owner swaps and name-only journal publication occur under borrow.
+    pub(super) fn install_direct_commit(
+        &mut self,
+        mut prepared: PreparedDirectCommit,
+    ) -> (BaseWorkspaceCommit, ManagedWorkspaceStorage) {
+        assert_eq!(self.revision, prepared.expected_revision);
+        assert!(self.entries.is_empty() && self.global_bindings.is_empty());
+        let retired_storage = std::mem::replace(&mut self.managed_storage, prepared.storage);
+        let previous_revision = self.revision;
+        self.revision = prepared.next_revision;
+        if !prepared.effect.is_empty() {
+            self.journal.record(
+                previous_revision,
+                prepared.next_revision,
+                &mut prepared.effect,
+            );
+        }
+        let commit = BaseWorkspaceCommit::new(
+            prepared.base_revision,
+            previous_revision,
+            prepared.next_revision,
+            prepared.effect,
+        );
+        (commit, retired_storage)
     }
 
     pub(super) fn preflight_commit(
@@ -32,86 +211,5 @@ impl BaseWorkspaceState {
         self.revision
             .next()
             .ok_or(BaseWorkspaceError::RevisionExhausted)
-    }
-
-    pub(super) fn commit_preflighted(
-        &mut self,
-        base_revision: WorkspaceRevision,
-        revision: WorkspaceRevision,
-        delta: WorkspaceDelta,
-    ) -> BaseWorkspaceCommit {
-        let previous_revision = self.revision;
-        if !delta.is_empty() {
-            apply_delta(&mut self.entries, &mut self.global_bindings, &delta);
-            self.revision = revision;
-            self.journal.record(revision, &delta);
-        }
-        let changes = canonical_effect(&delta, &self.entries);
-        BaseWorkspaceCommit::new(base_revision, previous_revision, self.revision, changes)
-    }
-}
-
-/// Collapse an ordered input into the canonical effect observed after commit.
-/// Intermediate assigned values therefore stop retaining managed captures as
-/// soon as publication completes, even when a receipt remains alive.
-fn canonical_effect(delta: &WorkspaceDelta, entries: &RootedWorkspaceEntries) -> WorkspaceDelta {
-    let mut clear = false;
-    let mut names = BTreeSet::new();
-    for change in delta.changes() {
-        match change.data() {
-            WorkspaceChangeData::Assign { name, .. }
-            | WorkspaceChangeData::Remove { name }
-            | WorkspaceChangeData::BindGlobal { name }
-            | WorkspaceChangeData::UnbindGlobal { name } => {
-                names.insert(name.clone());
-            }
-            WorkspaceChangeData::Clear => {
-                clear = true;
-                names.clear();
-            }
-        }
-    }
-    let mut effect = WorkspaceDelta::new();
-    if clear {
-        effect.clear();
-    }
-    for name in names {
-        match entries.get(&name) {
-            Some(entry) => effect.push_assign_entry(name, entry.clone()),
-            None if !clear => effect.remove(name),
-            None => {}
-        }
-    }
-    effect
-}
-
-fn apply_delta(
-    entries: &mut super::values::RootedWorkspaceEntries,
-    global_bindings: &mut std::collections::HashSet<String>,
-    delta: &WorkspaceDelta,
-) {
-    for change in delta.changes() {
-        match change.data() {
-            WorkspaceChangeData::Assign { name, entry } => {
-                if !global_bindings.contains(name) {
-                    entries.insert(name.clone(), entry.clone());
-                }
-            }
-            WorkspaceChangeData::Remove { name } => {
-                entries.remove(name);
-            }
-            WorkspaceChangeData::BindGlobal { name } => {
-                entries.remove(name);
-                global_bindings.insert(name.clone());
-            }
-            WorkspaceChangeData::UnbindGlobal { name } => {
-                entries.remove(name);
-                global_bindings.remove(name);
-            }
-            WorkspaceChangeData::Clear => {
-                entries.clear();
-                global_bindings.clear();
-            }
-        }
     }
 }

@@ -1363,6 +1363,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "complex-bessel"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ec6688beb0cb7bbc135ffc88b928e96c546ee757e6fc31e06dfb6f32de17fea"
+dependencies = [
+ "num-complex",
+ "num-traits",
+]
+
+[[package]]
 name = "compression-codecs"
 version = "0.4.38"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3976,76 +3986,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nano-gemm"
-version = "0.2.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e04345dc84b498ff89fe0d38543d1f170da9e43a2c2bcee73a0f9069f72d081"
-dependencies = [
- "equator 0.2.2",
- "nano-gemm-c32",
- "nano-gemm-c64",
- "nano-gemm-codegen",
- "nano-gemm-core",
- "nano-gemm-f32",
- "nano-gemm-f64",
- "num-complex",
-]
-
-[[package]]
-name = "nano-gemm-c32"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0775b1e2520e64deee8fc78b7732e3091fb7585017c0b0f9f4b451757bbbc562"
-dependencies = [
- "nano-gemm-codegen",
- "nano-gemm-core",
- "num-complex",
-]
-
-[[package]]
-name = "nano-gemm-c64"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9af49a20d58816e6b5ee65f64142e50edb5eba152678d4bb7377fcbf63f8437a"
-dependencies = [
- "nano-gemm-codegen",
- "nano-gemm-core",
- "num-complex",
-]
-
-[[package]]
-name = "nano-gemm-codegen"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cc8d495c791627779477a2cf5df60049f5b165342610eb0d76bee5ff5c5d74c"
-
-[[package]]
-name = "nano-gemm-core"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d998dfa644de87a0f8660e5ea511d7cb5c33b5a2d9847b7af57a2565105089f0"
-
-[[package]]
-name = "nano-gemm-f32"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "879d962e79bc8952e4ad21ca4845a21132540ed3f5e01184b2ff7f720e666523"
-dependencies = [
- "nano-gemm-codegen",
- "nano-gemm-core",
-]
-
-[[package]]
-name = "nano-gemm-f64"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9a513473dce7dc00c7e7c318481ca4494034e76997218d8dad51bd9f007a815"
-dependencies = [
- "nano-gemm-codegen",
- "nano-gemm-core",
-]
-
-[[package]]
 name = "jiff-tzdb"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4738,6 +4678,76 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.118",
+]
+
+[[package]]
+name = "nano-gemm"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e04345dc84b498ff89fe0d38543d1f170da9e43a2c2bcee73a0f9069f72d081"
+dependencies = [
+ "equator 0.2.2",
+ "nano-gemm-c32",
+ "nano-gemm-c64",
+ "nano-gemm-codegen",
+ "nano-gemm-core",
+ "nano-gemm-f32",
+ "nano-gemm-f64",
+ "num-complex",
+]
+
+[[package]]
+name = "nano-gemm-c32"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0775b1e2520e64deee8fc78b7732e3091fb7585017c0b0f9f4b451757bbbc562"
+dependencies = [
+ "nano-gemm-codegen",
+ "nano-gemm-core",
+ "num-complex",
+]
+
+[[package]]
+name = "nano-gemm-c64"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9af49a20d58816e6b5ee65f64142e50edb5eba152678d4bb7377fcbf63f8437a"
+dependencies = [
+ "nano-gemm-codegen",
+ "nano-gemm-core",
+ "num-complex",
+]
+
+[[package]]
+name = "nano-gemm-codegen"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cc8d495c791627779477a2cf5df60049f5b165342610eb0d76bee5ff5c5d74c"
+
+[[package]]
+name = "nano-gemm-core"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d998dfa644de87a0f8660e5ea511d7cb5c33b5a2d9847b7af57a2565105089f0"
+
+[[package]]
+name = "nano-gemm-f32"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "879d962e79bc8952e4ad21ca4845a21132540ed3f5e01184b2ff7f720e666523"
+dependencies = [
+ "nano-gemm-codegen",
+ "nano-gemm-core",
+]
+
+[[package]]
+name = "nano-gemm-f64"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9a513473dce7dc00c7e7c318481ca4494034e76997218d8dad51bd9f007a815"
+dependencies = [
+ "nano-gemm-codegen",
+ "nano-gemm-core",
 ]
 
 [[package]]
@@ -6727,6 +6737,7 @@ name = "runmat-accelerate-api"
 version = "0.6.2"
 dependencies = [
  "anyhow",
+ "futures",
  "once_cell",
  "runmat-execution",
  "runmat-time",
@@ -6879,9 +6890,11 @@ dependencies = [
 name = "runmat-core"
 version = "0.6.2"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "async-trait",
  "futures",
+ "hashbrown 0.16.1",
  "log",
  "pollster 0.3.0",
  "runmat-accelerate",
@@ -7078,14 +7091,18 @@ dependencies = [
 name = "runmat-gc"
 version = "0.6.2"
 dependencies = [
+ "allocator-api2",
+ "hashbrown 0.16.1",
  "log",
  "num_cpus",
  "once_cell",
  "page_size",
  "parking_lot",
  "runmat-accelerate-api",
+ "runmat-execution",
  "runmat-gc-api",
  "runmat-time",
+ "runmat-types",
  "runmat-value",
  "serde",
  "thiserror 1.0.69",
@@ -7476,7 +7493,9 @@ dependencies = [
 name = "runmat-native-executor"
 version = "0.6.2"
 dependencies = [
+ "allocator-api2",
  "futures",
+ "hashbrown 0.16.1",
  "runmat-builtins",
  "runmat-execution",
  "runmat-gc",
@@ -7679,6 +7698,7 @@ name = "runmat-runtime"
 version = "0.6.2"
 dependencies = [
  "accelerate-src",
+ "allocator-api2",
  "anyhow",
  "arrow-array",
  "arrow-schema",
@@ -7691,6 +7711,7 @@ dependencies = [
  "bytes",
  "calamine",
  "chrono",
+ "complex-bessel",
  "compression-codecs",
  "encoding_rs",
  "faer",
@@ -7699,6 +7720,7 @@ dependencies = [
  "getrandom 0.2.17",
  "glam",
  "glob",
+ "hashbrown 0.16.1",
  "hdf5-metno",
  "http 1.4.2",
  "image 0.24.9",
@@ -7946,8 +7968,10 @@ dependencies = [
 name = "runmat-vm"
 version = "0.6.2"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "futures",
+ "hashbrown 0.16.1",
  "log",
  "miette",
  "once_cell",

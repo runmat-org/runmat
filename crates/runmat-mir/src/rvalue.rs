@@ -147,13 +147,16 @@ impl MirRvalue {
         }
     }
 
-    pub fn visit_expression_regions(&self, mut visitor: impl FnMut(&crate::MirExpressionRegion)) {
+    pub fn visit_expression_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
         self.visit_expression_regions_dyn(&mut visitor);
     }
 
     pub(crate) fn visit_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         self.visit_direct_expression_regions_dyn(&mut |region| {
             visitor(region);
@@ -163,7 +166,7 @@ impl MirRvalue {
 
     pub(crate) fn visit_direct_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         match self {
             MirRvalue::Index { indexing, .. } => {
@@ -457,11 +460,18 @@ pub(crate) fn visit_stmt_operands(
         statement.visit_outer_operands_dyn(visitor);
         return;
     }
-    match &statement.kind {
+    visit_stmt_kind_operands(&statement.kind, visitor);
+}
+
+pub(crate) fn visit_stmt_kind_operands(
+    kind: &crate::MirStmtKind,
+    visitor: &mut dyn FnMut(&MirOperand),
+) {
+    match kind {
         crate::MirStmtKind::CaptureSequence { source, .. } => source.visit_operands(&mut *visitor),
         crate::MirStmtKind::Assign { place, value } => {
             visit_place_operands(place, visitor);
-            visit_rvalue_operands(value, visitor, descend_expression_regions);
+            visit_rvalue_operands(value, visitor, true);
         }
         crate::MirStmtKind::MultiAssign { targets, value } => {
             for target in &targets.targets {
@@ -474,16 +484,14 @@ pub(crate) fn visit_stmt_operands(
                     crate::MirOutputTarget::Discard => {}
                 }
             }
-            visit_rvalue_operands(value, visitor, descend_expression_regions);
+            visit_rvalue_operands(value, visitor, true);
         }
         crate::MirStmtKind::SequenceAssign { target, value } => {
             visit_place_operands(target.base(), visitor);
             target.visit_operands(&mut *visitor);
-            visit_rvalue_operands(value, visitor, descend_expression_regions);
+            visit_rvalue_operands(value, visitor, true);
         }
-        crate::MirStmtKind::Expr(value) => {
-            visit_rvalue_operands(value, visitor, descend_expression_regions)
-        }
+        crate::MirStmtKind::Expr(value) => visit_rvalue_operands(value, visitor, true),
         crate::MirStmtKind::PlaceMutation(mutation) => {
             visit_place_operands(&mutation.place, visitor)
         }

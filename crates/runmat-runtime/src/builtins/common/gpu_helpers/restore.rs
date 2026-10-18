@@ -260,7 +260,7 @@ pub fn restore_class_preserving_value_with_operands(
                         && automatic_host_fallback
                         && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if error.is_unsupported()) =>
                 {
-                    return Ok(value)
+                    return Ok(value);
                 }
                 Err(error) => {
                     return Err(build_runtime_error(format!(
@@ -268,7 +268,7 @@ pub fn restore_class_preserving_value_with_operands(
                     ))
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .with_source(error)
-                    .build())
+                    .build());
                 }
             };
             (
@@ -345,7 +345,7 @@ pub fn restore_class_preserving_value_with_operands(
                         && automatic_host_fallback
                         && matches!(&error, runmat_accelerate_api::NumericUploadError::Provider(error) if error.is_unsupported()) =>
                 {
-                    return Ok(value)
+                    return Ok(value);
                 }
                 Err(error) => {
                     return Err(build_runtime_error(format!(
@@ -353,7 +353,7 @@ pub fn restore_class_preserving_value_with_operands(
                     ))
                     .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
                     .with_source(error)
-                    .build())
+                    .build());
                 }
             };
             (

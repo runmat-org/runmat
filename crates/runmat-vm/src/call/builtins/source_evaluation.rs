@@ -3,7 +3,7 @@
 use super::{
     compile_dynamic_workspace_eval_inner, compile_dynamic_workspace_eval_inner_typed,
     parse_dynamic_eval, DynamicEvalCompileRequest, DynamicEvalCompiled, DynamicEvalResultCapture,
-    FunctionRegistry,
+    DynamicTerminalOutput, FunctionRegistry,
 };
 use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort;
@@ -76,9 +76,10 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         .require_base_workspace("evaluate session source")
         .map_err(runmat_runtime::context::RuntimeCapabilityError::into_runtime_error)?
         .owner();
-    let projection = runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
+    let projection = runmat_runtime::workspace::BaseWorkspaceProjectionService::new_for_context(
         base.begin_projection()
             .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?,
+        &runtime,
     );
     let snapshot = projection.snapshot()?;
     let mut names = HashMap::with_capacity(snapshot.len());
@@ -121,11 +122,14 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         builtin: "source evaluation",
         ast: &ast,
         workspace_bindings: &names,
+        workspace_value_count: values.len(),
         lowering_bindings: &names,
         function_registry,
         source_ref: Some(source_ref),
         requested_outputs,
-        result_capture: DynamicEvalResultCapture::TerminalPop,
+        result_capture: DynamicEvalResultCapture::TerminalExpression(
+            DynamicTerminalOutput::Preserve,
+        ),
         select_product: selected.as_ref().map(|_| {
             &requires_product
                 as &dyn Fn(
@@ -141,10 +145,10 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         )
         .map_err(|error| error.into_runtime_error());
     };
-    let (bytecode, result_slot, runtime, _publication) = match compiled {
-        DynamicEvalCompiled::Ordinary(bytecode, result_slot) => (
+    let (bytecode, result, runtime, _publication) = match compiled {
+        DynamicEvalCompiled::Ordinary(bytecode, result) => (
             *bytecode,
-            result_slot,
+            result,
             runtime.without_selected_graph_program(),
             None,
         ),
@@ -160,7 +164,7 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
             )?;
             (
                 admitted.execution_bytecode,
-                admitted.result_slot,
+                admitted.result,
                 admitted.runtime,
                 Some(admitted.publication),
             )
@@ -182,7 +186,7 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
         &bytecode,
         &mut values,
         Some(&source_label),
-        execution_runtime,
+        execution_runtime.clone(),
         Some(admission),
         selected.as_ref().map(|selected| selected.port.clone()),
     )
@@ -190,7 +194,7 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
 
     let pending_changes = projection.has_pending_changes()?;
     if pending_changes {
-        projection.publish()?;
+        projection.publish_with_context(&execution_runtime)?;
     }
     let InterpreterOutcome::Completed(completion) = execution.outcome?;
     if requested_outputs == 0 {
@@ -201,8 +205,13 @@ pub async fn evaluate_session_source_with_dynamic_admission_in_context(
     }
     completion.try_map_owned(
         |completion| {
-            let value = result_slot
-                .and_then(|slot| completion.values.get(slot).cloned())
+            let value = result
+                .and_then(|result| {
+                    completion
+                        .values
+                        .get(result.slot)
+                        .map(|value| value.clone())
+                })
                 .unwrap_or(Value::Num(0.0));
             runmat_value::ValueSequence::single(value)
                 .map_err(runmat_runtime::sequence::sequence_error_to_runtime)

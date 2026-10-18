@@ -289,9 +289,15 @@ fn install_test_callbacks(
             assert!(owners.iter().any(|(function, owner)| {
                 *function == binding.function && lease.matches(owner)
             }));
+            assert_eq!(arguments.capture_count(), 0);
             let invoker = crate::user_functions::current_semantic_function_invoker()
                 .expect("timeit fixture numeric callback");
-            let future = invoker(Some(runtime), binding.function, arguments.values(), outputs);
+            let future = invoker(
+                Some(runtime),
+                binding.function,
+                arguments.supplied(),
+                outputs,
+            );
             Box::pin(async move {
                 let _arguments = arguments;
                 future.await

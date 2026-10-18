@@ -417,6 +417,12 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
         held: Arc<std::sync::Mutex<Vec<Held>>>,
         panic_on_submit: bool,
     }
+    struct RetentionDrop(Arc<std::sync::atomic::AtomicUsize>);
+    impl Drop for RetentionDrop {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
     impl WgpuObservationProgress for Gate {
         fn reserve(
             &self,
@@ -505,9 +511,20 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
             budget.clone(),
             Some(gate.clone()),
         );
+        let provider_a = ProviderOperationReceipt::with_wgpu_progress(budget.clone(), gate.clone());
+        let retention_drops = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let (retention_completion, retirement) =
+            with_provider_observation(Some(provider_a.recorder()), || {
+                PreparedSubmittedAllocationRetention::reserve().unwrap()
+            });
+        pending
+            .retain_allocations_until_next_submit(
+                retention_completion,
+                SubmittedAllocationRetention::new(RetentionDrop(retention_drops.clone())),
+            )
+            .unwrap();
         let command_a = CommandProfilingRoot::new();
         let command_b = CommandProfilingRoot::new();
-        let provider_a = ProviderOperationReceipt::with_wgpu_progress(budget.clone(), gate.clone());
         let provider_b = match provider.begin_operation_observation(&query) {
             ProviderObservationSupport::Observed(receipt) => receipt,
             ProviderObservationSupport::Unsupported => panic!("native progress required"),
@@ -554,6 +571,11 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
             })
             .unwrap();
         pending.commit();
+        assert_eq!(
+            retention_drops.load(std::sync::atomic::Ordering::SeqCst),
+            usize::from(panicking),
+            "an accepted submission retains allocations until its exact progress callback"
+        );
         let held = if panicking {
             assert!(gate.held.lock().unwrap().is_empty());
             None
@@ -611,6 +633,16 @@ fn scope_swapped_direct_queries_retain_quota_until_device_retirement() {
             );
             std::thread::yield_now();
         }
+        assert_eq!(
+            retention_drops.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "submitted allocation retention releases exactly once after settlement"
+        );
+        assert_eq!(
+            futures::executor::block_on(retirement).is_ok(),
+            !stopped && !panicking,
+            "retirement proof follows exact queue progress, never semantic-map completion"
+        );
         if matched_provider {
             assert!(matches!(
                 provider_a.status(),

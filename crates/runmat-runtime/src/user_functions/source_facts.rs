@@ -19,7 +19,7 @@ type ExternalSourceResolver =
 
 pub type SelectedExternalInvocation = dyn Fn(
     crate::context::RuntimeContext,
-    Vec<runmat_value::Value>,
+    crate::call::RootedFunctionArguments,
     usize,
     Option<runmat_value::LexicalEnvironment>,
 ) -> crate::context::RuntimeServiceFuture<
@@ -64,7 +64,7 @@ pub(super) async fn invoke_selected_native_lease(
     function: usize,
     origin: runmat_execution::FunctionBindingOrigin,
     lease: Rc<dyn runmat_value::SelectedNativeFunctionLease>,
-    arguments: Vec<runmat_value::Value>,
+    arguments: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {

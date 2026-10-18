@@ -13,7 +13,7 @@ fn current_bound_nested_and_escaped_handles_enter_native_with_their_activation()
         ExecutableSource::new(
             "native-bound-lexical@1",
             "nativeBoundLexical.m",
-            "function [direct, escaped] = nativeBoundLexical(x)\nshared = x;\nhandle = @bump;\ndirect = feval(handle, 2);\nreturned = makeAdder(7);\nescaped = feval(returned, 3);\nfunction y = bump(delta)\nshared = shared + delta;\ny = shared;\nend\nfunction result = makeAdder(base)\nfunction y = add(value)\ny = base + value;\nend\nresult = @add;\nend\nend\n",
+            "function [direct, mapped, escaped] = nativeBoundLexical(x)\nshared = x;\nhandle = @bump;\ndirect = feval(handle, 2);\nmapped = cellfun(handle, {1, 2});\nreturned = makeAdder(7);\nescaped = feval(returned, 3);\nfunction y = bump(delta)\nshared = shared + delta;\ny = shared;\nend\nfunction result = makeAdder(base)\nfunction y = add(value)\ny = base + value;\nend\nresult = @add;\nend\nend\n",
         ),
         None,
     ))
@@ -25,16 +25,23 @@ fn current_bound_nested_and_escaped_handles_enter_native_with_their_activation()
         ProcedureInvocation {
             target: ProcedureTarget::Function("nativeBoundLexical".into()),
             arguments: vec![Value::Num(4.0)],
-            requested_outputs: 2,
+            requested_outputs: 3,
         },
         &InvocationControl::default().force_generic_native(),
     ))
     .expect("execute forced native bound lexical fixture");
-    assert_eq!(result.as_slice(), &[Value::Num(6.0), Value::Num(10.0)]);
+    assert_eq!(
+        result.as_slice(),
+        &[
+            Value::Num(6.0),
+            Value::Tensor(runmat_value::Tensor::new(vec![7.0, 9.0], vec![1, 2]).unwrap()),
+            Value::Num(10.0),
+        ]
+    );
     assert_eq!(
         super::native_semantic::bound_native_completions(),
-        2,
-        "both bound handles must complete generated native execution, not VM deoptimization"
+        4,
+        "feval and both mapped calls must retain their bound captures in generated native execution"
     );
 }
 

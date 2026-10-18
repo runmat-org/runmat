@@ -31,15 +31,22 @@ pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
             implicit_nargout: None,
         },
         argument_validations: vec![],
+        binding_locals: vec![],
+        closure_captures: vec![],
         locals: vec![],
         entry: NativeBlockId(0),
         blocks: vec![entry_block()],
+        expression_continuation_geometry:
+            runmat_native_codegen::NativeExpressionContinuationGeometry {
+                region_capacity: 16,
+                retained_input_capacity: 16,
+            },
         expected_sites: vec![],
     };
     let (mut state, _) = HostState::new(HostStateInput {
         functions: Arc::new(vec![function.clone()]),
         function,
-        arguments: vec![],
+        inputs: crate::execute::state::NativeFunctionInputs::Legacy(vec![]),
         requested_outputs: 0,
         runtime: runtime.clone(),
         program_capture: None,

@@ -1,16 +1,17 @@
-//! Exact retained host outputs for finite random calls. The sampler fills the
-//! claimed storage directly, so neither Single nor complex output needs a
-//! second whole-result conversion buffer.
+//! Native-class host outputs for normal draws. A finite route uses an exact
+//! retained claim; an unbounded route fills one final buffer directly.
 
 use super::{builtin_error, random};
+use crate::builtins::common::random::gpu_like::ExactHostRandomMode;
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
 };
 use crate::execution::CpuCooperationBudget;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_value::{
-    ComplexElement, ComplexStorage, ComplexTensor, ExactHostComplexTensorAllocation,
-    ExactHostTensorAllocation, HostComplexBuffer, NumericDType, Tensor,
+    exact_capacity_vec_from_slice, exact_capacity_vec_with, ComplexElement, ComplexStorage,
+    ComplexTensor, ExactHostComplexTensorAllocation, ExactHostTensorAllocation, HostComplexBuffer,
+    NumericDType, Tensor,
 };
 
 fn allocation_error(error: HostAllocationError) -> RuntimeError {
@@ -31,29 +32,48 @@ fn output_size(shape: &[usize]) -> BuiltinResult<usize> {
 
 fn receipt(
     turn: &random::RandomTurn,
-    requested_bytes: usize,
+    shape: &[usize],
+    dtype: NumericDType,
+    complex: bool,
+    mode: ExactHostRandomMode,
 ) -> BuiltinResult<Option<(crate::context::RuntimeContext, HostAllocationReceipt)>> {
-    let Some(runtime) = turn.owner().cloned() else {
+    if mode == ExactHostRandomMode::Unbounded {
         return Ok(None);
+    }
+    let retained_bytes = if complex {
+        HostAllocationPlan::retained_complex_tensor_bytes(dtype, shape)
+    } else {
+        HostAllocationPlan::retained_tensor_bytes(dtype, shape)
+    }
+    .map_err(allocation_error)?;
+    let Some(runtime) = turn.owner().cloned() else {
+        return Err(builtin_error(
+            "randn: selected exact host output lost its runtime owner",
+        ));
     };
-    let requested_bytes = u64::try_from(requested_bytes)
-        .map_err(|_| builtin_error("randn: output allocation size overflow"))?;
-    let plan = HostAllocationPlan::new(0, requested_bytes).map_err(allocation_error)?;
-    Ok(HostAllocationReceipt::admit(Some(&runtime), plan)
+    let plan = HostAllocationPlan::new(0, retained_bytes).map_err(allocation_error)?;
+    let receipt = HostAllocationReceipt::admit(Some(&runtime), plan)
         .map_err(allocation_error)?
-        .map(|receipt| (runtime, receipt)))
+        .ok_or_else(|| builtin_error("randn: selected exact host output lost managed admission"))?;
+    Ok(Some((runtime, receipt)))
 }
 
 fn native_storage<T: Clone>(len: usize, zero: T) -> BuiltinResult<Vec<T>> {
-    let mut values = Vec::new();
-    values.try_reserve_exact(len).map_err(|source| {
+    exact_capacity_vec_with(len, |_| zero.clone()).map_err(|source| {
         build_runtime_error("randn: cannot reserve normal output storage")
             .with_builtin("randn")
             .with_source(source)
             .build()
-    })?;
-    values.resize(len, zero);
-    Ok(values)
+    })
+}
+
+fn unbounded_shape(shape: &[usize]) -> BuiltinResult<Vec<usize>> {
+    exact_capacity_vec_from_slice(shape).map_err(|source| {
+        build_runtime_error("randn: cannot reserve output shape")
+            .with_builtin("randn")
+            .with_source(source)
+            .build()
+    })
 }
 
 async fn fill_values(
@@ -98,11 +118,11 @@ pub(super) async fn real(
     turn: &mut random::RandomTurn,
     shape: &[usize],
     dtype: NumericDType,
-) -> BuiltinResult<Option<Tensor>> {
+    mode: ExactHostRandomMode,
+) -> BuiltinResult<Tensor> {
     let len = output_size(shape)?;
-    let requested_bytes = ExactHostTensorAllocation::requested_bytes(dtype, shape)
-        .map_err(|error| builtin_error(format!("randn: {error}")))?;
-    let Some((runtime, receipt)) = receipt(turn, requested_bytes)? else {
+    let Some((runtime, receipt)) = receipt(turn, shape, dtype, false, mode)? else {
+        let output_shape = unbounded_shape(shape)?;
         if dtype == NumericDType::F32 {
             let mut values = native_storage(len, 0.0_f32)?;
             fill_values(turn, len, |index, value| {
@@ -110,11 +130,18 @@ pub(super) async fn real(
                 Ok(())
             })
             .await?;
-            return Tensor::from_f32(values, shape.to_vec())
-                .map(Some)
-                .map_err(builtin_error);
+            return Tensor::from_f32(values, output_shape).map_err(builtin_error);
         }
-        return Ok(None);
+        if dtype == NumericDType::F64 {
+            let mut values = native_storage(len, 0.0_f64)?;
+            fill_values(turn, len, |index, value| {
+                values[index] = value;
+                Ok(())
+            })
+            .await?;
+            return Tensor::new(values, output_shape).map_err(builtin_error);
+        }
+        return Err(builtin_error("randn: output must be single or double"));
     };
     let mut output = receipt
         .with_output_allocation(&runtime, |permit| {
@@ -160,18 +187,18 @@ pub(super) async fn real(
         .into_tensor()
         .map_err(|error| builtin_error(format!("randn: {error}")))?;
     receipt.checkpoint(&runtime).map_err(allocation_error)?;
-    Ok(Some(output))
+    Ok(output)
 }
 
 pub(super) async fn complex(
     turn: &mut random::RandomTurn,
     shape: &[usize],
     dtype: NumericDType,
+    mode: ExactHostRandomMode,
 ) -> BuiltinResult<ComplexTensor> {
     let len = output_size(shape)?;
-    let requested_bytes = ExactHostComplexTensorAllocation::requested_bytes(dtype, shape)
-        .map_err(|error| builtin_error(format!("randn: {error}")))?;
-    let Some((runtime, receipt)) = receipt(turn, requested_bytes)? else {
+    let Some((runtime, receipt)) = receipt(turn, shape, dtype, true, mode)? else {
+        let output_shape = unbounded_shape(shape)?;
         return match dtype {
             NumericDType::F64 => {
                 let mut values = native_storage(len, ComplexElement(0.0_f64, 0.0_f64))?;
@@ -182,7 +209,7 @@ pub(super) async fn complex(
                 .await?;
                 ComplexTensor::from_complex_storage(
                     ComplexStorage::F64(HostComplexBuffer::from_elements(values)),
-                    shape.to_vec(),
+                    output_shape,
                 )
                 .map_err(builtin_error)
             }
@@ -195,7 +222,7 @@ pub(super) async fn complex(
                 .await?;
                 ComplexTensor::from_complex_storage(
                     ComplexStorage::F32(HostComplexBuffer::from_elements(values)),
-                    shape.to_vec(),
+                    output_shape,
                 )
                 .map_err(builtin_error)
             }

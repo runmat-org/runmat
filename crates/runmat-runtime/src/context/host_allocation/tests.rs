@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use runmat_execution::{cancellation::CancellationSource, CancellationReason};
-use runmat_value::{ExactHostTensor2dAllocation, NumericDType, NumericScalar, Value};
+use runmat_value::{
+    ExactHostAllocationPermit, ExactHostTensor2dAllocation, NumericDType, NumericScalar, Value,
+};
 
 use super::*;
 use crate::context::host_effect::ManagedHostEffectLedger;
@@ -69,6 +71,141 @@ impl RuntimeParallelService for UnmanagedFinite {
 fn runtime(ports: RuntimeServicePorts) -> RuntimeContext {
     RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_service_ports(ports)
+}
+
+#[test]
+fn trace_scratch_growth_claims_exact_live_bytes_and_revokes_new_growth() {
+    let ledger = ManagedHostEffectLedger::new_with_epoch(4_096, 7);
+    let cancellation = CancellationSource::new();
+    let runtime = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    )
+    .with_cancellation_token(cancellation.token());
+    let scratch = HostAllocationReceipt::dynamic_trace_scratch(&runtime)
+        .unwrap()
+        .expect("finite trace issuer");
+    let claim = scratch.reserve_exact_claim(128).expect("admitted growth");
+    let charged = 128 + crate::context::host_effect::owned_output_claim_metadata_bytes();
+    assert_eq!(ledger.snapshot().live_reserved_bytes, charged as u64);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged as u64);
+
+    cancellation.cancel(CancellationReason::User);
+    assert!(scratch.reserve_exact_claim(1).is_err());
+    assert_eq!(
+        scratch.source_failure(runmat_value::ExactHostNumericAllocationError::ExceedsPermit),
+        HostAllocationError::Cancelled
+    );
+    drop(claim);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+}
+
+#[test]
+fn admitted_collection_blocks_survive_retirement_without_new_growth() {
+    use allocator_api2::alloc::Allocator;
+    use std::alloc::Layout;
+
+    for layout in [
+        Layout::from_size_align(37, 64).unwrap(),
+        Layout::from_size_align(0, 64).unwrap(),
+    ] {
+        let ledger = ManagedHostEffectLedger::new(65_536);
+        let context = runtime(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        );
+        let physical = AdmittedCollectionAllocator::requested_bytes(layout).unwrap();
+        let charged = HostAllocationPlan::retained_exact_output_bytes(
+            physical as u64,
+            AdmittedCollectionAllocator::retained_claim_count(),
+        )
+        .unwrap();
+        let receipt = HostAllocationReceipt::admit(
+            Some(&context),
+            HostAllocationPlan::new(0, charged).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        let allocator = AdmittedCollectionAllocator::new(receipt.output_permit(&context).unwrap());
+        let block = allocator.allocate(layout).unwrap();
+        let pointer = block.cast::<u8>();
+        assert_eq!(pointer.as_ptr().align_offset(layout.align()), 0);
+        // SAFETY: the returned block has exactly the requested writable size.
+        unsafe { pointer.as_ptr().write_bytes(0x5a, layout.size()) };
+        drop(receipt);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, charged);
+        let replacement = Layout::from_size_align(layout.size() + 1, layout.align()).unwrap();
+        // SAFETY: pointer/layout identify the live block. Failed growth must
+        // leave it owned by the original allocation, even after revocation.
+        assert!(unsafe { allocator.clone().grow(pointer, layout, replacement) }.is_err());
+        for index in 0..layout.size() {
+            // SAFETY: the original block remains live after failed growth.
+            assert_eq!(unsafe { pointer.as_ptr().add(index).read() }, 0x5a);
+        }
+        // SAFETY: consume the sole block with its original exact layout.
+        unsafe { allocator.deallocate(pointer, layout) };
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+}
+
+#[test]
+fn operation_collection_growth_uses_only_the_installed_receipt() {
+    use allocator_api2::alloc::Allocator;
+    use std::alloc::Layout;
+
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let layout = Layout::from_size_align(41, 16).unwrap();
+    let block = HostAllocationPlan::retained_exact_output_bytes(
+        AdmittedCollectionAllocator::requested_bytes(layout).unwrap() as u64,
+        AdmittedCollectionAllocator::retained_claim_count(),
+    )
+    .unwrap();
+    let first = HostAllocationReceipt::admit(
+        Some(&context),
+        HostAllocationPlan::new(0, OperationPermitGate::retained_bytes().unwrap() + block).unwrap(),
+    )
+    .unwrap()
+    .unwrap();
+    let gate = OperationPermitGate::prepare(&first.output_permit(&context).unwrap()).unwrap();
+    let allocator = OperationCollectionAllocator::new(gate.clone());
+    assert!(allocator.allocate(layout).is_err());
+    let installed = gate
+        .install(first.output_permit(&context).unwrap())
+        .unwrap();
+    assert!(matches!(
+        gate.install(first.output_permit(&context).unwrap()),
+        Err(OperationPermitGateError::AlreadyInstalled)
+    ));
+    let first_block = allocator.allocate(layout).unwrap().cast::<u8>();
+    drop(installed);
+    drop(first);
+    assert!(allocator.allocate(layout).is_err());
+
+    let second =
+        HostAllocationReceipt::admit(Some(&context), HostAllocationPlan::new(0, block).unwrap())
+            .unwrap()
+            .unwrap();
+    let installed = gate
+        .install(second.output_permit(&context).unwrap())
+        .unwrap();
+    let second_block = allocator.allocate(layout).unwrap().cast::<u8>();
+    drop(installed);
+    drop(second);
+    unsafe {
+        allocator.deallocate(first_block, layout);
+        allocator.deallocate(second_block, layout);
+    }
+    assert_eq!(
+        ledger.snapshot().live_claimed_bytes,
+        OperationPermitGate::retained_bytes().unwrap()
+    );
+    drop(allocator);
+    drop(gate);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
 }
 
 #[test]
@@ -143,8 +280,7 @@ fn retained_state_rechecks_ledgers_epoch_even_if_service_reports_stale_epoch() {
 #[test]
 fn ordinary_numeric_call_shares_one_ledger_and_transfers_retained_output() {
     let scratch = HostAllocationPlan::numeric_workspace_bytes(NumericDType::F64, 4).unwrap();
-    let output = ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, 1, 4).unwrap();
-    let output = u64::try_from(output).unwrap();
+    let output = HostAllocationPlan::retained_tensor_bytes(NumericDType::F64, &[1, 4]).unwrap();
     let plan = HostAllocationPlan::new(scratch, output).unwrap();
     let ledger = ManagedHostEffectLedger::new_with_epoch(scratch + output, 7);
     let runtime = runtime(
@@ -223,6 +359,20 @@ fn complex_scratch_uses_one_claimed_interleaved_real_backing() {
     assert_eq!(workspace.get(3), None);
     assert_eq!(ledger.snapshot().live_claimed_bytes, scratch);
     drop(workspace);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+    let mut lanes = receipt
+        .temporary_numeric(&runtime, NumericDType::F64, 6)
+        .unwrap();
+    lanes.as_complex_f64_slice_mut().unwrap()[1] = runmat_value::ComplexElement(2.0, -3.0);
+    assert_eq!(lanes.as_f64_slice().unwrap()[2..4], [2.0, -3.0]);
+    drop(lanes);
+    let mut singles = receipt
+        .temporary_numeric(&runtime, NumericDType::F32, 6)
+        .unwrap();
+    singles.as_complex_f32_slice_mut().unwrap()[2] = runmat_value::ComplexElement(4.0, -5.0);
+    assert_eq!(singles.as_f32_slice_mut().unwrap()[4..6], [4.0, -5.0]);
+    drop(singles);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
 }
 
@@ -335,9 +485,9 @@ fn owned_cpu_work_retains_scratch_after_cancelled_caller_retires_receipt() {
 
 #[test]
 fn output_allocation_restores_control_cause_and_drops_unpublished_claim() {
-    let output = ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, 1, 2).unwrap();
-    let plan = HostAllocationPlan::new(0, u64::try_from(output).unwrap()).unwrap();
-    let ledger = ManagedHostEffectLedger::new_with_epoch(u64::try_from(output).unwrap(), 11);
+    let output = HostAllocationPlan::retained_tensor_bytes(NumericDType::F64, &[1, 2]).unwrap();
+    let plan = HostAllocationPlan::new(0, output).unwrap();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(output, 11);
     let cancellation = CancellationSource::new();
     let runtime = runtime(
         RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),

@@ -584,9 +584,6 @@ fn bar_descriptor_error(
 #[derive(Clone, Copy)]
 struct BarRenderConfig {
     builtin_name: &'static str,
-    title: &'static str,
-    x_label: &'static str,
-    y_label: &'static str,
     orientation: Orientation,
     gpu_orientation: BarOrientation,
     invalid_error: &'static BuiltinErrorDescriptor,
@@ -605,9 +602,6 @@ impl BarRenderConfig {
 
 const BAR_CONFIG: BarRenderConfig = BarRenderConfig {
     builtin_name: BUILTIN_NAME,
-    title: "Bar Chart",
-    x_label: "Category",
-    y_label: "Value",
     orientation: Orientation::Vertical,
     gpu_orientation: BarOrientation::Vertical,
     invalid_error: &BAR_ERROR_INVALID_ARGUMENT,
@@ -616,9 +610,6 @@ const BAR_CONFIG: BarRenderConfig = BarRenderConfig {
 
 const BARH_CONFIG: BarRenderConfig = BarRenderConfig {
     builtin_name: BARH_BUILTIN_NAME,
-    title: "Horizontal Bar Chart",
-    x_label: "Value",
-    y_label: "Category",
     orientation: Orientation::Horizontal,
     gpu_orientation: BarOrientation::Horizontal,
     invalid_error: &BARH_ERROR_INVALID_ARGUMENT,
@@ -717,12 +708,7 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
     let style = parse_bar_style_args(config.builtin_name, &rest, defaults)?;
     let mut input = Some(BarInput::from_value(x_values, values, config).await?);
-    let opts = PlotRenderOptions {
-        title: config.title,
-        x_label: config.x_label,
-        y_label: config.y_label,
-        ..Default::default()
-    };
+    let opts = PlotRenderOptions::default();
     let plot_indices = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
@@ -1722,7 +1708,10 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_builtin_matches_backend_contract() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
         setup_plot_tests();
+        crate::builtins::plotting::state::reset_hold_state_for_run();
+        crate::builtins::plotting::state::clear_figure(None).unwrap();
         let out = bar_builtin(vec![Value::Tensor(tensor_from(&[1.0, 2.0, 3.0]))]);
         if let Err(err) = out {
             assert!(
@@ -1730,6 +1719,13 @@ pub(crate) mod tests {
                 "unexpected error: {err}"
             );
         }
+        let figure = crate::builtins::plotting::clone_figure(
+            crate::builtins::plotting::current_figure_handle(),
+        )
+        .expect("bar figure exists");
+        assert_eq!(figure.title.as_deref().unwrap_or_default(), "");
+        assert_eq!(figure.x_label.as_deref().unwrap_or_default(), "");
+        assert_eq!(figure.y_label.as_deref().unwrap_or_default(), "");
     }
 
     #[test]

@@ -521,7 +521,7 @@ pub(in crate::builtins::table) fn value_shape_or_column(
     match value {
         Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::StringArray(array) => Ok(array.shape.clone()),
-        Value::LogicalArray(array) => Ok(array.shape.clone()),
+        Value::LogicalArray(array) => Ok(array.shape.to_vec()),
         Value::Cell(cell) => Ok(cell.shape.clone()),
         Value::CharArray(array) => Ok(vec![array.rows, 1]),
         _ => Ok(vec![1, 1]),

@@ -5,6 +5,7 @@
 //! the concrete instruction-loop future in every nested semantic Process frame.
 
 use super::*;
+use crate::interpreter::vars::InterpreterVars;
 #[cfg(feature = "native-accel")]
 use runmat_runtime::context::VmFusionHostInstruction;
 use std::future::Future;
@@ -12,7 +13,9 @@ use std::pin::Pin;
 
 #[path = "instruction_loop/fusion_publish.rs"]
 mod fusion_publish;
-use fusion_publish::{after_global_store, after_local_fallback_store, after_local_store};
+use fusion_publish::after_global_store;
+#[path = "instruction_loop/stochastic_source.rs"]
+mod stochastic_source;
 #[cfg(feature = "native-accel")]
 use fusion_publish::{publish_fusion_stores, FusionPublicationFrame};
 #[cfg(feature = "native-accel")]
@@ -25,7 +28,7 @@ pub(super) struct InstructionLoopContext<'a> {
     pub(super) bytecode: &'a Bytecode,
     pub(super) pc: &'a mut usize,
     pub(super) stack: &'a mut Vec<Value>,
-    pub(super) vars: &'a mut Vec<Value>,
+    pub(super) vars: &'a mut InterpreterVars,
     pub(super) completion_boundary:
         Option<crate::interpreter::state::InterpreterCompletionBoundary>,
     pub(super) completion_assigned_slots: &'a mut Option<HashSet<usize>>,
@@ -132,7 +135,7 @@ type FusionExecutionFuture<'a> = Pin<
 #[cfg(feature = "native-accel")]
 struct FusionExecutionFrame<'a> {
     stack: &'a mut Vec<Value>,
-    vars: &'a mut Vec<Value>,
+    vars: &'a mut InterpreterVars,
     context: &'a mut crate::bytecode::program::ExecutionContext,
     persistent_aliases: &'a crate::interpreter::PersistentAliases,
     current_function_name: &'a str,
@@ -255,6 +258,8 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
     } else {
         Vec::new()
     };
+    #[cfg(all(feature = "native-accel", not(feature = "wgpu")))]
+    let mut original_image_span: Option<runmat_accelerate::InstrSpan> = None;
     while *pc < bytecode.instructions.len() {
         #[cfg(feature = "wgpu")]
         if let Some(route) = fusion_observations.take_completed_original() {
@@ -280,9 +285,20 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             .copied()
             .flatten()
             .and_then(|scope| catch_exceptions.get(&scope).cloned());
+        #[cfg(all(feature = "native-accel", not(feature = "wgpu")))]
+        if original_image_span
+            .as_ref()
+            .is_some_and(|span| *pc <= span.start || *pc > span.end)
+        {
+            original_image_span = None;
+        }
+        #[cfg(all(feature = "native-accel", not(feature = "wgpu")))]
+        let mut image_original_source = original_image_span.is_some();
+        #[cfg(all(feature = "native-accel", feature = "wgpu"))]
+        let mut image_original_source = false;
         #[cfg(feature = "native-accel")]
         if let Some(installation) = image_installation.as_ref() {
-            let image_result = image_stages::execute(
+            let prepared_image = image_stages::prepare(
                 installation,
                 *pc,
                 image_stages::ImageStageFrame {
@@ -290,13 +306,31 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                     context: &mut *context,
                     var_names: &bytecode.var_names,
                     completion_assigned_slots,
-                    global_aliases,
                     persistent_aliases: &*persistent_aliases,
                     current_function_name,
                     missing_input_slots,
                 },
-            )
-            .await;
+            );
+            let image_result = match prepared_image {
+                Err(error) => Err(error),
+                Ok(None) => Ok(image_stages::ImageStageOutcome::Declined),
+                Ok(Some(selected)) => {
+                    let runtime = selected.runtime().clone();
+                    let mut outcome = image_stages::ImageStageOutcome::Declined;
+                    let outcome_slot = &mut outcome;
+                    let completed = match runmat_runtime::execution::admit_domain_continuation_with(
+                        &runtime,
+                        move || async move {
+                            *outcome_slot = image_stages::execute_selected(selected).await?;
+                            Ok(())
+                        },
+                    ) {
+                        Err(error) => Err(error),
+                        Ok(continuation) => continuation.await,
+                    };
+                    completed.map(|()| outcome)
+                }
+            };
             match image_result {
                 Ok(image_stages::ImageStageOutcome::Declined) => {}
                 #[cfg(feature = "wgpu")]
@@ -306,6 +340,13 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                     route,
                 }) => {
                     fusion_observations.begin_original(span, publication, route);
+                    image_original_source = true;
+                    interp_engine::check_cancelled(&context.runtime)?;
+                }
+                #[cfg(not(feature = "wgpu"))]
+                Ok(image_stages::ImageStageOutcome::OriginalSource { span }) => {
+                    original_image_span = Some(span);
+                    image_original_source = true;
                     interp_engine::check_cancelled(&context.runtime)?;
                 }
                 Ok(image_stages::ImageStageOutcome::Executed { next_pc }) => {
@@ -321,7 +362,6 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                         &mut *vars,
                         &mut *last_exception,
                         &mut *pc,
-                        refresh_workspace_state,
                     ) {
                         interp_dispatch::ExceptionHandling::Caught => continue,
                         interp_dispatch::ExceptionHandling::Uncaught(error) => return Err(*error),
@@ -336,7 +376,10 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 .and_then(|plan| plan.group_for_pc_clone(*pc)),
             fusion_accel_graph.as_ref(),
         ) {
-            if plan.group.span.start == *pc && !fusion_observations.contains_start(*pc) {
+            if plan.group.span.start == *pc
+                && !fusion_observations.contains_start(*pc)
+                && !image_original_source
+            {
                 let span = plan.group.span.clone();
                 let crosses_catch_scope = !bytecode.catch_scopes.is_empty()
                     && bytecode
@@ -471,7 +514,6 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                     context: &mut *context,
                                     var_names: &bytecode.var_names,
                                     completion_assigned_slots,
-                                    global_aliases,
                                     persistent_aliases,
                                     current_function_name,
                                     missing_input_slots,
@@ -485,7 +527,6 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                     &mut *vars,
                                     &mut *last_exception,
                                     &mut *pc,
-                                    refresh_workspace_state,
                                 ) {
                                     interp_dispatch::ExceptionHandling::Caught => continue,
                                     interp_dispatch::ExceptionHandling::Uncaught(err) => {
@@ -534,7 +575,6 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                                 &mut *vars,
                                 &mut *last_exception,
                                 &mut *pc,
-                                refresh_workspace_state,
                             ) {
                                 interp_dispatch::ExceptionHandling::Caught => continue,
                                 interp_dispatch::ExceptionHandling::Uncaught(err) => {
@@ -582,40 +622,14 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             &bytecode.instructions[*pc],
             stack.len(),
         );
-        let store_var_global_aliases = match &bytecode.instructions[*pc] {
-            Instr::StoreVar(_) => Some(global_aliases.clone()),
-            _ => None,
-        };
-        let store_local_global_aliases = match &bytecode.instructions[*pc] {
-            Instr::StoreLocal(_) => Some(global_aliases.clone()),
-            _ => None,
-        };
-        let mut store_var_before_overwrite = |_current: &Value, _incoming: &Value| {};
-        let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
-            if let Some(ref aliases) = store_var_global_aliases {
-                after_global_store(
-                    completion_assigned_slots,
-                    aliases,
-                    stored_index,
-                    stored_value,
-                );
-            } else if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
-                assigned_slots.insert(stored_index);
-            }
+        let mut store_var_before_overwrite = |_stored_index: usize| {};
+        let mut store_var_after_store = |stored_index: usize| {
+            after_global_store(completion_assigned_slots, stored_index);
         };
         let mut store_local_before_local_overwrite = |_current: &Value, _incoming: &Value| {};
-        let mut store_local_before_var_overwrite = |_current: &Value, _incoming: &Value| {};
-        let mut store_local_after_store = |stored_offset: usize, stored_value: &Value| {
-            if let Some(ref aliases) = store_local_global_aliases {
-                after_local_store(aliases, stored_offset, stored_value);
-            }
-        };
-        let mut store_local_after_fallback_store =
-            |_func_name: &str, stored_offset: usize, stored_value: &Value| {
-                if let Some(ref aliases) = store_local_global_aliases {
-                    after_local_fallback_store(aliases, stored_offset, stored_value);
-                }
-            };
+        let mut store_local_before_var_overwrite = |_stored_index: usize| {};
+        let mut store_local_after_store = |_stored_offset: usize, _stored_value: &Value| {};
+        let mut store_local_after_fallback_store = |_func_name: &str, _stored_offset: usize| {};
         #[cfg(feature = "native-accel")]
         let executed_pc = *pc;
         // The installed region supplies only request-local, instruction-scoped
@@ -745,7 +759,6 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                     &mut *vars,
                     &mut *last_exception,
                     &mut *pc,
-                    refresh_workspace_state,
                 ) {
                     interp_dispatch::ExceptionHandling::Caught => {
                         continue;
@@ -791,6 +804,75 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                     #[cfg(feature = "native-accel")]
                     fusion_observations.instruction_exit(executed_pc, *pc);
                     continue;
+                }
+            }
+        }
+        // The source descriptor may own randn argument vectors and text. Its
+        // speculative preflight must borrow the instruction before the
+        // ordinary by-value dispatch clones any opcode payload.
+        if let instruction @ Instr::StochasticEvolution { fallback_pc, .. } =
+            &bytecode.instructions[*pc]
+        {
+            let prepared = stochastic_source::prepare(
+                instruction,
+                stochastic_source::StochasticSourceFrame {
+                    vars: &mut *vars,
+                    context: &mut *context,
+                    var_names: &bytecode.var_names,
+                    completion_assigned_slots: &mut *completion_assigned_slots,
+                    global_aliases,
+                    persistent_aliases: &mut *persistent_aliases,
+                    missing_input_slots: &mut *missing_input_slots,
+                    current_function_name,
+                },
+            );
+            let result = match prepared {
+                Err(error) => Err(error),
+                Ok(None) => Ok(stochastic_source::StochasticDispatch::Declined),
+                Ok(Some(selected)) => {
+                    let runtime = selected.runtime().clone();
+                    let mut outcome = stochastic_source::StochasticDispatch::Declined;
+                    let outcome_slot = &mut outcome;
+                    let completed = match runmat_runtime::execution::admit_domain_continuation_with(
+                        &runtime,
+                        move || async move {
+                            *outcome_slot = stochastic_source::execute_selected(selected).await?;
+                            Ok(())
+                        },
+                    ) {
+                        Err(error) => Err(error),
+                        Ok(continuation) => continuation.await,
+                    };
+                    completed.map(|()| outcome)
+                }
+            };
+            match result {
+                Ok(stochastic_source::StochasticDispatch::Declined) => {
+                    *pc = *fallback_pc;
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.instruction_exit(executed_pc, *pc);
+                    continue;
+                }
+                Ok(stochastic_source::StochasticDispatch::Completed) => {
+                    *pc += 1;
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.instruction_exit(executed_pc, *pc);
+                    continue;
+                }
+                Err(err) => {
+                    #[cfg(feature = "native-accel")]
+                    fusion_observations.abort();
+                    sequence_register.clear(&mut *stack);
+                    match interp_dispatch::redirect_exception_to_catch(
+                        err,
+                        &mut *try_stack,
+                        &mut *vars,
+                        &mut *last_exception,
+                        &mut *pc,
+                    ) {
+                        interp_dispatch::ExceptionHandling::Caught => continue,
+                        interp_dispatch::ExceptionHandling::Uncaught(err) => return Err(*err),
+                    }
                 }
             }
         }
@@ -974,36 +1056,10 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             | Instr::CreateRange(_)
             | Instr::PackToRow(_)
             | Instr::PackToCol(_) => unreachable!("handled by dispatch_instruction"),
-            Instr::StochasticEvolution => {
-                let steps_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let scale_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let drift_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let state_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let evolved =
-                    crate::accel::idioms::stochastic_evolution::execute_stochastic_evolution(
-                        state_value,
-                        drift_value,
-                        scale_value,
-                        steps_value,
-                    )
-                    .await?;
-                stack.push(evolved);
+            Instr::StochasticEvolution { .. } => {
+                unreachable!("stochastic source is dispatched before opcode cloning")
             }
         }
-        if debug_stack {
-            debug!(pc = *pc, stack_len = stack.len(), "[vm] after exec");
-        }
-        *pc += 1;
-        #[cfg(feature = "native-accel")]
-        fusion_observations.instruction_exit(executed_pc, *pc);
     }
     #[cfg(feature = "wgpu")]
     if let Some(route) = fusion_observations.take_completed_original() {

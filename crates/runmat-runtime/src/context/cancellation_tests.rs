@@ -156,7 +156,9 @@ fn parallel_child_retains_origin_token_across_parent_rebinding_and_scoped_overri
     let source = CancellationSource::new();
     let context =
         RuntimeContext::with_cancellation(Rc::new(RuntimeExecutionService::new()), source.token());
-    let child = context.fork_parallel_lab(RuntimeServicePorts::default());
+    let child = context
+        .fork_parallel_lab(RuntimeServicePorts::default())
+        .expect("idle session fork");
     let override_source = CancellationSource::new();
     let _active = context.enter();
     {

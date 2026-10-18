@@ -169,8 +169,15 @@ impl GenericNativeCache {
         &self,
         arguments: &[runmat_value::Value],
     ) -> Option<RepresentationProfile> {
+        self.representation_profile_from_values(arguments.iter())
+    }
+
+    pub(crate) fn representation_profile_from_values<'a>(
+        &self,
+        arguments: impl IntoIterator<Item = &'a runmat_value::Value>,
+    ) -> Option<RepresentationProfile> {
         let facts = arguments
-            .iter()
+            .into_iter()
             .map(runmat_runtime::value_fact::value_fact)
             .collect();
         RepresentationProfile::from_facts(facts, self.tiering.config().max_profile_bytes).ok()
@@ -665,17 +672,7 @@ impl GenericNativeCache {
         )?;
         let mut keys = BTreeSet::from([program_key, project_scope_key, catalog_key]);
 
-        let roots = unit
-            .script_entrypoint()
-            .into_iter()
-            .chain(preferred_function.and_then(|name| unit.native_function_id(name)))
-            .collect::<BTreeSet<_>>();
-        if roots.is_empty() {
-            return Err(super::error::stage(
-                "NativeTierIdentity",
-                "entry function is missing",
-            ));
-        }
+        let roots = BTreeSet::from([unit.native_entrypoint_function(preferred_function)?]);
         let selected = runmat_mir::analysis::selected_function_closure(unit.mir(), &roots);
         let mut referenced = super::dependencies::analyze(unit.mir(), &selected);
         if !referenced.super_callers.is_empty() {
@@ -755,10 +752,7 @@ fn tier_site(
     unit: &ExecutableUnit,
     preferred_function: Option<&str>,
 ) -> Result<TierSiteId, runmat_runtime::RuntimeError> {
-    let function = preferred_function
-        .and_then(|name| unit.native_function_id(name))
-        .or_else(|| unit.script_entrypoint())
-        .ok_or_else(|| super::error::stage("NativeTierIdentity", "entry function is missing"))?;
+    let function = unit.native_entrypoint_function(preferred_function)?;
     let function = u32::try_from(function.0)
         .map(runmat_types::ProgramFunctionId)
         .map_err(|_| super::error::stage("NativeTierIdentity", "function identity exceeds u32"))?;

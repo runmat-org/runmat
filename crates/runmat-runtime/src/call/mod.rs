@@ -7,5 +7,7 @@ pub mod closures;
 pub mod descriptor;
 pub(crate) mod feval;
 pub mod function_abi;
+mod function_arguments;
 pub mod identity;
 pub mod lexical;
+pub use function_arguments::{CapturedValueLease, RootedFunctionArguments};

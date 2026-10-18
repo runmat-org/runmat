@@ -1,8 +1,12 @@
-use super::{MirExpressionRegion, MirExpressionStep};
+use super::{
+    MirExpressionRegion, MirExpressionRegionRef, MirExpressionStep, MirPreparedExpressionRegion,
+};
 use crate::{MirOperand, MirRvalue, MirSequenceLocalId};
 use std::collections::BTreeSet;
 
-impl MirExpressionRegion {
+macro_rules! impl_region_traversal {
+($region:ty) => {
+impl $region {
     pub fn visit_operands(&self, mut visitor: impl FnMut(&MirOperand)) {
         self.visit_operands_dyn(&mut visitor);
     }
@@ -93,8 +97,13 @@ impl MirExpressionRegion {
 
     pub fn visit_sequence_locals(&self, mut visitor: impl FnMut(&MirSequenceLocalId)) {
         for step in &self.steps {
-            if let MirExpressionStep::Let { value, .. } = step {
-                value.visit_direct_sequence_locals(&mut visitor);
+            match step {
+                MirExpressionStep::Let { value, .. } => {
+                    value.visit_direct_sequence_locals(&mut visitor);
+                }
+                MirExpressionStep::CaptureSequence { source, .. } => {
+                    source.visit_sequence_locals(&mut visitor);
+                }
             }
         }
     }
@@ -105,7 +114,7 @@ impl MirExpressionRegion {
         })
     }
 
-    pub(crate) fn visit_nested_regions(&self, visitor: &mut dyn FnMut(&MirExpressionRegion)) {
+    pub(crate) fn visit_nested_regions(&self, visitor: &mut dyn FnMut(MirExpressionRegionRef<'_>)) {
         for step in &self.steps {
             match step {
                 MirExpressionStep::Let { value, .. } => value.visit_expression_regions_dyn(visitor),
@@ -116,3 +125,8 @@ impl MirExpressionRegion {
         }
     }
 }
+};
+}
+
+impl_region_traversal!(MirExpressionRegion);
+impl_region_traversal!(MirPreparedExpressionRegion);

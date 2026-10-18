@@ -8,6 +8,7 @@ mod distributions;
 mod normal;
 mod parallel;
 pub(crate) mod gpu;
+pub(crate) mod gpu_like;
 pub(crate) mod gpu_execution;
 pub(crate) mod gpu_integer;
 pub(crate) mod gpu_integer_batch;
@@ -32,9 +33,11 @@ pub use parallel::{
     reserve_parallel_randomness_context_async, ParallelRandomStreamGuard,
 };
 pub(crate) use state::{RandomState, RngAlgorithm, RngSnapshot, RuntimeRng};
+pub(crate) use turn::acquire as acquire_turn;
+#[cfg(test)]
+pub(crate) use turn::try_acquire as try_acquire_turn;
 pub(crate) use turn::RandomTurn;
 pub(crate) use turn::RandomTurnGate;
-pub(crate) use turn::{acquire as acquire_turn, try_acquire as try_acquire_turn};
 pub(crate) use uniform::{fill_uniform_scaled, generate_uniform, generate_uniform_cooperative};
 
 pub(crate) const DEFAULT_RNG_SEED: u64 = runmat_execution::task::RUNMAT_MT_DEFAULT_SEED;
@@ -121,6 +124,21 @@ fn with_rng_state_mut<T>(
         }
         Ok(operation(state))
     })?
+}
+
+/// A cost-class fact only: inspect the explicitly owned source stream without
+/// cloning or materializing its state, acquiring a draw turn, or advancing it.
+/// A selected caller revalidates this fact after acquiring its ordered turn.
+pub(crate) fn normal_source_algorithm(
+    context: &crate::context::RuntimeContext,
+) -> BuiltinResult<RngAlgorithm> {
+    with_rng_state_in(Some(context), "randn", |rng| rng.state.algorithm())
+}
+
+pub(crate) fn normal_source_algorithm_in_turn(
+    turn: &mut RandomTurn,
+) -> BuiltinResult<RngAlgorithm> {
+    turn.with_state("randn", |rng| rng.state.algorithm())
 }
 
 fn legacy_tokens() -> &'static Mutex<LegacyTokenState> {
@@ -226,9 +244,51 @@ pub(crate) fn generate_integer_offsets(
             format!("{label}: integer sampling span must be in 1..=2^64"),
         ));
     }
+    let mut offsets = Vec::new();
+    offsets.try_reserve_exact(len).map_err(|source| {
+        build_runtime_error(format!("{label}: cannot reserve integer offsets"))
+            .with_builtin(label)
+            .with_source(source)
+            .build()
+    })?;
     with_rng_state_mut(turn, label, len != 0, |state| {
-        generate_integer_offsets_from_state(&mut state.state, span, len)
-    })
+        generate_integer_offsets_from_state(&mut state.state, span, len, &mut offsets);
+    })?;
+    Ok(offsets)
+}
+
+/// Fill a caller-owned, pre-admitted native U64 workspace using the same
+/// rejection and source-word order as `generate_integer_offsets`.
+pub(crate) fn fill_integer_offsets(
+    turn: &mut RandomTurn,
+    span: u128,
+    offsets: &mut [u64],
+    label: &str,
+) -> BuiltinResult<()> {
+    if span == 0 || span > (1_u128 << 64) {
+        return Err(random_error(
+            label,
+            format!("{label}: integer sampling span must be in 1..=2^64"),
+        ));
+    }
+    with_rng_state_mut(turn, label, !offsets.is_empty() && span != 1, |state| {
+        for slot in offsets {
+            *slot = if span == 1 {
+                0
+            } else if span == (1_u128 << 64) {
+                next_u64_state(&mut state.state)
+            } else {
+                let span = span as u64;
+                loop {
+                    let word = next_u64_state(&mut state.state);
+                    if let Some(offset) = unbiased_offset_from_word(word, span) {
+                        break offset;
+                    }
+                }
+            };
+        }
+    })?;
+    Ok(())
 }
 
 /// Draw one unbiased offset per shrinking Fisher–Yates span under one stream
@@ -264,27 +324,59 @@ pub(crate) fn generate_permutation_offsets(
     Ok(offsets)
 }
 
+/// Fill an already admitted offset buffer without allocating after the first
+/// stream word. The shrinking-span loop is the same Fisher–Yates owner as
+/// `generate_permutation_offsets`.
+pub(crate) fn fill_permutation_offsets(
+    turn: &mut RandomTurn,
+    n: usize,
+    offsets: &mut [u64],
+) -> BuiltinResult<()> {
+    if offsets.len() > n {
+        return Err(random_error("randperm", "randperm: K exceeds N"));
+    }
+    with_rng_state_mut(turn, "randperm", !offsets.is_empty() && n > 1, |state| {
+        for (i, slot) in offsets.iter_mut().enumerate() {
+            let span = (n - i) as u64;
+            *slot = if span == 1 {
+                0
+            } else {
+                loop {
+                    let word = next_u64_state(&mut state.state);
+                    if let Some(offset) = unbiased_offset_from_word(word, span) {
+                        break offset;
+                    }
+                }
+            };
+        }
+    })?;
+    Ok(())
+}
+
 fn generate_integer_offsets_from_state(
     state: &mut RandomState,
     span: u128,
     len: usize,
-) -> Vec<u64> {
+    out: &mut Vec<u64>,
+) {
     if span == 1 {
-        return vec![0; len];
+        out.resize(len, 0);
+        return;
     }
     if span == (1_u128 << 64) {
-        return (0..len).map(|_| next_u64_state(state)).collect();
+        for _ in 0..len {
+            out.push(next_u64_state(state));
+        }
+        return;
     }
 
     let span = span as u64;
-    let mut out = Vec::with_capacity(len);
     while out.len() < len {
         let word = next_u64_state(state);
         if let Some(offset) = unbiased_offset_from_word(word, span) {
             out.push(offset);
         }
     }
-    out
 }
 
 fn unbiased_offset_from_word(word: u64, span: u64) -> Option<u64> {
@@ -301,7 +393,7 @@ pub(crate) fn generate_uniform_single(
     generate_uniform(turn, len, label).map(|data| data.into_iter().map(single_open_unit).collect())
 }
 
-fn single_open_unit(value: f64) -> f64 {
+pub(crate) fn single_open_unit(value: f64) -> f64 {
     // Rounding the largest binary64 values to Single can produce exactly 1.0.
     (value as f32).min(f32::from_bits(0x3f7f_ffff)) as f64
 }
@@ -445,7 +537,9 @@ pub(crate) fn expected_uniform_sequence(count: usize) -> Vec<f64> {
 #[cfg(test)]
 pub(crate) fn expected_integer_offset_sequence(span: u128, count: usize) -> Vec<u64> {
     let mut seed = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
-    generate_integer_offsets_from_state(&mut seed, span, count)
+    let mut offsets = Vec::with_capacity(count);
+    generate_integer_offsets_from_state(&mut seed, span, count, &mut offsets);
+    offsets
 }
 
 #[cfg(test)]
@@ -525,7 +619,10 @@ mod integer_offset_tests {
     #[test]
     fn single_rounding_keeps_half_open_uniform_range() {
         let near_one = f64::from_bits(1.0_f64.to_bits() - 1);
-        assert!(single_open_unit(near_one) < 1.0);
+        assert_eq!(
+            single_open_unit(near_one),
+            f64::from(f32::from_bits(0x3f7f_ffff))
+        );
         assert_eq!(single_open_unit(0.0), 0.0);
     }
 
@@ -534,10 +631,9 @@ mod integer_offset_tests {
         let mut state = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
         let expected: Vec<u64> = (0..32).map(|_| next_u64_state(&mut state)).collect();
         let mut state = RandomState::seeded_unbounded(DEFAULT_USER_SEED);
-        assert_eq!(
-            generate_integer_offsets_from_state(&mut state, 1_u128 << 64, 32),
-            expected
-        );
+        let mut offsets = Vec::with_capacity(32);
+        generate_integer_offsets_from_state(&mut state, 1_u128 << 64, 32, &mut offsets);
+        assert_eq!(offsets, expected);
     }
 
     #[test]
@@ -565,6 +661,29 @@ mod parallel_stream_tests {
 
     fn context() -> crate::context::RuntimeContext {
         crate::context::RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
+    }
+
+    #[test]
+    fn caller_owned_offsets_keep_integer_and_permutation_word_order() {
+        for span in [1, 10, 1_u128 << 64] {
+            let expected_context = context();
+            let actual_context = context();
+            let mut expected_turn = try_acquire_turn(Some(&expected_context), "randi").unwrap();
+            let expected = generate_integer_offsets(&mut expected_turn, span, 31, "randi").unwrap();
+            let mut actual_turn = try_acquire_turn(Some(&actual_context), "randi").unwrap();
+            let mut actual = [0_u64; 31];
+            fill_integer_offsets(&mut actual_turn, span, &mut actual, "randi").unwrap();
+            assert_eq!(actual.as_slice(), expected.as_slice());
+        }
+        let expected_context = context();
+        let actual_context = context();
+        let mut expected_turn = try_acquire_turn(Some(&expected_context), "randperm").unwrap();
+        let expected = generate_permutation_offsets(&mut expected_turn, 37, 19).unwrap();
+        let mut actual_turn = try_acquire_turn(Some(&actual_context), "randperm").unwrap();
+        let mut actual = [0_u64; 19];
+        fill_permutation_offsets(&mut actual_turn, 37, &mut actual).unwrap();
+        let expected: Vec<_> = expected.into_iter().map(|offset| offset as u64).collect();
+        assert_eq!(actual.as_slice(), expected.as_slice());
     }
 
     fn iteration_values(

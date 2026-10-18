@@ -2,6 +2,7 @@ mod call;
 mod contract;
 mod legacy_builtin;
 mod mutation;
+mod operator;
 mod parallel;
 mod value;
 
@@ -11,6 +12,7 @@ pub(crate) use contract::{
 };
 pub(crate) use legacy_builtin::infer_legacy_builtin;
 pub(crate) use mutation::assign_place;
+pub(crate) use operator::{infer_binary_operator, infer_unary_operator};
 pub(crate) use parallel::{collective_fact, distributed_fact, distributed_output_sequence};
 pub(crate) use value::{
     append_inference_diagnostics, infer_expansion_sequence, infer_rvalue, infer_rvalue_outputs,

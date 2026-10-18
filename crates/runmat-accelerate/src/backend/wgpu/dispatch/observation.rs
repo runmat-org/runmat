@@ -1,8 +1,7 @@
 //! Provider-owned private fences. Map callbacks never perform WGPU emission.
-use futures::channel::oneshot;
 use runmat_accelerate_api::observation::{
     current_provider_observation, ProviderObservationBudget, ProviderObservationFailure,
-    WgpuSubmissionMeasurement,
+    StochasticEvolutionSourceTransferRetirementNotifier, WgpuSubmissionMeasurement,
 };
 use runmat_accelerate_api::{WgpuDeviceAccess, WgpuEmission};
 use runmat_execution::profiling::current_command_profiling;
@@ -11,10 +10,12 @@ use std::sync::Arc;
 #[path = "observation/admission.rs"]
 mod admission;
 use admission::{fail_mismatched_admission, prepare, ProviderAdmission};
-#[path = "observation/probe_ticket.rs"]
-mod probe_ticket;
+#[path = "observation/completion_signal.rs"]
+mod completion_signal;
 #[path = "observation/compute_pass.rs"]
 mod compute_pass;
+#[path = "observation/probe_ticket.rs"]
+mod probe_ticket;
 use compute_pass::EncodedMeasurement;
 pub(crate) use compute_pass::{
     ProfiledEncoder, SubmissionEncoder, TimestampCapability, MAX_QUERY_REQUESTED_BYTES,
@@ -122,10 +123,23 @@ impl Drop for ProbeSubmitGuard {
 }
 
 mod completion;
+#[path = "observation/host_control.rs"]
+mod host_control;
+#[path = "observation/inline_slots.rs"]
+mod inline_slots;
+mod submitted_retention;
 #[cfg(target_arch = "wasm32")]
 use completion::map_direct_fence;
 use completion::{
     map_timing, DirectCompletion, FenceCompletion, PendingDirectObservation, PendingObservation,
+    SourceTransferRetirement,
+};
+use host_control::observed_completion_callback_fits_bound;
+pub(crate) use host_control::observed_submission_dispatch_host_control_upper_bytes;
+use inline_slots::InlineSlots;
+
+pub(crate) use submitted_retention::{
+    PreparedSubmittedAllocationRetention, SubmittedAllocationRetention,
 };
 
 /// Construct outside the access closure, borrow through nested emitters, then
@@ -138,12 +152,15 @@ pub(crate) struct PendingSubmissions {
     budget: Option<Arc<ProviderObservationBudget>>,
     #[cfg(not(target_arch = "wasm32"))]
     progress_port: Option<Arc<dyn runmat_accelerate_api::observation::WgpuObservationProgress>>,
-    observations: Vec<PendingObservation>,
+    observations: InlineSlots<PendingObservation, 1>,
     direct_observations: Vec<PendingDirectObservation>,
     legacy_poll: Option<wgpu::SubmissionIndex>,
     last_fence_requested_bytes: Option<u64>,
     armed_probe: Option<ProbeFenceTicket>,
-    armed_resources: Vec<runmat_accelerate_api::observation::ProviderResourceTicket>,
+    armed_resources: InlineSlots<runmat_accelerate_api::observation::ProviderResourceTicket, 3>,
+    armed_allocation_retention: Option<SubmittedAllocationRetention>,
+    armed_source_transfer_retirement: Option<StochasticEvolutionSourceTransferRetirementNotifier>,
+    prepared_allocation_admission: Option<ProviderAdmission>,
 }
 
 impl PendingSubmissions {
@@ -154,12 +171,15 @@ impl PendingSubmissions {
             budget: None,
             #[cfg(not(target_arch = "wasm32"))]
             progress_port: None,
-            observations: Vec::new(),
+            observations: InlineSlots::default(),
             direct_observations: Vec::new(),
             legacy_poll: None,
             last_fence_requested_bytes: None,
             armed_probe: None,
-            armed_resources: Vec::new(),
+            armed_resources: InlineSlots::default(),
+            armed_allocation_retention: None,
+            armed_source_transfer_retirement: None,
+            prepared_allocation_admission: None,
         }
     }
 
@@ -183,7 +203,7 @@ impl PendingSubmissions {
     }
 
     pub(crate) fn profiled_encoder<'a>(
-        &self,
+        &mut self,
         emission: &'a WgpuEmission<'_>,
         descriptor: &wgpu::CommandEncoderDescriptor<'_>,
     ) -> ProfiledEncoder<'a> {
@@ -192,7 +212,10 @@ impl PendingSubmissions {
         let provider_active = selected_provider.is_some();
         let command_active = command.is_some();
         let active = provider_active || command_active;
-        let admission = selected_provider.map_or(ProviderAdmission::Absent, prepare);
+        let admission = self
+            .prepared_allocation_admission
+            .take()
+            .unwrap_or_else(|| selected_provider.map_or(ProviderAdmission::Absent, prepare));
         let provider_prepared = matches!(&admission, ProviderAdmission::Prepared(_));
         ProfiledEncoder::new(
             emission,
@@ -224,7 +247,57 @@ impl PendingSubmissions {
         &mut self,
         ticket: runmat_accelerate_api::observation::ProviderResourceTicket,
     ) {
+        self.retain_provider_resource_until_next_submit(ticket);
+    }
+
+    /// Retain one exact transient physical allocation ticket through the next
+    /// submitted command's canonical completion owner.
+    pub(crate) fn retain_provider_resource_until_next_submit(
+        &mut self,
+        ticket: runmat_accelerate_api::observation::ProviderResourceTicket,
+    ) {
         self.armed_resources.push(ticket);
+    }
+
+    /// Transfer one operation-owned allocation bundle into the next exact
+    /// submission completion.  This does not create another completion path.
+    pub(crate) fn retain_allocations_until_next_submit(
+        &mut self,
+        prepared: PreparedSubmittedAllocationRetention,
+        retention: SubmittedAllocationRetention,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.armed_allocation_retention.is_none(),
+            "submission allocation retention is already armed"
+        );
+        anyhow::ensure!(
+            self.prepared_allocation_admission.is_none(),
+            "submission completion admission is already armed"
+        );
+        let PreparedSubmittedAllocationRetention {
+            admission,
+            retirement,
+        } = prepared;
+        let retention = retention.with_retirement(retirement)?;
+        anyhow::ensure!(
+            matches!(admission, ProviderAdmission::Prepared(_)),
+            "submission completion admission was not prepared"
+        );
+        self.prepared_allocation_admission = Some(admission);
+        self.armed_allocation_retention = Some(retention);
+        Ok(())
+    }
+
+    pub(crate) fn retire_source_transfer_with_next_submit(
+        &mut self,
+        notifier: StochasticEvolutionSourceTransferRetirementNotifier,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            self.armed_source_transfer_retirement.is_none(),
+            "source-transfer retirement is already armed"
+        );
+        self.armed_source_transfer_retirement = Some(notifier);
+        Ok(())
     }
 
     /// Emission fact only. None is an absent fence, not completed GPU work.
@@ -260,6 +333,11 @@ impl PendingSubmissions {
         self.last_fence_requested_bytes = None;
         let mut probe = ProbeSubmitGuard(self.armed_probe.take());
         let submitted_resources = std::mem::take(&mut self.armed_resources);
+        let submitted_allocation_retention = self.armed_allocation_retention.take();
+        let source_transfer_retirement = self
+            .armed_source_transfer_retirement
+            .take()
+            .map(SourceTransferRetirement::new);
         let current_recorder = current_provider_observation();
         let command = current_command_profiling();
         let admission_matched = fail_mismatched_admission(
@@ -274,10 +352,17 @@ impl PendingSubmissions {
             ProviderAdmission::Prepared(observed) => Some(observed),
             ProviderAdmission::Absent | ProviderAdmission::Failed(_) => None,
         };
+        let retained_allocations_need_direct_completion =
+            submitted_allocation_retention.is_some() && observed.is_none();
+        let source_transfer_needs_direct_completion =
+            source_transfer_retirement.is_some() && observed.is_none();
         // A failed provider recorder cannot silently become a direct route.
         // Its physical contribution remains Missing after the real submit.
         let needs_direct_completion =
-            admission_matched && command.is_some() && !observation_requested;
+            (admission_matched && command.is_some() && !observation_requested)
+                || retained_allocations_need_direct_completion;
+        let needs_direct_completion =
+            needs_direct_completion || source_transfer_needs_direct_completion;
         // Even an unattributable command-only query must retain its readback
         // and permit through submitted-work retirement. Scope mismatch removes
         // positive evidence, not the device resource's lifetime owner.
@@ -300,6 +385,25 @@ impl PendingSubmissions {
         } else {
             None
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        if (submitted_allocation_retention.is_some() || source_transfer_retirement.is_some())
+            && observed.is_none()
+            && direct_progress.is_none()
+        {
+            return Err(anyhow::anyhow!(
+                "exact submission progress is unavailable for retained allocations"
+            ));
+        }
+        #[cfg(target_arch = "wasm32")]
+        if (submitted_allocation_retention.is_some() || source_transfer_retirement.is_some())
+            && observed.is_none()
+            && readback.is_none()
+            && direct_fence_permit.is_none()
+        {
+            return Err(anyhow::anyhow!(
+                "exact submission fence is unavailable for retained allocations"
+            ));
+        }
         #[cfg(target_arch = "wasm32")]
         let direct_fence = direct_fence_permit.as_ref().map(|_| {
             let buffer = runmat_accelerate_api::WgpuBufferOwner::new(
@@ -357,7 +461,7 @@ impl PendingSubmissions {
         let mut submitted_probe = ProbeSubmitGuard(probe_for_fence);
         if let (Some(observed), Some(fence)) = (observed, fence) {
             let readback_result = readback.as_ref().map(map_timing);
-            let (send, result) = oneshot::channel();
+            let (send, result) = completion_signal::channel();
             let token = observed.token;
             fence
                 .slice(..)
@@ -369,7 +473,7 @@ impl PendingSubmissions {
                         token.fail();
                         None
                     };
-                    let _ = send.send(completed);
+                    send.send(completed);
                 });
             self.observations.push(PendingObservation {
                 completion: FenceCompletion {
@@ -385,7 +489,9 @@ impl PendingSubmissions {
                     probe: submitted_probe.0.clone(),
                     resource_ticket,
                     submitted_resources,
+                    submitted_allocation_retention,
                     physical: physical.take(),
+                    source_transfer_retirement,
                 },
                 #[cfg(not(target_arch = "wasm32"))]
                 submission: submission.clone(),
@@ -406,6 +512,8 @@ impl PendingSubmissions {
                         result,
                         physical: physical.take(),
                         measurement,
+                        submitted_allocation_retention,
+                        source_transfer_retirement,
                     },
                     submission: submission.clone(),
                     progress,
@@ -430,6 +538,8 @@ impl PendingSubmissions {
                         result,
                         physical: physical.take(),
                         measurement,
+                        submitted_allocation_retention,
+                        source_transfer_retirement,
                     },
                 });
             } else {
@@ -443,6 +553,10 @@ impl PendingSubmissions {
         if let Some(probe) = self.armed_probe.take() {
             probe.fail();
         }
+        // An armed owner with no physical submit has no device work to await.
+        drop(self.armed_allocation_retention.take());
+        drop(self.armed_source_transfer_retirement.take());
+        drop(self.prepared_allocation_admission.take());
         self.drain(false);
         if let Some(submission) = self.legacy_poll.take() {
             super::common::poll_submitted(&self.access, submission);
@@ -492,7 +606,7 @@ impl PendingSubmissions {
             #[cfg(target_arch = "wasm32")]
             wasm_bindgen_futures::spawn_local(observation.completion.after_callback());
         }
-        for observation in self.observations.drain(..) {
+        for observation in self.observations.drain() {
             if abandoned {
                 if let Some(probe) = &observation.completion.probe {
                     probe.fail();
@@ -510,11 +624,13 @@ impl PendingSubmissions {
                     progress,
                 } = observation;
                 let recorder = completion.recorder.clone();
+                let callback = move |status| completion.after_poll(status);
+                if !observed_completion_callback_fits_bound(&callback) {
+                    recorder.fail(ProviderObservationFailure::TrackingOverflow);
+                    continue;
+                }
                 let delivered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    progress.submit(
-                        submission,
-                        Box::new(move |status| completion.after_poll(status)),
-                    )
+                    progress.submit(submission, Box::new(callback))
                 }));
                 match &delivered {
                     Ok(Ok(())) => {
@@ -542,6 +658,9 @@ impl Drop for PendingSubmissions {
         if let Some(probe) = self.armed_probe.take() {
             probe.fail();
         }
+        drop(self.armed_allocation_retention.take());
+        drop(self.armed_source_transfer_retirement.take());
+        drop(self.prepared_allocation_admission.take());
         self.drain(true);
     }
 }

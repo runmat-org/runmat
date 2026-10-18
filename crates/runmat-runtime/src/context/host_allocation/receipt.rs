@@ -32,6 +32,19 @@ pub enum HostAllocationError {
 }
 
 impl HostAllocationError {
+    /// A speculative route may decline these resource refusals before any
+    /// source effect. Cancellation, revoked authority and invalid geometry
+    /// remain errors; they must not become permission to try another route.
+    pub fn is_capacity_denial(self) -> bool {
+        matches!(
+            self,
+            Self::Resource(
+                HostEffectAllocationError::ExceedsCapacity
+                    | HostEffectAllocationError::ExceedsStageEnvelope
+            )
+        )
+    }
+
     /// Preserve cancellation and revoked service authority as typed runtime
     /// causes at every host-allocation admission boundary.
     pub fn runtime_identifier_suffix(self) -> &'static str {
@@ -61,6 +74,58 @@ impl std::error::Error for HostAllocationError {}
 impl From<HostEffectAllocationError> for HostAllocationError {
     fn from(error: HostEffectAllocationError) -> Self {
         Self::Resource(error)
+    }
+}
+
+/// The current operation's host-allocation policy, without reserving bytes or
+/// constructing a receipt. This is a policy fact, not an allocation grant.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum HostAllocationPolicy {
+    Unbounded,
+    Managed,
+}
+
+enum ResolvedHostAllocationPolicy {
+    Unbounded,
+    Managed {
+        ledger: ManagedHostEffectLedger,
+        epoch: u64,
+    },
+}
+
+impl ResolvedHostAllocationPolicy {
+    fn for_runtime(runtime: Option<&RuntimeContext>) -> Result<Self, HostAllocationError> {
+        let Some(runtime) = runtime else {
+            return Ok(Self::Unbounded);
+        };
+        if runtime.is_cancelled() {
+            return Err(HostAllocationError::Cancelled);
+        }
+        let Some(parallel) = runtime.service_ports().parallel() else {
+            return Ok(Self::Unbounded);
+        };
+        let resources = parallel.placement_resources();
+        if resources.memory_available_bytes.is_none() {
+            return Ok(Self::Unbounded);
+        }
+        let ledger = parallel
+            .managed_host_effect_ledger()
+            .ok_or(HostAllocationError::MissingManagedOwner)?;
+        let snapshot = ledger.snapshot();
+        if !snapshot.current || snapshot.epoch != resources.epoch {
+            return Err(HostAllocationError::StaleAuthority);
+        }
+        Ok(Self::Managed {
+            ledger,
+            epoch: resources.epoch,
+        })
+    }
+
+    fn policy(&self) -> HostAllocationPolicy {
+        match self {
+            Self::Unbounded => HostAllocationPolicy::Unbounded,
+            Self::Managed { .. } => HostAllocationPolicy::Managed,
+        }
     }
 }
 
@@ -97,7 +162,7 @@ pub struct HostAllocationReceipt {
     runtime: RuntimeContext,
     ledger: ManagedHostEffectLedger,
     stage: Arc<ManagedHostEffectStageReservation>,
-    output: GuardedOutputPermit,
+    output: HostOutputPermit,
     fence: AllocationFence,
 }
 
@@ -263,6 +328,28 @@ fn provider_metadata_error(error: HostAllocationError) -> ProviderHostMetadataEr
 }
 
 impl HostAllocationReceipt {
+    /// Issue exact per-growth trace scratch against the same current managed
+    /// ledger as ordinary output admission. An unbounded operation has no
+    /// issuer; finite trace growth never falls back to the global allocator.
+    pub(crate) fn dynamic_trace_scratch(
+        runtime: &RuntimeContext,
+    ) -> Result<Option<super::HostTraceScratchPermit>, HostAllocationError> {
+        match ResolvedHostAllocationPolicy::for_runtime(Some(runtime))? {
+            ResolvedHostAllocationPolicy::Unbounded => Ok(None),
+            ResolvedHostAllocationPolicy::Managed { ledger, epoch } => {
+                super::HostTraceScratchPermit::new(runtime, ledger, epoch).map(Some)
+            }
+        }
+    }
+
+    /// Inspect the same canonical owner/finite-policy decision used by
+    /// `admit`, without reserving a stage or creating output authority.
+    pub fn policy(
+        runtime: Option<&RuntimeContext>,
+    ) -> Result<HostAllocationPolicy, HostAllocationError> {
+        Ok(ResolvedHostAllocationPolicy::for_runtime(runtime)?.policy())
+    }
+
     /// A selected provider callback may outlive the invocation frame after
     /// cancellation. Move this exact retained metadata claim into that
     /// callback owner; no view issuer is needed for non-view control state.
@@ -312,33 +399,18 @@ impl HostAllocationReceipt {
         runtime: Option<&RuntimeContext>,
         plan: HostAllocationPlan,
     ) -> Result<Option<Self>, HostAllocationError> {
-        let Some(runtime) = runtime else {
-            return Ok(None);
+        let (ledger, epoch) = match ResolvedHostAllocationPolicy::for_runtime(runtime)? {
+            ResolvedHostAllocationPolicy::Unbounded => return Ok(None),
+            ResolvedHostAllocationPolicy::Managed { ledger, epoch } => (ledger, epoch),
         };
-        if runtime.is_cancelled() {
-            return Err(HostAllocationError::Cancelled);
-        }
-        let Some(parallel) = runtime.service_ports().parallel() else {
-            return Ok(None);
-        };
-        let resources = parallel.placement_resources();
-        if resources.memory_available_bytes.is_none() {
-            return Ok(None);
-        }
-        let ledger = parallel
-            .managed_host_effect_ledger()
-            .ok_or(HostAllocationError::MissingManagedOwner)?;
-        let snapshot = ledger.snapshot();
-        if !snapshot.current || snapshot.epoch != resources.epoch {
-            return Err(HostAllocationError::StaleAuthority);
-        }
+        let runtime = runtime.expect("managed allocation policy has a runtime");
         let stage = ledger.reserve_stage(plan.scratch_peak_bytes())?;
         let headroom = stage.reserve_output_headroom(plan.retained_output_bytes())?;
         let (generation_owner, generation) = runtime.host_effect_session_generation();
         let fence = AllocationFence {
             active: Arc::new(AtomicBool::new(true)),
             ledger: ledger.clone(),
-            epoch: resources.epoch,
+            epoch,
             cancellation: runtime.cancellation(),
             generation_owner,
             generation,
@@ -347,7 +419,7 @@ impl HostAllocationReceipt {
             runtime: runtime.clone(),
             ledger,
             stage,
-            output: GuardedOutputPermit {
+            output: HostOutputPermit {
                 headroom,
                 fence: fence.clone(),
             },
@@ -434,6 +506,17 @@ impl HostAllocationReceipt {
         result.map_err(HostAllocationError::Numeric)
     }
 
+    /// Retain the existing invocation fence and headroom without allocating
+    /// another capability owner. Retirement revokes future allocations but
+    /// does not revoke the claims already retained by published storage.
+    pub(crate) fn output_permit(
+        &self,
+        runtime: &RuntimeContext,
+    ) -> Result<HostOutputPermit, HostAllocationError> {
+        self.checkpoint(runtime)?;
+        Ok(self.output.clone())
+    }
+
     /// Retain an exact output while its owner performs cooperative host work.
     /// The caller must checkpoint again before publishing after any awaits.
     pub fn exact_output_tensor(
@@ -455,20 +538,21 @@ impl Drop for HostAllocationReceipt {
     }
 }
 
-struct GuardedOutputPermit {
+#[derive(Clone)]
+pub(crate) struct HostOutputPermit {
     headroom: Arc<dyn HostEffectOutputHeadroom>,
     fence: AllocationFence,
 }
 
-impl fmt::Debug for GuardedOutputPermit {
+impl fmt::Debug for HostOutputPermit {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("GuardedOutputPermit")
+            .debug_struct("HostOutputPermit")
             .finish_non_exhaustive()
     }
 }
 
-impl ExactHostAllocationPermit for GuardedOutputPermit {
+impl ExactHostAllocationPermit for HostOutputPermit {
     fn reserve_exact(
         &self,
         bytes: usize,
@@ -477,6 +561,20 @@ impl ExactHostAllocationPermit for GuardedOutputPermit {
             .check()
             .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
         let claim = self.headroom.reserve_exact(bytes)?;
+        self.fence
+            .check()
+            .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
+        Ok(claim)
+    }
+
+    fn reserve_exact_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<runmat_value::ExactHostAllocationClaim, ExactHostNumericAllocationError> {
+        self.fence
+            .check()
+            .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
+        let claim = self.headroom.reserve_exact_claim(bytes)?;
         self.fence
             .check()
             .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;

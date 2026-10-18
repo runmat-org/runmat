@@ -174,7 +174,10 @@ pub(crate) use host_source::HostSingleImageSource;
 #[cfg(feature = "wgpu")]
 pub use original_route::ImageVmOriginalRoute;
 pub(crate) use prepared::PreparedImageStages;
-pub use vm::{ImageVmCheckpoint, ImageVmPreparation, ImageVmSelectedRoute, ImageVmStages};
+pub use vm::{
+    ImageVmCheckpoint, ImageVmPreparation, ImageVmSelectedRoute, ImageVmSourceFallbackRoute,
+    ImageVmStages,
+};
 
 /// Owns only its own references. A VM-published moment is a separate retained
 /// handle and remains live if this session is abandoned at a later checkpoint.

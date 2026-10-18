@@ -1,12 +1,12 @@
 use runmat_builtins::BuiltinErrorDescriptor;
-use runmat_value::{CharArray, ComplexTensor, LogicalArray, Tensor, Value};
+use runmat_value::{CharArray, ComplexTensor, LogicalArray, SharedShape, Tensor, Value};
 
 use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 pub(super) struct LogicalBuffer {
     pub(super) data: Vec<u8>,
-    pub(super) shape: Vec<usize>,
+    pub(super) shape: SharedShape,
 }
 
 pub(super) async fn from_value(
@@ -63,7 +63,7 @@ pub(super) fn admitted_shape<'a>(
 pub(super) fn into_value(
     builtin: &'static str,
     data: Vec<u8>,
-    shape: Vec<usize>,
+    shape: SharedShape,
     invalid: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<Value> {
     if data.len() == 1 && crate::builtins::common::tensor::element_count(&shape) == 1 {
@@ -100,7 +100,7 @@ pub(super) fn error_with_detail(
 fn scalar(value: bool) -> LogicalBuffer {
     LogicalBuffer {
         data: vec![u8::from(value)],
-        shape: vec![1, 1],
+        shape: vec![1, 1].into(),
     }
 }
 
@@ -113,7 +113,7 @@ fn from_logical(array: LogicalArray) -> BuiltinResult<LogicalBuffer> {
 }
 
 fn from_tensor(tensor: Tensor) -> LogicalBuffer {
-    let shape = tensor.shape().to_vec();
+    let shape = tensor.shared_shape();
     let data = (0..tensor.len())
         .map(|index| {
             u8::from(
@@ -128,7 +128,7 @@ fn from_tensor(tensor: Tensor) -> LogicalBuffer {
 }
 
 fn from_complex_tensor(tensor: ComplexTensor) -> LogicalBuffer {
-    let shape = tensor.shape().to_vec();
+    let shape = tensor.shared_shape();
     let data = (0..tensor.len())
         .map(|index| {
             let (real, imaginary) = tensor
@@ -142,7 +142,7 @@ fn from_complex_tensor(tensor: ComplexTensor) -> LogicalBuffer {
 
 fn from_char_array(array: CharArray) -> LogicalBuffer {
     let data = array.to_column_major();
-    let shape = array.shape;
+    let shape = array.shape.into();
     LogicalBuffer {
         data: data
             .into_iter()

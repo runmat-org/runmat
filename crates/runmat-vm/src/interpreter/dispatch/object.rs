@@ -63,7 +63,7 @@ pub(super) fn take_sequence_register(
 }
 
 pub struct ObjectDispatchContext<'a> {
-    pub vars: &'a [Value],
+    pub vars: &'a crate::interpreter::vars::InterpreterVars,
     pub runtime: &'a runmat_runtime::context::RuntimeContext,
     pub current_function_name: &'a str,
     pub bytecode: &'a crate::bytecode::Bytecode,

@@ -203,9 +203,14 @@ fn run_case(source_text: &str, cell_output: bool, terminal: Terminal) {
                     .iter()
                     .find_map(|(slot, name)| (name == "x").then_some(*slot))
                     .unwrap();
-                assert!(
-                    matches!(&completion.values[slot], Value::HandleObject(handle) if handle.target == target)
-                );
+                let published_target_matches = {
+                    let value = completion
+                        .values
+                        .get(slot)
+                        .expect("completed handle remains in its compiled slot");
+                    matches!(&*value, Value::HandleObject(handle) if handle.target == target)
+                };
+                assert!(published_target_matches);
                 output_root = Some(runmat_gc::ExplicitRoot::new(target).unwrap());
             } else {
                 assert!(result.is_err());

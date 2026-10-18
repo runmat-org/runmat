@@ -8,12 +8,32 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::operand::materialize_operand;
 use super::state::HostState;
 
+fn adopt_tensor_result(
+    state: &mut HostState,
+    value: runmat_runtime::execution::RootedValue,
+) -> NativeExecutorResult<NativeValueRef> {
+    Ok(value.with_owned(|value| state.arena.insert(value)))
+}
+
 pub(super) fn evaluate(
     state: &mut HostState,
     kind: &MirAggregateKind,
     row_lengths: &[usize],
     elements: &[MirAggregateElement],
 ) -> NativeExecutorResult<NativeValueRef> {
+    let embedded = if matches!(kind, MirAggregateKind::Tensor) {
+        let embedded = state.current_embedded_operation()?;
+        if let Some(value) = super::call_suspension::take_completed_semantic_value_operation(
+            state,
+            embedded.as_ref(),
+            super::call_suspension::SemanticOperationKind::TensorAggregate,
+        )? {
+            return adopt_tensor_result(state, value);
+        }
+        embedded
+    } else {
+        None
+    };
     let rows = row_lengths.len();
     let expected_elements = row_lengths
         .iter()
@@ -59,13 +79,31 @@ pub(super) fn evaluate(
             Ok(state.arena.insert(value))
         }
         MirAggregateKind::Tensor => {
-            let result = super::sync::complete(
-                &state.runtime,
-                runmat_runtime::create_matrix_from_values(&realized_rows),
-                "tensor aggregate construction",
+            if runmat_runtime::host_matrix_can_run_inline(&state.runtime, &realized_rows)
+                .map_err(NativeExecutorError::from)?
+            {
+                let value = runmat_runtime::create_host_matrix_from_values(realized_rows)
+                    .map_err(NativeExecutorError::from)?;
+                return adopt_tensor_result(state, value);
+            }
+            let input_roots = runmat_runtime::execution::RootedValueLease::for_values(
+                realized_rows.iter().flat_map(|row| row.iter()),
             )
-            .finish(state)?;
-            Ok(result.with_owned(|value| state.arena.insert(value)))
+            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+            let future = async move {
+                let _input_roots = input_roots;
+                runmat_runtime::create_matrix_from_values(&realized_rows)
+                    .await
+                    .map_err(NativeExecutorError::from)
+            };
+            let value = super::call_suspension::begin_semantic_value_operation(
+                state,
+                embedded,
+                super::call_suspension::SemanticOperationKind::TensorAggregate,
+                Vec::new(),
+                future,
+            )?;
+            adopt_tensor_result(state, value)
         }
     }
 }

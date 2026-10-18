@@ -11,6 +11,10 @@ use runmat_value::{
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
+#[path = "concatenation/host_matrix.rs"]
+mod host_matrix;
+pub use host_matrix::{create_host_matrix_from_values, host_matrix_can_run_inline};
+
 fn concat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).build()
 }
@@ -1267,12 +1271,25 @@ pub async fn create_matrix_from_values(
         .finish()
         .map_err(|error| error.into_runtime_error())?;
 
-    // The aggregate itself owns this structural check. Do it only after row
-    // expressions have completed, and only for numeric/logical rows; a
-    // selected callee's failure or another concatenation domain must retain
-    // its original cause.
+    validate_matrix_row_widths(row_matrices.values())?;
+
+    // Stack rows using vertcat builtin
+    if row_matrices.len() == 1 {
+        row_matrices.with_owned_values(|mut values| {
+            crate::execution::RootedValue::new(values.remove(0))
+                .map_err(|error| error.into_runtime_error())
+        })
+    } else {
+        crate::call_builtin_async("vertcat", row_matrices.values()).await
+    }
+}
+
+/// The aggregate owns this structural check after its row expressions have
+/// completed. Numeric/logical geometry gets the matrix-literal diagnostic;
+/// another concatenation domain retains the selected callee's own error.
+pub(super) fn validate_matrix_row_widths(rows: &[Value]) -> BuiltinResult<()> {
     let mut expected_columns = None;
-    for row in row_matrices.values() {
+    for row in rows {
         if matches!(row, Value::Tensor(value) if value.rows() == 0 && value.cols() == 0) {
             continue;
         }
@@ -1296,15 +1313,7 @@ pub async fn create_matrix_from_values(
         }
     }
 
-    // Stack rows using vertcat builtin
-    if row_matrices.len() == 1 {
-        row_matrices.with_owned_values(|mut values| {
-            crate::execution::RootedValue::new(values.remove(0))
-                .map_err(|error| error.into_runtime_error())
-        })
-    } else {
-        crate::call_builtin_async("vertcat", row_matrices.values()).await
-    }
+    Ok(())
 }
 
 #[cfg(test)]

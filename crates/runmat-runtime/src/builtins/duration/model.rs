@@ -99,7 +99,7 @@ fn operand_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
             }
         }
         Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
-        Value::LogicalArray(array) => Ok(array.shape.clone()),
+        Value::LogicalArray(array) => Ok(array.shape.to_vec()),
         Value::GpuTensor(handle) => Ok(handle.shape().to_vec()),
         _ => Ok(vec![1, 1]),
     }

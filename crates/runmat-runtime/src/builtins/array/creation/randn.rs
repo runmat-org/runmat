@@ -11,6 +11,7 @@ use crate::build_runtime_error;
 #[cfg(test)]
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random;
+use crate::builtins::common::random::gpu_like::ExactHostRandomMode;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_constructor_dimensions, keyword_of,
 };
@@ -21,10 +22,12 @@ use crate::builtins::common::spec::{
 use crate::builtins::common::tensor;
 #[path = "randn/host_output.rs"]
 mod host_output;
+pub(crate) mod source_controls;
 #[cfg(test)]
 use runmat_builtins::ResolveContext;
 #[cfg(test)]
 use runmat_builtins::Type;
+use source_controls::{normalized_shape, RandnKeyword};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::randn")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -74,8 +77,46 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::array::creation::randn"
 )]
 async fn randn_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let parsed = ParsedRandn::parse(rest).await?;
+    let parsed = ParsedRandn::parse(&rest).await?;
     build_output(parsed).await
+}
+
+/// Draws one already-described real source block from the caller's ordered
+/// host turn. The caller owns the turn across every logical stochastic step;
+/// this entry neither reparses controls nor acquires another random stream.
+pub(crate) async fn draw_source_normal(
+    turn: &mut random::RandomTurn,
+    shape: &[usize],
+    dtype: NumericDType,
+    mode: ExactHostRandomMode,
+) -> crate::BuiltinResult<Value> {
+    let count = shape.iter().try_fold(1usize, |total, dimension| {
+        total
+            .checked_mul(*dimension)
+            .ok_or_else(|| builtin_error("randn: output dimensions overflow"))
+    })?;
+    if dtype == NumericDType::F64 && count == 1 {
+        let mut value = 0.0;
+        if let Some(runtime) = turn.owner().cloned() {
+            let mut budget = crate::execution::CpuCooperationBudget::new(
+                runtime.execution().clone(),
+                runtime.cancellation(),
+            );
+            random::fill_normal_cooperative(turn, 1, "randn", &runtime, &mut budget, |_, drawn| {
+                value = drawn;
+                Ok(())
+            })
+            .await?;
+        } else {
+            random::fill_normal(turn, 1, "randn", |_, drawn| {
+                value = drawn;
+                Ok(())
+            })?;
+        }
+        return Ok(Value::Num(value));
+    }
+    let tensor = host_output::real(turn, shape, dtype, mode).await?;
+    Ok(tensor::tensor_into_value(tensor))
 }
 
 struct ParsedRandn {
@@ -92,7 +133,7 @@ enum RandnTemplate {
 }
 
 impl ParsedRandn {
-    async fn parse(args: Vec<Value>) -> crate::BuiltinResult<Self> {
+    async fn parse(args: &[Value]) -> crate::BuiltinResult<Self> {
         let mut dims: Vec<usize> = Vec::new();
         let mut saw_dims_arg = false;
         let mut template: Option<RandnTemplate> = None;
@@ -101,11 +142,11 @@ impl ParsedRandn {
 
         let mut idx = 0;
         while idx < args.len() {
-            let arg = args[idx].clone();
+            let arg = &args[idx];
 
-            if let Some(keyword) = keyword_of(&arg) {
-                match keyword.as_str() {
-                    "like" => {
+            if let Some(keyword) = keyword_of(arg) {
+                match RandnKeyword::from_text(&keyword) {
+                    RandnKeyword::Like => {
                         let Some(proto) = args.get(idx + 1).cloned() else {
                             return Err(builtin_error("randn: expected prototype after 'like'"));
                         };
@@ -113,19 +154,19 @@ impl ParsedRandn {
                         idx += 2;
                         continue;
                     }
-                    "double" => {
+                    RandnKeyword::Double => {
                         template = Some(RandnTemplate::Double);
                         dtype = NumericDType::F64;
                         idx += 1;
                         continue;
                     }
-                    "single" => {
+                    RandnKeyword::Single => {
                         template = Some(RandnTemplate::Double);
                         dtype = NumericDType::F32;
                         idx += 1;
                         continue;
                     }
-                    "gpuarray" => {
+                    RandnKeyword::GpuArray => {
                         // MATLAB class-specification syntax: randn(m,n,"gpuArray") or
                         // gpuArray.randn(m,n). Keep explicit residency in the parsed
                         // template so the producer, rather than the dispatcher, owns it.
@@ -134,9 +175,9 @@ impl ParsedRandn {
                         idx += 1;
                         continue;
                     }
-                    other => {
+                    RandnKeyword::Unknown => {
                         return Err(builtin_error(format!(
-                            "randn: unrecognised option '{other}'"
+                            "randn: unrecognised option '{keyword}'"
                         )));
                     }
                 }
@@ -148,7 +189,7 @@ impl ParsedRandn {
                     "randn",
                 )?;
             }
-            if let Some(parsed_dims) = extract_constructor_dimensions(&arg, "randn")
+            if let Some(parsed_dims) = extract_constructor_dimensions(arg, "randn")
                 .await
                 .map_err(builtin_error)?
             {
@@ -185,17 +226,7 @@ impl ParsedRandn {
             )));
         }
 
-        let shape = if saw_dims_arg {
-            if dims.is_empty() {
-                vec![0, 0]
-            } else if dims.len() == 1 {
-                vec![dims[0], dims[0]]
-            } else {
-                dims
-            }
-        } else {
-            vec![1, 1]
-        };
+        let shape = normalized_shape(dims, saw_dims_arg);
 
         let template = template.unwrap_or(RandnTemplate::Double);
 
@@ -211,7 +242,90 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
     match &parsed.template {
         RandnTemplate::GpuArray => return randn_gpu(&parsed.shape).await,
         RandnTemplate::Like(Value::GpuTensor(handle)) => {
-            return randn_like_gpu(handle, &parsed.shape).await;
+            return match random::gpu_like::intent("randn", handle)? {
+                random::gpu_like::GpuLikeIntent::ExplicitGpuStream => {
+                    randn_like_gpu(handle, &parsed.shape).await
+                }
+                random::gpu_like::GpuLikeIntent::AutomaticHostStream => {
+                    let class = random::gpu_like::class(handle).ok_or_else(|| {
+                        builtin_error("randn: unsupported gpuArray prototype class")
+                    })?;
+                    if !matches!(class, random::gpu_like::GpuLikeClass::Floating { .. }) {
+                        return Err(builtin_error(
+                            "randn: 'like' prototype must have single or double underlying type",
+                        ));
+                    }
+                    let host_mode = random::gpu_like::host_random_mode(
+                        crate::context::legacy::active().as_ref(),
+                    );
+                    let scratch = random::gpu_like::exact_host_workspace(
+                        "randn",
+                        random::gpu_like::ExactHostRandomWorkspace::DirectOutput,
+                        host_mode,
+                    )?;
+                    let upload_scratch = match class {
+                        random::gpu_like::GpuLikeClass::Floating {
+                            precision,
+                            complex: true,
+                        } => random::gpu_like::complex_upload_workspace_bytes(
+                            "randn",
+                            &parsed.shape,
+                            precision,
+                        )?,
+                        _ => scratch,
+                    };
+                    let presentation = random::gpu_like::select_presentation(
+                        "randn",
+                        handle,
+                        &parsed.shape,
+                        class,
+                        random::gpu_like::host_result_bytes("randn", &parsed.shape, class, host_mode)?,
+                        scratch,
+                        upload_scratch,
+                        match upload_scratch {
+                            runmat_execution::ResourceByteBound::Known(bytes)
+                                if class.native_storage()
+                                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => bytes,
+                            _ => 0,
+                        },
+                        host_mode,
+                    )?;
+                    let mut turn = random::acquire_turn(presentation.runtime(), "randn").await?;
+                    presentation.checkpoint_for_turn(&turn)?;
+                    let result = match class {
+                        random::gpu_like::GpuLikeClass::Floating { precision, complex } => {
+                            let dtype = match precision {
+                                ProviderPrecision::F32 => NumericDType::F32,
+                                ProviderPrecision::F64 => NumericDType::F64,
+                            };
+                            if complex {
+                                host_output::complex(
+                                    &mut turn,
+                                    &parsed.shape,
+                                    dtype,
+                                    presentation.mode(),
+                                )
+                                .await
+                                .map(complex_tensor_into_value)
+                            } else {
+                                host_output::real(
+                                    &mut turn,
+                                    &parsed.shape,
+                                    dtype,
+                                    presentation.mode(),
+                                )
+                                .await
+                                .map(tensor::tensor_into_value)
+                            }
+                        }
+                        random::gpu_like::GpuLikeClass::Integer { .. }
+                        | random::gpu_like::GpuLikeClass::Logical => Err(builtin_error(
+                            "randn: 'like' prototype must have single or double underlying type",
+                        )),
+                    };
+                    presentation.finish_result("randn", result, &parsed.shape)
+                }
+            };
         }
         _ => {}
     }
@@ -260,20 +374,8 @@ async fn randn_double(
     turn: &mut random::RandomTurn,
     shape: &[usize],
 ) -> crate::BuiltinResult<Value> {
-    let tensor = host_normal_tensor(turn, shape, NumericDType::F64).await?;
-    Ok(tensor::tensor_into_value(tensor))
-}
-
-async fn draw_normal(turn: &mut random::RandomTurn, len: usize) -> crate::BuiltinResult<Vec<f64>> {
-    if let Some(runtime) = turn.owner().cloned() {
-        let mut budget = crate::execution::CpuCooperationBudget::new(
-            runtime.execution().clone(),
-            runtime.cancellation(),
-        );
-        random::generate_normal_cooperative(turn, len, "randn", Some(&runtime), &mut budget).await
-    } else {
-        random::generate_normal(turn, len, "randn")
-    }
+    let mode = random::gpu_like::host_random_mode(turn.owner());
+    draw_source_normal(turn, shape, NumericDType::F64, mode).await
 }
 
 async fn host_normal_tensor(
@@ -281,13 +383,8 @@ async fn host_normal_tensor(
     shape: &[usize],
     dtype: NumericDType,
 ) -> crate::BuiltinResult<Tensor> {
-    if let Some(output) = host_output::real(turn, shape, dtype).await? {
-        return Ok(output);
-    }
-    let len = tensor::element_count(shape);
-    let data = draw_normal(turn, len).await?;
-    Tensor::new_with_dtype(data, shape.to_vec(), dtype)
-        .map_err(|error| builtin_error(format!("randn: {error}")))
+    let mode = random::gpu_like::host_random_mode(turn.owner());
+    host_output::real(turn, shape, dtype, mode).await
 }
 
 async fn randn_single(
@@ -340,7 +437,8 @@ async fn randn_complex(
     shape: &[usize],
     dtype: NumericDType,
 ) -> crate::BuiltinResult<Value> {
-    host_output::complex(turn, shape, dtype)
+    let mode = random::gpu_like::host_random_mode(turn.owner());
+    host_output::complex(turn, shape, dtype, mode)
         .await
         .map(complex_tensor_into_value)
 }
@@ -384,7 +482,7 @@ async fn randn_like_gpu(handle: &GpuTensorHandle, shape: &[usize]) -> crate::Bui
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::common::{random, test_support};
+    use crate::builtins::common::{gpu_helpers, random, test_support};
     use futures::executor::block_on;
     use runmat_accelerate_api::test_support::{RetirementProbe, TestAllocationOwner};
     use runmat_accelerate_api::AccelProvider;
@@ -763,10 +861,10 @@ pub(crate) mod tests {
     #[test]
     fn randn_parser_records_explicit_residency_in_its_typed_template() {
         let parsed =
-            block_on(ParsedRandn::parse(vec![Value::from("gpuArray")])).expect("gpuArray form");
+            block_on(ParsedRandn::parse(&[Value::from("gpuArray")])).expect("gpuArray form");
         assert!(matches!(parsed.template, RandnTemplate::GpuArray));
 
-        let parsed = block_on(ParsedRandn::parse(Vec::new())).expect("default form");
+        let parsed = block_on(ParsedRandn::parse(&[])).expect("default form");
         assert!(matches!(parsed.template, RandnTemplate::Double));
     }
 
@@ -805,7 +903,11 @@ pub(crate) mod tests {
                 data: &tensor.materialize_f64(),
                 shape: tensor.shape(),
             };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = provider
+                .upload(&view)
+                .expect("upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let args = vec![
                 Value::Num(2.0),
                 Value::Num(2.0),
@@ -829,6 +931,71 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn automatic_like_normal_uses_cpu_stream_and_preserves_single_class() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+        test_support::with_test_provider(|provider| {
+            let prototype = Tensor::from_f32(vec![0.0; 4], vec![2, 2]).expect("single");
+            let source = gpu_helpers::upload_tensor(provider, &prototype)
+                .expect("upload prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic prototype");
+            let child_before = random::gpu::snapshot().expect("child before");
+            let expected = block_on(randn_builtin(vec![Value::Num(2.0), Value::from("single")]))
+                .expect("host single normal");
+            random::reset_rng();
+            let actual = block_on(randn_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(source),
+            ]))
+            .expect("automatic normal");
+            assert_eq!(actual, expected);
+            assert_eq!(random::gpu::snapshot().expect("child after"), child_before);
+            let Value::Tensor(output) = actual else {
+                panic!("single storage must survive");
+            };
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn automatic_complex_like_uses_cpu_stream_and_single_class() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+        test_support::with_f32_test_provider(|provider| {
+            let prototype = ComplexTensor::from_f32(vec![(0.0, 0.0); 4], vec![2, 2])
+                .expect("complex single prototype");
+            let source = gpu_helpers::upload_complex_tensor(provider, &prototype)
+                .expect("upload prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic prototype");
+            let child_before = random::gpu::snapshot().expect("child before");
+            let expected = block_on(randn_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::ComplexTensor(prototype),
+            ]))
+            .expect("host complex normal");
+            random::reset_rng();
+            let actual = block_on(randn_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(source),
+            ]))
+            .expect("automatic complex normal");
+            assert_eq!(actual, expected);
+            assert_eq!(random::gpu::snapshot().expect("child after"), child_before);
+            let Value::ComplexTensor(output) = actual else {
+                panic!("complex output required");
+            };
+            assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn randn_rejects_integer_gpu_like_prototype() {
         let _guard = random::test_guard();
         test_support::with_test_provider(|provider| {
@@ -839,7 +1006,9 @@ pub(crate) mod tests {
                     data: runmat_accelerate_api::HostIntegerDataView::I64(&values),
                     shape: &shape,
                 })
-                .expect("upload integer gpu prototype");
+                .expect("upload integer gpu prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let error = block_on(randn_builtin(vec![
                 Value::Num(2.0),
                 Value::from("like"),

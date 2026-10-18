@@ -1,4 +1,6 @@
-use runmat_accelerate_api::{AccelProvider, HostTensorView};
+use runmat_accelerate_api::{
+    AccelProvider, HostTensorView, ProviderNdgridAxis, ProviderNdgridRequest,
+};
 
 async fn actual_linear_launch_tail_witness() {
     #[cfg(not(target_arch = "wasm32"))]
@@ -50,8 +52,11 @@ async fn actual_linear_launch_tail_witness() {
     assert_ne!(first.repmat.linear_launch(), second.repmat.linear_launch());
     for (first_bundle, second_bundle) in [
         (&first.eye, &second.eye),
+        (&first.fill, &second.fill),
         (&first.fspecial, &second.fspecial),
         (&first.linspace, &second.linspace),
+        (&first.diag_from_vector, &second.diag_from_vector),
+        (&first.diag_extract, &second.diag_extract),
     ] {
         assert_eq!(first_bundle.linear_dispatch_groups(65).unwrap(), 2);
         assert_eq!(second_bundle.linear_dispatch_groups(65).unwrap(), 1);
@@ -79,10 +84,24 @@ async fn actual_linear_launch_tail_witness() {
             let second_cold = second.repmat.get(emission)?;
             assert!(std::ptr::eq(first_cold, first.repmat.get(emission)?));
             assert!(std::ptr::eq(second_cold, second.repmat.get(emission)?));
-            for bundle in [&first.eye, &first.fspecial, &first.linspace] {
+            for bundle in [
+                &first.eye,
+                &first.fill,
+                &first.fspecial,
+                &first.linspace,
+                &first.diag_from_vector,
+                &first.diag_extract,
+            ] {
                 bundle.get(emission)?;
             }
-            for bundle in [&second.eye, &second.fspecial, &second.linspace] {
+            for bundle in [
+                &second.eye,
+                &second.fill,
+                &second.fspecial,
+                &second.linspace,
+                &second.diag_from_vector,
+                &second.diag_extract,
+            ] {
                 bundle.get(emission)?;
             }
             assert_eq!(first.repmat.linear_dispatch_groups(65)?, 2);
@@ -156,6 +175,107 @@ async fn actual_linear_launch_tail_witness() {
         .map(|index| -1.0 + (index as f64) / 64.0)
         .collect::<Vec<_>>();
     assert_eq!(linspace_host.data, expected_linspace);
+
+    let filled = selected
+        .fill(&[1, 65], 3.25)
+        .expect("fill tail dispatch")
+        .expect("fill is supported by the selected hardware provider");
+    assert_floating_output(&filled, &[1, 65]);
+    let filled_host = selected.download(&filled).await.expect("fill readback");
+    assert_eq!(filled_host.shape, vec![1, 65]);
+    assert_eq!(filled_host.data, vec![3.25; 65]);
+
+    let diagonal_data = (0..65).map(f64::from).collect::<Vec<_>>();
+    let diagonal_input = selected
+        .upload(&HostTensorView {
+            data: &diagonal_data,
+            shape: &[65, 1],
+        })
+        .expect("diagonal input upload");
+    let diagonal = selected
+        .diag_from_vector(&diagonal_input, 0)
+        .expect("diag construction tail dispatch");
+    assert_floating_output(&diagonal, &[65, 65]);
+    let diagonal_host = selected
+        .download(&diagonal)
+        .await
+        .expect("diagonal matrix readback");
+    for col in 0..65 {
+        for (row, value) in diagonal_data.iter().copied().enumerate() {
+            assert_eq!(
+                diagonal_host.data[row + col * 65],
+                if row == col { value } else { 0.0 }
+            );
+        }
+    }
+    let extracted = selected
+        .diag_extract(&diagonal, 0)
+        .expect("diag extraction tail dispatch");
+    assert_floating_output(&extracted, &[65, 1]);
+    let extracted_host = selected
+        .download(&extracted)
+        .await
+        .expect("diagonal extraction readback");
+    assert_eq!(extracted_host.data, diagonal_data);
+    let bounded_diagonal = selected
+        .diag_from_vector_sized(&diagonal_input, 0, 3, 3)
+        .expect("bounded diagonal construction");
+    assert_floating_output(&bounded_diagonal, &[3, 3]);
+    let bounded_diagonal_host = selected
+        .download(&bounded_diagonal)
+        .await
+        .expect("bounded diagonal readback");
+    assert_eq!(
+        bounded_diagonal_host.data,
+        vec![0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0]
+    );
+
+    let first_axis_data = (0..65).map(f64::from).collect::<Vec<_>>();
+    let second_axis_data = vec![10.0, 20.0];
+    let first_axis = selected
+        .upload(&HostTensorView {
+            data: &first_axis_data,
+            shape: &[65, 1],
+        })
+        .expect("first ndgrid axis upload");
+    let second_axis = selected
+        .upload(&HostTensorView {
+            data: &second_axis_data,
+            shape: &[2, 1],
+        })
+        .expect("second ndgrid axis upload");
+    let grids = selected
+        .ndgrid(&ProviderNdgridRequest {
+            axes: &[
+                ProviderNdgridAxis {
+                    handle: &first_axis,
+                },
+                ProviderNdgridAxis {
+                    handle: &second_axis,
+                },
+            ],
+            output_shape: &[65, 2],
+            output_count: 2,
+        })
+        .expect("ndgrid tail dispatch")
+        .outputs;
+    assert_eq!(grids.len(), 2);
+    for grid in &grids {
+        assert_floating_output(grid, &[65, 2]);
+    }
+    let first_grid = selected
+        .download(&grids[0])
+        .await
+        .expect("first ndgrid output readback");
+    assert_eq!(
+        first_grid.data,
+        [first_axis_data.as_slice(), first_axis_data.as_slice()].concat()
+    );
+    let second_grid = selected
+        .download(&grids[1])
+        .await
+        .expect("second ndgrid output readback");
+    assert_eq!(second_grid.data, [vec![10.0; 65], vec![20.0; 65]].concat());
 
     let input_data = (0..1_026).map(f64::from).collect::<Vec<_>>();
     let input = provider

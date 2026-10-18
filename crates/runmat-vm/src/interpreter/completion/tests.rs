@@ -2,6 +2,7 @@ use super::*;
 use runmat_accelerate_api::{
     test_support::TestAllocationOwner, GpuTensorStorage, NumericElementType,
 };
+use runmat_value::Value;
 
 #[test]
 fn projection_drop_preserves_output_alias_and_retires_unpublished_values() {
@@ -18,7 +19,7 @@ fn projection_drop_preserves_output_alias_and_retires_unpublished_values() {
             Value::GpuTensor(old.handle),
         ])
         .unwrap();
-        let output = projection.values()[0].clone();
+        let output = projection.values().get(0).unwrap().clone();
         drop(projection);
         assert_eq!(shared.probe.retirements(), 0);
         assert_eq!(old.probe.retirements(), 1);

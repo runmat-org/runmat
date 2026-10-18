@@ -4,6 +4,7 @@ use runmat_types::{DynamicReason, ValueFact, ValueKindFact};
 use super::{index_selectors, simple_operand_fact};
 
 mod dotted_invoke;
+mod callable;
 
 pub(crate) struct SubscriptChainInference {
     pub inference: runmat_types::FactInference,
@@ -38,12 +39,25 @@ pub(crate) fn infer(
             runmat_types::SequenceUse::RequireSingle
         };
         let inference = match step {
-            MirSubscriptStep::Index(indexing) => runmat_types::infer_index(
-                &current,
-                indexing.kind,
-                &index_selectors(indexing, facts),
-                indexing.result_context,
-            ),
+            MirSubscriptStep::Index(indexing) => {
+                if let Some((inferred, call_effects, call_capabilities)) =
+                    infer_callable_index(&current, indexing, terminal_use, facts)
+                {
+                    effects.0.extend(call_effects.0);
+                    capabilities.0.extend(call_capabilities.0);
+                    runmat_types::FactInference {
+                        fact: callable::selected_fact(&inferred.sequence, terminal_use),
+                        diagnostics: inferred.diagnostics,
+                    }
+                } else {
+                    runmat_types::infer_index(
+                        &current,
+                        indexing.kind,
+                        &index_selectors(indexing, facts),
+                        indexing.result_context,
+                    )
+                }
+            }
             MirSubscriptStep::Member(member) => {
                 runmat_types::infer_member_read(&current, member, terminal_use)
             }
@@ -56,6 +70,9 @@ pub(crate) fn infer(
                     &runmat_types::MemberName(name),
                     terminal_use,
                 )
+            }
+            MirSubscriptStep::PreparedDynamicMember(_) => {
+                return dynamic_dispatch(position, diagnostics, effects, capabilities);
             }
             MirSubscriptStep::DottedInvoke {
                 member,
@@ -118,12 +135,18 @@ pub(crate) fn infer_sequence(
         let terminal = position + 1 == chain.steps.len();
         if terminal {
             let mut inferred = match step {
-                MirSubscriptStep::Index(indexing) => runmat_types::infer_index_sequence(
-                    &current,
-                    indexing.kind,
-                    &index_selectors(indexing, facts),
-                    indexing.result_context,
-                ),
+                MirSubscriptStep::Index(indexing) => {
+                    infer_callable_index(&current, indexing, chain.sequence_use, facts)
+                        .map(|(inferred, _, _)| inferred)
+                        .unwrap_or_else(|| {
+                            runmat_types::infer_index_sequence(
+                                &current,
+                                indexing.kind,
+                                &index_selectors(indexing, facts),
+                                indexing.result_context,
+                            )
+                        })
+                }
                 MirSubscriptStep::Member(member) => {
                     runmat_types::infer_member_sequence(&current, member)
                 }
@@ -135,6 +158,12 @@ pub(crate) fn infer_sequence(
                         };
                     };
                     runmat_types::infer_member_sequence(&current, &runmat_types::MemberName(name))
+                }
+                MirSubscriptStep::PreparedDynamicMember(_) => {
+                    return runmat_types::SequenceFactInference {
+                        sequence: runmat_types::ValueSequenceFact::dynamic(),
+                        diagnostics,
+                    };
                 }
                 MirSubscriptStep::DottedInvoke {
                     member,
@@ -168,12 +197,27 @@ pub(crate) fn infer_sequence(
         }
 
         let inference = match step {
-            MirSubscriptStep::Index(indexing) => runmat_types::infer_index(
+            MirSubscriptStep::Index(indexing) => infer_callable_index(
                 &current,
-                indexing.kind,
-                &index_selectors(indexing, facts),
-                indexing.result_context,
-            ),
+                indexing,
+                runmat_types::SequenceUse::RequireSingle,
+                facts,
+            )
+            .map(|(inferred, _, _)| runmat_types::FactInference {
+                fact: callable::selected_fact(
+                    &inferred.sequence,
+                    runmat_types::SequenceUse::RequireSingle,
+                ),
+                diagnostics: inferred.diagnostics,
+            })
+            .unwrap_or_else(|| {
+                runmat_types::infer_index(
+                    &current,
+                    indexing.kind,
+                    &index_selectors(indexing, facts),
+                    indexing.result_context,
+                )
+            }),
             MirSubscriptStep::Member(member) => runmat_types::infer_member_read(
                 &current,
                 member,
@@ -191,6 +235,12 @@ pub(crate) fn infer_sequence(
                     &runmat_types::MemberName(name),
                     runmat_types::SequenceUse::RequireSingle,
                 )
+            }
+            MirSubscriptStep::PreparedDynamicMember(_) => {
+                return runmat_types::SequenceFactInference {
+                    sequence: runmat_types::ValueSequenceFact::dynamic(),
+                    diagnostics,
+                };
             }
             MirSubscriptStep::DottedInvoke {
                 member,
@@ -225,6 +275,47 @@ pub(crate) fn infer_sequence(
         sequence: runmat_types::ValueSequenceFact::single(current),
         diagnostics,
     }
+}
+
+fn infer_callable_index(
+    current: &ValueFact,
+    indexing: &crate::MirIndexing,
+    sequence_use: runmat_types::SequenceUse,
+    facts: &[Option<ValueFact>],
+) -> Option<(
+    runmat_types::SequenceFactInference,
+    runmat_types::EffectSet,
+    runmat_types::CapabilitySet,
+)> {
+    if indexing.kind != runmat_types::IndexKind::Paren {
+        return None;
+    }
+    let arguments = indexing
+        .components
+        .iter()
+        .map(|component| match component {
+            crate::MirIndexComponent::Expr(operand) => simple_operand_fact(operand, facts),
+            crate::MirIndexComponent::Colon
+            | crate::MirIndexComponent::ContextualExpr(_)
+            | crate::MirIndexComponent::PreparedExpr(_) => {
+                ValueFact::unknown(DynamicReason::DynamicDispatch)
+            }
+        })
+        .collect();
+    let literals = indexing
+        .components
+        .iter()
+        .map(|component| match component {
+            crate::MirIndexComponent::Expr(MirOperand::Constant(constant)) => {
+                super::literal_value(constant)
+            }
+            crate::MirIndexComponent::Expr(_)
+            | crate::MirIndexComponent::Colon
+            | crate::MirIndexComponent::ContextualExpr(_)
+            | crate::MirIndexComponent::PreparedExpr(_) => runmat_types::LiteralValue::Unknown,
+        })
+        .collect();
+    callable::infer(current, arguments, literals, sequence_use)
 }
 
 fn dynamic_dispatch(

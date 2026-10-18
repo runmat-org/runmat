@@ -152,19 +152,35 @@ fn compiled_fused_compute_then_ordinary_second_store_failure_is_caught_without_r
             .outcome
             .expect("language catch handles terminal publication failure");
         assert_eq!(
-            completion.values[slot(&bytecode, "observed_identifier")],
-            Value::String("RunMat:FusionFixture:SecondStore".to_string())
+            completion
+                .values
+                .get(slot(&bytecode, "observed_identifier"))
+                .as_deref(),
+            Some(&Value::String(
+                "RunMat:FusionFixture:SecondStore".to_string()
+            ))
         );
         assert_eq!(
-            completion.values[slot(&bytecode, "observed_message")],
-            Value::String("second workspace publication rejected".to_string())
+            completion
+                .values
+                .get(slot(&bytecode, "observed_message"))
+                .as_deref(),
+            Some(&Value::String(
+                "second workspace publication rejected".to_string()
+            ))
         );
         assert!(matches!(
-            &completion.values[slot(&bytecode, "mu")],
-            Value::GpuTensor(_)
+            completion.values.get(slot(&bytecode, "mu")).as_deref(),
+            Some(Value::GpuTensor(_))
         ));
-        assert_eq!(completion.values[slot(&bytecode, "sigma")], Value::Num(0.0));
-        assert_eq!(completion.values[slot(&bytecode, "out")], Value::Num(0.0));
+        assert_eq!(
+            completion.values.get(slot(&bytecode, "sigma")).as_deref(),
+            Some(&Value::Num(0.0))
+        );
+        assert_eq!(
+            completion.values.get(slot(&bytecode, "out")).as_deref(),
+            Some(&Value::Num(0.0))
+        );
         let after = provider.fused_dispatches.load(Ordering::Relaxed);
         assert!(
             after > before,
@@ -226,16 +242,35 @@ fn compiled_fusion_hard_provider_failure_is_caught_without_cpu_replay() {
             .outcome
             .expect("language catch handles exact hard provider error");
         assert_eq!(
-            completion.values[slot(&bytecode, "observed_identifier")],
-            Value::String("RunMat:FusionFixture:ProviderFailure".to_string())
+            completion
+                .values
+                .get(slot(&bytecode, "observed_identifier"))
+                .as_deref(),
+            Some(&Value::String(
+                "RunMat:FusionFixture:ProviderFailure".to_string()
+            ))
         );
         assert_eq!(
-            completion.values[slot(&bytecode, "observed_message")],
-            Value::String("selected provider rejected single-output execution".to_string())
+            completion
+                .values
+                .get(slot(&bytecode, "observed_message"))
+                .as_deref(),
+            Some(&Value::String(
+                "selected provider rejected single-output execution".to_string()
+            ))
         );
-        assert_eq!(completion.values[slot(&bytecode, "mu")], Value::Num(0.0));
-        assert_eq!(completion.values[slot(&bytecode, "sigma")], Value::Num(0.0));
-        assert_eq!(completion.values[slot(&bytecode, "out")], Value::Num(0.0));
+        assert_eq!(
+            completion.values.get(slot(&bytecode, "mu")).as_deref(),
+            Some(&Value::Num(0.0))
+        );
+        assert_eq!(
+            completion.values.get(slot(&bytecode, "sigma")).as_deref(),
+            Some(&Value::Num(0.0))
+        );
+        assert_eq!(
+            completion.values.get(slot(&bytecode, "out")).as_deref(),
+            Some(&Value::Num(0.0))
+        );
         assert_eq!(
             provider.fused_dispatches.load(Ordering::Relaxed) - before,
             1

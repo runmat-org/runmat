@@ -20,6 +20,7 @@ pub use native::{AotObjectDataOptions, NativeCompilationInput};
 pub use revision::ExecutableRevision;
 pub(crate) use revision::ExecutableSourceSelection;
 pub use runmat_test::coverage::{CoverageFragment, CoverageMetric, CoverageSite};
+pub(crate) use source::CapturedPrimarySource;
 pub use source::ExecutableSource;
 pub use source_map::{ExecutableSourceMap, SourceMapEntry};
 pub(crate) use unit::ExecutableUnitDraft;

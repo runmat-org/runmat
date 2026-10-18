@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use runmat_types::{
     CapabilitySet, DistributedValueId, EffectSet, FactJoin, FactWiden, LiteralValue, ValueFact,
@@ -8,6 +9,7 @@ use runmat_types::{
 use crate::{MirBody, MirLocalId, MirPlace, MirSequenceLocalId, SequenceRootCreation};
 
 use super::super::InitFact;
+use crate::analysis::workspace_effect::current_scope_bindings;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LocalState {
@@ -25,6 +27,14 @@ impl LocalState {
         }
     }
 
+    fn runtime_workspace_lookup() -> Self {
+        Self {
+            fact: None,
+            literal: LiteralValue::Unknown,
+            assignment: InitFact::RuntimeWorkspaceLookup,
+        }
+    }
+
     pub fn assigned(fact: ValueFact, literal: LiteralValue) -> Self {
         Self {
             fact: Some(fact),
@@ -38,11 +48,16 @@ impl LocalState {
         self.literal = literal;
         self.assignment = InitFact::DefinitelyAssigned;
     }
+
+    fn invalidate_for_current_workspace_effect(&mut self) {
+        *self = Self::runtime_workspace_lookup();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FlowState {
     pub locals: Vec<LocalState>,
+    current_workspace_bindings: Arc<[MirLocalId]>,
     pub effects: EffectSet,
     pub capabilities: CapabilitySet,
     pub distributed: BTreeMap<DistributedValueId, ValueFact>,
@@ -74,6 +89,7 @@ impl FlowState {
     ) -> Self {
         let mut state = Self {
             locals: vec![LocalState::unassigned(); body.locals.len()],
+            current_workspace_bindings: current_scope_bindings(body).into(),
             effects: EffectSet::default(),
             capabilities: CapabilitySet::default(),
             distributed: BTreeMap::new(),
@@ -140,6 +156,8 @@ impl FlowState {
                     }),
                     LiteralValue::Unknown,
                 );
+            } else if matches!(local.kind, crate::MirLocalKind::ExternalWorkspace) {
+                state.locals[local.id.0] = LocalState::runtime_workspace_lookup();
             }
         }
         if let Some(local) = constructor_instance {
@@ -151,12 +169,24 @@ impl FlowState {
         state
     }
 
+    pub(crate) fn invalidate_current_workspace_bindings(&mut self) {
+        for binding in self.current_workspace_bindings.iter() {
+            self.locals[binding.0].invalidate_for_current_workspace_effect();
+        }
+    }
+
     pub fn join_from(&mut self, incoming: &Self, widen: bool) -> bool {
         let mut changed = false;
         for (slot, next) in self.locals.iter_mut().zip(&incoming.locals) {
             let assignment = join_assignment(slot.assignment, next.assignment);
-            let fact = join_optional(slot.fact.as_ref(), next.fact.as_ref(), widen);
-            let literal = if slot.literal == next.literal {
+            let fact = if assignment == InitFact::RuntimeWorkspaceLookup {
+                None
+            } else {
+                join_optional(slot.fact.as_ref(), next.fact.as_ref(), widen)
+            };
+            let literal = if assignment == InitFact::RuntimeWorkspaceLookup {
+                LiteralValue::Unknown
+            } else if slot.literal == next.literal {
                 slot.literal.clone()
             } else {
                 LiteralValue::Unknown
@@ -282,6 +312,9 @@ fn join_assignment(left: InitFact, right: InitFact) -> InitFact {
         (InitFact::Unassigned, InitFact::Unassigned) => InitFact::Unassigned,
         (InitFact::DefinitelyAssigned, InitFact::DefinitelyAssigned) => {
             InitFact::DefinitelyAssigned
+        }
+        (InitFact::RuntimeWorkspaceLookup, _) | (_, InitFact::RuntimeWorkspaceLookup) => {
+            InitFact::RuntimeWorkspaceLookup
         }
         _ => InitFact::MaybeAssigned,
     }

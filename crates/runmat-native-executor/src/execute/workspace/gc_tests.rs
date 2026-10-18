@@ -4,6 +4,13 @@ use runmat_native_codegen::{NativeBlockId, NativeFunction, NativeFunctionAbi};
 use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 fn workspace(values: BTreeMap<String, Value>) -> NativeWorkspaceState {
+    workspace_for_context(values, None)
+}
+
+fn workspace_for_context(
+    values: BTreeMap<String, Value>,
+    context: Option<&runmat_runtime::context::RuntimeContext>,
+) -> NativeWorkspaceState {
     let function = NativeFunction {
         lexical_bindings: Vec::new(),
         inherited_storage_bindings: Vec::new(),
@@ -24,20 +31,25 @@ fn workspace(values: BTreeMap<String, Value>) -> NativeWorkspaceState {
             implicit_nargout: None,
         },
         argument_validations: vec![],
+        binding_locals: vec![],
+        closure_captures: vec![],
         locals: vec![],
         entry: NativeBlockId(0),
         blocks: vec![],
+        expression_continuation_geometry:
+            runmat_native_codegen::NativeExpressionContinuationGeometry {
+                region_capacity: 0,
+                retained_input_capacity: 0,
+            },
         expected_sites: vec![],
     };
-    NativeWorkspaceState::new(
+    NativeWorkspaceState::new_with_runtime(
         &function,
-        NativeWorkspaceInput {
-            values,
-            ..Default::default()
-        },
+        NativeWorkspaceInput::from_test_values(values, Default::default(), Vec::new(), Vec::new()),
         FrameGlobalBindings::default(),
         None,
         None,
+        context,
     )
     .unwrap()
 }
@@ -145,14 +157,26 @@ fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
                 implicit_nargout: None,
             },
             argument_validations: vec![],
+            binding_locals: vec![],
+            closure_captures: vec![],
             locals: vec![],
             entry: NativeBlockId(0),
             blocks: vec![],
+            expression_continuation_geometry:
+                runmat_native_codegen::NativeExpressionContinuationGeometry {
+                    region_capacity: 0,
+                    retained_input_capacity: 0,
+                },
             expected_sites: vec![],
         };
         let state = NativeWorkspaceState::new(
             &function,
-            NativeWorkspaceInput::default(),
+            NativeWorkspaceInput::from_test_values(
+                Default::default(),
+                Default::default(),
+                Vec::new(),
+                Vec::new(),
+            ),
             FrameGlobalBindings::default(),
             Some(canonical.clone()),
             None,
@@ -220,6 +244,34 @@ fn input_snapshot_aliases_remove_clear_and_replacement_have_exact_root_lifetimes
         service.clear().unwrap();
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_err());
+
+        // A captured generation retains its own old roots. Clearing the live
+        // workspace releases them only after that external reader retires.
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let state = workspace_for_context(BTreeMap::new(), Some(&runtime));
+        let service = state.service();
+        let allocation = runmat_gc::gc_allocate_rooted(Value::Num(29.0)).unwrap();
+        let handle = allocation.handle();
+        service
+            .assign_with_context(&runtime, "captured", handle_value(handle))
+            .unwrap();
+        let capture = service
+            .capture_workspace_generation_with_context(&runtime)
+            .unwrap()
+            .expect("private workspace generation capture");
+        allocation.unroot().unwrap();
+        service.clear_with_context(&runtime).unwrap();
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        assert_eq!(capture.get("captured"), Some(&handle_value(handle)));
+        drop(capture);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(
+            runmat_gc::gc_clone_value(&handle).is_err(),
+            "only the external capture retains the cleared generation"
+        );
     });
 }
 
@@ -237,11 +289,11 @@ fn reentrant_mutation_is_structured_and_gc_never_borrows_workspace_storage() {
         let state = workspace(BTreeMap::from([("retained".into(), handle_value(handle))]));
         let service = state.service();
         allocation.unroot().unwrap();
-        let borrow = state.frame.values.borrow_mut();
+        let borrow = state.frame.lexical.borrow_mut();
         runmat_gc::gc_collect_major().unwrap();
         assert!(
             runmat_gc::gc_clone_value(&handle).is_ok(),
-            "explicit roots do not scan the RefCell"
+            "retained generation roots do not scan borrowed Native metadata"
         );
         for result in [
             service.assign("retained", Value::Num(0.0)),

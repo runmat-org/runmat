@@ -54,6 +54,7 @@ pub mod parallel;
 pub mod source_context;
 pub mod tcp;
 pub mod testing;
+pub mod third_party_notices;
 pub mod value_fact;
 
 pub mod builtins;
@@ -701,7 +702,9 @@ pub use runmat_macros::{register_fusion_spec, register_gpu_spec};
 
 // Pruned legacy re-exports; prefer builtins::* and explicit shims only
 // Transitional root-level shims for widely used helpers
-pub use builtins::common::concatenation::create_matrix_from_values;
+pub use builtins::common::concatenation::{
+    create_host_matrix_from_values, create_matrix_from_values, host_matrix_can_run_inline,
+};
 pub use builtins::common::elementwise::{
     elementwise_div, elementwise_mul, elementwise_neg, elementwise_pow, power,
 };

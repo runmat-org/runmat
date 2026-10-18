@@ -63,19 +63,21 @@ fn process_worker_returns_stable_success_and_failure_exits() {
             "--report",
             "json",
             "--report",
+            "json",
+            "--report",
             "junit",
         ],
         passing_reports.path(),
     );
     assert!(passing.status.success(), "{passing:#?}");
-    let json_path = find_named(passing_reports.path(), "test-results.json").unwrap();
+    let json_path = passing_reports.path().join("test-results.json");
     let json: serde_json::Value =
         serde_json::from_slice(&std::fs::read(json_path).unwrap()).unwrap();
     assert_eq!(
         json["result"]["tests"][0]["report_identity"]["display_name"],
         "arithmeticTest/testPasses"
     );
-    let junit_path = find_named(passing_reports.path(), "test-results.xml").unwrap();
+    let junit_path = passing_reports.path().join("test-results.xml");
     let junit = std::fs::read_to_string(junit_path).unwrap();
     assert!(junit.contains("classname=\"arithmeticTest\""), "{junit}");
     assert!(junit.contains("name=\"testPasses\""), "{junit}");
@@ -106,7 +108,7 @@ fn explicit_native_session_and_none_modes_execute_without_claiming_process_isola
         );
         assert!(output.status.success(), "{isolation}: {output:#?}");
         assert!(
-            find_named(reports.path(), "test-results.json").is_some(),
+            reports.path().join("test-results.json").is_file(),
             "{isolation}: {output:#?}"
         );
     }
@@ -137,12 +139,9 @@ fn process_workers_merge_backend_coverage_and_emit_all_formats() {
         "coverage.xml",
         "coverage.html",
     ] {
-        assert!(
-            find_named(reports.path(), name).is_some(),
-            "{name}: {output:#?}"
-        );
+        assert!(reports.path().join(name).is_file(), "{name}: {output:#?}");
     }
-    let path = find_named(reports.path(), "coverage.json").unwrap();
+    let path = reports.path().join("coverage.json");
     let coverage: serde_json::Value =
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert!(
@@ -193,19 +192,4 @@ fn hard_timeout_recovers_capacity_for_the_next_fixture_group_test() {
     assert!(stdout.contains("TimedOut"), "{output:#?}");
     assert!(stdout.contains("Passed"), "{output:#?}");
     assert!(stdout.contains("2 tests"), "{output:#?}");
-}
-
-fn find_named(root: &Path, name: &str) -> Option<PathBuf> {
-    for entry in std::fs::read_dir(root).ok()? {
-        let path = entry.ok()?.path();
-        if path.file_name().is_some_and(|value| value == name) {
-            return Some(path);
-        }
-        if path.is_dir() {
-            if let Some(found) = find_named(&path, name) {
-                return Some(found);
-            }
-        }
-    }
-    None
 }

@@ -154,6 +154,7 @@ where
             let state = get_state_mut(&mut reg, handle);
             state.figure.set_active_axes_index(axes_index);
             if should_clear {
+                state.figure.reset_axes_text(axes_index);
                 state.figure.set_axes_kind(axes_index, AxesKind::Cartesian);
                 state.figure.set_axes_limits(axes_index, None, None);
                 state.figure.set_axes_z_limits(axes_index, None);

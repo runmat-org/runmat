@@ -287,7 +287,7 @@ impl DeferredGraphSnapshot for SelectedGraphSnapshot {
         let (issuer, source_map) =
             GraphSourceIssuer::capture_selected_units(&units.source_facts())?;
         let graph = prepared.finish(&issuer, &source_map, &layouts, &proofs, &node_units)?;
-        let required_schema = runmat_vm::selected_graph_execution_required_schema(
+        let selected_value_schema = runmat_vm::selected_graph_execution_required_schema(
             &roots,
             &graph,
             |owner| {
@@ -341,6 +341,18 @@ impl DeferredGraphSnapshot for SelectedGraphSnapshot {
             },
         )
         .map_err(invalid)?;
+        // The selected-code floor is shared with legacy worker admission.
+        // Only this new producer chooses the supplied-only callable argument
+        // ABI; an older V10/V11 request must not be reinterpreted as V12.
+        let required_schema = if matches!(
+            &roots,
+            runmat_execution::value::GraphInvocationRoots::Callable { .. }
+        ) {
+            selected_value_schema
+                .max(runmat_execution::value::GraphRequiredSchema::CallableArgumentsV12)
+        } else {
+            selected_value_schema
+        };
         let selected_units = units
             .units()
             .iter()

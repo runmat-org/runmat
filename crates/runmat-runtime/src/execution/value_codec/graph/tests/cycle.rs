@@ -9,7 +9,7 @@ fn closure_activation_cycle_and_argument_alias_round_trip_under_one_rooted_batch
         ));
         let (environment, original_roots) =
             crate::call::lexical::allocate_environment(None).unwrap();
-        assert!(environment.reserve_owned_binding(BindingId(7)));
+        assert!(crate::call::lexical::reserve_owned_binding(&environment, BindingId(7)).unwrap());
         let closure = Value::Closure(Closure::from_data(runmat_value::ClosureData {
             function_name: "nested".into(),
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),

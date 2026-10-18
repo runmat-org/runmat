@@ -193,10 +193,6 @@ const REDUCE_ND_MOMENTS_SHADER_F64: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F64;
 const REDUCE_ND_MOMENTS_SHADER_F32: &str =
     crate::backend::wgpu::shaders::reduction::REDUCE_ND_MOMENTS_SHADER_F32;
-const STOCHASTIC_EVOLUTION_SHADER_F64: &str =
-    crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F64;
-const STOCHASTIC_EVOLUTION_SHADER_F32: &str =
-    crate::backend::wgpu::shaders::stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F32;
 const LINEAR_GATHER_WORDS_SHADER: &str =
     crate::backend::wgpu::shaders::index_select::LINEAR_GATHER_WORDS_SHADER;
 const LINEAR_SCATTER_WORDS_SHADER: &str =
@@ -227,6 +223,77 @@ pub struct PipelineBundle {
     entries: Vec<wgpu::BindGroupLayoutEntry>,
     shader_source: Cow<'static, str>,
     required_features: wgpu::Features,
+}
+
+pub(crate) struct StochasticEvolutionPipelines {
+    entries: Vec<(
+        runmat_accelerate_api::stochastic_evolution::StochasticEvolutionArithmeticClass,
+        PipelineBundle,
+    )>,
+}
+
+impl StochasticEvolutionPipelines {
+    fn new(
+        access: &runmat_accelerate_api::WgpuDeviceAccess,
+        linear_tokens: FrozenShaderTokens,
+    ) -> Self {
+        use runmat_accelerate_api::scalar_program::ScalarLiteral;
+        use runmat_accelerate_api::stochastic_evolution::StochasticEvolutionArithmetic;
+        use runmat_types::NumericClass;
+
+        let mut entries = Vec::with_capacity(16);
+        for state in [NumericClass::Single, NumericClass::Double] {
+            for noise in [NumericClass::Single, NumericClass::Double] {
+                for drift in [NumericClass::Single, NumericClass::Double] {
+                    for scale in [NumericClass::Single, NumericClass::Double] {
+                        let literal = |class| match class {
+                            NumericClass::Single => ScalarLiteral::F32Bits(0),
+                            NumericClass::Double => ScalarLiteral::F64Bits(0),
+                            _ => unreachable!(),
+                        };
+                        let arithmetic = StochasticEvolutionArithmetic::new(
+                            state,
+                            noise,
+                            literal(drift),
+                            literal(scale),
+                        )
+                        .expect("real floating arithmetic is canonical");
+                        let class = arithmetic.class_identity();
+                        let source =
+                            crate::backend::wgpu::shaders::stochastic_evolution::source(class)
+                                .expect("canonical arithmetic has a shader representation");
+                        entries.push((
+                            class,
+                            create_pipeline(
+                                access,
+                                "runmat-stochastic-evolution-layout",
+                                "runmat-stochastic-evolution-shader",
+                                "runmat-stochastic-evolution-pipeline",
+                                vec![
+                                    storage_read_entry(0),
+                                    storage_read_entry(1),
+                                    storage_read_write_entry(2),
+                                    uniform_entry(3),
+                                ],
+                                source,
+                            )
+                            .with_linear_launch(linear_tokens),
+                        ));
+                    }
+                }
+            }
+        }
+        Self { entries }
+    }
+
+    pub(crate) fn get(
+        &self,
+        class: runmat_accelerate_api::stochastic_evolution::StochasticEvolutionArithmeticClass,
+    ) -> Option<&PipelineBundle> {
+        self.entries
+            .iter()
+            .find_map(|(candidate, pipeline)| (*candidate == class).then_some(pipeline))
+    }
 }
 
 impl PipelineBundle {
@@ -466,7 +533,7 @@ pub struct WgpuPipelines {
     pub random_exprnd: PipelineBundle,
     pub random_normrnd: PipelineBundle,
     pub random_unifrnd: PipelineBundle,
-    pub stochastic_evolution: PipelineBundle,
+    pub(crate) stochastic_evolution: StochasticEvolutionPipelines,
     pub randperm: PipelineBundle,
     pub fspecial: PipelineBundle,
     pub peaks: PipelineBundle,
@@ -1522,7 +1589,8 @@ impl WgpuPipelines {
                 NumericPrecision::F64 => FILL_SHADER_F64,
                 NumericPrecision::F32 => FILL_SHADER_F32,
             },
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let linspace = create_pipeline(
             access,
@@ -1714,22 +1782,7 @@ impl WgpuPipelines {
         )
         .with_linear_launch(linear_tokens);
 
-        let stochastic_evolution = create_pipeline(
-            access,
-            "runmat-stochastic-evolution-layout",
-            "runmat-stochastic-evolution-shader",
-            "runmat-stochastic-evolution-pipeline",
-            vec![
-                storage_read_entry(0),
-                storage_read_write_entry(1),
-                uniform_entry(2),
-            ],
-            match precision {
-                NumericPrecision::F64 => STOCHASTIC_EVOLUTION_SHADER_F64,
-                NumericPrecision::F32 => STOCHASTIC_EVOLUTION_SHADER_F32,
-            },
-        )
-        .with_linear_launch(linear_tokens);
+        let stochastic_evolution = StochasticEvolutionPipelines::new(access, linear_tokens);
 
         let randperm = create_pipeline(
             access,
@@ -1907,7 +1960,8 @@ impl WgpuPipelines {
                 NumericPrecision::F32 => DIAG_FROM_VECTOR_SHADER_F32,
             }
             .replace("@WG@", &linear_launch.workgroup().to_string()),
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let diag_extract = create_pipeline(
             access,
@@ -1926,7 +1980,8 @@ impl WgpuPipelines {
                 },
                 linear_launch.workgroup(),
             ),
-        );
+        )
+        .with_linear_launch(linear_tokens);
 
         let interp1 = create_pipeline(
             access,

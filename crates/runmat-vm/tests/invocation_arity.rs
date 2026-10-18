@@ -22,13 +22,20 @@ fn expect_handler_reached<F: Future>(future: Pin<&mut F>, reached: oneshot::Rece
     }
 }
 
-fn output(bytecode: &runmat_vm::Bytecode, values: &[Value], name: &str) -> Value {
+fn output(
+    bytecode: &runmat_vm::Bytecode,
+    values: &runmat_vm::InterpreterVars,
+    name: &str,
+) -> Value {
     let slot = bytecode
         .var_names
         .iter()
         .find_map(|(slot, candidate)| (candidate == name).then_some(*slot))
         .expect("compiled output slot");
-    values[slot].clone()
+    values
+        .get(slot)
+        .expect("completed output remains in its compiled slot")
+        .clone()
 }
 
 #[test]

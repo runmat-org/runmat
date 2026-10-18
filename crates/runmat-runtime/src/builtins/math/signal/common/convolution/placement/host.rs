@@ -305,7 +305,7 @@ fn input_facts(value: &Value) -> InputFacts {
         },
         Value::LogicalArray(array) => InputFacts {
             class: InputClass::Logical,
-            shape: array.shape.clone(),
+            shape: array.shape.to_vec(),
         },
         Value::Num(_) => InputFacts {
             class: InputClass::DoubleScalar,

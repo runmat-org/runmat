@@ -4,7 +4,7 @@
 //! stage envelope, while final output claims consume separate headroom.
 
 use crate::context::host_allocation::{HostAllocationError, HostAllocationPlan};
-use runmat_value::{ExactHostComplexTensorAllocation, ExactHostTensorAllocation, NumericDType};
+use runmat_value::NumericDType;
 
 pub(crate) fn tensor_spline_allocation_plan(
     rows: usize,
@@ -40,20 +40,17 @@ pub(crate) fn tensor_spline_allocation_plan(
     let output = if lanes == 1 && output_count == 1 && dtype == NumericDType::F64 {
         0
     } else if lanes == 2 {
-        ExactHostComplexTensorAllocation::requested_bytes_for_dimensions(
+        HostAllocationPlan::retained_complex_tensor_bytes_for_dimensions(
             dtype,
             output_count,
             output_rank.max(2),
         )?
     } else {
-        ExactHostTensorAllocation::requested_bytes_for_dimensions(
+        HostAllocationPlan::retained_tensor_bytes_for_dimensions(
             dtype,
             output_count,
             output_rank.max(2),
         )?
     };
-    HostAllocationPlan::new(
-        scratch,
-        u64::try_from(output).map_err(|_| HostAllocationError::Overflow)?,
-    )
+    HostAllocationPlan::new(scratch, output)
 }

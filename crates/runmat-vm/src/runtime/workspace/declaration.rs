@@ -3,31 +3,26 @@
 
 use super::*;
 
-pub(crate) fn declare_workspace_persistent_slot(
+pub(crate) fn prepare_workspace_persistent_slot(
     selected: runmat_runtime::context::RuntimeContextLocalId,
     index: usize,
-    value: &Value,
-) {
+    context: &runmat_runtime::context::RuntimeContext,
+) -> Result<Option<super::frame_assignment::PreparedFrameAssignment>, runmat_runtime::RuntimeError>
+{
     let owner = WorkspaceOwner::Runtime(selected);
     if current_owner() != owner {
-        return;
+        return Ok(None);
     }
-    with_active_frame_mut(owner, |frame| {
-        let ws = &mut frame.state;
-        let Some(name) = ws
-            .slot_lifecycle
-            .get(&index)
-            .map(|slot| slot.name().to_owned())
-        else {
-            return;
-        };
-        ws.assigned.insert(name.clone());
-        mark_slot_assigned(ws, index, name);
-        if ws.values.len() <= index {
-            ws.values.resize(index + 1, Value::Num(0.0));
-        }
-        ws.values[index] = value.clone();
-    });
+    let Some(frame) = workspace_frame_identity() else {
+        return Ok(None);
+    };
+    super::frame_assignment::prepare_workspace_frame_import(
+        frame,
+        Some(context),
+        index,
+        &Value::Num(0.0),
+    )
+    .map(Some)
 }
 
 #[cfg(test)]
@@ -44,7 +39,8 @@ mod tests {
                 crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
             let frame = activation.frame();
             futures::executor::block_on(activation.scope(runtime.scope(async {
-                let mut vars = vec![Value::Num(99.0)];
+                let mut vars =
+                    crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(99.0)]);
                 let _frame = set_transient_workspace_state(
                     [("p".into(), 3), ("untouched".into(), 0)]
                         .into_iter()
@@ -55,9 +51,18 @@ mod tests {
                 );
                 let empty =
                     Value::Tensor(runmat_value::Tensor::new(Vec::new(), vec![0, 0]).unwrap());
-                declare_workspace_persistent_slot(other.local_identity(), 3, &empty);
+                assert!(
+                    prepare_workspace_persistent_slot(other.local_identity(), 3, &other)
+                        .unwrap()
+                        .is_none()
+                );
                 assert_eq!(workspace_slot_assigned(3), Some(false));
-                declare_workspace_persistent_slot(runtime.local_identity(), 3, &empty);
+                let prepared =
+                    prepare_workspace_persistent_slot(runtime.local_identity(), 3, &runtime)
+                        .unwrap()
+                        .expect("selected frame");
+                prepared.checkpoint_before_publication().unwrap();
+                prepared.commit_owned_value(empty.clone());
                 assert_eq!(workspace_slot_assigned(3), Some(true));
                 assert_eq!(workspace_lookup("p"), Some(empty));
                 assert_eq!(workspace_slot_assigned(0), Some(false));

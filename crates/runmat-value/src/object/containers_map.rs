@@ -159,6 +159,15 @@ impl ContainersMapStorage {
             visitor(&entry.value);
         }
     }
+
+    pub(crate) fn trace_value_at(&self, index: usize) -> Option<&Value> {
+        let entry = self.entries.get(index / 2)?;
+        Some(if index.is_multiple_of(2) {
+            &entry.key_value
+        } else {
+            &entry.value
+        })
+    }
 }
 
 impl Trace for ContainersMapStorage {

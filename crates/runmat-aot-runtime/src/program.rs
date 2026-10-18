@@ -58,7 +58,7 @@ pub async fn invoke_workspace(
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
-    let roots = runmat_runtime::execution::RootedValueLease::for_values(workspace.values.values())
+    let roots = runmat_runtime::execution::RootedValueLease::for_values(workspace.profile_values())
         .map_err(|error| error.into_runtime_error())?;
     let runtime = install_acceleration_services(runtime);
     let (runtime, placement) = runtime.native_invocation_context();
@@ -220,7 +220,7 @@ impl ProgramInvocationGuards {
                             function.0
                         )));
                     }
-                    invoke_native_values(
+                    invoke_native_values_legacy(
                         Rc::clone(&executor),
                         function,
                         arguments,
@@ -276,7 +276,7 @@ impl ProgramInvocationGuards {
                     invoke_native_values(
                         Rc::clone(&executor),
                         function,
-                        arguments.values().to_vec(),
+                        arguments,
                         requested_outputs,
                         runtime,
                         lexical_environment,
@@ -542,6 +542,64 @@ fn isolated_runtime(
 async fn invoke_native_values(
     executor: Rc<runmat_native_executor::NativeExecutor>,
     function: ProgramFunctionId,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError> {
+    let environment_roots = if let Some(callable) = arguments.callable() {
+        let Value::Closure(closure) = callable.value() else {
+            unreachable!("rooted callable arguments validated their source")
+        };
+        if closure.lexical_environment.as_ref() != lexical_environment.as_ref() {
+            return Err(native_error(
+                "selected callable lexical activation differs from native invocation",
+            ));
+        }
+        None
+    } else {
+        lexical_environment
+            .as_ref()
+            .map(runmat_runtime::call::lexical::root_environment)
+            .transpose()?
+    };
+    let runtime =
+        super_constructor::bind_selected(&executor, function, runtime).map_err(|error| *error)?;
+    let (runtime, placement) = runtime.native_invocation_context();
+    let selected = runtime.clone();
+    let execution = runmat_runtime::context::run_rooted_function_native_continuation(
+        &runtime,
+        placement,
+        arguments,
+        move |arguments| async move {
+            let _active =
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
+            let _environment_roots = environment_roots;
+            executor
+                .invoke_rooted_function_arguments_async(
+                    function,
+                    arguments,
+                    requested_outputs,
+                    selected,
+                    lexical_environment,
+                )
+                .await
+                .map_err(native_executor_error)
+        },
+    )
+    .await?;
+    execution.try_map_owned(
+        |execution| normalize_outputs(execution.outputs, requested_outputs).map_err(|error| *error),
+        |error| error.into_runtime_error(),
+    )
+}
+
+/// Borrowed semantic-invoker compatibility entry. Its flattened capture
+/// prefix has no selected callable generation; keep the original ABI until
+/// that producer transports typed capture ownership.
+async fn invoke_native_values_legacy(
+    executor: Rc<runmat_native_executor::NativeExecutor>,
+    function: ProgramFunctionId,
     arguments: Vec<Value>,
     requested_outputs: usize,
     runtime: runmat_runtime::context::RuntimeContext,
@@ -595,6 +653,9 @@ async fn invoke_native_values(
 pub(crate) fn install_acceleration_services(
     runtime: runmat_runtime::context::RuntimeContext,
 ) -> runmat_runtime::context::RuntimeContext {
+    if runmat_accelerate_api::provider().is_none() {
+        return runtime;
+    }
     let runtime = if runtime.service_ports().placement().is_none() {
         let ports = runtime.service_ports().clone().with_placement(Rc::new(
             runmat_accelerate::placement::PlacementSession::default(),

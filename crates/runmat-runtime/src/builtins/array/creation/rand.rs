@@ -7,6 +7,8 @@ use runmat_accelerate_api::{GpuTensorHandle, ProviderPrecision};
 use runmat_macros::runtime_builtin;
 use runmat_value::{ComplexTensor, IntValue, NumericDType, Tensor, Value};
 
+mod host_output;
+
 use crate::build_runtime_error;
 #[cfg(test)]
 use crate::builtins::array::type_resolvers::tensor_type_from_rank;
@@ -316,7 +318,95 @@ async fn build_output(parsed: ParsedRand) -> crate::BuiltinResult<Value> {
     match &parsed.template {
         RandTemplate::GpuArray(dtype) => return rand_gpu(&parsed.shape, *dtype),
         RandTemplate::Like(Value::GpuTensor(handle)) => {
-            return rand_like_gpu(handle, &parsed.shape).await;
+            return match random::gpu_like::intent("rand", handle)? {
+                random::gpu_like::GpuLikeIntent::ExplicitGpuStream => {
+                    rand_like_gpu(handle, &parsed.shape).await
+                }
+                random::gpu_like::GpuLikeIntent::AutomaticHostStream => {
+                    let class = random::gpu_like::class(handle).ok_or_else(|| {
+                        builtin_error("rand: unsupported gpuArray prototype class")
+                    })?;
+                    if !matches!(class, random::gpu_like::GpuLikeClass::Floating { .. }) {
+                        return Err(builtin_error(
+                            "rand: 'like' prototype must have single or double underlying type",
+                        ));
+                    }
+                    let host_mode = random::gpu_like::host_random_mode(
+                        crate::context::legacy::active().as_ref(),
+                    );
+                    let scratch = match class {
+                        random::gpu_like::GpuLikeClass::Floating { .. } => {
+                            random::gpu_like::exact_host_workspace(
+                                "rand",
+                                random::gpu_like::ExactHostRandomWorkspace::DirectOutput,
+                                host_mode,
+                            )?
+                        }
+                        _ => random::gpu_like::unquoted_host_scratch(),
+                    };
+                    let upload_scratch = match class {
+                        random::gpu_like::GpuLikeClass::Floating {
+                            precision,
+                            complex: true,
+                        } => random::gpu_like::complex_upload_workspace_bytes(
+                            "rand",
+                            &parsed.shape,
+                            precision,
+                        )?,
+                        _ => scratch,
+                    };
+                    let presentation = random::gpu_like::select_presentation(
+                        "rand",
+                        handle,
+                        &parsed.shape,
+                        class,
+                        random::gpu_like::host_result_bytes("rand", &parsed.shape, class, host_mode)?,
+                        scratch,
+                        upload_scratch,
+                        match upload_scratch {
+                            runmat_execution::ResourceByteBound::Known(bytes)
+                                if class.native_storage()
+                                    == runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved => bytes,
+                            _ => 0,
+                        },
+                        host_mode,
+                    )?;
+                    let mut turn = random::acquire_turn(presentation.runtime(), "rand").await?;
+                    presentation.checkpoint_for_turn(&turn)?;
+                    let result = match class {
+                        random::gpu_like::GpuLikeClass::Floating { precision, complex } => {
+                            let dtype = match precision {
+                                ProviderPrecision::F32 => NumericDType::F32,
+                                ProviderPrecision::F64 => NumericDType::F64,
+                            };
+                            if complex {
+                                host_output::complex(
+                                    &mut turn,
+                                    &parsed.shape,
+                                    dtype,
+                                    presentation.mode(),
+                                )
+                                .await
+                                .map(complex_tensor_into_value)
+                            } else {
+                                host_output::real(
+                                    &mut turn,
+                                    &parsed.shape,
+                                    dtype,
+                                    presentation.mode(),
+                                )
+                                .await
+                                .map(tensor::tensor_into_value)
+                            }
+                        }
+                        random::gpu_like::GpuLikeClass::Integer { .. }
+                        | random::gpu_like::GpuLikeClass::Logical => Err(builtin_error(
+                            "rand: 'like' prototype must have single or double underlying type",
+                        )),
+                    };
+                    presentation.finish_result("rand", result, &parsed.shape)
+                }
+            };
         }
         _ => {}
     }
@@ -410,7 +500,13 @@ fn rand_complex(
     dtype: NumericDType,
 ) -> crate::BuiltinResult<Value> {
     let len = tensor::element_count(shape);
-    let data = random::generate_complex(turn, len, "rand")?;
+    let mut data = random::generate_complex(turn, len, "rand")?;
+    if dtype == NumericDType::F32 {
+        for (real, imaginary) in &mut data {
+            *real = random::single_open_unit(*real);
+            *imaginary = random::single_open_unit(*imaginary);
+        }
+    }
     let tensor = ComplexTensor::from_f64_values_with_dtype(data, shape.to_vec(), dtype)
         .map_err(|e| builtin_error(format!("rand: {e}")))?;
     Ok(complex_tensor_into_value(tensor))
@@ -835,6 +931,10 @@ pub(crate) mod tests {
         };
         assert_eq!(output.shape(), &[2, 2]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
+        for (real, imaginary) in output.materialize_f64() {
+            assert!((0.0..1.0).contains(&real));
+            assert!((0.0..1.0).contains(&imaginary));
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -862,7 +962,11 @@ pub(crate) mod tests {
                 data: &tensor.materialize_f64(),
                 shape: tensor.shape(),
             };
-            let handle = provider.upload(&view).expect("upload");
+            let handle = provider
+                .upload(&view)
+                .expect("upload")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let args = vec![
                 Value::Num(2.0),
                 Value::Num(2.0),
@@ -887,6 +991,68 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn automatic_like_uses_ordered_host_stream_without_advancing_gpu_child() {
+        let _guard = reset_rng_clean();
+        test_support::with_test_provider(|provider| {
+            let prototype = Tensor::new(vec![0.0; 4], vec![2, 2]).expect("prototype");
+            let data = prototype.materialize_f64();
+            let source = provider
+                .upload(&HostTensorView {
+                    data: &data,
+                    shape: prototype.shape(),
+                })
+                .expect("upload prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic view");
+            let gpu_before = random::gpu::snapshot().expect("GPU child snapshot");
+            let expected = block_on(rand_builtin(vec![Value::Num(2.0)])).expect("host rand");
+            random::reset_rng();
+            let actual = block_on(rand_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(source),
+            ]))
+            .expect("automatic like rand");
+            assert_eq!(actual, expected);
+            assert_eq!(
+                random::gpu::snapshot().expect("GPU child snapshot"),
+                gpu_before
+            );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn selected_unbounded_like_uses_quoted_direct_single_output() {
+        use std::rc::Rc;
+
+        let _guard = reset_rng_clean();
+        test_support::with_test_provider(|provider| {
+            let witness = Rc::new(crate::context::host_presentation::tests::Witness::default());
+            let runtime = witness.context();
+            let _entered = runtime.enter();
+            let prototype = Tensor::from_f32(vec![0.0; 4], vec![2, 2]).expect("single prototype");
+            let source = gpu_helpers::upload_tensor(provider, &prototype)
+                .expect("upload prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic prototype");
+            random::set_seed(29).expect("host seed");
+            let expected = block_on(rand_builtin(vec![Value::Num(2.0), Value::from("single")]))
+                .expect("ordinary host single");
+            random::set_seed(29).expect("restore host seed");
+            let actual = block_on(rand_builtin(vec![
+                Value::Num(2.0),
+                Value::from("like"),
+                Value::GpuTensor(source),
+            ]))
+            .expect("selected unbounded like");
+            assert_eq!(actual, expected);
+            assert_eq!(witness.selections(), 1);
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn rand_rejects_integer_gpu_like_prototype() {
         let _guard = random::test_guard();
         test_support::with_test_provider(|provider| {
@@ -897,7 +1063,9 @@ pub(crate) mod tests {
                     data: runmat_accelerate_api::HostIntegerDataView::U64(&values),
                     shape: &shape,
                 })
-                .expect("upload integer gpu prototype");
+                .expect("upload integer gpu prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let error = block_on(rand_builtin(vec![
                 Value::Num(2.0),
                 Value::from("like"),

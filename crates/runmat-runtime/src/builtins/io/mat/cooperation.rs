@@ -118,7 +118,11 @@ impl<'a> MatCodecCooperation<'a> {
 
     fn check_source(&self) -> BuiltinResult<()> {
         if let Some(service) = self.workspace_liveness.as_ref() {
-            service.ensure_effect_authority().map_err(|mut error| {
+            let liveness = match self.runtime {
+                Some(runtime) => service.ensure_effect_authority_with_context(runtime),
+                None => service.ensure_effect_authority(),
+            };
+            liveness.map_err(|mut error| {
                 error.context = error.context.with_builtin(self.builtin);
                 error
             })?;

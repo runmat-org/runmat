@@ -49,7 +49,8 @@ fn foreign_session_or_function_persistent_resume_fails_before_first_read_or_stor
             let resume = InterpreterResumeState {
                 pc: 0,
                 completion_boundary: None,
-                vars: vec![Some(Value::Num(7.0))],
+                vars: crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(7.0)]),
+                assigned_slots: std::collections::HashSet::from([0]),
                 supplied_inputs: 0,
                 requested_outputs: 0,
                 missing_input_slots: Default::default(),

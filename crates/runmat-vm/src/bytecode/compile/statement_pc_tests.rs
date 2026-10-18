@@ -47,6 +47,7 @@ fn assert_exact_statement_projection(
                         bytecode.instructions[pc],
                         Instr::Jump(_)
                             | Instr::JumpIfFalse(_)
+                            | Instr::StochasticEvolution { .. }
                             | Instr::EnterTry { .. }
                             | Instr::LeaveTry(_)
                             | Instr::Return

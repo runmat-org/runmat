@@ -1510,7 +1510,8 @@ fn generic_native_structure_assignment_uses_shared_growth_semantics() {
 fn generic_global_and_persistent_declarations_use_semantic_session_names() {
     let runtime = runtime_context();
     futures::executor::block_on(runtime.scope(async {
-        runmat_runtime::workspace::session::store_global_named("shared", Value::Num(41.0));
+        runmat_runtime::workspace::session::store_global_named("shared", Value::Num(41.0))
+            .expect("initialize the shared global used by native declarations");
         runmat_runtime::workspace::session::store_persistent_named(
             "persistent_counter",
             "calls",
@@ -1578,24 +1579,36 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
         WorkspaceEffect::None,
     ))
     .unwrap();
+    let runtime = runtime_context();
+    let base = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+    let mut initial = runmat_runtime::workspace::WorkspaceDelta::new();
+    initial.assign("counter", Value::Num(41.0)).unwrap();
+    base.apply(initial).unwrap();
+    let generation = runmat_runtime::workspace::LogicalWorkspaceGeneration::capture(
+        &runtime,
+        &base,
+        &runtime.session_variable_authority(),
+    )
+    .unwrap();
+    let workspace = NativeWorkspaceInput::from_generation(
+        generation,
+        BTreeMap::from([(BindingId(0), "counter".into())]),
+        vec![NativeWorkspaceBinding {
+            binding: BindingId(0),
+            name: "counter".into(),
+        }],
+        Vec::new(),
+    );
     let mut invocation = executor
         .begin_request(runmat_native_executor::NativeInvocationRequest {
             function: ProgramFunctionId(0),
             captures: Vec::new(),
             arguments: Vec::new(),
             requested_outputs: 1,
-            runtime: runtime_context(),
+            runtime,
             deoptimization: DeoptimizationPolicy::default(),
             osr_target: None,
-            workspace: Some(NativeWorkspaceInput {
-                values: BTreeMap::from([("counter".into(), Value::Num(41.0))]),
-                local_names: BTreeMap::from([(BindingId(0), "counter".into())]),
-                global_bindings: Vec::new(),
-                bindings: vec![NativeWorkspaceBinding {
-                    binding: BindingId(0),
-                    name: "counter".into(),
-                }],
-            }),
+            workspace: Some(workspace),
         })
         .unwrap();
     let runmat_native_executor::execute::NativeInvocationStep::Completed(execution) =
@@ -1605,8 +1618,8 @@ fn generic_interactive_workspace_uses_binding_identity_and_commits_a_snapshot() 
     };
     assert_eq!(execution.outputs, vec![Value::Num(42.0)]);
     assert_eq!(
-        &execution.workspace.as_ref().unwrap().values,
-        &BTreeMap::from([("counter".into(), Value::Num(42.0))])
+        execution.workspace.as_ref().unwrap().get("counter"),
+        Some(&Value::Num(42.0))
     );
 }
 

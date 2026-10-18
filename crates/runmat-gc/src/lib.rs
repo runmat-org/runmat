@@ -1,5 +1,6 @@
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+use allocator::GcAllocationKind;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use runmat_time::Instant;
 use runmat_value::Value;
@@ -16,9 +17,18 @@ pub mod collector;
 pub mod config;
 pub use runmat_gc_api::{GcHandle, GcRoot, RootId, RootInfo, RootScannerStats, Trace, Tracer};
 pub mod generations;
+mod lexical_activation;
+pub use lexical_activation::{
+    LexicalActivation, LexicalBindingMutationError, LexicalReservationOutcome, LexicalSlotState,
+    LexicalValueOwner, PreparedLexicalTable, RetiredLexicalTable,
+};
 pub mod roots;
 mod reachability;
 pub use reachability::{gc_with_registered_root_reachability, RegisteredRootReachability};
+mod root_admission;
+pub use root_admission::{
+    PreparedRootLease, PreparedRootPlan, PreparedRootQuote, RootAdmissionError, RootTraceFailure,
+};
 mod root_retirement;
 pub use root_retirement::{RootRetirement, RootRetirementObserver};
 mod retirement;
@@ -176,7 +186,7 @@ pub struct GarbageCollector {
     collector: Mutex<MarkSweepCollector>,
 
     /// Explicit roots stored as identity handles with registration counts.
-    root_ptrs: Mutex<HashMap<GcHandle, usize>>,
+    root_ptrs: Mutex<root_admission::RootRegistry>,
 
     /// Collection state
     collection_in_progress: AtomicBool,
@@ -312,7 +322,7 @@ impl GarbageCollector {
             config: Arc::new(RwLock::new(config)),
             allocator: Mutex::new(allocator),
             collector: Mutex::new(collector),
-            root_ptrs: Mutex::new(HashMap::new()),
+            root_ptrs: Mutex::new(root_admission::RootRegistry::new()),
             collection_in_progress: AtomicBool::new(false),
             collection_epoch: AtomicU64::new(0),
             allocation_in_progress: AtomicUsize::new(0),
@@ -376,17 +386,31 @@ impl GarbageCollector {
         Ok(unsafe { ptr.as_ptr_unchecked().cast::<Value>().as_ptr() })
     }
 
-    fn validate_value_handle(&self, handle: &GcHandle, raw: *const Value) -> Result<()> {
+    fn validate_handle_kind(&self, handle: &GcHandle, kind: GcAllocationKind) -> Result<()> {
         let allocator = self.allocator.lock();
-        if allocator.find_generation(raw.cast::<u8>()).is_none()
-            || !allocator.is_live_handle(handle)
-        {
+        if allocator.allocation_kind(handle) != Some(kind) {
             return Err(GcError::InvalidPointer(format!(
-                "GC value handle {:p} is not live in the RunMat GC heap",
-                raw
+                "GC handle {:p} is not a live {:?} in the RunMat GC heap",
+                handle.addr() as *const u8,
+                kind,
             )));
         }
         Ok(())
+    }
+
+    fn validate_value_handle(&self, handle: &GcHandle, _raw: *const Value) -> Result<()> {
+        self.validate_handle_kind(handle, GcAllocationKind::Value)
+    }
+
+    fn validate_live_handle(&self, handle: &GcHandle) -> Result<()> {
+        if self.allocator.lock().is_live_handle(handle) {
+            Ok(())
+        } else {
+            Err(GcError::InvalidPointer(format!(
+                "GC handle {:p} is not live in the RunMat GC heap",
+                handle.addr() as *const u8,
+            )))
+        }
     }
 
     fn begin_value_borrow(&self, mutable: bool) -> Result<GcValueBorrowGuard<'_>> {
@@ -470,6 +494,32 @@ impl GarbageCollector {
     pub fn with_value_mut<R>(&self, ptr: &GcHandle, f: impl FnOnce(&mut Value) -> R) -> Result<R> {
         let mut value = self.write_value(ptr)?;
         Ok(f(&mut value))
+    }
+
+    fn with_lexical_activation<R>(
+        &self,
+        handle: &GcHandle,
+        f: impl FnOnce(&LexicalActivation) -> R,
+    ) -> Result<R> {
+        let _borrow = self.begin_value_borrow(false)?;
+        self.validate_handle_kind(handle, GcAllocationKind::LexicalActivation)?;
+        // SAFETY: the live kind check and GC borrow guard establish the typed
+        // payload and prevent collection for the whole callback.
+        Ok(f(unsafe { &*(handle.addr() as *const LexicalActivation) }))
+    }
+
+    fn with_lexical_activation_mut<R>(
+        &self,
+        handle: &GcHandle,
+        f: impl FnOnce(&mut LexicalActivation) -> R,
+    ) -> Result<R> {
+        let _borrow = self.begin_value_borrow(true)?;
+        self.validate_handle_kind(handle, GcAllocationKind::LexicalActivation)?;
+        // SAFETY: the live kind check and exclusive GC borrow guard establish
+        // the typed payload and prevent concurrent mutation or collection.
+        Ok(f(unsafe {
+            &mut *(handle.addr() as *mut LexicalActivation)
+        }))
     }
 
     /// Borrow a GC-managed value through an explicit guard.
@@ -666,11 +716,13 @@ impl GarbageCollector {
 
     /// Add a root to protect an object from collection
     pub fn add_root(&self, root: GcHandle) -> Result<()> {
-        let _admission = ROOT_ADMISSION.write();
-        let raw = Self::non_null_value_ptr(&root)?;
-        self.validate_value_handle(&root, raw)?;
+        let admission = ROOT_ADMISSION.write();
+        self.validate_live_handle(&root)?;
         let mut roots = self.root_ptrs.lock();
-        *roots.entry(root).or_insert(0) += 1;
+        let retired = roots.add_unbounded(root)?;
+        drop(roots);
+        drop(admission);
+        drop(retired);
         Ok(())
     }
 
@@ -679,15 +731,7 @@ impl GarbageCollector {
         {
             let _admission = ROOT_ADMISSION.write();
             let mut roots = self.root_ptrs.lock();
-            match roots.get_mut(&root) {
-                Some(count) if *count > 1 => {
-                    *count -= 1;
-                }
-                Some(_) => {
-                    roots.remove(&root);
-                }
-                None => {}
-            }
+            roots.remove(root);
         }
         root_retirement::notify(RootRetirement::Explicit(root));
         Ok(())
@@ -907,6 +951,86 @@ pub fn gc_allocate_rooted(value: Value) -> Result<ExplicitRoot> {
     })
 }
 
+/// Allocate a private lexical activation and root it before collection may
+/// observe the new handle. No language Value is constructed at its address.
+pub fn gc_allocate_lexical_activation_rooted(
+    activation: LexicalActivation,
+) -> Result<ExplicitRoot> {
+    let _gate = AllocationGate::enter(&GC);
+    let mut allocator = GC.allocator.lock();
+    let handle = match allocator.allocate_lexical_activation(activation, &GC.stats) {
+        Ok(handle) => handle,
+        Err((error, activation)) => {
+            drop(allocator);
+            drop(activation);
+            return Err(error);
+        }
+    };
+    drop(allocator);
+    GC.add_root(handle)?;
+    Ok(ExplicitRoot {
+        handle: Some(handle),
+    })
+}
+
+pub fn gc_with_lexical_activation<R>(
+    handle: &GcHandle,
+    f: impl FnOnce(&LexicalActivation) -> R,
+) -> Result<R> {
+    GC.with_lexical_activation(handle, f)
+}
+
+pub fn gc_with_lexical_activation_mut<R>(
+    handle: &GcHandle,
+    f: impl FnOnce(&mut LexicalActivation) -> R,
+) -> Result<R> {
+    GC.with_lexical_activation_mut(handle, f)
+}
+
+/// A short, prevalidated exclusive phase for a prepared lexical batch. It is
+/// acquired before any paired external workspace commit, so no collection or
+/// competing GC mutation can invalidate the prepared activation handles in
+/// the allocation-free commit closure.
+pub struct LexicalMutationGuard<'a> {
+    handles: &'a [GcHandle],
+    _borrow: GcValueBorrowGuard<'static>,
+}
+
+impl LexicalMutationGuard<'_> {
+    /// Visit a handle from the exact slice validated when this guard was
+    /// acquired. The index is private batch metadata, not a new handle
+    /// lookup that could fail after a paired workspace commit.
+    pub fn with_prevalidated_activation<R>(
+        &mut self,
+        index: usize,
+        visit: impl FnOnce(&mut LexicalActivation) -> R,
+    ) -> R {
+        let handle = self.handles[index];
+        // SAFETY: validation established the live typed allocation, this
+        // guard blocks collection, and &mut self serializes all references.
+        visit(unsafe { &mut *(handle.addr() as *mut LexicalActivation) })
+    }
+}
+
+pub fn gc_lock_lexical_mutations(handles: &[GcHandle]) -> Result<LexicalMutationGuard<'_>> {
+    let borrow = GC.begin_value_borrow(true)?;
+    {
+        let allocator = GC.allocator.lock();
+        for handle in handles {
+            if allocator.allocation_kind(handle) != Some(GcAllocationKind::LexicalActivation) {
+                return Err(GcError::InvalidPointer(format!(
+                    "GC lexical activation handle {:p} is not live",
+                    handle.addr() as *const u8,
+                )));
+            }
+        }
+    }
+    Ok(LexicalMutationGuard {
+        handles,
+        _borrow: borrow,
+    })
+}
+
 pub fn gc_with_value<R>(ptr: &GcHandle, f: impl FnOnce(&Value) -> R) -> Result<R> {
     GC.with_value(ptr, f)
 }
@@ -1046,7 +1170,22 @@ pub fn gc_visit_retained_values(
     // across value traversal or invoke callbacks while holding it.
     let explicit = GC.root_ptrs.try_lock()?.keys().copied().collect::<Vec<_>>();
     for handle in explicit {
-        gc_with_value(&handle, &mut *visitor).ok()??;
+        let kind = GC.allocator.lock().allocation_kind(&handle)?;
+        match kind {
+            GcAllocationKind::Value => gc_with_value(&handle, &mut *visitor).ok()??,
+            GcAllocationKind::LexicalActivation => {
+                gc_with_lexical_activation(&handle, |activation| {
+                    let mut accepted = Some(());
+                    activation.for_each_value(|value| {
+                        if accepted.is_some() {
+                            accepted = visitor(value);
+                        }
+                    });
+                    accepted
+                })
+                .ok()??;
+            }
+        }
     }
     Some(())
 }
@@ -1090,7 +1229,7 @@ fn reachability_snapshot_excluding(target: GcHandle, excluded: &[RootId]) -> Opt
             return Some(true);
         }
         if visited.insert(handle) {
-            let children = gc_with_value(&handle, gc_handles_in_value).ok()?;
+            let children = gc_handles_in_allocation(&handle)?;
             pending.extend(children);
         }
     }
@@ -1153,6 +1292,19 @@ pub fn gc_record_handle_write(owner: &GcHandle, new: &Value) {
     }
 }
 
+pub(crate) fn gc_handles_in_allocation(handle: &GcHandle) -> Option<Vec<GcHandle>> {
+    let kind = GC.allocator.lock().allocation_kind(handle)?;
+    match kind {
+        GcAllocationKind::Value => gc_with_value(handle, gc_handles_in_value).ok(),
+        GcAllocationKind::LexicalActivation => gc_with_lexical_activation(handle, |activation| {
+            let mut children = Vec::new();
+            activation.for_each_value(|value| children.extend(gc_handles_in_value(value)));
+            children
+        })
+        .ok(),
+    }
+}
+
 fn gc_handles_in_value(value: &Value) -> Vec<GcHandle> {
     struct HandleCollector {
         handles: Vec<GcHandle>,
@@ -1200,14 +1352,14 @@ pub fn gc_reset_for_test() -> Result<()> {
         let config = GcConfig::default();
         *GC.config.write() = config.clone();
         let mut alloc = GC.allocator.lock();
-        let live_ptrs = alloc.take_tracked_value_ptrs_for_reset();
+        let live_ptrs = alloc.take_tracked_allocations_for_reset();
         let mut retired = Vec::with_capacity(live_ptrs.len());
-        for (ptr, handle) in live_ptrs {
+        for (ptr, handle, kind) in live_ptrs {
             // SAFETY: these pointers are drained from allocator bookkeeping for
-            // initialized Value slots that remain live at whole-GC test reset.
+            // initialized typed slots that remain live at whole-GC test reset.
             // Each pointer is deduplicated before it is returned.
             unsafe {
-                retired.push(retirement::RetiredValue::take(ptr, handle));
+                retired.push(retirement::RetiredValue::take(ptr, handle, kind));
             }
         }
         *alloc = GenerationalAllocator::new(&config);

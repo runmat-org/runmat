@@ -1,6 +1,7 @@
 use crate::indexing::selectors::{
-    build_assignment_selectors, build_slice_selectors, index_scalar_from_value,
-    logical_indices_linear, materialize_index_value, numeric_tensor_indices, SliceSelector,
+    build_assignment_selectors, build_assignment_selectors_host, build_slice_selectors,
+    build_slice_selectors_host, index_scalar_from_value, logical_indices_linear,
+    materialize_index_value, numeric_tensor_indices, SliceSelector,
 };
 use crate::indexing::EndExpr;
 use crate::runtime_error::semantic_error as mex;
@@ -38,6 +39,33 @@ pub async fn build_indexed_store_plan(
     match mode {
         IndexedStorePlanMode::Bounded => build_index_plan(&selectors, dims, base_shape),
         IndexedStorePlanMode::Grow => build_assignment_plan(&selectors, dims, base_shape),
+    }
+}
+
+/// Decode and plan a host-only indexed store without constructing or polling
+/// the provider continuation. `None` means a selector needs GPU gathering.
+pub fn build_indexed_store_plan_host(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+    mode: IndexedStorePlanMode,
+) -> VmResult<Option<IndexPlan>> {
+    let selectors = match mode {
+        IndexedStorePlanMode::Bounded => {
+            build_slice_selectors_host(dims, colon_mask, end_mask, numeric, base_shape)?
+        }
+        IndexedStorePlanMode::Grow => {
+            build_assignment_selectors_host(dims, colon_mask, end_mask, numeric, base_shape)?
+        }
+    };
+    let Some(selectors) = selectors else {
+        return Ok(None);
+    };
+    match mode {
+        IndexedStorePlanMode::Bounded => build_index_plan(&selectors, dims, base_shape).map(Some),
+        IndexedStorePlanMode::Grow => build_assignment_plan(&selectors, dims, base_shape).map(Some),
     }
 }
 

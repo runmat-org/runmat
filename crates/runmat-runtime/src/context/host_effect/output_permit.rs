@@ -7,7 +7,8 @@ use std::sync::{
 };
 
 use runmat_value::{
-    ExactHostAllocationPermit, ExactHostAllocationReservation, ExactHostNumericAllocationError,
+    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostAllocationReservation,
+    ExactHostNumericAllocationError,
 };
 
 pub(super) struct ReceiptOutputPermit {
@@ -51,6 +52,24 @@ impl ExactHostAllocationPermit for ReceiptOutputPermit {
             .upgrade()
             .ok_or(ExactHostNumericAllocationError::ExceedsPermit)?;
         let claim = authority.reserve_exact(bytes)?;
+        if !self.active_epoch.load(Ordering::Acquire) || self.cancellation.is_cancelled() {
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        Ok(claim)
+    }
+
+    fn reserve_exact_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<ExactHostAllocationClaim, ExactHostNumericAllocationError> {
+        if !self.active_epoch.load(Ordering::Acquire) || self.cancellation.is_cancelled() {
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let authority = self
+            .authority
+            .upgrade()
+            .ok_or(ExactHostNumericAllocationError::ExceedsPermit)?;
+        let claim = authority.reserve_exact_claim(bytes)?;
         if !self.active_epoch.load(Ordering::Acquire) || self.cancellation.is_cancelled() {
             return Err(ExactHostNumericAllocationError::ExceedsPermit);
         }

@@ -44,6 +44,7 @@ pub(super) async fn execute(
         capabilities: BTreeSet::from([
             Capability::ProcessIsolation,
             Capability::GraphSelectedValuesV11,
+            Capability::GraphCallableArgumentsV12,
         ]),
     };
     run_owned_attempt(
@@ -120,6 +121,9 @@ pub(in crate::remote) async fn execute_remote_attempt(
     resources
         .capabilities
         .insert(Capability::GraphSelectedValuesV11);
+    resources
+        .capabilities
+        .insert(Capability::GraphCallableArgumentsV12);
     run_owned_attempt(
         run_id,
         attempt_id.bytes(),

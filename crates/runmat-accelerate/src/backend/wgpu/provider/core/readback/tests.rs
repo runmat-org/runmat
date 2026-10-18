@@ -2,6 +2,56 @@ use super::*;
 #[cfg(not(target_arch = "wasm32"))]
 use futures::channel::oneshot;
 
+#[test]
+fn completion_replaces_and_wakes_tasks_outside_state_lock() {
+    use std::sync::{atomic::AtomicUsize, atomic::Ordering, Weak};
+    use std::task::{Context, Wake};
+
+    struct Task {
+        completion: Weak<MapCompletion>,
+        retired: Arc<AtomicUsize>,
+    }
+    impl Task {
+        fn assert_unlocked(&self) {
+            let completion = self.completion.upgrade().unwrap();
+            assert!(completion.state.try_lock().is_ok());
+        }
+    }
+    impl Wake for Task {
+        fn wake(self: Arc<Self>) {
+            self.assert_unlocked();
+        }
+    }
+    impl Drop for Task {
+        fn drop(&mut self) {
+            self.assert_unlocked();
+            self.retired.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let completion = Arc::new(MapCompletion {
+        state: Mutex::new(MapCompletionState::default()),
+    });
+    let retired = Arc::new(AtomicUsize::new(0));
+    let mut wait = std::pin::pin!(completion.wait());
+    for _ in 0..2 {
+        let waker = Waker::from(Arc::new(Task {
+            completion: Arc::downgrade(&completion),
+            retired: retired.clone(),
+        }));
+        assert!(
+            std::future::Future::poll(wait.as_mut(), &mut Context::from_waker(&waker)).is_pending()
+        );
+    }
+    assert_eq!(retired.load(Ordering::SeqCst), 1);
+    completion.complete(Ok(()));
+    assert_eq!(retired.load(Ordering::SeqCst), 2);
+    assert!(
+        std::future::Future::poll(wait.as_mut(), &mut Context::from_waker(Waker::noop()))
+            .is_ready()
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 #[ignore = "requires provisioned WGPU adapter; run with --ignored"]

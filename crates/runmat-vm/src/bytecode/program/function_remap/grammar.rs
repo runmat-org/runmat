@@ -84,7 +84,7 @@ macro_rules! with_instruction_function_references {
             | crate::bytecode::Instr::Jump(..)
             | crate::bytecode::Instr::Pop
             | crate::bytecode::Instr::Unpack(..)
-            | crate::bytecode::Instr::StochasticEvolution
+            | crate::bytecode::Instr::StochasticEvolution { .. }
             | crate::bytecode::Instr::CreateMatrix(..)
             | crate::bytecode::Instr::CreateMatrixFromSequences { .. }
             | crate::bytecode::Instr::CreateMatrixDynamic(..)

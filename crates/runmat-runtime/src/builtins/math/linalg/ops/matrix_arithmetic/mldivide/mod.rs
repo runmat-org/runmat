@@ -3,6 +3,7 @@
 use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
+use crate::context::RuntimeContext;
 use crate::BuiltinResult;
 
 use super::solve::{self, SolveOrientation};
@@ -14,12 +15,18 @@ pub(crate) mod spec;
 #[runtime_builtin(
     name = "mldivide",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::linalg::ops::matrix_arithmetic::mldivide"
+    builtin_path = "crate::builtins::math::linalg::ops::matrix_arithmetic::mldivide",
+    context = true
 )]
-async fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    mldivide_eval(&lhs, &rhs).await
+async fn mldivide_builtin(
+    context: Option<RuntimeContext>,
+    lhs: Value,
+    rhs: Value,
+) -> BuiltinResult<Value> {
+    solve::evaluate_with_context(SolveOrientation::Left, &lhs, &rhs, context.as_ref()).await
 }
 
+#[cfg(test)]
 pub(crate) async fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {
     solve::evaluate(SolveOrientation::Left, lhs, rhs).await
 }

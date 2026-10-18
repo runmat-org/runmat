@@ -23,6 +23,8 @@ use crate::placement::partition::{
     single_candidate_resources_admitted, CandidateResourceFacts, ResourceAdmissionError,
 };
 
+mod managed_pair;
+
 pub(super) type ProbeKey = (Digest, Digest, ExecutionCandidateKind);
 
 struct ProbeLease {
@@ -236,6 +238,15 @@ impl PlacementSession {
         request: WholeWorkPlacementRequestRef<'_>,
         managed: bool,
     ) -> Result<SelectionDraft, PlacementPlanError> {
+        // The managed lane's complete-call chooser is stack-backed for at
+        // most one host and one provider alternative. A larger request must
+        // not make SmallVec spill before its finite owner can admit storage.
+        if managed && request.candidates.len() > 2 {
+            return Err(PlacementPlanError {
+                code: "RunMat:Placement:InsufficientResourceEvidence",
+                message: "managed whole-work selection supports at most two physical routes".into(),
+            });
+        }
         request.validate().map_err(invalid_request)?;
         let operation =
             PlacementOperationId::new(request.signature.operation).map_err(invalid_request)?;
@@ -316,50 +327,7 @@ impl PlacementSession {
         }
 
         if managed {
-            if admitted.len() != 1 {
-                return Err(PlacementPlanError {
-                    code: "RunMat:Placement:InsufficientResourceEvidence",
-                    message: "managed placement cannot retain a compared physical graph".into(),
-                });
-            }
-            // A single admitted route has no comparison graph. Keep the same
-            // validated candidate and observation cost; an occupied managed
-            // slot suppresses a second exploratory probe without replay.
-            let item = &admitted[0];
-            let active = self.managed_observations.as_ref().is_some_and(|pool| {
-                request
-                    .signature
-                    .permit_identity()
-                    .ok()
-                    .is_some_and(|identity| pool.has_active(identity, item.identity))
-            });
-            let kind = if matches!(
-                request.constraint,
-                WholeWorkConstraint::ProviderRequired { .. }
-            ) {
-                WholeWorkDecisionKind::ProviderRequired
-            } else if matches!(item.cost, CandidateCostEvidence::Unavailable(_)) {
-                if active {
-                    WholeWorkDecisionKind::Unmeasured
-                } else {
-                    WholeWorkDecisionKind::Exploratory
-                }
-            } else {
-                WholeWorkDecisionKind::Uncompared
-            };
-            return Ok(SelectionDraft::Direct {
-                selected: CompactSelectedExecutionCandidate {
-                    node: operation,
-                    candidate: item.identity,
-                    kind: item.candidate.kind,
-                },
-                kind,
-                predicted_total_ns: item
-                    .cost
-                    .estimate()
-                    .and_then(|cost| cost.checked_total_ns()),
-                probe: None,
-            });
+            return managed_pair::select(self, request, &admitted, operation);
         }
 
         let provider_only = admitted

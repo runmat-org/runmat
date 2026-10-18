@@ -24,7 +24,7 @@ impl WorkspaceFrameActivation {
 
     pub(crate) fn scope<F: Future>(self, future: F) -> WorkspaceFrameFuture<F> {
         WorkspaceFrameFuture {
-            activation: self,
+            activation: Some(self),
             future: Box::pin(future),
         }
     }
@@ -35,15 +35,26 @@ impl WorkspaceFrameActivation {
 }
 
 pub(crate) struct WorkspaceFrameFuture<F> {
-    activation: WorkspaceFrameActivation,
+    activation: Option<WorkspaceFrameActivation>,
     future: Pin<Box<F>>,
+}
+
+impl<F: Future> WorkspaceFrameFuture<F> {
+    /// Service-owned dynamic targets have no VM frame to activate. Their
+    /// RuntimeContext and captured issuer remain the exact authority.
+    pub(crate) fn without_frame(future: F) -> Self {
+        Self {
+            activation: None,
+            future: Box::pin(future),
+        }
+    }
 }
 
 impl<F: Future> Future for WorkspaceFrameFuture<F> {
     type Output = F::Output;
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Self::Output> {
-        let _guard = PollActivationGuard::enter(self.activation);
+        let _guard = self.activation.map(PollActivationGuard::enter);
         self.future.as_mut().poll(context)
     }
 }

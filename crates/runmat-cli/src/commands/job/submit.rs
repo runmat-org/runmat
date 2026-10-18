@@ -96,11 +96,9 @@ pub async fn submit(
     session
         .install_project_handoff(runmat_package::FrozenProjectHandoff::new(frozen.clone()))
         .await?;
-    let source_text = std::fs::read_to_string(&file)
-        .with_context(|| format!("read remote job source {}", file.display()))?;
     let unit = session
         .compile_executable_unit(
-            crate::commands::package::executable_source(Some(frozen), &file, source_text)?,
+            crate::commands::package::executable_source(Some(frozen), &file).await?,
             Some(revision.clone()),
         )
         .await?;

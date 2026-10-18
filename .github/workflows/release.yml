@@ -655,18 +655,31 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $outDir = "artifacts/release-product/${{ matrix.platform.release_for }}/product"
           $artifactName = "runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
+          $archivePath = Join-Path (Get-Location) ("$artifactName.zip")
+          if (Test-Path -LiteralPath $archivePath) { throw "Release archive already exists: $archivePath" }
 
           Push-Location $outDir
-          7z a (Join-Path "..\..\..\.." ("$artifactName.zip")) ${{ matrix.platform.bin }} *.dll
-          Pop-Location
+          try {
+            $members = @("${{ matrix.platform.bin }}", "THIRD_PARTY_NOTICES.txt") + @(Get-ChildItem -File -Filter *.dll | ForEach-Object { $_.Name })
+            & 7z a $archivePath @members
+            if ($LASTEXITCODE -ne 0) { throw "Release archive creation failed" }
+          } finally { Pop-Location }
+          $noticeDir = Join-Path $env:RUNNER_TEMP ("runmat-release-notices-" + [guid]::NewGuid().ToString())
+          & 7z x $archivePath THIRD_PARTY_NOTICES.txt "-o$noticeDir"
+          if ($LASTEXITCODE -ne 0) { throw "Release archive notice extraction failed" }
+          & node scripts/distribution/third-party-notices.cjs verify $noticeDir
+          if ($LASTEXITCODE -ne 0) { throw "Release archive notice verification failed" }
 
       - name: Package as archive (Unix)
         if: runner.os != 'Windows'
         shell: bash
         run: |
+          set -euo pipefail
           cd artifacts/release-product/${{ matrix.platform.release_for }}/product
           ARTIFACT_NAME="runmat-${{ env.VERSION }}-${{ matrix.platform.release_for }}"
-          tar czvf ../../../../${ARTIFACT_NAME}.tar.gz ${{ matrix.platform.bin }}
+          archive="../../../../${ARTIFACT_NAME}.tar.gz"
+          tar czvf "$archive" ${{ matrix.platform.bin }} THIRD_PARTY_NOTICES.txt
+          tar -xOf "$archive" THIRD_PARTY_NOTICES.txt | cmp THIRD_PARTY_NOTICES.txt -
           cd -
 
       - name: Publish release artifacts

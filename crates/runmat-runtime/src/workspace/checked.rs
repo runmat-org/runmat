@@ -15,7 +15,7 @@ pub fn try_detach_selected(
         .service_ports()
         .workspace()
         .ok_or_else(workspace_capability_error)?;
-    service.detach_selected(selection)
+    service.detach_selected_with_context(&context, selection)
 }
 
 /// Checked lookup for code that must distinguish an empty workspace from an
@@ -25,7 +25,7 @@ pub fn try_detach_selected(
 pub fn try_lookup(name: &str) -> Result<Option<Value>, crate::RuntimeError> {
     if let Some(context) = crate::context::legacy::active() {
         if let Some(service) = context.service_ports().workspace() {
-            return service.try_lookup(name);
+            return service.try_lookup_with_context(&context, name);
         }
         if let Some(resolver) = context.state().workspace.borrow().as_ref() {
             return Ok((resolver.lookup)(name));
@@ -42,7 +42,7 @@ pub fn try_lookup(name: &str) -> Result<Option<Value>, crate::RuntimeError> {
 pub fn try_snapshot() -> Result<Option<Vec<(String, Value)>>, crate::RuntimeError> {
     if let Some(context) = crate::context::legacy::active() {
         if let Some(service) = context.service_ports().workspace() {
-            return service.try_snapshot().map(Some);
+            return service.try_snapshot_with_context(&context).map(Some);
         }
         if let Some(resolver) = context.state().workspace.borrow().as_ref() {
             return Ok(Some((resolver.snapshot)()));
@@ -60,7 +60,7 @@ pub fn try_snapshot() -> Result<Option<Vec<(String, Value)>>, crate::RuntimeErro
 pub fn try_global_names() -> Result<Vec<String>, crate::RuntimeError> {
     if let Some(context) = crate::context::legacy::active() {
         if let Some(service) = context.service_ports().workspace() {
-            return service.try_global_names();
+            return service.try_global_names_with_context(&context);
         }
         if let Some(resolver) = context.state().workspace.borrow().as_ref() {
             return Ok((resolver.globals)());
@@ -101,7 +101,7 @@ pub fn begin_base_workspace_projection() -> Result<BaseWorkspaceProjection, crat
 pub fn try_assign(name: &str, value: Value) -> Result<(), crate::RuntimeError> {
     if let Some(context) = crate::context::legacy::active() {
         if let Some(service) = context.service_ports().workspace() {
-            return service.assign(name, value);
+            return service.assign_with_context(&context, name, value);
         }
         if context.state().workspace.borrow().is_some() {
             return with_context_resolver(&context, |resolver| {
@@ -124,7 +124,7 @@ pub fn try_assign(name: &str, value: Value) -> Result<(), crate::RuntimeError> {
 pub fn try_clear() -> Result<(), crate::RuntimeError> {
     if let Some(context) = crate::context::legacy::active() {
         if let Some(service) = context.service_ports().workspace() {
-            return service.clear();
+            return service.clear_with_context(&context);
         }
         if context.state().workspace.borrow().is_some() {
             return with_context_resolver(&context, |resolver| {
@@ -147,7 +147,7 @@ pub fn try_clear() -> Result<(), crate::RuntimeError> {
 pub fn try_remove(name: &str) -> Result<(), crate::RuntimeError> {
     if let Some(context) = crate::context::legacy::active() {
         if let Some(service) = context.service_ports().workspace() {
-            return service.remove(name);
+            return service.remove_with_context(&context, name);
         }
         if context.state().workspace.borrow().is_some() {
             return with_context_resolver(&context, |resolver| {

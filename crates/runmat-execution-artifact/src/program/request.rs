@@ -18,6 +18,7 @@ pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_V7: u16 = 7;
 pub use runmat_execution::value::{
     GRAPH_REQUEST_SCHEMA_V10 as GRAPH_EXECUTION_REQUEST_SCHEMA_V10,
     GRAPH_REQUEST_SCHEMA_V11 as GRAPH_EXECUTION_REQUEST_SCHEMA_V11,
+    GRAPH_REQUEST_SCHEMA_V12 as GRAPH_EXECUTION_REQUEST_SCHEMA_V12,
 };
 pub const PROGRAM_EXECUTION_REQUEST_SCHEMA_VERSION: u16 = PROGRAM_EXECUTION_REQUEST_SCHEMA_V7;
 pub const MAX_PROGRAM_EXECUTION_ARGUMENTS: usize = 4096;
@@ -68,7 +69,9 @@ pub fn admit_remote_program_object_bytes(bytes: &[u8]) -> ArtifactResult<()> {
                 .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
             descriptor.validate_for_portable_host()
         }
-        GRAPH_EXECUTION_REQUEST_SCHEMA_V10 | GRAPH_EXECUTION_REQUEST_SCHEMA_V11 => {
+        GRAPH_EXECUTION_REQUEST_SCHEMA_V10
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V11
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V12 => {
             let request: GraphExecutionRequest = serde_json::from_slice(bytes)
                 .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
             request.validate()
@@ -94,7 +97,9 @@ pub fn admit_worker_program_request_bytes(bytes: &[u8]) -> ArtifactResult<()> {
     })?;
     match header.schema_version {
         PROGRAM_EXECUTION_REQUEST_SCHEMA_V7 => admit_program_execution_request_bytes(bytes),
-        GRAPH_EXECUTION_REQUEST_SCHEMA_V10 | GRAPH_EXECUTION_REQUEST_SCHEMA_V11 => {
+        GRAPH_EXECUTION_REQUEST_SCHEMA_V10
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V11
+        | GRAPH_EXECUTION_REQUEST_SCHEMA_V12 => {
             let request: GraphExecutionRequest =
                 serde_json::from_slice(bytes).map_err(|error| {
                     ArtifactError::Invalid(format!("invalid graph worker request: {error}"))

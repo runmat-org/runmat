@@ -77,16 +77,14 @@ pub async fn execute(
     if let Some(runtime) = runtime.as_ref() {
         policy.validate(&runtime.manifest.capabilities)?;
     }
-    let source_text = std::fs::read_to_string(&file)
-        .with_context(|| format!("failed to read compile entrypoint `{}`", file.display()))?;
     let mut session =
         super::session::create_session(false, false, config, "failed to create compile session")?;
     let project = install_project_for_source(&mut session, &file, cli).await?;
     let source = super::package::executable_source(
         project.as_ref().map(|project| &project.resolved.frozen),
         &file,
-        source_text,
-    )?;
+    )
+    .await?;
     let unit = session
         .compile_executable_unit(&source, None)
         .await

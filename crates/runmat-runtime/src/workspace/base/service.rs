@@ -53,6 +53,95 @@ impl RuntimeBaseWorkspaceService for BaseWorkspaceService {
 }
 
 impl RuntimeWorkspaceService for BaseWorkspaceService {
+    fn prepare_workspace_completion_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+        identity: crate::workspace::WorkspaceCompletionIdentity,
+        source: &dyn crate::workspace::WorkspaceCompletionSource,
+    ) -> Result<crate::workspace::PreparedWorkspaceCompletion, RuntimeError> {
+        crate::workspace::PreparedWorkspaceCompletion::for_direct_owner(
+            &self.owner,
+            context,
+            identity,
+            source,
+        )
+    }
+
+    fn capture_workspace_generation_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+    ) -> Result<Option<crate::workspace::LogicalWorkspaceGeneration>, RuntimeError> {
+        crate::workspace::LogicalWorkspaceGeneration::capture(
+            context,
+            &self.owner,
+            &context.session_variable_authority(),
+        )
+        .map(Some)
+    }
+
+    fn capture_dynamic_workspace_target_with_context(
+        self: std::rc::Rc<Self>,
+        context: &crate::context::RuntimeContext,
+    ) -> Result<Option<crate::workspace::DynamicWorkspaceTargetCapture>, RuntimeError> {
+        let identity = self
+            .capture_workspace_completion_identity_with_context(context)?
+            .ok_or_else(|| {
+                semantic_error(
+                    "RunMat:Workspace:ExactCompletionUnavailable",
+                    "base workspace did not issue transactional completion authority",
+                )
+            })?;
+        let generation = crate::workspace::LogicalWorkspaceGeneration::capture(
+            context,
+            &self.owner,
+            &context.session_variable_authority(),
+        )?;
+        let issuer: std::rc::Rc<dyn RuntimeWorkspaceService> = self;
+        Ok(Some(
+            crate::workspace::DynamicWorkspaceTargetCapture::issued(
+                context.local_identity(),
+                identity,
+                generation,
+                issuer,
+            ),
+        ))
+    }
+
+    fn capture_workspace_completion_identity_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+    ) -> Result<Option<crate::workspace::WorkspaceCompletionIdentity>, RuntimeError> {
+        let plan =
+            crate::context::host_allocation::HostAllocationPlan::new(0, 0).map_err(|cause| {
+                super::projection_service::workspace_admission_error(context, cause)
+            })?;
+        if let Some(receipt) =
+            crate::context::host_allocation::HostAllocationReceipt::admit(Some(context), plan)
+                .map_err(|cause| {
+                    super::projection_service::workspace_admission_error(context, cause)
+                })?
+        {
+            receipt.checkpoint(context).map_err(|cause| {
+                super::projection_service::workspace_admission_error(context, cause)
+            })?;
+        }
+        self.owner
+            .workspace_completion_identity()
+            .map(Some)
+            .map_err(base_workspace_error_to_runtime)
+    }
+
+    fn apply_workspace_completion_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+        identity: crate::workspace::WorkspaceCompletionIdentity,
+        source: &dyn crate::workspace::WorkspaceCompletionSource,
+    ) -> Result<(), RuntimeError> {
+        self.owner
+            .apply_workspace_completion(context, identity, source)
+            .map_err(base_workspace_error_to_runtime)
+    }
+
     fn detach_selected(
         &self,
         selection: &WorkspaceDetachSelection,
@@ -141,10 +230,58 @@ impl RuntimeWorkspaceService for BaseWorkspaceService {
         self.apply(delta)
     }
 
+    fn bind_base_global_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        let service = super::BaseWorkspaceProjectionService::new_for_context(
+            self.owner
+                .begin_projection()
+                .map_err(base_workspace_error_to_runtime)?,
+            context,
+        );
+        RuntimeWorkspaceService::bind_base_global_with_context(&service, context, name)?;
+        service.publish_with_context(context).map(|_| ())
+    }
+
+    fn bind_base_global_target_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+        name: &str,
+        target: &crate::workspace::GlobalBindingTarget,
+    ) -> Result<(), RuntimeError> {
+        let service = super::BaseWorkspaceProjectionService::new_for_context(
+            self.owner
+                .begin_projection()
+                .map_err(base_workspace_error_to_runtime)?,
+            context,
+        );
+        RuntimeWorkspaceService::bind_base_global_target_with_context(
+            &service, context, name, target,
+        )?;
+        service.publish_with_context(context).map(|_| ())
+    }
+
     fn unbind_base_global(&self, name: &str) -> Result<(), RuntimeError> {
         let mut delta = WorkspaceDelta::new();
         delta.unbind_global(name);
         self.apply(delta)
+    }
+
+    fn unbind_base_global_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        let service = super::BaseWorkspaceProjectionService::new_for_context(
+            self.owner
+                .begin_projection()
+                .map_err(base_workspace_error_to_runtime)?,
+            context,
+        );
+        RuntimeWorkspaceService::unbind_base_global_with_context(&service, context, name)?;
+        service.publish_with_context(context).map(|_| ())
     }
 
     fn assign_base_local(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
@@ -198,6 +335,15 @@ pub fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> RuntimeErro
                 .with_source(source)
                 .build()
         }
+        BaseWorkspaceError::HostAllocation(source) => {
+            let identifier = format!("RunMat:Workspace:{}", source.runtime_identifier_suffix());
+            crate::context::host_allocation::host_allocation_runtime_error(
+                None,
+                &identifier,
+                format!("could not admit base-workspace storage: {source}"),
+                source,
+            )
+        }
         error @ BaseWorkspaceError::Closed => {
             semantic_error("RunMat:Workspace:Closed", error.to_string())
         }
@@ -207,11 +353,18 @@ pub fn base_workspace_error_to_runtime(error: BaseWorkspaceError) -> RuntimeErro
         error @ BaseWorkspaceError::FutureRevision { .. } => {
             semantic_error("RunMat:Workspace:RevisionMismatch", error.to_string())
         }
+        error @ BaseWorkspaceError::CompletionConflict => {
+            semantic_error("RunMat:Workspace:CompletionConflict", error.to_string())
+        }
         error @ BaseWorkspaceError::RevisionExhausted => {
             semantic_error("RunMat:Workspace:RevisionExhausted", error.to_string())
         }
         error @ BaseWorkspaceError::PendingChanges => {
             semantic_error("RunMat:Workspace:PendingChanges", error.to_string())
         }
+        error @ BaseWorkspaceError::PrivateProjectionRequired => semantic_error(
+            "RunMat:Workspace:PrivateProjectionRequired",
+            error.to_string(),
+        ),
     }
 }

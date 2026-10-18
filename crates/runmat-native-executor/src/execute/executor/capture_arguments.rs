@@ -1,11 +1,79 @@
 //! Split a feval/semantic call's flattened capture prefix using verified
 //! Native IR identity, before starting a native invocation.
 
+use super::super::state::NativeCaptureInput;
 use super::*;
-use runmat_native_codegen::NativeLocalKind;
+use runmat_native_codegen::NativeClosureCaptureDisposition;
 use runmat_runtime::call::lexical::LexicalCapture;
+use runmat_runtime::call::RootedFunctionArguments;
 
 impl NativeExecutor {
+    pub(super) fn retained_capture_arguments(
+        &self,
+        function: ProgramFunctionId,
+        arguments: &RootedFunctionArguments,
+    ) -> NativeExecutorResult<Vec<NativeCaptureInput>> {
+        let body = self
+            .functions
+            .iter()
+            .find(|body| body.id == function)
+            .ok_or_else(|| {
+                NativeExecutorError::Host(format!("native function {} is unavailable", function.0))
+            })?;
+        if let Some(Value::Closure(closure)) = arguments.callable().map(|owner| owner.value()) {
+            if closure
+                .bound_function()
+                .is_some_and(|bound| bound != function.0 as usize)
+            {
+                return Err(NativeExecutorError::Host(
+                    "selected native body differs from retained closure identity".into(),
+                ));
+            }
+        }
+        let actual_capture_count = arguments.capture_count();
+        if body.closure_captures.len() != actual_capture_count {
+            let carrier = match arguments.callable().map(|owner| owner.value()) {
+                Some(Value::Closure(closure)) => format!(
+                    "closure '{}' ({:?}, bound={:?})",
+                    closure.function_name,
+                    closure.source_role,
+                    closure.bound_function()
+                ),
+                Some(_) => "non-closure callable".to_owned(),
+                None => "ordinary arguments".to_owned(),
+            };
+            return Err(NativeExecutorError::Host(format!(
+                "retained closure capture count disagrees with selected native body '{}' \
+                     (function {}, expected {}, actual {}, carrier {carrier})",
+                body.name,
+                function.0,
+                body.closure_captures.len(),
+                actual_capture_count,
+            )));
+        }
+        body.closure_captures
+            .iter()
+            .enumerate()
+            .filter(|(_, capture)| {
+                matches!(
+                    capture.disposition,
+                    NativeClosureCaptureDisposition::ByValue
+                        | NativeClosureCaptureDisposition::TransitSnapshot
+                )
+            })
+            .map(|(index, capture)| {
+                let value = arguments.capture_lease(index).ok_or_else(|| {
+                    NativeExecutorError::Host("retained closure capture is unavailable".into())
+                })?;
+                Ok(NativeCaptureInput::Retained {
+                    binding: capture.binding,
+                    local: capture.local,
+                    value,
+                })
+            })
+            .collect()
+    }
+
     pub fn split_flattened_capture_arguments(
         &self,
         function: ProgramFunctionId,
@@ -26,29 +94,31 @@ fn split_for_function(
     body: &runmat_native_codegen::NativeFunction,
     arguments: Vec<Value>,
 ) -> NativeExecutorResult<(Vec<LexicalCapture>, Vec<Value>)> {
-    let bindings = body
-        .locals
-        .iter()
-        .filter(|local| local.kind == NativeLocalKind::Capture)
-        .map(|local| {
-            local.binding.ok_or_else(|| {
-                NativeExecutorError::Host("native capture local has no semantic binding".into())
-            })
-        })
-        .collect::<NativeExecutorResult<Vec<_>>>()?;
-    if arguments.len() < bindings.len() {
+    if arguments.len() < body.closure_captures.len() {
         return Err(NativeExecutorError::Host(
             "closure invocation omitted lexical captures".into(),
         ));
     }
     let mut values = arguments.into_iter();
-    let captures = bindings
-        .into_iter()
-        .map(|binding| LexicalCapture {
-            binding,
-            value: values.next().expect("capture prefix was length-checked"),
-        })
-        .collect();
+    let mut captures = Vec::new();
+    for capture in &body.closure_captures {
+        let value = values.next().ok_or_else(|| {
+            NativeExecutorError::Host("closure invocation omitted lexical captures".into())
+        })?;
+        if !matches!(
+            capture.disposition,
+            NativeClosureCaptureDisposition::ByValue
+                | NativeClosureCaptureDisposition::TransitSnapshot
+        ) {
+            return Err(NativeExecutorError::Host(
+                "legacy flattened closure invocation cannot retain shared capture authority".into(),
+            ));
+        }
+        captures.push(LexicalCapture {
+            binding: capture.binding,
+            value,
+        });
+    }
     Ok((captures, values.collect()))
 }
 
@@ -56,7 +126,8 @@ fn split_for_function(
 mod tests {
     use super::*;
     use runmat_native_codegen::{
-        NativeBlockId, NativeFunctionAbi, NativeLocalId, NativeLocalMetadata,
+        NativeBlockId, NativeClosureCapture, NativeFunctionAbi, NativeLocalId, NativeLocalKind,
+        NativeLocalMetadata,
     };
     use runmat_types::{BindingId, ProgramSourceId};
 
@@ -81,6 +152,32 @@ mod tests {
                 implicit_nargout: None,
             },
             argument_validations: vec![],
+            binding_locals: vec![
+                runmat_native_codegen::NativeBindingLocal {
+                    binding: BindingId(7),
+                    local: NativeLocalId(0),
+                },
+                runmat_native_codegen::NativeBindingLocal {
+                    binding: BindingId(9),
+                    local: NativeLocalId(1),
+                },
+                runmat_native_codegen::NativeBindingLocal {
+                    binding: BindingId(10),
+                    local: NativeLocalId(2),
+                },
+            ],
+            closure_captures: vec![
+                NativeClosureCapture {
+                    binding: BindingId(7),
+                    local: NativeLocalId(0),
+                    disposition: NativeClosureCaptureDisposition::ByValue,
+                },
+                NativeClosureCapture {
+                    binding: BindingId(9),
+                    local: NativeLocalId(1),
+                    disposition: NativeClosureCaptureDisposition::ByValue,
+                },
+            ],
             locals: vec![
                 NativeLocalMetadata {
                     id: NativeLocalId(0),
@@ -103,6 +200,11 @@ mod tests {
             ],
             entry: NativeBlockId(0),
             blocks: vec![],
+            expression_continuation_geometry:
+                runmat_native_codegen::NativeExpressionContinuationGeometry {
+                    region_capacity: 0,
+                    retained_input_capacity: 0,
+                },
             expected_sites: vec![],
         }
     }
@@ -129,10 +231,10 @@ mod tests {
         );
         assert_eq!(arguments, [Value::Num(5.0)]);
         assert!(split_for_function(&body(), vec![Value::Num(17.0)]).is_err());
-        let mut missing_binding = body();
-        missing_binding.locals[1].binding = None;
+        let mut shared_capture = body();
+        shared_capture.closure_captures[1].disposition = NativeClosureCaptureDisposition::Lexical;
         assert!(split_for_function(
-            &missing_binding,
+            &shared_capture,
             vec![Value::Num(17.0), Value::Num(23.0), Value::Num(5.0)],
         )
         .is_err());

@@ -62,6 +62,7 @@ pub(super) const RETHROW: BuiltinDocumentation = BuiltinDocumentation {
     keywords: &["rethrow", "exception", "catch", "error propagation"], related: &["error", "warning", "assert"],
     sections: &[BuiltinDocumentationSection { heading: "Behavior and placement",
         paragraphs: &["`rethrow(err)` preserves the identifier and message of an `MException` value.",
+        "The `identifier` and `message` properties are character vectors through both dot access and `getfield`; empty text is a 0-by-0 character array.",
         "A caught `MException` retains the original runtime span, call frames, phase, failure policy, and owning typed source across rethrow; a manually constructed `MException` has only its public identifier, message, and stack.",
         "`rethrow(message)` is a RunMat-only extension that raises a fresh error using the supplied string as the message.",
         "Other value types produce a generic `RunMat:error`-style failure describing the value.",

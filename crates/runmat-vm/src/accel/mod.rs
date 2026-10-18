@@ -5,7 +5,6 @@ pub mod fusion;
 pub(crate) mod fusion_declaration;
 #[cfg(feature = "native-accel")]
 pub(crate) mod graph;
-pub(crate) mod idioms;
 #[cfg(all(test, feature = "native-accel"))]
 mod residency_tests;
 #[cfg(feature = "native-accel")]

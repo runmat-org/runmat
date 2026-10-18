@@ -2,11 +2,14 @@
 //! ordered phase plan; tickets retain that identity through late retirement.
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[path = "resources/storage.rs"]
+mod storage;
+use storage::{PhaseStorage, ScopeStorage};
 
 /// A prepared sequence of maximum active-owner backing bytes. Domain owners
 /// name the positions; the common ledger knows only issued order and limits.
 pub struct ProviderResourcePhasePlan {
-    limits: Box<[u64]>,
+    limits: PhaseStorage<u64>,
 }
 
 impl ProviderResourcePhasePlan {
@@ -15,7 +18,7 @@ impl ProviderResourcePhasePlan {
             return Err(ProviderObservationFailure::TrackingOverflow);
         }
         Ok(Self {
-            limits: Box::new(limits),
+            limits: PhaseStorage::from_array(limits),
         })
     }
 }
@@ -63,8 +66,8 @@ pub struct ProviderResourceSnapshot {
 
 struct ScopeState {
     id: u64,
-    phase_limits: Box<[u64]>,
-    phase_peaks: Vec<Option<u64>>,
+    phase_limits: PhaseStorage<u64>,
+    phase_peaks: PhaseStorage<Option<u64>>,
     next_phase: usize,
     active_phase: Option<usize>,
     finished: bool,
@@ -112,7 +115,7 @@ impl ScopeState {
             issued: self.issued,
             retired: self.retired,
             pooled_handoffs: self.pooled_handoffs,
-            phase_peaks: self.phase_peaks.clone(),
+            phase_peaks: self.phase_peaks.to_vec(),
             phase_limits: self.phase_limits.to_vec(),
             finished: self.finished,
         }
@@ -121,7 +124,7 @@ impl ScopeState {
 
 #[derive(Default)]
 pub(super) struct ResourceState {
-    scopes: Vec<ScopeState>,
+    scopes: ScopeStorage<ScopeState>,
     unfinished_scopes: u64,
     issued: u64,
     retired: u64,
@@ -131,6 +134,10 @@ pub(super) struct ResourceState {
 }
 
 impl ResourceState {
+    pub(super) fn has_issued_resources(&self) -> bool {
+        self.issued != 0
+    }
+
     pub(super) fn live_count(&self) -> u64 {
         self.issued - self.retired
     }
@@ -164,7 +171,7 @@ impl ResourceState {
             .ok_or(ProviderObservationFailure::TrackingOverflow)?;
         self.scopes.push(ScopeState {
             id,
-            phase_peaks: vec![None; plan.limits.len()],
+            phase_peaks: PhaseStorage::filled(None, plan.limits.len()),
             phase_limits: plan.limits,
             next_phase: 0,
             active_phase: None,
@@ -307,6 +314,11 @@ impl Drop for TicketInner {
 pub struct ProviderResourceTicket(Arc<TicketInner>);
 
 impl ProviderResourceTicket {
+    /// One physical ticket's control allocation; cloned handles share it.
+    pub fn host_metadata_upper_bytes() -> Option<u64> {
+        super::host_metadata::arc_host_upper_bytes::<TicketInner>()
+    }
+
     pub fn requested_bytes(&self) -> u64 {
         self.0.bytes
     }
@@ -350,6 +362,13 @@ impl Drop for ScopeInner {
 pub struct ProviderResourceScope(Arc<ScopeInner>);
 
 impl ProviderResourceScope {
+    /// The first scope and its single phase have inline ledger storage.
+    /// Only the scope's shared control allocation is newly allocated here.
+    /// Additional scopes and multi-phase plans require independent quotes.
+    pub fn first_single_phase_host_metadata_upper_bytes() -> Option<u64> {
+        super::host_metadata::arc_host_upper_bytes::<ScopeInner>()
+    }
+
     pub fn id(&self) -> u64 {
         self.0.id
     }

@@ -260,7 +260,7 @@ fn legacy_entry_context_inherits_exact_bound_invoker() {
     let exact: Rc<BoundFunctionInvoker> = Rc::new(
         |_,
          _binding: runmat_value::BoundFunctionBinding,
-         _args: crate::execution::RootedValues,
+         _args: crate::call::RootedFunctionArguments,
          _outputs: usize,
          _lexical_environment: Option<runmat_value::LexicalEnvironment>| {
             Box::pin(async {

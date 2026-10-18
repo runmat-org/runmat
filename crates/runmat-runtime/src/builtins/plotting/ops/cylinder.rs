@@ -98,7 +98,6 @@ async fn cylinder_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         if let Err(err) = render_active_plot(
             NAME,
             PlotRenderOptions {
-                title: "Cylinder",
                 axis_equal: true,
                 ..Default::default()
             },

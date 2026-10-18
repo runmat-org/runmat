@@ -1,7 +1,12 @@
-use std::collections::{BTreeSet, HashSet, VecDeque};
+mod impact;
+pub(super) use impact::{PreparedWorkspaceImpacts, WorkspaceImpact};
 
-use super::delta::WorkspaceChangeData;
-use super::values::RootedWorkspaceEntries;
+use crate::workspace::GlobalBindingTarget;
+use std::collections::{BTreeSet, HashMap, VecDeque};
+
+use super::delta::{WorkspaceChange, WorkspaceChangeData, WorkspaceChangeStorage};
+use super::storage::ManagedWorkspaceStorage;
+use super::values::{RootedWorkspaceEntries, WorkspaceEntryName};
 use super::{
     BaseWorkspaceError, BaseWorkspaceReconciliation, BaseWorkspaceSnapshot, WorkspaceDelta,
     WorkspaceRevision,
@@ -15,17 +20,18 @@ pub(super) struct WorkspaceJournal {
     records: VecDeque<WorkspaceHistoryRecord>,
     change_count: usize,
     change_limit: usize,
+    managed: PreparedWorkspaceImpacts,
 }
 
 #[derive(Debug)]
 struct WorkspaceHistoryRecord {
     revision: WorkspaceRevision,
-    impacts: Vec<WorkspaceImpact>,
+    impacts: Vec<LegacyWorkspaceImpact>,
 }
 
 #[derive(Debug)]
-enum WorkspaceImpact {
-    Name(String),
+enum LegacyWorkspaceImpact {
+    Name(WorkspaceEntryName),
     Clear,
 }
 
@@ -36,6 +42,7 @@ impl WorkspaceJournal {
             records: VecDeque::new(),
             change_count: 0,
             change_limit,
+            managed: PreparedWorkspaceImpacts::default(),
         }
     }
 
@@ -43,18 +50,57 @@ impl WorkspaceJournal {
         self.floor = revision;
         self.records.clear();
         self.change_count = 0;
+        self.managed = PreparedWorkspaceImpacts::default();
     }
 
-    pub(super) fn record(&mut self, revision: WorkspaceRevision, delta: &WorkspaceDelta) {
+    pub(super) fn record(
+        &mut self,
+        previous_revision: WorkspaceRevision,
+        revision: WorkspaceRevision,
+        delta: &mut WorkspaceDelta,
+    ) {
+        let reset_mixed_history = delta.requires_history_reset();
+        let mut managed = delta.take_prepared_impacts();
+        if reset_mixed_history {
+            // A context-bearing mutation may not fall through to the legacy
+            // allocation path when an earlier mutation in the same delta was
+            // not covered by the pre-admitted impact chain. Reset is the
+            // conservative complete reconciliation result.
+            self.clear_at(revision);
+            return;
+        }
+        if !managed.is_empty() {
+            if !self.records.is_empty() {
+                self.records.clear();
+                self.change_count = 0;
+                self.floor = previous_revision;
+            }
+            managed.stamp(revision);
+            managed.attach_older(std::mem::take(&mut self.managed));
+            self.change_count = managed.len();
+            if let Some(floor) = managed.truncate(self.change_limit) {
+                self.floor = floor;
+            }
+            self.change_count = managed.len();
+            self.managed = managed;
+            return;
+        }
+        if !self.managed.is_empty() {
+            self.managed = PreparedWorkspaceImpacts::default();
+            self.change_count = 0;
+            self.floor = previous_revision;
+        }
         let impacts = delta
             .changes()
             .iter()
             .map(|change| match change.data() {
                 WorkspaceChangeData::Assign { name, .. }
                 | WorkspaceChangeData::Remove { name }
-                | WorkspaceChangeData::BindGlobal { name }
-                | WorkspaceChangeData::UnbindGlobal { name } => WorkspaceImpact::Name(name.clone()),
-                WorkspaceChangeData::Clear => WorkspaceImpact::Clear,
+                | WorkspaceChangeData::BindGlobal { name, .. }
+                | WorkspaceChangeData::UnbindGlobal { name } => {
+                    LegacyWorkspaceImpact::Name(name.clone())
+                }
+                WorkspaceChangeData::Clear => LegacyWorkspaceImpact::Clear,
             })
             .collect::<Vec<_>>();
         let impact_count = impacts.len();
@@ -78,7 +124,8 @@ impl WorkspaceJournal {
         revision: WorkspaceRevision,
         current: WorkspaceRevision,
         entries: &RootedWorkspaceEntries,
-        global_bindings: &HashSet<String>,
+        global_bindings: &HashMap<String, GlobalBindingTarget>,
+        managed_storage: &ManagedWorkspaceStorage,
     ) -> Result<BaseWorkspaceReconciliation, BaseWorkspaceError> {
         if revision > current {
             return Err(BaseWorkspaceError::FutureRevision {
@@ -86,7 +133,7 @@ impl WorkspaceJournal {
                 current: current.get(),
             });
         }
-        Ok(self.reconcile_known(revision, current, entries, global_bindings))
+        Ok(self.reconcile_known(revision, current, entries, global_bindings, managed_storage))
     }
 
     pub(super) fn reconcile_known(
@@ -94,7 +141,8 @@ impl WorkspaceJournal {
         revision: WorkspaceRevision,
         current: WorkspaceRevision,
         entries: &RootedWorkspaceEntries,
-        global_bindings: &HashSet<String>,
+        global_bindings: &HashMap<String, GlobalBindingTarget>,
+        managed_storage: &ManagedWorkspaceStorage,
     ) -> BaseWorkspaceReconciliation {
         if revision == current {
             return BaseWorkspaceReconciliation::UpToDate { revision };
@@ -104,11 +152,26 @@ impl WorkspaceJournal {
                 current,
                 entries.clone(),
                 global_bindings.clone(),
+                managed_storage.clone(),
             ));
         }
 
         let mut clear = false;
         let mut names = BTreeSet::new();
+        for (record_revision, impact) in self.managed.iter_newest() {
+            if record_revision <= revision {
+                break;
+            }
+            match impact {
+                WorkspaceImpact::Name(name) => {
+                    names.insert(name.clone());
+                }
+                WorkspaceImpact::Clear => {
+                    clear = true;
+                    break;
+                }
+            }
+        }
         for record in self
             .records
             .iter()
@@ -116,10 +179,10 @@ impl WorkspaceJournal {
         {
             for impact in &record.impacts {
                 match impact {
-                    WorkspaceImpact::Name(name) => {
+                    LegacyWorkspaceImpact::Name(name) => {
                         names.insert(name.clone());
                     }
-                    WorkspaceImpact::Clear => {
+                    LegacyWorkspaceImpact::Clear => {
                         clear = true;
                         names.clear();
                     }
@@ -132,15 +195,33 @@ impl WorkspaceJournal {
             changes.clear();
         }
         for name in names {
-            if global_bindings.contains(&name) {
-                changes.bind_global(name);
+            let target = match managed_storage.global(name.as_str()) {
+                Some(true) => managed_storage.global_target(name.as_str()),
+                Some(false) => None,
+                None => global_bindings.get(name.as_str()),
+            };
+            if let Some(target) = target {
+                let storage = if managed_storage.global(name.as_str()) == Some(true) {
+                    WorkspaceChangeStorage::ManagedOverlay
+                } else {
+                    WorkspaceChangeStorage::Legacy
+                };
+                changes.push_reconciled_change(
+                    WorkspaceChange::bind_global_prepared(name, target.clone())
+                        .with_storage(storage),
+                );
                 continue;
             }
-            changes.unbind_global(name.clone());
-            match entries.get(&name) {
-                Some(entry) => changes.push_assign_entry(name, entry.clone()),
-                None if !clear => changes.remove(name),
-                None => {}
+            changes.push_reconciled_change(WorkspaceChange::unbind_global_prepared(name.clone()));
+            if let Some(entry) = managed_storage.entry(name.as_str()) {
+                changes.push_reconciled_change(
+                    WorkspaceChange::assign_entry(name, entry)
+                        .with_storage(WorkspaceChangeStorage::ManagedOverlay),
+                );
+            } else if let Some(entry) = entries.get(&name).cloned() {
+                changes.push_reconciled_change(WorkspaceChange::assign_entry(name, entry));
+            } else if !clear {
+                changes.push_reconciled_change(WorkspaceChange::remove_prepared(name));
             }
         }
         BaseWorkspaceReconciliation::Delta {

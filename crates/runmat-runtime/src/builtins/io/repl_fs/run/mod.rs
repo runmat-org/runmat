@@ -1,4 +1,4 @@
-//! Script-source resolution for the VM-owned caller-workspace execution boundary.
+//! Script-source resolution for the selected caller-workspace execution service.
 #[cfg(test)]
 mod tests;
 use crate::builtins::common::fs::path_to_string;
@@ -8,7 +8,7 @@ use crate::builtins::common::path_search::{
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use runmat_builtins::{
     BuiltinErrorDescriptor, RUN_ERROR_ARG_TYPE, RUN_ERROR_EMPTY_SCRIPT, RUN_ERROR_FILE_NOT_FOUND,
-    RUN_ERROR_FILE_READ, RUN_ERROR_PATH_RESOLVE, RUN_ERROR_REQUIRES_VM, RUN_ERROR_TOO_MANY_OUTPUTS,
+    RUN_ERROR_FILE_READ, RUN_ERROR_PATH_RESOLVE, RUN_ERROR_TOO_MANY_OUTPUTS,
 };
 use runmat_macros::runtime_builtin;
 use runmat_types::RUN_BUILTIN_NAME;
@@ -55,10 +55,6 @@ fn value_to_string_scalar(value: &Value) -> Option<String> {
         Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
         _ => None,
     }
-}
-
-pub fn requires_vm_workspace_context() -> crate::BuiltinResult<Value> {
-    Err(run_error(&RUN_ERROR_REQUIRES_VM))
 }
 
 pub fn too_many_outputs_error() -> RuntimeError {
@@ -155,8 +151,21 @@ pub async fn resolve_run_source(value: &Value) -> BuiltinResult<RunScriptSource>
 #[runtime_builtin(
     name = "run",
     binding_variant = "default",
+    context = true,
+    requested_outputs = true,
+    output_sequence = true,
     builtin_path = "crate::builtins::io::repl_fs::run"
 )]
-pub fn run_builtin_registered(_args: Vec<Value>) -> crate::BuiltinResult<Value> {
-    requires_vm_workspace_context()
+pub async fn run_builtin_registered(
+    runtime: Option<crate::context::RuntimeContext>,
+    requested_outputs: Option<usize>,
+    args: Vec<Value>,
+) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
+    crate::context::execute_selected_dynamic_workspace(
+        runtime,
+        runmat_builtins::DynamicWorkspaceBuiltin::Run,
+        args,
+        requested_outputs,
+    )
+    .await
 }

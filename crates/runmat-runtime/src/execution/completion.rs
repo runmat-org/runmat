@@ -1,4 +1,4 @@
-use runmat_gc::Trace;
+use runmat_gc::{GcHandle, PreparedRootPlan, Trace, Tracer};
 use runmat_value::{Value, ValueSequence};
 
 use super::ExecutionServiceError;
@@ -6,7 +6,9 @@ use super::ExecutionServiceError;
 #[path = "completion/roots.rs"]
 mod roots;
 use roots::RetainedValueRoots;
-pub(crate) use roots::{RootedValueChildren, RootedValueHandles, RootedValueMember};
+pub(crate) use roots::{
+    RootedValueAdmissionError, RootedValueChildren, RootedValueHandles, RootedValueMember,
+};
 
 /// A completed executor-owned value whose reachable managed handles remain GC
 /// roots until the completion record is discarded or transferred to a sink.
@@ -36,6 +38,58 @@ pub struct RootedValueLease {
 }
 
 impl RootedValueLease {
+    /// Root one private GC activation without tracing a language Value or
+    /// allocating traversal scratch. Used by a prepared lexical transaction
+    /// while its source environment may otherwise retire before commit.
+    pub(crate) fn for_handle_in_context(
+        handle: GcHandle,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, RootedValueAdmissionError> {
+        use crate::context::host_allocation::{
+            HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+        };
+
+        struct Handle(GcHandle);
+        impl Trace for Handle {
+            fn trace(&self, tracer: &mut dyn Tracer) {
+                tracer.mark(self.0);
+            }
+        }
+
+        let source = Handle(handle);
+        let plan = PreparedRootPlan::for_traced(&source).map_err(|error| {
+            RootedValueAdmissionError::Gc(runmat_gc::GcError::RootRegistrationFailed(
+                error.to_string(),
+            ))
+        })?;
+        let quote = plan.quote();
+        let raw = u64::try_from(quote.raw_retained_bytes)
+            .map_err(|_| RootedValueAdmissionError::Host(HostAllocationError::Overflow))?;
+        let retained = HostAllocationPlan::retained_exact_output_bytes(raw, quote.retained_claims)?;
+        if let Some(receipt) =
+            HostAllocationReceipt::admit(Some(runtime), HostAllocationPlan::new(0, retained)?)?
+        {
+            let permit = receipt.output_permit(runtime)?;
+            let roots = plan.prepare(&source, &permit).map_err(|error| {
+                RootedValueAdmissionError::Gc(runmat_gc::GcError::RootRegistrationFailed(
+                    error.to_string(),
+                ))
+            })?;
+            receipt.checkpoint(runtime)?;
+            Ok(Self {
+                _roots: RootedValueHandles::from_prepared(roots),
+            })
+        } else {
+            let roots = plan.prepare_unbounded(&source).map_err(|error| {
+                RootedValueAdmissionError::Gc(runmat_gc::GcError::RootRegistrationFailed(
+                    error.to_string(),
+                ))
+            })?;
+            Ok(Self {
+                _roots: RootedValueHandles::from_prepared(roots),
+            })
+        }
+    }
     pub fn for_traced(value: &impl Trace) -> Result<Self, ExecutionServiceError> {
         let roots = RootedValueHandles::for_traced(value).map_err(|error| {
             ExecutionServiceError::Infrastructure(format!(
@@ -54,6 +108,56 @@ impl RootedValueLease {
             ))
         })?;
         Ok(Self { _roots: roots })
+    }
+
+    /// Retain an owned request's supplied arguments before its future can be
+    /// queued unpolled. The original Vec remains with its descriptor; this
+    /// admits only the independent GC root lease, not a second Value copy.
+    pub(crate) fn for_values_in_context(
+        values: &[Value],
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let _roots =
+            RootedValueHandles::for_values_slice_in_context(values, runtime).map_err(|source| {
+                match source {
+                    RootedValueAdmissionError::Host(source) => {
+                        crate::context::host_allocation::host_allocation_runtime_error(
+                            Some(runtime),
+                            "RunMat:Call:Arguments",
+                            "call argument root admission failed",
+                            source,
+                        )
+                    }
+                    RootedValueAdmissionError::Gc(source) => {
+                        crate::runtime_error::semantic_error_with_source(
+                            "RunMat:Call:Arguments",
+                            "call argument root admission failed",
+                            source,
+                        )
+                    }
+                }
+            })?;
+        Ok(Self { _roots })
+    }
+
+    /// Root one already-protected Value under the current operation's exact
+    /// allocation policy. The returned lease can be shared into a retained
+    /// publication owner without registering its handles a second time.
+    pub(crate) fn for_value_in_context(
+        value: &Value,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, RootedValueAdmissionError> {
+        RootedValueHandles::for_value_in_context(value, runtime).map(|_roots| Self { _roots })
+    }
+
+    pub(crate) fn empty() -> Self {
+        Self {
+            _roots: RootedValueHandles::empty(),
+        }
+    }
+
+    pub(crate) fn shared_handles(&self) -> RootedValueHandles {
+        self._roots.clone()
     }
 
     pub fn for_sequence(value: &ValueSequence) -> Result<Self, ExecutionServiceError> {
@@ -111,6 +215,38 @@ impl RootedValuesBuilder {
 }
 
 impl RootedValues {
+    /// Take ownership of an already-allocated argument vector and admit its
+    /// external GC roots under the current operation without copying Values.
+    /// This does not certify arbitrary preexisting payload/vector backing.
+    pub fn in_context(
+        values: Vec<Value>,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        let roots = RootedValueHandles::for_values_slice_in_context(&values, runtime).map_err(
+            |source| match source {
+                RootedValueAdmissionError::Host(source) => {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Call:Arguments",
+                        "function argument root admission failed",
+                        source,
+                    )
+                }
+                RootedValueAdmissionError::Gc(source) => {
+                    crate::runtime_error::semantic_error_with_source(
+                        "RunMat:Call:Arguments",
+                        "function argument root admission failed",
+                        source,
+                    )
+                }
+            },
+        )?;
+        Ok(Self {
+            values,
+            _roots: RetainedValueRoots::direct(roots),
+        })
+    }
+
     pub fn new(values: Vec<Value>) -> Result<Self, ExecutionServiceError> {
         let roots = RootedValueHandles::for_values(values.iter()).map_err(|error| {
             ExecutionServiceError::Infrastructure(format!(
@@ -228,6 +364,15 @@ impl<T: Trace> RootedResult<T> {
 }
 
 impl RootedResult<ValueSequence> {
+    /// A zero-output result owns no managed values or root registrations.
+    /// It is independent of ambient runtime context and needs no allocation.
+    pub fn empty() -> Self {
+        Self {
+            value: ValueSequence::empty(),
+            _roots: RootedValueHandles::empty(),
+        }
+    }
+
     pub fn with_owned_sequence<R>(self, consume: impl FnOnce(ValueSequence) -> R) -> R {
         self.with_owned(consume)
     }
@@ -270,8 +415,8 @@ mod tests {
     fn unmanaged_values_need_no_shared_root_owner() {
         let values = [Value::Num(7.0), Value::Bool(false)];
         let roots = RootedValueHandles::for_values(values.iter()).expect("no managed handles");
-        assert!(roots._roots.is_none());
-        assert!(roots.clone()._roots.is_none());
+        assert!(roots.is_empty());
+        assert!(roots.clone().is_empty());
     }
 
     #[test]

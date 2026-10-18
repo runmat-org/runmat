@@ -6,7 +6,7 @@ fn malformed_logical_signal_is_rejected_with_or_without_an_output() {
         let _outputs = crate::output_count::push_output_count(Some(count));
         let logical = runmat_value::LogicalArray {
             data: runmat_value::HostLogicalBuffer::new(vec![0, 1, 0]),
-            shape: vec![1, 4],
+            shape: vec![1, 4].into(),
         };
         let error = block_on(resample_builtin(
             Value::LogicalArray(logical),
@@ -59,7 +59,7 @@ fn discarded_logical_filter_uses_shape_admission_and_prepared_coefficients_stay_
         runmat_value::LogicalArray::new(vec![1, 0, 0, 1], vec![2, 2]).unwrap(),
         runmat_value::LogicalArray {
             data: runmat_value::HostLogicalBuffer::new(vec![0, 1, 0]),
-            shape: vec![1, 4],
+            shape: vec![1, 4].into(),
         },
     ] {
         let error = block_on(parse_filter_vector(

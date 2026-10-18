@@ -296,6 +296,19 @@ pub(super) fn single_candidate_resources_admitted(
     resources: &PlacementResourceSnapshot,
     require_transactional_results: bool,
 ) -> Result<(), ResourceAdmissionError> {
+    single_candidate_resource_adjustment_ns(candidate, resources, require_transactional_results)
+        .map(|_| ())
+}
+
+/// The same physical admission and eviction adjustment used by the graph
+/// planner, evaluated for a complete one-node route without constructing a
+/// graph or a portable descriptor. The empty provider-retention map has no
+/// backing allocation.
+pub(super) fn single_candidate_resource_adjustment_ns(
+    candidate: CandidateResourceFacts<'_>,
+    resources: &PlacementResourceSnapshot,
+    require_transactional_results: bool,
+) -> Result<u64, ResourceAdmissionError> {
     candidate_resource_adjustment_ns(
         candidate,
         ResourceAdmissionContext {
@@ -305,7 +318,6 @@ pub(super) fn single_candidate_resources_admitted(
             require_transactional_results,
         },
     )
-    .map(|_| ())
 }
 
 fn candidate_resource_adjustment_ns(

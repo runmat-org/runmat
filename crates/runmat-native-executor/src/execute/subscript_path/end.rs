@@ -11,7 +11,7 @@ pub(in crate::execute) fn resolve_end(
     component: usize,
     component_count: usize,
 ) -> NativeExecutorResult<Value> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = resolve_end_inner(
         state,
         prepared,
@@ -19,15 +19,7 @@ pub(in crate::execute) fn resolve_end(
         component_count,
         embedded.as_ref(),
     );
-    if let Ok(value) = &result {
-        state.cache_embedded_call(embedded.as_ref(), std::slice::from_ref(value));
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(value), Ok(())) => Ok(value),
-    }
+    state.settle_embedded_result(embedded.as_ref(), result, std::slice::from_ref)
 }
 
 fn resolve_end_inner(

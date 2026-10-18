@@ -103,8 +103,10 @@ fn scoped_name_binding_does_not_redirect_same_numbered_numeric_call() {
     .expect("unbound feval keeps leased name selection");
     assert_eq!(feval.as_slice(), &[Value::Num(33.0)]);
     let mapped = futures::executor::block_on(
-        crate::builtins::common::mapped_callable::MappedCallable::Closure(unbound_closure)
-            .invoke_with_outputs(&[], 1),
+        crate::builtins::common::mapped_callable::MappedCallable::Closure(
+            crate::call::descriptor::RetainedClosureValue::new(unbound_closure),
+        )
+        .invoke_with_outputs(&[], 1),
     )
     .unwrap_or_else(|_| panic!("mapped unbound closure keeps leased name selection"));
     assert_eq!(mapped, Value::Num(33.0));

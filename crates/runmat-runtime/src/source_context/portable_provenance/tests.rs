@@ -128,7 +128,9 @@ fn admitted_program_binding_and_fork_retain_owner_but_callback_text_does_not() {
             .owner_identity,
         "imported-owner"
     );
-    let fork = bound.fork_parallel_lab(crate::context::RuntimeServicePorts::default());
+    let fork = bound
+        .fork_parallel_lab(crate::context::RuntimeServicePorts::default())
+        .expect("idle session fork");
     assert_eq!(
         portable_source_identity_in_context(&fork, source)
             .expect("inherited owner")

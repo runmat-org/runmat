@@ -102,7 +102,7 @@ impl PendingSequenceTarget {
         &mut self,
         state: &mut HostState,
     ) -> NativeExecutorResult<Option<PreparedSequenceTarget>> {
-        let (region, next_step, _) = state.enter_contextual_region();
+        let (region, next_step, _) = state.enter_contextual_region()?;
         match self.region {
             Some(expected) if expected != region || self.step != next_step => {
                 return Err(NativeExecutorError::Host(
@@ -114,7 +114,7 @@ impl PendingSequenceTarget {
         }
         loop {
             let step = self.step;
-            state.enter_contextual_step(region, step);
+            state.enter_contextual_step(region, step)?;
             let result = self.advance_step(state);
             let next_step = step + usize::from(result.is_ok());
             state.finish_contextual_step(region, step, next_step)?;
@@ -124,7 +124,7 @@ impl PendingSequenceTarget {
                         Some(seed) => seed,
                         None => state.local_reference(self.root.0)?,
                     };
-                    state.finish_contextual_region(region, vec![root]);
+                    state.finish_contextual_region(region, root);
                     return Ok(Some(PreparedSequenceTarget {
                         root: self.root,
                         destination,
@@ -231,7 +231,7 @@ fn stage_call(
         Box<dyn std::future::Future<Output = NativeExecutorResult<SequenceStage>> + 'static>,
     >,
 ) -> NativeExecutorResult<SequenceStage> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = (|| {
         if let Some(stage) = take_completed_sequence_stage(state, embedded.as_ref())? {
             return Ok(stage);

@@ -49,7 +49,7 @@ fn source<'a>(
         }),
         Value::LogicalArray(array) => Some(DeepLearningForwardSource::Host {
             element_type,
-            shape: array.shape.clone(),
+            shape: array.shape.to_vec(),
         }),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(DeepLearningForwardSource::Host {
             element_type,

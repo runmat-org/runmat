@@ -152,7 +152,7 @@ fn value_rank(value: &Value) -> Option<usize> {
 fn filter2_value_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
         Value::Tensor(value) => Some(value.shape().to_vec()),
-        Value::LogicalArray(value) => Some(value.shape.clone()),
+        Value::LogicalArray(value) => Some(value.shape.to_vec()),
         Value::GpuTensor(value) => Some(value.shape().to_vec()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) => Some(vec![1, 1]),
         _ => None,

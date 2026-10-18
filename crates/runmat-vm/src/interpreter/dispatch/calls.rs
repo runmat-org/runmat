@@ -6,6 +6,7 @@ use crate::call::shared::build_expanded_args_from_specs;
 use crate::call::{execute_callable_descriptor, execute_callable_descriptor_owned, root_values};
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
+use crate::interpreter::vars::InterpreterVars;
 use crate::object::class_def as obj_class_def;
 use runmat_hir::{CallableFallbackPolicy, CallableIdentity};
 use runmat_runtime::call::arguments::ArgumentSpec;
@@ -119,7 +120,7 @@ pub struct MethodExpandCallContext<'a> {
 
 pub struct ExceptionRouteContext<'a> {
     pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
-    pub vars: &'a mut Vec<Value>,
+    pub vars: &'a mut InterpreterVars,
     pub last_exception: &'a mut Option<MException>,
     pub pc: &'a mut usize,
 }
@@ -277,7 +278,6 @@ pub fn handle_builtin_outcome(
     _output_hint: usize,
     _stack: &mut Vec<Value>,
     ctx: ExceptionRouteContext<'_>,
-    refresh_vars: impl Fn(&[Value]),
 ) -> Result<BuiltinHandling, RuntimeError> {
     let ExceptionRouteContext {
         try_stack,
@@ -293,14 +293,7 @@ pub fn handle_builtin_outcome(
             }
             ImportedBuiltinResolution::Ambiguous(err) => Err(err),
             ImportedBuiltinResolution::NotFound => Ok(
-                match redirect_exception_to_catch(
-                    err,
-                    try_stack,
-                    vars,
-                    last_exception,
-                    pc,
-                    refresh_vars,
-                ) {
+                match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
                     ExceptionHandling::Caught => BuiltinHandling::Caught,
                     ExceptionHandling::Uncaught(err) => BuiltinHandling::Uncaught(err),
                 },
@@ -312,14 +305,12 @@ pub fn handle_builtin_outcome(
 pub fn handle_builtin_call_multi<'a>(
     ctx: BuiltinCallContext<'a>,
     out_count: usize,
-    refresh_vars: impl Fn(&[Value]) + 'a,
 ) -> impl std::future::Future<Output = Result<BuiltinHandling, RuntimeError>> + 'a {
-    handle_builtin_call_inner(ctx, refresh_vars, out_count)
+    handle_builtin_call_inner(ctx, out_count)
 }
 
 async fn handle_builtin_call_inner(
     ctx: BuiltinCallContext<'_>,
-    refresh_vars: impl Fn(&[Value]),
     requested_outputs: usize,
 ) -> Result<BuiltinHandling, RuntimeError> {
     let BuiltinCallContext {
@@ -353,7 +344,6 @@ async fn handle_builtin_call_inner(
             requested_outputs,
             stack,
             exception,
-            refresh_vars,
         );
     }
     if call_builtins::is_vm_dynamic_workspace_builtin(name) {
@@ -367,6 +357,7 @@ async fn handle_builtin_call_inner(
             call_builtins::DynamicBuiltinSource {
                 source_id,
                 driver: process_driver,
+                dynamic_admission: None,
             },
         )
         .await;
@@ -381,7 +372,6 @@ async fn handle_builtin_call_inner(
             requested_outputs,
             stack,
             exception,
-            refresh_vars,
         );
     }
     let args = call_builtins::collect_call_args(stack, arg_count)?;
@@ -403,14 +393,12 @@ async fn handle_builtin_call_inner(
         requested_outputs,
         stack,
         exception,
-        refresh_vars,
     )
 }
 
 pub async fn handle_prepared_user_function_call(
     ctx: UserCallContext<'_>,
     args: Vec<Value>,
-    refresh_vars: impl Fn(&[Value]),
 ) -> Result<UserCallHandling, RuntimeError> {
     let _roots = root_values(&args)?;
     let UserCallContext {
@@ -511,14 +499,7 @@ pub async fn handle_prepared_user_function_call(
     match result {
         Ok(result) => Ok(UserCallHandling::Completed(result)),
         Err(err) => Ok(
-            match redirect_exception_to_catch(
-                err,
-                try_stack,
-                vars,
-                last_exception,
-                pc,
-                refresh_vars,
-            ) {
+            match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
                 ExceptionHandling::Caught => UserCallHandling::Caught,
                 ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
             },
@@ -529,16 +510,14 @@ pub async fn handle_prepared_user_function_call(
 pub async fn handle_user_function_call(
     ctx: UserCallContext<'_>,
     arg_count: usize,
-    refresh_vars: impl Fn(&[Value]),
 ) -> Result<UserCallHandling, RuntimeError> {
     let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
-    handle_prepared_user_function_call(ctx, args, refresh_vars).await
+    handle_prepared_user_function_call(ctx, args).await
 }
 
 pub async fn handle_workspace_first_prepared_call(
     ctx: WorkspaceFirstCallContext<'_>,
     args: Vec<Value>,
-    refresh_vars: impl Fn(&[Value]),
 ) -> Result<UserCallHandling, RuntimeError> {
     let _roots = root_values(&args)?;
     let WorkspaceFirstCallContext {
@@ -585,14 +564,7 @@ pub async fn handle_workspace_first_prepared_call(
         return match result {
             Ok(sequence) => Ok(UserCallHandling::Completed(sequence)),
             Err(err) => Ok(
-                match redirect_exception_to_catch(
-                    err,
-                    try_stack,
-                    vars,
-                    last_exception,
-                    pc,
-                    refresh_vars,
-                ) {
+                match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
                     ExceptionHandling::Caught => UserCallHandling::Caught,
                     ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
                 },
@@ -614,6 +586,7 @@ pub async fn handle_workspace_first_prepared_call(
                 call_builtins::DynamicBuiltinSource {
                     source_id,
                     driver: process_driver,
+                    dynamic_admission: None,
                 },
             )
             .await;
@@ -629,14 +602,7 @@ pub async fn handle_workspace_first_prepared_call(
                     |error| error.into_runtime_error(),
                 )?)),
                 Err(err) => Ok(
-                    match redirect_exception_to_catch(
-                        err,
-                        try_stack,
-                        vars,
-                        last_exception,
-                        pc,
-                        refresh_vars,
-                    ) {
+                    match redirect_exception_to_catch(err, try_stack, vars, last_exception, pc) {
                         ExceptionHandling::Caught => UserCallHandling::Caught,
                         ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
                     },
@@ -662,7 +628,6 @@ pub async fn handle_workspace_first_prepared_call(
             exception,
         },
         args,
-        refresh_vars,
     )
     .await
 }
@@ -856,6 +821,7 @@ mod tests {
     };
     use crate::call::builtins::ImportedBuiltinResolution;
     use crate::interpreter::errors::mex;
+    use crate::interpreter::vars::InterpreterVars;
     use runmat_value::Value;
 
     #[test]
@@ -913,7 +879,7 @@ mod tests {
     #[test]
     fn handle_builtin_outcome_preserves_ambiguous_import_identifier() {
         let mut try_stack: Vec<crate::interpreter::state::ActiveTryHandler> = Vec::new();
-        let mut vars: Vec<Value> = Vec::new();
+        let mut vars = InterpreterVars::from_owned(Vec::new());
         let mut last_exception = None;
         let mut pc = 0usize;
         let mut stack: Vec<Value> = Vec::new();
@@ -932,7 +898,6 @@ mod tests {
                 last_exception: &mut last_exception,
                 pc: &mut pc,
             },
-            |_| {},
         );
         let err = match outcome {
             Err(err) => err,

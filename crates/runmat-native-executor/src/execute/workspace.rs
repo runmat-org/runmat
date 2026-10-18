@@ -4,40 +4,63 @@ use std::{
     rc::{Rc, Weak},
 };
 
+use runmat_execution::resource::ExactShared;
 use runmat_mir::{MirLocalId, MirStmtKind};
 use runmat_native_codegen::NativeInstruction;
+use runmat_runtime::context::host_allocation::{
+    HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
+};
 use runmat_runtime::context::RuntimeWorkspaceService;
 use runmat_runtime::workspace::bindings::FrameGlobalBindings;
-use runmat_runtime::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelection};
+use runmat_runtime::workspace::{
+    CapturedWorkspaceReadView, DetachedWorkspaceValues, GlobalBindingTarget,
+    LogicalWorkspaceGeneration, WorkspaceDetachSelection, WorkspaceRevision,
+    WorkspaceSlotReadLease,
+};
 use runmat_types::BindingId;
 use runmat_types::{EnvironmentEffect, WorkspaceEffect};
-use runmat_value::Value;
+use runmat_value::{
+    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostNumericAllocationError, Value,
+};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
 use super::state::HostState;
 
-mod rooted_value;
-use rooted_value::RootedWorkspaceValue;
+mod operation;
+mod names;
+mod capture;
+use names::NativeWorkspaceNames;
 
 /// One assigned interactive binding supplied to a native script invocation.
 ///
 /// Binding identity selects the exact Native IR local. The retained name is
 /// the MATLAB workspace identity used by dynamic workspace builtins.
-/// The value lives only in `NativeWorkspaceInput::values`; metadata must not
-/// duplicate payloads or compare language values to validate caller identity.
+/// The value is retained by `NativeWorkspaceInput`'s logical generation;
+/// metadata must not duplicate payloads or compare language values to
+/// validate caller identity.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NativeWorkspaceBinding {
     pub binding: BindingId,
     pub name: String,
 }
 
+/// One source-visible workspace name and its exact session-global storage
+/// destination. The target is independent of both the source spelling and the
+/// Native IR local slot.
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativeWorkspaceGlobalBinding {
+    pub binding: BindingId,
+    pub name: String,
+    pub target: GlobalBindingTarget,
+}
+
 /// Transactional interactive workspace input for one native invocation.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct NativeWorkspaceInput {
-    /// Complete assigned caller workspace, including names not referenced by
-    /// this source but visible to dynamic workspace builtins.
-    pub values: BTreeMap<String, Value>,
+    /// Exact immutable caller workspace, including dynamic names not named by
+    /// this source. The generation owns its Value and managed-handle roots.
+    generation: LogicalWorkspaceGeneration,
     /// Function-scoped semantic names for every caller binding retained by
     /// the synthetic entrypoint, including bindings initially unassigned.
     pub local_names: BTreeMap<BindingId, String>,
@@ -45,17 +68,102 @@ pub struct NativeWorkspaceInput {
     pub bindings: Vec<NativeWorkspaceBinding>,
     /// Semantic caller bindings that resolve through the session-global store.
     /// Values remain owned by that store; this list carries alias identity only.
-    pub global_bindings: Vec<NativeWorkspaceBinding>,
+    pub global_bindings: Vec<NativeWorkspaceGlobalBinding>,
 }
 
 impl NativeWorkspaceInput {
-    pub fn profile_values(&self) -> Vec<Value> {
-        self.values.values().cloned().collect()
+    /// A standalone script begins with no caller workspace. Construct its
+    /// source through the same exact generation owner as populated inputs.
+    pub fn empty_for_context(
+        context: &runmat_runtime::context::RuntimeContext,
+        local_names: BTreeMap<BindingId, String>,
+    ) -> Result<Self, Box<runmat_runtime::RuntimeError>> {
+        let base = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let generation = LogicalWorkspaceGeneration::capture(
+            context,
+            &base,
+            &context.session_variable_authority(),
+        )
+        .map_err(Box::new)?;
+        Ok(Self::from_generation(
+            generation,
+            local_names,
+            Vec::new(),
+            Vec::new(),
+        ))
+    }
+
+    pub fn from_generation(
+        generation: LogicalWorkspaceGeneration,
+        local_names: BTreeMap<BindingId, String>,
+        bindings: Vec<NativeWorkspaceBinding>,
+        global_bindings: Vec<NativeWorkspaceGlobalBinding>,
+    ) -> Self {
+        Self {
+            generation,
+            local_names,
+            bindings,
+            global_bindings,
+        }
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.generation.get(name)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.generation.iter()
+    }
+
+    pub fn global_target(&self, name: &str) -> Option<&GlobalBindingTarget> {
+        self.generation.global_target(name)
+    }
+
+    pub fn profile_values(&self) -> impl Iterator<Item = &Value> {
+        self.generation.iter().map(|(_, value)| value)
+    }
+
+    #[cfg(test)]
+    pub(super) fn from_test_values(
+        values: BTreeMap<String, Value>,
+        local_names: BTreeMap<BindingId, String>,
+        bindings: Vec<NativeWorkspaceBinding>,
+        global_bindings: Vec<NativeWorkspaceGlobalBinding>,
+    ) -> Self {
+        let context = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let base = runmat_runtime::workspace::BaseWorkspaceOwner::new();
+        let mut delta = runmat_runtime::workspace::WorkspaceDelta::new();
+        let session = context.session_variable_authority();
+        for (name, value) in values {
+            match global_bindings.iter().find(|binding| binding.name == name) {
+                Some(binding) => match &binding.target {
+                    GlobalBindingTarget::Named(target) => session
+                        .store_global_with_context(&context, target.as_str(), value)
+                        .expect("valid fixture named global"),
+                    GlobalBindingTarget::LegacySlot(slot) => session
+                        .store_global_slot_with_context(&context, *slot, value)
+                        .expect("valid fixture legacy global"),
+                },
+                None => delta
+                    .assign(name, value)
+                    .expect("valid fixture workspace value"),
+            }
+        }
+        for binding in &global_bindings {
+            delta.bind_global_target(binding.name.clone(), binding.target.clone());
+        }
+        base.apply(delta).expect("install fixture workspace values");
+        let generation = LogicalWorkspaceGeneration::capture(&context, &base, &session)
+            .expect("capture fixture workspace generation");
+        Self::from_generation(generation, local_names, bindings, global_bindings)
     }
 
     pub(super) fn frame_global_bindings(
         &self,
         function: &runmat_native_codegen::NativeFunction,
+        context: &runmat_runtime::context::RuntimeContext,
     ) -> NativeExecutorResult<FrameGlobalBindings> {
         let aliases = FrameGlobalBindings::default();
         let mut seen = BTreeSet::new();
@@ -83,24 +191,128 @@ impl NativeWorkspaceInput {
                     binding.name
                 )));
             }
-            aliases.declare_named(local.id.0 as usize, binding.name.clone());
+            let prepared = aliases
+                .prepare_target(context, local.id.0 as usize, &binding.target)
+                .map_err(|cause| {
+                    NativeExecutorError::from(super::global_target::alias_admission_error(
+                        context, cause,
+                    ))
+                })?;
+            prepared.checkpoint().map_err(|cause| {
+                NativeExecutorError::from(super::global_target::alias_admission_error(
+                    context, cause,
+                ))
+            })?;
+            prepared.commit();
         }
         Ok(aliases)
     }
 }
 
-/// Assigned workspace values after a successful native invocation.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// Retained logical workspace generation after a successful invocation. It
+/// shares the Runtime projection/session owners and never copies Values into
+/// a terminal Native map.
+#[derive(Clone, Debug)]
 pub struct NativeWorkspaceSnapshot {
-    pub values: BTreeMap<String, Value>,
-    pub global_bindings: BTreeSet<String>,
+    owner: ExactShared<NativeWorkspaceSnapshotPayload>,
+}
+
+#[derive(Debug)]
+struct NativeWorkspaceSnapshotPayload {
+    view: CapturedWorkspaceReadView,
+    // ExactShared releases its header before dropping this payload. The
+    // immutable generation and lexical leases retire before the claim.
+    _claim: Option<ExactHostAllocationClaim>,
+}
+
+impl PartialEq for NativeWorkspaceSnapshot {
+    fn eq(&self, other: &Self) -> bool {
+        self.iter().eq(other.iter())
+            && self
+                .owner
+                .get()
+                .view
+                .global_bindings()
+                .eq(other.owner.get().view.global_bindings())
+    }
+}
+
+impl NativeWorkspaceSnapshot {
+    fn prepare(
+        context: &runmat_runtime::context::RuntimeContext,
+        view: CapturedWorkspaceReadView,
+    ) -> NativeExecutorResult<Self> {
+        let bytes = ExactShared::<NativeWorkspaceSnapshotPayload>::requested_bytes();
+        let retained = HostAllocationPlan::retained_exact_output_bytes(
+            u64::try_from(bytes)
+                .map_err(|_| snapshot_admission_error(context, HostAllocationError::Overflow))?,
+            1,
+        )
+        .map_err(|cause| snapshot_admission_error(context, cause))?;
+        let plan = HostAllocationPlan::new(0, retained)
+            .map_err(|cause| snapshot_admission_error(context, cause))?;
+        let receipt = HostAllocationReceipt::admit(Some(context), plan)
+            .map_err(|cause| snapshot_admission_error(context, cause))?;
+        let build = |permit: Option<&dyn ExactHostAllocationPermit>| {
+            let claim = permit
+                .map(|permit| permit.reserve_exact_claim(bytes))
+                .transpose()?;
+            ExactShared::try_new(NativeWorkspaceSnapshotPayload {
+                view,
+                _claim: claim,
+            })
+            .map(|owner| Self { owner })
+            .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
+        };
+        match receipt {
+            Some(receipt) => receipt
+                .with_output_allocation(context, |permit| build(Some(permit)))
+                .map_err(|cause| snapshot_admission_error(context, cause)),
+            None => build(None).map_err(|cause| {
+                snapshot_admission_error(context, HostAllocationError::Numeric(cause))
+            }),
+        }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Value)> {
+        self.owner.get().view.iter()
+    }
+
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.owner.get().view.get(name).is_some()
+    }
+
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.owner.get().view.get(name)
+    }
+
+    pub fn global_target(&self, name: &str) -> Option<&GlobalBindingTarget> {
+        self.owner.get().view.global_target(name)
+    }
+}
+
+fn snapshot_admission_error(
+    context: &runmat_runtime::context::RuntimeContext,
+    cause: HostAllocationError,
+) -> NativeExecutorError {
+    NativeExecutorError::from(
+        runmat_runtime::build_runtime_error(format!(
+            "native workspace snapshot admission failed: {cause}"
+        ))
+        .with_identifier(format!(
+            "{}:{}",
+            context.error_namespace(),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build(),
+    )
 }
 
 struct NativeWorkspaceFrame {
-    values: RefCell<BTreeMap<String, RootedWorkspaceValue>>,
+    runtime: Option<runmat_runtime::context::RuntimeContextLocalId>,
     lexical: RefCell<Option<NativeLexicalWorkspaceBindings>>,
     externally_mutated: Cell<bool>,
-    canonical_revision: Cell<Option<runmat_runtime::workspace::WorkspaceRevision>>,
     active: Cell<bool>,
 }
 
@@ -108,6 +320,25 @@ struct NativeWorkspaceFrame {
 struct NativeLexicalWorkspaceBindings {
     environment: runmat_value::LexicalEnvironment,
     by_name: BTreeMap<String, runmat_native_codegen::NativeLexicalBinding>,
+}
+
+fn private_workspace_service(
+    generation: Option<&runmat_runtime::workspace::LogicalWorkspaceGeneration>,
+    context: Option<&runmat_runtime::context::RuntimeContext>,
+) -> NativeExecutorResult<(
+    Rc<dyn RuntimeWorkspaceService>,
+    runmat_runtime::workspace::BaseWorkspaceOwner,
+)> {
+    let (owner, service) = match generation {
+        Some(generation) => {
+            runmat_runtime::workspace::BaseWorkspaceProjectionService::private_from_generation(
+                generation, context,
+            )
+        }
+        None => runmat_runtime::workspace::BaseWorkspaceProjectionService::private_empty(context),
+    }
+    .map_err(NativeExecutorError::from)?;
+    Ok((Rc::new(service), owner))
 }
 
 #[derive(Clone, Copy)]
@@ -118,14 +349,19 @@ enum NativeWorkspaceMutationOrigin {
 
 pub(super) struct NativeWorkspaceState {
     frame: Rc<NativeWorkspaceFrame>,
-    local_names: BTreeMap<usize, String>,
+    observed_revision: Cell<Option<WorkspaceRevision>>,
+    local_names: NativeWorkspaceNames,
     publish: bool,
     global_aliases: FrameGlobalBindings,
     canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+    caller: Option<Rc<dyn RuntimeWorkspaceService>>,
+    _private_owner: Option<runmat_runtime::workspace::BaseWorkspaceOwner>,
     session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
 }
 
 impl NativeWorkspaceState {
+    /// Unbound fixture construction; production frames use `new_for_context`.
+    #[cfg(test)]
     pub(super) fn new(
         function: &runmat_native_codegen::NativeFunction,
         input: NativeWorkspaceInput,
@@ -133,20 +369,63 @@ impl NativeWorkspaceState {
         canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
         session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
     ) -> NativeExecutorResult<Self> {
-        let local_names = function
-            .locals
-            .iter()
-            .filter(|local| local.kind == runmat_native_codegen::NativeLocalKind::Binding)
-            .filter_map(|local| {
-                local
-                    .binding
-                    .and_then(|binding| input.local_names.get(&binding).cloned())
-                    .or_else(|| local.name.clone())
-                    .map(|name| (local.id.0 as usize, name))
-            })
-            .collect::<BTreeMap<_, _>>();
+        Self::new_with_runtime(
+            function,
+            input,
+            global_aliases,
+            canonical,
+            session_variables,
+            None,
+        )
+    }
+
+    pub(super) fn new_for_context(
+        function: &runmat_native_codegen::NativeFunction,
+        input: NativeWorkspaceInput,
+        global_aliases: FrameGlobalBindings,
+        canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+        session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<Self> {
+        Self::new_with_runtime(
+            function,
+            input,
+            global_aliases,
+            canonical,
+            session_variables,
+            Some(context),
+        )
+    }
+
+    fn new_with_runtime(
+        function: &runmat_native_codegen::NativeFunction,
+        input: NativeWorkspaceInput,
+        global_aliases: FrameGlobalBindings,
+        canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+        session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
+        context: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> NativeExecutorResult<Self> {
+        let input_revision = input.generation.base_revision();
+        let local_names = NativeWorkspaceNames::prepare(function, Some(&input), context)?;
+        for (slot, name) in local_names.iter() {
+            if let Some(target) = global_aliases.binding_handle_for_slot(slot) {
+                if input.generation.global_target(name) != Some(&target) {
+                    return Err(NativeExecutorError::Host(format!(
+                        "native global binding '{}' does not match the caller generation target",
+                        name
+                    )));
+                }
+            }
+        }
         let mut seen_bindings = BTreeSet::new();
-        let values = input.values;
+        for binding in &input.global_bindings {
+            if input.generation.global_target(&binding.name) != Some(&binding.target) {
+                return Err(NativeExecutorError::Host(format!(
+                    "native global binding '{}' does not match the caller generation target",
+                    binding.name
+                )));
+            }
+        }
         for supplied in input.bindings {
             if !seen_bindings.insert(supplied.binding) {
                 return Err(NativeExecutorError::Host(
@@ -171,71 +450,123 @@ impl NativeWorkspaceState {
                     supplied.name
                 )));
             }
-            if !values.contains_key(&supplied.name) {
+            if input.generation.get(&supplied.name).is_none() {
                 return Err(NativeExecutorError::Host(format!(
                     "native workspace binding '{}' is missing from the caller snapshot",
                     supplied.name
                 )));
             }
         }
-        let values = values
-            .into_iter()
-            .map(|(name, value)| RootedWorkspaceValue::new(value).map(|value| (name, value)))
-            .collect::<Result<_, _>>()
-            .map_err(NativeExecutorError::Runtime)?;
+        let caller = canonical.clone();
+        let (canonical, private_owner) = match canonical {
+            Some(canonical) => (Some(canonical), None),
+            None => {
+                let (service, owner) = private_workspace_service(Some(&input.generation), context)?;
+                (Some(service), Some(owner))
+            }
+        };
         Ok(Self {
             frame: Rc::new(NativeWorkspaceFrame {
-                values: RefCell::new(values),
+                runtime: context.map(runmat_runtime::context::RuntimeContext::local_identity),
                 lexical: RefCell::new(None),
                 externally_mutated: Cell::new(false),
-                canonical_revision: Cell::new(None),
                 active: Cell::new(true),
             }),
+            observed_revision: Cell::new(Some(input_revision)),
             local_names,
             publish: true,
             global_aliases,
             canonical,
+            caller,
+            _private_owner: private_owner,
             session_variables,
         })
     }
 
+    /// Unbound fixture construction; production frames use `function_frame_for_context`.
+    #[cfg(test)]
     pub(super) fn function_frame(
         function: &runmat_native_codegen::NativeFunction,
         global_aliases: FrameGlobalBindings,
         canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
         session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
     ) -> Self {
-        let local_names = function
-            .locals
-            .iter()
-            .filter(|local| local.kind != runmat_native_codegen::NativeLocalKind::Temporary)
-            .filter_map(|local| local.name.clone().map(|name| (local.id.0 as usize, name)))
-            .collect();
-        Self {
-            frame: Rc::new(NativeWorkspaceFrame {
-                values: RefCell::new(BTreeMap::new()),
-                lexical: RefCell::new(None),
-                externally_mutated: Cell::new(false),
-                canonical_revision: Cell::new(None),
-                active: Cell::new(true),
-            }),
-            local_names,
-            publish: false,
+        Self::function_frame_with_runtime(
+            function,
             global_aliases,
             canonical,
             session_variables,
-        }
+            None,
+        )
+        .expect("unbound fixture workspace frame")
     }
 
-    pub(super) fn service(&self) -> Rc<dyn RuntimeWorkspaceService> {
-        Rc::new(NativeWorkspaceService {
+    pub(super) fn function_frame_for_context(
+        function: &runmat_native_codegen::NativeFunction,
+        global_aliases: FrameGlobalBindings,
+        canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+        session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<Self> {
+        Self::function_frame_with_runtime(
+            function,
+            global_aliases,
+            canonical,
+            session_variables,
+            Some(context),
+        )
+    }
+
+    fn function_frame_with_runtime(
+        function: &runmat_native_codegen::NativeFunction,
+        global_aliases: FrameGlobalBindings,
+        canonical: Option<Rc<dyn RuntimeWorkspaceService>>,
+        session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
+        context: Option<&runmat_runtime::context::RuntimeContext>,
+    ) -> NativeExecutorResult<Self> {
+        let local_names = NativeWorkspaceNames::prepare(function, None, context)?;
+        let (service, owner) = private_workspace_service(None, context)?;
+        let (current, private_owner) = (Some(service), Some(owner));
+        if let (Some(context), Some(current)) = (context, current.as_ref()) {
+            for (slot, name) in local_names.iter() {
+                if let Some(target) = global_aliases.binding_handle_for_slot(slot) {
+                    current.bind_base_global_target_with_context(context, name, &target)?;
+                }
+            }
+        }
+        Ok(Self {
+            frame: Rc::new(NativeWorkspaceFrame {
+                runtime: context.map(runmat_runtime::context::RuntimeContext::local_identity),
+                lexical: RefCell::new(None),
+                externally_mutated: Cell::new(false),
+                active: Cell::new(true),
+            }),
+            observed_revision: Cell::new(None),
+            local_names,
+            publish: false,
+            global_aliases,
+            canonical: current,
+            caller: canonical,
+            _private_owner: private_owner,
+            session_variables,
+        })
+    }
+
+    fn service_value(&self) -> NativeWorkspaceService {
+        NativeWorkspaceService {
             frame: Rc::downgrade(&self.frame),
             global_aliases: self.global_aliases.clone(),
             local_names: self.local_names.clone(),
             canonical: self.canonical.as_ref().map(Rc::downgrade),
+            caller: self.caller.as_ref().map(Rc::downgrade),
+            private_current: self._private_owner.is_some(),
             publish: self.publish,
             session_variables: self.session_variables.clone(),
-        })
+        }
+    }
+
+    pub(super) fn service(&self) -> Rc<dyn RuntimeWorkspaceService> {
+        Rc::new(self.service_value())
     }
 
     pub(super) fn attach_lexical_bindings(
@@ -253,11 +584,11 @@ impl NativeWorkspaceState {
         for binding in &function.lexical_bindings {
             let name = self
                 .local_names
-                .get(&(binding.local.0 as usize))
+                .name(binding.local.0 as usize)
                 .ok_or_else(|| {
                     NativeExecutorError::Host("native lexical binding has no workspace name".into())
                 })?;
-            if by_name.insert(name.clone(), *binding).is_some() {
+            if by_name.insert(name.to_owned(), *binding).is_some() {
                 return Err(NativeExecutorError::Host(
                     "native lexical workspace has duplicate binding names".into(),
                 ));
@@ -282,145 +613,316 @@ impl NativeWorkspaceState {
         self.frame.externally_mutated.get()
     }
 
+    pub(super) fn needs_reconciliation_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<bool> {
+        if self.needs_reconciliation() {
+            return Ok(true);
+        }
+        let revision = self.current_revision_with_context(context)?;
+        Ok(revision != self.observed_revision.get())
+    }
+
+    pub(super) fn current_revision_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<Option<WorkspaceRevision>> {
+        operation::validate_frame_context(&self.frame, Some(context))?;
+        self.canonical
+            .as_ref()
+            .ok_or_else(|| NativeExecutorError::from(native_workspace_closed()))?
+            .workspace_revision_with_context(context)
+            .map_err(NativeExecutorError::from)
+    }
+
+    pub(super) fn record_observed_revision(&self, revision: Option<WorkspaceRevision>) {
+        self.observed_revision.set(revision);
+    }
+
     pub(super) fn mark_reconciled(&self) {
         self.frame.externally_mutated.set(false);
     }
 
-    pub(super) fn initial_value(&self, slot: usize) -> Option<Value> {
-        self.local_names.get(&slot).and_then(|name| {
-            self.frame
-                .values
-                .borrow()
-                .get(name)
-                .map(|entry| entry.value.clone())
-        })
+    pub(super) fn capture_generation_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<LogicalWorkspaceGeneration> {
+        operation::validate_frame_context(&self.frame, Some(context))?;
+        if !self.frame.active.get() {
+            return Err(NativeExecutorError::from(native_workspace_closed()));
+        }
+        if !self.publish {
+            if let Some(caller) = &self.caller {
+                caller.ensure_effect_authority_with_context(context)?;
+            }
+        }
+        self.canonical
+            .as_ref()
+            .ok_or_else(|| NativeExecutorError::from(native_workspace_closed()))?
+            .capture_workspace_generation_with_context(context)?
+            .ok_or_else(|| {
+                NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
+                    "RunMat:Workspace:GenerationUnavailable",
+                    "native workspace owner cannot retain a live generation",
+                ))
+            })
     }
 
+    pub(super) fn initial_value_lease(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+    ) -> NativeExecutorResult<Option<WorkspaceSlotReadLease>> {
+        self.lookup_local_lease(context, slot)
+    }
+
+    fn shared_lexical_binding(&self, slot: usize) -> NativeExecutorResult<bool> {
+        let Some(name) = self.local_names.name(slot) else {
+            return Ok(false);
+        };
+        let bindings = self
+            .frame
+            .lexical
+            .try_borrow()
+            .map_err(workspace_read_borrow_error)?;
+        Ok(bindings
+            .as_ref()
+            .and_then(|owner| owner.by_name.get(name))
+            .is_some_and(|binding| {
+                binding.kind != runmat_native_codegen::NativeLexicalBindingKind::Transit
+            }))
+    }
+
+    pub(super) fn lookup_local_lease(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+    ) -> NativeExecutorResult<Option<WorkspaceSlotReadLease>> {
+        if let Some(name) = self.local_names.name(slot) {
+            let lexical = {
+                let bindings = self
+                    .frame
+                    .lexical
+                    .try_borrow()
+                    .map_err(workspace_read_borrow_error)?;
+                bindings.as_ref().and_then(|owner| {
+                    owner.by_name.get(name).copied().and_then(|binding| {
+                        (binding.kind != runmat_native_codegen::NativeLexicalBindingKind::Transit)
+                            .then(|| (owner.environment.clone(), binding.binding))
+                    })
+                })
+            };
+            if let Some((environment, binding)) = lexical {
+                return runmat_runtime::call::lexical::read_binding_lease_with_context(
+                    &environment,
+                    binding,
+                    context,
+                )
+                .map(|lease| lease.map(WorkspaceSlotReadLease::from))
+                .map_err(NativeExecutorError::from);
+            }
+        }
+        let generation = self.capture_generation_with_context(context)?;
+        Ok(self
+            .local_names
+            .name(slot)
+            .and_then(|name| generation.read_lease(name))
+            .map(WorkspaceSlotReadLease::from))
+    }
+
+    pub(super) fn local_slots(&self) -> impl Iterator<Item = (usize, &str)> {
+        self.local_names.iter()
+    }
+
+    #[cfg(test)]
     pub(super) fn initialize_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
-        let Some(name) = self.local_names.get(&slot) else {
+        self.initialize_local_in_context(None, slot, value)
+    }
+
+    pub(super) fn initialize_local_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        value: Value,
+    ) -> NativeExecutorResult<()> {
+        self.initialize_local_in_context(Some(context), slot, value)
+    }
+
+    /// Move a named input into the canonical projection before the arena is
+    /// seeded. An unnamed or session-global local remains owned by the caller.
+    pub(super) fn initialize_local_owned_or_return(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        value: Value,
+    ) -> NativeExecutorResult<Option<Value>> {
+        operation::validate_frame_context(&self.frame, Some(context))?;
+        let Some(name) = self.local_names.name(slot) else {
+            return Ok(Some(value));
+        };
+        if self.global_aliases.has_binding_for_slot(slot) {
+            return Ok(Some(value));
+        }
+        if self.shared_lexical_binding(slot)? {
+            return Ok(Some(value));
+        }
+        let current = self
+            .canonical
+            .as_ref()
+            .ok_or_else(|| NativeExecutorError::from(native_workspace_closed()))?;
+        current.assign_with_context(context, name, value)?;
+        Ok(None)
+    }
+
+    fn initialize_local_in_context(
+        &self,
+        context: Option<&runmat_runtime::context::RuntimeContext>,
+        slot: usize,
+        value: Value,
+    ) -> NativeExecutorResult<()> {
+        let Some(name) = self.local_names.name(slot) else {
             return Ok(());
         };
-        let rooted = RootedWorkspaceValue::new(value).map_err(NativeExecutorError::Runtime)?;
-        let mut values = self
-            .frame
-            .values
-            .try_borrow_mut()
-            .map_err(workspace_borrow_error)?;
-        let previous = values.insert(name.clone(), rooted);
-        drop(values);
-        drop(previous);
+        operation::validate_frame_context(&self.frame, context)?;
+        if self.shared_lexical_binding(slot)? {
+            return Ok(());
+        }
+        if !self.global_aliases.has_binding_for_slot(slot) {
+            if let Some(current) = &self.canonical {
+                match context {
+                    Some(context) => current.assign_with_context(context, name, value)?,
+                    None => current.assign(name, value)?,
+                }
+            }
+        }
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn synchronize_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
         self.synchronize_local_with_origin(
+            None,
             slot,
             value,
             NativeWorkspaceMutationOrigin::ExecutorStore,
         )
     }
 
-    pub(super) fn refresh_local(&self, slot: usize, value: Value) -> NativeExecutorResult<()> {
+    pub(super) fn synchronize_local_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        value: Value,
+    ) -> NativeExecutorResult<()> {
         self.synchronize_local_with_origin(
+            Some(context),
+            slot,
+            value,
+            NativeWorkspaceMutationOrigin::ExecutorStore,
+        )
+    }
+
+    pub(super) fn refresh_local_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        value: Value,
+    ) -> NativeExecutorResult<()> {
+        self.synchronize_local_with_origin(
+            Some(context),
             slot,
             value,
             NativeWorkspaceMutationOrigin::CanonicalRefresh,
         )
     }
 
-    /// Mirror an observed shared-cell value into the named frame view. This
-    /// is a read, not an executor store or another canonical effect.
-    pub(super) fn observe_shared_local(
-        &self,
-        slot: usize,
-        value: Option<Value>,
-    ) -> NativeExecutorResult<()> {
-        let Some(name) = self.local_names.get(&slot) else {
-            return Ok(());
-        };
-        let rooted = value
-            .map(RootedWorkspaceValue::new)
-            .transpose()
-            .map_err(NativeExecutorError::Runtime)?;
-        let mut values = self
-            .frame
-            .values
-            .try_borrow_mut()
-            .map_err(workspace_borrow_error)?;
-        let previous = if let Some(rooted) = rooted {
-            values.insert(name.clone(), rooted)
-        } else {
-            values.remove(name)
-        };
-        drop(values);
-        drop(previous);
-        Ok(())
-    }
-
     fn synchronize_local_with_origin(
         &self,
+        context: Option<&runmat_runtime::context::RuntimeContext>,
         slot: usize,
         value: Value,
         origin: NativeWorkspaceMutationOrigin,
     ) -> NativeExecutorResult<()> {
-        if let Some(name) = self.local_names.get(&slot) {
-            let rooted =
-                RootedWorkspaceValue::new(value.clone()).map_err(NativeExecutorError::Runtime)?;
-            self.frame
-                .values
-                .try_borrow_mut()
-                .map(drop)
-                .map_err(workspace_borrow_error)?;
+        // A private function frame still inherits its caller's revocation.
+        // Check that lineage before publishing any frame-local, lexical,
+        // session-global, or canonical store; the private current service
+        // alone cannot prove that its caller remains executable.
+        self.service_value().ensure_mutation_in_operation(context)?;
+        if let Some(name) = self.local_names.name(slot) {
+            let shared_lexical = {
+                let bindings = self
+                    .frame
+                    .lexical
+                    .try_borrow()
+                    .map_err(workspace_read_borrow_error)?;
+                bindings
+                    .as_ref()
+                    .and_then(|owner| owner.by_name.get(name))
+                    .is_some_and(|binding| {
+                        binding.kind != runmat_native_codegen::NativeLexicalBindingKind::Transit
+                    })
+            };
             if let Some(canonical) = self.canonical.as_ref() {
-                if self.publish && !self.global_aliases.is_bound(slot, name) {
+                if shared_lexical {
+                    // HostState writes the lexical cell after this authority
+                    // check; no second workspace value is published.
+                    if let Some(context) = context {
+                        canonical.ensure_mutation_authority_with_context(context)?;
+                    } else {
+                        canonical.ensure_mutation_authority()?;
+                    }
+                } else if self._private_owner.is_some()
+                    && !self.global_aliases.has_binding_for_slot(slot)
+                {
+                    if let Some(context) = context {
+                        canonical.assign_ref_with_context(context, name, &value)?;
+                    } else {
+                        canonical.assign(name, value.clone())?;
+                    }
+                } else if self.publish && !self.global_aliases.has_binding_for_slot(slot) {
                     match origin {
                         NativeWorkspaceMutationOrigin::ExecutorStore => {
-                            canonical.assign_executor_slot(slot, name, value.clone())?;
+                            if let Some(context) = context {
+                                canonical.assign_executor_slot_ref(context, slot, name, &value)?;
+                            } else {
+                                canonical.assign_executor_slot(slot, name, value.clone())?;
+                            }
                         }
                         NativeWorkspaceMutationOrigin::CanonicalRefresh => {
-                            canonical.assign(name, value.clone())?;
+                            if let Some(context) = context {
+                                canonical.assign_ref_with_context(context, name, &value)?;
+                            } else {
+                                canonical.assign(name, value.clone())?;
+                            }
                         }
                     }
                 } else {
-                    canonical.ensure_mutation_authority()?;
+                    // No canonical publication occurs for a frame-local or
+                    // session-global alias. This is the existing mutation-only
+                    // checkpoint, not an effect/reconciliation request.
+                    if let Some(context) = context {
+                        canonical.ensure_mutation_authority_with_context(context)?;
+                    } else {
+                        canonical.ensure_mutation_authority()?;
+                    }
                 }
             }
-            let mut values = self
-                .frame
-                .values
-                .try_borrow_mut()
-                .map_err(workspace_borrow_error)?;
-            let previous = values.insert(name.clone(), rooted);
-            drop(values);
-            drop(previous);
         }
         Ok(())
     }
 
-    pub(super) fn local_values(&self) -> Vec<(usize, Option<Value>)> {
-        let values = self.frame.values.borrow();
-        self.local_names
-            .iter()
-            .map(|(slot, name)| (*slot, values.get(name).map(|entry| entry.value.clone())))
-            .collect()
-    }
-
-    pub(super) fn snapshot(&self) -> Option<NativeWorkspaceSnapshot> {
-        self.publish.then(|| NativeWorkspaceSnapshot {
-            values: self
-                .frame
-                .values
-                .borrow()
-                .iter()
-                .map(|(name, entry)| (name.clone(), entry.value.clone()))
-                .collect(),
-            global_bindings: self
-                .global_aliases
-                .named_bindings()
-                .into_iter()
-                .map(|(_, name)| name)
-                .collect(),
-        })
+    pub(super) fn snapshot_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> NativeExecutorResult<Option<NativeWorkspaceSnapshot>> {
+        if !self.publish {
+            return Ok(None);
+        }
+        capture::capture_read_view(&self.service_value(), context)
+            .map_err(NativeExecutorError::from)?
+            .map(|view| NativeWorkspaceSnapshot::prepare(context, view))
+            .transpose()
     }
 }
 
@@ -441,13 +943,6 @@ mod lexical_tests;
 #[cfg(test)]
 mod gc_tests;
 
-fn workspace_borrow_error(error: std::cell::BorrowMutError) -> runmat_runtime::RuntimeError {
-    runmat_runtime::runtime_error::semantic_error(
-        "NativeWorkspaceBorrow",
-        format!("native workspace mutation is reentrant: {error}"),
-    )
-}
-
 fn workspace_read_borrow_error(error: std::cell::BorrowError) -> runmat_runtime::RuntimeError {
     runmat_runtime::runtime_error::semantic_error(
         "NativeWorkspaceBorrow",
@@ -455,7 +950,6 @@ fn workspace_read_borrow_error(error: std::cell::BorrowError) -> runmat_runtime:
     )
 }
 
-#[cfg(not(test))]
 fn missing_session_variable_authority() -> runmat_runtime::RuntimeError {
     runmat_runtime::runtime_error::semantic_error(
         "RunMat:Workspace:SessionAuthorityMissing",
@@ -466,8 +960,10 @@ fn missing_session_variable_authority() -> runmat_runtime::RuntimeError {
 struct NativeWorkspaceService {
     frame: Weak<NativeWorkspaceFrame>,
     global_aliases: FrameGlobalBindings,
-    local_names: BTreeMap<usize, String>,
+    local_names: NativeWorkspaceNames,
     canonical: Option<Weak<dyn RuntimeWorkspaceService>>,
+    caller: Option<Weak<dyn RuntimeWorkspaceService>>,
+    private_current: bool,
     publish: bool,
     session_variables: Option<runmat_runtime::workspace::session::SessionVariableAuthority>,
 }
@@ -480,6 +976,12 @@ impl From<NativeWorkspaceClosed> for runmat_runtime::RuntimeError {
     }
 }
 
+impl From<NativeWorkspaceClosed> for Box<runmat_runtime::RuntimeError> {
+    fn from(_: NativeWorkspaceClosed) -> Self {
+        Box::new(native_workspace_closed())
+    }
+}
+
 impl NativeWorkspaceService {
     fn frame(&self) -> Result<Rc<NativeWorkspaceFrame>, NativeWorkspaceClosed> {
         let frame = self.frame.upgrade().ok_or(NativeWorkspaceClosed)?;
@@ -489,93 +991,106 @@ impl NativeWorkspaceService {
         Ok(frame)
     }
 
-    fn canonical(&self) -> Option<Rc<dyn RuntimeWorkspaceService>> {
-        self.canonical.as_ref().and_then(Weak::upgrade)
-    }
-}
-
-impl RuntimeWorkspaceService for NativeWorkspaceService {
-    fn detach_selected(
+    fn detach_in_operation(
         &self,
+        context: Option<&runmat_runtime::context::RuntimeContext>,
         selection: &WorkspaceDetachSelection,
-    ) -> Result<DetachedWorkspaceValues, runmat_runtime::RuntimeError> {
-        self.ensure_effect_authority()?;
+    ) -> Result<DetachedWorkspaceValues, Box<runmat_runtime::RuntimeError>> {
+        self.ensure_effect_in_operation(context)?;
         let frame = self.frame()?;
-        let mut values = frame
-            .values
-            .try_borrow_mut()
-            .map_err(workspace_borrow_error)?;
-        let detached = DetachedWorkspaceValues::new(
-            selection.select(
-                values
-                    .iter()
-                    .map(|(name, entry)| (name.clone(), entry.value.clone()))
-                    .collect(),
-            ),
-        )
-        .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
-        // The frame borrow prevents a reentrant writer between the canonical
-        // publication and the local retirement. No await or user callback is
-        // permitted until both owners have released these exact bindings.
-        let _retired_canonical = if self.publish {
-            if let Some(canonical) = self.canonical() {
-                let delegated = match selection {
-                    WorkspaceDetachSelection::All => WorkspaceDetachSelection::All,
-                    WorkspaceDetachSelection::Names(names) => {
-                        WorkspaceDetachSelection::Names(names.clone())
-                    }
-                    WorkspaceDetachSelection::Except(_) => WorkspaceDetachSelection::Names(
-                        detached
-                            .entries()
-                            .iter()
-                            .map(|(name, _)| name.clone())
-                            .collect(),
-                    ),
-                };
-                Some(canonical.detach_selected(&delegated)?)
-            } else {
-                None
-            }
-        } else {
-            None
+        let canonical = self
+            .canonical_for_operation()?
+            .ok_or_else(native_workspace_closed)?;
+        let detached = match context {
+            Some(context) => canonical.detach_selected_with_context(context, selection)?,
+            None => canonical.detach_selected(selection)?,
         };
         match selection {
             WorkspaceDetachSelection::All => {
-                values.clear();
                 self.global_aliases.unbind_all();
             }
             WorkspaceDetachSelection::Names(names) => {
                 for name in names {
-                    values.remove(name);
                     self.global_aliases.unbind_name(name);
                 }
             }
-            WorkspaceDetachSelection::Except(_) => {
-                for (name, _) in detached.entries() {
-                    values.remove(name);
-                    self.global_aliases.unbind_name(name);
+            WorkspaceDetachSelection::Except(excluded) => {
+                for (_, name) in self.local_names.iter() {
+                    if !excluded.iter().any(|excluded| excluded == name) {
+                        self.global_aliases.unbind_name(name);
+                    }
                 }
             }
         }
-        drop(values);
         frame.externally_mutated.set(true);
         Ok(detached)
+    }
+}
+
+impl RuntimeWorkspaceService for NativeWorkspaceService {
+    fn capture_workspace_generation_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Option<LogicalWorkspaceGeneration>, runmat_runtime::RuntimeError> {
+        self.ensure_effect_in_operation(Some(context))
+            .map_err(|error| *error)?;
+        self.canonical
+            .as_ref()
+            .and_then(Weak::upgrade)
+            .ok_or_else(native_workspace_closed)?
+            .capture_workspace_generation_with_context(context)
+    }
+
+    fn capture_dynamic_workspace_target_with_context(
+        self: Rc<Self>,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<
+        Option<runmat_runtime::workspace::DynamicWorkspaceTargetCapture>,
+        runmat_runtime::RuntimeError,
+    > {
+        capture::capture_target(self, context).map_err(|error| *error)
+    }
+
+    fn caller_workspace_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Option<Rc<dyn RuntimeWorkspaceService>>, runmat_runtime::RuntimeError> {
+        self.ensure_effect_in_operation(Some(context))
+            .map_err(|error| *error)?;
+        Ok(self.caller.as_ref().and_then(Weak::upgrade))
+    }
+
+    fn detach_selected(
+        &self,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, runmat_runtime::RuntimeError> {
+        self.detach_in_operation(None, selection)
+            .map_err(|error| *error)
+    }
+
+    fn detach_selected_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, runmat_runtime::RuntimeError> {
+        self.detach_in_operation(Some(context), selection)
+            .map_err(|error| *error)
     }
 
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
         let frame = self.frame.upgrade()?;
         frame.active.get().then_some(())?;
-        for entry in frame.values.try_borrow().ok()?.values() {
-            visitor(&entry.value)?;
-        }
-        Some(())
+        self.canonical
+            .as_ref()?
+            .upgrade()?
+            .visit_retained_values(visitor)
     }
 
     fn lookup(&self, name: &str) -> Option<Value> {
         let frame = self.frame.upgrade()?;
         frame.active.get().then_some(())?;
-        let values = frame.values.try_borrow().ok()?;
-        values.get(name).map(|entry| entry.value.clone())
+        frame.runtime.is_none().then_some(())?;
+        self.try_lookup_in_operation(None, name).ok().flatten()
     }
 
     fn snapshot(&self) -> Vec<(String, Value)> {
@@ -585,16 +1100,10 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         if !frame.active.get() {
             return Vec::new();
         }
-        frame
-            .values
-            .try_borrow()
-            .map(|values| {
-                values
-                    .iter()
-                    .map(|(name, entry)| (name.clone(), entry.value.clone()))
-                    .collect()
-            })
-            .unwrap_or_default()
+        if frame.runtime.is_some() {
+            return Vec::new();
+        }
+        self.try_snapshot_in_operation(None).unwrap_or_default()
     }
 
     fn global_names(&self) -> Vec<String> {
@@ -602,6 +1111,9 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
             return Vec::new();
         };
         if !frame.active.get() {
+            return Vec::new();
+        }
+        if frame.runtime.is_some() {
             return Vec::new();
         }
         match self.session_variables.as_ref() {
@@ -614,196 +1126,120 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
     }
 
     fn try_lookup(&self, name: &str) -> Result<Option<Value>, runmat_runtime::RuntimeError> {
-        self.ensure_effect_authority()?;
-        let frame = self.frame()?;
-        let values = frame
-            .values
-            .try_borrow()
-            .map_err(workspace_read_borrow_error)?;
-        Ok(values.get(name).map(|entry| entry.value.clone()))
+        self.try_lookup_in_operation(None, name)
+            .map_err(|error| *error)
+    }
+
+    fn try_lookup_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+    ) -> Result<Option<Value>, runmat_runtime::RuntimeError> {
+        self.try_lookup_in_operation(Some(context), name)
+            .map_err(|error| *error)
     }
 
     fn try_snapshot(&self) -> Result<Vec<(String, Value)>, runmat_runtime::RuntimeError> {
-        self.ensure_effect_authority()?;
-        let frame = self.frame()?;
-        let values = frame
-            .values
-            .try_borrow()
-            .map_err(workspace_read_borrow_error)?;
-        Ok(values
-            .iter()
-            .map(|(name, entry)| (name.clone(), entry.value.clone()))
-            .collect())
+        self.try_snapshot_in_operation(None).map_err(|error| *error)
+    }
+
+    fn try_snapshot_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Vec<(String, Value)>, runmat_runtime::RuntimeError> {
+        self.try_snapshot_in_operation(Some(context))
+            .map_err(|error| *error)
     }
 
     fn try_global_names(&self) -> Result<Vec<String>, runmat_runtime::RuntimeError> {
-        self.ensure_effect_authority()?;
-        match self.session_variables.as_ref() {
-            Some(authority) => authority.global_names(),
-            #[cfg(test)]
-            None => Ok(runmat_runtime::workspace::session::global_names()),
-            #[cfg(not(test))]
-            None => Err(missing_session_variable_authority()),
-        }
+        self.try_global_names_in_operation(None)
+            .map_err(|error| *error)
+    }
+
+    fn try_global_names_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Vec<String>, runmat_runtime::RuntimeError> {
+        self.try_global_names_in_operation(Some(context))
+            .map_err(|error| *error)
     }
 
     fn ensure_effect_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
-        let frame = self.frame()?;
-        if let Some(canonical) = self.canonical() {
-            canonical.ensure_effect_authority()?;
-            if !self.publish {
-                return Ok(());
-            }
-            let revision = canonical.workspace_revision()?;
-            if revision.is_some() && revision == frame.canonical_revision.get() {
-                return Ok(());
-            }
-            let canonical_values = canonical.try_snapshot()?;
-            let global_values = {
-                let values = frame
-                    .values
-                    .try_borrow()
-                    .map_err(workspace_read_borrow_error)?;
-                self.local_names
-                    .iter()
-                    .filter(|(slot, name)| self.global_aliases.is_bound(**slot, name))
-                    .filter_map(|(_, name)| {
-                        values
-                            .get(name)
-                            .map(|entry| (name.clone(), entry.value.clone()))
-                    })
-                    .collect::<Vec<_>>()
-            };
-            let refreshed = canonical_values
-                .into_iter()
-                .chain(global_values)
-                .map(|(name, value)| {
-                    RootedWorkspaceValue::new(value)
-                        .map(|value| (name, value))
-                        .map_err(|error| *error)
-                })
-                .collect::<Result<BTreeMap<_, _>, _>>()?;
-            let mut values = frame
-                .values
-                .try_borrow_mut()
-                .map_err(workspace_borrow_error)?;
-            let previous = std::mem::replace(&mut *values, refreshed);
-            drop(values);
-            frame.externally_mutated.set(true);
-            frame.canonical_revision.set(revision);
-            drop(previous);
-        }
-        Ok(())
+        self.ensure_effect_in_operation(None)
+            .map_err(|error| *error)
+    }
+
+    fn ensure_effect_authority_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.ensure_effect_in_operation(Some(context))
+            .map_err(|error| *error)
     }
 
     fn ensure_mutation_authority(&self) -> Result<(), runmat_runtime::RuntimeError> {
-        self.frame()?;
-        if let Some(canonical) = self.canonical() {
-            canonical.ensure_mutation_authority()?;
-        }
-        Ok(())
+        self.ensure_mutation_in_operation(None)
+            .map_err(|error| *error)
+    }
+
+    fn ensure_mutation_authority_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.ensure_mutation_in_operation(Some(context))
+            .map_err(|error| *error)
     }
 
     fn workspace_revision(
         &self,
     ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, runmat_runtime::RuntimeError>
     {
-        self.ensure_effect_authority()?;
-        Ok(self.frame()?.canonical_revision.get())
+        self.ensure_effect_in_operation(None)
+            .map_err(|error| *error)?;
+        self.canonical_for_operation()
+            .map_err(|error| *error)?
+            .ok_or_else(native_workspace_closed)?
+            .workspace_revision()
+    }
+
+    fn workspace_revision_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, runmat_runtime::RuntimeError>
+    {
+        self.ensure_effect_in_operation(Some(context))
+            .map_err(|error| *error)?;
+        self.canonical_for_operation()
+            .map_err(|error| *error)?
+            .ok_or_else(native_workspace_closed)?
+            .workspace_revision_with_context(context)
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), runmat_runtime::RuntimeError> {
-        self.ensure_effect_authority()?;
-        let publish_global = self
-            .local_names
-            .iter()
-            .any(|(slot, local)| local == name && self.global_aliases.is_bound(*slot, name));
-        let global_value = publish_global.then(|| value.clone());
-        let rooted = RootedWorkspaceValue::new(value).map_err(|error| *error)?;
-        let shared_value = rooted.value.clone();
-        let frame = self.frame()?;
-        let lexical = frame
-            .lexical
-            .try_borrow()
-            .map_err(workspace_read_borrow_error)?
-            .as_ref()
-            .and_then(|owner| {
-                owner
-                    .by_name
-                    .get(name)
-                    .copied()
-                    .map(|binding| (owner.environment.clone(), binding))
-            });
-        frame
-            .values
-            .try_borrow_mut()
-            .map(drop)
-            .map_err(workspace_borrow_error)?;
-        if self.publish {
-            if let Some(canonical) = self.canonical() {
-                if publish_global {
-                    canonical.remove(name)?;
-                } else {
-                    canonical.assign(name, rooted.value.clone())?;
-                }
-            }
-        }
-        let mut values = frame
-            .values
-            .try_borrow_mut()
-            .map_err(workspace_borrow_error)?;
-        let previous = values.insert(name.to_string(), rooted);
-        drop(values);
-        if let Some(value) = global_value {
-            match self.session_variables.as_ref() {
-                Some(authority) => authority.store_global(name, value)?,
-                #[cfg(test)]
-                None => runmat_runtime::workspace::session::store_global_named(name, value),
-                #[cfg(not(test))]
-                None => return Err(missing_session_variable_authority()),
-            }
-        }
-        frame.externally_mutated.set(true);
-        drop(previous);
-        if let Some((environment, binding)) = lexical {
-            publish_native_lexical_binding(&environment, binding, shared_value)
-                .map_err(|error| *error)?;
-        }
-        Ok(())
+        self.assign_in_operation(None, name, value)
+            .map_err(|error| *error)
+    }
+
+    fn assign_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+        value: Value,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.assign_in_operation(Some(context), name, value)
+            .map_err(|error| *error)
     }
 
     fn clear(&self) -> Result<(), runmat_runtime::RuntimeError> {
-        self.ensure_effect_authority()?;
-        let frame = self.frame()?;
-        let lexical = frame
-            .lexical
-            .try_borrow()
-            .map_err(workspace_read_borrow_error)?
-            .clone();
-        frame
-            .values
-            .try_borrow_mut()
-            .map(drop)
-            .map_err(workspace_borrow_error)?;
-        if self.publish {
-            if let Some(canonical) = self.canonical() {
-                canonical.clear()?;
-            }
-        }
-        let mut values = frame
-            .values
-            .try_borrow_mut()
-            .map_err(workspace_borrow_error)?;
-        let previous = std::mem::take(&mut *values);
-        drop(values);
-        frame.externally_mutated.set(true);
-        self.global_aliases.unbind_all();
-        drop(previous);
-        if let Some(lexical) = lexical {
-            retire_native_lexical_bindings(&lexical.environment, lexical.by_name.values().copied())
-                .map_err(|error| *error)?;
-        }
-        Ok(())
+        self.clear_in_operation(None).map_err(|error| *error)
+    }
+
+    fn clear_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.clear_in_operation(Some(context))
+            .map_err(|error| *error)
     }
 
     fn declare_global_binding(
@@ -811,55 +1247,51 @@ impl RuntimeWorkspaceService for NativeWorkspaceService {
         slot: usize,
         name: &str,
     ) -> Result<(), runmat_runtime::RuntimeError> {
-        self.ensure_mutation_authority()?;
-        if self.publish {
-            if let Some(canonical) = self.canonical() {
-                canonical.bind_base_global(name)?;
-            }
-        }
-        self.global_aliases.declare_named(slot, name.to_string());
-        Ok(())
+        self.declare_global_in_operation(None, slot, name)
+            .map_err(|error| *error)
+    }
+
+    fn declare_global_binding_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        name: &str,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.declare_global_in_operation(Some(context), slot, name)
+            .map_err(|error| *error)
+    }
+
+    fn declare_legacy_global_binding_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        name: &str,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.declare_legacy_global_in_operation(context, slot, name)
+            .map_err(|error| *error)
+    }
+
+    fn bind_base_global_target_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+        target: &GlobalBindingTarget,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.bind_global_target_in_operation(context, name, target)
+            .map_err(|error| *error)
     }
 
     fn remove(&self, name: &str) -> Result<(), runmat_runtime::RuntimeError> {
-        self.ensure_effect_authority()?;
-        let frame = self.frame()?;
-        let lexical = frame
-            .lexical
-            .try_borrow()
-            .map_err(workspace_read_borrow_error)?
-            .as_ref()
-            .and_then(|owner| {
-                owner
-                    .by_name
-                    .get(name)
-                    .copied()
-                    .map(|binding| (owner.environment.clone(), binding))
-            });
-        frame
-            .values
-            .try_borrow_mut()
-            .map(drop)
-            .map_err(workspace_borrow_error)?;
-        if self.publish {
-            if let Some(canonical) = self.canonical() {
-                canonical.unbind_base_global(name)?;
-            }
-        }
-        let mut values = frame
-            .values
-            .try_borrow_mut()
-            .map_err(workspace_borrow_error)?;
-        let previous = values.remove(name);
-        drop(values);
-        frame.externally_mutated.set(true);
-        self.global_aliases.unbind_name(name);
-        drop(previous);
-        if let Some((environment, binding)) = lexical {
-            retire_native_lexical_bindings(&environment, std::iter::once(binding))
-                .map_err(|error| *error)?;
-        }
-        Ok(())
+        self.remove_in_operation(None, name).map_err(|error| *error)
+    }
+
+    fn remove_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+    ) -> Result<(), runmat_runtime::RuntimeError> {
+        self.remove_in_operation(Some(context), name)
+            .map_err(|error| *error)
     }
 }
 
@@ -883,12 +1315,14 @@ fn retire_native_lexical_bindings(
     Ok(())
 }
 
-/// The canonical and local workspace write has committed before this call.
-/// Report an explicit partial publication error if the shared cell rejects it.
+/// A global workspace write may already have committed before lexical
+/// publication; a lexical-only write instead has this cell as its sole value
+/// authority. Preserve that distinction in the typed failure diagnostic.
 fn publish_native_lexical_binding(
     environment: &runmat_value::LexicalEnvironment,
     binding: runmat_native_codegen::NativeLexicalBinding,
     value: Value,
+    workspace_committed: bool,
 ) -> Result<(), Box<runmat_runtime::RuntimeError>> {
     let result = match binding.kind {
         runmat_native_codegen::NativeLexicalBindingKind::Owned => {
@@ -903,7 +1337,11 @@ fn publish_native_lexical_binding(
         let failure_origin = error.failure_origin;
         let mut failure = runmat_runtime::runtime_error::semantic_error_with_source(
             "RunMat:Workspace:LexicalPublication",
-            format!("workspace assignment committed before lexical publication: {error}"),
+            if workspace_committed {
+                format!("workspace assignment committed before lexical publication: {error}")
+            } else {
+                format!("lexical workspace assignment was not published: {error}")
+            },
             error,
         );
         failure.gpu_gather_retry = runmat_runtime::runtime_error::GpuGatherRetry::Never;

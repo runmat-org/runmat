@@ -17,7 +17,10 @@ fn committed_native_workspace_remove_tombstones_its_owned_lexical_cell() {
             NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
         let (environment, _roots) =
             runmat_runtime::call::lexical::allocate_environment(None).unwrap();
-        assert!(environment.reserve_owned_binding(BindingId(0)));
+        assert!(
+            runmat_runtime::call::lexical::reserve_owned_binding(&environment, BindingId(0))
+                .unwrap()
+        );
         runmat_runtime::call::lexical::write_owned_binding(
             &environment,
             BindingId(0),
@@ -43,9 +46,6 @@ fn committed_native_workspace_remove_tombstones_its_owned_lexical_cell() {
             Value::Num(11.0),
         )
         .unwrap();
-        state
-            .observe_shared_local(0, Some(Value::Num(11.0)))
-            .unwrap();
         assert_eq!(
             state.service().try_lookup("missing").unwrap(),
             Some(Value::Num(11.0))
@@ -67,7 +67,10 @@ fn native_anonymous_transit_clear_does_not_retire_parent_cell() {
             NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
         let (environment, _roots) =
             runmat_runtime::call::lexical::allocate_environment(None).unwrap();
-        assert!(environment.reserve_owned_binding(BindingId(0)));
+        assert!(
+            runmat_runtime::call::lexical::reserve_owned_binding(&environment, BindingId(0))
+                .unwrap()
+        );
         runmat_runtime::call::lexical::write_owned_binding(
             &environment,
             BindingId(0),
@@ -110,8 +113,8 @@ fn committed_native_assignment_retains_lexical_failure_as_a_typed_source() {
             NativeWorkspaceState::new(&function, input, Default::default(), None, None).unwrap();
         let (environment, _roots) =
             runmat_runtime::call::lexical::allocate_environment(None).unwrap();
-        // Deliberately omit the Owned reservation: the workspace write commits
-        // before the shared lexical cell rejects publication.
+        // Deliberately omit the Owned reservation: the shared lexical cell is
+        // this name's sole value authority, so failure cannot publish a value.
         state
             .attach_lexical_bindings(&function, Some(&environment))
             .unwrap();
@@ -132,9 +135,6 @@ fn committed_native_assignment_retains_lexical_failure_as_a_typed_source() {
             .and_then(|source| source.downcast_ref::<runmat_runtime::RuntimeError>())
             .expect("original lexical RuntimeError is retained");
         assert_eq!(cause.identifier(), Some("Acme:LexicalEnvironment"));
-        assert_eq!(
-            state.service().try_lookup("missing").unwrap(),
-            Some(Value::Num(8.0))
-        );
+        assert_eq!(state.service().try_lookup("missing").unwrap(), None);
     });
 }

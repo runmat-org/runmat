@@ -36,7 +36,8 @@ fn failed_retirement_retains_payload_and_failure_record_without_reviving_view() 
             .fail_free_buffer
             .store(owned.buffer_id(), Ordering::Relaxed);
         let failure = FailFreeBuffer(provider);
-        let mut vars = vec![Value::GpuTensor(owned.clone())];
+        let mut vars =
+            runmat_vm::InterpreterVars::from_owned(vec![Value::GpuTensor(owned.clone())]);
         let mut context = Default::default();
         runmat_vm::accel::fusion::write_elementwise_materialized_stores(
             vec![(
@@ -77,14 +78,32 @@ pub(super) fn resident_outputs(values: &[Value]) -> Vec<GpuTensorHandle> {
     let mut seen = HashSet::new();
     let mut handles = Vec::new();
     for value in values {
-        runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
-            if seen.insert(runmat_accelerate_api::handle_identity(handle)) {
-                handles.push(handle.clone());
-            }
-        })
-        .unwrap();
+        record_resident_outputs(value, &mut seen, &mut handles);
     }
     handles
+}
+
+pub(super) fn resident_outputs_frame(values: &runmat_vm::InterpreterVars) -> Vec<GpuTensorHandle> {
+    let mut seen = HashSet::new();
+    let mut handles = Vec::new();
+    for slot in 0..values.len() {
+        let value = values.get(slot).expect("slot in completed frame extent");
+        record_resident_outputs(&value, &mut seen, &mut handles);
+    }
+    handles
+}
+
+fn record_resident_outputs(
+    value: &Value,
+    seen: &mut HashSet<runmat_accelerate_api::GpuHandleIdentity>,
+    handles: &mut Vec<GpuTensorHandle>,
+) {
+    runmat_runtime::dispatcher::try_visit_gpu_handles(value, &mut |handle| {
+        if seen.insert(runmat_accelerate_api::handle_identity(handle)) {
+            handles.push(handle.clone());
+        }
+    })
+    .unwrap();
 }
 
 #[test]
@@ -182,27 +201,37 @@ fn completed_builtin_calls_release_consumed_intermediates_and_adopt_aliases() {
                 .unwrap()
                 .0
         };
-        let Value::GpuTensor(y) = &completed.values[slot("y")] else {
-            panic!("resident Single output")
-        };
-        let Value::GpuTensor(alias) = &completed.values[slot("alias")] else {
-            panic!("resident output alias")
-        };
-        assert_eq!(
-            runmat_accelerate_api::handle_identity(y),
-            runmat_accelerate_api::handle_identity(alias)
-        );
-        let result = block_on(provider.download_numeric(y)).unwrap();
-        assert_eq!(result.shape, vec![1, 2]);
-        let HostNumericDataOwned::F32(values) = result.data else {
-            panic!("physical Single output")
-        };
-        assert_eq!(values, vec![0.25f64.sin() as f32, 0.5f64.sin() as f32]);
+        {
+            let y = completed
+                .values
+                .get(slot("y"))
+                .expect("resident Single output");
+            let Value::GpuTensor(y) = &*y else {
+                panic!("resident Single output")
+            };
+            let alias = completed
+                .values
+                .get(slot("alias"))
+                .expect("resident output alias");
+            let Value::GpuTensor(alias) = &*alias else {
+                panic!("resident output alias")
+            };
+            assert_eq!(
+                runmat_accelerate_api::handle_identity(y),
+                runmat_accelerate_api::handle_identity(alias)
+            );
+            let result = block_on(provider.download_numeric(y)).unwrap();
+            assert_eq!(result.shape, vec![1, 2]);
+            let HostNumericDataOwned::F32(values) = result.data else {
+                panic!("physical Single output")
+            };
+            assert_eq!(values, vec![0.25f64.sin() as f32, 0.5f64.sin() as f32]);
+        }
         assert_eq!(
             provider.pull(&input).unwrap(),
             (vec![0.25, 0.5], vec![1, 2])
         );
-        let outputs = resident_outputs(&completed.values);
+        let outputs = resident_outputs_frame(&completed.values);
         let mut expected = baseline.clone();
         expected.extend(outputs.iter().map(|handle| handle.buffer_id()));
         let live = provider
@@ -288,10 +317,10 @@ fn overwritten_fusion_stores_preserve_older_nested_alias_and_retire_once() {
             },
         };
         let mut context = Default::default();
-        let mut vars = vec![
+        let mut vars = runmat_vm::InterpreterVars::from_owned(vec![
             Value::GpuTensor(borrowed.clone()),
             Value::GpuTensor(borrowed.clone()),
-        ];
+        ]);
         runmat_vm::accel::fusion::write_elementwise_materialized_stores(
             vec![(store(0), Value::Num(0.0)), (store(1), Value::Num(0.0))],
             &mut vars,
@@ -313,10 +342,10 @@ fn overwritten_fusion_stores_preserve_older_nested_alias_and_retire_once() {
             .inspect_roots_on_free
             .store(true, Ordering::Relaxed);
         let _inspect = InspectRootsOnFree(provider);
-        vars = vec![
+        vars = runmat_vm::InterpreterVars::from_owned(vec![
             Value::GpuTensor(owned.clone()),
             Value::GpuTensor(owned.clone()),
-        ];
+        ]);
         runmat_vm::accel::fusion::write_elementwise_materialized_stores(
             vec![(store(0), Value::Num(0.0)), (store(1), Value::Num(0.0))],
             &mut vars,

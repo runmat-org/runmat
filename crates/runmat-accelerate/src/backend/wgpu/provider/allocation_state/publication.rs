@@ -137,19 +137,21 @@ impl AllocationState {
             if records.contains_key(&id) {
                 return Err(AllocationStateError::IdentifierExhausted.into());
             }
-            if let Some(owner) = admission {
+            let registration_slot = if let Some(owner) = admission {
                 if !records.managed_slot_is_prepared() {
                     return Err(AllocationStateError::Capacity.into());
                 }
-                owner.commit_registration_slot((&**self as *const Self) as usize)?;
+                owner.claim_registration_slot((&**self as *const Self) as usize)?
             } else {
                 records
                     .try_reserve(1)
                     .map_err(|_| AllocationStateError::Capacity)?;
-            }
+                None
+            };
             let record = (
                 id,
                 Record {
+                    registration_slot,
                     phase: Phase::Registering(Stage::Registration),
                     retained_bytes: entry.buffer.size(),
                     entry: Some(entry),

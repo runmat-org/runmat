@@ -1,12 +1,13 @@
 use num_complex::Complex64;
-use std::alloc::{alloc, Layout};
+use std::alloc::{alloc, dealloc, Layout};
 use std::fmt;
 use std::sync::Arc;
 
 use runmat_accelerate_api::HostNumericDataView;
 use runmat_value::{
-    ExactHostAllocationClaim, ExactHostAllocationPermit, ExactHostAllocationReservation,
-    ExactHostNumericAllocation, ExactHostNumericAllocationError, NumericDType, NumericScalar,
+    ComplexElement, ExactHostAllocationClaim, ExactHostAllocationPermit,
+    ExactHostAllocationReservation, ExactHostNumericAllocation, ExactHostNumericAllocationError,
+    NumericDType, NumericScalar,
 };
 
 use super::receipt::AllocationFence;
@@ -33,7 +34,17 @@ impl fmt::Debug for ScratchClaim {
     }
 }
 
-impl ExactHostAllocationReservation for ScratchClaim {}
+impl ExactHostAllocationReservation for ScratchClaim {
+    fn retire_owned(self: Box<Self>) {
+        let pointer = Box::into_raw(self);
+        // SAFETY: consuming the unique Box makes the retained live claim
+        // uniquely owned until it is dropped below.
+        let live = unsafe { std::ptr::read(std::ptr::addr_of!((*pointer)._live)) };
+        // SAFETY: `pointer` came from a Box<ScratchClaim> with this layout.
+        unsafe { dealloc(pointer.cast::<u8>(), Layout::new::<Self>()) };
+        drop(live);
+    }
+}
 
 struct ScratchPermit {
     stage: Arc<ManagedHostEffectStageReservation>,
@@ -84,7 +95,7 @@ impl ExactHostAllocationPermit for ScratchPermit {
         }
         unsafe {
             pointer.write(ScratchClaim { _live: live });
-            Ok(ExactHostAllocationClaim::Owned(Box::from_raw(pointer)))
+            Ok(ExactHostAllocationClaim::owned(Box::from_raw(pointer)))
         }
     }
 }
@@ -184,4 +195,50 @@ impl HostNumericWorkspace {
     pub fn as_f32_slice_mut(&mut self) -> Option<&mut [f32]> {
         self.allocation.as_f32_slice_mut()
     }
+
+    /// View one exactly admitted F32 scratch buffer as interleaved complex
+    /// values. The owner retains the original backing and claim throughout
+    /// the returned borrow; no second vector or payload allocation is made.
+    pub fn as_complex_f32_slice_mut(&mut self) -> Option<&mut [ComplexElement<f32>]> {
+        complex_f32_view(self.allocation.as_f32_slice_mut()?)
+    }
+
+    /// F64 counterpart of `as_complex_f32_slice_mut`.
+    pub fn as_complex_f64_slice_mut(&mut self) -> Option<&mut [ComplexElement<f64>]> {
+        complex_f64_view(self.allocation.as_f64_slice_mut()?)
+    }
+
+    pub fn as_u64_slice_mut(&mut self) -> Option<&mut [u64]> {
+        self.allocation.as_u64_slice_mut()
+    }
+
+    pub fn as_u64_slice(&self) -> Option<&[u64]> {
+        self.allocation.as_u64_slice()
+    }
 }
+
+macro_rules! complex_workspace_view {
+    ($name:ident, $lane:ty) => {
+        fn $name(lanes: &mut [$lane]) -> Option<&mut [ComplexElement<$lane>]> {
+            if lanes.len() % 2 != 0 {
+                return None;
+            }
+            // The exact owner allocated initialized, aligned native lanes;
+            // repr(C) ComplexElement has precisely two of these lanes.
+            assert_eq!(
+                std::mem::size_of::<ComplexElement<$lane>>(),
+                2 * std::mem::size_of::<$lane>()
+            );
+            assert_eq!(
+                std::mem::align_of::<ComplexElement<$lane>>(),
+                std::mem::align_of::<$lane>()
+            );
+            Some(unsafe {
+                std::slice::from_raw_parts_mut(lanes.as_mut_ptr().cast(), lanes.len() / 2)
+            })
+        }
+    };
+}
+
+complex_workspace_view!(complex_f32_view, f32);
+complex_workspace_view!(complex_f64_view, f64);

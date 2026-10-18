@@ -537,8 +537,91 @@ fn parse_numeric_dimension(value: f64) -> Result<usize, DimensionDecodeError> {
     })
 }
 
+/// A borrowed, allocation-free view of the canonical dimension-vector
+/// grammar. Callers with an admitted collection owner can materialize only
+/// their final dimensions instead of first allocating a temporary decoder Vec.
+pub(crate) enum BorrowedHostShapeDimensions<'a> {
+    Floating(&'a Tensor, std::ops::Range<usize>),
+    Integer(&'a IntegerStorage, std::ops::Range<usize>),
+    Logical(&'a [u8], std::ops::Range<usize>),
+    Number(Option<f64>),
+    IntegerScalar(Option<&'a IntValue>),
+}
+
+impl BorrowedHostShapeDimensions<'_> {
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Floating(_, indices) | Self::Integer(_, indices) | Self::Logical(_, indices) => {
+                indices.len()
+            }
+            Self::Number(value) => usize::from(value.is_some()),
+            Self::IntegerScalar(value) => usize::from(value.is_some()),
+        }
+    }
+}
+
+impl Iterator for BorrowedHostShapeDimensions<'_> {
+    type Item = Result<usize, DimensionDecodeError>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Floating(tensor, indices) => indices
+                .next()
+                .map(|index| parse_numeric_dimension(tensor_value_f64(tensor, index))),
+            Self::Integer(storage, indices) => indices.next().map(|index| {
+                parse_integer_shape_dimension(
+                    &storage.value_at(index).expect("integer storage index"),
+                )
+            }),
+            Self::Logical(values, indices) => indices
+                .next()
+                .map(|index| parse_numeric_dimension(if values[index] != 0 { 1.0 } else { 0.0 })),
+            Self::Number(value) => value.take().map(parse_numeric_dimension),
+            Self::IntegerScalar(value) => value.take().map(parse_integer_shape_dimension),
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let len = self.len();
+        (len, Some(len))
+    }
+}
+
+impl ExactSizeIterator for BorrowedHostShapeDimensions<'_> {}
+
+pub(crate) fn borrowed_host_shape_dimensions(
+    value: &Value,
+) -> Option<BorrowedHostShapeDimensions<'_>> {
+    let is_vector = |len: usize, shape: &[usize]| {
+        len == 0
+            || len == 1
+            || shape.len() == 1
+            || (shape.len() >= 2 && (shape[0] == 1 || shape[1] == 1))
+    };
+    match value {
+        Value::Num(value) => Some(BorrowedHostShapeDimensions::Number(Some(*value))),
+        Value::Int(value) => Some(BorrowedHostShapeDimensions::IntegerScalar(Some(value))),
+        Value::Tensor(tensor) if is_vector(tensor.len(), tensor.shape()) => {
+            match tensor.integer_storage() {
+                Some(storage) => Some(BorrowedHostShapeDimensions::Integer(
+                    storage,
+                    0..storage.len(),
+                )),
+                None => Some(BorrowedHostShapeDimensions::Floating(
+                    tensor,
+                    0..tensor.len(),
+                )),
+            }
+        }
+        Value::LogicalArray(logical) if is_vector(logical.data.len(), &logical.shape) => Some(
+            BorrowedHostShapeDimensions::Logical(&logical.data, 0..logical.data.len()),
+        ),
+        _ => None,
+    }
+}
+
 fn dims_from_tensor_values(
-    values: &[f64],
+    values: impl ExactSizeIterator<Item = f64>,
     shape: &[usize],
 ) -> Result<Option<Vec<usize>>, DimensionDecodeError> {
     let len = values.len();
@@ -552,7 +635,7 @@ fn dims_from_tensor_values(
         return Ok(None);
     }
     let mut dims = Vec::with_capacity(len);
-    for &value in values {
+    for value in values {
         dims.push(parse_numeric_dimension(value)?);
     }
     Ok(Some(dims))
@@ -599,15 +682,14 @@ pub async fn dims_from_value_async_typed(
         Value::Int(i) => parse_integer_shape_dimension(i).map(|dim| Some(vec![dim])),
         Value::Tensor(t) => match t.integer_storage() {
             Some(storage) => dims_from_integer_tensor_values(storage, t.shape()),
-            None => dims_from_tensor_values(tensor_values_f64_cow(t).as_ref(), t.shape()),
+            None => dims_from_tensor_values(
+                (0..t.len()).map(|index| tensor_value_f64(t, index)),
+                t.shape(),
+            ),
         },
         Value::LogicalArray(la) => {
-            let values: Vec<f64> = la
-                .data
-                .iter()
-                .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-                .collect();
-            dims_from_tensor_values(&values, &la.shape)
+            let values = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 });
+            dims_from_tensor_values(values, &la.shape)
         }
         Value::GpuTensor(handle) => {
             let gathered = gather_if_needed_async(&Value::GpuTensor(handle.clone()))
@@ -630,9 +712,10 @@ pub async fn dims_from_value_async_typed(
                     );
                     let dims = match t.integer_storage() {
                         Some(storage) => dims_from_integer_tensor_values(storage, t.shape())?,
-                        None => {
-                            dims_from_tensor_values(tensor_values_f64_cow(&t).as_ref(), t.shape())?
-                        }
+                        None => dims_from_tensor_values(
+                            (0..t.len()).map(|index| tensor_value_f64(&t, index)),
+                            t.shape(),
+                        )?,
                     };
                     if dims.is_none() {
                         tracing::debug!(
@@ -644,12 +727,8 @@ pub async fn dims_from_value_async_typed(
                     Ok(dims)
                 }
                 Value::LogicalArray(la) => {
-                    let values: Vec<f64> = la
-                        .data
-                        .iter()
-                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
-                        .collect();
-                    let dims = dims_from_tensor_values(&values, &la.shape)?;
+                    let values = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 });
+                    let dims = dims_from_tensor_values(values, &la.shape)?;
                     if dims.is_none() {
                         tracing::debug!(
                             gpu_shape = ?handle.shape(),
@@ -954,10 +1033,33 @@ mod dimension_tests {
         tensor_values_f64_cow, DimensionDecodeError,
     };
     use futures::executor::block_on;
-    use runmat_value::{IntValue, IntegerStorage, NumericStorage, Tensor, Value};
+    use runmat_value::{IntValue, IntegerStorage, LogicalArray, NumericStorage, Tensor, Value};
 
     #[test]
     fn typed_dimension_decoder_retains_semantic_error_identity() {
+        // Single and logical controls decode directly into the final usize
+        // vector; neither needs a temporary floating-point payload.
+        for (value, expected) in [
+            (
+                Value::Tensor(Tensor::from_f32(vec![2.0, 3.0], vec![1, 2]).unwrap()),
+                vec![2, 3],
+            ),
+            (
+                Value::LogicalArray(LogicalArray::new(vec![1, 0], vec![2, 1]).unwrap()),
+                vec![1, 0],
+            ),
+        ] {
+            assert_eq!(
+                block_on(dims_from_value_async_typed(&value)).unwrap(),
+                Some(expected)
+            );
+        }
+        assert!(matches!(
+            block_on(dims_from_value_async_typed(&Value::Tensor(
+                Tensor::from_f32(vec![1.25], vec![1, 1]).unwrap()
+            ))),
+            Err(DimensionDecodeError::Fractional)
+        ));
         assert!(matches!(
             block_on(dims_from_value_async_typed(&Value::Num(f64::NAN))),
             Err(DimensionDecodeError::NonFinite)

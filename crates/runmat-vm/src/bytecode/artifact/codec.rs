@@ -17,6 +17,8 @@ pub fn encode_interpreter_script_v2(
     bytecode
         .validate_catch_scope_metadata()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     bytecode
         .statement_pc_ranges()
         .map_err(|error| invalid(InterpreterPayloadForm::ScriptV2, error.to_string()))?;
@@ -50,6 +52,8 @@ pub fn decode_interpreter_script_v2(bytes: &[u8]) -> Result<Bytecode, Interprete
     bytecode
         .validate_catch_scope_metadata()
         .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
+    crate::bytecode::validate_sequence_register_flow(&bytecode.instructions)
+        .map_err(|message| invalid(InterpreterPayloadForm::ScriptV2, message))?;
     bytecode
         .statement_pc_ranges()
         .map_err(|error| invalid(InterpreterPayloadForm::ScriptV2, error.to_string()))?;
@@ -73,6 +77,8 @@ pub fn encode_interpreter_program_v2(
     for function in registry.functions.values() {
         function
             .validate_catch_scope_metadata()
+            .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
+        crate::bytecode::validate_sequence_register_flow(&function.instructions)
             .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
         function
             .statement_pc_ranges()
@@ -125,6 +131,8 @@ pub fn decode_interpreter_program_v2(
     for function in registry.functions.values() {
         function
             .validate_catch_scope_metadata()
+            .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
+        crate::bytecode::validate_sequence_register_flow(&function.instructions)
             .map_err(|message| invalid(InterpreterPayloadForm::ProgramV2, message))?;
         function
             .statement_pc_ranges()

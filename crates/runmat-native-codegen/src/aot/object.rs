@@ -274,6 +274,7 @@ fn emit_object(
         catalog_fingerprint: *assembly.program.catalog_fingerprint(),
         optimization,
         runtime_binding_mode,
+        required_capabilities: assembly.requirements.capabilities.clone(),
         foreign_policy,
         object_digest: runmat_execution::Digest::sha256(&bytes),
         object_bytes,

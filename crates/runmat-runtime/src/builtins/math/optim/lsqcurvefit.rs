@@ -528,7 +528,7 @@ async fn real_array_with_cooperation(
             finite_array(
                 label,
                 crate::builtins::math::optim::common::logical_values(&data, cooperation).await?,
-                shape,
+                shape.as_slice().to_vec(),
                 cooperation,
             )
             .await

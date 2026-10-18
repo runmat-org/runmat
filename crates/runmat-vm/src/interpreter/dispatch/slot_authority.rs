@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -44,19 +45,21 @@ pub(super) struct AssignmentSlotAuthority<'a> {
 impl AssignmentSlotAuthority<'_> {
     pub fn refresh(
         &self,
-        vars: &mut Vec<Value>,
+        vars: &mut InterpreterVars,
         slot: usize,
     ) -> Result<AssignmentRootPresence, RuntimeError> {
-        let global_binding = self.global_aliases.binding_for_slot(slot);
-        let global_value = crate::runtime::globals::current_bound_value(self.global_aliases, slot);
+        let global_binding = self.global_aliases.binding_handle_for_slot(slot);
+        let global_value = global_binding
+            .as_ref()
+            .and_then(crate::runtime::globals::current_bound_value_for_handle);
         if let Some(global_value) =
             global_value.or_else(|| global_binding.as_ref().map(|_| empty_declared_root()))
         {
             if slot >= vars.len() {
-                vars.resize(slot + 1, Value::Num(0.0));
+                vars.resize_owned(slot + 1, Value::Num(0.0));
             }
-            vars[slot] = global_value;
-            crate::runtime::workspace::refresh_workspace_slot(slot, &vars[slot]);
+            let _retired = vars.replace_owned(slot, global_value);
+            crate::runtime::workspace::refresh_workspace_slot_from_vars(slot, vars);
         }
         let authority = self.context.runtime.session_variable_authority();
         persistent::refresh(
@@ -90,11 +93,11 @@ impl AssignmentSlotAuthority<'_> {
             )
         };
         if absent {
-            if let Some(value) = vars.get_mut(slot) {
-                *value = Value::Num(0.0);
+            if vars.get(slot).is_some() {
+                let _retired = vars.replace_owned(slot, Value::Num(0.0));
                 // A missing canonical alias is not a workspace `clear`: do
                 // not record a removal in this frame's completion report.
-                crate::runtime::workspace::refresh_workspace_slot(slot, value);
+                crate::runtime::workspace::refresh_workspace_slot_from_vars(slot, vars);
             }
             let name = self
                 .var_names
@@ -108,10 +111,7 @@ impl AssignmentSlotAuthority<'_> {
         }
     }
 
-    pub fn publish(&self, vars: &[Value], slot: usize) -> Result<(), RuntimeError> {
-        if let Some(value) = vars.get(slot) {
-            crate::runtime::globals::update_global_store(slot, value, self.global_aliases);
-        }
+    pub fn publish(&self, vars: &InterpreterVars, slot: usize) -> Result<(), RuntimeError> {
         persistent::publish_store(
             self.persistent_aliases,
             vars,

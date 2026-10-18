@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, rc::Rc};
 
 use runmat_native_executor::{
     deopt::{DeoptimizationPolicy, MaterializedFrame, ResumeTarget},
-    execute::{NativeExecution, NativeInvocationStep, RootedNativeExecution},
+    execute::{NativeExecution, NativeInvocation, NativeInvocationStep, RootedNativeExecution},
     NativeExecutor,
 };
 use runmat_value::Value;
@@ -64,7 +64,7 @@ pub(super) async fn invoke(
                 request
                     .workspace
                     .iter()
-                    .flat_map(|workspace| workspace.values.values()),
+                    .flat_map(|workspace| workspace.profile_values()),
             ),
     )
     .map_err(|error| error.into_runtime_error())?;
@@ -138,9 +138,8 @@ async fn invoke_with_policy(
         .as_ref()
         .map(runmat_runtime::call::lexical::root_environment)
         .transpose()?;
-    #[cfg(all(test, not(target_arch = "wasm32")))]
     let had_lexical_environment = lexical_environment.is_some();
-    let mut invocation = executor
+    let invocation = executor
         .begin_request_with_environment(
             runmat_native_executor::NativeInvocationRequest {
                 function,
@@ -155,6 +154,50 @@ async fn invoke_with_policy(
             lexical_environment,
         )
         .map_err(super::error::from_native_executor_error)?;
+    drive_prepared_invocation(
+        unit,
+        invocation,
+        requested_outputs,
+        runtime,
+        dynamic_admission,
+        had_lexical_environment,
+    )?
+    .await
+}
+
+pub(super) fn drive_prepared_invocation(
+    unit: &ExecutableUnit,
+    invocation: NativeInvocation,
+    requested_outputs: usize,
+    runtime: runmat_runtime::context::RuntimeContext,
+    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+    had_lexical_environment: bool,
+) -> Result<
+    runmat_runtime::execution::RuntimeContinuationFuture<'static, RootedNativeExecution>,
+    runmat_runtime::RuntimeError,
+> {
+    let unit = unit.clone();
+    let admission_runtime = runtime.clone();
+    runmat_runtime::execution::admit_rooted_result_with(&admission_runtime, move || {
+        drive_prepared_invocation_inner(
+            unit,
+            invocation,
+            requested_outputs,
+            runtime,
+            dynamic_admission,
+            had_lexical_environment,
+        )
+    })
+}
+
+async fn drive_prepared_invocation_inner(
+    unit: ExecutableUnit,
+    mut invocation: NativeInvocation,
+    requested_outputs: usize,
+    runtime: runmat_runtime::context::RuntimeContext,
+    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+    _had_lexical_environment: bool,
+) -> Result<RootedNativeExecution, runmat_runtime::RuntimeError> {
     loop {
         match invocation
             .advance()
@@ -162,7 +205,7 @@ async fn invoke_with_policy(
         {
             NativeInvocationStep::Completed(execution) => {
                 #[cfg(all(test, not(target_arch = "wasm32")))]
-                if had_lexical_environment {
+                if _had_lexical_environment {
                     NATIVE_LEXICAL_COMPLETIONS.with(|count| count.set(count.get() + 1));
                 }
                 return Ok(execution);
@@ -197,7 +240,7 @@ async fn invoke_with_policy(
                     .map(runmat_runtime::call::lexical::root_environment)
                     .transpose()?;
                 return resume_interpreter(
-                    unit,
+                    &unit,
                     frame,
                     requested_outputs,
                     runtime,
@@ -290,7 +333,8 @@ async fn resume_interpreter(
             });
         continuation.validate_selected(&persistent_authority, owner)?;
     }
-    let mut vars = vec![None; var_count];
+    let mut vars = vec![Value::Num(0.0); var_count];
+    let mut assigned_slots = std::collections::HashSet::new();
     for local in frame.locals {
         let slot = layout
             .mir_local_slots
@@ -301,7 +345,10 @@ async fn resume_interpreter(
                     "native local has no canonical VM slot",
                 )
             })?;
-        vars[slot.0] = local.value;
+        if let Some(value) = local.value {
+            vars[slot.0] = value;
+            assigned_slots.insert(slot.0);
+        }
     }
     // Native frame operands describe the MIR operation about to execute and
     // remain available to the generic-native continuation. The VM resumes at
@@ -380,7 +427,8 @@ async fn resume_interpreter(
     let resume = runmat_vm::InterpreterResumeState {
         pc,
         completion_boundary: None,
-        vars,
+        vars: runmat_vm::InterpreterVars::from_owned(vars),
+        assigned_slots,
         supplied_inputs: frame.supplied_inputs,
         requested_outputs: frame.requested_outputs,
         missing_input_slots,
@@ -416,6 +464,7 @@ async fn resume_interpreter(
                 .binding_slots
                 .get(local)
                 .and_then(|slot| values.get(slot.0))
+                .as_deref()
                 .cloned()
                 .unwrap_or(Value::Num(0.0))
         })
@@ -428,9 +477,10 @@ async fn resume_interpreter(
     let outputs = runmat_runtime::call::function_abi::collect_function_outputs(
         &function_name,
         &fixed_outputs,
-        varargout,
+        varargout.as_deref(),
         requested_outputs,
     )?;
+    drop(varargout);
     let captures: Vec<_> = unit
         .mir()
         .functions
@@ -445,7 +495,11 @@ async fn resume_interpreter(
             let slot = layout.mir_local_slots.get(&local.id)?;
             Some(runmat_runtime::call::lexical::LexicalCapture {
                 binding: capture.binding,
-                value: values.get(slot.0).cloned().unwrap_or(Value::Num(0.0)),
+                value: values
+                    .get(slot.0)
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or(Value::Num(0.0)),
             })
         })
         .collect();
@@ -747,7 +801,11 @@ mod tests {
                     workspace: None,
                 })
                 .expect("begin native persistent-clear invocation");
-            let result = block_on(async {
+            // `clear` retires selected native extensions on the session's
+            // local-task host. Drive that same host while this raw invocation
+            // is suspended, as the public request path does.
+            let local_tasks = session.local_task_driver();
+            let result = block_on(local_tasks.participate_foreground(async {
                 loop {
                     match invocation.advance().expect("advance native clear fixture") {
                         super::NativeInvocationStep::Completed(_) => {
@@ -786,7 +844,8 @@ mod tests {
                         }
                     }
                 }
-            });
+            }))
+            .expect("drive native-clear lifecycle tasks");
             assert_eq!(result.outputs, vec![Value::Num(3.0)]);
             assert_eq!(
                 session

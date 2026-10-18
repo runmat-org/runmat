@@ -79,6 +79,183 @@ fn admitted_incoming_workspace_is_initialized_without_seeding_new_locals() {
 }
 
 #[test]
+fn dynamic_workspace_reads_defer_presence_to_runtime_without_proving_assignment() {
+    use runmat_types::{ProgramFunctionId, RegionValueId};
+
+    for source in [
+        "run('worker'); after_run = generated + 1;",
+        "eval('created = 41;'); observed = created;",
+        "A = [9 8]; picked = A(end + eval('created = 1; created - 1')); observed = created;",
+    ] {
+        let parsed = runmat_parser::parse(source).expect("parse dynamic workspace source");
+        let hir = runmat_hir::lower(&parsed, &runmat_hir::LoweringContext::empty())
+            .expect("lower dynamic workspace HIR");
+        let binding = hir
+            .assembly
+            .bindings
+            .iter()
+            .find(|binding| binding.role == runmat_hir::BindingRole::ExternalWorkspace)
+            .expect("dynamic effect exposes an external workspace read");
+        let mir =
+            crate::lowering::lower_assembly(&hir.assembly).expect("lower dynamic workspace MIR");
+        let (function, local) = mir
+            .bodies
+            .iter()
+            .find_map(|(function, body)| {
+                body.locals.iter().find_map(|local| {
+                    (local.binding == Some(binding.id)).then_some((*function, local))
+                })
+            })
+            .expect("external read has a MIR slot");
+        assert_eq!(local.kind, crate::MirLocalKind::ExternalWorkspace);
+
+        let analysis = crate::analysis::analyze_assembly(&mir);
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .all(|item| !matches!(item.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+            "dynamic read is checked by the executor, not diagnosed as a local: {source}: {:#?}",
+            analysis.diagnostics
+        );
+        let function = ProgramFunctionId(u32::try_from(function.0).unwrap());
+        let local = RegionValueId {
+            function,
+            local: u32::try_from(local.id.0).unwrap(),
+        };
+        assert!(analysis.program_points.iter().any(|point| {
+            point.point.function == function
+                && point.local(local).is_some_and(|fact| {
+                    fact.assignment == crate::analysis::AssignmentFact::MaybeAssigned
+                        && fact.fact.is_none()
+                })
+        }));
+    }
+}
+
+#[test]
+fn current_workspace_effect_rechecks_existing_bindings_without_proving_a_value() {
+    use runmat_types::{ProgramFunctionId, RegionValueId};
+
+    for source in [
+        "function out = current_output()\n eval('out = 1;');\n end",
+        "function out = conditional_local()\n if false; created = 0; end\n eval('created = 41;');\n out = created;\n end",
+        "function out = run_into_output()\n run('worker');\n out = generated;\n end",
+        "function out = indexed_effect()\n A = [9 8];\n picked = A(end + eval('out = 1; out - 1'));\n end",
+        "function out = later_index_read()\n A = [9 8];\n picked = A(end + eval('out = 1; out - 1'), out);\n end",
+        "function out = argument_effect()\n used = plus(eval('out = 1'), out);\n end",
+        "function out = later_expansion_argument()\n C = {7};\n used = plus(C{end + eval('out = 1; out - 1')}, out);\n end",
+        "function out = cell_after_effect()\n C = {7};\n eval('C = {9};');\n out = C{1};\n end",
+        "function out = short_circuit_effect(flag)\n flag && eval('out = 1');\n end",
+    ] {
+        let parsed = runmat_parser::parse(source).expect("parse current-workspace mutation");
+        let hir = runmat_hir::lower(&parsed, &runmat_hir::LoweringContext::empty())
+            .expect("lower current-workspace mutation");
+        let mir = crate::lowering::lower_assembly(&hir.assembly)
+            .expect("lower current-workspace mutation MIR");
+        let analysis = crate::analysis::analyze_assembly(&mir);
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .all(|item| !matches!(item.code.as_str(), "RM-MIR0001" | "RM-MIR0002" | "RM-TYPE-BRACE-INDEX")),
+            "current-workspace presence is checked at execution: {source}: {:#?}",
+            analysis.diagnostics
+        );
+        let (function, output) = mir
+            .bodies
+            .iter()
+            .find_map(|(function, body)| {
+                body.locals
+                    .iter()
+                    .find(|local| local.kind == crate::MirLocalKind::Output)
+                    .map(|local| (*function, local.id))
+            })
+            .expect("function output local");
+        let function = ProgramFunctionId(u32::try_from(function.0).unwrap());
+        let output = RegionValueId {
+            function,
+            local: u32::try_from(output.0).unwrap(),
+        };
+        assert!(analysis.program_points.iter().any(|point| {
+            point.point.function == function
+                && point.local(output).is_some_and(|fact| {
+                    fact.assignment == crate::analysis::AssignmentFact::MaybeAssigned
+                        && fact.fact.is_none()
+                })
+        }), "opaque effect does not prove the output value: {source}");
+    }
+}
+
+#[test]
+fn other_workspace_effect_and_call_arguments_do_not_initialize_current_locals() {
+    for source in [
+        "function out = base_only()\n evalin('base', 'out = 1;');\n end",
+        "function out = base_index()\n A = [9 8];\n picked = A(end + evalin('base', 'out = 1; 0'));\n end",
+        "function out = read_before_eval()\n eval(out);\n end",
+        "function out = earlier_index_read()\n A = [9 8];\n picked = A(out, end + eval('out = 1; out - 1'));\n end",
+        "function out = earlier_expansion_argument()\n C = {7};\n used = plus(out, C{end + eval('out = 1; out - 1')});\n end",
+        "function out = earlier_binary_operand()\n used = out + eval('out = 1; 2');\n end",
+        "function out = earlier_array_element()\n used = [out, eval('out = 1; 2')];\n end",
+        "function out = no_effect()\n if false; created = 1; end\n out = created;\n end",
+    ] {
+        let found = diagnostics(source);
+        assert!(
+            found
+                .iter()
+                .any(|item| matches!(item.code.as_str(), "RM-MIR0001" | "RM-MIR0002")),
+            "unassigned current-scope read must stay diagnosed: {source}: {found:#?}"
+        );
+    }
+}
+
+#[test]
+fn nested_current_effect_invalidates_preexisting_output_fact() {
+    use runmat_types::{ProgramFunctionId, RegionValueId};
+
+    let source = "function out = stale_after_nested_effect()\n out = 7;\n A = [9 8];\n picked = A(end + eval('out = 1; out - 1'), out);\n end";
+    let parsed = runmat_parser::parse(source).expect("parse ordered nested effect");
+    let hir = runmat_hir::lower(&parsed, &runmat_hir::LoweringContext::empty())
+        .expect("lower ordered nested effect HIR");
+    let mir =
+        crate::lowering::lower_assembly(&hir.assembly).expect("lower ordered nested effect MIR");
+    let (function, output) = mir
+        .bodies
+        .iter()
+        .find_map(|(function, body)| {
+            body.locals
+                .iter()
+                .find(|local| local.kind == crate::MirLocalKind::Output)
+                .map(|local| (*function, local.id))
+        })
+        .expect("function output local");
+    let function = ProgramFunctionId(u32::try_from(function.0).unwrap());
+    let output = RegionValueId {
+        function,
+        local: u32::try_from(output.0).unwrap(),
+    };
+    let analysis = crate::analysis::analyze_assembly(&mir);
+    assert!(analysis
+        .diagnostics
+        .iter()
+        .all(|item| !matches!(item.code.as_str(), "RM-MIR0001" | "RM-MIR0002")));
+    let final_point = analysis
+        .program_points
+        .iter()
+        .rfind(|point| point.point.function == function)
+        .expect("final function point");
+    let fact = final_point.local(output).expect("output fact");
+    assert_eq!(
+        fact.assignment,
+        crate::analysis::AssignmentFact::MaybeAssigned
+    );
+    assert!(
+        fact.fact.is_none(),
+        "opaque eval invalidates the old value proof"
+    );
+}
+
+#[test]
 fn declared_storage_does_not_infer_a_new_cell_from_brace_output() {
     use runmat_types::{ProgramFunctionId, ProgramPointId, RegionValueId, ValueKindFact};
 
@@ -148,4 +325,74 @@ fn declared_storage_does_not_infer_a_new_cell_from_brace_output() {
             "{declaration} declaration must not become a proven Cell from a missing payload"
         );
     }
+}
+
+#[test]
+fn current_eval_invalidates_a_visible_lexical_capture() {
+    use runmat_types::{ProgramFunctionId, ProgramPointId, RegionValueId};
+
+    let source = "function out = outer()\n shared = 7;\n out = inner();\n function result = inner()\n before = shared;\n eval('shared = 9;');\n result = shared;\n end\n end";
+    let parsed = runmat_parser::parse(source).expect("parse nested lexical eval");
+    let hir = runmat_hir::lower(&parsed, &runmat_hir::LoweringContext::empty())
+        .expect("lower nested lexical eval HIR");
+    let mir =
+        crate::lowering::lower_assembly(&hir.assembly).expect("lower nested lexical eval MIR");
+    let (function_id, _) = mir
+        .functions
+        .iter()
+        .find(|(_, metadata)| metadata.name.0 == "inner")
+        .expect("nested function");
+    let body = &mir.bodies[function_id];
+    let capture = body
+        .locals
+        .iter()
+        .find(|local| local.kind == crate::MirLocalKind::Capture)
+        .expect("outer shared binding is captured");
+    assert!(crate::analysis::workspace_effect::current_scope_bindings(body).contains(&capture.id));
+    let (block, position) = body
+        .blocks
+        .iter()
+        .find_map(|block| {
+            block
+                .statements
+                .iter()
+                .position(|statement| {
+                    crate::analysis::workspace_effect::statement_exposes_current_workspace(
+                        &statement.kind,
+                    )
+                })
+                .map(|position| (block.id, position))
+        })
+        .expect("typed current eval statement");
+    let analysis = crate::analysis::analyze_assembly(&mir);
+    let function = ProgramFunctionId(u32::try_from(function_id.0).unwrap());
+    let capture = RegionValueId {
+        function,
+        local: u32::try_from(capture.id.0).unwrap(),
+    };
+    let point = |position| ProgramPointId {
+        function,
+        block: u32::try_from(block.0).unwrap(),
+        position: u32::try_from(position).unwrap(),
+    };
+    let before = analysis
+        .facts_at(point(position))
+        .and_then(|facts| facts.local(capture))
+        .expect("capture fact before eval");
+    assert!(
+        before.fact.is_some(),
+        "the capture had a pre-eval value fact"
+    );
+    let after = analysis
+        .facts_at(point(position + 1))
+        .and_then(|facts| facts.local(capture))
+        .expect("capture fact after eval");
+    assert_eq!(
+        after.assignment,
+        crate::analysis::AssignmentFact::MaybeAssigned
+    );
+    assert!(
+        after.fact.is_none(),
+        "current eval retires the captured value proof"
+    );
 }

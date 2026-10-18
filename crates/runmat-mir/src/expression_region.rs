@@ -4,7 +4,9 @@ mod model;
 mod traversal;
 mod validation;
 
-pub use model::{MirExpressionRegion, MirExpressionStep};
+pub use model::{
+    MirExpressionRegion, MirExpressionRegionRef, MirExpressionStep, MirPreparedExpressionRegion,
+};
 
 #[cfg(all(test, feature = "compiler"))]
 #[path = "expression_region/tests.rs"]

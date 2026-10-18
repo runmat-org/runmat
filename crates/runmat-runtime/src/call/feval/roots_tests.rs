@@ -130,14 +130,16 @@ fn mapped_nested_closure_uses_explicit_runtime_without_ambient_or_foreign_ambien
         ))
         .expect("root activation");
         let mapped = crate::builtins::common::mapped_callable::MappedCallable::Closure(
-            Closure::from_data(runmat_value::ClosureData {
-                function_name: "nested".into(),
-                binding: Some(binding),
-                source_role: runmat_types::FunctionSourceRole::Nested,
-                source_file: None,
-                captures: Vec::new(),
-                lexical_environment: Some(LexicalEnvironment::new(activation.handle(), None)),
-            }),
+            crate::call::descriptor::RetainedClosureValue::new(Closure::from_data(
+                runmat_value::ClosureData {
+                    function_name: "nested".into(),
+                    binding: Some(binding),
+                    source_role: runmat_types::FunctionSourceRole::Nested,
+                    source_file: None,
+                    captures: Vec::new(),
+                    lexical_environment: Some(LexicalEnvironment::new(activation.handle(), None)),
+                },
+            )),
         );
         let no_ambient = futures::executor::block_on(mapped.invoke_with_outputs_in_context(
             Some(&selected),

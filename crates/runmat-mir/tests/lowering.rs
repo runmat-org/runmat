@@ -1159,6 +1159,28 @@ fn diagnostics_report_maybe_assigned_local_read_after_branch() {
 }
 
 #[test]
+fn catch_binding_is_assigned_only_on_the_catch_edge() {
+    let inside = analyze_assembly(&lower_mir(
+        "function y = f(); y = ''; try; error('boom'); catch e; y = e.message; end; end",
+    ))
+    .diagnostics;
+    assert!(
+        inside
+            .iter()
+            .all(|diagnostic| diagnostic.severity != runmat_hir::HirDiagnosticSeverity::Error),
+        "{inside:#?}"
+    );
+
+    let after = analyze_assembly(&lower_mir(
+        "function y = f(); try; y = 1; catch e; y = 2; end; z = e.message; end",
+    ))
+    .diagnostics;
+    assert!(after
+        .iter()
+        .any(|diagnostic| matches!(diagnostic.code.as_str(), "RM-MIR0001" | "RM-MIR0002")));
+}
+
+#[test]
 fn definite_assignment_uses_proven_nonempty_for_backedge_only() {
     let cases = [
         (

@@ -4,9 +4,23 @@
 use std::collections::HashSet;
 
 use crate::fusion::{detect_fusion_groups, FusionGroup, FusionKind, FusionPattern};
-use crate::graph::{AccelGraph, NodeId, ValueOrigin};
+use crate::graph::{AccelGraph, NodeId, ValueId, ValueOrigin};
 
 use super::{publication_follows_stage, ImageSourcePublication};
+
+fn checkpoint_producers(group: &FusionGroup) -> Option<[Option<ValueId>; 5]> {
+    let FusionPattern::ImageNormalize(pattern) = group.pattern.as_ref()? else {
+        return None;
+    };
+    let producers = pattern.reduction_routes.as_ref()?.stage_producers()?;
+    Some([
+        Some(producers.mu),
+        Some(producers.sigma),
+        producers.pre_clamp_output,
+        producers.clamp_output,
+        Some(producers.output),
+    ])
+}
 
 fn same_detected_group(left: &FusionGroup, right: &FusionGroup) -> bool {
     left.id == right.id
@@ -68,15 +82,28 @@ pub fn selected_group_with_publications(
     if base.kind != FusionKind::ImageNormalize || publications.len() < 3 {
         return None;
     }
+    let checkpoints = checkpoint_producers(base)?;
+    if publications.len() != checkpoints.iter().flatten().count()
+        || publications
+            .iter()
+            .zip(checkpoints.into_iter().flatten())
+            .any(|(publication, checkpoint)| publication.producer != checkpoint)
+    {
+        return None;
+    }
     let mut selected = detected_base(graph, base)?;
     let mut nodes = selected.nodes.iter().copied().collect::<HashSet<_>>();
     for publication in publications {
         for node in cast_path(graph, publication)? {
             let cast = graph.node(node)?;
             if nodes.insert(node) {
-                // Existing interior casts are part of the detected source;
-                // only a suffix after its final producer may be added.
-                if cast.span.start <= base.span.end {
+                // The exact VM publication authorizes this canonical cast at
+                // its source statement. Publication casts for mean and sigma
+                // can be interleaved with the detected arithmetic; they are
+                // not necessarily a suffix after the final image producer.
+                if cast.span.start < publication.statement.start
+                    || cast.span.end >= publication.statement.end
+                {
                     return None;
                 }
                 selected.nodes.push(node);
@@ -107,15 +134,7 @@ pub(super) fn matches_extended_group(graph: &AccelGraph, selected: &FusionGroup)
         {
             return false;
         }
-        let Some(FusionPattern::ImageNormalize(pattern)) = base.pattern.as_ref() else {
-            return false;
-        };
-        let Some(final_source) = pattern
-            .reduction_routes
-            .as_ref()
-            .and_then(|routes| routes.stage_producers())
-            .map(|producers| producers.output)
-        else {
+        let Some(checkpoints) = checkpoint_producers(base) else {
             return false;
         };
         let base_nodes = base.nodes.iter().copied().collect::<HashSet<_>>();
@@ -125,32 +144,39 @@ pub(super) fn matches_extended_group(graph: &AccelGraph, selected: &FusionGroup)
             .copied()
             .filter(|node| !base_nodes.contains(node))
             .collect::<Vec<_>>();
-        if selected.nodes.len() != base.nodes.len() + extra.len()
+        let selected_nodes = selected.nodes.iter().copied().collect::<HashSet<_>>();
+        if selected_nodes.len() != selected.nodes.len()
+            || selected.nodes.len() != base.nodes.len() + extra.len()
             || !base.nodes.iter().all(|node| selected.nodes.contains(node))
         {
             return false;
         }
-        let mut current = final_source;
+        // Added nodes must form canonical cast paths rooted at exact semantic
+        // image checkpoints. This accepts interleaved mean/sigma publication
+        // casts without admitting unrelated arithmetic into the image group.
+        let mut reachable = checkpoints.into_iter().flatten().collect::<HashSet<_>>();
         for node in &extra {
             let Some(cast) = graph.node(*node) else {
                 return false;
             };
-            if cast.span.start <= base.span.end
-                || cast.span.end > selected.span.end
-                || !super::super::is_canonical_single_cast(cast)
-                || cast.inputs.as_slice() != [current]
-            {
+            let [input] = cast.inputs.as_slice() else {
                 return false;
-            }
+            };
             let [output] = cast.outputs.as_slice() else {
                 return false;
             };
-            current = *output;
+            if cast.span.end > selected.span.end
+                || !super::super::is_canonical_single_cast(cast)
+                || !reachable.contains(input)
+            {
+                return false;
+            }
+            reachable.insert(*output);
         }
         selected.span.end
             == extra
-                .last()
-                .and_then(|node| graph.node(*node))
-                .map_or(base.span.end, |node| node.span.end)
+                .iter()
+                .filter_map(|node| graph.node(*node))
+                .fold(base.span.end, |end, node| end.max(node.span.end))
     })
 }

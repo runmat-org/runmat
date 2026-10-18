@@ -716,9 +716,9 @@ fn ismember_complex(
 
 fn ismember_promoted_complex_f64(
     a: ComplexStorage,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: ComplexStorage,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     ismember_floating_complex(
@@ -732,9 +732,9 @@ fn ismember_promoted_complex_f64(
 
 fn ismember_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
     a: A,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: B,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     rows: bool,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     if rows {
@@ -754,7 +754,7 @@ fn ismember_complex_elements(
 
 fn ismember_floating_complex_elements<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
     a: A,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: B,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let mut map: HashMap<ComplexKey, usize> = HashMap::new();
@@ -795,9 +795,9 @@ fn ismember_complex_rows(
 
 fn ismember_floating_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
     a: A,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: B,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
     let (rows_a, cols_a) = shape_rows_cols(&a_shape, "ismember")?;
     let (rows_b, cols_b) = shape_rows_cols(&b_shape, "ismember")?;
@@ -1102,7 +1102,7 @@ impl IsMemberEvaluation {
         Ok(IsMemberResult {
             mask: HostLogicalOwned {
                 data: mask.data.into_vec(),
-                shape: mask.shape,
+                shape: mask.shape.to_vec(),
             },
             loc: tensor::tensor_into_host_f64_owned(loc),
         })

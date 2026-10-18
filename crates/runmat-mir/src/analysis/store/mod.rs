@@ -106,4 +106,7 @@ pub(super) enum InitFact {
     Unassigned,
     MaybeAssigned,
     DefinitelyAssigned,
+    /// A dynamic workspace effect may have supplied this slot. Reading it
+    /// requires the executor's missing-binding check, not a static proof.
+    RuntimeWorkspaceLookup,
 }

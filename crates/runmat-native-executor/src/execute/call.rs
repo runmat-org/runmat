@@ -25,17 +25,9 @@ pub(super) fn evaluate(
     call: &MirCall,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = evaluate_inner(state, call, requested_outputs, embedded.as_ref());
-    if let Ok(outputs) = &result {
-        state.cache_embedded_call(embedded.as_ref(), outputs);
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(outputs), Ok(())) => Ok(outputs),
-    }
+    state.settle_embedded_result(embedded.as_ref(), result, Vec::as_slice)
 }
 
 fn evaluate_inner(
@@ -128,25 +120,20 @@ fn evaluate_inner(
                     let _call_roots =
                         runmat_runtime::execution::RootedValueLease::for_traced(&lexical_call)
                             .map_err(|error| error.into_runtime_error())?;
-                    let result = super::sync::complete(
-                        &runtime,
-                        runmat_runtime::callsite::with_function_input_callsite(
-                            Some(input_callsite.clone()),
-                            invoker(Some(runtime.clone()), lexical_call),
-                        ),
-                        "nested lexical call",
-                    )
-                    .finish(state)?;
-                    return result.with_owned(|result| {
-                        state.apply_lexical_captures(result.captures)?;
-                        normalize_sequence_outputs(result.outputs, requested_outputs)?
-                            .into_iter()
-                            .map(|value| {
-                                let reference = state.arena.insert(value);
-                                state.arena.get(reference).cloned()
-                            })
-                            .collect()
+                    let future = runmat_runtime::callsite::with_function_input_callsite(
+                        Some(input_callsite.clone()),
+                        invoker(Some(runtime), lexical_call),
+                    );
+                    let future = Box::pin(async move {
+                        let _call_roots = _call_roots;
+                        future.await
                     });
+                    return super::call_suspension::begin_lexical_call(
+                        state,
+                        embedded.cloned(),
+                        future,
+                        requested_outputs,
+                    );
                 }
             }
             let descriptor = CallableDescriptor::resolved(
@@ -267,17 +254,9 @@ pub(super) fn materialize_arguments(
     state: &mut HostState,
     arguments: &[MirCallArg],
 ) -> NativeExecutorResult<Vec<Value>> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = materialize_arguments_inner(state, arguments, embedded.as_ref());
-    if let Ok(values) = &result {
-        state.cache_embedded_call(embedded.as_ref(), values);
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(values), Ok(())) => Ok(values),
-    }
+    state.settle_embedded_result(embedded.as_ref(), result, Vec::as_slice)
 }
 
 fn materialize_arguments_inner(
@@ -469,7 +448,11 @@ fn materialize_expansion_source(
             ));
         }
         runmat_mir::MirExpansionSource::CellContents { base, indexing } => {
-            let base = materialize_operand(state, base)?;
+            let base = if super::indexing::indexing_requires_retention(indexing) {
+                super::operand::materialize_retained_operand(state, base)?.1
+            } else {
+                materialize_operand(state, base)?
+            };
             super::indexing::materialize_cell_expansion_source(state, base, indexing)?
         }
         runmat_mir::MirExpansionSource::ReturnedOutputs(base) => {
@@ -500,17 +483,9 @@ pub(super) fn builtin(
     arguments: Vec<Value>,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = builtin_inner(state, name, arguments, requested_outputs, embedded.as_ref());
-    if let Ok(outputs) = &result {
-        state.cache_embedded_call(embedded.as_ref(), outputs);
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(outputs), Ok(())) => Ok(outputs),
-    }
+    state.settle_embedded_result(embedded.as_ref(), result, Vec::as_slice)
 }
 
 fn builtin_inner(

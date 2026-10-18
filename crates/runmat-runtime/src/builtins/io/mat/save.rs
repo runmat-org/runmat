@@ -170,7 +170,7 @@ async fn save_builtin(
 async fn collect_selected_entries(
     request: &controls::SaveRequest,
     regex_patterns: &[Regex],
-    workspace_read: &mut WorkspaceReadSet,
+    workspace_read: &mut WorkspaceReadSet<'_>,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     let mut workspace_entries: Option<Vec<(String, Value)>> = None;
@@ -263,7 +263,7 @@ async fn collect_selected_entries(
 async fn encode_selected_entries(
     entries: Vec<(String, Value)>,
     destination: &MatFsPath,
-    workspace_read: &mut WorkspaceReadSet,
+    workspace_read: &mut WorkspaceReadSet<'_>,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<()> {
     let mut mat_vars = Vec::with_capacity(entries.len());

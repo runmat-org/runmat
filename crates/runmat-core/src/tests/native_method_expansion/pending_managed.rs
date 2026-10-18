@@ -60,7 +60,8 @@ fn take_temporary_target() -> runmat_gc::GcHandle {
     runmat_runtime::workspace::session::store_global_named(
         "pending_handle_witness",
         Value::Num(0.0),
-    );
+    )
+    .expect("retire the observer's managed-handle alias");
     assert_eq!(
         runmat_runtime::workspace::session::global_value("pending_handle_witness"),
         Some(Value::Num(0.0)),

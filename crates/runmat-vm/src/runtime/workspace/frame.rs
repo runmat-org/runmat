@@ -186,7 +186,10 @@ fn release_pending_workspace_service_frame_for_owner(owner: WorkspaceOwner, id: 
     });
 }
 
-fn with_frame<R>(id: WorkspaceFrameId, f: impl FnOnce(&WorkspaceFrame) -> R) -> Option<R> {
+pub(super) fn with_frame<R>(
+    id: WorkspaceFrameId,
+    f: impl FnOnce(&WorkspaceFrame) -> R,
+) -> Option<R> {
     WORKSPACE_STACKS.with(|stacks| {
         let stacks = stacks.try_borrow().ok()?;
         stacks
@@ -197,14 +200,7 @@ fn with_frame<R>(id: WorkspaceFrameId, f: impl FnOnce(&WorkspaceFrame) -> R) -> 
     })
 }
 
-fn with_frame_mut<R>(id: WorkspaceFrameId, f: impl FnOnce(&mut WorkspaceFrame) -> R) -> Option<R> {
-    if frame_is_detaching(id) {
-        return None;
-    }
-    with_frame_mut_unlocked(id, f)
-}
-
-fn with_frame_mut_unlocked<R>(
+pub(super) fn with_frame_mut_unlocked<R>(
     id: WorkspaceFrameId,
     f: impl FnOnce(&mut WorkspaceFrame) -> R,
 ) -> Option<R> {
@@ -222,6 +218,9 @@ struct FrameDetachGuard(WorkspaceFrameId);
 
 impl FrameDetachGuard {
     fn acquire(id: WorkspaceFrameId) -> Option<Self> {
+        if with_frame(id, |frame| frame.state.mutation_phase.is_busy())? {
+            return None;
+        }
         DETACHING_WORKSPACE_FRAMES.with(|frames| frames.borrow_mut().insert(id).then_some(Self(id)))
     }
 }
@@ -249,7 +248,7 @@ pub(crate) fn workspace_frame_lookup(id: WorkspaceFrameId, name: &str) -> Option
             .state
             .assigned
             .contains(name)
-            .then(|| frame.state.values.get(*index).cloned())
+            .then(|| frame.state.values.get(*index).map(|value| value.clone()))
             .flatten()
     })
     .flatten()
@@ -269,9 +268,9 @@ fn snapshot_frame_entries(frame: &WorkspaceFrame) -> Vec<(String, Value)> {
                 .state
                 .assigned
                 .contains(name)
-                .then(|| frame.state.values.get(*index).cloned())
+                .then(|| frame.state.values.get(*index).map(|value| value.clone()))
                 .flatten()
-                .map(|value| (name.clone(), value))
+                .map(|value| (name.as_str().to_owned(), value))
         })
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| left.0.cmp(&right.0));
@@ -303,21 +302,16 @@ pub(crate) fn workspace_frame_detach_selected(
     })
     .ok_or_else(unavailable)?
     .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
+    let context = runmat_runtime::context::legacy::active();
+    let prepared = super::frame_lifecycle::prepare_workspace_frame_detach(
+        id,
+        context.as_ref(),
+        selection,
+        &detached,
+    )?;
+    prepared.checkpoint_before_publication()?;
     publish(&detached)?;
-    with_frame_mut_unlocked(id, |frame| match selection {
-        runmat_runtime::workspace::WorkspaceDetachSelection::All => clear_workspace_frame(frame),
-        runmat_runtime::workspace::WorkspaceDetachSelection::Names(names) => {
-            for name in names {
-                remove_workspace_name(frame, name);
-            }
-        }
-        runmat_runtime::workspace::WorkspaceDetachSelection::Except(_) => {
-            for (name, _) in detached.entries() {
-                remove_workspace_name(frame, name);
-            }
-        }
-    })
-    .ok_or_else(unavailable)?;
+    prepared.commit();
     Ok(detached)
 }
 
@@ -325,98 +319,139 @@ pub(crate) fn workspace_frame_publishes(id: WorkspaceFrameId) -> Option<bool> {
     with_frame(id, |frame| frame.policy.publishes_mutations())
 }
 
-pub(crate) fn workspace_frame_name_is_global(id: WorkspaceFrameId, name: &str) -> Option<bool> {
-    with_frame(id, |frame| {
-        frame
-            .state
-            .names
-            .get(name)
-            .is_some_and(|slot| frame.global_aliases.binding_for_slot(*slot).is_some())
-    })
-}
-
-pub(crate) fn workspace_frame_declare_global(
+/// Resolve the actual declared global authority for one workspace name.
+/// The compiler/workspace spelling can differ from a named global alias;
+/// callers must not manufacture the session target from `name`.
+pub(crate) fn workspace_frame_global_binding(
     id: WorkspaceFrameId,
-    slot: usize,
-    name: String,
-) -> Option<()> {
-    with_frame_mut(id, |frame| {
-        frame.global_aliases.declare_named(slot, name);
+    name: &str,
+) -> Option<(usize, runmat_runtime::workspace::GlobalBindingTarget)> {
+    with_frame(id, |frame| {
+        let slot = *frame.state.names.get(name)?;
+        frame
+            .global_aliases
+            .binding_handle_for_slot(slot)
+            .map(|binding| (slot, binding))
     })
+    .flatten()
 }
 
+/// Resolve one compiler-owned lexical binding from the frame's canonical
+/// name/slot tables. The returned environment handle and binding identity can
+/// be retained across preparation without holding the workspace-stack borrow.
+pub(crate) fn workspace_frame_lexical_binding(
+    id: WorkspaceFrameId,
+    name: &str,
+) -> Option<(
+    usize,
+    runmat_value::LexicalEnvironment,
+    crate::bytecode::program::LexicalBindingSlot,
+)> {
+    with_frame(id, |frame| {
+        let slot = *frame.state.names.get(name)?;
+        let lexical = frame.lexical.as_ref()?;
+        lexical
+            .slots
+            .get(&slot)
+            .copied()
+            .map(|binding| (slot, lexical.environment.clone(), binding))
+    })
+    .flatten()
+}
+
+pub(crate) fn prepare_workspace_frame_declare_global(
+    id: WorkspaceFrameId,
+    context: &runmat_runtime::context::RuntimeContext,
+    slot: usize,
+    name: &str,
+) -> Result<
+    Option<runmat_runtime::workspace::bindings::PreparedAliasBinding>,
+    runmat_runtime::RuntimeError,
+> {
+    let Some(aliases) = with_frame(id, |frame| frame.global_aliases.clone()) else {
+        return Ok(None);
+    };
+    aliases
+        .prepare_named(context, slot, name)
+        .map(Some)
+        .map_err(super::frame_allocation_error)
+}
+
+pub(crate) fn prepare_workspace_frame_declare_legacy_global(
+    id: WorkspaceFrameId,
+    context: &runmat_runtime::context::RuntimeContext,
+    slot: usize,
+) -> Result<
+    Option<runmat_runtime::workspace::bindings::PreparedAliasBinding>,
+    runmat_runtime::RuntimeError,
+> {
+    let Some(aliases) = with_frame(id, |frame| frame.global_aliases.clone()) else {
+        return Ok(None);
+    };
+    aliases
+        .prepare_legacy_slot(context, slot)
+        .map(Some)
+        .map_err(super::frame_allocation_error)
+}
+
+#[cfg(test)]
 pub(crate) fn workspace_frame_assign(
     id: WorkspaceFrameId,
     name: &str,
     value: Value,
 ) -> Result<(), String> {
-    with_frame_mut(id, |frame| {
-        set_workspace_variable_in_frame_with_reconciliation(frame, name, value, true, false)
-    })
-    .ok_or_else(|| "workspace frame is closed".to_string())?
+    let context = runmat_runtime::context::legacy::active();
+    let prepared = prepare_workspace_frame_assignment(id, context.as_ref(), name, &value, true)
+        .map_err(|error| error.to_string())?;
+    prepared
+        .checkpoint_before_publication()
+        .map_err(|error| error.to_string())?;
+    prepared.commit();
+    Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn workspace_frame_assign_from_executor(
     id: WorkspaceFrameId,
     name: &str,
     value: Value,
 ) -> Result<(), String> {
-    with_frame_mut(id, |frame| {
-        set_workspace_variable_in_frame_with_reconciliation(frame, name, value, false, false)
-    })
-    .ok_or_else(|| "workspace frame is closed".to_string())?
+    let context = runmat_runtime::context::legacy::active();
+    let prepared = prepare_workspace_frame_assignment(id, context.as_ref(), name, &value, false)
+        .map_err(|error| error.to_string())?;
+    prepared
+        .checkpoint_before_publication()
+        .map_err(|error| error.to_string())?;
+    prepared.commit();
+    Ok(())
 }
 
+#[cfg(test)]
 pub(crate) fn workspace_frame_clear(id: WorkspaceFrameId) -> Result<(), String> {
-    with_frame_mut(id, clear_workspace_frame).ok_or_else(|| "workspace frame is closed".to_string())
+    let context = runmat_runtime::context::legacy::active();
+    let prepared =
+        prepare_workspace_frame_clear(id, context.as_ref()).map_err(|error| error.to_string())?;
+    prepared
+        .checkpoint_before_publication()
+        .map_err(|error| error.to_string())?;
+    prepared.commit();
+    Ok(())
 }
 
-pub(crate) fn workspace_frame_remove(id: WorkspaceFrameId, name: &str) -> Result<(), String> {
-    with_frame_mut(id, |frame| remove_workspace_name(frame, name))
-        .ok_or_else(|| "workspace frame is closed".to_string())
-}
-
+#[cfg(test)]
 pub(crate) fn reconcile_workspace_frame(
     id: WorkspaceFrameId,
     values: Vec<(String, Value)>,
 ) -> Result<(), String> {
-    with_frame_mut(id, |frame| {
-        let incoming = values
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<HashSet<_>>();
-        let removed = frame
-            .state
-            .names
-            .iter()
-            .filter_map(|(name, slot)| {
-                // The canonical projection contains assigned values only.
-                // A compiler-reserved, still-unassigned name has no value to
-                // project, but its exact slot remains the VM's later-read
-                // authority (including an eval assignment in this frame).
-                (frame.state.assigned.contains(name)
-                    && !incoming.contains(name.as_str())
-                    && frame.global_aliases.binding_for_slot(*slot).is_none())
-                .then_some(name.clone())
-            })
-            .collect::<Vec<_>>();
-        for name in removed {
-            remove_workspace_name(frame, &name);
-        }
-        for (name, value) in values {
-            if frame
-                .state
-                .names
-                .get(&name)
-                .is_some_and(|slot| frame.global_aliases.binding_for_slot(*slot).is_some())
-            {
-                continue;
-            }
-            set_workspace_variable_in_frame(frame, &name, value)?;
-        }
-        Ok(())
-    })
-    .ok_or_else(|| "workspace frame is closed".to_string())?
+    super::frame_reconcile::reconcile_workspace_frame(id, values)
+}
+
+pub(crate) fn reconcile_workspace_frame_with_context(
+    id: WorkspaceFrameId,
+    context: Option<&runmat_runtime::context::RuntimeContext>,
+    values: Vec<(String, Value)>,
+) -> Result<(), runmat_runtime::RuntimeError> {
+    super::frame_reconcile::reconcile_workspace_frame_with_context(id, context, values)
 }
 
 #[cfg(test)]
@@ -432,7 +467,11 @@ mod reconciliation_tests {
         let reserved = reserve_workspace_service_frame(runtime_id, None);
         let activation = frame_activation(runtime_id, reserved.id);
         futures::executor::block_on(activation.scope(runtime.scope(async {
-            let mut vars = vec![Value::Num(41.0), Value::Num(9.0), Value::Num(0.0)];
+            let mut vars = crate::interpreter::vars::InterpreterVars::from_owned(vec![
+                Value::Num(41.0),
+                Value::Num(9.0),
+                Value::Num(0.0),
+            ]);
             let _guard = set_workspace_state(
                 HashMap::from([
                     ("warm".to_string(), 0),

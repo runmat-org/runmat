@@ -11,6 +11,141 @@ use runmat_value::Value;
 use std::rc::Rc;
 use std::sync::Arc;
 
+#[path = "source_evaluation/assignin_args.rs"]
+mod assignin_args;
+
+/// One already-resolved dynamic-workspace builtin invocation. Arguments stay
+/// borrowed from the selected call owner through completion; the service must
+/// not rediscover or reselect a callable by name.
+pub struct DynamicWorkspaceInvocation<'a> {
+    pub builtin: runmat_builtins::DynamicWorkspaceBuiltin,
+    pub arguments: &'a [Value],
+    pub requested_outputs: usize,
+    pub callsite: Option<crate::callsite::CallsiteInfo>,
+}
+
+/// Execute the mutation-only `assignin` contract. This path deliberately
+/// depends only on the selected workspace/session authorities; it does not
+/// require a source evaluator, parser, or compiler service.
+pub fn execute_assignin_effect(
+    runtime: &RuntimeContext,
+    arguments: &[Value],
+    requested_outputs: usize,
+) -> Result<(), RuntimeError> {
+    if arguments.len() < 3 {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:NotEnoughInputs",
+            "assignin takes three arguments",
+        ));
+    }
+    if arguments.len() > 3 {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:TooManyInputs",
+            "assignin takes three arguments",
+        ));
+    }
+    if requested_outputs > 0 {
+        return Err(
+            crate::builtins::introspection::dynamic_workspace::assignin_too_many_outputs_error(),
+        );
+    }
+    // Keep name validation before the unknown-selector diagnostic, matching
+    // the established argument-error order without materializing either text.
+    let selector = assignin_args::selector(&arguments[0])?;
+    let mut character_row = [0u8; crate::builtins::common::identifiers::MATLAB_NAME_LENGTH_MAX];
+    let name = assignin_args::name(&arguments[1], &mut character_row)?;
+    match selector {
+        assignin_args::AssigninSelector::Caller => {
+            let current = runtime
+                .service_ports()
+                .require_workspace("assignin caller workspace")
+                .map_err(super::RuntimeCapabilityError::into_runtime_error)?
+                .clone();
+            let caller = current
+                .caller_workspace_with_context(runtime)?
+                .ok_or_else(|| {
+                    crate::runtime_error::semantic_error(
+                        "RunMat:DynamicWorkspaceUnavailable",
+                        "assignin caller workspace is unavailable",
+                    )
+                })?;
+            caller.assign_ref_with_context(runtime, name, &arguments[2])?;
+        }
+        assignin_args::AssigninSelector::Base => {
+            let base = runtime
+                .service_ports()
+                .require_base_workspace("assignin base workspace")
+                .map_err(super::RuntimeCapabilityError::into_runtime_error)?;
+            crate::workspace::assign_logical_base_value_ref_with_context(
+                &base.owner(),
+                &runtime.session_variable_authority(),
+                runtime,
+                name,
+                &arguments[2],
+            )?;
+        }
+        assignin_args::AssigninSelector::Unknown => {
+            return Err(crate::runtime_error::semantic_error(
+                "RunMat:DynamicWorkspaceSelector",
+                "assignin workspace selector must be 'base' or 'caller'",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Execute one catalog-selected dynamic workspace builtin. Registration,
+/// scoped replacement, direct-call observation, and implementation admission
+/// have already selected the canonical builtin body before this function is
+/// entered.
+pub async fn execute_selected_dynamic_workspace(
+    runtime: Option<RuntimeContext>,
+    builtin: runmat_builtins::DynamicWorkspaceBuiltin,
+    arguments: Vec<Value>,
+    requested_outputs: Option<usize>,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    let runtime = runtime.ok_or_else(|| {
+        let descriptor = match builtin {
+            runmat_builtins::DynamicWorkspaceBuiltin::Run => {
+                &runmat_builtins::RUN_ERROR_REQUIRES_VM
+            }
+            runmat_builtins::DynamicWorkspaceBuiltin::Eval
+            | runmat_builtins::DynamicWorkspaceBuiltin::Evalc
+            | runmat_builtins::DynamicWorkspaceBuiltin::Evalin
+            | runmat_builtins::DynamicWorkspaceBuiltin::Assignin => {
+                &runmat_builtins::DYNAMIC_WORKSPACE_ERROR_REQUIRES_VM
+            }
+        };
+        crate::runtime_descriptor_error(builtin.name(), descriptor)
+    })?;
+    let requested_outputs = requested_outputs.unwrap_or(match builtin {
+        runmat_builtins::DynamicWorkspaceBuiltin::Assignin
+        | runmat_builtins::DynamicWorkspaceBuiltin::Run => 0,
+        runmat_builtins::DynamicWorkspaceBuiltin::Eval
+        | runmat_builtins::DynamicWorkspaceBuiltin::Evalc
+        | runmat_builtins::DynamicWorkspaceBuiltin::Evalin => 1,
+    });
+    if builtin == runmat_builtins::DynamicWorkspaceBuiltin::Assignin {
+        execute_assignin_effect(&runtime, &arguments, requested_outputs)?;
+        return crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
+            .map_err(|error| error.into_runtime_error());
+    }
+    let service = runtime
+        .service_ports()
+        .require_source_evaluation("execute dynamic workspace builtin")
+        .map_err(super::RuntimeCapabilityError::into_runtime_error)?;
+    let invocation = DynamicWorkspaceInvocation {
+        builtin,
+        arguments: &arguments,
+        requested_outputs,
+        callsite: crate::callsite::current_callsite(),
+    };
+    let result = service
+        .evaluate_dynamic_workspace(&runtime, invocation)?
+        .await;
+    result
+}
+
 /// Retains an executor-issued source record. The executor retires the record
 /// when the last lease drops; a callback must not leak permanent catalog rows.
 pub trait SourceEvaluationProvenance: std::fmt::Debug {
@@ -102,7 +237,7 @@ impl SessionSourceEvaluation {
         }
         if purpose == SessionSourcePurpose::WorkspaceCallback {
             if let Some(workspace) = runtime.service_ports().workspace() {
-                workspace.ensure_effect_authority()?;
+                workspace.ensure_effect_authority_with_context(runtime)?;
             }
         }
         let service = runtime
@@ -335,6 +470,25 @@ pub trait RuntimeSourceEvaluationService {
         runtime: RuntimeContext,
         request: SessionSourceEvaluation,
     ) -> RuntimeServiceFuture<Result<crate::execution::RootedValueSequence, RuntimeError>>;
+
+    /// Execute an exact dynamic-workspace builtin after callable selection.
+    /// External source services remain source compatible and fail before any
+    /// workspace effect until they implement this stronger authority.
+    fn evaluate_dynamic_workspace<'a>(
+        &'a self,
+        _runtime: &'a RuntimeContext,
+        invocation: DynamicWorkspaceInvocation<'a>,
+    ) -> Result<
+        crate::execution::RuntimeContinuationFuture<'a, crate::execution::RootedValueSequence>,
+        RuntimeError,
+    > {
+        Err(crate::build_runtime_error(format!(
+            "{} requires a workspace-aware execution service",
+            invocation.builtin.name()
+        ))
+        .with_identifier("RunMat:DynamicWorkspaceRequiresVm")
+        .build())
+    }
 }
 
 #[cfg(test)]

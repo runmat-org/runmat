@@ -762,6 +762,15 @@ impl RuntimeContext {
             })
     }
 
+    /// Read a legacy slot from this selected session, not from ambient state
+    /// or a coincidentally named `var_N` global.
+    pub fn session_global_slot_value(
+        &self,
+        slot: usize,
+    ) -> Result<Option<runmat_value::Value>, crate::RuntimeError> {
+        self.session_variable_authority().global_slot(slot)
+    }
+
     /// Enumerate this exact session's global namespace without relying on
     /// ambient runtime activation.
     pub fn session_global_names(&self) -> Result<Vec<String>, crate::RuntimeError> {
@@ -1576,7 +1585,14 @@ impl RuntimeContext {
 
     /// Create an isolated worker runtime that retains immutable resolution and
     /// host capabilities while owning independent mutable language state.
-    pub fn fork_parallel_lab(&self, services: RuntimeServicePorts) -> Self {
+    pub fn fork_parallel_lab(
+        &self,
+        services: RuntimeServicePorts,
+    ) -> Result<Self, crate::RuntimeError> {
+        // A prepared session-global commit relies on its root remaining
+        // unique. Refuse a fork before it clones that root; the reservation
+        // is released by its transaction token on commit or cancellation.
+        self.state.session_global_mutation.ensure_idle()?;
         // A lab is an isolated mutable-language-state owner. Caller-provided
         // ports cannot confer either its current frame or session base
         // workspace; a lab workspace must be installed explicitly afterward.
@@ -1630,7 +1646,9 @@ impl RuntimeContext {
                 .snapshot(),
         ));
         *child.state.classes.borrow_mut() = self.state.classes.borrow().clone();
-        *child.state.session_variables.borrow_mut() = self.state.session_variables.borrow().clone();
+        self.state.session_global_mutation.ensure_idle()?;
+        *child.state.session_variables.borrow_mut() =
+            self.state.session_variables.borrow().fork_snapshot();
         child
             .state
             .runmat_extensions_enabled
@@ -1653,7 +1671,7 @@ impl RuntimeContext {
             .callstack_limit
             .set(self.state.callstack_limit.get());
         *child.state.error_namespace.borrow_mut() = self.state.error_namespace.borrow().clone();
-        child
+        Ok(child)
     }
 
     /// Scope every poll of `future` to this context. This is the supported

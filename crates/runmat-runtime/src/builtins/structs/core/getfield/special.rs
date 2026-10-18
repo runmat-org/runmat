@@ -1,6 +1,7 @@
 use super::errors;
 use crate::{make_cell_with_shape, BuiltinResult};
 use runmat_builtins::{GETFIELD_ERROR_INVALID_HANDLE, GETFIELD_ERROR_MISSING_FIELD};
+use runmat_types::ExceptionProperty;
 use runmat_value::{Listener, MException, Value};
 
 pub(super) fn listener_field(listener: &Listener, name: &str) -> BuiltinResult<Value> {
@@ -39,12 +40,16 @@ fn read_listener_value(listener: &Listener, callback: bool) -> BuiltinResult<Val
 }
 
 pub(super) fn exception_field(exception: &MException, name: &str) -> BuiltinResult<Value> {
-    match name {
-        "message" => Ok(Value::String(exception.message.clone())),
-        "identifier" => Ok(Value::String(exception.identifier.clone())),
-        "stack" => exception_stack_to_value(&exception.stack),
-        other => Err(errors::with_message(
-            format!("Reference to non-existent field '{}'.", other),
+    match ExceptionProperty::from_name(name) {
+        Some(ExceptionProperty::Message) => Ok(crate::object::resolve::exception_text_value(
+            &exception.message,
+        )),
+        Some(ExceptionProperty::Identifier) => Ok(crate::object::resolve::exception_text_value(
+            &exception.identifier,
+        )),
+        Some(ExceptionProperty::Stack) => exception_stack_to_value(&exception.stack),
+        None => Err(errors::with_message(
+            format!("Reference to non-existent field '{}'.", name),
             &GETFIELD_ERROR_MISSING_FIELD,
         )),
     }

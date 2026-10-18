@@ -24,6 +24,7 @@ pub enum MirSubscriptStep {
         arguments: Vec<MirDottedInvokeArgument>,
         semantic_fallback: Option<runmat_types::CallableIdentity>,
     },
+    PreparedDynamicMember(crate::MirPreparedExpressionRegion),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,6 +35,7 @@ pub enum MirSubscriptChainError {
     BracesWithoutCellPlan,
     InvalidCellExpandAll,
     InvalidDottedArgumentRegion,
+    InvalidPreparedRegion,
 }
 
 impl fmt::Display for MirSubscriptChainError {
@@ -51,6 +53,7 @@ impl fmt::Display for MirSubscriptChainError {
             Self::InvalidDottedArgumentRegion => {
                 "dotted invocation argument preparation is invalid"
             }
+            Self::InvalidPreparedRegion => "subscript preparation is invalid",
         })
     }
 }
@@ -60,7 +63,10 @@ impl MirSubscriptStep {
     pub fn call_syntax(&self) -> Option<runmat_types::CallSyntax> {
         match self {
             Self::DottedInvoke { .. } => Some(runmat_types::CallSyntax::DottedInvoke),
-            Self::Index(_) | Self::Member(_) | Self::DynamicMember(_) => None,
+            Self::Index(_)
+            | Self::Member(_)
+            | Self::DynamicMember(_)
+            | Self::PreparedDynamicMember(_) => None,
         }
     }
 
@@ -68,7 +74,10 @@ impl MirSubscriptStep {
     pub fn fallback_policy(&self) -> Option<runmat_types::CallableFallbackPolicy> {
         match self {
             Self::DottedInvoke { .. } => Some(runmat_types::CallableFallbackPolicy::ObjectDispatch),
-            Self::Index(_) | Self::Member(_) | Self::DynamicMember(_) => None,
+            Self::Index(_)
+            | Self::Member(_)
+            | Self::DynamicMember(_)
+            | Self::PreparedDynamicMember(_) => None,
         }
     }
 }
@@ -78,6 +87,16 @@ impl MirSubscriptChain {
         for step in &self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => indexing.visit_sequence_locals(visitor),
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    let local_sequences = region
+                        .defined_sequences()
+                        .collect::<std::collections::BTreeSet<_>>();
+                    region.visit_sequence_locals(|sequence| {
+                        if !local_sequences.contains(sequence) {
+                            visitor(sequence);
+                        }
+                    });
+                }
                 MirSubscriptStep::DottedInvoke { arguments, .. } => {
                     for argument in arguments {
                         argument.visit_sequence_locals(visitor);
@@ -99,6 +118,7 @@ impl MirSubscriptChain {
             match step {
                 MirSubscriptStep::Index(indexing) => indexing
                     .visit_direct_expression_regions_dyn(&mut |region| visitor(region.steps())),
+                MirSubscriptStep::PreparedDynamicMember(region) => visitor(region.steps()),
                 MirSubscriptStep::DottedInvoke { arguments, .. } => {
                     for argument in arguments {
                         match argument {
@@ -122,6 +142,11 @@ impl MirSubscriptChain {
         for step in &self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => validate_index_step(indexing)?,
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    if region.validate().is_err() {
+                        return Err(MirSubscriptChainError::InvalidPreparedRegion);
+                    }
+                }
                 MirSubscriptStep::DottedInvoke { arguments, .. } => {
                     if arguments
                         .iter()
@@ -144,7 +169,9 @@ impl MirSubscriptChain {
                 .any(|component| matches!(component, MirIndexComponent::ContextualExpr(region) if region.contains_contextual_end())),
             MirSubscriptStep::DottedInvoke { arguments, .. } =>
                 arguments.iter().any(MirDottedInvokeArgument::contains_contextual_end),
-            MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => false,
+            MirSubscriptStep::Member(_)
+            | MirSubscriptStep::DynamicMember(_)
+            | MirSubscriptStep::PreparedDynamicMember(_) => false,
         })
     }
 
@@ -159,6 +186,9 @@ impl MirSubscriptChain {
                     }
                 }
                 MirSubscriptStep::DynamicMember(member) => visitor(member),
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    region.visit_operands_dyn(&mut visitor)
+                }
                 MirSubscriptStep::Member(_) => {}
             }
         }
@@ -175,16 +205,26 @@ impl MirSubscriptChain {
                     }
                 }
                 MirSubscriptStep::DynamicMember(member) => visitor(member),
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    region.visit_external_operands(&mut visitor)
+                }
                 MirSubscriptStep::Member(_) => {}
             }
         }
     }
 
-    pub fn visit_expression_regions(&self, mut visitor: impl FnMut(&crate::MirExpressionRegion)) {
+    pub fn visit_expression_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
         for step in &self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => {
                     indexing.visit_expression_regions(&mut visitor)
+                }
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    visitor(crate::MirExpressionRegionRef::Prepared(region));
+                    region.visit_nested_regions(&mut visitor);
                 }
                 MirSubscriptStep::DottedInvoke { arguments, .. } => {
                     for argument in arguments {
@@ -198,12 +238,15 @@ impl MirSubscriptChain {
 
     pub(crate) fn visit_direct_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         for step in &self.steps {
             match step {
                 MirSubscriptStep::Index(indexing) => {
                     indexing.visit_direct_expression_regions_dyn(visitor)
+                }
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    visitor(crate::MirExpressionRegionRef::Prepared(region))
                 }
                 MirSubscriptStep::DottedInvoke { arguments, .. } => {
                     for argument in arguments {
@@ -226,6 +269,9 @@ impl MirSubscriptChain {
                     }
                 }
                 MirSubscriptStep::DynamicMember(member) => visitor(member),
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    region.visit_operands_mut_dyn(&mut visitor)
+                }
                 MirSubscriptStep::Member(_) => {}
             }
         }
@@ -239,7 +285,13 @@ fn validate_index_step(indexing: &MirIndexing) -> Result<(), MirSubscriptChainEr
     ) {
         return Err(MirSubscriptChainError::InvalidReadContext);
     }
-    validate_index_plan(indexing)
+    validate_index_plan(indexing)?;
+    if indexing.components.iter().any(|component| {
+        matches!(component, MirIndexComponent::PreparedExpr(region) if region.validate().is_err())
+    }) {
+        return Err(MirSubscriptChainError::InvalidPreparedRegion);
+    }
+    Ok(())
 }
 
 fn validate_index_plan(indexing: &MirIndexing) -> Result<(), MirSubscriptChainError> {
@@ -285,41 +337,70 @@ pub enum MirIndexComponent {
     Colon,
     Expr(MirOperand),
     ContextualExpr(crate::MirExpressionRegion),
+    PreparedExpr(crate::MirPreparedExpressionRegion),
 }
 
 impl MirIndexing {
     pub(crate) fn visit_sequence_locals(&self, visitor: &mut dyn FnMut(&MirSequenceLocalId)) {
         for component in &self.components {
-            if let MirIndexComponent::ContextualExpr(region) = component {
+            let region = match component {
+                MirIndexComponent::ContextualExpr(region) => {
+                    crate::MirExpressionRegionRef::Contextual(region)
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    crate::MirExpressionRegionRef::Prepared(region)
+                }
+                MirIndexComponent::Colon | MirIndexComponent::Expr(_) => continue,
+            };
+            {
                 let local_sequences = region
                     .defined_sequences()
                     .collect::<std::collections::BTreeSet<_>>();
-                region.visit_sequence_locals(|sequence| {
-                    if !local_sequences.contains(sequence) {
-                        visitor(sequence);
+                for step in region.steps() {
+                    let mut visit = |sequence: &MirSequenceLocalId| {
+                        if !local_sequences.contains(sequence) {
+                            visitor(sequence);
+                        }
+                    };
+                    match step {
+                        MirExpressionStep::Let { value, .. } => {
+                            value.visit_direct_sequence_locals(&mut visit)
+                        }
+                        MirExpressionStep::CaptureSequence { source, .. } => {
+                            source.visit_sequence_locals(&mut visit)
+                        }
                     }
-                });
+                }
             }
         }
     }
     pub(crate) fn visit_direct_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         for component in &self.components {
-            if let MirIndexComponent::ContextualExpr(region) = component {
-                visitor(region);
+            match component {
+                MirIndexComponent::ContextualExpr(region) => {
+                    visitor(crate::MirExpressionRegionRef::Contextual(region))
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    visitor(crate::MirExpressionRegionRef::Prepared(region))
+                }
+                MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
             }
         }
     }
 
-    pub fn visit_expression_regions(&self, mut visitor: impl FnMut(&crate::MirExpressionRegion)) {
+    pub fn visit_expression_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
         self.visit_expression_regions_dyn(&mut visitor);
     }
 
     pub(crate) fn visit_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         self.visit_direct_expression_regions_dyn(&mut |region| {
             visitor(region);
@@ -335,8 +416,12 @@ impl MirIndexing {
         for component in &self.components {
             if let MirIndexComponent::Expr(operand) = component {
                 visitor(operand);
-            } else if let MirIndexComponent::ContextualExpr(region) = component {
-                region.visit_operands_dyn(visitor);
+            } else {
+                match component {
+                    MirIndexComponent::ContextualExpr(region) => region.visit_operands_dyn(visitor),
+                    MirIndexComponent::PreparedExpr(region) => region.visit_operands_dyn(visitor),
+                    MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
+                }
             }
         }
     }
@@ -345,8 +430,16 @@ impl MirIndexing {
         for component in &self.components {
             if let MirIndexComponent::Expr(operand) = component {
                 visitor(operand);
-            } else if let MirIndexComponent::ContextualExpr(region) = component {
-                region.visit_external_operands(&mut *visitor);
+            } else {
+                match component {
+                    MirIndexComponent::ContextualExpr(region) => {
+                        region.visit_external_operands(&mut *visitor)
+                    }
+                    MirIndexComponent::PreparedExpr(region) => {
+                        region.visit_external_operands(&mut *visitor)
+                    }
+                    MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
+                }
             }
         }
     }
@@ -363,8 +456,16 @@ impl MirIndexing {
         for component in &mut self.components {
             if let MirIndexComponent::Expr(operand) = component {
                 visitor(operand);
-            } else if let MirIndexComponent::ContextualExpr(region) = component {
-                region.visit_operands_mut_dyn(visitor);
+            } else {
+                match component {
+                    MirIndexComponent::ContextualExpr(region) => {
+                        region.visit_operands_mut_dyn(visitor)
+                    }
+                    MirIndexComponent::PreparedExpr(region) => {
+                        region.visit_operands_mut_dyn(visitor)
+                    }
+                    MirIndexComponent::Colon | MirIndexComponent::Expr(_) => {}
+                }
             }
         }
     }

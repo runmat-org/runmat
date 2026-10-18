@@ -1,4 +1,5 @@
 use crate::bytecode::{program::ExecutionContext, FunctionRegistry, Instr};
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::execution::value_codec::ValueCodecError;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -10,7 +11,7 @@ mod distributed;
 mod parfor;
 mod spmd;
 mod tasks;
-pub(crate) use distributed::encode_spmd_output;
+pub(crate) use distributed::encode_spmd_interpreter_output;
 
 pub(super) struct ParallelDispatchContext<'a> {
     pub bytecode: &'a crate::bytecode::Bytecode,
@@ -22,7 +23,7 @@ pub(super) struct ParallelDispatchContext<'a> {
 pub(super) async fn dispatch(
     instr: &Instr,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
     pc: &mut usize,
     sequence_state: &mut super::SequenceState,
     context: ParallelDispatchContext<'_>,

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::execution::{RootedValue, RootedValueLease, RootedValueSequence};
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::RuntimeError;
@@ -10,12 +11,12 @@ use super::support::{empty_cell_root, root};
 
 pub(super) async fn commit(
     stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     state: &mut SequenceState,
     retained_outputs: usize,
     authority: &super::super::slot_authority::AssignmentSlotAuthority<'_>,
-    before_overwrite: &mut dyn FnMut(&Value, &Value),
-    after_store: &mut dyn FnMut(usize, &Value),
+    before_overwrite: &mut dyn FnMut(usize),
+    after_store: &mut dyn FnMut(usize),
 ) -> Result<(), RuntimeError> {
     let layout = state.output_layout()?;
     let source_roots = state
@@ -119,10 +120,9 @@ pub(super) async fn commit(
             )
         })?;
         value.with_owned(|value| {
-            before_overwrite(root(vars, slot)?, &value);
-            crate::runtime::workspace::admit_workspace_slot_write(slot, &value)?;
-            vars[slot] = value;
-            after_store(slot, &vars[slot]);
+            before_overwrite(slot);
+            crate::runtime::workspace::commit_workspace_slot_value(vars, slot, None, value)?;
+            after_store(slot);
             authority.publish(vars, slot)?;
             Ok::<_, RuntimeError>(())
         })?;

@@ -3,6 +3,27 @@ use super::*;
 #[path = "workspace/bindings.rs"]
 mod bindings;
 
+#[path = "workspace/binding_table.rs"]
+pub(super) mod binding_table;
+
+#[path = "workspace/binding_control.rs"]
+pub(super) mod binding_control;
+
+#[path = "workspace/binding_scratch.rs"]
+mod binding_scratch;
+
+#[path = "workspace/binding_key.rs"]
+pub(super) mod binding_key;
+
+#[path = "workspace/global_key.rs"]
+pub(super) mod global_key;
+
+#[path = "workspace/publication.rs"]
+mod publication;
+
+#[path = "workspace/ingress.rs"]
+mod ingress;
+
 use super::error_conversion::into_anyhow as workspace_runtime_error;
 
 impl RunMatSession {
@@ -18,16 +39,32 @@ impl RunMatSession {
         self.abi_workspace_handle
     }
 
+    pub(in crate::session) fn admitted_workspace_binding_key(
+        &self,
+        name: &str,
+    ) -> std::result::Result<crate::abi::WorkspaceBindingKey, RuntimeError> {
+        self.workspace_bindings
+            .borrow()
+            .get(name)
+            .map(|binding| binding.key.clone())
+            .ok_or_else(|| {
+                runmat_runtime::build_runtime_error(format!(
+                    "canonical workspace name `{name}` has no admitted compiler binding"
+                ))
+                .with_identifier("RunMat:WorkspaceBindingSlots")
+                .build()
+            })
+    }
+
+    #[cfg(test)]
     pub(crate) fn workspace_binding_key(&self, name: &str) -> crate::abi::WorkspaceBindingKey {
-        if self
+        if let Some(binding) = self
             .workspace_bindings
             .borrow()
             .get(name)
-            .is_some_and(|binding| {
-                matches!(&binding.key, crate::abi::WorkspaceBindingKey::Global { .. })
-            })
+            .filter(|binding| binding.key.is_global())
         {
-            return self.global_workspace_binding_key(name);
+            return binding.key.clone();
         }
         let binding = runmat_hir::BindingName(name.to_string());
         if let Some(source) = self.active_source_identity.clone() {
@@ -44,16 +81,6 @@ impl RunMatSession {
         }
     }
 
-    pub(crate) fn global_workspace_binding_key(
-        &self,
-        name: &str,
-    ) -> crate::abi::WorkspaceBindingKey {
-        crate::abi::WorkspaceBindingKey::Global {
-            scope: crate::abi::GlobalScopeKey::Session(self.abi_workspace_handle.0),
-            name: runmat_hir::BindingName(name.to_string()),
-        }
-    }
-
     pub(crate) fn session_global_binding_names(
         &self,
     ) -> std::result::Result<std::collections::HashSet<String>, RuntimeError> {
@@ -65,11 +92,17 @@ impl RunMatSession {
             .collect())
     }
 
+    #[cfg(test)]
     pub(crate) fn bind_workspace_slot(&mut self, name: String, slot: usize) {
         let key = self.workspace_binding_key(&name);
-        self.workspace_bindings
-            .borrow_mut()
-            .insert(name, SessionWorkspaceBinding { key, slot });
+        let mut bindings = self.workspace_bindings.borrow_mut();
+        bindings
+            .reserve_unbounded(1)
+            .expect("test binding capacity");
+        bindings.insert_prepared(
+            runmat_runtime::workspace::WorkspaceName::unbounded(&name),
+            SessionWorkspaceBinding::unbounded(key, slot),
+        );
     }
 
     pub(crate) fn logical_workspace_values(
@@ -83,44 +116,97 @@ impl RunMatSession {
             .map(|(name, value)| (name.to_string(), value.clone()))
             .collect::<std::collections::BTreeMap<_, _>>();
         for name in global_names {
-            if let Some(value) = self.runtime_context.session_global_value(&name)? {
+            if let Some(value) = self.logical_workspace_value(&name)? {
                 values.insert(name, value);
             }
         }
         Ok(values)
     }
 
+    pub(crate) fn logical_workspace_names(
+        &self,
+    ) -> std::result::Result<std::collections::BTreeSet<String>, RuntimeError> {
+        let base = self.base_workspace_snapshot()?;
+        let globals = self.session_global_binding_names()?;
+        let mut names = base
+            .iter()
+            .filter(|(name, _)| !globals.contains(*name))
+            .map(|(name, _)| name.to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+        let authority = self.runtime_context.session_variable_authority();
+        for name in globals {
+            let target = self
+                .base_workspace
+                .global_target(&name)
+                .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
+                .ok_or_else(|| {
+                    runmat_runtime::build_runtime_error(
+                        "global binding has no canonical storage target",
+                    )
+                    .with_identifier("RunMat:Workspace:GlobalTargetUnavailable")
+                    .build()
+                })?;
+            if authority.contains_global_target(&target)? {
+                names.insert(name);
+            }
+        }
+        Ok(names)
+    }
+
     pub(crate) fn logical_workspace_value(
         &self,
         name: &str,
     ) -> std::result::Result<Option<Value>, RuntimeError> {
-        if self
-            .base_workspace
-            .is_global(name)
-            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?
-        {
-            return self.runtime_context.session_global_value(name);
-        }
-        self.base_workspace
-            .lookup(name)
-            .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)
+        runmat_runtime::workspace::lookup_logical_base_value(
+            &self.base_workspace,
+            &self.runtime_context.session_variable_authority(),
+            name,
+        )
     }
 
     pub(crate) fn lowering_workspace_bindings(&self) -> HashMap<String, usize> {
         self.workspace_bindings
             .borrow()
             .iter()
-            .map(|(name, binding)| (name.clone(), binding.slot))
+            .map(|(name, binding)| (name.as_str().to_owned(), binding.slot))
             .collect()
     }
 
     pub fn clear_variables(&mut self) -> std::result::Result<(), RuntimeError> {
+        let lease = self
+            .workspace_bindings
+            .reserve(
+                binding_control::BindingPhase::Clear,
+                Some(&self.runtime_context),
+            )
+            .map_err(|error| {
+                runmat_runtime::build_runtime_error(format!(
+                    "workspace binding clear admission failed: {error}"
+                ))
+                .with_identifier("RunMat:WorkspaceBindingSlots")
+                .with_source(error)
+                .build()
+            })?;
+        lease
+            .checkpoint(Some(&self.runtime_context))
+            .map_err(|error| {
+                runmat_runtime::build_runtime_error(format!(
+                    "workspace binding clear authority failed: {error}"
+                ))
+                .with_identifier("RunMat:WorkspaceBindingSlots")
+                .with_source(error)
+                .build()
+            })?;
         let mut delta = runmat_runtime::workspace::WorkspaceDelta::new();
         delta.clear();
         self.base_workspace
             .apply(delta)
             .map_err(runmat_runtime::workspace::base_workspace_error_to_runtime)?;
-        self.workspace_bindings.borrow_mut().clear();
+        lease
+            .try_borrow_mut()
+            .expect("clear lease keeps the binding table available")
+            .clear_prepared();
+        lease.mark_changed();
         self.workspace_preview_tokens.clear();
         Ok(())
     }
@@ -165,6 +251,9 @@ impl RunMatSession {
             runmat_runtime::execution::validate_storable_value(value)
                 .map_err(workspace_runtime_error)?;
         }
+        let (prepared_bindings, binding_lease) = self
+            .prepare_import_binding_metadata(entries.as_slice())
+            .map_err(workspace_runtime_error)?;
         let mut delta = runmat_runtime::workspace::WorkspaceDelta::new();
         delta.clear();
         for (name, value) in entries.as_slice() {
@@ -175,13 +264,9 @@ impl RunMatSession {
         self.base_workspace
             .apply(delta)
             .map_err(base_workspace_error)?;
-        self.workspace_bindings.borrow_mut().clear();
-        for (index, (name, _)) in entries.as_slice().iter().enumerate() {
-            let key = self.interactive_workspace_binding_key(name);
-            self.workspace_bindings
-                .borrow_mut()
-                .insert(name.clone(), SessionWorkspaceBinding { key, slot: index });
-        }
+        binding_lease
+            .replace_table(prepared_bindings)
+            .expect("import lease keeps the prepared binding table available");
 
         self.workspace_preview_tokens.clear();
         Ok(())
@@ -342,6 +427,7 @@ fn base_workspace_error(error: runmat_runtime::workspace::BaseWorkspaceError) ->
     ))
 }
 
+#[cfg(test)]
 fn source_binding_def_path(source_name: &str) -> runmat_hir::DefPath {
     use std::path::Path;
 

@@ -82,14 +82,35 @@ fn complete_observed_upload(provider: &WgpuProvider) -> Result<()> {
             recorder.expects_operation(&operation)
                 || recorder.observes_conditional_provider_upload(provider.device_id())
                 || recorder.observes_selected_image_upload(provider.device_id())
+                || recorder.observes_stochastic_evolution_source_transfer(provider.device_id())
                 || recorder.observes_real_unary_upload(provider.device_id())
                 || recorder.observes_power_scalar_upload(provider.device_id())
         })
     else {
         return Ok(());
     };
+    let source_transfer_retirement = if recorder
+        .observes_stochastic_evolution_source_transfer(provider.device_id())
+    {
+        match recorder.take_stochastic_evolution_source_transfer_retirement(provider.device_id()) {
+            Some(notifier) => Some(notifier),
+            None => {
+                recorder.fail(
+                    runmat_accelerate_api::observation::ProviderObservationFailure::ExecutionUnproven,
+                );
+                anyhow::bail!(
+                    "selected stochastic source upload lacks an armed retirement witness"
+                );
+            }
+        }
+    } else {
+        None
+    };
     let checkpoint = recorder.submission_checkpoint();
-    provider.with_emission(|emission, pending| -> Result<()> {
+    provider.with_emission(move |emission, pending| -> Result<()> {
+        if let Some(notifier) = source_transfer_retirement {
+            pending.retire_source_transfer_with_next_submit(notifier)?;
+        }
         let encoder = pending.profiled_encoder(
             emission,
             &wgpu::CommandEncoderDescriptor {
@@ -278,6 +299,22 @@ impl AccelProvider for WgpuProvider {
 
     fn output_registration_preparation_host_bytes(&self) -> Option<u64> {
         AllocationState::managed_preparation_host_bytes()
+    }
+
+    fn reusable_output_registration_host_bytes(&self) -> Option<u64> {
+        runmat_execution::resource::ProviderRegistrationSlotPool::requested_host_bytes()
+    }
+
+    fn prepare_reusable_output_host_metadata(
+        &self,
+        admission: Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        registrations: usize,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    > {
+        self.allocations
+            .prepare_reusable_managed_metadata(admission, registrations)
+            .map_err(runmat_accelerate_api::ProviderExecutionError::from)
     }
 
     fn prepare_output_host_metadata(
@@ -667,6 +704,9 @@ impl AccelProvider for WgpuProvider {
             .is_some_and(|progress| progress.is_available())
         {
             return runmat_accelerate_api::observation::ProviderObservationCapability::Unsupported;
+        }
+        if let Some(capability) = self.stochastic_evolution_observation_capability(query) {
+            return with_device_query(capability);
         }
         if query.workload.gpu_random.is_some() || query.workload.gpu_integer.is_some() {
             use runmat_accelerate_api::observation::{
@@ -1094,6 +1134,9 @@ impl AccelProvider for WgpuProvider {
         &self,
         query: &runmat_accelerate_api::ProviderFeasibilityQuery,
     ) -> runmat_accelerate_api::ProviderFeasibility {
+        if let Some(stochastic) = self.stochastic_evolution_feasibility(query) {
+            return stochastic;
+        }
         if let Some(random) = self.random_child_feasibility(query) {
             return random;
         }
@@ -1390,14 +1433,48 @@ impl AccelProvider for WgpuProvider {
         self.random_unifrnd_exec(a, b, shape)
     }
 
-    fn stochastic_evolution(
+    fn stochastic_evolution_planning_host_workspace(
         &self,
-        state: &GpuTensorHandle,
-        drift: f64,
-        scale: f64,
-        steps: u32,
-    ) -> Result<GpuTensorHandle> {
-        self.stochastic_evolution_exec(state, drift, scale, steps)
+        _rank: usize,
+    ) -> runmat_execution::ResourceByteBound {
+        // `plan_stochastic_evolution_exec` does not allocate temporary host
+        // workspace. Its two shape clones are retained by the returned plan,
+        // so Runtime accounts them as selected-plan metadata rather than as
+        // planning scratch.
+        runmat_execution::ResourceByteBound::Known(0)
+    }
+
+    fn stochastic_evolution_source_transfer_retirement_host_workspace(
+        &self,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_accelerate_api::observation::stochastic_evolution_source_transfer_retirement_host_upper_bytes()
+            .map(runmat_execution::ResourceByteBound::Known)
+            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+            ))
+    }
+
+    fn plan_stochastic_evolution(
+        &self,
+        request: &runmat_accelerate_api::stochastic_evolution::ProviderStochasticEvolutionWorkRequest,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<
+        Option<runmat_accelerate_api::stochastic_evolution::ProviderStochasticEvolutionSelection>,
+    > {
+        Ok(self.plan_stochastic_evolution_exec(request))
+    }
+
+    fn execute_stochastic_evolution_tile<'a>(
+        &'a self,
+        request: runmat_accelerate_api::stochastic_evolution::ProviderStochasticEvolutionTileRequest<'a>,
+        metadata: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        completion_control: Option<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        >,
+    ) -> runmat_accelerate_api::ProviderExecutionFuture<
+        'a,
+        runmat_accelerate_api::stochastic_evolution::ProviderStochasticEvolutionProgress,
+    > {
+        Box::pin(self.stochastic_evolution_tile_exec(request, metadata, completion_control))
     }
 
     fn fspecial(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
@@ -3877,10 +3954,27 @@ impl AccelProvider for WgpuProvider {
         &self,
         host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
     ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
+        self.upload_logical_raw_admitted(host, None, None)
+    }
+    fn upload_logical_raw_admitted(
+        &self,
+        host: &runmat_accelerate_api::HostLogicalTensorView<'_>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        scratch: Option<runmat_accelerate_api::HostLogicalUploadScratch<'_>>,
+    ) -> runmat_accelerate_api::ProviderExecutionResult<GpuTensorHandle> {
         host.validate()?;
-        let output = self.upload_logical_exec(host).map_err(|error| {
-            runmat_accelerate_api::ProviderExecutionError::from(error).with_unproven_effects()
-        })?;
+        let buffer_created = std::cell::Cell::new(false);
+        let output = self
+            .upload_logical_exec_observed_admitted(
+                host,
+                || {
+                    buffer_created.set(true);
+                    Ok(())
+                },
+                admission,
+                scratch,
+            )
+            .map_err(|error| numeric_upload_failure(error, buffer_created.get()))?;
         if let Err(error) = complete_observed_upload(self) {
             let primary = runmat_accelerate_api::ProviderExecutionError::from(error).after_effect();
             let cleanup = output.release().err().into_iter().collect();
@@ -3897,6 +3991,85 @@ impl AccelProvider for WgpuProvider {
     fn download_numeric<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelNumericDownloadFuture<'a> {
         Box::pin(async move { self.download_numeric_exec(h).await })
     }
+    fn download_numeric_admitted<'a>(
+        &'a self,
+        h: &'a GpuTensorHandle,
+        completion_claim: std::sync::Arc<
+            dyn runmat_execution::resource::RetainedHostAllocationClaim,
+        >,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(self.download_numeric_exec_with_claim_and_stage(h, Some(completion_claim), None))
+    }
+    fn prepare_numeric_download_stage(
+        &self,
+        source: &GpuTensorHandle,
+        query: &runmat_accelerate_api::ProviderFeasibilityQuery,
+        completion_claim: std::sync::Arc<
+            dyn runmat_execution::resource::RetainedHostAllocationClaim,
+        >,
+    ) -> anyhow::Result<runmat_accelerate_api::PreparedNumericDownloadStage> {
+        use runmat_execution::ResourceByteBound;
+        if !self
+            .numeric_download_feasibility_exec(source, query)
+            .is_supported()
+        {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "exact numeric download staging source/query",
+            ));
+        }
+        let ResourceByteBound::Known(scratch) =
+            self.download_numeric_provider_scratch_bound(source)
+        else {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "numeric download staging bound",
+            ));
+        };
+        let entry = self.get_entry_raw(source)?;
+        let staging = if entry.len == 0 {
+            None
+        } else {
+            Some(self.with_emission(|emission, _| {
+                emission.device().create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("runmat-numeric-download-staging"),
+                    size: entry.allocated_bytes,
+                    usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            })?)
+        };
+        AllocationState::prepare_numeric_download_stage(
+            &self.allocations,
+            source,
+            scratch,
+            self.download_numeric_queue_slots(source),
+            staging,
+            completion_claim,
+        )
+    }
+    fn download_numeric_admitted_stage<'a>(
+        &'a self,
+        source: &'a GpuTensorHandle,
+        stage: runmat_accelerate_api::PreparedNumericDownloadStage,
+    ) -> AccelNumericDownloadFuture<'a> {
+        let claim = stage.completion_claim();
+        Box::pin(self.download_numeric_exec_with_claim_and_stage(source, Some(claim), Some(stage)))
+    }
+    fn download_numeric_completion_host_bound(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        let future = self.download_numeric_exec_with_claim_and_stage(handle, None, None);
+        let future_bytes = u64::try_from(std::mem::size_of_val(&future)).ok();
+        super::core::map_completion_host_upper_bytes()
+            .and_then(|callback| callback.checked_add(future_bytes?))
+            .and_then(|bytes| {
+                bytes.checked_add(super::allocation_state::numeric_download_stage_host_bytes()?)
+            })
+            .map(runmat_execution::ResourceByteBound::Known)
+            .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
+                runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+            ))
+    }
     fn download_numeric_host_workspace_bound(
         &self,
         handle: &GpuTensorHandle,
@@ -3905,7 +4078,9 @@ impl AccelProvider for WgpuProvider {
 
         // Decoding allocates the returned native vector directly from mapped
         // staging bytes. A 2-D lazy transpose clones that vector once before
-        // replacing it. The mapped wgpu buffer is provider-owned scratch.
+        // replacing it. Entry lookup constructs one logical shape Vec, which
+        // overlaps the returned native shape until this call returns. The
+        // mapped wgpu buffer is provider-owned scratch.
         let Some(payload) =
             runmat_accelerate_api::checked_numeric_download_host_payload_bytes(handle)
         else {
@@ -3917,8 +4092,15 @@ impl AccelProvider for WgpuProvider {
             } else {
                 0
             };
+        let shapes = handle
+            .shape()
+            .len()
+            .checked_mul(std::mem::size_of::<usize>())
+            .and_then(|bytes| bytes.checked_mul(2))
+            .and_then(|bytes| u64::try_from(bytes).ok());
         payload
             .checked_add(extra)
+            .and_then(|bytes| bytes.checked_add(shapes?))
             .map(ResourceByteBound::Known)
             .unwrap_or(ResourceByteBound::Unavailable(
                 ResourceBoundUnavailable::NoScratchBound,

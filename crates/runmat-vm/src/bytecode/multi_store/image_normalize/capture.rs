@@ -6,6 +6,7 @@ use super::{
 };
 use crate::accel::graph::AccelStore;
 use crate::bytecode::program::ExecutionContext;
+use crate::interpreter::vars::InterpreterVars;
 use runmat_accelerate::fusion::{
     image_reduction::{ImageSourceLeaf, ImageSourceTranscript},
     FusionGroupPlan,
@@ -40,39 +41,55 @@ pub(super) fn sealed_entry_inputs(
     sources.try_reserve_exact(plan.inputs.len()).ok()?;
     for &id in &plan.inputs {
         let info = graph.value(id)?;
-        let mut prior_binding: Option<&VarBinding> = None;
+        let indexed_binding = graph.var_binding(id);
+        let mut indexed_live = None;
+        let mut sole_live = None;
+        let mut ambiguous_live = false;
         for store in stores
             .iter()
             .filter(|store| store.pc < start && store.value_id == id)
         {
-            if prior_binding.is_some_and(|binding| binding != &store.binding) {
-                // One graph value was assigned to multiple slots. Its ValueId
-                // does not identify which later Load supplied this operand.
-                return None;
+            if stores
+                .iter()
+                .rev()
+                .find(|candidate| candidate.pc < start && candidate.binding == store.binding)?
+                .value_id
+                != id
+            {
+                continue;
             }
-            prior_binding = Some(&store.binding);
+            if indexed_binding == Some(&store.binding) {
+                indexed_live = Some(&store.binding);
+            }
+            match sole_live {
+                None => sole_live = Some(&store.binding),
+                Some(binding) if binding == &store.binding => {}
+                Some(_) => ambiguous_live = true,
+            }
         }
+        // The graph reverse index supplies semantic binding identity only
+        // when that exact binding still holds the value at the region entry.
+        // Otherwise a single live ordered store is authoritative; multiple
+        // live aliases without a typed identity remain genuinely ambiguous.
+        let prior_binding = if indexed_binding.is_some() {
+            indexed_live
+        } else {
+            (!ambiguous_live).then_some(sole_live).flatten()
+        };
         let entry = if let Some(binding) = prior_binding {
             if let ValueOrigin::Variable { kind, index } = &info.origin {
                 if binding.kind != *kind || binding.index != *index {
                     return None;
                 }
             }
-            if stores
-                .iter()
-                .rev()
-                .find(|store| store.pc < start && &store.binding == binding)?
-                .value_id
-                != id
-            {
-                // A later write replaced this value before the region began.
-                return None;
-            }
             if let ValueOrigin::NodeOutput { node, .. } = &info.origin {
                 if graph.node(*node)?.span.end >= start {
                     return None;
                 }
             }
+            // The ordered pre-region store is the temporal binding authority.
+            // `AccelGraph::var_binding` is a whole-graph reverse index and may
+            // name a later store of the same graph value to another slot.
             ImageEntryInput::Binding(binding.clone())
         } else {
             match &info.origin {
@@ -119,17 +136,6 @@ pub(super) fn sealed_entry_inputs(
             }
         };
         if let ImageEntryInput::Binding(binding) = &entry {
-            if prior_binding.is_some()
-                && graph
-                    .var_binding(id)
-                    .is_some_and(|indexed| indexed != binding)
-            {
-                // The ordered store is authority; the graph's binding index
-                // can be absent for a projected compiler-private slot. If it
-                // survives projection, it must agree, but cannot establish
-                // order by itself.
-                return None;
-            }
             if publication
                 .ordered_stores()
                 .iter()
@@ -150,13 +156,22 @@ impl SelectedImageRegionSet {
         region: &'a SelectedImageRegion,
         id: &runmat_accelerate::graph::ValueId,
         source: &ImageEntryInput,
-        vars: &'a [Value],
+        vars: &'a InterpreterVars,
         context: &'a ExecutionContext,
-    ) -> Option<&'a Value> {
+    ) -> Option<crate::interpreter::vars::InterpreterValueRef<'a>> {
         self.graph.value(*id)?;
         match source {
-            ImageEntryInput::Constant => region.plan.const_values.get(id),
-            ImageEntryInput::FoldedConstant => self.graph.value(*id)?.constant.as_ref(),
+            ImageEntryInput::Constant => region
+                .plan
+                .const_values
+                .get(id)
+                .map(crate::interpreter::vars::InterpreterValueRef::borrowed),
+            ImageEntryInput::FoldedConstant => self
+                .graph
+                .value(*id)?
+                .constant
+                .as_ref()
+                .map(crate::interpreter::vars::InterpreterValueRef::borrowed),
             ImageEntryInput::Binding(binding) => match binding.kind {
                 VarKind::Global => vars.get(binding.index),
                 VarKind::Local => {
@@ -164,6 +179,7 @@ impl SelectedImageRegionSet {
                         context
                             .locals
                             .get(frame.locals_start.checked_add(binding.index)?)
+                            .map(crate::interpreter::vars::InterpreterValueRef::borrowed)
                     } else {
                         vars.get(binding.index)
                     }
@@ -175,7 +191,7 @@ impl SelectedImageRegionSet {
     pub(crate) fn capture_inputs(
         &self,
         region: &SelectedImageRegion,
-        vars: &[Value],
+        vars: &InterpreterVars,
         context: &ExecutionContext,
         runtime: &RuntimeContext,
     ) -> Result<Option<CapturedImageInputs>, HostAllocationError> {
@@ -200,7 +216,7 @@ impl SelectedImageRegionSet {
             let Some(value) = self.entry_value(region, id, source, vars, context) else {
                 return Ok(None);
             };
-            let additional = match value {
+            let additional = match &*value {
                 Value::Tensor(tensor) => tensor
                     .shape()
                     .len()
@@ -265,7 +281,7 @@ impl SelectedImageRegionSet {
             let Some(value) = self.entry_value(region, id, source, vars, context) else {
                 return Ok(None);
             };
-            values.push(value.clone());
+            values.push((*value).clone());
         }
         Ok(Some(CapturedImageInputs {
             values,

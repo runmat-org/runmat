@@ -93,7 +93,9 @@ fn spmd_style_cloned_ports_cannot_inherit_parent_workspace_authorities() {
             .with_workspace(base),
     );
 
-    let lab = parent.fork_parallel_lab(parent.service_ports().clone());
+    let lab = parent
+        .fork_parallel_lab(parent.service_ports().clone())
+        .expect("idle session fork");
     assert!(lab.service_ports().workspace().is_none());
     assert!(lab.service_ports().base_workspace().is_none());
     {

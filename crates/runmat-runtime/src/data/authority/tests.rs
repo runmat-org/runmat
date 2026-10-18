@@ -220,7 +220,9 @@ fn session_handle_survives_invocations_but_not_cross_session_or_end() {
 
     let session = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
     let unrelated = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-    let worker = session.fork_parallel_lab(RuntimeServicePorts::default());
+    let worker = session
+        .fork_parallel_lab(RuntimeServicePorts::default())
+        .expect("idle session fork");
     let filesystem: Arc<dyn FsProvider> = Arc::new(
         runmat_filesystem::MemoryFsProvider::with_current_dir(fixture_root("session")),
     );

@@ -113,9 +113,9 @@ impl Default for OverlayConfig {
             show_grid: true,
             show_axes: true,
             show_title: true,
-            title: Some("Plot".to_string()),
-            x_label: Some("X".to_string()),
-            y_label: Some("Y".to_string()),
+            title: None,
+            x_label: None,
+            y_label: None,
             sidebar_width: 280.0,
             plot_margins: PlotMargins {
                 left: 60.0,
@@ -3253,10 +3253,29 @@ fn truncate_label(label: &str, max_len: usize) -> String {
 
 #[cfg(test)]
 mod positioned_axes_tests {
-    use super::PlotOverlay;
+    use super::{OverlayConfig, PlotOverlay};
     use crate::core::Camera;
     use egui::{pos2, vec2, Rect};
     use glam::Vec3;
+
+    #[test]
+    fn overlay_annotations_are_absent_by_default_but_explicit_text_remains_visible() {
+        let mut config = OverlayConfig::default();
+        assert!(config.show_title);
+        assert!(config.title.is_none());
+        assert!(config.x_label.is_none());
+        assert!(config.y_label.is_none());
+        assert!(!PlotOverlay::has_visible_text(config.title.as_deref()));
+        assert!(!PlotOverlay::has_visible_text(config.x_label.as_deref()));
+        assert!(!PlotOverlay::has_visible_text(config.y_label.as_deref()));
+
+        config.title = Some("Explicit title".to_string());
+        config.x_label = Some("Horizontal".to_string());
+        config.y_label = Some("Vertical".to_string());
+        assert!(PlotOverlay::has_visible_text(config.title.as_deref()));
+        assert!(PlotOverlay::has_visible_text(config.x_label.as_deref()));
+        assert!(PlotOverlay::has_visible_text(config.y_label.as_deref()));
+    }
 
     #[test]
     fn positioned_axes_accepts_a_surface_smaller_than_overlay_margins() {

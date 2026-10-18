@@ -37,7 +37,7 @@ impl RuntimeCallService for IncrementingCallService {
                 > + 'static,
         >,
     > {
-        let result = match request.arguments.as_slice() {
+        let result = match request.descriptor().args.as_slice() {
             [Value::Int(IntValue::I32(value))] => Value::Int(IntValue::I32(value + 2)),
             _ => Value::Num(f64::NAN),
         };
@@ -400,8 +400,11 @@ fn java_callbacks_reenter_the_originating_runtime_call_service() {
     assert_eq!(requests.len(), 2);
     assert!(requests
         .iter()
-        .all(|request| request.requested_outputs == 1));
-    assert_eq!(requests[0].arguments, vec![Value::Int(IntValue::I32(1))]);
+        .all(|request| request.descriptor().requested_outputs == 1));
+    assert_eq!(
+        requests[0].descriptor().args,
+        vec![Value::Int(IntValue::I32(1))]
+    );
 }
 
 #[test]

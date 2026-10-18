@@ -49,6 +49,20 @@ fn executable_source_identity_from_candidates(
     let root_relative = root.relative_path.replace('\\', "/");
     let full = full_path.map(|path| path.replace('\\', "/"));
     let root_full = root_full_path.map(|path| path.replace('\\', "/"));
+    if let Some(captured) = root.captured_primary() {
+        if full.as_deref() == Some(captured.access_path.as_str()) {
+            if !captured.matches_access(captured.access_path.as_str(), &root.text) {
+                return Err("captured primary access or bytes changed".into());
+            }
+            return Ok((
+                captured.owner_identity.clone(),
+                captured.relative_path.clone(),
+            ));
+        }
+        if full.is_none() && display == root_relative {
+            return Err("captured primary has no matching issued access path".into());
+        }
+    }
     if !candidates.is_empty() {
         if let Some(full) = &full {
             let mut exact = candidates
@@ -105,6 +119,10 @@ pub(in super::super) fn executable_primary_access_path(
     let Some(handoff) = handoff else {
         return Ok(None);
     };
+    if let Some(captured) = root.captured_primary() {
+        captured.validate(handoff, root)?;
+        return Ok(Some(captured.access_path.clone()));
+    }
     let mut matches = handoff.project.all_sources().filter(|(descriptor, _)| {
         descriptor.id.package_instance.to_string() == root.owner_identity
             && descriptor.id.relative_path.to_string().replace('\\', "/")

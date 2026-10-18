@@ -309,11 +309,9 @@ pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Pie Chart",
             axis_equal: true,
             grid: false,
-            x_label: "",
-            y_label: "",
+            ..Default::default()
         },
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);

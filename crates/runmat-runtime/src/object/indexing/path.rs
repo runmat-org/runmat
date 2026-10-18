@@ -91,6 +91,14 @@ impl ObjectSubscript {
     pub const fn selector(&self) -> &ObjectIndexSelector {
         &self.selector
     }
+    /// Move the selector and typed fallback out after the kind and origin
+    /// have been validated. Chained call arguments retain their original
+    /// Value payloads instead of cloning them at this path boundary.
+    pub(crate) fn into_parts(
+        self,
+    ) -> (ObjectIndexSelector, Option<runmat_types::CallableIdentity>) {
+        (self.selector, self.semantic_fallback)
+    }
     pub const fn origin(&self) -> ObjectSubscriptOrigin {
         self.origin
     }

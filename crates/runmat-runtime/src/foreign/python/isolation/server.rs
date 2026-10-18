@@ -26,9 +26,7 @@ use crate::context::{
     ForeignCall, RuntimeCallRequest, RuntimeCallService, RuntimeContext, RuntimeLifecycleHost,
     RuntimeLocalTaskSupervisor, RuntimeServicePorts,
 };
-use crate::execution::{
-    RootedValueLease, RootedValueMember, RootedValuesBuilder, RuntimeExecutionService,
-};
+use crate::execution::{RootedValueMember, RootedValuesBuilder, RuntimeExecutionService};
 use crate::foreign::{
     ForeignAdapter, ForeignPlatform, ForeignRuntime, PythonAdapter, PythonRuntimeConfiguration,
 };
@@ -342,13 +340,15 @@ impl HostCallbackRouter {
         &self,
         request: RuntimeCallRequest,
     ) -> Result<crate::execution::RootedValueSequence, PythonWireError> {
-        if request.binding.is_some() {
+        let descriptor = request.descriptor();
+        let crate::call::descriptor::CallableTarget::Resolved { identity, .. } = &descriptor.target
+        else {
             return Err(wire_error(
                 "RunMat:Python:CallbackProtocol",
                 "isolated Python host cannot invoke a local bound callable by driver callback ID",
             ));
-        }
-        let callback_id = callback_id(&request.identity).ok_or_else(|| {
+        };
+        let callback_id = callback_id(identity).ok_or_else(|| {
             wire_error(
                 "RunMat:Python:CallbackProtocol",
                 "isolated Python host received a non-driver callback identity",
@@ -370,10 +370,10 @@ impl HostCallbackRouter {
         }
         self.depth.set(depth);
         let result = (|| {
-            let _argument_roots = RootedValueLease::for_values(request.arguments.iter())
-                .map_err(|error| wire_error("RunMat:Python:ValueEncode", error.to_string()))?;
-            let arguments = request
-                .arguments
+            let (descriptor, _source_roots, _supplied_roots) = request.into_parts();
+            let requested_outputs = descriptor.requested_outputs;
+            let arguments = descriptor
+                .args
                 .into_iter()
                 .map(|value| encode_host_value(value, &self.snapshots, &self.resources))
                 .collect::<Result<Vec<_>, _>>()?;
@@ -383,7 +383,7 @@ impl HostCallbackRouter {
                     request_id,
                     callback_id,
                     depth,
-                    requested_outputs: u32::try_from(request.requested_outputs).map_err(|_| {
+                    requested_outputs: u32::try_from(requested_outputs).map_err(|_| {
                         wire_error(
                             "RunMat:Python:CallbackProtocol",
                             "Python callback output count exceeds u32",
@@ -414,7 +414,7 @@ impl HostCallbackRouter {
                             wire_error("RunMat:Python:ValueDecode", error.to_string())
                         })?;
                         return values.with_owned_values(|mut values| {
-                            let sequence = if request.requested_outputs == 1 && values.len() == 1 {
+                            let sequence = if requested_outputs == 1 && values.len() == 1 {
                                 runmat_value::ValueSequence::single(
                                     values.pop().expect("one Python callback output"),
                                 )

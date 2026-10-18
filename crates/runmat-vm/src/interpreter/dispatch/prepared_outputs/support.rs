@@ -1,3 +1,4 @@
+use crate::interpreter::vars::{InterpreterValueRef, InterpreterVars};
 use runmat_runtime::object::indexing::ObjectIndexComponent;
 use runmat_runtime::sequence::SequenceEndpointSpec;
 use runmat_runtime::RuntimeError;
@@ -50,7 +51,10 @@ pub(super) fn empty_cell_root() -> Value {
     super::super::slot_authority::empty_cell_root()
 }
 
-pub(super) fn root(vars: &[Value], slot: usize) -> Result<&Value, RuntimeError> {
+pub(super) fn root(
+    vars: &InterpreterVars,
+    slot: usize,
+) -> Result<InterpreterValueRef<'_>, RuntimeError> {
     vars.get(slot).ok_or_else(|| {
         crate::interpreter::errors::mex(
             "OutputTargetSlotOutOfBounds",

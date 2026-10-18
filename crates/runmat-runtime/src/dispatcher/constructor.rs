@@ -12,6 +12,34 @@ pub(super) enum ConstructorInvocationTarget {
     },
 }
 
+/// Prepared exact bodies own their segmented arguments inside `invoke`.
+/// Constructor policy only needs their logical arity; registered and legacy
+/// bound dispatch still borrow their actual contiguous arguments.
+pub(super) enum ConstructorArguments<'a> {
+    Borrowed(&'a [Value]),
+    PreparedCount(usize),
+}
+
+impl ConstructorArguments<'_> {
+    pub(super) fn is_empty(&self) -> bool {
+        match self {
+            Self::Borrowed(values) => values.is_empty(),
+            Self::PreparedCount(count) => *count == 0,
+        }
+    }
+
+    pub(super) fn borrowed(&self) -> Result<&[Value], RuntimeError> {
+        match self {
+            Self::Borrowed(values) => Ok(values),
+            Self::PreparedCount(_) => Err(build_runtime_error(
+                "prepared constructor has no borrowed argument slice",
+            )
+            .with_identifier("RunMat:ConstructorOwnerInvalid")
+            .build()),
+        }
+    }
+}
+
 /// The callback is constructed only after the exact receiver is rooted, and
 /// receives that invocation's selected context under its receiver poll guard.
 pub type PreparedConstructorInvoke = Box<
@@ -48,7 +76,7 @@ pub async fn call_prepared_constructor_sequence_in_context(
     call_admitted_prepared_constructor_sequence_in_context(
         context,
         owner,
-        args,
+        ConstructorArguments::Borrowed(args),
         requested_outputs,
         invoke,
     )
@@ -79,7 +107,7 @@ pub async fn call_portable_prepared_constructor_sequence_in_context(
     call_admitted_prepared_constructor_sequence_in_context(
         context,
         owner,
-        args,
+        ConstructorArguments::Borrowed(args),
         requested_outputs,
         invoke,
     )
@@ -89,7 +117,7 @@ pub async fn call_portable_prepared_constructor_sequence_in_context(
 async fn call_admitted_prepared_constructor_sequence_in_context(
     context: &crate::context::RuntimeContext,
     owner: runmat_types::ClassMethodOwner,
-    args: &[Value],
+    args: ConstructorArguments<'_>,
     requested_outputs: usize,
     invoke: PreparedConstructorInvoke,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
@@ -112,6 +140,58 @@ async fn call_admitted_prepared_constructor_sequence_in_context(
             )
         })
         .await
+}
+
+pub async fn call_prepared_constructor_sequence_with_argument_count_in_context(
+    context: &crate::context::RuntimeContext,
+    owner: runmat_types::ClassMethodOwner,
+    binding: runmat_value::BoundFunctionBinding,
+    argument_count: usize,
+    requested_outputs: usize,
+    invoke: PreparedConstructorInvoke,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    if !binding.authority.admits_local(&context.session_lease())
+        || binding.authority.local_lease(binding.function).is_none()
+    {
+        return Err(build_runtime_error(
+            "prepared constructor lacks its selected definition lease",
+        )
+        .with_identifier("RunMat:ConstructorOwnerInvalid")
+        .build());
+    }
+    call_admitted_prepared_constructor_sequence_in_context(
+        context,
+        owner,
+        ConstructorArguments::PreparedCount(argument_count),
+        requested_outputs,
+        invoke,
+    )
+    .await
+}
+
+pub async fn call_portable_prepared_constructor_sequence_with_argument_count_in_context(
+    context: &crate::context::RuntimeContext,
+    owner: runmat_types::ClassMethodOwner,
+    binding: runmat_value::BoundFunctionBinding,
+    argument_count: usize,
+    requested_outputs: usize,
+    invoke: PreparedConstructorInvoke,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    if binding.authority.portable_origin().is_none() {
+        return Err(
+            build_runtime_error("portable constructor lacks its admitted binding origin")
+                .with_identifier("RunMat:ConstructorOwnerInvalid")
+                .build(),
+        );
+    }
+    call_admitted_prepared_constructor_sequence_in_context(
+        context,
+        owner,
+        ConstructorArguments::PreparedCount(argument_count),
+        requested_outputs,
+        invoke,
+    )
+    .await
 }
 
 /// Invoke an already-admitted constructor definition while preserving the
@@ -139,7 +219,7 @@ pub async fn call_bound_constructor_sequence_in_context(
         .scope(async move {
             super::call_class_constructor(
                 class_identity,
-                args,
+                ConstructorArguments::Borrowed(args),
                 Some(requested_outputs),
                 Some(&selected),
                 ConstructorInvocationTarget::ExactBound { owner, binding },

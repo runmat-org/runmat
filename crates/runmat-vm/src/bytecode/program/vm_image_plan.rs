@@ -433,7 +433,7 @@ impl VmImagePlanInstallation {
     pub(crate) fn capture_inputs(
         &self,
         region: &SelectedImageRegion,
-        vars: &[runmat_value::Value],
+        vars: &crate::interpreter::vars::InterpreterVars,
         context: &super::ExecutionContext,
         runtime: &RuntimeContext,
     ) -> Result<

@@ -1,14 +1,17 @@
-use crate::{MirDiagnostic, MirDottedInvokeArgument, MirExpressionStep, MirSubscriptChain};
+use crate::{
+    MirDiagnostic, MirDottedInvokeArgument, MirExpressionStep, MirLocalId, MirSubscriptChain,
+};
 use runmat_hir::Span;
 
 use super::{
     diagnose_call_argument_reads, diagnose_expansion_source_reads, diagnose_indexing_reads,
-    diagnose_operand_read, diagnose_rvalue_reads, InitFact,
+    diagnose_operand_read, diagnose_rvalue_reads, transfer_region_workspace_lookup, InitFact,
 };
 
 pub(super) fn diagnose_subscript_chain_reads(
     chain: &MirSubscriptChain,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -16,15 +19,32 @@ pub(super) fn diagnose_subscript_chain_reads(
     for step in &chain.steps {
         match step {
             crate::MirSubscriptStep::Index(indexing) => {
-                diagnose_indexing_reads(indexing, state, span, diagnostics)
+                diagnose_indexing_reads(indexing, state, current_bindings, span, diagnostics)
             }
             crate::MirSubscriptStep::DottedInvoke { arguments, .. } => {
                 for argument in arguments {
-                    diagnose_dotted_argument_reads(argument, state, span, diagnostics);
+                    diagnose_dotted_argument_reads(
+                        argument,
+                        state,
+                        current_bindings,
+                        span,
+                        diagnostics,
+                    );
                 }
             }
             crate::MirSubscriptStep::DynamicMember(member) => {
                 diagnose_operand_read(member, state, span, diagnostics)
+            }
+            crate::MirSubscriptStep::PreparedDynamicMember(region) => {
+                let mut nested_state = state.to_vec();
+                diagnose_expression_steps(
+                    region.steps(),
+                    &mut nested_state,
+                    current_bindings,
+                    diagnostics,
+                );
+                diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+                transfer_region_workspace_lookup(state, &nested_state, current_bindings);
             }
             crate::MirSubscriptStep::Member(_) => {}
         }
@@ -33,7 +53,8 @@ pub(super) fn diagnose_subscript_chain_reads(
 
 fn diagnose_dotted_argument_reads(
     argument: &MirDottedInvokeArgument,
-    state: &[InitFact],
+    state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     span: Span,
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
@@ -41,13 +62,31 @@ fn diagnose_dotted_argument_reads(
         MirDottedInvokeArgument::Colon => {}
         MirDottedInvokeArgument::Contextual(region) => {
             let mut nested_state = state.to_vec();
-            diagnose_expression_steps(region.steps(), &mut nested_state, diagnostics);
+            diagnose_expression_steps(
+                region.steps(),
+                &mut nested_state,
+                current_bindings,
+                diagnostics,
+            );
             diagnose_operand_read(region.result(), &nested_state, span, diagnostics);
+            transfer_region_workspace_lookup(state, &nested_state, current_bindings);
         }
         MirDottedInvokeArgument::Call(region) => {
             let mut nested_state = state.to_vec();
-            diagnose_expression_steps(&region.steps, &mut nested_state, diagnostics);
-            diagnose_call_argument_reads(&region.argument, &nested_state, region.span, diagnostics);
+            diagnose_expression_steps(
+                &region.steps,
+                &mut nested_state,
+                current_bindings,
+                diagnostics,
+            );
+            diagnose_call_argument_reads(
+                &region.argument,
+                &mut nested_state,
+                current_bindings,
+                region.span,
+                diagnostics,
+            );
+            transfer_region_workspace_lookup(state, &nested_state, current_bindings);
         }
     }
 }
@@ -55,16 +94,23 @@ fn diagnose_dotted_argument_reads(
 pub(super) fn diagnose_expression_steps(
     steps: &[MirExpressionStep],
     state: &mut [InitFact],
+    current_bindings: &[MirLocalId],
     diagnostics: &mut Vec<MirDiagnostic>,
 ) {
     for step in steps {
         match step {
             MirExpressionStep::Let { local, value, span } => {
-                diagnose_rvalue_reads(value, state, *span, diagnostics);
+                diagnose_rvalue_reads(value, state, current_bindings, *span, diagnostics);
                 state[local.0] = InitFact::DefinitelyAssigned;
             }
             MirExpressionStep::CaptureSequence { source, span, .. } => {
-                diagnose_expansion_source_reads(source, state, *span, diagnostics);
+                diagnose_expansion_source_reads(
+                    source,
+                    state,
+                    current_bindings,
+                    *span,
+                    diagnostics,
+                );
             }
         }
     }
@@ -99,10 +145,16 @@ mod tests {
             context: runmat_types::ObjectIndexingContext::Expression,
         };
         let source = MirExpansionSource::SubscriptChain(chain);
-        let state = [InitFact::DefinitelyAssigned, InitFact::Unassigned];
+        let mut state = [InitFact::DefinitelyAssigned, InitFact::Unassigned];
         let mut diagnostics = Vec::new();
 
-        super::super::diagnose_expansion_source_reads(&source, &state, span, &mut diagnostics);
+        super::super::diagnose_expansion_source_reads(
+            &source,
+            &mut state,
+            &[],
+            span,
+            &mut diagnostics,
+        );
 
         assert!(diagnostics.is_empty(), "{diagnostics:#?}");
         assert_eq!(state[1], InitFact::Unassigned);

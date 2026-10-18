@@ -123,7 +123,14 @@ async fn assert_chain_full_call(decoded_function: bool, original_power: bool, re
             .await
             .expect("ordinary VM general-chain invocation");
     let published = completion
-        .with_owned(|completion| runmat_runtime::execution::RootedValues::new(completion.values))
+        .with_owned(|completion| {
+            runmat_runtime::execution::RootedValues::new(
+                completion
+                    .values
+                    .into_owned()
+                    .expect("ordinary elementwise frame is owned"),
+            )
+        })
         .unwrap();
     let resident_slot = bytecode
         .var_names

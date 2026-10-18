@@ -946,6 +946,148 @@ fn selector_mask_limit_is_rejected_before_native_execution() {
 }
 
 #[test]
+fn expression_continuation_geometry_counts_constant_statement_selectors_only_when_needed() {
+    let span = Span { start: 0, end: 8 };
+    let pure = lower(&function(vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(0)),
+            value: MirRvalue::Use(MirOperand::Constant(MirConstant::Bool(true))),
+        },
+        span,
+    }]));
+    assert_eq!(
+        pure.functions[0]
+            .expression_continuation_geometry
+            .region_capacity,
+        0
+    );
+    assert_eq!(
+        pure.functions[0]
+            .expression_continuation_geometry
+            .retained_input_capacity,
+        0
+    );
+    pure.verify().unwrap();
+
+    let prepared = runmat_mir::MirPreparedExpressionRegion::from_lowered(
+        Vec::new(),
+        MirOperand::Constant(MirConstant::Bool(true)),
+    )
+    .unwrap();
+    let mut components =
+        vec![
+            runmat_mir::MirIndexComponent::Expr(MirOperand::Constant(MirConstant::Bool(true)));
+            20
+        ];
+    components.push(runmat_mir::MirIndexComponent::PreparedExpr(prepared));
+    let sequence = runmat_mir::MirSequenceLocalId(0);
+    let statement = MirStmt {
+        kind: MirStmtKind::CaptureSequence {
+            destination: sequence,
+            source: runmat_mir::MirExpansionSource::CellContents {
+                base: MirOperand::Constant(MirConstant::EmptyArray),
+                indexing: runmat_mir::MirIndexing {
+                    kind: runmat_types::IndexKind::Brace,
+                    plan: runmat_mir::MirIndexPlan::Cell,
+                    components,
+                    result_context: runmat_types::IndexResultContext::ReadCommaList,
+                    cell_expand_all: false,
+                },
+            },
+        },
+        span,
+    };
+    let mut native = lower(&function(vec![
+        statement,
+        MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(0)),
+                value: MirRvalue::Aggregate {
+                    kind: runmat_mir::MirAggregateKind::Cell,
+                    row_lengths: vec![1],
+                    elements: vec![runmat_mir::MirAggregateElement::CapturedSequence(sequence)],
+                },
+            },
+            span,
+        },
+    ]));
+    let geometry = native.functions[0].expression_continuation_geometry;
+    assert!(geometry.region_capacity > 0);
+    assert!(geometry.retained_input_capacity >= 23);
+    native.verify().unwrap();
+    native.functions[0]
+        .expression_continuation_geometry
+        .retained_input_capacity -= 1;
+    assert_eq!(
+        native.verify().unwrap_err().code,
+        "native.ir.expression_continuation_geometry"
+    );
+}
+
+#[test]
+fn expression_continuation_geometry_counts_nested_dotted_argument_cursors() {
+    let span = Span { start: 0, end: 8 };
+    let call_argument =
+        runmat_mir::MirDottedInvokeArgument::Call(runmat_mir::MirCallArgumentRegion {
+            steps: Vec::new(),
+            argument: runmat_mir::MirCallArg::Single(MirOperand::Constant(MirConstant::Bool(true))),
+            span,
+        });
+    let prepared = runmat_mir::MirPreparedExpressionRegion::from_lowered(
+        vec![MirStmt {
+            kind: MirStmtKind::Assign {
+                place: MirPlace::Local(MirLocalId(1)),
+                value: MirRvalue::SubscriptChain(runmat_mir::MirSubscriptChain {
+                    root: MirOperand::Constant(MirConstant::Bool(true)),
+                    steps: vec![runmat_mir::MirSubscriptStep::DottedInvoke {
+                        member: runmat_types::MemberName("method".into()),
+                        arguments: vec![call_argument; 3],
+                        semantic_fallback: None,
+                    }],
+                    sequence_use: SequenceUse::RequireSingle,
+                    context: runmat_types::ObjectIndexingContext::Expression,
+                }),
+            },
+            span,
+        }],
+        MirOperand::Local(MirLocalId(1)),
+    )
+    .unwrap();
+    let mut mir = function(vec![MirStmt {
+        kind: MirStmtKind::Assign {
+            place: MirPlace::Local(MirLocalId(0)),
+            value: MirRvalue::Index {
+                base: MirOperand::Constant(MirConstant::EmptyArray),
+                indexing: runmat_mir::MirIndexing {
+                    kind: runmat_types::IndexKind::Paren,
+                    plan: runmat_mir::MirIndexPlan::Scalar,
+                    components: vec![runmat_mir::MirIndexComponent::PreparedExpr(prepared)],
+                    result_context: runmat_types::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            },
+        },
+        span,
+    }]);
+    mir.bodies
+        .get_mut(&FunctionId(0))
+        .unwrap()
+        .locals
+        .push(MirLocal {
+            id: MirLocalId(1),
+            binding: None,
+            kind: MirLocalKind::Temporary,
+            span,
+        });
+    let native = lower(&mir);
+    let geometry = native.functions[0].expression_continuation_geometry;
+    // The outer PreparedExpr and all three zero-step dotted Call arguments
+    // have distinct continuation entries, despite sharing one chain step.
+    assert!(geometry.region_capacity >= 4);
+    native.verify().unwrap();
+}
+
+#[test]
 fn legacy_binding_places_are_rejected_before_native_execution() {
     let span = Span { start: 0, end: 8 };
     let mir = function(vec![MirStmt {
@@ -1732,7 +1874,8 @@ fn canonical_construct_taxonomy_is_complete_unique_and_serializable() {
     // metadata.
     assert!(all.contains(&runmat_mir::MirConstructKind::CaptureSequence));
     assert!(all.contains(&runmat_mir::MirConstructKind::SequenceAssign));
-    assert_eq!(all.len(), 58);
+    assert!(all.contains(&runmat_mir::MirConstructKind::WorkspaceFirstStaticProperty));
+    assert_eq!(all.len(), 59);
     assert_eq!(
         all.iter()
             .copied()

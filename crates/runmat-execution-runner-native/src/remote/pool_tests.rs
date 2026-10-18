@@ -922,6 +922,7 @@ async fn pinned_quic_ready_v1_upgrades_only_the_opted_in_worker() {
         .await
         .unwrap();
         assert!(capabilities.contains(&Capability::GraphSelectedValuesV11));
+        assert!(capabilities.contains(&Capability::GraphCallableArgumentsV12));
         channel.drain().await.unwrap();
     };
     let (server, ()) = tokio::join!(server, client);

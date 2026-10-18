@@ -899,21 +899,9 @@ impl WebRenderer {
                         font_scale: 1.25,
                         show_axes: true,
                         show_title: self.plot_renderer.geometry_overlay().is_none(),
-                        title: self
-                            .plot_renderer
-                            .overlay_title()
-                            .cloned()
-                            .or(Some("Plot".to_string())),
-                        x_label: self
-                            .plot_renderer
-                            .overlay_x_label()
-                            .cloned()
-                            .or(Some("X".to_string())),
-                        y_label: self
-                            .plot_renderer
-                            .overlay_y_label()
-                            .cloned()
-                            .or(Some("Y".to_string())),
+                        title: self.plot_renderer.overlay_title().cloned(),
+                        x_label: self.plot_renderer.overlay_x_label().cloned(),
+                        y_label: self.plot_renderer.overlay_y_label().cloned(),
                         // Disable the heavyweight sidebar in IDE surfaces for now.
                         show_sidebar: false,
                         ..Default::default()

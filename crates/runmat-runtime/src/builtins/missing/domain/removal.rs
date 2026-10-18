@@ -275,12 +275,10 @@ pub(super) fn remove_missing_string_array(
 ) -> BuiltinResult<(Value, LogicalArray)> {
     let rows = array.rows();
     let cols = array.cols();
-    let shape = array.shape.clone();
     remove_missing_column_major(
         array.data,
         rows,
         cols,
-        shape,
         options,
         |text| is_missing_text(text),
         |data, shape| {
@@ -301,7 +299,6 @@ pub(super) fn remove_missing_logical_array(
         array.data.into_vec(),
         rows,
         cols,
-        array.shape.clone(),
         options,
         |_| false,
         |data, shape| {
@@ -412,7 +409,6 @@ pub(super) fn remove_missing_column_major<T: Clone>(
     data: Vec<T>,
     rows: usize,
     cols: usize,
-    _shape: Vec<usize>,
     options: RemoveOptions,
     is_missing: impl Fn(&T) -> bool,
     build: impl Fn(Vec<T>, Vec<usize>) -> BuiltinResult<Value>,

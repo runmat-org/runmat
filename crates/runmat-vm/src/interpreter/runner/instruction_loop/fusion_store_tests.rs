@@ -97,7 +97,8 @@ fn supplied_final_only_span_with_stores_reaches_ordinary_vm_before_fusion_execut
     let crate::interpreter::api::InterpreterOutcome::Completed(completion) = outcome;
     for (name, slot) in publication_slots {
         assert_eq!(
-            completion.values[slot], expected[slot],
+            *completion.values.get(slot).unwrap(),
+            *expected.get(slot).unwrap(),
             "{name} publication"
         );
         assert!(completion.assigned_slots.contains(&slot), "{name} assigned");
@@ -114,13 +115,21 @@ fn second_store_failure_keeps_first_publication_and_exact_error() {
         let (runtime, activation) =
             crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
         futures::executor::block_on(activation.scope(runtime.scope(async {
-            let mut vars = vec![Value::Num(0.0), Value::Num(0.0)];
+            let mut vars = crate::interpreter::vars::InterpreterVars::from_owned(vec![
+                Value::Num(0.0),
+                Value::Num(0.0),
+            ]);
             let names = HashMap::from([("mu".to_string(), 0), ("sigma".to_string(), 1)]);
+            let aliases = FrameGlobalBindings::default();
+            if records_completion {
+                aliases.declare_named(0, "fusion_first_store".to_string());
+                aliases.declare_named(1, "fusion_second_store".to_string());
+            }
             let _workspace = crate::runtime::workspace::set_workspace_state(
                 names,
                 HashSet::new(),
                 &mut vars,
-                FrameGlobalBindings::default(),
+                aliases,
             );
             let store = |index| FusionStoreMaterialization {
                 value_id: index as u32,
@@ -132,11 +141,8 @@ fn second_store_failure_keeps_first_publication_and_exact_error() {
             };
             let mut completed = Some(HashSet::new());
             let mut missing = HashSet::new();
-            let aliases = FrameGlobalBindings::default();
             let mut persistent_aliases = crate::interpreter::PersistentAliases::new();
-            if records_completion {
-                aliases.declare_named(0, "fusion_first_store".to_string());
-            } else {
+            if !records_completion {
                 runtime
                     .session_variable_authority()
                     .store_persistent_slot("<main>", 0, Value::Num(0.0))
@@ -162,7 +168,6 @@ fn second_store_failure_keeps_first_publication_and_exact_error() {
                     context: &mut context,
                     var_names: &var_names,
                     completion_assigned_slots: &mut completed,
-                    global_aliases: &aliases,
                     persistent_aliases: &persistent_aliases,
                     current_function_name: "<main>",
                     missing_input_slots: &mut missing,
@@ -206,8 +211,8 @@ fn second_store_failure_keeps_first_publication_and_exact_error() {
 }
 
 #[test]
-fn in_frame_local_store_uses_frame_offset_without_workspace_publication() {
-    let mut vars = vec![Value::Num(0.0)];
+fn in_frame_local_store_uses_frame_offset_and_only_publishes_declared_globals() {
+    let mut vars = crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(0.0)]);
     let mut context = crate::bytecode::program::ExecutionContext {
         locals: vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
         ..Default::default()
@@ -239,7 +244,6 @@ fn in_frame_local_store_uses_frame_offset_without_workspace_publication() {
             context: &mut context,
             var_names: &HashMap::new(),
             completion_assigned_slots: &mut completion,
-            global_aliases: &FrameGlobalBindings::default(),
             persistent_aliases: &crate::interpreter::PersistentAliases::new(),
             current_function_name: "fusion_fixture",
             missing_input_slots: &mut missing,
@@ -252,4 +256,66 @@ fn in_frame_local_store_uses_frame_offset_without_workspace_publication() {
     );
     assert_eq!(vars, vec![Value::Num(0.0)]);
     assert_eq!(completion, Some(HashSet::new()));
+
+    let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ));
+    let (runtime, activation) =
+        crate::runtime::workspace_service::VmWorkspaceService::install(runtime, None);
+    futures::executor::block_on(activation.scope(runtime.scope(async {
+        let mut vars =
+            crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(0.0); 3]);
+        let aliases = FrameGlobalBindings::default();
+        aliases.declare_named(2, "local_global_alias".to_string());
+        let _workspace = crate::runtime::workspace::set_workspace_state(
+            HashMap::from([("compiler_local".to_string(), 2)]),
+            HashSet::new(),
+            &mut vars,
+            aliases,
+        );
+        let mut context = crate::bytecode::program::ExecutionContext {
+            runtime: runtime.clone(),
+            locals: vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)],
+            ..Default::default()
+        };
+        context
+            .call_stack
+            .push(crate::bytecode::program::CallFrame {
+                function_name: "fusion_fixture".to_string(),
+                return_address: 0,
+                locals_start: 2,
+                locals_count: 1,
+                expected_outputs: 0,
+            });
+        let mut completion = Some(HashSet::new());
+        let mut missing = HashSet::new();
+        publish_fusion_stores(
+            vec![(
+                FusionStoreMaterialization {
+                    value_id: 0,
+                    binding: VarBinding {
+                        kind: VarKind::Local,
+                        index: 0,
+                    },
+                },
+                Value::Num(11.0),
+            )],
+            FusionPublicationFrame {
+                vars: &mut vars,
+                context: &mut context,
+                var_names: &HashMap::new(),
+                completion_assigned_slots: &mut completion,
+                persistent_aliases: &crate::interpreter::PersistentAliases::new(),
+                current_function_name: "fusion_fixture",
+                missing_input_slots: &mut missing,
+            },
+        )
+        .expect("declared global local publication");
+        assert_eq!(context.locals[2], Value::Num(11.0));
+        assert_eq!(completion, Some(HashSet::new()));
+        assert_eq!(
+            runmat_runtime::workspace::session::global_value("local_global_alias"),
+            Some(Value::Num(11.0))
+        );
+    })));
 }

@@ -383,7 +383,7 @@ impl SymbolInput {
             Value::Bool(b) => {
                 let logical = LogicalArray {
                     data: vec![u8::from(b)].into(),
-                    shape: vec![1, 1],
+                    shape: vec![1, 1].into(),
                 };
                 Self::from_logical(logical, order, input_type)
             }
@@ -437,7 +437,9 @@ impl SymbolInput {
     ) -> BuiltinResult<Self> {
         match input_type {
             InputType::Integer => Err(pskmod_error("pskmod: logical X requires InputType='bit'")),
-            InputType::Bit => bits_to_symbols(logical.data.into_vec(), logical.shape, order),
+            InputType::Bit => {
+                bits_to_symbols(logical.data.into_vec(), logical.shape.to_vec(), order)
+            }
         }
     }
 }

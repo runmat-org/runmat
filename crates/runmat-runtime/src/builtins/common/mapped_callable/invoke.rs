@@ -21,7 +21,7 @@ impl MappedCallable {
     ) -> impl std::future::Future<Output = Result<RootedValue, CallableCallError>> + 'a {
         let closure_roots = match self {
             Self::Closure(closure) => Some(
-                crate::execution::RootedValueLease::for_traced(closure)
+                crate::execution::RootedValueLease::for_traced(closure.as_value())
                     .map_err(|error| CallableCallError::Runtime(error.into_runtime_error())),
             ),
             _ => None,
@@ -127,21 +127,25 @@ async fn invoke_external(
 
 async fn invoke_closure(
     context: Option<&crate::context::RuntimeContext>,
-    closure: &runmat_value::Closure,
+    retained: &crate::call::descriptor::RetainedClosureValue,
     arguments: &[Value],
     requested_outputs: usize,
 ) -> Result<RootedValue, CallableCallError> {
-    let mut merged = closure.captures.clone();
-    merged.extend_from_slice(arguments);
+    let closure = retained.as_closure();
     if let Some(binding) = closure.binding.clone() {
         let function = binding.function;
-        let request =
-            user_functions::CallableRequest::bound(binding, merged.clone(), requested_outputs)
-                .with_lexical_environment(closure.lexical_environment.clone())
-                .with_selected_runtime(context);
-        if let Some(result) = user_functions::try_call_semantic_descriptor(request).await {
-            return result
-                .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+        if let Some(result) =
+            crate::call::descriptor::try_execute_retained_bound_closure_in_context(
+                context,
+                retained.clone(),
+                arguments.to_vec(),
+                requested_outputs,
+                None,
+            )
+            .await
+            .map_err(CallableCallError::Runtime)?
+        {
+            return crate::call::arguments::project_rooted_legacy_builtin_value_abi(result)
                 .map_err(CallableCallError::Runtime);
         }
         return Err(CallableCallError::SemanticUnavailable {
@@ -149,6 +153,8 @@ async fn invoke_closure(
             function: function.to_string(),
         });
     }
+    let mut merged = closure.captures.clone();
+    merged.extend_from_slice(arguments);
     if let Some(result) = user_functions::try_call_semantic_function_by_name_in_context(
         context,
         &closure.function_name,

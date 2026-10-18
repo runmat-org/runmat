@@ -26,7 +26,7 @@ pub type UnscopedFunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctio
 pub type BoundFunctionInvoker = dyn Fn(
     crate::context::RuntimeContext,
     runmat_value::BoundFunctionBinding,
-    crate::execution::RootedValues,
+    crate::call::RootedFunctionArguments,
     usize,
     Option<runmat_value::LexicalEnvironment>,
 ) -> UserFunctionFuture;

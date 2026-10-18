@@ -314,6 +314,7 @@ mod tests {
                 catalog_fingerprint: catalog,
                 optimization: NativeOptimization::Speed,
                 runtime_binding_mode: AotRuntimeBindingMode::Dynamic,
+                required_capabilities: runmat_types::CapabilitySet::default(),
                 foreign_policy: None,
                 object_digest: Digest::sha256(&bytes),
                 object_bytes: bytes.len() as u64,

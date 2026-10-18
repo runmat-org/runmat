@@ -59,7 +59,7 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         | Value::Symbolic(_)
         | Value::Foreign(_) => Some(vec![1, 1]),
         Value::SymbolicArray(arr) => Some(arr.shape.clone()),
-        Value::LogicalArray(arr) => Some(arr.shape.clone()),
+        Value::LogicalArray(arr) => Some(arr.shape.as_slice().to_vec()),
         Value::StringArray(sa) => Some(sa.shape.clone()),
         Value::String(s) => Some(vec![1, s.chars().count()]),
         Value::CharArray(ca) => Some(ca.shape.clone()),

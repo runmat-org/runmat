@@ -72,7 +72,7 @@ fn sibling_native_pending_frames_remain_isolated_after_out_of_order_drop() {
                 release
                     .await
                     .map_err(|_| "native input abandoned".to_string())?;
-                Ok(InteractionResponse::Line("ok".into()))
+                Ok(InteractionResponse::Line("0".into()))
             })
         })));
         drop(scope);
@@ -110,18 +110,38 @@ fn sibling_native_pending_frames_remain_isolated_after_out_of_order_drop() {
         );
         second_release_tx.send(()).expect("second remains live");
         block_on(second_pending).expect("second input completion");
-        let NativeInvocationStep::Completed(output) = second.advance().expect("second final step")
-        else {
-            panic!("second native invocation did not finish");
-        };
-        let Value::StructArray(frames) = &output.outputs[0] else {
-            panic!("dbstack must return a struct array");
+        let output = block_on(async {
+            loop {
+                match second.advance().expect("second native step") {
+                    NativeInvocationStep::Completed(output) => break output,
+                    NativeInvocationStep::Suspended {
+                        continuation,
+                        generation,
+                    } => second
+                        .resume_suspension(continuation, generation)
+                        .await
+                        .expect("complete remaining native operation"),
+                    NativeInvocationStep::Deoptimized { target, .. }
+                        if target == runmat_runtime::native::NativeResumeKind::GENERIC_NATIVE =>
+                    {
+                        second
+                            .resume_deoptimization()
+                            .expect("resume generic native operation");
+                    }
+                    other => panic!("unexpected remaining native transition: {other:?}"),
+                }
+            }
+        });
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "input must not replay");
+        // The canonical structure representation normalizes exactly one frame
+        // to a scalar; an abandoned sibling would produce a non-scalar array.
+        let Value::Struct(frame) = &output.outputs[0] else {
+            panic!("dbstack must contain exactly one live frame");
         };
         assert_eq!(
-            frames.field_values("name").and_then(|names| names.first()),
+            frame.fields.get("name"),
             Some(&Value::String("pendingNativeFrame".into()))
         );
-        assert_eq!(frames.len(), 1, "abandoned sibling frame cannot leak");
         assert!(runmat_runtime::debug_context::current_frames().is_empty());
     });
 }

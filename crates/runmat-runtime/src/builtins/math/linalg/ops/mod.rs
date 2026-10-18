@@ -1,11 +1,17 @@
 //! Linear algebra operations builtins.
 
 pub(crate) mod cross;
+pub(crate) mod callable_linear_operator;
 pub(crate) mod ctranspose;
 pub(crate) mod dot;
+/// Borrowed typed dense/CSC operator shared by host iterative solvers.
+pub mod linear_operator;
 pub(crate) mod matrix_arithmetic;
 pub(crate) mod pagemtimes;
 pub(crate) mod pagetranspose;
+/// Borrowed typed CSC operator boundary shared by sparse solvers and providers.
+pub mod sparse_operator;
+pub(crate) mod triangular_operator;
 pub(crate) mod trace;
 pub(crate) mod transpose;
 

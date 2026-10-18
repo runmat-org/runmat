@@ -286,9 +286,6 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .map_err(map_meshc_invalid_argument)?,
     );
     let opts = PlotRenderOptions {
-        title: "Mesh with Contours",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: false,
         ..Default::default()
     };

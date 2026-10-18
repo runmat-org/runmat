@@ -1,4 +1,5 @@
 use crate::bytecode::instr::{BytecodeClassMethod, BytecodeClassProperty, PropertyDefaultLiteral};
+use crate::bytecode::StochasticSourceOperand;
 use crate::call::builtins::is_vm_intrinsic_builtin;
 use crate::compiler::CompileError;
 use crate::instr::Instr;
@@ -18,6 +19,7 @@ use runmat_runtime::call::arguments::{ArgumentExpansionSpec, ArgumentSpec};
 use std::collections::HashMap;
 
 mod aggregate_construction;
+mod stochastic_evolution;
 mod subscript_path;
 
 #[derive(Clone)]
@@ -90,13 +92,6 @@ struct SpanGuard {
     prev: Option<runmat_hir::Span>,
 }
 
-struct MirStochasticEvolutionPlan {
-    state: runmat_mir::MirLocalId,
-    drift: MirOperand,
-    scale: MirOperand,
-    steps: MirOperand,
-}
-
 const IDENT_MIR_CELL_EXPAND_PLAN_INVALID: &str = "RunMat:MirCellExpandPlanInvalid";
 const IDENT_MIR_PAREN_CELL_PLAN_INVALID: &str = "RunMat:MirParenCellPlanInvalid";
 const IDENT_MIR_SCALAR_INDEX_PLAN_INVALID: &str = "RunMat:MirScalarIndexPlanInvalid";
@@ -131,34 +126,6 @@ const IDENT_MIR_METHOD_FALLBACK_POLICY_UNSUPPORTED: &str =
 const IDENT_MIR_METHOD_CALL_CALLEE_INVALID: &str = "RunMat:MirMethodCallCalleeInvalid";
 const IDENT_MIR_METHOD_CALL_RECEIVER_MISSING: &str = "RunMat:MirMethodCallReceiverMissing";
 
-fn stochastic_evolution_disabled() -> bool {
-    std::env::var("RUNMAT_DISABLE_STOCHASTIC_EVOLUTION")
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes"
-            )
-        })
-        .unwrap_or(false)
-}
-
-fn mir_range_starts_at_one(iterable: &MirRvalue) -> bool {
-    let MirRvalue::Range { start, step, .. } = iterable else {
-        return false;
-    };
-    mir_operand_is_one(start) && step.as_ref().is_none_or(mir_operand_is_one)
-}
-
-fn mir_operand_is_one(operand: &MirOperand) -> bool {
-    match operand {
-        MirOperand::Constant(MirConstant::Number(value)) => value == "1" || value == "1.0",
-        MirOperand::Constant(MirConstant::IntegerLiteral(value)) => {
-            runmat_value::IntValue::from(value).try_to_u64() == Some(1)
-        }
-        _ => false,
-    }
-}
-
 pub(super) fn call_name(call: &MirCall) -> Option<&str> {
     match &call.callee {
         MirCallee::Static(CallableIdentity::Builtin(id)) => Some(id.0.as_str()),
@@ -190,96 +157,6 @@ fn imported_handle_runtime_name(path: &runmat_hir::DefPath) -> Option<String> {
         segments.push(normalized.to_string());
     }
     Some(segments.join("."))
-}
-
-fn randn_assignment(stmt: &MirStmt) -> Option<(runmat_mir::MirLocalId, &MirCall)> {
-    let MirStmtKind::Assign {
-        place: MirPlace::Local(local),
-        value: MirRvalue::Call(call),
-    } = &stmt.kind
-    else {
-        return None;
-    };
-    call_name(call)
-        .is_some_and(|name| name.eq_ignore_ascii_case("randn"))
-        .then_some((*local, call))
-}
-
-fn assigned_rvalue(statements: &[MirStmt], local: runmat_mir::MirLocalId) -> Option<&MirRvalue> {
-    statements.iter().find_map(|stmt| {
-        let MirStmtKind::Assign {
-            place: MirPlace::Local(candidate),
-            value,
-        } = &stmt.kind
-        else {
-            return None;
-        };
-        (*candidate == local).then_some(value)
-    })
-}
-
-fn local_operand(operand: &MirOperand) -> Option<runmat_mir::MirLocalId> {
-    match operand {
-        MirOperand::Local(local) => Some(*local),
-        _ => None,
-    }
-}
-
-fn exp_call_arg(statements: &[MirStmt], exp_local: runmat_mir::MirLocalId) -> Option<&MirOperand> {
-    let MirRvalue::Call(call) = assigned_rvalue(statements, exp_local)? else {
-        return None;
-    };
-    if !call_name(call).is_some_and(|name| name.eq_ignore_ascii_case("exp")) || call.args.len() != 1
-    {
-        return None;
-    }
-    match &call.args[0] {
-        MirCallArg::Single(arg) => Some(arg),
-        _ => None,
-    }
-}
-
-fn add_with_scale_term(
-    statements: &[MirStmt],
-    arg_local: runmat_mir::MirLocalId,
-    z_local: runmat_mir::MirLocalId,
-) -> Option<(&MirOperand, &MirOperand)> {
-    let MirRvalue::Binary(left, OperatorKind::Add, right) = assigned_rvalue(statements, arg_local)?
-    else {
-        return None;
-    };
-    if local_operand(left)
-        .and_then(|local| scale_term(statements, local, z_local))
-        .is_some()
-    {
-        Some((right, left))
-    } else if local_operand(right)
-        .and_then(|local| scale_term(statements, local, z_local))
-        .is_some()
-    {
-        Some((left, right))
-    } else {
-        None
-    }
-}
-
-fn scale_term(
-    statements: &[MirStmt],
-    scale_mul_local: runmat_mir::MirLocalId,
-    z_local: runmat_mir::MirLocalId,
-) -> Option<&MirOperand> {
-    let MirRvalue::Binary(left, OperatorKind::ElementwiseMultiply, right) =
-        assigned_rvalue(statements, scale_mul_local)?
-    else {
-        return None;
-    };
-    if matches!(left, MirOperand::Local(local) if *local == z_local) {
-        Some(right)
-    } else if matches!(right, MirOperand::Local(local) if *local == z_local) {
-        Some(left)
-    } else {
-        None
-    }
 }
 
 fn mir_indexing_context_matches(actual: IndexResultContext, expected: IndexResultContext) -> bool {
@@ -719,6 +596,8 @@ impl Compiler {
                     ..
                 } => {
                     if self.try_compile_mir_stochastic_evolution(
+                        block.id,
+                        *binding,
                         iterable,
                         *body_block,
                         *exit_block,
@@ -879,68 +758,93 @@ impl Compiler {
 
     fn try_compile_mir_stochastic_evolution(
         &mut self,
+        header_block: BasicBlockId,
+        binding: runmat_mir::MirLocalId,
         iterable: &MirRvalue,
         body_block: BasicBlockId,
         exit_block: BasicBlockId,
         pending_jumps: &mut Vec<(usize, BasicBlockId, bool)>,
     ) -> Result<bool, CompileError> {
-        if stochastic_evolution_disabled() || !mir_range_starts_at_one(iterable) {
-            return Ok(false);
-        }
-        let Some(plan) = self.detect_mir_stochastic_evolution(body_block, iterable) else {
+        let Some(plan) = self.body.as_ref().and_then(|body| {
+            stochastic_evolution::detect(body, header_block, binding, body_block, iterable)
+        }) else {
             return Ok(false);
         };
+        let iteration_slot = self.mir_local_slot(plan.iteration_binding)?;
+        let noise_slot = self.mir_local_slot(plan.noise)?;
         let state_slot = self.mir_local_slot(plan.state)?;
-        self.emit(Instr::LoadVar(state_slot));
-        self.compile_mir_operand(&plan.drift)?;
-        self.compile_mir_operand(&plan.scale)?;
-        self.compile_mir_operand(&plan.steps)?;
-        self.emit(Instr::StochasticEvolution);
-        self.emit(Instr::StoreVar(state_slot));
+        // A selected attempt cannot execute LoadVar before the original For:
+        // even a successful load may refresh an alias and clone shape metadata.
+        let Some(steps) = self.stochastic_source_operand(&plan.steps)? else {
+            return Ok(false);
+        };
+        let Some(drift) = self.stochastic_source_operand(&plan.drift)? else {
+            return Ok(false);
+        };
+        let Some(scale) = self.stochastic_source_operand(&plan.scale)? else {
+            return Ok(false);
+        };
+        let Some(randn_args) = plan
+            .randn_args
+            .iter()
+            .map(|arg| self.stochastic_source_operand(arg))
+            .collect::<Result<Option<Vec<_>>, _>>()?
+        else {
+            return Ok(false);
+        };
+        let selected = self.emit(Instr::StochasticEvolution {
+            iteration_slot,
+            noise_slot,
+            state_slot,
+            steps: steps.clone(),
+            drift: drift.clone(),
+            scale: scale.clone(),
+            randn_args: randn_args.clone(),
+            fallback_pc: usize::MAX,
+        });
         let done = self.emit(Instr::Jump(usize::MAX));
         pending_jumps.push((done, exit_block, false));
+        let fallback_pc = self.instructions.len();
+        self.patch(
+            selected,
+            Instr::StochasticEvolution {
+                iteration_slot,
+                noise_slot,
+                state_slot,
+                steps,
+                drift,
+                scale,
+                randn_args,
+                fallback_pc,
+            },
+        );
+        self.compile_mir_for_terminator(binding, iterable, body_block, exit_block, pending_jumps)?;
         Ok(true)
     }
 
-    fn detect_mir_stochastic_evolution(
+    fn stochastic_source_operand(
         &self,
-        body_block: BasicBlockId,
-        iterable: &MirRvalue,
-    ) -> Option<MirStochasticEvolutionPlan> {
-        let body = self.body.as_ref()?;
-        let block = body.blocks.iter().find(|block| block.id == body_block)?;
-        let statements = block.statements.as_slice();
-        let (z_local, _) = statements.iter().find_map(randn_assignment)?;
-        let (state, exp_operand) = statements.iter().rev().find_map(|stmt| {
-            let MirStmtKind::Assign {
-                place: MirPlace::Local(state),
-                value: MirRvalue::Binary(left, OperatorKind::ElementwiseMultiply, right),
-            } = &stmt.kind
-            else {
-                return None;
-            };
-            if matches!(left, MirOperand::Local(local) if local == state) {
-                Some((*state, right))
-            } else if matches!(right, MirOperand::Local(local) if local == state) {
-                Some((*state, left))
-            } else {
-                None
+        operand: &MirOperand,
+    ) -> Result<Option<StochasticSourceOperand>, CompileError> {
+        Ok(Some(match operand {
+            MirOperand::Local(local) => StochasticSourceOperand::Slot(self.mir_local_slot(*local)?),
+            MirOperand::Constant(MirConstant::Number(source)) => {
+                let Ok(value) = source.parse::<f64>() else {
+                    return Ok(None);
+                };
+                StochasticSourceOperand::Number(value)
             }
-        })?;
-        let exp_local = local_operand(exp_operand)?;
-        let exp_arg = exp_call_arg(statements, exp_local)?;
-        let arg_local = local_operand(exp_arg)?;
-        let (drift, scale_mul_operand) = add_with_scale_term(statements, arg_local, z_local)?;
-        let scale = scale_term(statements, local_operand(scale_mul_operand)?, z_local)?;
-        let MirRvalue::Range { end, .. } = iterable else {
-            return None;
-        };
-        Some(MirStochasticEvolutionPlan {
-            state,
-            drift: drift.clone(),
-            scale: scale.clone(),
-            steps: end.clone(),
-        })
+            MirOperand::Constant(MirConstant::IntegerLiteral(source)) => {
+                StochasticSourceOperand::Integer(runmat_value::IntValue::from(source))
+            }
+            MirOperand::Constant(MirConstant::Bool(value)) => StochasticSourceOperand::Bool(*value),
+            MirOperand::Constant(MirConstant::String(value)) => {
+                StochasticSourceOperand::String(value.0.clone())
+            }
+            // The normal For retains every other literal/handle's exact
+            // evaluation and error timing.
+            _ => return Ok(None),
+        }))
     }
 
     fn compile_mir_for_terminator(
@@ -962,6 +866,11 @@ impl Compiler {
         };
         let binding_slot = self.mir_local_slot(binding)?;
         let init_flag = self.alloc_temp();
+        let entered_flag = self.alloc_temp();
+        // Keep the range cursor separate from the source binding: the latter
+        // is published only for an iteration that will actually run, and a
+        // body assignment to it does not alter the next range element.
+        let cursor_var = self.alloc_temp();
         let end_var = self.alloc_temp();
         let step_var = self.alloc_temp();
 
@@ -970,7 +879,9 @@ impl Compiler {
         self.emit(Instr::Equal);
         let already_initialized = self.emit(Instr::JumpIfFalse(usize::MAX));
         self.compile_mir_operand(start)?;
-        self.emit(Instr::StoreVar(binding_slot));
+        self.emit(Instr::StoreVar(cursor_var));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::StoreVar(entered_flag));
         if let Some(step) = step {
             self.compile_mir_operand(step)?;
         } else {
@@ -984,10 +895,10 @@ impl Compiler {
         let after_update = self.emit(Instr::Jump(usize::MAX));
         let increment_pc = self.instructions.len();
         self.patch(already_initialized, Instr::JumpIfFalse(increment_pc));
-        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(cursor_var));
         self.emit(Instr::LoadVar(step_var));
         self.emit(Instr::Add);
-        self.emit(Instr::StoreVar(binding_slot));
+        self.emit(Instr::StoreVar(cursor_var));
         let condition_pc = self.instructions.len();
         self.patch(after_update, Instr::Jump(condition_pc));
 
@@ -995,10 +906,7 @@ impl Compiler {
         self.emit(Instr::LoadConst(0.0));
         self.emit(Instr::Equal);
         let nonzero_step = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadConst(0.0));
-        self.emit(Instr::StoreVar(init_flag));
         let zero_step_exit = self.emit(Instr::Jump(usize::MAX));
-        pending_jumps.push((zero_step_exit, exit_block, false));
         let after_zero_step = self.instructions.len();
         self.patch(nonzero_step, Instr::JumpIfFalse(after_zero_step));
 
@@ -1006,26 +914,38 @@ impl Compiler {
         self.emit(Instr::LoadConst(0.0));
         self.emit(Instr::GreaterEqual);
         let negative_step_branch = self.emit(Instr::JumpIfFalse(usize::MAX));
-        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(cursor_var));
         self.emit(Instr::LoadVar(end_var));
         self.emit(Instr::LessEqual);
         let positive_step_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
         let condition_done = self.emit(Instr::Jump(usize::MAX));
         let negative_branch = self.instructions.len();
         self.patch(negative_step_branch, Instr::JumpIfFalse(negative_branch));
-        self.emit(Instr::LoadVar(binding_slot));
+        self.emit(Instr::LoadVar(cursor_var));
         self.emit(Instr::LoadVar(end_var));
         self.emit(Instr::GreaterEqual);
         let negative_step_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
         let body_jump_pc = self.instructions.len();
         self.patch(condition_done, Instr::Jump(body_jump_pc));
 
+        self.emit(Instr::LoadVar(cursor_var));
+        self.emit(Instr::StoreVar(binding_slot));
+        self.emit(Instr::LoadConst(1.0));
+        self.emit(Instr::StoreVar(entered_flag));
         let body_jump = self.emit(Instr::Jump(usize::MAX));
         pending_jumps.push((body_jump, body_block, false));
 
         let exit_pc = self.instructions.len();
+        self.patch(zero_step_exit, Instr::Jump(exit_pc));
         self.patch(positive_step_exit, Instr::JumpIfFalse(exit_pc));
         self.patch(negative_step_exit, Instr::JumpIfFalse(exit_pc));
+        self.emit(Instr::LoadVar(entered_flag));
+        self.emit(Instr::LoadConst(0.0));
+        self.emit(Instr::Equal);
+        let nonempty_exit = self.emit(Instr::JumpIfFalse(usize::MAX));
+        self.emit(Instr::CreateMatrix(0, 0));
+        self.emit(Instr::StoreVar(binding_slot));
+        self.patch(nonempty_exit, Instr::JumpIfFalse(self.instructions.len()));
         self.emit(Instr::LoadConst(0.0));
         self.emit(Instr::StoreVar(init_flag));
         let done = self.emit(Instr::Jump(usize::MAX));
@@ -1628,6 +1548,10 @@ impl Compiler {
                     self.compile_mir_operand(operand)?;
                     selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
                 }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
+                    selectors.push(crate::bytecode::BytecodeSubscriptSelector::Value);
+                }
                 MirIndexComponent::ContextualExpr(region) => {
                     let previous = self.prepared_index_component.replace(component_index);
                     self.compile_mir_expression_region(region)?;
@@ -1642,6 +1566,17 @@ impl Compiler {
     fn compile_mir_expression_region(
         &mut self,
         region: &runmat_mir::MirExpressionRegion,
+    ) -> Result<(), CompileError> {
+        region
+            .validate()
+            .map_err(|message| self.compile_error(message))?;
+        self.compile_mir_expression_steps(region.steps())?;
+        self.compile_mir_operand(region.result())
+    }
+
+    fn compile_mir_prepared_expression_region(
+        &mut self,
+        region: &runmat_mir::MirPreparedExpressionRegion,
     ) -> Result<(), CompileError> {
         region
             .validate()
@@ -1702,6 +1637,10 @@ impl Compiler {
                     self.compile_mir_operand(operand)?;
                     numeric_count += 1;
                 }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
+                    numeric_count += 1;
+                }
                 MirIndexComponent::ContextualExpr(region) => {
                     let previous = self.contextual_index_component.replace(component_index);
                     self.compile_mir_expression_region(region)?;
@@ -1730,6 +1669,9 @@ impl Compiler {
                 }
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
                 }
                 MirIndexComponent::ContextualExpr(region) => {
                     let previous = self.contextual_index_component.replace(component_index);
@@ -1883,6 +1825,10 @@ impl Compiler {
                 }
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
+                    index_count += 1;
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
                     index_count += 1;
                 }
                 MirIndexComponent::ContextualExpr(_) => {
@@ -4119,6 +4065,9 @@ impl Compiler {
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
                 }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
+                }
                 _ => {
                     return Err(self
                         .compile_error("MIR cell index lowering expects expression selectors")
@@ -4184,12 +4133,17 @@ impl Compiler {
         indexing: &MirIndexing,
     ) -> Result<(), CompileError> {
         for component in &indexing.components {
-            let MirIndexComponent::Expr(operand) = component else {
-                return Err(self
-                    .compile_error("scalar index lowering expects expression selectors only")
-                    .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
-            };
-            self.compile_mir_operand(operand)?;
+            match component {
+                MirIndexComponent::Expr(operand) => self.compile_mir_operand(operand)?,
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?
+                }
+                MirIndexComponent::Colon | MirIndexComponent::ContextualExpr(_) => {
+                    return Err(self
+                        .compile_error("scalar index lowering expects expression selectors only")
+                        .with_identifier(IDENT_MIR_SCALAR_INDEX_PLAN_INVALID));
+                }
+            }
         }
         Ok(())
     }
@@ -4212,6 +4166,10 @@ impl Compiler {
                 )?,
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
+                    numeric_count += 1;
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
                     numeric_count += 1;
                 }
                 MirIndexComponent::ContextualExpr(_) => {

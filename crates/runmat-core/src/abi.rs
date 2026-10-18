@@ -10,7 +10,46 @@ use crate::fusion::FusionPlanSnapshot;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SourceInput {
     Path(String),
-    Text { name: String, text: String },
+    Text {
+        name: String,
+        text: String,
+    },
+    /// Exact bytes read once through the canonical path-source reader. Unlike
+    /// Text's display name, this carries an issued source access path.
+    CapturedPath(CapturedPathSource),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CapturedPathSource {
+    display_name: String,
+    access_path: String,
+    text: std::sync::Arc<str>,
+}
+
+impl CapturedPathSource {
+    pub(crate) fn new(display_name: String, access_path: String, text: String) -> Self {
+        Self {
+            display_name,
+            access_path,
+            text: text.into(),
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (String, String, String) {
+        (self.display_name, self.access_path, self.text.to_string())
+    }
+
+    pub(crate) fn access_path(&self) -> &str {
+        &self.access_path
+    }
+
+    pub(crate) fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,6 +160,16 @@ pub struct ExecutionOutcome {
     pub fusion_plan: Option<FusionPlanSnapshot>,
 }
 
+impl ExecutionOutcome {
+    /// Language failures can be reported with committed workspace effects in
+    /// an otherwise successfully delivered response.
+    pub fn has_errors(&self) -> bool {
+        self.diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == DiagnosticSeverity::Error)
+    }
+}
+
 impl Default for ExecutionOutcome {
     fn default() -> Self {
         Self {
@@ -187,6 +236,10 @@ pub enum WorkspaceBindingKey {
         scope: GlobalScopeKey,
         name: BindingName,
     },
+    GlobalSlot {
+        scope: GlobalScopeKey,
+        slot: usize,
+    },
     Persistent {
         function: DefPath,
         name: BindingName,
@@ -199,17 +252,32 @@ pub enum GlobalScopeKey {
     Package(String),
 }
 
+impl WorkspaceBindingKey {
+    pub(crate) fn is_global(&self) -> bool {
+        matches!(self, Self::Global { .. } | Self::GlobalSlot { .. })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkspaceBindingValue {
+    /// Storage identity, which may differ from the workspace spelling.
     pub key: WorkspaceBindingKey,
+    pub name: BindingName,
     pub value: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceBindingRemoval {
+    /// The retired identity; `name` identifies the visible workspace entry.
+    pub key: WorkspaceBindingKey,
+    pub name: BindingName,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct WorkspaceDelta {
     pub version: u64,
     pub upserts: Vec<WorkspaceBindingValue>,
-    pub removals: Vec<WorkspaceBindingKey>,
+    pub removals: Vec<WorkspaceBindingRemoval>,
     pub full_snapshot_required: bool,
 }
 

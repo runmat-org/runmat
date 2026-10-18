@@ -12,8 +12,11 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 mod platform;
+mod numeric_download_stage;
+pub use numeric_download_stage::{NumericDownloadStageLease, PreparedNumericDownloadStage};
 mod provider_registry;
 pub mod random;
+pub mod stochastic_evolution;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
 pub use platform::AcceleratorThreadBound;
@@ -74,11 +77,11 @@ mod numerical_domain;
 pub mod reduction;
 pub use reduction::ProviderDoubleSumPreflight;
 pub mod scalar_program;
-pub mod wgpu_ieee_words;
 #[cfg(feature = "wgpu")]
 mod wgpu_access;
 #[cfg(feature = "wgpu")]
 mod wgpu_buffer_owner;
+pub mod wgpu_ieee_words;
 #[cfg(feature = "wgpu")]
 pub use wgpu_access::{
     CanonicalWgpuEmissionAuthority, WgpuAccessError, WgpuCleanup, WgpuDeviceAccess, WgpuEmission,
@@ -91,7 +94,10 @@ pub use fusion_outputs::{
     validate_fused_output_classes, ProviderFusedElementwiseAbi, ProviderFusedElementwiseRequest,
     ProviderFusedElementwiseWorkload,
 };
-pub use logical_upload::{upload_logical_protecting, HostLogicalTensorView};
+pub use logical_upload::{
+    upload_logical_protecting, upload_logical_protecting_admitted, HostLogicalTensorView,
+    HostLogicalUploadScratch,
+};
 pub use native_device::*;
 pub use numeric_upload::{
     class_preserving_upload_query, is_invalid_numeric_upload_result, upload_numeric_protecting,
@@ -1763,6 +1769,27 @@ pub trait AccelProvider: AcceleratorThreadBound {
         None
     }
 
+    /// Control backing for a reusable concurrent registration reservation.
+    /// Absent support is distinct from a zero-byte or cumulative reservation.
+    fn reusable_output_registration_host_bytes(&self) -> Option<u64> {
+        None
+    }
+
+    /// Reserve simultaneous physical records rather than total emissions.
+    /// Returned slot ownership follows each record through exact retirement.
+    fn prepare_reusable_output_host_metadata(
+        &self,
+        _admission: Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        _registrations: usize,
+    ) -> ProviderExecutionResult<Box<dyn runmat_execution::resource::ProviderHostMetadataAdmission>>
+    {
+        Err(ProviderExecutionError::from(
+            unsupported_provider_operation(
+                "reusable provider registration capacity is unsupported",
+            ),
+        ))
+    }
+
     /// Prepare provider-owned registry backing and the exact number of output
     /// slots before the selected operation can emit. `None` admission is only
     /// an unbounded route; finite callers pass an owned managed receipt.
@@ -2026,6 +2053,23 @@ pub trait AccelProvider: AcceleratorThreadBound {
     ) -> ProviderExecutionResult<GpuTensorHandle> {
         Err(unsupported_provider_operation("provider does not implement logical upload").into())
     }
+    /// A finite selected upload must consume the same request-local metadata
+    /// permit as numeric publication. Existing unbounded providers retain the
+    /// ordinary hook; a missing admitted implementation declines pre-effect.
+    fn upload_logical_raw_admitted(
+        &self,
+        host: &HostLogicalTensorView<'_>,
+        admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        scratch: Option<HostLogicalUploadScratch<'_>>,
+    ) -> ProviderExecutionResult<GpuTensorHandle> {
+        if admission.is_some() || scratch.is_some() {
+            return Err(unsupported_provider_operation(
+                "provider does not implement admitted logical upload",
+            )
+            .into());
+        }
+        self.upload_logical_raw(host)
+    }
     fn upload(&self, host: &crate::HostTensorView) -> anyhow::Result<GpuTensorHandle>;
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a>;
 
@@ -2148,8 +2192,71 @@ pub trait AccelProvider: AcceleratorThreadBound {
         })
     }
 
+    /// Selected finite readback transfers the caller's retained callback
+    /// control claim into the provider's physical mapping owner. The default
+    /// rejects it before any provider effect; ordinary unbounded downloads
+    /// continue through `download_numeric`.
+    fn download_numeric_admitted<'a>(
+        &'a self,
+        _h: &'a GpuTensorHandle,
+        _completion_claim: std::sync::Arc<
+            dyn runmat_execution::resource::RetainedHostAllocationClaim,
+        >,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async {
+            Err(unsupported_provider_operation(
+                "provider does not implement admitted numeric download",
+            ))
+        })
+    }
+
+    /// Issue a provider-owned physical staging lease before the selected
+    /// readback's first effect. The caller has already funded callback and
+    /// stage-control metadata with `download_numeric_completion_host_bound`.
+    /// The default cannot certify a physical staging lifetime.
+    fn prepare_numeric_download_stage(
+        &self,
+        _source: &GpuTensorHandle,
+        _query: &ProviderFeasibilityQuery,
+        _completion_claim: std::sync::Arc<
+            dyn runmat_execution::resource::RetainedHostAllocationClaim,
+        >,
+    ) -> anyhow::Result<PreparedNumericDownloadStage> {
+        Err(unsupported_provider_operation(
+            "provider does not implement admitted numeric download staging",
+        ))
+    }
+
+    /// Consume the exact selected staging authority. An implementation must
+    /// retain the stage through physical callback retirement on cancellation.
+    fn download_numeric_admitted_stage<'a>(
+        &'a self,
+        _source: &'a GpuTensorHandle,
+        _stage: PreparedNumericDownloadStage,
+    ) -> AccelNumericDownloadFuture<'a> {
+        Box::pin(async {
+            Err(unsupported_provider_operation(
+                "provider does not implement admitted numeric download staging",
+            ))
+        })
+    }
+
+    /// Provider-owned upper bound for the callback state retained across an
+    /// asynchronous numeric download. Native payload and transpose buffers
+    /// belong to `download_numeric_host_workspace_bound` instead.
+    fn download_numeric_completion_host_bound(
+        &self,
+        _handle: &GpuTensorHandle,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        )
+    }
+
     /// Peak host workspace owned by one `download_numeric` call, including its
-    /// returned native payload and any simultaneously live host temporaries.
+    /// returned native payload and shape plus any simultaneously live host
+    /// temporaries. A consumer that moves that shape into a Tensor must not
+    /// charge the same shape backing again.
     /// Provider-owned device/mapped staging allocations belong to provider
     /// scratch, not this host bound. A provider without a proven bound must
     /// leave it unavailable; callers must not substitute the payload length.
@@ -3051,16 +3158,61 @@ pub trait AccelProvider: AcceleratorThreadBound {
         Err(anyhow::anyhow!("random_unifrnd not supported by provider"))
     }
 
-    fn stochastic_evolution(
+    /// Peak temporary host workspace required while selecting stochastic
+    /// evolution geometry, excluding the request and metadata retained in the
+    /// returned selection. Callers account those owned values separately.
+    ///
+    /// A provider must not be asked to plan under a finite host budget unless
+    /// it supplies a proven bound. The conservative default therefore keeps
+    /// planning unavailable rather than assuming that a synchronous method is
+    /// allocation-free.
+    fn stochastic_evolution_planning_host_workspace(
         &self,
-        _state: &GpuTensorHandle,
-        _drift: f64,
-        _scale: f64,
-        _steps: u32,
-    ) -> anyhow::Result<GpuTensorHandle> {
-        Err(anyhow::anyhow!(
-            "stochastic_evolution not supported by provider"
-        ))
+        _rank: usize,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        )
+    }
+
+    /// Host control allocation required to acknowledge exact retirement of
+    /// each selected stochastic source upload. `Known` is also the provider's
+    /// contract that its upload implementation consumes the armed typed
+    /// witness through canonical submitted-work completion. Runtime must
+    /// decline the optimized source before effects for every other result.
+    fn stochastic_evolution_source_transfer_retirement_host_workspace(
+        &self,
+    ) -> runmat_execution::ResourceByteBound {
+        runmat_execution::ResourceByteBound::Unavailable(
+            runmat_execution::ResourceBoundUnavailable::NoScratchBound,
+        )
+    }
+
+    /// Select immutable provider-owned tile geometry and its exact physical
+    /// proposal before Runtime draws or uploads any noise. `None` is a
+    /// certified pre-effect decline; execution accepts only this selected
+    /// plan/proposal pair.
+    fn plan_stochastic_evolution(
+        &self,
+        _request: &stochastic_evolution::ProviderStochasticEvolutionWorkRequest,
+    ) -> ProviderExecutionResult<Option<stochastic_evolution::ProviderStochasticEvolutionSelection>>
+    {
+        Ok(None)
+    }
+
+    /// Execute one bounded tile of one already-selected evolution step.
+    /// Runtime owns the ordered RNG turn and supplies the exact noise tile.
+    /// The default is certified unsupported before effects.
+    fn execute_stochastic_evolution_tile<'a>(
+        &'a self,
+        _request: stochastic_evolution::ProviderStochasticEvolutionTileRequest<'a>,
+        _metadata: Option<&'a dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+        _completion_control: Option<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        >,
+    ) -> ProviderExecutionFuture<'a, stochastic_evolution::ProviderStochasticEvolutionProgress>
+    {
+        unsupported_execution_future("caller-supplied stochastic evolution is not supported")
     }
 
     /// Set the provider RNG state to align with the host RNG.

@@ -56,7 +56,11 @@ fn execution_scope_preserves_normal_caught_language_errors_inner() {
         .iter()
         .find_map(|(slot, name)| (name == "x").then_some(*slot))
         .unwrap();
-    assert_eq!(completion.values[slot], runmat_value::Value::Num(42.0));
+    let value = completion
+        .values
+        .get(slot)
+        .expect("completed value remains in its compiled slot");
+    assert_eq!(*value, runmat_value::Value::Num(42.0));
     assert!(!source.token().is_cancelled());
 }
 

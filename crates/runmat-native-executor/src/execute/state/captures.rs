@@ -19,27 +19,23 @@ impl HostState {
             ));
         }
         let capture_bindings = target
-            .locals
+            .closure_captures
             .iter()
-            .filter(|local| local.kind == NativeLocalKind::Capture)
-            .map(|local| local.binding)
+            .filter(|capture| {
+                capture.disposition
+                    == runmat_native_codegen::NativeClosureCaptureDisposition::ByValue
+            })
+            .map(|capture| capture.binding)
             .collect::<Vec<_>>();
         let mut captures = Vec::new();
         for target_binding in capture_bindings {
-            let binding = target_binding.ok_or_else(|| {
-                NativeExecutorError::Host("native capture local has no semantic binding".into())
+            let binding = target_binding;
+            let source = self.function.local_for_binding(binding).ok_or_else(|| {
+                NativeExecutorError::Host(
+                    "nested native capture is not visible in its caller".into(),
+                )
             })?;
-            let source = self
-                .function
-                .locals
-                .iter()
-                .find(|local| local.binding == Some(binding))
-                .ok_or_else(|| {
-                    NativeExecutorError::Host(
-                        "nested native capture is not visible in its caller".into(),
-                    )
-                })?;
-            let slot = source.id.0 as usize;
+            let slot = source.0 as usize;
             let value = self.local_reference(slot)?;
             // The binding-keyed activation, not this transport snapshot, owns
             // nested semantics. An unassigned capture may be initialized by
@@ -52,6 +48,63 @@ impl HostState {
             captures.push(runmat_runtime::call::lexical::LexicalCapture { binding, value });
         }
         Ok((nested || !captures.is_empty()).then_some(captures))
+    }
+
+    /// Materialize the callable's complete compiler-ordered capture vector.
+    /// Shared lexical and canonical-storage entries remain authoritative in
+    /// their live owners; the closure's ordinary capture snapshot preserves
+    /// the same full positional ABI used by VM-produced callables.
+    pub fn callable_capture_values(
+        &mut self,
+        function: runmat_types::ProgramFunctionId,
+    ) -> NativeExecutorResult<Vec<runmat_value::Value>> {
+        let functions = std::sync::Arc::clone(&self.functions);
+        let captures = &functions
+            .iter()
+            .find(|candidate| candidate.id == function)
+            .ok_or_else(|| NativeExecutorError::Host("native function is unavailable".into()))?
+            .closure_captures;
+        let mut values = Vec::with_capacity(captures.len());
+        for capture in captures {
+            if capture.disposition
+                == runmat_native_codegen::NativeClosureCaptureDisposition::Lexical
+            {
+                let environment = self.lexical_environment.as_ref().ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "native lexical capture has no activation authority".into(),
+                    )
+                })?;
+                let value = runmat_runtime::call::lexical::read_binding_lease_with_context(
+                    environment,
+                    capture.binding,
+                    &self.runtime,
+                )?
+                .ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "native closure capture is unassigned at callable creation".into(),
+                    )
+                })?;
+                values.push(value.value().clone());
+                continue;
+            }
+            let source = self
+                .function
+                .local_for_binding(capture.binding)
+                .ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "native closure capture is not visible in its creating frame".into(),
+                    )
+                })?;
+            let value = self.local_reference(source.0 as usize)?;
+            if value.is_null() {
+                return Err(NativeExecutorError::Host(
+                    "native closure capture is unassigned at callable creation".into(),
+                ));
+            } else {
+                values.push(self.arena.get(value)?.clone());
+            }
+        }
+        Ok(values)
     }
 
     fn nested_function_is_visible(
@@ -112,7 +165,7 @@ impl HostState {
                 })?
                 .id
                 .0 as usize;
-            if self.global_bindings.binding_for_slot(slot).is_some()
+            if self.global_bindings.has_binding_for_slot(slot)
                 || self.persistent_bindings.contains_key(&slot)
             {
                 // The callee already published its mutation through the
@@ -130,13 +183,14 @@ impl HostState {
         &self,
     ) -> NativeExecutorResult<Vec<runmat_runtime::call::lexical::LexicalCapture>> {
         self.function
-            .locals
+            .closure_captures
             .iter()
-            .filter(|local| local.kind == NativeLocalKind::Capture)
-            .map(|local| {
-                let binding = local.binding.ok_or_else(|| {
-                    NativeExecutorError::Host("native capture local has no semantic binding".into())
-                })?;
+            .filter(|capture| {
+                capture.disposition
+                    == runmat_native_codegen::NativeClosureCaptureDisposition::ByValue
+            })
+            .map(|capture| {
+                let binding = capture.binding;
                 if let Some(environment) = self.lexical_environment.as_ref().filter(|_| {
                     self.function.lexical_bindings.iter().any(|entry| {
                         entry.binding == binding
@@ -153,7 +207,7 @@ impl HostState {
                         });
                     }
                 }
-                let value = self.locals[local.id.0 as usize];
+                let value = self.locals[capture.local.0 as usize];
                 Ok(runmat_runtime::call::lexical::LexicalCapture {
                     binding,
                     value: self.arena.get(value)?.clone(),

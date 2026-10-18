@@ -6,6 +6,7 @@ use crate::{
     RuntimeError,
 };
 use runmat_value::{IntValue, LogicalArray, NumericScalar, Tensor, Value};
+use std::borrow::{Borrow, Cow};
 
 pub type VmResult<T> = Result<T, RuntimeError>;
 
@@ -247,32 +248,15 @@ pub(crate) fn logical_indices_linear(
 }
 
 pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
-    if let Value::Bool(b) = value {
-        return Ok(if *b { vec![1] } else { Vec::new() });
+    if let Value::GpuTensor(handle) = value {
+        let gathered = if total_len_from_shape(handle.shape()) == 1 {
+            gather_if_needed_async(value).await?
+        } else {
+            materialize_index_value(value).await?
+        };
+        return indices_from_host_value_linear(&gathered, total_len);
     }
-    if let Value::LogicalArray(la) = value {
-        if la.data.len() == 1 && is_scalar_shape(&la.shape) {
-            return Ok(if la.data[0] != 0 { vec![1] } else { Vec::new() });
-        }
-    }
-    if let Some(idx_val) = index_scalar_from_value(value).await? {
-        return checked_positive_index(idx_val, Some(total_len)).map(|index| vec![index]);
-    }
-    let materialized;
-    let value = if matches!(value, Value::GpuTensor(_)) {
-        materialized = materialize_index_value(value).await?;
-        &materialized
-    } else {
-        value
-    };
-    match value {
-        Value::Tensor(idx_t) => numeric_tensor_indices(idx_t, Some(total_len)),
-        Value::LogicalArray(la) => logical_indices_linear(la, total_len),
-        _ => Err(mex(
-            "UnsupportedIndexType",
-            "Unsupported index type for linear indexing",
-        )),
-    }
+    indices_from_host_value_linear(value, total_len)
 }
 
 async fn selector_from_value_dim_with_bounds(
@@ -280,48 +264,90 @@ async fn selector_from_value_dim_with_bounds(
     dim_len: usize,
     require_in_bounds: bool,
 ) -> VmResult<SliceSelector> {
-    if let Value::Bool(b) = value {
-        if *b {
-            return Ok(SliceSelector::Indices(vec![1]));
+    if let Value::GpuTensor(handle) = value {
+        let gathered = if total_len_from_shape(handle.shape()) == 1 {
+            gather_if_needed_async(value).await?
+        } else {
+            materialize_index_value(value).await?
+        };
+        return selector_from_host_value_dim(&gathered, dim_len, require_in_bounds);
+    }
+    selector_from_host_value_dim(value, dim_len, require_in_bounds)
+}
+
+pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
+    selector_from_value_dim_with_bounds(value, dim_len, true).await
+}
+
+fn indices_from_host_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
+    if let Value::Bool(value) = value {
+        return Ok(if *value { vec![1] } else { Vec::new() });
+    }
+    if let Value::LogicalArray(value) = value {
+        if value.data.len() == 1 && is_scalar_shape(&value.shape) {
+            return Ok(if value.data[0] != 0 {
+                vec![1]
+            } else {
+                Vec::new()
+            });
         }
-        return Ok(SliceSelector::Indices(Vec::new()));
     }
-    if let Value::LogicalArray(la) = value {
-        if la.data.len() == 1 && is_scalar_shape(&la.shape) {
-            if la.data[0] != 0 {
-                return Ok(SliceSelector::Indices(vec![1]));
-            }
-            return Ok(SliceSelector::Indices(Vec::new()));
-        }
+    if let Some(value) = index_scalar_from_host_value(value) {
+        return checked_positive_index(value, Some(total_len)).map(|index| vec![index]);
     }
-    if let Some(idx_val) = index_scalar_from_value(value).await? {
-        let bound = require_in_bounds.then_some(dim_len);
-        return checked_positive_index(idx_val, bound).map(SliceSelector::Scalar);
-    }
-    let materialized;
-    let value = if matches!(value, Value::GpuTensor(_)) {
-        materialized = materialize_index_value(value).await?;
-        &materialized
-    } else {
-        value
-    };
     match value {
-        Value::Tensor(idx_t) => numeric_tensor_indices(idx_t, require_in_bounds.then_some(dim_len))
+        Value::Tensor(value) => numeric_tensor_indices(value, Some(total_len)),
+        Value::LogicalArray(value) => logical_indices_linear(value, total_len),
+        _ => Err(mex(
+            "UnsupportedIndexType",
+            "Unsupported index type for linear indexing",
+        )),
+    }
+}
+
+fn selector_from_host_value_dim(
+    value: &Value,
+    dim_len: usize,
+    require_in_bounds: bool,
+) -> VmResult<SliceSelector> {
+    if let Value::Bool(value) = value {
+        return Ok(SliceSelector::Indices(if *value {
+            vec![1]
+        } else {
+            Vec::new()
+        }));
+    }
+    if let Value::LogicalArray(value) = value {
+        if value.data.len() == 1 && is_scalar_shape(&value.shape) {
+            return Ok(SliceSelector::Indices(if value.data[0] != 0 {
+                vec![1]
+            } else {
+                Vec::new()
+            }));
+        }
+    }
+    if let Some(index) = index_scalar_from_host_value(value) {
+        return checked_positive_index(index, require_in_bounds.then_some(dim_len))
+            .map(SliceSelector::Scalar);
+    }
+    match value {
+        Value::Tensor(value) => numeric_tensor_indices(value, require_in_bounds.then_some(dim_len))
             .map(SliceSelector::Indices),
-        Value::LogicalArray(la) => {
-            if la.data.len() != dim_len {
+        Value::LogicalArray(value) => {
+            if value.data.len() != dim_len {
                 return Err(mex(
                     "IndexShape",
                     "Logical mask length mismatch for dimension",
                 ));
             }
-            let mut indices = Vec::new();
-            for (i, &b) in la.data.iter().enumerate() {
-                if b != 0 {
-                    indices.push(i + 1);
-                }
-            }
-            Ok(SliceSelector::Indices(indices))
+            Ok(SliceSelector::Indices(
+                value
+                    .data
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(index, selected)| (*selected != 0).then_some(index + 1))
+                    .collect(),
+            ))
         }
         _ => Err(mex(
             "UnsupportedIndexType",
@@ -330,8 +356,61 @@ async fn selector_from_value_dim_with_bounds(
     }
 }
 
-pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
-    selector_from_value_dim_with_bounds(value, dim_len, true).await
+fn used_numeric_has_gpu(dims: usize, colon_mask: u32, end_mask: u32, numeric: &[Value]) -> bool {
+    if dims == 1 {
+        return (colon_mask & 1) == 0
+            && (end_mask & 1) == 0
+            && numeric
+                .first()
+                .is_some_and(|value| matches!(value, Value::GpuTensor(_)));
+    }
+    let mut numeric = numeric.iter();
+    (0..dims).any(|dimension| {
+        if selector_mask_has_dim(colon_mask | end_mask, dimension) {
+            false
+        } else {
+            numeric
+                .next()
+                .is_some_and(|value| matches!(value, Value::GpuTensor(_)))
+        }
+    })
+}
+
+async fn materialize_used_numeric<'a>(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &'a [Value],
+    linear: bool,
+) -> VmResult<Vec<Cow<'a, Value>>> {
+    let mut values = Vec::new();
+    let mut used = numeric.iter();
+    for dimension in 0..dims {
+        if selector_mask_has_dim(colon_mask | end_mask, dimension) {
+            continue;
+        }
+        let value = used.next().ok_or_else(|| {
+            mex(
+                "MissingNumericIndex",
+                if linear {
+                    "missing numeric index for linear slice"
+                } else {
+                    "missing numeric index for slice"
+                },
+            )
+        })?;
+        let Value::GpuTensor(handle) = value else {
+            values.push(Cow::Borrowed(value));
+            continue;
+        };
+        let gathered = if linear || total_len_from_shape(handle.shape()) != 1 {
+            materialize_index_value(value).await?
+        } else {
+            gather_if_needed_async(value).await?
+        };
+        values.push(Cow::Owned(gathered));
+    }
+    Ok(values)
 }
 
 pub async fn build_slice_selectors(
@@ -339,6 +418,41 @@ pub async fn build_slice_selectors(
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Vec<SliceSelector>> {
+    // Shape validation precedes any resident selector gather, as it does for
+    // the host decoder. Only selectors actually consumed by this expression
+    // may initiate provider work.
+    if dims == 1 {
+        checked_total_len_from_shape(base_shape)?;
+    } else {
+        crate::indexing::plan::effective_index_shape(base_shape, dims)?;
+    }
+    let materialized =
+        materialize_used_numeric(dims, colon_mask, end_mask, numeric, dims == 1).await?;
+    build_slice_selectors_from_host(dims, colon_mask, end_mask, &materialized, base_shape)
+}
+
+/// A typed synchronous completion is possible only when no selector needs a
+/// provider gather. `None` is a routing decision, not an indexing error.
+pub fn build_slice_selectors_host(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Option<Vec<SliceSelector>>> {
+    if used_numeric_has_gpu(dims, colon_mask, end_mask, numeric) {
+        return Ok(None);
+    }
+    build_slice_selectors_from_host(dims, colon_mask, end_mask, numeric, base_shape).map(Some)
+}
+
+fn build_slice_selectors_from_host<B: Borrow<Value>>(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[B],
     base_shape: &[usize],
 ) -> VmResult<Vec<SliceSelector>> {
     let mut selectors = Vec::with_capacity(dims);
@@ -352,14 +466,13 @@ pub async fn build_slice_selectors(
             selectors.push(SliceSelector::Scalar(total_len.max(1)));
             return Ok(selectors);
         }
-        let value = numeric.first().ok_or_else(|| {
+        let value = numeric.first().map(Borrow::borrow).ok_or_else(|| {
             mex(
                 "MissingNumericIndex",
                 "missing numeric index for linear slice",
             )
         })?;
-        let materialized = materialize_index_value(value).await?;
-        if let Value::Tensor(idx_t) = &materialized {
+        if let Value::Tensor(idx_t) = value {
             let indices = numeric_tensor_indices(idx_t, Some(total_len))?;
             selectors.push(SliceSelector::LinearIndices {
                 values: indices,
@@ -369,15 +482,15 @@ pub async fn build_slice_selectors(
                     idx_t.len(),
                 ),
             });
-        } else if let Value::LogicalArray(_) = &materialized {
+        } else if let Value::LogicalArray(_) = value {
             // MATLAB linear logical indexing always yields a column vector.
-            let idxs = indices_from_value_linear(&materialized, total_len).await?;
+            let idxs = indices_from_host_value_linear(value, total_len)?;
             selectors.push(SliceSelector::LinearIndices {
                 output_shape: vec![idxs.len(), 1],
                 values: idxs,
             });
         } else {
-            let idxs = indices_from_value_linear(&materialized, total_len).await?;
+            let idxs = indices_from_host_value_linear(value, total_len)?;
             selectors.push(SliceSelector::Indices(idxs));
         }
         return Ok(selectors);
@@ -399,9 +512,10 @@ pub async fn build_slice_selectors(
         }
         let value = numeric
             .get(numeric_iter)
+            .map(Borrow::borrow)
             .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
         numeric_iter += 1;
-        selectors.push(selector_from_value_dim(value, dim_len).await?);
+        selectors.push(selector_from_host_value_dim(value, dim_len, true)?);
     }
     Ok(selectors)
 }
@@ -414,6 +528,31 @@ pub async fn build_assignment_selectors(
     colon_mask: u32,
     end_mask: u32,
     numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Vec<SliceSelector>> {
+    crate::indexing::plan::effective_index_shape(base_shape, dims)?;
+    let materialized = materialize_used_numeric(dims, colon_mask, end_mask, numeric, false).await?;
+    build_assignment_selectors_from_host(dims, colon_mask, end_mask, &materialized, base_shape)
+}
+
+pub fn build_assignment_selectors_host(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[Value],
+    base_shape: &[usize],
+) -> VmResult<Option<Vec<SliceSelector>>> {
+    if used_numeric_has_gpu(dims, colon_mask, end_mask, numeric) {
+        return Ok(None);
+    }
+    build_assignment_selectors_from_host(dims, colon_mask, end_mask, numeric, base_shape).map(Some)
+}
+
+fn build_assignment_selectors_from_host<B: Borrow<Value>>(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    numeric: &[B],
     base_shape: &[usize],
 ) -> VmResult<Vec<SliceSelector>> {
     let effective_shape = crate::indexing::plan::effective_index_shape(base_shape, dims)?;
@@ -431,14 +570,15 @@ pub async fn build_assignment_selectors(
         }
         let value = numeric
             .get(numeric_iter)
+            .map(Borrow::borrow)
             .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
         numeric_iter += 1;
         match value {
             Value::Bool(_) | Value::LogicalArray(_) => {
-                selectors.push(selector_from_value_dim_with_bounds(value, dim_len, true).await?);
+                selectors.push(selector_from_host_value_dim(value, dim_len, true)?);
             }
             _ => {
-                selectors.push(selector_from_value_dim_with_bounds(value, dim_len, false).await?);
+                selectors.push(selector_from_host_value_dim(value, dim_len, false)?);
             }
         }
     }

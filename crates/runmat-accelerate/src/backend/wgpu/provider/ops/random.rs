@@ -1,6 +1,5 @@
 use anyhow::{anyhow, ensure, Result};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
-use runmat_time::Instant;
 
 use super::{
     advance_rng_state, philox_keys_from_state, product_checked, rng_state, seed_from_state,
@@ -11,6 +10,8 @@ use super::{
 mod child;
 #[path = "random/integer_child.rs"]
 mod integer_child;
+#[path = "random/stochastic_evolution.rs"]
+mod stochastic_evolution;
 
 impl WgpuProvider {
     pub(crate) fn set_rng_state_exec(&self, state: u64) -> Result<()> {
@@ -568,150 +569,6 @@ impl WgpuProvider {
         drop(rng_guard);
 
         self.register_existing_buffer(out_buffer, shape.to_vec(), total_len)
-    }
-
-    pub(crate) fn stochastic_evolution_exec(
-        &self,
-        state: &GpuTensorHandle,
-        drift: f64,
-        scale: f64,
-        steps: u32,
-    ) -> Result<GpuTensorHandle> {
-        let total_len = product_checked(state.shape())
-            .ok_or_else(|| anyhow!("stochastic_evolution: tensor size exceeds GPU limits"))?;
-        let start = Instant::now();
-        let state_entry = self.get_entry(state)?;
-        let out_buffer = self.with_emission(|emission, _| {
-            self.create_storage_buffer_checked(
-                emission,
-                total_len,
-                "runmat-stochastic-evolution-out",
-            )
-        })??;
-        if total_len == 0 {
-            return self.register_existing_buffer(out_buffer, state_entry.shape.clone(), 0);
-        }
-        ensure!(
-            total_len <= u32::MAX as usize,
-            "stochastic_evolution: tensor length too large"
-        );
-
-        let chunk_capacity = self
-            .linear_launch
-            .chunk_capacity()
-            .ok_or_else(|| anyhow!("GPU RNG frozen launch extent overflow"))?;
-
-        let mut rng_guard = rng_state()
-            .lock()
-            .map_err(|_| anyhow!("stochastic_evolution: provider RNG mutex poisoned"))?;
-        let mut chunk_state = *rng_guard;
-
-        self.with_emission(|emission, pending| -> Result<()> {
-            let pipeline = self.pipelines.stochastic_evolution.get(emission)?;
-            let mut offset = 0usize;
-            while offset < total_len {
-                let remaining = total_len - offset;
-                let chunk_len = remaining.min(chunk_capacity);
-                let chunk_u32 = u32::try_from(chunk_len).map_err(|_| {
-                    anyhow!("stochastic_evolution: chunk length exceeds GPU dispatch limits")
-                })?;
-                let offset_u32 = u32::try_from(offset)
-                    .map_err(|_| anyhow!("stochastic_evolution: offset exceeds GPU limits"))?;
-                let len_u32 = u32::try_from(total_len)
-                    .map_err(|_| anyhow!("stochastic_evolution: len overflow"))?;
-                let (key0, key1) = philox_keys_from_state(chunk_state);
-
-                let params_buffer = match self.precision {
-                    NumericPrecision::F64 => {
-                        let params = crate::backend::wgpu::params::StochasticEvolutionParamsF64 {
-                            offset: offset_u32,
-                            chunk: chunk_u32,
-                            len: len_u32,
-                            steps,
-                            key0,
-                            key1,
-                            _pad0: 0,
-                            _pad1: 0,
-                            drift,
-                            scale,
-                        };
-                        self.uniform_buffer(
-                            emission,
-                            &params,
-                            "runmat-stochastic-evolution-f64-params",
-                        )?
-                    }
-                    NumericPrecision::F32 => {
-                        let params = crate::backend::wgpu::params::StochasticEvolutionParamsF32 {
-                            offset: offset_u32,
-                            chunk: chunk_u32,
-                            len: len_u32,
-                            steps,
-                            key0,
-                            key1,
-                            _pad0: 0,
-                            _pad1: 0,
-                            drift: drift as f32,
-                            scale: scale as f32,
-                        };
-                        self.uniform_buffer(
-                            emission,
-                            &params,
-                            "runmat-stochastic-evolution-f32-params",
-                        )?
-                    }
-                };
-
-                let bind_group = emission
-                    .device()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-stochastic-evolution-bind"),
-                        layout: &pipeline.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: state_entry.buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: out_buffer.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
-
-                let workgroups = self
-                    .pipelines
-                    .stochastic_evolution
-                    .linear_dispatch_groups(chunk_len)?;
-                crate::backend::wgpu::dispatch::creation::run(
-                    emission,
-                    pending,
-                    &pipeline.pipeline,
-                    &bind_group,
-                    workgroups,
-                    "runmat-stochastic-evolution-encoder",
-                    "runmat-stochastic-evolution-pass",
-                )?;
-
-                if steps > 0 {
-                    let advance = u64::from(chunk_u32) * u64::from(steps);
-                    chunk_state = advance_rng_state(chunk_state, advance);
-                }
-                offset += chunk_len;
-            }
-
-            Ok(())
-        })??;
-        *rng_guard = chunk_state;
-        drop(rng_guard);
-
-        self.telemetry
-            .record_fused_elementwise_duration(start.elapsed());
-        self.register_existing_buffer(out_buffer, state_entry.shape.clone(), total_len)
     }
 
     pub(crate) fn randperm_exec(&self, n: usize, k: usize) -> Result<GpuTensorHandle> {

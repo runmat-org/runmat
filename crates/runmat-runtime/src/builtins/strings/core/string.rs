@@ -512,7 +512,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                         .into_iter()
                         .map(|value| Value::Num(f64::from(value)))
                         .collect(),
-                    shape: logical.shape,
+                    shape: logical.shape.to_vec(),
                 })
             } else {
                 tensor_into_argument_data(s.to_dense().map_err(string_flow)?)
@@ -530,7 +530,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                     .into_iter()
                     .map(|(re, im)| Value::String(complex_to_string(re, im)))
                     .collect(),
-                shape,
+                shape: shape.to_vec(),
             })
         }
         Value::LogicalArray(la) => Ok(ArgumentData {
@@ -539,7 +539,7 @@ async fn extract_argument_data(value: Value) -> BuiltinResult<ArgumentData> {
                 .into_iter()
                 .map(|byte| Value::Num(if byte != 0 { 1.0 } else { 0.0 }))
                 .collect(),
-            shape: la.shape,
+            shape: la.shape.to_vec(),
         }),
         Value::Cell(cell) => {
             let mut values = Vec::with_capacity(cell.data.len());
@@ -802,7 +802,8 @@ fn complex_tensor_to_string_array(tensor: ComplexTensor) -> BuiltinResult<String
         strings.push(tensor.format_element(idx));
     }
     let (storage, shape) = tensor.into_complex_storage_and_shape();
-    let result = StringArray::new(strings, shape).map_err(|e| string_flow(format!("string: {e}")));
+    let result =
+        StringArray::new(strings, shape.to_vec()).map_err(|e| string_flow(format!("string: {e}")));
     drop(storage);
     result
 }
@@ -812,7 +813,8 @@ fn logical_array_to_string_array(logical: LogicalArray) -> BuiltinResult<StringA
     for &byte in &logical.data {
         strings.push(bool_to_string(byte != 0).to_string());
     }
-    StringArray::new(strings, logical.shape).map_err(|e| string_flow(format!("string: {e}")))
+    StringArray::new(strings, logical.shape.to_vec())
+        .map_err(|e| string_flow(format!("string: {e}")))
 }
 
 async fn cell_array_to_string_array(

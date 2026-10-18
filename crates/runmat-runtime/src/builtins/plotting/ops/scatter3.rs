@@ -689,9 +689,6 @@ pub async fn scatter3_builtin(
     .await?;
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_scatter3_invalid_argument)?;
     let opts = PlotRenderOptions {
-        title: "3-D Scatter",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };

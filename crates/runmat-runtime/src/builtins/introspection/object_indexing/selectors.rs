@@ -210,7 +210,7 @@ pub(super) fn target_shape(target: &Value) -> Option<Vec<usize>> {
         Value::ObjectArray(array) => Some(array.shape().to_vec()),
         Value::Tensor(tensor) => Some(tensor.shape().to_vec()),
         Value::ComplexTensor(tensor) => Some(tensor.shape().to_vec()),
-        Value::LogicalArray(array) => Some(array.shape.clone()),
+        Value::LogicalArray(array) => Some(array.shape.to_vec()),
         Value::StringArray(array) => Some(array.shape.clone()),
         Value::SparseTensor(sparse) => Some(sparse.shape()),
         Value::CharArray(chars) => Some(chars.shape.clone()),

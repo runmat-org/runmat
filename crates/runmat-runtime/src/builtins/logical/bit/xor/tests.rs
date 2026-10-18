@@ -344,7 +344,7 @@ fn xor_wgpu_matches_host_path() {
     let gpu_value = run_xor(Value::GpuTensor(gpu_lhs), Value::GpuTensor(gpu_rhs)).expect("gpu xor");
     let gathered = test_support::gather(gpu_value).expect("gather gpu result");
 
-    assert_eq!(gathered.shape(), expected_shape);
+    assert_eq!(gathered.shape(), expected_shape.as_slice());
     let tol = match provider.precision() {
         ProviderPrecision::F64 => 1e-12,
         ProviderPrecision::F32 => 1e-5,

@@ -5,7 +5,7 @@
 use super::admission::{dimensions, Method};
 use super::*;
 use crate::context::host_allocation::{HostAllocationError, HostAllocationPlan};
-use runmat_value::{ExactHostTensor2dAllocation, ExactHostTensorAllocation, NumericDType};
+use runmat_value::{ExactHostTensorAllocation, NumericDType};
 
 fn overflow() -> RuntimeError {
     invalid("nlparci host allocation dimensions overflow")
@@ -82,12 +82,11 @@ pub(super) fn plan(
         add(&mut scratch, bytes(n.max(p), 64)?)?;
     }
     let retained = if produces_output {
-        ExactHostTensor2dAllocation::requested_bytes(dtype, p, 2).map_err(|_| overflow())?
+        HostAllocationPlan::retained_tensor_bytes(dtype, &[p, 2]).map_err(map_plan_error)?
     } else {
         0
     };
-    HostAllocationPlan::new(scratch, u64::try_from(retained).map_err(|_| overflow())?)
-        .map_err(map_plan_error)
+    HostAllocationPlan::new(scratch, retained).map_err(map_plan_error)
 }
 
 fn map_plan_error(error: HostAllocationError) -> RuntimeError {

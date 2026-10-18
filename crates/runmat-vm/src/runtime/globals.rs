@@ -1,5 +1,7 @@
-use crate::runtime::workspace::refresh_workspace_slot;
-use runmat_runtime::workspace::bindings::{FrameGlobalBinding, FrameGlobalBindings};
+use crate::interpreter::vars::InterpreterVars;
+use crate::runtime::workspace::refresh_workspace_slot_from_vars;
+use runmat_runtime::workspace::bindings::FrameGlobalBindings;
+use runmat_runtime::workspace::GlobalBindingTarget;
 use runmat_value::Value;
 
 pub fn workspace_global_names() -> Vec<String> {
@@ -11,12 +13,16 @@ pub fn get_global_value(name: &str) -> Option<Value> {
 }
 
 pub fn current_bound_value(bindings: &FrameGlobalBindings, slot: usize) -> Option<Value> {
-    match bindings.binding_for_slot(slot) {
-        Some(FrameGlobalBinding::Named(name)) => get_global_value(&name),
-        Some(FrameGlobalBinding::LegacySlot) => {
-            runmat_runtime::workspace::session::global_slot_value(slot)
+    let binding = bindings.binding_handle_for_slot(slot)?;
+    current_bound_value_for_handle(&binding)
+}
+
+pub fn current_bound_value_for_handle(binding: &GlobalBindingTarget) -> Option<Value> {
+    match binding {
+        GlobalBindingTarget::Named(name) => get_global_value(name.as_str()),
+        GlobalBindingTarget::LegacySlot(slot) => {
+            runmat_runtime::workspace::session::global_slot_value(*slot)
         }
-        None => None,
     }
 }
 
@@ -24,99 +30,80 @@ pub fn collect_thread_roots() -> Vec<Value> {
     runmat_runtime::workspace::session::roots()
 }
 
-pub fn update_global_store(
-    stored_index: usize,
-    stored_value: &Value,
-    global_aliases: &FrameGlobalBindings,
-) {
-    match global_aliases.binding_for_slot(stored_index) {
-        Some(FrameGlobalBinding::Named(alias)) => {
-            runmat_runtime::workspace::session::store_global_named(&alias, stored_value.clone());
-        }
-        Some(FrameGlobalBinding::LegacySlot) => {
-            runmat_runtime::workspace::session::store_global_slot(
-                stored_index,
-                stored_value.clone(),
-            );
-        }
-        None => {}
-    }
-}
-
 pub fn declare_global(
-    indices: Vec<usize>,
-    vars: &mut Vec<Value>,
+    indices: &[usize],
+    vars: &mut InterpreterVars,
     global_aliases: &FrameGlobalBindings,
-) {
-    for i in indices {
+) -> Result<(), runmat_runtime::RuntimeError> {
+    for &i in indices {
+        if let Some(runtime) = runmat_runtime::context::legacy::active() {
+            let workspace = runtime.service_ports().workspace().ok_or_else(|| {
+                runmat_runtime::runtime_error::semantic_error(
+                    "RunMat:Workspace:FrameUnavailable",
+                    "legacy global declaration has no active workspace frame",
+                )
+            })?;
+            let existing = crate::runtime::workspace::workspace_slot_name_handle(i);
+            let fallback;
+            let name = match &existing {
+                Some(name) => name.as_str(),
+                None => {
+                    fallback = format!("var_{i}");
+                    &fallback
+                }
+            };
+            workspace.declare_legacy_global_binding_with_context(&runtime, i, name)?;
+            continue;
+        }
         global_aliases.declare_legacy_slot(i);
         let val_opt = runmat_runtime::workspace::session::global_slot_value(i);
         if let Some(v) = val_opt {
             if i >= vars.len() {
-                vars.resize(i + 1, Value::Num(0.0));
+                vars.resize_owned(i + 1, Value::Num(0.0));
             }
-            vars[i] = v;
-            refresh_workspace_slot(i, &vars[i]);
+            let _retired = vars.replace_owned(i, v);
+            refresh_workspace_slot_from_vars(i, vars);
         }
     }
+    Ok(())
 }
 
 pub fn declare_global_named(
-    indices: Vec<usize>,
-    names: Vec<String>,
-    vars: &mut Vec<Value>,
+    indices: &[usize],
+    names: &[String],
+    vars: &mut InterpreterVars,
     global_aliases: &FrameGlobalBindings,
 ) -> Result<(), runmat_runtime::RuntimeError> {
-    for (pos, i) in indices.into_iter().enumerate() {
-        let name = names
-            .get(pos)
-            .cloned()
-            .unwrap_or_else(|| format!("var_{i}"));
-        let value = if let Some(runtime) = runmat_runtime::context::legacy::active() {
-            if let Some(workspace) = runtime.service_ports().workspace() {
-                workspace.declare_global_binding(i, &name)?;
+    for (pos, &i) in indices.iter().enumerate() {
+        let fallback;
+        let name = match names.get(pos) {
+            Some(name) => name.as_str(),
+            None => {
+                fallback = format!("var_{i}");
+                &fallback
             }
-            runtime.session_variable_authority().declare_global(&name)?
-        } else {
-            runmat_runtime::workspace::session::declare_global_named(&name)
         };
-        if i >= vars.len() {
-            vars.resize(i + 1, Value::Num(0.0));
+        if let Some(runtime) = runmat_runtime::context::legacy::active() {
+            let workspace = runtime.service_ports().workspace().ok_or_else(|| {
+                runmat_runtime::runtime_error::semantic_error(
+                    "RunMat:Workspace:FrameUnavailable",
+                    "named global declaration has no active workspace frame",
+                )
+            })?;
+            workspace.declare_global_binding_with_context(&runtime, i, name)?;
+            continue;
         }
-        vars[i] = value;
-        refresh_workspace_slot(i, &vars[i]);
-        global_aliases.declare_named(i, name);
+        let value = runmat_runtime::workspace::session::declare_global_named(name)?;
+        if i >= vars.len() {
+            vars.resize_owned(i + 1, Value::Num(0.0));
+        }
+        let _retired = vars.replace_owned(i, value);
+        refresh_workspace_slot_from_vars(i, vars);
+        global_aliases.declare_named(i, name.to_owned());
     }
     Ok(())
 }
 
 pub(crate) fn reset_thread_state_for_tests() {
     runmat_runtime::workspace::session::reset_legacy_state_for_tests();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{update_global_store, FrameGlobalBindings};
-    use runmat_value::Value;
-
-    #[test]
-    fn named_global_write_does_not_mutate_an_unrelated_legacy_slot() {
-        let runtime = runmat_runtime::context::RuntimeContext::new(std::rc::Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
-        futures::executor::block_on(runtime.scope(async {
-            let bindings = FrameGlobalBindings::default();
-            bindings.declare_named(4, "other".into());
-            runmat_runtime::workspace::session::store_global_slot(4, Value::Num(11.0));
-            update_global_store(4, &Value::Num(19.0), &bindings);
-            assert_eq!(
-                runmat_runtime::workspace::session::global_slot_value(4),
-                Some(Value::Num(11.0))
-            );
-            assert_eq!(
-                runmat_runtime::workspace::session::global_value("other"),
-                Some(Value::Num(19.0))
-            );
-        }));
-    }
 }

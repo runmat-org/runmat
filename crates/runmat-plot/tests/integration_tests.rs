@@ -33,6 +33,7 @@ fn test_complete_2d_plotting_pipeline() {
     let mut figure = Figure::new()
         .with_title("2D Multi-Plot Example")
         .with_labels("X", "Y")
+        .with_legend(true)
         .with_grid(true);
 
     figure.add_line_plot(line_plot);

@@ -27,9 +27,7 @@ use super::{
     PYTHON_HOST_SNAPSHOT_ROOT_ENV,
 };
 use crate::context::{ForeignCall, RuntimeContext};
-use crate::execution::{
-    RootedValue, RootedValueLease, RootedValueMember, RootedValues, RootedValuesBuilder,
-};
+use crate::execution::{RootedValueLease, RootedValueMember, RootedValues, RootedValuesBuilder};
 use crate::foreign::{
     foreign_callback_request, invoke_foreign_callback, ForeignHandleRegistry,
     ForeignResourceMetadata, PythonRuntimeConfiguration,
@@ -79,7 +77,7 @@ pub struct IsolatedPythonClient {
     next_callback_id: u64,
     local_to_remote: BTreeMap<u64, u64>,
     remote_to_local: BTreeMap<u64, (u64, WeakForeignRef)>,
-    callbacks: BTreeMap<u64, RootedValue>,
+    callbacks: BTreeMap<u64, crate::execution::RetainedValueReadLease>,
     nested_aborted: bool,
     shutdown_progress: ShutdownProgress,
 }
@@ -288,7 +286,7 @@ impl IsolatedPythonClient {
 
     async fn request(
         &mut self,
-        call: ForeignCall,
+        mut call: ForeignCall,
         released_local_handles: Vec<u64>,
     ) -> Result<PythonInvocationRequest, PythonWireError> {
         let _input_roots = RootedValueLease::for_values(call.arguments.iter())
@@ -296,7 +294,7 @@ impl IsolatedPythonClient {
         let request_id = self.take_request_id()?;
         let releases = self.translate_releases(released_local_handles);
         let mut arguments = Vec::with_capacity(call.arguments.len());
-        for value in &call.arguments {
+        for value in std::mem::take(&mut call.arguments) {
             arguments.push(self.encode_driver_value(value).await?);
         }
         Ok(PythonInvocationRequest {
@@ -421,7 +419,8 @@ impl IsolatedPythonClient {
         })?;
         let sequence = arguments
             .with_owned_values_async(|arguments| async {
-                let request = foreign_callback_request(&callable, arguments, requested_outputs)?;
+                let request =
+                    foreign_callback_request(&runtime, &callable, arguments, requested_outputs)?;
                 let callback_future = invoke_foreign_callback(runtime.clone(), request);
                 tokio::pin!(callback_future);
                 loop {
@@ -449,18 +448,31 @@ impl IsolatedPythonClient {
             )?;
             crate::execution::RootedValues::new(values).map_err(|error| error.into_runtime_error())
         })?;
-        let mut encoded = Vec::with_capacity(values.len());
-        for value in values.values() {
-            let gathered = crate::gather_if_needed_async(value).await?;
-            let gathered = crate::execution::RootedValue::new(gathered)
-                .map_err(|error| error.into_runtime_error())?;
-            encoded.push(
-                self.encode_driver_value(gathered.value())
-                    .await
-                    .map_err(runtime_error)?,
-            );
-        }
-        Ok(encoded)
+        values
+            .with_owned_values_async(|values| async {
+                let mut encoded = Vec::with_capacity(values.len());
+                for value in values {
+                    if super::super::super::is_callable(&value) {
+                        encoded.push(
+                            self.encode_driver_value(value)
+                                .await
+                                .map_err(runtime_error)?,
+                        );
+                    } else {
+                        let gathered = crate::gather_if_needed_async(&value).await?;
+                        let gathered = crate::execution::RootedValue::new(gathered)
+                            .map_err(|error| error.into_runtime_error())?;
+                        encoded.push(
+                            gathered
+                                .with_owned_async(|value| self.encode_driver_value(value))
+                                .await
+                                .map_err(runtime_error)?,
+                        );
+                    }
+                }
+                Ok(encoded)
+            })
+            .await
     }
 
     async fn invoke_nested(
@@ -522,15 +534,18 @@ impl IsolatedPythonClient {
 
     async fn encode_driver_value(
         &mut self,
-        value: &Value,
+        value: Value,
     ) -> Result<PythonWireValue, PythonWireError> {
-        if super::super::super::is_callable(value) {
+        if super::super::super::is_callable(&value) {
             let id = self.next_callback_id;
             self.next_callback_id = self.next_callback_id.checked_add(1).ok_or_else(|| {
                 wire_error("RunMat:Python:HostProtocol", "callback identity exhausted")
             })?;
-            let callable = RootedValue::new(value.clone())
-                .map_err(|error| wire_error("RunMat:Python:ValueEncode", error.to_string()))?;
+            let generation = runmat_value::SharedValueGeneration::unbounded(value);
+            let callable = crate::execution::RetainedValueReadLease::retain_shared_generation(
+                generation, None,
+            )
+            .map_err(|error| wire_error("RunMat:Python:ValueEncode", error.to_string()))?;
             self.callbacks.insert(id, callable);
             return Ok(PythonWireValue::Callback { id });
         }
@@ -558,8 +573,8 @@ impl IsolatedPythonClient {
                 "RunMat:TransientSequenceNotPortable",
                 "transient output sequences cannot be encoded as nested Python values",
             )),
-            _ => {
-                let host = crate::gather_if_needed_async(value)
+            other => {
+                let host = crate::gather_if_needed_async(&other)
                     .await
                     .map_err(|error| wire_error("RunMat:Python:ValueGather", error.to_string()))?;
                 encode_portable(&host, &self.child.lease().snapshots).map(PythonWireValue::Portable)

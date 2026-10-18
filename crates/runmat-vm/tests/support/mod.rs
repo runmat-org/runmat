@@ -85,7 +85,10 @@ pub fn interpret_with_program_source(
         ))?;
         let runmat_vm::InterpreterOutcome::Completed(completion) = outcome;
         completion.with_owned(|completion| {
-            RootedValues::new(completion.values).map_err(|error| error.into_runtime_error())
+            let values = completion.values.into_owned().map_err(|_| {
+                RuntimeError::new("ordinary test execution retained a workspace-owned frame")
+            })?;
+            RootedValues::new(values).map_err(|error| error.into_runtime_error())
         })
     })?
 }

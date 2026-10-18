@@ -16,7 +16,7 @@ runmat-core = { workspace = true, default-features = false, optional = true }
 runmat-execution = { workspace = true }
 runmat-execution-artifact = { workspace = true }
 runmat-config = { workspace = true }
-runmat-accelerate = { workspace = true, features = ["cuda"] }
+runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
 runmat-native-codegen = { workspace = true, default-features = false }
 runmat-native-executor = { workspace = true }
@@ -33,7 +33,9 @@ tokio = { workspace = true, features = ["rt", "time"] }
 tempfile = "3.12"
 
 [features]
-default = []
+default = ["wgpu", "cuda"]
+wgpu = ["runmat-accelerate/wgpu", "runmat-runtime/wgpu"]
+cuda = ["runmat-accelerate/cuda"]
 source-evaluation = ["dep:runmat-core"]
 
 [dev-dependencies]

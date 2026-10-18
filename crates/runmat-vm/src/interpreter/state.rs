@@ -1,5 +1,6 @@
 use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::Bytecode;
+use crate::interpreter::vars::InterpreterVars;
 use log::debug;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::graph::AccelGraph;
@@ -24,13 +25,13 @@ pub enum InterpreterOutcome {
 /// value.
 #[derive(Debug)]
 pub struct InterpreterCompletion {
-    pub values: Vec<Value>,
+    pub values: InterpreterVars,
     pub assigned_slots: HashSet<usize>,
 }
 
 impl Trace for InterpreterCompletion {
     fn trace(&self, tracer: &mut dyn Tracer) {
-        for value in &self.values {
+        for value in self.values.iter() {
             value.trace(tracer);
         }
     }
@@ -54,11 +55,12 @@ impl InterpreterCompletionBoundary {
 }
 
 /// Exact VM-owned state materialized from a native empty-stack MIR boundary.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug)]
 pub struct InterpreterResumeState {
     pub pc: usize,
     pub completion_boundary: Option<InterpreterCompletionBoundary>,
-    pub vars: Vec<Option<Value>>,
+    pub vars: InterpreterVars,
+    pub assigned_slots: HashSet<usize>,
     pub supplied_inputs: usize,
     pub requested_outputs: usize,
     pub missing_input_slots: HashSet<usize>,
@@ -129,7 +131,7 @@ impl VmFusionPublicationFault {
 pub struct InterpreterState {
     pub bytecode: Bytecode,
     pub stack: Vec<Value>,
-    pub vars: Vec<Value>,
+    pub vars: InterpreterVars,
     pub pc: usize,
     pub completion_boundary: Option<InterpreterCompletionBoundary>,
     pub completion_assigned_slots: Option<HashSet<usize>>,
@@ -182,11 +184,70 @@ impl InterpreterState {
         invocation_arity: RuntimeInvocationArity,
         runtime: runmat_runtime::context::RuntimeContext,
     ) -> Self {
+        Self::from_owned_in_context(
+            bytecode,
+            initial_vars.to_vec(),
+            current_function_name,
+            invocation_arity,
+            runtime,
+        )
+    }
+
+    pub fn from_owned_in_context(
+        bytecode: Bytecode,
+        initial_vars: Vec<Value>,
+        current_function_name: Option<&str>,
+        invocation_arity: RuntimeInvocationArity,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Self {
         let initial_assigned_var_count = initial_vars.len();
-        let mut vars = initial_vars.to_vec();
+        let mut vars = InterpreterVars::from_owned(initial_vars);
         if vars.len() < bytecode.var_count {
-            vars.resize(bytecode.var_count, Value::Num(0.0));
+            vars.resize_owned(bytecode.var_count, Value::Num(0.0));
         }
+        Self::from_prepared_vars_in_context(
+            bytecode,
+            vars,
+            initial_assigned_var_count,
+            current_function_name,
+            invocation_arity,
+            runtime,
+        )
+    }
+
+    pub fn from_vars_in_context(
+        bytecode: Bytecode,
+        vars: InterpreterVars,
+        initial_assigned_var_count: usize,
+        current_function_name: Option<&str>,
+        invocation_arity: RuntimeInvocationArity,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Result<Self, runmat_runtime::RuntimeError> {
+        if vars.len() < bytecode.var_count {
+            return Err(runmat_runtime::execution::ExecutionServiceError::Infrastructure(
+                "RunMat:Interpreter:RetainedFrameExtent: retained interpreter frame extent was not prepared before execution"
+                    .to_owned(),
+            )
+            .into_runtime_error());
+        }
+        Ok(Self::from_prepared_vars_in_context(
+            bytecode,
+            vars,
+            initial_assigned_var_count,
+            current_function_name,
+            invocation_arity,
+            runtime,
+        ))
+    }
+
+    fn from_prepared_vars_in_context(
+        bytecode: Bytecode,
+        vars: InterpreterVars,
+        initial_assigned_var_count: usize,
+        current_function_name: Option<&str>,
+        invocation_arity: RuntimeInvocationArity,
+        runtime: runmat_runtime::context::RuntimeContext,
+    ) -> Self {
         if bytecode.async_metadata.mir_spawn_site_count > 0
             || bytecode.async_metadata.mir_await_site_count > 0
         {

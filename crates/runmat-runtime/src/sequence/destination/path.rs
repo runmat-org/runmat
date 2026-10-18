@@ -93,6 +93,23 @@ impl SequenceDestinationBuilder {
         })
     }
 
+    /// Take ownership of a root that was detached from a guarded source.
+    ///
+    /// This is the same preparation owner as [`Self::new`], but avoids
+    /// retaining the source guard across object-protocol callbacks and avoids
+    /// cloning the root a second time after the caller has detached it.
+    pub fn from_owned(root: Value) -> Result<Self, RuntimeError> {
+        let source_roots = RootedValueLease::for_values(std::iter::once(&root))
+            .map_err(|error| error.into_runtime_error())?;
+        Ok(Self {
+            current: RootedValue::new(root).map_err(|error| error.into_runtime_error())?,
+            source_roots,
+            steps: Vec::new(),
+            object_suffix: None,
+            selector_roots: Vec::new(),
+        })
+    }
+
     pub fn current(&self) -> &Value {
         &self.current
     }

@@ -47,7 +47,7 @@ struct PooledStageSlot {
 
 impl ManagedHostEffectStagePool {
     pub const fn owned_output_claim_metadata_bytes() -> usize {
-        PooledOutputPermit::claim_metadata_bytes()
+        super::OwnedOutputClaim::metadata_bytes()
     }
 
     pub fn new(
@@ -199,7 +199,7 @@ impl HostEffectStageReservation for PooledStageSlot {
     }
 
     fn owned_output_claim_metadata_bytes(&self) -> usize {
-        PooledOutputPermit::claim_metadata_bytes()
+        super::OwnedOutputClaim::metadata_bytes()
     }
 
     fn is_current(&self) -> bool {

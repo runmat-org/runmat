@@ -202,7 +202,7 @@ pub(in crate::builtins::table) fn dictionary_assign(
 fn dictionary_element_shape(value: &Value) -> Vec<usize> {
     match value {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
-        Value::LogicalArray(array) => array.shape.clone(),
+        Value::LogicalArray(array) => array.shape.to_vec(),
         Value::StringArray(array) => array.shape.clone(),
         Value::Cell(array) => vec![array.rows, array.cols],
         Value::CharArray(array) => vec![array.rows, 1],

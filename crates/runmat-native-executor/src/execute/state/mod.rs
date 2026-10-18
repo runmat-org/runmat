@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use runmat_native_codegen::{
-    NativeBlockId, NativeEdge, NativeFunction, NativeLocalKind, NativeTerminatorKind, NativeValueId,
+    NativeBlockId, NativeEdge, NativeFunction, NativeTerminatorKind, NativeValueId,
 };
 use runmat_runtime::native::{NativeRoot, NativeRootKind, NativeRootSet, NativeValueRef};
 use runmat_runtime::{context::RuntimeContext, RuntimeError};
@@ -26,12 +26,12 @@ pub(super) struct ActiveExceptionHandler {
 
 pub(super) struct HostStateInput {
     pub function: NativeFunction,
-    pub arguments: Vec<runmat_value::Value>,
+    pub inputs: NativeFunctionInputs,
     pub requested_outputs: usize,
     pub runtime: RuntimeContext,
     pub program_capture: Option<Vec<u8>>,
     pub functions: Arc<Vec<NativeFunction>>,
-    pub captures: Vec<runmat_runtime::call::lexical::LexicalCapture>,
+    pub captures: Vec<NativeCaptureInput>,
     pub lexical_environment: Option<runmat_value::LexicalEnvironment>,
     pub deoptimization: DeoptimizationPolicy,
     pub interpreter_resume_points: BTreeMap<runmat_types::ProgramPointId, u64>,
@@ -39,6 +39,20 @@ pub(super) struct HostStateInput {
     pub osr_point: Option<runmat_types::ProgramPointId>,
     pub optimized_regions: Arc<Vec<crate::region::OptimizedRegionPlan>>,
     pub workspace: Option<super::workspace::NativeWorkspaceInput>,
+}
+
+pub(super) enum NativeFunctionInputs {
+    Legacy(Vec<runmat_value::Value>),
+    Prepared(runmat_runtime::call::function_abi::PreparedFunctionInputs),
+}
+
+pub(super) enum NativeCaptureInput {
+    Owned(runmat_runtime::call::lexical::LexicalCapture),
+    Retained {
+        binding: runmat_types::BindingId,
+        local: runmat_native_codegen::NativeLocalId,
+        value: runmat_runtime::call::CapturedValueLease,
+    },
 }
 
 pub(super) struct HostState {
@@ -77,12 +91,18 @@ pub(super) struct HostState {
         usize,
         usize,
     )>,
-    contextual_regions: contextual_regions::ContextualRegionState,
+    contextual_regions: expression_regions::ExpressionRegionState,
     pub current_request: Option<runmat_runtime::native::NativeSiteRequest>,
     resume_target: Option<runmat_runtime::native::NativeSiteRequest>,
     current_block: Option<NativeBlockId>,
     global_bindings: runmat_runtime::workspace::bindings::FrameGlobalBindings,
-    global_seen_revision: BTreeMap<usize, runmat_runtime::workspace::session::GlobalRevision>,
+    global_seen_revision: BTreeMap<
+        usize,
+        (
+            runmat_runtime::workspace::GlobalBindingTarget,
+            runmat_runtime::workspace::session::GlobalRevision,
+        ),
+    >,
     persistent_seen_revision:
         BTreeMap<usize, runmat_runtime::workspace::session::PersistentRevision>,
     persistent_bindings:
@@ -128,12 +148,14 @@ impl HostState {
 
 mod captures;
 mod construction;
-mod contextual_regions;
+pub(super) use construction::function_input_specs;
+#[path = "contextual_regions.rs"]
+mod expression_regions;
 mod continuation;
 mod control;
 mod workspace;
 
-pub(crate) use contextual_regions::EmbeddedOperationIdentity;
+pub(crate) use expression_regions::EmbeddedOperationIdentity;
 
 fn optimized_site_identity(
     request: runmat_runtime::native::NativeSiteRequest,

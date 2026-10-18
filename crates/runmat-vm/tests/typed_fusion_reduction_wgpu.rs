@@ -90,7 +90,14 @@ fn assert_actual_folded_full_call_shape_with_dtype(
     )
     .expect("actual VM typed folded reduction");
     let vars = completion
-        .with_owned(|completion| runmat_runtime::execution::RootedValues::new(completion.values))
+        .with_owned(|completion| {
+            runmat_runtime::execution::RootedValues::new(
+                completion
+                    .values
+                    .into_owned()
+                    .expect("ordinary folded-reduction frame is owned"),
+            )
+        })
         .expect("root published folded reduction values");
     let slot = bytecode
         .var_names

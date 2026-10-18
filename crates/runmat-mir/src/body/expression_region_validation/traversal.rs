@@ -52,7 +52,7 @@ pub(super) fn statement_outer_rvalue(statement: &crate::MirStmt) -> Option<&crat
 
 pub(super) fn visit_terminator_regions(
     terminator: &MirTerminatorKind,
-    visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+    visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
 ) {
     match terminator {
         MirTerminatorKind::For { iterable, .. } => iterable.visit_expression_regions_dyn(visitor),

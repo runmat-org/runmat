@@ -84,7 +84,8 @@ fn publish_borrowed(
             runmat_runtime::workspace::session::store_global_named(
                 &format!("suspension_borrowed_{index}"),
                 Value::GpuTensor((*handle).clone()),
-            );
+            )
+            .expect("retain the borrowed device buffer through cancellation");
         }
     }));
 }
@@ -93,7 +94,8 @@ fn unpublish_borrowed(runtime: &runmat_runtime::context::RuntimeContext) {
     block_on(runtime.scope(async {
         for name in runmat_runtime::workspace::session::global_names() {
             if name.starts_with("suspension_borrowed_") {
-                runmat_runtime::workspace::session::store_global_named(&name, Value::Num(0.0));
+                runmat_runtime::workspace::session::store_global_named(&name, Value::Num(0.0))
+                    .expect("retire the published borrowed device buffer");
             }
         }
     }));
@@ -176,7 +178,7 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         assert!(bytecode
             .instructions
             .iter()
-            .any(|instruction| matches!(instruction, Instr::StochasticEvolution)));
+            .any(|instruction| matches!(instruction, Instr::StochasticEvolution { .. })));
         let slot = |name: &str| {
             *bytecode
                 .var_names
@@ -209,18 +211,24 @@ fn stochastic_witness(resident: bool, cancel: bool) {
         let drift = provider.push(vec![0.1], vec![1, 1]);
         let borrowed = resident.then(|| provider.push(vec![1., 2.], vec![2, 1]));
         let baseline = provider.buffers.lock().unwrap().clone();
-        let mut vars = vec![None; bytecode.var_count];
-        vars[slot("M")] = Some(Value::Num(2.));
-        vars[slot("S")] = Some(borrowed.as_ref().map_or_else(
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        let m_slot = slot("M");
+        let s_slot = slot("S");
+        let drift_slot = slot("drift");
+        vars[m_slot] = Value::Num(2.);
+        vars[s_slot] = borrowed.as_ref().map_or_else(
             || Value::Tensor(Tensor::new(vec![1., 2.], vec![2, 1]).unwrap()),
             |handle| Value::GpuTensor(handle.clone()),
-        ));
-        vars[slot("drift")] = Some(Value::GpuTensor(drift.clone()));
-        vars[scale_slot] = Some(Value::Num(0.2));
+        );
+        vars[drift_slot] = Value::GpuTensor(drift.clone());
+        vars[scale_slot] = Value::Num(0.2);
         let resume = runmat_vm::InterpreterResumeState {
             pc: store + 1,
             completion_boundary: None,
-            vars,
+            vars: runmat_vm::InterpreterVars::from_owned(vars),
+            assigned_slots: std::collections::HashSet::from([
+                m_slot, s_slot, drift_slot, scale_slot,
+            ]),
             supplied_inputs: 0,
             requested_outputs: 0,
             missing_input_slots: Default::default(),
@@ -432,7 +440,8 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
             .find(|(_, name)| name.as_str() == "y")
             .unwrap()
             .0;
-        let Value::GpuTensor(handle) = &completed.values[y] else {
+        let output_value = completed.values.get(y).expect("resident fused output");
+        let Value::GpuTensor(handle) = &*output_value else {
             panic!(
                 "actual fused output must remain resident; provider error={:?}",
                 provider_error()
@@ -463,7 +472,8 @@ fn typed_fusion_single_restoration_completes_with_exact_single_output() {
         // Completion returns a dense full frame, also used by region-resume
         // consumers, not just exported y. Assert exact ownership before freeing
         // its deduplicated resident slots; an unreturned temporary still fails.
-        let adopted = consumed_values::resident_outputs(&completed.values);
+        drop(output_value);
+        let adopted = consumed_values::resident_outputs_frame(&completed.values);
         let mut expected_ids = baseline
             .keys()
             .copied()

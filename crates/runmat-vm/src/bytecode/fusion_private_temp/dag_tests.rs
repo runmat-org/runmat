@@ -467,13 +467,16 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
     let lower = Value::Num(-37.0);
     let mut stack = vec![lower.clone(), Value::Num(3.0), Value::Num(5.0)];
     let original = stack.clone();
-    let mut vars = vec![Value::Num(11.0); bytecode.var_count];
+    let vars = crate::interpreter::vars::InterpreterVars::from_owned(vec![
+        Value::Num(11.0);
+        bytecode.var_count
+    ]);
     let mut context = crate::bytecode::program::ExecutionContext::default();
     let (guard, request, _) = crate::accel::fusion::gather_fusion_inputs(
         selected,
         &graph,
         &mut stack,
-        &mut vars,
+        &vars,
         &mut context,
         None,
     )
@@ -488,7 +491,7 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         selected,
         &graph,
         &mut too_shallow,
-        &mut vars,
+        &vars,
         &mut context,
         None,
     )
@@ -511,7 +514,7 @@ fn assert_private_dag_uses_exact_vm_stack(bytecode: &Bytecode) {
         &malformed,
         &graph,
         &mut stack,
-        &mut vars,
+        &vars,
         &mut context,
         None,
     )

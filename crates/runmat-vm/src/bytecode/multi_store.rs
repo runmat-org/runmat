@@ -354,6 +354,7 @@ pub(super) fn interior_control_targets(instructions: &[Instr]) -> HashSet<usize>
             | Instr::JumpIfFalse(target)
             | Instr::AndAnd(target)
             | Instr::OrOr(target) => Some(*target),
+            Instr::StochasticEvolution { fallback_pc, .. } => Some(*fallback_pc),
             Instr::EnterTry { catch_pc, .. } => Some(*catch_pc),
             _ => None,
         })

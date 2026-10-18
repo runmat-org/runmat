@@ -33,7 +33,7 @@ pub(super) async fn dispatch(
             OutputPublication::Fixed(*out_count),
         ),
         Instr::CallSemanticFunctionMultiUsingOutputSlot(function, arg_count, out_count_slot) => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             (
                 runmat_hir::CallableIdentity::BoundFunction(*function),
                 calls::selected_static_call_binding(&context.runtime, instr, *pc, *function)?
@@ -73,7 +73,7 @@ pub(super) async fn dispatch(
             arg_count,
             out_count_slot,
         } => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             (
                 identity.clone(),
                 match identity {
@@ -119,7 +119,6 @@ pub(super) async fn dispatch(
             },
         },
         arg_count,
-        refresh_workspace_state,
     )
     .await?;
     match result {

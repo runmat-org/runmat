@@ -1,22 +1,25 @@
 use super::*;
 use crate::Tensor;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 #[derive(Debug)]
 struct Permit {
     limit: usize,
     retained: Arc<AtomicUsize>,
+    claims: Arc<AtomicUsize>,
 }
 
 #[derive(Debug)]
 struct Reservation {
     retained: Arc<AtomicUsize>,
+    claims: Arc<AtomicUsize>,
     bytes: usize,
 }
 
 impl Drop for Reservation {
     fn drop(&mut self) {
         self.retained.fetch_sub(self.bytes, Ordering::SeqCst);
+        self.claims.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -32,8 +35,10 @@ impl ExactHostAllocationPermit for Permit {
                 used.checked_add(bytes).filter(|total| *total <= self.limit)
             })
             .map_err(|_| ExactHostNumericAllocationError::ExceedsPermit)?;
+        self.claims.fetch_add(1, Ordering::SeqCst);
         Ok(Arc::new(Reservation {
             retained: self.retained.clone(),
+            claims: self.claims.clone(),
             bytes,
         }))
     }
@@ -43,6 +48,7 @@ fn permit(limit: usize) -> Permit {
     Permit {
         limit,
         retained: Arc::new(AtomicUsize::new(0)),
+        claims: Arc::new(AtomicUsize::new(0)),
     }
 }
 
@@ -76,6 +82,59 @@ fn failed_release_metadata_allocation_refunds_the_retained_claim() {
 }
 
 #[test]
+fn owned_release_header_retires_before_its_claim() {
+    #[derive(Debug)]
+    struct OrderedReservation {
+        owner_released: Arc<AtomicBool>,
+        claim_dropped: Arc<AtomicBool>,
+    }
+
+    impl Drop for OrderedReservation {
+        fn drop(&mut self) {
+            assert!(self.owner_released.load(Ordering::SeqCst));
+            self.claim_dropped.store(true, Ordering::SeqCst);
+        }
+    }
+
+    impl ExactHostAllocationReservation for OrderedReservation {
+        fn retire_owned(self: Box<Self>) {
+            let pointer = Box::into_raw(self);
+            // SAFETY: the unique Box supplied the exact test allocation.
+            let value = unsafe { std::ptr::read(pointer) };
+            // SAFETY: the pointer came from Box with this exact layout.
+            unsafe {
+                dealloc(pointer.cast::<u8>(), Layout::new::<Self>());
+            }
+            drop(value);
+        }
+    }
+
+    let owner_released = Arc::new(AtomicBool::new(false));
+    let claim_dropped = Arc::new(AtomicBool::new(false));
+    let claim = ExactHostAllocationClaim::owned(Box::new(OrderedReservation {
+        owner_released: owner_released.clone(),
+        claim_dropped: claim_dropped.clone(),
+    }));
+    let payload_layout = Layout::new::<f64>();
+    let payload = NonNull::new(unsafe { alloc(payload_layout) }).expect("test payload allocation");
+    let owner = RustExactRelease::try_new(payload_layout, claim).expect("release owner");
+    // SAFETY: both test allocations came from the global allocator with the
+    // exact layouts supplied to their respective deallocation callbacks.
+    unsafe {
+        RustExactRelease::release_owned_with(
+            owner,
+            payload,
+            |pointer, layout| dealloc(pointer.as_ptr(), layout),
+            |pointer, layout| {
+                dealloc(pointer.as_ptr(), layout);
+                owner_released.store(true, Ordering::SeqCst);
+            },
+        )
+    };
+    assert!(claim_dropped.load(Ordering::SeqCst));
+}
+
+#[test]
 fn exact_float_provenance_uses_static_allocator_identity() {
     let quota = permit(floating_charge(std::mem::size_of::<f64>()));
     let allocation = ExactHostNumericAllocation::new(NumericDType::F64, 1, &quota).unwrap();
@@ -90,6 +149,10 @@ fn exact_float_provenance_uses_static_allocator_identity() {
 
 #[test]
 fn canonical_requested_bytes_equal_the_retained_charge_for_every_numeric_class() {
+    assert_eq!(ExactHostTensor2dAllocation::retained_claim_count(), 2);
+    assert_eq!(ExactHostTensorAllocation::retained_claim_count(), 2);
+    assert_eq!(ExactHostComplexTensorAllocation::retained_claim_count(), 2);
+    assert_eq!(ExactHostLogicalTensorAllocation::retained_claim_count(), 2);
     let classes = [
         (NumericDType::I8, 1),
         (NumericDType::U8, 1),
@@ -112,17 +175,19 @@ fn canonical_requested_bytes_equal_the_retained_charge_for_every_numeric_class()
         assert_eq!(
             requested,
             6 * width
-                + 2 * std::mem::size_of::<usize>()
                 + release
                 + HostNumericBuffer::exact_metadata_bytes()
+                + SharedShape::requested_bytes_for_rank(2).unwrap()
         );
         let quota = permit(requested);
         let output = ExactHostTensor2dAllocation::new(dtype, 2, 3, &quota).unwrap();
         assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
+        assert_eq!(quota.claims.load(Ordering::SeqCst), 2);
         let retained = output.into_tensor().unwrap();
         assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
         drop(retained);
         assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+        assert_eq!(quota.claims.load(Ordering::SeqCst), 0);
     }
     assert_eq!(
         ExactHostTensor2dAllocation::requested_bytes(NumericDType::F32, usize::MAX, 2),
@@ -142,6 +207,7 @@ fn exact_nd_real_and_complex_outputs_retain_their_physical_claims() {
         );
         let real_quota = permit(real_bytes);
         let mut real = ExactHostTensorAllocation::new(dtype, &shape, &real_quota).unwrap();
+        assert_eq!(real_quota.claims.load(Ordering::SeqCst), 2);
         if let Some(values) = real.as_f32_slice_mut() {
             values.copy_from_slice(&[1.0, 2.0, 3.0, 4.0]);
         } else {
@@ -155,6 +221,7 @@ fn exact_nd_real_and_complex_outputs_retain_their_physical_claims() {
         assert_eq!(real_quota.retained.load(Ordering::SeqCst), real_bytes);
         drop(real);
         assert_eq!(real_quota.retained.load(Ordering::SeqCst), 0);
+        assert_eq!(real_quota.claims.load(Ordering::SeqCst), 0);
 
         let complex_bytes =
             ExactHostComplexTensorAllocation::requested_bytes(dtype, &shape).unwrap();
@@ -166,6 +233,7 @@ fn exact_nd_real_and_complex_outputs_retain_their_physical_claims() {
         let complex_quota = permit(complex_bytes);
         let mut complex =
             ExactHostComplexTensorAllocation::new(dtype, &shape, &complex_quota).unwrap();
+        assert_eq!(complex_quota.claims.load(Ordering::SeqCst), 2);
         for index in 0..4 {
             complex.set(index, index as f64, -(index as f64)).unwrap();
         }
@@ -185,11 +253,32 @@ fn exact_nd_real_and_complex_outputs_retain_their_physical_claims() {
         assert_eq!(complex_quota.retained.load(Ordering::SeqCst), complex_bytes);
         drop(complex);
         assert_eq!(complex_quota.retained.load(Ordering::SeqCst), 0);
+        assert_eq!(complex_quota.claims.load(Ordering::SeqCst), 0);
     }
     assert_eq!(
         ExactHostComplexTensorAllocation::requested_bytes(NumericDType::F64, &[usize::MAX, 2]),
         Err(ExactHostNumericAllocationError::LayoutOverflow)
     );
+}
+
+#[test]
+fn exact_logical_output_retains_independent_payload_and_shape_claims() {
+    let shape = [2, 2];
+    let requested = ExactHostLogicalTensorAllocation::requested_bytes(&shape).unwrap();
+    let quota = permit(requested);
+    let mut output = ExactHostLogicalTensorAllocation::new(&shape, &quota).unwrap();
+    output.as_mut_slice().copy_from_slice(&[0, 1, 1, 0]);
+    let pointer = output.as_mut_slice().as_ptr();
+    assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 2);
+    let output = output.into_array().unwrap();
+    assert_eq!(&*output.shape, &shape);
+    assert_eq!(output.data.as_slice(), &[0, 1, 1, 0]);
+    assert_eq!(output.data.as_slice().as_ptr(), pointer);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 2);
+    drop(output);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -201,7 +290,9 @@ fn retained_exact_claim_follows_last_original_owner_not_later_cow_copy() {
         .into_tensor()
         .unwrap();
     let mut later_copy = original.clone();
+    let shape_bytes = SharedShape::requested_bytes_for_rank(2).unwrap();
     assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 2);
     later_copy
         .set_numeric_assignment_at(0, NumericScalar::U64(7))
         .unwrap();
@@ -209,10 +300,14 @@ fn retained_exact_claim_follows_last_original_owner_not_later_cow_copy() {
     assert_eq!(later_copy.numeric_value_at(0), Some(NumericScalar::U64(7)));
     assert_eq!(quota.retained.load(Ordering::SeqCst), requested);
     drop(original);
-    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
-    // The ordinary COW allocation belongs to the later mutation, not this
-    // initial output reservation or its complete-call certificate.
+    assert_eq!(quota.retained.load(Ordering::SeqCst), shape_bytes);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 1);
+    // The ordinary payload COW belongs to the later mutation, while the
+    // immutable shape remains shared under its independent initial claim.
     assert_eq!(later_copy.numeric_value_at(0), Some(NumericScalar::U64(7)));
+    drop(later_copy);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -233,8 +328,9 @@ fn owned_reservation_releases_after_retained_exact_output() {
             bytes: usize,
         ) -> Result<ExactHostAllocationClaim, ExactHostNumericAllocationError> {
             self.0.fetch_add(bytes, Ordering::SeqCst);
-            Ok(ExactHostAllocationClaim::Owned(Box::new(Reservation {
+            Ok(ExactHostAllocationClaim::owned(Box::new(Reservation {
                 retained: self.0.clone(),
+                claims: Arc::new(AtomicUsize::new(1)),
                 bytes,
             })))
         }
@@ -254,25 +350,24 @@ fn owned_reservation_releases_after_retained_exact_output() {
 
 #[test]
 fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
-    let shape_bytes = 2 * std::mem::size_of::<usize>();
-    let denied = permit(integer_charge(16 + shape_bytes) - 1);
+    let total = ExactHostTensor2dAllocation::requested_bytes(NumericDType::U64, 1, 2).unwrap();
+    let denied = permit(total - 1);
     assert!(matches!(
         ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &denied),
         Err(ExactHostNumericAllocationError::ExceedsPermit)
     ));
     assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
+    assert_eq!(denied.claims.load(Ordering::SeqCst), 0);
 
-    let quota = permit(integer_charge(16 + shape_bytes));
+    let quota = permit(total);
     let mut allocation = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &quota).unwrap();
     allocation
         .as_u64_slice_mut()
         .unwrap()
         .copy_from_slice(&[9_007_199_254_740_993, u64::MAX]);
     let original = allocation.as_u64_slice_mut().unwrap().as_ptr();
-    assert_eq!(
-        quota.retained.load(Ordering::SeqCst),
-        integer_charge(16 + shape_bytes)
-    );
+    assert_eq!(quota.retained.load(Ordering::SeqCst), total);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 2);
     let tensor = allocation.into_tensor().expect("exact geometry");
     assert_eq!(tensor.shape(), [1, 2]);
     assert_eq!(tensor.shape_capacity_for_testing(), 2);
@@ -284,10 +379,7 @@ fn exact_two_dimensional_owner_charges_shape_before_payload_and_retains_both() {
         unsafe { tensor.host_buffer().foreign_data_pointer() }.cast::<u64>(),
         original.cast_mut()
     );
-    assert_eq!(
-        quota.retained.load(Ordering::SeqCst),
-        integer_charge(16 + shape_bytes)
-    );
+    assert_eq!(quota.retained.load(Ordering::SeqCst), total);
     drop(tensor);
     assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
 }
@@ -304,7 +396,7 @@ fn exact_two_dimensional_shape_rejects_count_overflow_without_a_claim() {
 
 #[test]
 fn exact_two_dimensional_float_retains_single_storage_and_shape_charge() {
-    let total = floating_charge(3 * std::mem::size_of::<f32>() + 2 * std::mem::size_of::<usize>());
+    let total = ExactHostTensor2dAllocation::requested_bytes(NumericDType::F32, 3, 1).unwrap();
     let quota = permit(total);
     let mut allocation = ExactHostTensor2dAllocation::new(NumericDType::F32, 3, 1, &quota).unwrap();
     allocation
@@ -323,29 +415,27 @@ fn exact_two_dimensional_float_retains_single_storage_and_shape_charge() {
 
 #[test]
 fn exact_float_release_owner_is_precharged_before_payload_allocation() {
-    let payload_and_shape = 8 + 2 * std::mem::size_of::<usize>();
-    let denied = permit(floating_charge(payload_and_shape) - 1);
+    let total = ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, 1, 1).unwrap();
+    let denied = permit(total - 1);
     assert!(matches!(
         ExactHostTensor2dAllocation::new(NumericDType::F64, 1, 1, &denied),
         Err(ExactHostNumericAllocationError::ExceedsPermit)
     ));
     assert_eq!(denied.retained.load(Ordering::SeqCst), 0);
-    let admitted = permit(floating_charge(payload_and_shape));
+    let admitted = permit(total);
     let output = ExactHostTensor2dAllocation::new(NumericDType::F64, 1, 1, &admitted)
         .unwrap()
         .into_tensor()
         .unwrap();
-    assert_eq!(
-        admitted.retained.load(Ordering::SeqCst),
-        floating_charge(payload_and_shape)
-    );
+    assert_eq!(admitted.retained.load(Ordering::SeqCst), total);
     drop(output);
     assert_eq!(admitted.retained.load(Ordering::SeqCst), 0);
 }
 
 #[test]
 fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation() {
-    let float_quota = permit(floating_charge(16 + 2 * std::mem::size_of::<usize>()));
+    let float_quota =
+        permit(ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, 1, 2).unwrap());
     let mut floats = ExactHostTensor2dAllocation::new(NumericDType::F64, 1, 2, &float_quota)
         .expect("exact floating owner");
     let float_pointer = floats.as_f64_slice_mut().unwrap().as_ptr();
@@ -366,7 +456,8 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
     drop(tensor);
     assert_eq!(float_quota.retained.load(Ordering::SeqCst), 0);
 
-    let single_quota = permit(floating_charge(4 + 2 * std::mem::size_of::<usize>()));
+    let single_quota =
+        permit(ExactHostTensor2dAllocation::requested_bytes(NumericDType::F32, 1, 1).unwrap());
     let mut singles = ExactHostTensor2dAllocation::new(NumericDType::F32, 1, 1, &single_quota)
         .expect("exact single owner");
     let single_pointer = singles.as_f32_slice_mut().unwrap().as_ptr();
@@ -379,7 +470,8 @@ fn exact_parser_store_preserves_float_and_wide_integer_bits_without_reallocation
     drop(tensor);
     assert_eq!(single_quota.retained.load(Ordering::SeqCst), 0);
 
-    let integer_quota = permit(integer_charge(16 + 2 * std::mem::size_of::<usize>()));
+    let integer_quota =
+        permit(ExactHostTensor2dAllocation::requested_bytes(NumericDType::U64, 1, 2).unwrap());
     let mut integers = ExactHostTensor2dAllocation::new(NumericDType::U64, 1, 2, &integer_quota)
         .expect("exact integer owner");
     let integer_pointer = integers.as_u64_slice_mut().unwrap().as_ptr();
@@ -631,4 +723,40 @@ fn simultaneous_reservations_are_charged_until_each_owner_drops() {
     assert_eq!(permit.retained.load(Ordering::SeqCst), floating_charge(8));
     drop(second);
     assert_eq!(permit.retained.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn unmanaged_tensor_quotes_match_the_real_owner_layout_without_claim_headers() {
+    let shape = [2, 3];
+    let release_bytes = Layout::new::<RustExactRelease>().size();
+
+    let numeric = ExactHostTensorAllocation::unmanaged_requested_bytes(NumericDType::F64, &shape)
+        .expect("numeric unmanaged quote");
+    assert_eq!(
+        ExactHostTensorAllocation::requested_bytes(NumericDType::F64, &shape)
+            .expect("numeric managed quote"),
+        numeric + release_bytes
+    );
+    assert_eq!(
+        ExactHostTensorAllocation::requested_bytes(NumericDType::I32, &shape)
+            .expect("integer managed quote"),
+        ExactHostTensorAllocation::unmanaged_requested_bytes(NumericDType::I32, &shape)
+            .expect("integer unmanaged quote")
+    );
+
+    let complex =
+        ExactHostComplexTensorAllocation::unmanaged_requested_bytes(NumericDType::F32, &shape)
+            .expect("complex unmanaged quote");
+    assert_eq!(
+        ExactHostComplexTensorAllocation::requested_bytes(NumericDType::F32, &shape)
+            .expect("complex managed quote"),
+        complex + release_bytes
+    );
+
+    let logical = ExactHostLogicalTensorAllocation::unmanaged_requested_bytes(&shape)
+        .expect("logical unmanaged quote");
+    assert_eq!(
+        ExactHostLogicalTensorAllocation::requested_bytes(&shape).expect("logical managed quote"),
+        logical + release_bytes
+    );
 }

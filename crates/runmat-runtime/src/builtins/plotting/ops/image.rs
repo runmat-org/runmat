@@ -325,9 +325,6 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Image",
-            x_label: "X",
-            y_label: "Y",
             axis_equal: true,
             ..Default::default()
         },

@@ -99,6 +99,10 @@ impl QuicRemoteWorkerChannel {
             .resources
             .capabilities
             .remove(&Capability::GraphSelectedValuesV11);
+        worker
+            .resources
+            .capabilities
+            .remove(&Capability::GraphCallableArgumentsV12);
         let expected_worker = worker.id;
         let expected_pool = worker.pool_id;
         let expected_run = run_identity.clone();

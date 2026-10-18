@@ -23,8 +23,9 @@ impl<T> From<ComplexElement<T>> for (T, T) {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComplexTensor {
+    // Payload and immutable shape each retain their own allocation claim.
+    shape: SharedShape,
     storage: ComplexStorage,
-    shape: Vec<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,20 +89,24 @@ impl IntegerComplexStorage {
 }
 
 impl ComplexTensor {
-    pub fn new(data: Vec<(f64, f64)>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn new(data: Vec<(f64, f64)>, shape: impl Into<HostShapeInput>) -> Result<Self, String> {
         Self::from_complex_storage(ComplexStorage::F64(data.into()), shape)
     }
 
-    pub fn from_f32(data: Vec<(f32, f32)>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn from_f32(
+        data: Vec<(f32, f32)>,
+        shape: impl Into<HostShapeInput>,
+    ) -> Result<Self, String> {
         Self::from_complex_storage(ComplexStorage::F32(data.into()), shape)
     }
 
     /// Reconstructs floating complex values in the requested floating class.
     pub fn from_f64_values_with_dtype(
         data: Vec<(f64, f64)>,
-        shape: Vec<usize>,
+        shape: impl Into<HostShapeInput>,
         dtype: NumericDType,
     ) -> Result<Self, String> {
+        let shape = shape.into();
         match dtype {
             NumericDType::F64 => Self::new(data, shape),
             NumericDType::F32 => Self::from_f32(
@@ -119,18 +124,46 @@ impl ComplexTensor {
 
     pub fn from_complex_storage(
         storage: ComplexStorage,
-        shape: Vec<usize>,
+        shape: impl Into<HostShapeInput>,
     ) -> Result<Self, String> {
-        Ok(ComplexTensorAdmission::new(storage, shape)?
-            .finish_synchronously()?
-            .into_tensor())
+        match shape.into() {
+            HostShapeInput::Owned(shape) => Ok(ComplexTensorAdmission::new(storage, shape)?
+                .finish_synchronously()?
+                .into_tensor()),
+            HostShapeInput::Shared(shape) => Self::from_shared_host_buffer(storage, shape),
+        }
+    }
+
+    /// Reuses an independently admitted shape without cloning its backing.
+    pub fn from_shared_host_buffer(
+        storage: ComplexStorage,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        if let ComplexStorage::Integer(integer) = &storage {
+            if integer.real.numeric_dtype() != integer.imag.numeric_dtype()
+                || integer.real.len() != integer.imag.len()
+            {
+                return Err(
+                    "complex integer components must have matching class and length".into(),
+                );
+            }
+        }
+        let tensor = Self { shape, storage };
+        tensor.validate_shape()?;
+        Ok(tensor)
     }
 
     pub(super) fn from_validated_parts(parts: ValidatedComplexTensorParts) -> Self {
         let (storage, shape, _, _) = parts.into_components();
-        Self { storage, shape }
+        Self {
+            storage,
+            shape: SharedShape::new_unmanaged(shape),
+        }
     }
-    pub fn new_integer(storage: IntegerComplexStorage, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn new_integer(
+        storage: IntegerComplexStorage,
+        shape: impl Into<HostShapeInput>,
+    ) -> Result<Self, String> {
         Self::from_complex_storage(ComplexStorage::Integer(storage), shape)
     }
     pub fn new_2d(data: Vec<(f64, f64)>, rows: usize, cols: usize) -> Result<Self, String> {
@@ -160,7 +193,7 @@ impl ComplexTensor {
     ///
     /// Both owners are transferred together without exposing mutable metadata
     /// or reconstructing either allocation.
-    pub fn into_complex_storage_and_shape(self) -> (ComplexStorage, Vec<usize>) {
+    pub fn into_complex_storage_and_shape(self) -> (ComplexStorage, SharedShape) {
         let Self { storage, shape } = self;
         (storage, shape)
     }
@@ -286,6 +319,24 @@ impl ComplexTensor {
         Ok(())
     }
 
+    /// Installs an independently admitted shape for this operation without
+    /// borrowing the source payload's retained allocation authority.
+    pub fn reshape_with_shared_shape(&mut self, shape: SharedShape) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let expected = BorrowedShapeAdmission::new(&shape).finish_synchronously(|dimensions| {
+            format!("complex {class} tensor shape {dimensions:?} overflows usize")
+        })?;
+        if expected != self.len() {
+            return Err(format!(
+                "complex {class} storage length {} doesn't match shape {:?} ({expected} elements)",
+                self.len(),
+                shape
+            ));
+        }
+        self.shape = shape;
+        Ok(())
+    }
+
     /// Resize in the current complex class and publish admitted dimensions
     /// only after both component stores have grown successfully.
     pub fn resize_zeroed_for_shape(&mut self, shape: Vec<usize>) -> Result<(), String> {
@@ -350,12 +401,17 @@ impl ComplexTensor {
 
     fn apply_validated_shape(&mut self, shape: ValidatedShape) {
         let (shape, _, _) = shape.into_components();
-        self.shape = shape;
+        self.shape = SharedShape::new_unmanaged(shape);
     }
 
     /// Borrows the authoritative column-major dimensions.
     pub fn shape(&self) -> &[usize] {
         &self.shape
+    }
+
+    /// Shares the independently retained shape without retaining storage.
+    pub fn shared_shape(&self) -> SharedShape {
+        self.shape.clone()
     }
 
     pub fn rows(&self) -> usize {

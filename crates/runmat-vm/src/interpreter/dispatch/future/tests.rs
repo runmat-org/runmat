@@ -6,7 +6,7 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
     let bytecode = crate::bytecode::Bytecode::empty();
     let registry = crate::bytecode::FunctionRegistry::default();
     let mut stack = Vec::new();
-    let mut vars = Vec::new();
+    let mut vars = crate::interpreter::vars::InterpreterVars::from_owned(Vec::new());
     let mut sequence = SequenceState::default();
     let mut execution = crate::bytecode::program::ExecutionContext::default();
     let mut try_stack = Vec::new();
@@ -16,12 +16,12 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
     let mut persistent_aliases = HashMap::new();
     let mut missing_input_slots = HashSet::new();
     let mut pc = 0;
-    let mut before_var = |_current: &Value, _incoming: &Value| {};
-    let mut after_var = |_index: usize, _value: &Value| {};
+    let mut before_var = |_index: usize| {};
+    let mut after_var = |_index: usize| {};
     let mut before_local = |_current: &Value, _incoming: &Value| {};
-    let mut before_local_var = |_current: &Value, _incoming: &Value| {};
+    let mut before_local_var = |_index: usize| {};
     let mut after_local = |_index: usize, _value: &Value| {};
-    let mut after_fallback = |_name: &str, _index: usize, _value: &Value| {};
+    let mut after_fallback = |_name: &str, _index: usize| {};
 
     macro_rules! immediate_future {
         ($instruction:expr) => {

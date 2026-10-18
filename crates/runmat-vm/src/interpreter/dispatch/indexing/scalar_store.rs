@@ -3,6 +3,7 @@ use super::{
     idx_write_slice, index_scalar_from_value, map_slice_shape_error, RuntimeError, SliceSelector,
     Value,
 };
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::indexing::plan::{build_indexed_store_plan, IndexedStorePlanMode};
 use runmat_runtime::indexing::value as index_value;
 use runmat_value::IntValue;
@@ -10,7 +11,7 @@ use runmat_value::IntValue;
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    _vars: &mut [Value],
+    _vars: &mut InterpreterVars,
     _function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
     runtime: &runmat_runtime::context::RuntimeContext,

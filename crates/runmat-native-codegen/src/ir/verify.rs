@@ -5,6 +5,8 @@ use crate::{NativeCodegenError, NativeCodegenResult, NATIVE_IR_SCHEMA_VERSION};
 
 #[path = "verify/super_constructor.rs"]
 mod super_constructor;
+#[path = "verify/capture_layout.rs"]
+mod capture_layout;
 
 impl NativeAssembly {
     pub fn verify(&self) -> NativeCodegenResult<()> {
@@ -200,6 +202,14 @@ fn verify_function(
     if function.blocks.is_empty() {
         return Err(error("native.ir.blocks", "function must contain a block"));
     }
+    if NativeExpressionContinuationGeometry::for_blocks(&function.blocks)
+        != Some(function.expression_continuation_geometry)
+    {
+        return Err(error(
+            "native.ir.expression_continuation_geometry",
+            "expression continuation backing does not match canonical MIR site geometry",
+        ));
+    }
     if !function.capabilities.0.is_subset(&capabilities.0) {
         return Err(error(
             "native.ir.function_capabilities",
@@ -269,6 +279,7 @@ fn verify_function(
             "inherited canonical storage must name a nested capture and its owner",
         ));
     }
+    capture_layout::verify(function)?;
     for local in function
         .abi
         .fixed_inputs
@@ -903,6 +914,14 @@ fn verify_instruction(
                 "index selector count exceeds the shared 32-dimension mask contract",
             ));
         }
+        let mut regions_valid = true;
+        value.visit_expression_regions(|region| regions_valid &= region.validate().is_ok());
+        if !regions_valid {
+            return Err(error(
+                "native.ir.expression_region",
+                "embedded contextual or prepared expression region is invalid",
+            ));
+        }
         if rvalue_contains_legacy_binding_place(value) {
             return Err(error(
                 "native.ir.legacy_binding_place",
@@ -982,6 +1001,14 @@ fn verify_instruction(
             return Err(error(
                 "native.capability.selector_dimension_limit",
                 "index selector count exceeds the shared 32-dimension mask contract",
+            ));
+        }
+        let mut regions_valid = true;
+        statement.visit_expression_regions(|region| regions_valid &= region.validate().is_ok());
+        if !regions_valid {
+            return Err(error(
+                "native.ir.expression_region",
+                "embedded contextual or prepared expression region is invalid",
             ));
         }
         if statement_contains_legacy_binding_place(statement) {
@@ -1160,7 +1187,8 @@ fn expansion_source_selector_arity_valid_without_regions(
                 runmat_mir::MirSubscriptStep::Index(indexing) => Some(indexing),
                 runmat_mir::MirSubscriptStep::DottedInvoke { .. } => None,
                 runmat_mir::MirSubscriptStep::Member(_)
-                | runmat_mir::MirSubscriptStep::DynamicMember(_) => None,
+                | runmat_mir::MirSubscriptStep::DynamicMember(_)
+                | runmat_mir::MirSubscriptStep::PreparedDynamicMember(_) => None,
             })
             .all(|indexing| indexing.components.len() <= u32::BITS as usize),
         runmat_mir::MirExpansionSource::CellContents { indexing, .. } => {

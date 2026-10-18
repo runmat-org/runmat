@@ -858,7 +858,7 @@ fn complex_phase<T: SetFloat>((real, imaginary): (T, T)) -> T {
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
-        Value::LogicalArray(array) => array.shape.clone(),
+        Value::LogicalArray(array) => array.shape.to_vec(),
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
         _ => vec![1, 1],

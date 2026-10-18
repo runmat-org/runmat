@@ -12,7 +12,7 @@ fn exact_binding_rejects_an_ordinary_owner_before_default_creation() {
     };
     let error = futures::executor::block_on(super::call_class_constructor(
         class,
-        &[],
+        ConstructorArguments::Borrowed(&[]),
         Some(1),
         None,
         ConstructorInvocationTarget::ExactBound {

@@ -59,7 +59,8 @@ pub use bytecode::{
     EmitLabel, FunctionBytecode, FunctionRegistry, FunctionSourceProjectionError,
     InheritedStorageKind, InheritedStorageSlot, Instr, PrivateSourceAlias, PrivateSourceDirectory,
     PublishedNameResolutionView, SpawnSite, StackEffect, StatementPcProjectionError,
-    StatementPcRange, BYTECODE_SCHEMA_VERSION, FUNCTION_REGISTRY_SCHEMA_VERSION,
+    StatementPcRange, StochasticSourceOperand, BYTECODE_SCHEMA_VERSION,
+    FUNCTION_REGISTRY_SCHEMA_VERSION,
 };
 #[cfg(feature = "native-accel")]
 pub use bytecode::{
@@ -69,9 +70,10 @@ pub use bytecode::{
     ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
 };
 pub use call::builtins::{
-    compile_dynamic_workspace_eval_product, evaluate_numeric_text_source_in_context,
-    evaluate_session_source_in_context, evaluate_session_source_with_dynamic_admission_in_context,
-    push_dynamic_eval_options, set_dynamic_eval_options, DynamicEvalCompileProduct,
+    compile_dynamic_workspace_eval_product, evaluate_dynamic_workspace_in_context,
+    evaluate_numeric_text_source_in_context, evaluate_session_source_in_context,
+    evaluate_session_source_with_dynamic_admission_in_context, push_dynamic_eval_options,
+    set_dynamic_eval_options, DynamicEvalCompileProduct, DynamicEvalResult,
     DynamicSessionEvalAdmission, EvalSelectedSource,
 };
 pub use compiler::CompileError;
@@ -85,7 +87,9 @@ pub use interpreter::runner::{
     interpret_with_workspace_in_context, invoke_semantic_function_value,
     invoke_semantic_function_value_in_context,
     invoke_semantic_function_value_with_dynamic_admission_in_context,
-    invoke_semantic_function_value_with_environment_in_context, WorkspaceInterpreterOutcome,
+    invoke_semantic_function_value_with_environment_in_context,
+    invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context,
+    WorkspaceInterpreterOutcome,
 };
 pub use interpreter::runner::{
     interpret_resume_in_context, interpret_resume_with_dynamic_admission_in_context,
@@ -98,6 +102,7 @@ pub use interpreter::runner::{
 pub use interpreter::state::{
     InterpreterCompletionBoundary, InterpreterOutcome, InterpreterResumeState, InterpreterState,
 };
+pub use interpreter::vars::{InterpreterValueRef, InterpreterVars};
 pub use interpreter::CompletedFrameProjection;
 pub use interpreter::PersistentBinding;
 pub use layout::{

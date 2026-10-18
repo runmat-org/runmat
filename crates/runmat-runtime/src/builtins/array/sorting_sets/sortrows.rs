@@ -550,7 +550,7 @@ fn sortrows_host_with_args(
 fn value_shape(value: &Value) -> Vec<usize> {
     match value {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
-        Value::LogicalArray(logical) => logical.shape.clone(),
+        Value::LogicalArray(logical) => logical.shape.to_vec(),
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::CharArray(array) => array.shape.clone(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
@@ -922,7 +922,7 @@ fn compare_char_rows(ca: &CharArray, args: &SortRowsArgs, a: usize, b: usize) ->
 
 fn reorder_complex_rows(
     storage: ComplexStorage,
-    shape: Vec<usize>,
+    shape: runmat_value::SharedShape,
     rows: usize,
     cols: usize,
     order: &[usize],

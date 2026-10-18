@@ -109,12 +109,7 @@ async fn plot_builtin_with_runtime(
             .set_style_order(order)
             .map_err(|source| super::properties::map_figure_error(BUILTIN_NAME, source))?;
     }
-    let opts = PlotRenderOptions {
-        title: "Plot",
-        x_label: "X",
-        y_label: "Y",
-        ..Default::default()
-    };
+    let opts = PlotRenderOptions::default();
     let total = series_plans.len();
     let mut plots: Vec<LinePlot> = Vec::with_capacity(series_plans.len());
     for (series_idx, mut plan) in series_plans.drain(..).enumerate() {
@@ -1042,6 +1037,10 @@ pub(crate) mod tests {
         }
         let handle = current_figure_handle();
         let fig = clone_figure(handle).expect("figure exists");
+        assert!(!fig.legend_enabled);
+        assert_eq!(fig.title.as_deref().unwrap_or_default(), "");
+        assert_eq!(fig.x_label.as_deref().unwrap_or_default(), "");
+        assert_eq!(fig.y_label.as_deref().unwrap_or_default(), "");
         let first_plot = fig.plots().next().expect("plot created");
         let PlotElement::Line(line) = first_plot else {
             panic!("expected line plot");
@@ -1049,6 +1048,33 @@ pub(crate) mod tests {
         let (x, y) = line.host_xy_f64().unwrap().unwrap();
         assert_eq!(x, vec![1.0, 2.0, 3.0]);
         assert_eq!(y, vec![5.0, 6.0, 7.0]);
+
+        crate::builtins::plotting::title::title_builtin(vec![Value::String("Measured".into())])
+            .unwrap();
+        crate::builtins::plotting::xlabel::xlabel_builtin(vec![Value::String("Time".into())])
+            .unwrap();
+        crate::builtins::plotting::ylabel::ylabel_builtin(vec![Value::String("Signal".into())])
+            .unwrap();
+        set_hold(HoldMode::On);
+        block_on(plot_builtin(vec![Value::Tensor(tensor_from(&[
+            8.0, 9.0, 10.0,
+        ]))]))
+        .unwrap();
+        let retained = clone_figure(handle).expect("figure exists");
+        assert_eq!(retained.title.as_deref(), Some("Measured"));
+        assert_eq!(retained.x_label.as_deref(), Some("Time"));
+        assert_eq!(retained.y_label.as_deref(), Some("Signal"));
+
+        set_hold(HoldMode::Off);
+        block_on(plot_builtin(vec![Value::Tensor(tensor_from(&[
+            11.0, 12.0, 13.0,
+        ]))]))
+        .unwrap();
+        let replaced = clone_figure(handle).expect("figure exists");
+        assert_eq!(replaced.len(), 1);
+        assert!(replaced.title.is_none());
+        assert!(replaced.x_label.is_none());
+        assert!(replaced.y_label.is_none());
     }
 
     #[test]

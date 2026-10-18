@@ -440,7 +440,7 @@ fn eq_wgpu_matches_host() {
     let gathered = test_support::gather(gpu).expect("gather");
     match (cpu, gathered) {
         (Value::LogicalArray(expected), actual) => {
-            assert_eq!(actual.shape(), expected.shape);
+            assert_eq!(actual.shape(), expected.shape.as_slice());
             let tol = match provider.precision() {
                 ProviderPrecision::F64 => 1e-12,
                 ProviderPrecision::F32 => 1e-5,

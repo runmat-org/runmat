@@ -148,7 +148,7 @@ impl ClassificationBoundary {
             return Err(self.internal("resident integer metadata is contradictory"));
         }
         let mask = self.logical_fill(
-            handle.shape().to_vec(),
+            handle.shape(),
             matches!(self.predicate, NumericClassificationPredicate::Finite),
         )?;
         let restored = gpu_helpers::restore_class_preserving_value(handle, mask, self.name())
@@ -180,15 +180,15 @@ impl ClassificationBoundary {
             Value::Tensor(value) => self.classify_tensor(value),
             Value::ComplexTensor(value) => self.classify_complex_tensor(value),
             Value::LogicalArray(value) => self.logical_fill(
-                value.shape,
+                value.shape.as_slice(),
                 matches!(self.predicate, NumericClassificationPredicate::Finite),
             ),
             Value::CharArray(value) => self.logical_fill(
-                vec![value.rows, value.cols],
+                &[value.rows, value.cols],
                 matches!(self.predicate, NumericClassificationPredicate::Finite),
             ),
             Value::String(_) => Ok(Value::Bool(false)),
-            Value::StringArray(value) => self.logical_fill(value.shape, false),
+            Value::StringArray(value) => self.logical_fill(&value.shape, false),
             _ => Err(self.error(self.invalid, "unsupported input representation")),
         }
     }
@@ -246,8 +246,11 @@ impl ClassificationBoundary {
         }
     }
 
-    fn logical_fill(&self, shape: Vec<usize>, value: bool) -> BuiltinResult<Value> {
-        self.logical_result(vec![u8::from(value); tensor::element_count(&shape)], shape)
+    fn logical_fill(&self, shape: &[usize], value: bool) -> BuiltinResult<Value> {
+        self.logical_result(
+            vec![u8::from(value); tensor::element_count(shape)],
+            shape.to_vec(),
+        )
     }
 
     fn logical_result(&self, bits: Vec<u8>, shape: Vec<usize>) -> BuiltinResult<Value> {

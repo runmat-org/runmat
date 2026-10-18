@@ -29,9 +29,9 @@ struct PoolOwner {
     _backing: Arc<ManagedHostEffectStageReservation>,
 }
 
-/// Preallocated observation storage. `capacity` is a caller-selected count,
-/// not a guessed private Rust collection or allocator-header size. The ledger
-/// charges the exact requested `Slot` array bytes before its allocation.
+/// Preallocated observation storage. The backing reservation covers both the
+/// requested slot array and at most one callback-shared lease owner per slot.
+/// No second lease can be issued for a live slot.
 pub struct ManagedObservationPool {
     owner: Arc<PoolOwner>,
 }
@@ -43,6 +43,24 @@ pub struct ManagedObservationLease {
 }
 
 impl ManagedObservationPool {
+    /// Requested slot backing plus one Arc lease allocation for every
+    /// concurrently usable slot. The lease can outlive its caller while
+    /// callback-owned provider work is still physically retiring.
+    pub fn requested_backing_bytes(capacity: usize) -> Result<u64, HostEffectAllocationError> {
+        let lease_bytes = std::mem::size_of::<ManagedObservationLease>()
+            .checked_add(std::mem::size_of::<usize>() * 2)
+            .and_then(|bytes| bytes.checked_add(std::mem::align_of::<ManagedObservationLease>()))
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        capacity
+            .checked_mul(
+                std::mem::size_of::<Slot>()
+                    .checked_add(lease_bytes)
+                    .ok_or(HostEffectAllocationError::Overflow)?,
+            )
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or(HostEffectAllocationError::Overflow)
+    }
+
     #[cfg(test)]
     pub(crate) fn synthetic_unaccounted_for_tests(
         ledger: &ManagedHostEffectLedger,
@@ -65,10 +83,7 @@ impl ManagedObservationPool {
         ledger: &ManagedHostEffectLedger,
         capacity: usize,
     ) -> Result<Self, HostEffectAllocationError> {
-        let bytes = capacity
-            .checked_mul(std::mem::size_of::<Slot>())
-            .and_then(|bytes| u64::try_from(bytes).ok())
-            .ok_or(HostEffectAllocationError::Overflow)?;
+        let bytes = Self::requested_backing_bytes(capacity)?;
         let backing = ledger.reserve_stage(bytes)?;
         let mut slots = Vec::new();
         slots
@@ -88,7 +103,7 @@ impl ManagedObservationPool {
         &self,
         identity: PlacementPermitIdentity,
         candidate: Digest,
-    ) -> Result<ManagedObservationLease, HostEffectAllocationError> {
+    ) -> Result<Arc<ManagedObservationLease>, HostEffectAllocationError> {
         if !self.owner.ledger.snapshot().current {
             return Err(HostEffectAllocationError::Revoked);
         }
@@ -106,11 +121,11 @@ impl ManagedObservationPool {
         entry.identity = Some(identity);
         entry.candidate = Some(candidate);
         entry.current = true;
-        Ok(ManagedObservationLease {
+        Ok(Arc::new(ManagedObservationLease {
             owner: Arc::clone(&self.owner),
             slot,
             generation: entry.generation,
-        })
+        }))
     }
 
     pub fn has_active(&self, identity: PlacementPermitIdentity, candidate: Digest) -> bool {
@@ -184,7 +199,7 @@ mod tests {
 
     #[test]
     fn setup_charges_requested_backing_and_releases_on_last_lease() {
-        let bytes = std::mem::size_of::<Slot>() as u64;
+        let bytes = ManagedObservationPool::requested_backing_bytes(1).unwrap();
         let ledger = ManagedHostEffectLedger::new(bytes);
         let pool = ManagedObservationPool::new(&ledger, 1).expect("one physical slot");
         assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
@@ -194,13 +209,17 @@ mod tests {
         assert!(lease.same_owner(&pool));
         drop(pool);
         assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
+        let callback_held = Arc::clone(&lease);
         drop(lease);
+        assert!(callback_held.is_current());
+        assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
+        drop(callback_held);
         assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     }
 
     #[test]
     fn exhausted_and_foreign_slots_cannot_be_reused_until_drop() {
-        let bytes = (2 * std::mem::size_of::<Slot>()) as u64;
+        let bytes = ManagedObservationPool::requested_backing_bytes(2).unwrap();
         let first = ManagedObservationPool::new(&ManagedHostEffectLedger::new(bytes), 1).unwrap();
         let other = ManagedObservationPool::new(&ManagedHostEffectLedger::new(bytes), 1).unwrap();
         let lease = first.acquire(identity(), identity().signature).unwrap();
@@ -209,7 +228,13 @@ mod tests {
             first.acquire(identity(), identity().signature),
             Err(HostEffectAllocationError::ExceedsCapacity)
         ));
+        let callback_held = Arc::clone(&lease);
         drop(lease);
+        assert!(matches!(
+            first.acquire(identity(), identity().signature),
+            Err(HostEffectAllocationError::ExceedsCapacity)
+        ));
+        drop(callback_held);
         assert!(first
             .acquire(identity(), identity().signature)
             .unwrap()
@@ -218,7 +243,7 @@ mod tests {
 
     #[test]
     fn matching_invalidation_fences_late_observation_and_reuse_has_new_generation() {
-        let bytes = std::mem::size_of::<Slot>() as u64;
+        let bytes = ManagedObservationPool::requested_backing_bytes(1).unwrap();
         let pool = ManagedObservationPool::new(&ManagedHostEffectLedger::new(bytes), 1).unwrap();
         let first = pool.acquire(identity(), identity().signature).unwrap();
         let first_generation = first.generation;
@@ -232,7 +257,7 @@ mod tests {
 
     #[test]
     fn provider_provenance_invalidates_matching_managed_lease_only() {
-        let bytes = 2 * std::mem::size_of::<Slot>() as u64;
+        let bytes = ManagedObservationPool::requested_backing_bytes(2).unwrap();
         let pool = ManagedObservationPool::new(&ManagedHostEffectLedger::new(bytes), 2).unwrap();
         let provider_a = Digest::sha256(b"provider A");
         let provider_b = Digest::sha256(b"provider B");
@@ -255,7 +280,7 @@ mod tests {
 
     #[test]
     fn ledger_revocation_fences_existing_and_new_slots() {
-        let bytes = std::mem::size_of::<Slot>() as u64;
+        let bytes = ManagedObservationPool::requested_backing_bytes(1).unwrap();
         let ledger = ManagedHostEffectLedger::new(bytes);
         let pool = ManagedObservationPool::new(&ledger, 1).unwrap();
         let lease = pool.acquire(identity(), identity().signature).unwrap();

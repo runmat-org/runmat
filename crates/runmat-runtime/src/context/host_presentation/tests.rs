@@ -308,7 +308,10 @@ fn revoked_selection_discards_late_provider_completion_without_feedback() {
     let permit = Arc::new(TestObservationPermit(std::sync::atomic::AtomicBool::new(
         true,
     )));
-    owner.selected.observation_permit = Some(
+    let PresentationSelection::Portable(selected) = &mut owner.selected else {
+        panic!("expected portable selection");
+    };
+    selected.observation_permit = Some(
         super::super::RuntimeWholeWorkObservationAuthority::Dynamic(permit.clone()),
     );
     let submission = owner.recorder().submission().unwrap();
@@ -333,7 +336,10 @@ fn revoked_selection_cannot_register_a_late_deferred_source() {
     let permit = Arc::new(TestObservationPermit(std::sync::atomic::AtomicBool::new(
         true,
     )));
-    owner.selected.observation_permit = Some(
+    let PresentationSelection::Portable(selected) = &mut owner.selected else {
+        panic!("expected portable selection");
+    };
+    selected.observation_permit = Some(
         super::super::RuntimeWholeWorkObservationAuthority::Dynamic(permit.clone()),
     );
     let submission = owner.recorder().submission().unwrap();

@@ -180,7 +180,7 @@ impl AccelProvider for Provider {
             }
             Fault::BorrowedMask => return Ok(input.clone()),
             Fault::NonlogicalMask => {
-                return Ok(self.real(vec![0.0; input.shape().iter().product()]))
+                return Ok(self.real(vec![0.0; input.shape().iter().product()]));
             }
             Fault::WrongOwnerMask => {
                 let other = TestAllocationOwner::new();

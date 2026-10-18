@@ -482,9 +482,6 @@ async fn render_surface(
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Image",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };

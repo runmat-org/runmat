@@ -118,6 +118,189 @@ fn intermediate_brace_read_requires_exactly_one_cell_value() {
 }
 
 #[test]
+fn callable_selected_from_cell_uses_parentheses_as_one_invocation() {
+    use crate::object::indexing::{ObjectIndexComponent, ObjectIndexSelector};
+
+    let path = |arguments: Vec<ObjectIndexComponent>| {
+        ObjectSubscriptPath::new(vec![
+            ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+                components: vec![Value::Num(1.0).into()],
+            }),
+            ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+                components: arguments,
+            }),
+        ])
+        .expect("cell callable path")
+    };
+    let cell = |value| Value::Cell(CellArray::new(vec![value], 1, 1).expect("one cell"));
+
+    assert_eq!(
+        read(
+            path(vec![Value::Num(9.0).into()]),
+            cell(Value::FunctionHandle("sqrt".into())),
+        ),
+        Value::Num(3.0)
+    );
+    assert_eq!(
+        read(
+            path(vec![Value::Num(9.0).into()]),
+            cell(Value::Closure(runmat_value::Closure::new(
+                "sqrt".into(),
+                None,
+                runmat_types::FunctionSourceRole::Unknown,
+                None,
+                Vec::new(),
+                None,
+            ))),
+        ),
+        Value::Num(3.0)
+    );
+
+    let indexed_result = ObjectSubscriptPath::new(vec![
+        ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+            components: vec![Value::Num(1.0).into()],
+        }),
+        ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+            components: vec![Value::Tensor(
+                Tensor::new(vec![1.0, 4.0], vec![1, 2]).expect("input tensor"),
+            )
+            .into()],
+        }),
+        ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues {
+            components: vec![Value::Num(2.0).into()],
+        }),
+    ])
+    .expect("call result index path");
+    assert_eq!(
+        read(indexed_result, cell(Value::FunctionHandle("deal".into()))),
+        Value::Num(4.0)
+    );
+
+    let sequence = block_on(read_subscript_path_sequence_with_access(
+        cell(Value::FunctionHandle("deal".into())),
+        path(vec![Value::Num(7.0).into()]),
+        SubscriptReadRequest {
+            sequence_use: SequenceUse::SelectPrefix { count: 2 },
+            sequence_context: SequenceResolutionContext::default(),
+            indexing_context: ObjectIndexingContext::Expression,
+            access: ObjectAccessContext::default(),
+        },
+    ))
+    .expect("selected callable output count");
+    let values = sequence.with_owned_sequence(|sequence| {
+        sequence.resolve(
+            SequenceUse::SelectPrefix { count: 2 },
+            SequenceResolutionContext::default(),
+        )
+    });
+    assert_eq!(values.expect("two outputs"), vec![Value::Num(7.0); 2]);
+
+    let colon = block_on(read_subscript_path_with_access(
+        cell(Value::FunctionHandle("sqrt".into())),
+        path(vec![ObjectIndexComponent::Colon]),
+        ObjectAccessContext::default(),
+    ))
+    .expect_err("colon is an index selector, not a callable argument");
+    assert_eq!(
+        colon.identifier(),
+        Some("RunMat:UnsupportedFunctionHandleSelector")
+    );
+
+    let unknown_arity = block_on(read_subscript_path_sequence_with_access(
+        cell(Value::FunctionHandle("sqrt".into())),
+        path(vec![Value::Num(9.0).into()]),
+        SubscriptReadRequest {
+            sequence_use: SequenceUse::ExpandAll,
+            sequence_context: SequenceResolutionContext::default(),
+            indexing_context: ObjectIndexingContext::Expression,
+            access: ObjectAccessContext::default(),
+        },
+    ))
+    .expect_err("expanded invocation requires a known output count");
+    assert_eq!(
+        unknown_arity.identifier(),
+        Some("RunMat:SequenceOutputContextUnavailable")
+    );
+}
+
+#[test]
+fn selected_symbolic_and_foreign_parentheses_keep_their_existing_owners() {
+    use crate::object::indexing::{ObjectIndexComponent, ObjectIndexSelector};
+    use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
+    use runmat_value::{ForeignRef, ForeignResourceKey, SymbolicExpr};
+
+    let path = |components| {
+        ObjectSubscriptPath::new(vec![
+            ObjectSubscript::braces(ObjectIndexSelector::IndexValues {
+                components: vec![Value::Num(1.0).into()],
+            }),
+            ObjectSubscript::parentheses(ObjectIndexSelector::IndexValues { components }),
+        ])
+        .expect("selected item path")
+    };
+    let cell = |value| Value::Cell(CellArray::new(vec![value], 1, 1).expect("one cell"));
+    let symbolic = || {
+        cell(Value::Symbolic(SymbolicExpr::function_reference(
+            "f",
+            vec!["x".into()],
+        )))
+    };
+    assert_eq!(
+        read(path(vec![Value::Num(2.0).into()]), symbolic()),
+        Value::Symbolic(SymbolicExpr::function_call(
+            "f",
+            vec![SymbolicExpr::constant(2.0)],
+        ))
+    );
+    let colon = block_on(read_subscript_path_with_access(
+        symbolic(),
+        path(vec![ObjectIndexComponent::Colon]),
+        ObjectAccessContext::default(),
+    ))
+    .expect_err("symbolic call rejects colon");
+    assert_eq!(
+        colon.identifier(),
+        Some("RunMat:UnsupportedSymbolicFunctionSelector")
+    );
+    let arity = block_on(read_subscript_path_with_access(
+        symbolic(),
+        path(Vec::new()),
+        ObjectAccessContext::default(),
+    ))
+    .expect_err("symbolic function arity remains checked");
+    assert_eq!(arity.identifier(), Some("RunMat:SymbolicFunctionArity"));
+
+    let reference = ForeignRef::detached(
+        ForeignResourceKey {
+            host_identity: "missing-foreign-host".into(),
+            handle: 1,
+            generation: 1,
+        },
+        ForeignTypeIdentity {
+            family: "python".into(),
+            name: "object".into(),
+            version: 1,
+        },
+        ForeignOwnership::Borrowed,
+        ForeignAffinity::AnyThread,
+        ForeignLifetime::Session,
+    );
+    let direct = block_on(crate::foreign::index_foreign_resource(
+        reference.clone(),
+        vec![Value::Num(1.0)],
+    ))
+    .expect_err("detached foreign owner is unavailable");
+    let chained = block_on(read_subscript_path_with_access(
+        cell(Value::Foreign(reference)),
+        path(vec![Value::Num(1.0).into()]),
+        ObjectAccessContext::default(),
+    ))
+    .expect_err("chained foreign read reaches the same owner");
+    assert_eq!(chained.identifier(), direct.identifier());
+    assert_eq!(chained.message(), direct.message());
+}
+
+#[test]
 fn composite_brace_read_uses_exact_selected_runtime_lease_and_lab_selector() {
     use crate::execution::RuntimeExecutionServices;
     use runmat_execution::{CompositeHandle, CompositeId, GangHandle, GangId, PoolRequest};

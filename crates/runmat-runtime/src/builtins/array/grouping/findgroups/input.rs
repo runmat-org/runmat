@@ -93,7 +93,7 @@ fn table(values: Vec<Value>) -> BuiltinResult<FindGroupsInput> {
 fn vector_output_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     let shape = match value {
         Value::Tensor(value) => value.shape().to_vec(),
-        Value::LogicalArray(value) => value.shape.clone(),
+        Value::LogicalArray(value) => value.shape.to_vec(),
         Value::StringArray(value) => value.shape.clone(),
         Value::Cell(value) => vec![value.rows, value.cols],
         Value::GpuTensor(value) => value.shape().to_vec(),

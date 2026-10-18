@@ -496,7 +496,11 @@ impl<'a> GraphBuilder<'a> {
             // Control-flow breaks straight-line analysis. Invalidate both the operand stack and
             // our variable/value cache so we don't incorrectly treat loop induction variables
             // (e.g. `t` in `for t = 0:dt:T`) as compile-time constants inside the loop body.
-            Instr::Jump(_) | Instr::JumpIfFalse(_) | Instr::Return | Instr::ReturnValue => {
+            Instr::Jump(_)
+            | Instr::JumpIfFalse(_)
+            | Instr::StochasticEvolution { .. }
+            | Instr::Return
+            | Instr::ReturnValue => {
                 self.reset_control_flow_state();
             }
             _ => self.mark_unknown(),

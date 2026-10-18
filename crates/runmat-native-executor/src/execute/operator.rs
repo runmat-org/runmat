@@ -12,10 +12,10 @@ pub(super) fn evaluate(
     operator: OperatorKind,
     operands: &[&MirOperand],
 ) -> NativeExecutorResult<NativeValueRef> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = evaluate_inner(state, operator, operands, embedded.as_ref()).and_then(|value| {
         let retained = state.arena.get(value)?.clone();
-        state.cache_embedded_call(embedded.as_ref(), &[retained]);
+        state.cache_embedded_call(embedded.as_ref(), &[retained])?;
         Ok(value)
     });
     let finished = state.finish_embedded_call(embedded.as_ref());

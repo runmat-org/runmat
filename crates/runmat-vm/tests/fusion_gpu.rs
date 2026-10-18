@@ -3050,14 +3050,13 @@ fn ordinary_gpu_sum_survives_unclaimed_fused_reduction_without_fusion_upload() {
                 |instruction| matches!(instruction, Instr::StoreVar(index) if *index == input_slot),
             )
             .expect("literal input store");
-        let mut vars = vec![None; bytecode.var_count];
-        vars[input_slot] = Some(Value::GpuTensor(
-            provider.push(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]),
-        ));
+        let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+        vars[input_slot] = Value::GpuTensor(provider.push(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]));
         let resume = runmat_vm::InterpreterResumeState {
             pc: store + 1,
             completion_boundary: None,
-            vars,
+            vars: runmat_vm::InterpreterVars::from_owned(vars),
+            assigned_slots: std::collections::HashSet::from([input_slot]),
             supplied_inputs: 0,
             requested_outputs: 0,
             missing_input_slots: Default::default(),
@@ -3076,7 +3075,11 @@ fn ordinary_gpu_sum_survives_unclaimed_fused_reduction_without_fusion_upload() {
                 )),
             ))
             .expect("ordinary resident GPU sum");
-        let Value::GpuTensor(result) = &completion.values[output_slot] else {
+        let result_value = completion
+            .values
+            .get(output_slot)
+            .expect("ordinary resident output");
+        let Value::GpuTensor(result) = &*result_value else {
             panic!("ordinary sum must preserve resident output");
         };
         assert_eq!(provider.pull(result).unwrap(), (vec![3.0, 7.0], vec![1, 2]));

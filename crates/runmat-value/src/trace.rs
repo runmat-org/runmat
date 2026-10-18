@@ -2,6 +2,7 @@ use crate::*;
 use runmat_gc_api::{Trace, Tracer};
 
 mod value;
+pub use value::ValueTraceWorkspace;
 
 impl Trace for CellArray {
     fn trace(&self, tracer: &mut dyn Tracer) {

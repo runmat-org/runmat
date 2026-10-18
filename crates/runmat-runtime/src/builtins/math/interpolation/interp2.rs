@@ -865,11 +865,12 @@ mod tests {
         };
         assert_eq!(output.shape(), &[2, 3]);
         assert_eq!(output.numeric_dtype(), NumericDType::F32);
-        let retained = runmat_value::ExactHostComplexTensorAllocation::requested_bytes(
-            NumericDType::F32,
-            &[2, 3],
-        )
-        .unwrap() as u64;
+        let retained =
+            crate::context::host_allocation::HostAllocationPlan::retained_complex_tensor_bytes(
+                NumericDType::F32,
+                &[2, 3],
+            )
+            .unwrap();
         assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
         assert_eq!(ledger.snapshot().live_claimed_bytes, retained);
         drop(output);

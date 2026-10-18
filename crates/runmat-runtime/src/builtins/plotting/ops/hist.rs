@@ -365,7 +365,6 @@ pub struct HistEvaluation {
     #[allow(dead_code)]
     centers: Tensor,
     charts: Vec<BarChart>,
-    normalization: HistNormalization,
 }
 
 impl HistEvaluation {
@@ -374,7 +373,6 @@ impl HistEvaluation {
         centers: Vec<f64>,
         output_shape: Vec<usize>,
         charts: Vec<BarChart>,
-        normalization: HistNormalization,
     ) -> BuiltinResult<Self> {
         if counts.len() != centers.len() {
             return Err(hist_internal("mismatch between counts and bin centers"));
@@ -385,7 +383,6 @@ impl HistEvaluation {
             counts: counts_tensor,
             centers: centers_tensor,
             charts,
-            normalization,
         })
     }
 
@@ -399,18 +396,8 @@ impl HistEvaluation {
     }
 
     pub fn render_plot(&self) -> BuiltinResult<()> {
-        let y_label = match self.normalization {
-            HistNormalization::Count => "Count",
-            HistNormalization::Probability => "Probability",
-            HistNormalization::Pdf => "PDF",
-        };
         let mut charts = Some(self.charts.clone());
-        let opts = PlotRenderOptions {
-            title: "Histogram",
-            x_label: "Bin",
-            y_label,
-            ..Default::default()
-        };
+        let opts = PlotRenderOptions::default();
         render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
             let charts = charts
                 .take()
@@ -425,14 +412,8 @@ impl HistEvaluation {
 }
 
 impl HistComputation {
-    fn into_evaluation(self, normalization: HistNormalization) -> BuiltinResult<HistEvaluation> {
-        HistEvaluation::new(
-            self.counts,
-            self.centers,
-            self.output_shape,
-            self.charts,
-            normalization,
-        )
+    fn into_evaluation(self) -> BuiltinResult<HistEvaluation> {
+        HistEvaluation::new(self.counts, self.centers, self.output_shape, self.charts)
     }
 }
 
@@ -691,7 +672,7 @@ pub async fn evaluate_async(data: Value, rest: &[Value]) -> BuiltinResult<HistEv
         }
     };
 
-    let mut evaluation = computation.into_evaluation(normalization)?;
+    let mut evaluation = computation.into_evaluation()?;
     let chart_count = evaluation.charts.len();
     for (index, chart) in evaluation.charts.iter_mut().enumerate() {
         apply_bar_style(chart, &bar_style, HIST_DEFAULT_LABEL);

@@ -18,9 +18,9 @@ pub use vm_region::{
     record_vm_region_wgpu_submission, set_vm_region_for_current_poll, with_vm_region_poll,
     VmRegionRouteAudit, VmRegionRouteAuditSlot,
 };
-mod wgpu_query;
 #[cfg(feature = "wgpu")]
 mod wgpu_progress;
+mod wgpu_query;
 #[cfg(feature = "wgpu")]
 pub use wgpu_progress::{
     WgpuObservationProgress, WgpuObservationProgressError, WgpuObservationProgressReservation,
@@ -34,10 +34,12 @@ pub use budget::ProviderObservationBudget;
 pub use budget::{WgpuQueryPermit, WgpuTailPermit};
 pub use resource_activation::{current_provider_resource_scope, observe_provider_resource_future};
 pub use state::{
-    ProviderCompletedSubmission, ProviderOperationReceipt, ProviderOperationRecorder,
-    ProviderResourcePhasePlan, ProviderResourcePhaseToken, ProviderResourceScope,
-    ProviderResourceSnapshot, ProviderResourceTicket, ProviderScopedResourceSnapshot,
-    ProviderSubmission,
+    stochastic_evolution_source_transfer_retirement_host_upper_bytes, ProviderCompletedSubmission,
+    ProviderOperationReceipt, ProviderOperationRecorder, ProviderResourcePhasePlan,
+    ProviderResourcePhaseToken, ProviderResourceScope, ProviderResourceSnapshot,
+    ProviderResourceTicket, ProviderScopedResourceSnapshot, ProviderSubmission,
+    StochasticEvolutionSourceTransferRetirement,
+    StochasticEvolutionSourceTransferRetirementNotifier,
 };
 pub use wgpu_query::{
     WgpuEncoderQueryProspective, WgpuQueryAllocationDisposition, WgpuQueryAllocationObservation,

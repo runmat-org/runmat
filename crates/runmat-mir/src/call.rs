@@ -115,7 +115,7 @@ impl MirCallArg {
 
     pub(crate) fn visit_direct_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         if let Self::Expansion(source) = self {
             source.visit_direct_expression_regions_dyn(visitor);
@@ -233,7 +233,7 @@ impl MirExpansionSource {
 
     pub(crate) fn visit_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         match self {
             Self::SubscriptChain(chain) => chain.visit_expression_regions(visitor),
@@ -244,7 +244,7 @@ impl MirExpansionSource {
 
     pub(crate) fn visit_direct_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         match self {
             Self::SubscriptChain(chain) => chain.visit_direct_expression_regions_dyn(visitor),
@@ -255,7 +255,10 @@ impl MirExpansionSource {
         }
     }
 
-    pub fn visit_expression_regions(&self, mut visitor: impl FnMut(&crate::MirExpressionRegion)) {
+    pub fn visit_expression_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
         self.visit_expression_regions_dyn(&mut visitor);
     }
 }

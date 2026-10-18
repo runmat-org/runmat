@@ -69,6 +69,14 @@ pub(crate) fn annotate_fusion_groups_with_projected_literals(
             }
         }
 
+        if matches!(instr, Instr::StochasticEvolution { .. }) {
+            // The selected path and the separately compiled original For
+            // reconverge here; neither linear stack predecessor is a proof
+            // about values after that control-flow join.
+            stack.clear();
+            continue;
+        }
+
         if matches!(instr, Instr::Swap) {
             if stack.len() < 2 {
                 stack.clear();

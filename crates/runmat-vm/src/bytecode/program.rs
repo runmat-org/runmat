@@ -77,7 +77,7 @@ pub(crate) use vm_fusion_plan::VmFusionPlanInstallation;
 #[cfg(feature = "native-accel")]
 pub(crate) use vm_image_plan::SealedFunctionImage;
 #[cfg(feature = "native-accel")]
-pub(crate) use vm_image_plan::VmImagePlanInstallation;
+pub(crate) use vm_image_plan::{VmImagePlanInstallation, VmImageSelected};
 #[path = "program/bound_binding.rs"]
 mod bound_binding;
 #[path = "program/retained_artifacts.rs"]
@@ -2426,6 +2426,18 @@ fn validate_catch_scope_metadata(
         .any(|scope| !declared_scopes.contains(scope))
     {
         return Err("bytecode catch membership names an undeclared lexical scope".into());
+    }
+    if catch_scopes.len() == instructions.len() {
+        for (pc, instruction) in instructions.iter().enumerate() {
+            if let Instr::StochasticEvolution { fallback_pc, .. } = instruction {
+                if catch_scopes.get(pc) != catch_scopes.get(*fallback_pc) {
+                    return Err(
+                        "stochastic source fallback crosses its original lexical catch scope"
+                            .into(),
+                    );
+                }
+            }
+        }
     }
     Ok(())
 }

@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_value::{NumericStorage, ObjectInstance, Tensor, Value};
 
 use super::*;
+use crate::RuntimeError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum HeatmapAggregation {
@@ -57,15 +58,57 @@ pub(crate) struct AggregatedHeatmap {
     pub(crate) color_data: Tensor,
 }
 
+fn heatmap_table_invalid_message(detail: &str) -> String {
+    let error = &runmat_builtins::HEATMAP_ERROR_INVALID_ARGUMENT;
+    let detail = detail
+        .trim()
+        .strip_prefix("heatmap:")
+        .map(str::trim)
+        .unwrap_or(detail.trim());
+    if detail.is_empty() {
+        error.message.to_string()
+    } else {
+        format!("{}: {detail}", error.message)
+    }
+}
+
+fn heatmap_table_invalid(message: impl Into<String>) -> RuntimeError {
+    let error = &runmat_builtins::HEATMAP_ERROR_INVALID_ARGUMENT;
+    let message = message.into();
+    let mut builder =
+        crate::build_runtime_error(heatmap_table_invalid_message(&message)).with_builtin("heatmap");
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
+/// Retag failures from the synchronous, non-effecting table validators used
+/// below. Provider, callback, cancellation, and allocation-admission errors
+/// must not cross this boundary; those retain their typed terminal errors at
+/// their operation owner instead.
+fn map_pure_heatmap_table_validation(source: RuntimeError) -> RuntimeError {
+    let error = &runmat_builtins::HEATMAP_ERROR_INVALID_ARGUMENT;
+    let message = heatmap_table_invalid_message(source.message());
+    let mut builder = crate::build_runtime_error(message)
+        .with_builtin("heatmap")
+        .with_source(source);
+    if let Some(identifier) = error.identifier {
+        builder = builder.with_identifier(identifier);
+    }
+    builder.build()
+}
+
 fn selected_name(
     selector: &Value,
     table: &ObjectInstance,
     names: &[String],
 ) -> BuiltinResult<String> {
-    let selected = parse_variable_selector_for_object(Some(selector), table, names)?;
+    let selected = parse_variable_selector_for_object(Some(selector), table, names)
+        .map_err(map_pure_heatmap_table_validation)?;
     match selected.as_slice() {
         [name] => Ok(name.clone()),
-        _ => Err(invalid_variable(
+        _ => Err(heatmap_table_invalid(
             "heatmap: each axis or color variable must select exactly one table variable",
         )),
     }
@@ -75,7 +118,8 @@ fn category_order(value: &Value, keys: BTreeSet<GroupAtom>) -> BuiltinResult<Vec
     let mut ordered = keys.into_iter().collect::<Vec<_>>();
     if let Value::Object(object) = value {
         if object.is_class(CATEGORICAL_CLASS) {
-            let categories = categorical_categories(object)?;
+            let categories =
+                categorical_categories(object).map_err(map_pure_heatmap_table_validation)?;
             ordered.sort_by_key(|key| match key {
                 GroupAtom::Text(label) => categories
                     .iter()
@@ -103,9 +147,9 @@ fn numeric_color_column(value: &Value, height: usize) -> BuiltinResult<Value> {
                 .collect();
             Tensor::new(values, vec![height, 1])
                 .map(Value::Tensor)
-                .map_err(invalid_variable)
+                .map_err(heatmap_table_invalid)
         }
-        _ => Err(invalid_variable(
+        _ => Err(heatmap_table_invalid(
             "heatmap: ColorVariable must be a numeric or logical column",
         )),
     }
@@ -133,14 +177,17 @@ fn admit_axis_column(value: &Value, height: usize) -> BuiltinResult<()> {
                 })
         }
         Value::Object(object) if object.is_class(CATEGORICAL_CLASS) => {
-            categorical_label_view(object)?.len() == height
+            categorical_label_view(object)
+                .map_err(map_pure_heatmap_table_validation)?
+                .len()
+                == height
         }
         _ => false,
     };
     if vector {
         Ok(())
     } else {
-        Err(invalid_variable(
+        Err(heatmap_table_invalid(
             "heatmap: axis variables must be discrete single-column values",
         ))
     }
@@ -157,35 +204,41 @@ pub(crate) fn aggregate_heatmap_table(
     method: HeatmapAggregation,
 ) -> BuiltinResult<AggregatedHeatmap> {
     if !is_tabular_object(table) {
-        return Err(invalid_argument("heatmap: expected a table or timetable"));
+        return Err(heatmap_table_invalid(
+            "heatmap: expected a table or timetable",
+        ));
     }
-    let variables = table_variables_ref(table)?
-        .ok_or_else(|| invalid_variable("heatmap: table has no variable storage"))?;
-    let names = table_variable_names_from_object(table)?;
+    let variables = table_variables_ref(table)
+        .map_err(map_pure_heatmap_table_validation)?
+        .ok_or_else(|| heatmap_table_invalid("heatmap: table has no variable storage"))?;
+    let names =
+        table_variable_names_from_object(table).map_err(map_pure_heatmap_table_validation)?;
     let x_name = selected_name(x_selector, table, &names)?;
     let y_name = selected_name(y_selector, table, &names)?;
     let color_name = color_selector
         .map(|selector| selected_name(selector, table, &names))
         .transpose()?;
     if method != HeatmapAggregation::Count && color_name.is_none() {
-        return Err(invalid_argument(
+        return Err(heatmap_table_invalid(
             "heatmap: ColorMethod other than count requires ColorVariable",
         ));
     }
     let x = variables
         .fields
         .get(&x_name)
-        .ok_or_else(|| invalid_variable("heatmap: missing XVariable"))?;
+        .ok_or_else(|| heatmap_table_invalid("heatmap: missing XVariable"))?;
     let y = variables
         .fields
         .get(&y_name)
-        .ok_or_else(|| invalid_variable("heatmap: missing YVariable"))?;
-    let height = value_row_count(x)?;
-    if value_row_count(y)? != height {
-        return Err(invalid_variable("heatmap: axis column heights disagree"));
+        .ok_or_else(|| heatmap_table_invalid("heatmap: missing YVariable"))?;
+    let height = value_row_count(x).map_err(map_pure_heatmap_table_validation)?;
+    if value_row_count(y).map_err(map_pure_heatmap_table_validation)? != height {
+        return Err(heatmap_table_invalid(
+            "heatmap: axis column heights disagree",
+        ));
     }
     if matches!(x, Value::GpuTensor(_)) || matches!(y, Value::GpuTensor(_)) {
-        return Err(invalid_argument(
+        return Err(heatmap_table_invalid(
             "heatmap: resident table axis columns require a supported provider path",
         ));
     }
@@ -197,15 +250,17 @@ pub(crate) fn aggregate_heatmap_table(
             variables
                 .fields
                 .get(name)
-                .ok_or_else(|| invalid_variable("heatmap: missing ColorVariable"))
+                .ok_or_else(|| heatmap_table_invalid("heatmap: missing ColorVariable"))
         })
         .transpose()?;
     if let Some(color) = color.filter(|_| method != HeatmapAggregation::Count) {
-        if value_row_count(color)? != height {
-            return Err(invalid_variable("heatmap: color column height disagrees"));
+        if value_row_count(color).map_err(map_pure_heatmap_table_validation)? != height {
+            return Err(heatmap_table_invalid(
+                "heatmap: color column height disagrees",
+            ));
         }
         if matches!(color, Value::GpuTensor(_)) {
-            return Err(invalid_argument(
+            return Err(heatmap_table_invalid(
                 "heatmap: resident table color columns require a supported provider path",
             ));
         }
@@ -238,14 +293,14 @@ pub(crate) fn aggregate_heatmap_table(
     let x_keys = category_order(x, x_keys)?;
     let y_keys = category_order(y, y_keys)?;
     if x_keys.is_empty() || y_keys.is_empty() {
-        return Err(invalid_argument(
+        return Err(heatmap_table_invalid(
             "heatmap: table has no observed axis values",
         ));
     }
     let cell_count = x_keys
         .len()
         .checked_mul(y_keys.len())
-        .ok_or_else(|| invalid_argument("heatmap: aggregated grid is too large"))?;
+        .ok_or_else(|| heatmap_table_invalid("heatmap: aggregated grid is too large"))?;
     if method == HeatmapAggregation::None {
         let Value::Tensor(source) = color.as_ref().expect("none requires a color variable") else {
             unreachable!("numeric color normalized to Tensor")
@@ -274,7 +329,8 @@ pub(crate) fn aggregate_heatmap_table(
                         color.as_ref().expect("color admitted"),
                         std::iter::once(rows),
                         method,
-                    )?
+                    )
+                    .map_err(map_pure_heatmap_table_validation)?
                     .into_iter()
                     .next()
                     .expect("one admitted group");
@@ -291,7 +347,7 @@ pub(crate) fn aggregate_heatmap_table(
         }
     }
     let color_data =
-        Tensor::new(values, vec![y_keys.len(), x_keys.len()]).map_err(invalid_variable)?;
+        Tensor::new(values, vec![y_keys.len(), x_keys.len()]).map_err(heatmap_table_invalid)?;
     Ok(AggregatedHeatmap {
         x_labels: x_keys.iter().map(|key| group_atom_label(key)).collect(),
         y_labels: y_keys.iter().map(|key| group_atom_label(key)).collect(),
@@ -307,7 +363,7 @@ fn exact_unaggregated_color_data(
     cell_count: usize,
 ) -> BuiltinResult<Tensor> {
     if groups.values().any(|rows| rows.len() != 1) {
-        return Err(invalid_argument(
+        return Err(heatmap_table_invalid(
             "heatmap: ColorMethod none requires unique axis pairs",
         ));
     }
@@ -317,7 +373,7 @@ fn exact_unaggregated_color_data(
             for rows in groups.values() {
                 let value = integer
                     .value_at(rows[0])
-                    .ok_or_else(|| invalid_index("heatmap: color row out of bounds"))?;
+                    .ok_or_else(|| heatmap_table_invalid("heatmap: color row out of bounds"))?;
                 if !crate::builtins::common::validation::integer_is_exact_f64(&value) {
                     let error = &runmat_builtins::HEATMAP_ERROR_UNSUPPORTED_COLOR_DATA;
                     let mut builder =
@@ -349,7 +405,7 @@ fn exact_unaggregated_color_data(
             };
             let original = source
                 .numeric_value_at(rows[0])
-                .ok_or_else(|| invalid_index("heatmap: color row out of bounds"))?;
+                .ok_or_else(|| heatmap_table_invalid("heatmap: color row out of bounds"))?;
             let value = if has_holes && source.integer_storage().is_some() {
                 runmat_value::NumericScalar::F64(original.materialize_f64())
             } else {
@@ -357,9 +413,9 @@ fn exact_unaggregated_color_data(
             };
             storage
                 .set_value(x_index * y_keys.len() + y_index, value)
-                .map_err(invalid_variable)?;
+                .map_err(heatmap_table_invalid)?;
         }
     }
     Tensor::from_numeric_storage(storage, vec![y_keys.len(), x_keys.len()])
-        .map_err(invalid_variable)
+        .map_err(heatmap_table_invalid)
 }

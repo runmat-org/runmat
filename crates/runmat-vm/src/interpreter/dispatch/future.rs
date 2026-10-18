@@ -221,13 +221,17 @@ async fn dispatch_semantic_closure(
                     "pending closure's original captures are absent from the stack",
                 ));
             }
-            let (live_frame, live_names, assigned) =
-                crate::runtime::workspace::workspace_binding_state().ok_or_else(|| {
-                    crate::interpreter::errors::mex(
-                        "DynamicWorkspaceUnavailable",
-                        "pending closure lost its issuing workspace frame",
-                    )
-                })?;
+            let crate::runtime::workspace::WorkspaceBindingState {
+                frame: live_frame,
+                names: live_names,
+                assigned,
+                ..
+            } = crate::runtime::workspace::workspace_binding_state().ok_or_else(|| {
+                crate::interpreter::errors::mex(
+                    "DynamicWorkspaceUnavailable",
+                    "pending closure lost its issuing workspace frame",
+                )
+            })?;
             if live_frame != compiled.issuing_frame {
                 return Err(crate::interpreter::errors::mex(
                     "DynamicWorkspaceCompile",

@@ -5,7 +5,8 @@
 
 use crate::retirement::RetiredValue;
 use crate::{
-    roots::collect_value_roots, GcConfig, GcHandle, GcStats, GenerationalAllocator, Result,
+    allocator::GcAllocationKind, roots::collect_value_roots, GcConfig, GcHandle, GcStats,
+    GenerationalAllocator, Result,
 };
 use runmat_time::Instant;
 use runmat_value::Value;
@@ -62,11 +63,16 @@ impl MarkSweepCollector {
             if !self.marked_objects.lock().contains(&addr) {
                 collected += 1;
                 let handle = allocator.handle_for_live_ptr(ptr);
+                let kind = handle.and_then(|handle| allocator.allocation_kind(&handle));
                 if allocator.note_value_dropped(ptr) {
                     // SAFETY: the initialized slot was just removed from the
                     // live set; transfer it before its storage can be reused.
                     unsafe {
-                        retired.push(RetiredValue::take(ptr as *const Value, handle));
+                        retired.push(RetiredValue::take(
+                            ptr,
+                            handle,
+                            kind.expect("live GC allocation has a kind"),
+                        ));
                     }
                 }
                 // Space remains reserved; a free-list compactor can reclaim later
@@ -126,11 +132,16 @@ impl MarkSweepCollector {
             let addr = ptr as usize;
             if !self.marked_objects.lock().contains(&addr) {
                 let handle = allocator.handle_for_live_ptr(ptr);
+                let kind = handle.and_then(|handle| allocator.allocation_kind(&handle));
                 if allocator.note_value_dropped(ptr) {
                     collected += 1;
                     // SAFETY: removing the live slot grants its unique payload.
                     unsafe {
-                        retired.push(RetiredValue::take(ptr as *const Value, handle));
+                        retired.push(RetiredValue::take(
+                            ptr,
+                            handle,
+                            kind.expect("live GC allocation has a kind"),
+                        ));
                     }
                 }
             }
@@ -174,12 +185,12 @@ impl MarkSweepCollector {
         // SAFETY: this exposes the handle's preserved pointer token for
         // address-keyed mark bookkeeping. Ownership/liveness is established by
         // the root set and allocator before sweep.
-        let value_ptr = unsafe { obj.as_ptr_unchecked().cast::<Value>() };
-        let ptr = value_ptr.as_ptr().cast::<u8>();
+        let allocation = unsafe { obj.as_ptr_unchecked() };
+        let ptr = allocation.as_ptr().cast::<u8>();
         if allocator.find_generation(ptr).is_none() || !allocator.is_live_handle(&obj) {
             log::debug!(
                 "Ignoring stale GC mark edge {:p}@{}",
-                value_ptr.as_ptr(),
+                allocation.as_ptr(),
                 obj.epoch()
             );
             return Ok(());
@@ -201,7 +212,19 @@ impl MarkSweepCollector {
         // handles validated against allocator liveness above, and `ptr` is only
         // borrowed during the stop-the-world mark phase before any sweep can
         // reclaim the object.
-        collect_value_roots(unsafe { value_ptr.as_ref() }, &mut child_roots);
+        match allocator.allocation_kind(&obj) {
+            Some(GcAllocationKind::Value) => {
+                // SAFETY: this tagged live allocation contains a Value.
+                collect_value_roots(unsafe { &*ptr.cast::<Value>() }, &mut child_roots);
+            }
+            Some(GcAllocationKind::LexicalActivation) => {
+                // SAFETY: this tagged live allocation contains a private
+                // activation, never a language Value.
+                unsafe { &*ptr.cast::<crate::lexical_activation::LexicalActivation>() }
+                    .for_each_value(|value| collect_value_roots(value, &mut child_roots));
+            }
+            None => return Ok(()),
+        }
         for child in child_roots {
             self.mark_object(allocator, child)?;
         }

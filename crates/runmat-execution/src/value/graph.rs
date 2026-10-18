@@ -50,6 +50,9 @@ pub const GRAPH_MAX_SELECTED_UNITS: usize = u16::MAX as usize + 1;
 
 pub const GRAPH_REQUEST_SCHEMA_V10: u16 = 10;
 pub const GRAPH_REQUEST_SCHEMA_V11: u16 = 11;
+/// Callable roots carry only explicitly supplied arguments. Captures remain
+/// on the callable target and are not repeated in invocation arguments.
+pub const GRAPH_REQUEST_SCHEMA_V12: u16 = 12;
 
 /// Minimum schema required by actual graph nodes. A producer may require V11
 /// for selected code capable of returning V11 nodes even when inputs are V10.
@@ -57,6 +60,7 @@ pub const GRAPH_REQUEST_SCHEMA_V11: u16 = 11;
 pub enum GraphRequiredSchema {
     V10,
     SelectedValuesV11,
+    CallableArgumentsV12,
 }
 
 impl GraphRequiredSchema {
@@ -64,6 +68,7 @@ impl GraphRequiredSchema {
         match version {
             GRAPH_REQUEST_SCHEMA_V10 => Some(Self::V10),
             GRAPH_REQUEST_SCHEMA_V11 => Some(Self::SelectedValuesV11),
+            GRAPH_REQUEST_SCHEMA_V12 => Some(Self::CallableArgumentsV12),
             _ => None,
         }
     }
@@ -72,6 +77,7 @@ impl GraphRequiredSchema {
         match self {
             Self::V10 => GRAPH_REQUEST_SCHEMA_V10,
             Self::SelectedValuesV11 => GRAPH_REQUEST_SCHEMA_V11,
+            Self::CallableArgumentsV12 => GRAPH_REQUEST_SCHEMA_V12,
         }
     }
 
@@ -79,6 +85,9 @@ impl GraphRequiredSchema {
         match self {
             Self::V10 => None,
             Self::SelectedValuesV11 => Some(crate::resource::Capability::GraphSelectedValuesV11),
+            Self::CallableArgumentsV12 => {
+                Some(crate::resource::Capability::GraphCallableArgumentsV12)
+            }
         }
     }
 }

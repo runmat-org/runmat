@@ -3,6 +3,12 @@ use crate::Value;
 use std::future::Future;
 
 impl StructArray {
+    pub(crate) fn trace_field_values(&self, index: usize) -> Option<&[Value]> {
+        self.fields
+            .get_index(index)
+            .map(|(_, values)| values.as_slice())
+    }
+
     pub fn for_each_value(&self, mut visitor: impl FnMut(&Value)) {
         self.fields.values().flatten().for_each(&mut visitor);
     }

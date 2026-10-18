@@ -1,4 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
@@ -24,7 +25,7 @@ pub(super) async fn execute(
     executable: &crate::BytecodeParforRegion,
     iterable: Value,
     maximum_workers: Option<u32>,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
     context: &ExecutionContext,
     current_function_name: &str,
 ) -> Result<(), RuntimeError> {
@@ -48,7 +49,7 @@ pub(super) async fn execute(
     let inputs = executable
         .input_variables()
         .map(|variable| {
-            vars.get(variable.slot).cloned().ok_or_else(|| {
+            vars.get(variable.slot).map(|value| value.clone()).ok_or_else(|| {
                 crate::interpreter::errors::mex(
                     "ParallelFrame",
                     "parallel task input is outside its compiled VM frame",
@@ -95,13 +96,13 @@ pub(super) async fn execute(
     match scheduled_inputs {
         Ok(scheduled_inputs) => {
             for (slot, destination) in scheduled_inputs.sliced_destinations {
-                let Some(frame_value) = vars.get_mut(slot) else {
+                if vars.get(slot).is_none() {
                     return Err(crate::interpreter::errors::mex(
                         "ParallelFrame",
                         "parallel sliced destination is outside its compiled VM frame",
                     ));
                 };
-                *frame_value = destination;
+                let _retired = vars.replace_owned(slot, destination);
             }
             return execute_parfor_tasks(
                 execution,
@@ -143,7 +144,7 @@ pub(super) async fn execute(
 async fn execute_parfor_serial(
     execution: ParforExecution<'_>,
     task: ParforTaskPayload,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
 ) -> Result<(), RuntimeError> {
     let ParforTaskPayload {
         inputs,
@@ -172,9 +173,12 @@ async fn execute_parfor_serial(
                     "parallel task output is outside its compiled VM frame",
                 ));
             }
-            crate::runtime::workspace::admit_workspace_slot_write(variable.slot, &output)?;
-            let slot = &mut vars[variable.slot];
-            *slot = output;
+            crate::runtime::workspace::commit_workspace_slot_value(
+                vars,
+                variable.slot,
+                None,
+                output,
+            )?;
         }
         Ok::<(), RuntimeError>(())
     })?;
@@ -221,7 +225,7 @@ async fn validate_parfor_iterations(iterations: &[Value]) -> Result<(), RuntimeE
 async fn execute_parfor_tasks(
     execution: ParforExecution<'_>,
     task: ParforTaskPayload,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
     pool: &runmat_execution::PoolHandle,
     worker_budget: u32,
 ) -> Result<(), RuntimeError> {
@@ -559,7 +563,7 @@ async fn assemble_sliced_results(
     graph: &runmat_execution::ParallelTaskGraph,
     iterations: &[Value],
     results: runmat_runtime::execution::RootedValues,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
 ) -> Result<(), RuntimeError> {
     let output_variables = executable.output_variables().collect::<Vec<_>>();
     for (chunk, result) in graph.chunks.iter().zip(results.iter()) {
@@ -578,7 +582,8 @@ async fn assemble_sliced_results(
         for (variable, worker_value) in output_variables.iter().zip(&result.data) {
             match &variable.contract.role {
                 runmat_types::ParallelVariableRole::Sliced { access } => {
-                    let Some(destination) = vars.get(variable.slot).cloned() else {
+                    let Some(destination) = vars.get(variable.slot).map(|value| value.clone())
+                    else {
                         return Err(crate::interpreter::errors::mex(
                             "ParallelFrame",
                             "parallel sliced output is outside its compiled VM frame",
@@ -596,11 +601,12 @@ async fn assemble_sliced_results(
                         )
                         .await?;
                     }
-                    crate::runtime::workspace::admit_workspace_slot_write(
+                    crate::runtime::workspace::commit_workspace_slot_value(
+                        vars,
                         variable.slot,
-                        &assembled,
+                        None,
+                        assembled,
                     )?;
-                    vars[variable.slot] = assembled;
                 }
                 runmat_types::ParallelVariableRole::Reduction { operator } => {
                     let Value::Cell(contributions) = worker_value else {
@@ -615,7 +621,8 @@ async fn assemble_sliced_results(
                             "parallel reduction task returned the wrong contribution count",
                         ));
                     }
-                    let Some(accumulator) = vars.get(variable.slot).cloned() else {
+                    let Some(accumulator) = vars.get(variable.slot).map(|value| value.clone())
+                    else {
                         return Err(crate::interpreter::errors::mex(
                             "ParallelFrame",
                             "parallel reduction output is outside its compiled VM frame",
@@ -632,11 +639,14 @@ async fn assemble_sliced_results(
                         )
                         .await?;
                     }
-                    crate::runtime::workspace::admit_workspace_slot_write(
-                        variable.slot,
-                        accumulator.value(),
-                    )?;
-                    accumulator.with_owned(|value| vars[variable.slot] = value);
+                    accumulator.with_owned(|value| {
+                        crate::runtime::workspace::commit_workspace_slot_value(
+                            vars,
+                            variable.slot,
+                            None,
+                            value,
+                        )
+                    })?;
                 }
                 _ => {
                     return Err(crate::interpreter::errors::mex(
@@ -653,7 +663,7 @@ async fn assemble_sliced_results(
 fn slice_offset_value(
     executable: &crate::BytecodeParforRegion,
     access: runmat_types::ParallelSliceAccess,
-    vars: &[Value],
+    vars: &InterpreterVars,
 ) -> Result<Option<Value>, RuntimeError> {
     let value = match access.offset {
         runmat_types::ParallelSliceOffset::Add(
@@ -674,12 +684,15 @@ fn slice_offset_value(
                 "parallel slice offset has no compiler-bound frame value",
             )
         })?;
-    vars.get(variable.slot).cloned().map(Some).ok_or_else(|| {
-        crate::interpreter::errors::mex(
-            "ParallelSliceOffset",
-            "parallel slice offset is outside its compiled VM frame",
-        )
-    })
+    vars.get(variable.slot)
+        .map(|value| value.clone())
+        .map(Some)
+        .ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "ParallelSliceOffset",
+                "parallel slice offset is outside its compiled VM frame",
+            )
+        })
 }
 
 pub(super) fn maximum_worker_count(value: Value) -> Result<u32, RuntimeError> {

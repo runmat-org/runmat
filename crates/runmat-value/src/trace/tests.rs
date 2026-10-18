@@ -1,4 +1,6 @@
 use std::ptr::NonNull;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use runmat_types::ClassIdentity;
 
@@ -28,6 +30,19 @@ fn value_tracing_reaches_deep_container_handle_without_recursive_calls() {
     let mut tracer = RecordingTracer(Vec::new());
     value.trace(&mut tracer);
     assert_eq!(tracer.0, vec![handle]);
+    let live = Arc::new(AtomicUsize::new(0));
+    let permit = TracePermit {
+        live: live.clone(),
+        reservations: AtomicUsize::new(0),
+        max_reservations: usize::MAX,
+    };
+    let mut workspace = ValueTraceWorkspace::admitted(&permit);
+    let mut admitted = RecordingTracer(Vec::new());
+    workspace.try_trace(&value, &mut admitted).unwrap();
+    assert_eq!(admitted.0, tracer.0);
+    assert!(live.load(Ordering::SeqCst) > 0);
+    drop(workspace);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
     loop {
         value = match value {
             Value::Struct(structure) => structure.fields.into_iter().next().unwrap().1,
@@ -40,6 +55,80 @@ fn value_tracing_reaches_deep_container_handle_without_recursive_calls() {
     unsafe {
         drop(Box::from_raw(raw));
     }
+}
+
+#[derive(Debug)]
+struct TraceClaim {
+    live: Arc<AtomicUsize>,
+    bytes: usize,
+}
+
+impl Drop for TraceClaim {
+    fn drop(&mut self) {
+        self.live.fetch_sub(self.bytes, Ordering::SeqCst);
+    }
+}
+
+impl ExactHostAllocationReservation for TraceClaim {}
+
+#[derive(Debug)]
+struct TracePermit {
+    live: Arc<AtomicUsize>,
+    reservations: AtomicUsize,
+    max_reservations: usize,
+}
+
+impl ExactHostAllocationPermit for TracePermit {
+    fn reserve_exact(
+        &self,
+        bytes: usize,
+    ) -> Result<Arc<dyn ExactHostAllocationReservation>, ExactHostNumericAllocationError> {
+        let count = self.reservations.fetch_add(1, Ordering::SeqCst);
+        if count >= self.max_reservations {
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        self.live.fetch_add(bytes, Ordering::SeqCst);
+        Ok(Arc::new(TraceClaim {
+            live: self.live.clone(),
+            bytes,
+        }))
+    }
+}
+
+#[test]
+fn admitted_value_trace_growth_failure_is_terminal_and_workspace_can_retrace() {
+    let (raw, handle) = test_handle();
+    let mut nested = Value::HandleObject(HandleRef {
+        class_name: ClassIdentity::from("DeniedTrace"),
+        target: handle,
+        valid: true,
+    });
+    for _ in 0..12 {
+        let mut structure = StructValue::new();
+        structure.insert("next", nested);
+        nested = Value::Struct(structure);
+    }
+    let live = Arc::new(AtomicUsize::new(0));
+    let permit = TracePermit {
+        live: live.clone(),
+        reservations: AtomicUsize::new(0),
+        max_reservations: 1,
+    };
+    let mut workspace = ValueTraceWorkspace::admitted(&permit);
+    let mut tracer = RecordingTracer(Vec::new());
+    assert_eq!(
+        workspace.try_trace(&nested, &mut tracer),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    );
+    assert!(tracer.0.is_empty());
+    let scalar = Value::Num(1.0);
+    workspace
+        .try_trace(&scalar, &mut tracer)
+        .expect("empty trace reuses cleared workspace");
+    drop(workspace);
+    assert_eq!(live.load(Ordering::SeqCst), 0);
+    drop(nested);
+    unsafe { drop(Box::from_raw(raw)) };
 }
 
 #[test]
@@ -73,10 +162,7 @@ fn value_tracing_includes_object_native_property_and_metadata_edges() {
     object.insert_dynamic_property("metadata".into(), definition);
     let mut tracer = RecordingTracer(Vec::new());
     Value::Object(object).trace(&mut tracer);
-    assert_eq!(tracer.0.len(), 3);
-    for expected in [native, property, metadata] {
-        assert!(tracer.0.contains(&expected));
-    }
+    assert_eq!(tracer.0, vec![native, property, metadata]);
     unsafe {
         drop(Box::from_raw(native_raw));
         drop(Box::from_raw(property_raw));
@@ -161,9 +247,7 @@ fn nested_closure_traces_each_live_ancestor_activation() {
     }));
     let mut tracer = RecordingTracer(Vec::new());
     closure.trace(&mut tracer);
-    assert_eq!(tracer.0.len(), 2);
-    assert!(tracer.0.contains(&parent_handle));
-    assert!(tracer.0.contains(&child_handle));
+    assert_eq!(tracer.0, vec![parent_handle, child_handle]);
     drop(closure);
     unsafe {
         drop(Box::from_raw(parent_raw));

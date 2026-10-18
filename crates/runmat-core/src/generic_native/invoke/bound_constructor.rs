@@ -1,13 +1,12 @@
 //! Exact selected constructor admission for a native invocation's bound call.
 
-use std::{collections::BTreeMap, rc::Rc, sync::Arc};
+use std::rc::Rc;
 
 use runmat_runtime::{
-    context::RuntimeContext,
-    execution::{RootedValueSequence, RootedValues},
-    user_functions, RuntimeError,
+    call::RootedFunctionArguments, context::RuntimeContext, execution::RootedValueSequence,
+    RuntimeError,
 };
-use runmat_types::{BindingId, ClassMethodOwner, ProgramFunctionId};
+use runmat_types::ClassMethodOwner;
 use runmat_value::{BoundFunctionBinding, LexicalEnvironment};
 
 use crate::ExecutableUnit;
@@ -20,9 +19,7 @@ pub(super) struct Invocation {
     pub registry: Rc<runmat_vm::FunctionRegistry>,
     pub unit: ExecutableUnit,
     pub executor: Rc<runmat_native_executor::NativeExecutor>,
-    pub capture_bindings: Arc<BTreeMap<ProgramFunctionId, Vec<BindingId>>>,
-    pub direct: Option<Rc<user_functions::FunctionInvoker>>,
-    pub arguments: RootedValues,
+    pub arguments: RootedFunctionArguments,
     pub requested_outputs: usize,
     pub lexical_environment: Option<LexicalEnvironment>,
     pub is_native: bool,
@@ -41,8 +38,6 @@ pub(super) async fn invoke(
         registry,
         unit,
         executor,
-        capture_bindings,
-        direct,
         arguments,
         requested_outputs,
         lexical_environment,
@@ -66,13 +61,12 @@ pub(super) async fn invoke(
             })?
             .invocation_runtime(runtime)?
     };
-    let policy_arguments = Rc::new(arguments);
-    let invoke_arguments = Rc::clone(&policy_arguments);
+    let argument_count = arguments.supplied_count();
     let invocation_owner = owner.clone();
     let function = runmat_hir::FunctionId(binding.function);
     let invoked_function = binding.function;
-    let invoke: runmat_runtime::dispatcher::PreparedConstructorInvoke =
-        Box::new(move |selected_runtime| {
+    let invoke: runmat_runtime::dispatcher::PreparedConstructorInvoke = Box::new(
+        move |selected_runtime| {
             Box::pin(async move {
                 let selected_runtime = selected_runtime
                     .with_constructor_receiver_for_method(Some(&invocation_owner))?;
@@ -83,73 +77,45 @@ pub(super) async fn invoke(
                     function,
                     &execution_sources,
                 )?;
-                if is_native && lexical_environment.is_some() {
+                if is_native {
                     let function = super::program_function(function)?;
                     let selected = selected_runtime.clone();
                     return selected
-                        .scope(super::native_semantic::invoke(
+                        .scope(super::native_semantic::invoke_rooted(
                             &unit,
-                            super::super::deopt::DeoptimizationRequest {
-                                executor,
+                            executor,
+                            super::native_semantic::RootedInvocation {
                                 function,
-                                captures: Vec::new(),
-                                lexical_environment,
-                                arguments: invoke_arguments.values().to_vec(),
+                                arguments,
                                 requested_outputs,
                                 runtime: selected_runtime,
+                                lexical_environment,
                                 dynamic_admission,
-                                osr: None,
-                                workspace: None,
                             },
-                            capture_bindings
-                                .get(&function)
-                                .map(Vec::as_slice)
-                                .unwrap_or(&[]),
                         ))
                         .await;
                 }
-                if let Some(direct) = direct.filter(|_| lexical_environment.is_none()) {
-                    return selected_runtime
-                        .scope(direct(
-                            Some(selected_runtime.clone()),
-                            invoked_function,
-                            invoke_arguments.values(),
-                            requested_outputs,
-                        ))
-                        .await;
-                }
-                if let Some(dynamic_admission) = dynamic_admission {
-                    runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
-                        invoked_function,
-                        invoke_arguments.values(),
-                        requested_outputs,
-                        &registry,
-                        selected_runtime,
-                        lexical_environment,
-                        dynamic_admission,
-                    )
-                    .await
-                } else {
-                    runmat_vm::invoke_semantic_function_value_with_environment_in_context(
-                        invoked_function,
-                        invoke_arguments.values(),
-                        requested_outputs,
-                        &registry,
-                        selected_runtime,
-                        lexical_environment,
-                    )
-                    .await
-                }
+                runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
+                    invoked_function,
+                    arguments,
+                    requested_outputs,
+                    &registry,
+                    selected_runtime,
+                    lexical_environment,
+                    dynamic_admission,
+                )
+                .await
             })
-        });
+        },
+    );
     if super_body {
         return invoke(runtime).await;
     }
-    runmat_runtime::dispatcher::call_prepared_constructor_sequence_in_context(
+    runmat_runtime::dispatcher::call_prepared_constructor_sequence_with_argument_count_in_context(
         &runtime,
         owner,
         binding,
-        policy_arguments.values(),
+        argument_count,
         requested_outputs,
         invoke,
     )

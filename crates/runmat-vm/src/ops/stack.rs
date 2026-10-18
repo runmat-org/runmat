@@ -2,9 +2,8 @@ use crate::bytecode::program::ExecutionContext;
 use crate::bytecode::EmitLabel;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::{pop2, pop_value};
-use crate::runtime::workspace::{
-    admit_workspace_slot_write, ensure_workspace_slot_name, workspace_slot_value,
-};
+use crate::interpreter::vars::InterpreterVars;
+use crate::runtime::workspace::{admit_declared_global_slot_write, workspace_slot_value};
 use runmat_runtime::RuntimeError;
 use runmat_value::{CharArray, Value};
 use std::collections::HashMap;
@@ -42,7 +41,7 @@ pub async fn emit_stack_top(
 
 pub async fn emit_var(
     runtime: &runmat_runtime::context::RuntimeContext,
-    vars: &[Value],
+    vars: &InterpreterVars,
     var_index: usize,
     label: &EmitLabel,
     var_names: &HashMap<usize, String>,
@@ -50,9 +49,10 @@ pub async fn emit_var(
     if matches!(label, EmitLabel::InternalCapture) {
         return Ok(());
     }
-    if let Some(value) = vars.get(var_index) {
+    let value = vars.get(var_index).map(|value| value.clone());
+    if let Some(value) = value {
         let label_text = resolve_emit_label_text(label, var_names);
-        runmat_runtime::console::emit_statement_value(runtime, label_text.as_deref(), value)
+        runmat_runtime::console::emit_statement_value(runtime, label_text.as_deref(), &value)
             .await?;
     }
     Ok(())
@@ -93,7 +93,7 @@ pub fn load_char_row(stack: &mut Vec<Value>, value: String) -> Result<(), Runtim
 pub fn load_local(
     stack: &mut Vec<Value>,
     context: &ExecutionContext,
-    vars: &[Value],
+    vars: &InterpreterVars,
     offset: usize,
 ) -> Result<(), RuntimeError> {
     if let Some(current_frame) = context.call_stack.last() {
@@ -103,7 +103,11 @@ pub fn load_local(
         }
         stack.push(context.locals[local_index].clone());
     } else if offset < vars.len() {
-        stack.push(vars[offset].clone());
+        stack.push(
+            vars.get(offset)
+                .expect("local fallback slot lies within frame extent")
+                .clone(),
+        );
     } else {
         stack.push(Value::Num(0.0));
     }
@@ -111,21 +115,25 @@ pub fn load_local(
 }
 
 #[inline]
-pub fn load_var(stack: &mut Vec<Value>, vars: &[Value], index: usize) {
-    stack.push(workspace_slot_value(index).unwrap_or_else(|| vars[index].clone()));
+pub fn load_var(stack: &mut Vec<Value>, vars: &InterpreterVars, index: usize) {
+    stack.push(workspace_slot_value(index).unwrap_or_else(|| {
+        vars.get(index)
+            .expect("loaded variable slot lies within frame extent")
+            .clone()
+    }));
 }
 
 pub fn store_var<BeforeOverwrite, AfterStore>(
     stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     index: usize,
     var_names: &HashMap<usize, String>,
     before_overwrite: BeforeOverwrite,
     after_store: AfterStore,
 ) -> Result<(), RuntimeError>
 where
-    BeforeOverwrite: FnMut(&Value, &Value),
-    AfterStore: FnMut(usize, &Value),
+    BeforeOverwrite: FnMut(usize),
+    AfterStore: FnMut(usize),
 {
     let value = pop_value(stack)?;
     store_var_value(value, vars, index, var_names, before_overwrite, after_store)
@@ -133,28 +141,26 @@ where
 
 pub fn store_var_value<BeforeOverwrite, AfterStore>(
     value: Value,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     index: usize,
     var_names: &HashMap<usize, String>,
     mut before_overwrite: BeforeOverwrite,
     mut after_store: AfterStore,
 ) -> Result<(), RuntimeError>
 where
-    BeforeOverwrite: FnMut(&Value, &Value),
-    AfterStore: FnMut(usize, &Value),
+    BeforeOverwrite: FnMut(usize),
+    AfterStore: FnMut(usize),
 {
     if index < vars.len() {
-        before_overwrite(&vars[index], &value);
+        before_overwrite(index);
     }
-    if index >= vars.len() {
-        vars.resize(index + 1, Value::Num(0.0));
-    }
-    if let Some(name) = var_names.get(&index) {
-        ensure_workspace_slot_name(index, name);
-    }
-    admit_workspace_slot_write(index, &value)?;
-    vars[index] = value;
-    after_store(index, &vars[index]);
+    crate::runtime::workspace::commit_workspace_slot_value(
+        vars,
+        index,
+        var_names.get(&index).map(String::as_str),
+        value,
+    )?;
+    after_store(index);
     Ok(())
 }
 
@@ -162,7 +168,7 @@ where
 pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterLocalStore, AfterFallbackStore>(
     stack: &mut Vec<Value>,
     context: &mut ExecutionContext,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     offset: usize,
     before_local_overwrite: BeforeLocalOverwrite,
     before_var_overwrite: BeforeVarOverwrite,
@@ -171,9 +177,9 @@ pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterLocalStore, Af
 ) -> Result<(), RuntimeError>
 where
     BeforeLocalOverwrite: FnMut(&Value, &Value),
-    BeforeVarOverwrite: FnMut(&Value, &Value),
+    BeforeVarOverwrite: FnMut(usize),
     AfterLocalStore: FnMut(usize, &Value),
-    AfterFallbackStore: FnMut(&str, usize, &Value),
+    AfterFallbackStore: FnMut(&str, usize),
 {
     let value = pop_value(stack)?;
     store_local_value(
@@ -210,7 +216,7 @@ pub fn store_local_value<
 >(
     value: Value,
     context: &mut ExecutionContext,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     offset: usize,
     mut hooks: StoreLocalHooks<
         BeforeLocalOverwrite,
@@ -221,12 +227,13 @@ pub fn store_local_value<
 ) -> Result<(), RuntimeError>
 where
     BeforeLocalOverwrite: FnMut(&Value, &Value),
-    BeforeVarOverwrite: FnMut(&Value, &Value),
+    BeforeVarOverwrite: FnMut(usize),
     AfterLocalStore: FnMut(usize, &Value),
-    AfterFallbackStore: FnMut(&str, usize, &Value),
+    AfterFallbackStore: FnMut(&str, usize),
 {
     if let Some(current_frame) = context.call_stack.last() {
         let local_index = current_frame.locals_start + offset;
+        admit_declared_global_slot_write(local_index, &value)?;
         while context.locals.len() <= local_index {
             context.locals.push(Value::Num(0.0));
         }
@@ -235,16 +242,16 @@ where
         (hooks.after_local_store)(local_index, &context.locals[local_index]);
     } else {
         if offset >= vars.len() {
-            vars.resize(offset + 1, Value::Num(0.0));
+            vars.resize_owned(offset + 1, Value::Num(0.0));
         }
-        (hooks.before_var_overwrite)(&vars[offset], &value);
-        vars[offset] = value;
+        (hooks.before_var_overwrite)(offset);
+        crate::runtime::workspace::commit_workspace_slot_value(vars, offset, None, value)?;
         let func_name = context
             .call_stack
             .last()
             .map(|f| f.function_name.as_str())
             .unwrap_or("<main>");
-        (hooks.after_fallback_store)(func_name, offset, &vars[offset]);
+        (hooks.after_fallback_store)(func_name, offset);
     }
     Ok(())
 }

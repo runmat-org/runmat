@@ -10,6 +10,14 @@ pub struct HostLogicalTensorView<'a> {
     pub data: &'a [u8],
     pub shape: &'a [usize],
 }
+
+/// An operation-owned, already admitted native conversion workspace. The
+/// provider fills this borrowed storage; no second logical payload or output
+/// ownership is inferred from its presence.
+pub enum HostLogicalUploadScratch<'a> {
+    F32(&'a mut [f32]),
+    F64(&'a mut [f64]),
+}
 impl HostLogicalTensorView<'_> {
     pub fn validate(&self) -> anyhow::Result<()> {
         let count = if self.shape.contains(&0) {
@@ -41,12 +49,28 @@ pub fn upload_logical_protecting<P: AccelProvider + ?Sized>(
     host: &HostLogicalTensorView<'_>,
     protected: &[&GpuTensorHandle],
 ) -> crate::NumericUploadResult<GpuTensorHandle> {
+    upload_logical_protecting_admitted(provider, host, protected, None, None)
+}
+
+/// The same logical classification and rejected-output owner with a
+/// request-local provider registration permit. Logical is not numeric U8.
+pub fn upload_logical_protecting_admitted<P: AccelProvider + ?Sized>(
+    provider: &P,
+    host: &HostLogicalTensorView<'_>,
+    protected: &[&GpuTensorHandle],
+    admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
+    scratch: Option<HostLogicalUploadScratch<'_>>,
+) -> crate::NumericUploadResult<GpuTensorHandle> {
     host.validate()?;
-    let _residency: Vec<_> = protected
+    let _first_residency = protected
+        .first()
+        .map(|handle| ResidencyRestoreGuard::new(handle));
+    let _remaining_residency: Vec<_> = protected
         .iter()
+        .skip(1)
         .map(|handle| ResidencyRestoreGuard::new(handle))
         .collect();
-    let handle = provider.upload_logical_raw(host)?;
+    let handle = provider.upload_logical_raw_admitted(host, admission, scratch)?;
     if handle.device_id() == provider.device_id()
         && handle.shape() == host.shape
         && handle.view().is_logical()

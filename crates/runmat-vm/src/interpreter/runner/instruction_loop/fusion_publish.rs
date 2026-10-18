@@ -2,11 +2,10 @@ use super::*;
 
 #[cfg(feature = "native-accel")]
 pub(super) struct FusionPublicationFrame<'a> {
-    pub vars: &'a mut Vec<Value>,
+    pub vars: &'a mut crate::interpreter::vars::InterpreterVars,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub var_names: &'a HashMap<usize, String>,
     pub completion_assigned_slots: &'a mut Option<HashSet<usize>>,
-    pub global_aliases: &'a runmat_runtime::workspace::bindings::FrameGlobalBindings,
     pub persistent_aliases: &'a crate::interpreter::PersistentAliases,
     pub current_function_name: &'a str,
     pub missing_input_slots: &'a mut HashSet<usize>,
@@ -22,7 +21,6 @@ pub(super) fn publish_fusion_stores(
         context,
         var_names,
         completion_assigned_slots,
-        global_aliases,
         persistent_aliases,
         current_function_name,
         missing_input_slots,
@@ -36,14 +34,9 @@ pub(super) fn publish_fusion_stores(
                     vars,
                     index,
                     var_names,
-                    |_current, _incoming| {},
-                    |stored_index, stored_value| {
-                        after_global_store(
-                            completion_assigned_slots,
-                            global_aliases,
-                            stored_index,
-                            stored_value,
-                        );
+                    |_stored_index| {},
+                    |stored_index| {
+                        after_global_store(completion_assigned_slots, stored_index);
                     },
                 )?;
                 missing_input_slots.remove(&index);
@@ -64,18 +57,9 @@ pub(super) fn publish_fusion_stores(
                         index,
                         crate::ops::stack::StoreLocalHooks {
                             before_local_overwrite: |_current: &Value, _incoming: &Value| {},
-                            before_var_overwrite: |_current: &Value, _incoming: &Value| {},
-                            after_local_store: |stored_offset: usize, stored_value: &Value| {
-                                after_local_store(global_aliases, stored_offset, stored_value);
-                            },
-                            after_fallback_store:
-                                |_func_name: &str, stored_offset: usize, stored_value: &Value| {
-                                    after_local_fallback_store(
-                                        global_aliases,
-                                        stored_offset,
-                                        stored_value,
-                                    );
-                                },
+                            before_var_overwrite: |_stored_index: usize| {},
+                            after_local_store: |_stored_offset: usize, _stored_value: &Value| {},
+                            after_fallback_store: |_func_name: &str, _stored_offset: usize| {},
                         },
                     )?;
                 } else {
@@ -84,10 +68,8 @@ pub(super) fn publish_fusion_stores(
                         vars,
                         index,
                         var_names,
-                        |_current, _incoming| {},
-                        |stored_index, stored_value| {
-                            after_local_fallback_store(global_aliases, stored_index, stored_value);
-                        },
+                        |_stored_index| {},
+                        |_stored_index| {},
                     )?;
                     missing_input_slots.remove(&index);
                     crate::interpreter::persistent::publish_store(
@@ -106,28 +88,9 @@ pub(super) fn publish_fusion_stores(
 
 pub(super) fn after_global_store(
     completion_assigned_slots: &mut Option<HashSet<usize>>,
-    global_aliases: &runmat_runtime::workspace::bindings::FrameGlobalBindings,
     stored_index: usize,
-    stored_value: &Value,
 ) {
     if let Some(assigned_slots) = completion_assigned_slots.as_mut() {
         assigned_slots.insert(stored_index);
     }
-    runtime_globals::update_global_store(stored_index, stored_value, global_aliases);
-}
-
-pub(super) fn after_local_store(
-    global_aliases: &runmat_runtime::workspace::bindings::FrameGlobalBindings,
-    stored_offset: usize,
-    stored_value: &Value,
-) {
-    runtime_globals::update_global_store(stored_offset, stored_value, global_aliases);
-}
-
-pub(super) fn after_local_fallback_store(
-    global_aliases: &runmat_runtime::workspace::bindings::FrameGlobalBindings,
-    stored_offset: usize,
-    stored_value: &Value,
-) {
-    after_local_store(global_aliases, stored_offset, stored_value);
 }

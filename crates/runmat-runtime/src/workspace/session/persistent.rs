@@ -43,6 +43,17 @@ impl SessionVariableAuthority {
         self.with_state_mut(|state| state.store_persistent_named(function, name, value))
     }
 
+    pub fn store_persistent_named_with_context(
+        &self,
+        context: &crate::context::RuntimeContext,
+        function: &str,
+        name: &str,
+        value: Value,
+    ) -> Result<(), crate::RuntimeError> {
+        self.validate_context(context)?;
+        self.store_persistent_named(function, name, value)
+    }
+
     pub fn store_persistent_named_and_slot(
         &self,
         function: &str,

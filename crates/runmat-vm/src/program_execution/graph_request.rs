@@ -76,7 +76,7 @@ async fn invoke_selected_nested_bound(
     selected: &SelectedWorkerGraph,
     caller_runtime: runmat_runtime::context::RuntimeContext,
     binding: runmat_value::BoundFunctionBinding,
-    arguments: RootedValues,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     lexical_environment: Option<runmat_value::LexicalEnvironment>,
 ) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
@@ -380,13 +380,25 @@ async fn invoke_selected_root(
     request: &GraphExecutionRequest,
     selected: &SelectedWorkerGraph,
     runtime: &runmat_runtime::context::RuntimeContext,
-    values: &RootedValues,
+    values: RootedValues,
 ) -> Result<RootedValueSequence, ProgramExecutionResponse> {
     match &request.roots {
         GraphInvocationRoots::Callable { target, .. } => {
-            invoke_bound_root(request, selected, values, *target)
-                .await
-                .map_err(|error| graph_runtime_failure_response(error, runtime, selected))
+            let invocation = match callable_argument_layout(request.schema_version) {
+                Some(CallableArgumentLayout::SuppliedOnly) => {
+                    invoke_bound_root_v12(request, selected, values, *target).await
+                }
+                Some(CallableArgumentLayout::LegacyFlattened) => {
+                    // Old BoundFunctionHandle targets can carry captures only
+                    // in their flattened argument prefix. Preserve that ABI.
+                    invoke_bound_root_legacy(request, selected, &values, *target).await
+                }
+                None => Err(runmat_runtime::runtime_error::semantic_error(
+                    "WorkerGraph",
+                    "graph callable argument schema is unsupported",
+                )),
+            };
+            invocation.map_err(|error| graph_runtime_failure_response(error, runtime, selected))
         }
         GraphInvocationRoots::Builtin { name, .. } => {
             if !runmat_builtins::builtin_name_is_known(&name.0) {
@@ -441,12 +453,136 @@ async fn invoke_selected_root(
     }
 }
 
-async fn invoke_bound_root(
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CallableArgumentLayout {
+    LegacyFlattened,
+    SuppliedOnly,
+}
+
+fn callable_argument_layout(version: u16) -> Option<CallableArgumentLayout> {
+    use runmat_execution::value::GraphRequiredSchema;
+
+    match GraphRequiredSchema::from_version(version)? {
+        GraphRequiredSchema::V10 | GraphRequiredSchema::SelectedValuesV11 => {
+            Some(CallableArgumentLayout::LegacyFlattened)
+        }
+        GraphRequiredSchema::CallableArgumentsV12 => Some(CallableArgumentLayout::SuppliedOnly),
+    }
+}
+
+async fn invoke_bound_root_legacy(
     request: &GraphExecutionRequest,
     selected: &SelectedWorkerGraph,
     values: &RootedValues,
     target: GraphNodeRef,
 ) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
+    let (binding, view, selected_runtime) = prepare_bound_root(request, selected, target)?;
+    let target_value = values.values().first().ok_or_else(|| {
+        runmat_runtime::runtime_error::semantic_error("WorkerGraph", "graph target root is absent")
+    })?;
+    let (mut arguments, environment) = match target_value {
+        Value::Closure(closure) if closure.binding.as_ref() == Some(&binding) => (
+            closure.captures.clone(),
+            closure.lexical_environment.clone(),
+        ),
+        Value::BoundFunctionHandle(handle)
+            if handle.function == binding.function && handle.authority == binding.authority =>
+        {
+            (Vec::new(), None)
+        }
+        _ => {
+            return Err(runmat_runtime::runtime_error::semantic_error(
+                "WorkerGraph",
+                "reconstructed target differs from selected bound callable",
+            ))
+        }
+    };
+    arguments.extend(values.values()[1..].iter().cloned());
+    crate::invoke_semantic_function_value_with_environment_in_context(
+        binding.function,
+        &arguments,
+        usize::from(request.requested_outputs),
+        &view,
+        selected_runtime,
+        environment,
+    )
+    .await
+}
+
+async fn invoke_bound_root_v12(
+    request: &GraphExecutionRequest,
+    selected: &SelectedWorkerGraph,
+    values: RootedValues,
+    target: GraphNodeRef,
+) -> Result<RootedValueSequence, runmat_runtime::RuntimeError> {
+    let (binding, view, selected_runtime) = prepare_bound_root(request, selected, target)?;
+    values
+        .with_owned_values_async(move |mut owned| async move {
+            if owned.is_empty() {
+                return Err(runmat_runtime::runtime_error::semantic_error(
+                    "WorkerGraph",
+                    "graph target root is absent",
+                ));
+            }
+            let target_value = owned.remove(0);
+            let (arguments, environment) = match target_value {
+                Value::Closure(closure) if closure.binding.as_ref() == Some(&binding) => {
+                    let environment = closure.lexical_environment.clone();
+                    let callable =
+                        runmat_runtime::execution::RetainedValueReadLease::prepare_owned(
+                            Value::Closure(closure),
+                            &selected_runtime,
+                        )?;
+                    let supplied = RootedValues::in_context(owned, &selected_runtime)?;
+                    (
+                        runmat_runtime::call::RootedFunctionArguments::captured(
+                            callable, supplied,
+                        )?,
+                        environment,
+                    )
+                }
+                Value::BoundFunctionHandle(handle)
+                    if handle.function == binding.function
+                        && handle.authority == binding.authority =>
+                {
+                    let supplied = RootedValues::in_context(owned, &selected_runtime)?;
+                    (
+                        runmat_runtime::call::RootedFunctionArguments::ordinary(supplied),
+                        None,
+                    )
+                }
+                _ => {
+                    return Err(runmat_runtime::runtime_error::semantic_error(
+                        "WorkerGraph",
+                        "reconstructed target differs from selected bound callable",
+                    ))
+                }
+            };
+            crate::interpreter::runner::invoke_selected_graph_bound_in_context(
+                selected_runtime,
+                binding,
+                arguments,
+                usize::from(request.requested_outputs),
+                view,
+                environment,
+            )
+            .await
+        })
+        .await
+}
+
+fn prepare_bound_root(
+    request: &GraphExecutionRequest,
+    selected: &SelectedWorkerGraph,
+    target: GraphNodeRef,
+) -> Result<
+    (
+        runmat_value::BoundFunctionBinding,
+        crate::FunctionRegistry,
+        runmat_runtime::context::RuntimeContext,
+    ),
+    runmat_runtime::RuntimeError,
+> {
     let Some(GraphNode::Callable(node)) = request.graph.nodes.get(target.0 as usize) else {
         return Err(runmat_runtime::runtime_error::semantic_error(
             "WorkerGraph",
@@ -468,27 +604,6 @@ async fn invoke_bound_root(
             "graph target definition is absent",
         )
     })?;
-    let target_value = values.values().first().ok_or_else(|| {
-        runmat_runtime::runtime_error::semantic_error("WorkerGraph", "graph target root is absent")
-    })?;
-    let (mut arguments, environment) = match target_value {
-        Value::Closure(closure) if closure.binding.as_ref() == Some(binding) => (
-            closure.captures.clone(),
-            closure.lexical_environment.clone(),
-        ),
-        Value::BoundFunctionHandle(handle)
-            if handle.function == binding.function && handle.authority == binding.authority =>
-        {
-            (Vec::new(), None)
-        }
-        _ => {
-            return Err(runmat_runtime::runtime_error::semantic_error(
-                "WorkerGraph",
-                "reconstructed target differs from selected bound callable",
-            ))
-        }
-    };
-    arguments.extend(values.values()[1..].iter().cloned());
     let mut view = unit
         .registry()
         .owned_view(runmat_hir::FunctionId(binding.function), &binding.authority)
@@ -536,13 +651,5 @@ async fn invoke_bound_root(
             runmat_runtime::runtime_error::semantic_error("WorkerGraph", message)
         })?
     };
-    crate::invoke_semantic_function_value_with_environment_in_context(
-        binding.function,
-        &arguments,
-        usize::from(request.requested_outputs),
-        &view,
-        selected_runtime,
-        environment,
-    )
-    .await
+    Ok((binding.clone(), view, selected_runtime))
 }

@@ -4,7 +4,11 @@
 use super::*;
 use crate::bytecode::{ImageCheckpoint, ImageLiveOutSource, ImageStoreDestination};
 use runmat_accelerate::fusion::FusionStoreMaterialization;
-use runmat_accelerate::fusion_exec::{ImageVmPreparation, ImageVmSelectedRoute, ImageVmStages};
+#[cfg(feature = "wgpu")]
+use runmat_accelerate::fusion_exec::ImageVmSelectedRoute;
+#[cfg(not(feature = "wgpu"))]
+use runmat_accelerate::fusion_exec::ImageVmSourceFallbackRoute;
+use runmat_accelerate::fusion_exec::{ImageVmPreparation, ImageVmStages};
 use runmat_accelerate::graph::ValueOrigin;
 
 pub(super) enum ImageStageOutcome {
@@ -18,17 +22,36 @@ pub(super) enum ImageStageOutcome {
         publication: std::rc::Rc<crate::bytecode::ImageNormalizePublicationJoin>,
         route: Box<runmat_accelerate::fusion_exec::ImageVmOriginalRoute>,
     },
+    // Feature-unified accelerate may select the original route even when this
+    // VM build has no WGPU audit slot. Execute source bytecode once and withhold
+    // optional provider feedback in that configuration.
+    #[cfg(not(feature = "wgpu"))]
+    OriginalSource {
+        span: runmat_accelerate::InstrSpan,
+    },
 }
 
 pub(super) struct ImageStageFrame<'a> {
-    pub vars: &'a mut Vec<Value>,
+    pub vars: &'a mut crate::interpreter::vars::InterpreterVars,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub var_names: &'a HashMap<usize, String>,
     pub completion_assigned_slots: &'a mut Option<HashSet<usize>>,
-    pub global_aliases: &'a runmat_runtime::workspace::bindings::FrameGlobalBindings,
     pub persistent_aliases: &'a crate::interpreter::PersistentAliases,
     pub current_function_name: &'a str,
     pub missing_input_slots: &'a mut HashSet<usize>,
+}
+
+pub(super) struct SelectedImageStage<'a> {
+    selected: crate::bytecode::program::VmImageSelected<'a>,
+    captured: crate::bytecode::CapturedImageInputs,
+    frame: ImageStageFrame<'a>,
+    started: runmat_time::Instant,
+}
+
+impl SelectedImageStage<'_> {
+    pub(super) fn runtime(&self) -> &runmat_runtime::context::RuntimeContext {
+        &self.frame.context.runtime
+    }
 }
 
 fn selected_stage_pc(
@@ -61,7 +84,6 @@ fn publish(
             context: &mut *frame.context,
             var_names: frame.var_names,
             completion_assigned_slots: &mut *frame.completion_assigned_slots,
-            global_aliases: frame.global_aliases,
             persistent_aliases: frame.persistent_aliases,
             current_function_name: frame.current_function_name,
             missing_input_slots: &mut *frame.missing_input_slots,
@@ -69,13 +91,16 @@ fn publish(
     )
 }
 
-pub(super) async fn execute(
-    installation: &crate::bytecode::program::VmImagePlanInstallation,
+/// Select and capture one image region without constructing its provider
+/// continuation. Ordinary PCs and rejected captures stay on the allocation-
+/// free instruction path; only `Selected` crosses the admitted heap boundary.
+pub(super) fn prepare<'a>(
+    installation: &'a crate::bytecode::program::VmImagePlanInstallation,
     pc: usize,
-    mut frame: ImageStageFrame<'_>,
-) -> Result<ImageStageOutcome, RuntimeError> {
+    frame: ImageStageFrame<'a>,
+) -> Result<Option<SelectedImageStage<'a>>, RuntimeError> {
     let Some(selected) = installation.region_starting_at(pc, &frame.context.runtime) else {
-        return Ok(ImageStageOutcome::Declined);
+        return Ok(None);
     };
     let outer_started = runmat_time::Instant::now();
     let join = &selected.region.publication;
@@ -88,14 +113,14 @@ pub(super) async fn execute(
             .is_none_or(|entry| matches!(entry.destination, ImageStoreDestination::Intermediate)),
     }) {
         log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: live-out source");
-        return Ok(ImageStageOutcome::Declined);
+        return Ok(None);
     }
     if join.ordered_stores().iter().any(|entry| {
         matches!(entry.destination, ImageStoreDestination::Checkpoint(_))
             && selected_stage_pc(selected.graph, entry).is_none()
     }) {
         log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: stage PC");
-        return Ok(ImageStageOutcome::Declined);
+        return Ok(None);
     }
     let Some(captured) = installation
         .capture_inputs(
@@ -111,8 +136,26 @@ pub(super) async fn execute(
         })?
     else {
         log::debug!(target: "runmat_vm::accel::fusion::image_stages", "selected image declined: input capture");
-        return Ok(ImageStageOutcome::Declined);
+        return Ok(None);
     };
+    Ok(Some(SelectedImageStage {
+        selected,
+        captured,
+        frame,
+        started: outer_started,
+    }))
+}
+
+pub(super) async fn execute_selected(
+    selected: SelectedImageStage<'_>,
+) -> Result<ImageStageOutcome, RuntimeError> {
+    let SelectedImageStage {
+        selected,
+        captured,
+        mut frame,
+        started: outer_started,
+    } = selected;
+    let join = &selected.region.publication;
     let prepared = ImageVmStages::prepare(ImageVmPreparation {
         graph: selected.graph,
         plan: &selected.region.plan,
@@ -129,6 +172,7 @@ pub(super) async fn execute(
     // The selected continuation retains its own authenticated preparation;
     // release VM input clones and their reservation before stage execution.
     drop(captured);
+    #[cfg(feature = "wgpu")]
     let mut stage = match prepared {
         Ok(ImageVmSelectedRoute::Provider(stage)) => stage,
         #[cfg(feature = "wgpu")]
@@ -148,6 +192,23 @@ pub(super) async fn execute(
             return Ok(ImageStageOutcome::Declined);
         }
         Err(error) => return Err(accel_fusion::fusion_execution_error(error)),
+    };
+    #[cfg(not(feature = "wgpu"))]
+    let mut stage = {
+        let route = match prepared {
+            Ok(route) => route,
+            Err(error) if error.is_unsupported() => return Ok(ImageStageOutcome::Declined),
+            Err(error) => return Err(accel_fusion::fusion_execution_error(error)),
+        };
+        match route.into_source_fallback_route() {
+            ImageVmSourceFallbackRoute::Provider(stage) => stage,
+            ImageVmSourceFallbackRoute::Declined => return Ok(ImageStageOutcome::Declined),
+            ImageVmSourceFallbackRoute::OriginalSource => {
+                return Ok(ImageStageOutcome::OriginalSource {
+                    span: selected.region.plan.group.span.clone(),
+                });
+            }
+        }
     };
     let checkpoint = |role| {
         join.ordered_stores()

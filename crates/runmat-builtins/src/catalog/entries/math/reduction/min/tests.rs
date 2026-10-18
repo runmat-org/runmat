@@ -40,6 +40,31 @@ fn call(input: ValueFact, controls: Vec<LiteralValue>, outputs: usize) -> CallIn
 }
 
 #[test]
+fn literal_zero_is_pairwise_operand_but_not_reduction_axis() {
+    let shape = ShapeFact::from(vec![Some(2), Some(3)]);
+    let pairwise = call(
+        numeric(NumericClass::Double, shape.clone()),
+        vec![LiteralValue::Number(0.0)],
+        1,
+    );
+    assert_eq!(pairwise.outputs[0].shape, shape);
+    assert!(!pairwise
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-REDUCTION-DIMENSION"));
+
+    let invalid = call(
+        numeric(NumericClass::Double, shape),
+        vec![LiteralValue::Empty, LiteralValue::Number(0.0)],
+        1,
+    );
+    assert!(invalid
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "RM-TYPE-REDUCTION-DIMENSION"));
+}
+
+#[test]
 fn descriptor_preserves_reduction_pairwise_output_and_error_contracts() {
     let labels: Vec<_> = MIN_DESCRIPTOR
         .signatures

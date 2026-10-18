@@ -53,7 +53,16 @@ impl RecordTable {
     }
 
     pub(super) fn remove(&mut self, id: &u64) -> Option<Record> {
-        self.managed.remove(id).or_else(|| self.ordinary.remove(id))
+        let mut record = self
+            .managed
+            .remove(id)
+            .or_else(|| self.ordinary.remove(id))?;
+        // Return reserved capacity while removal is still under the table
+        // lock. A later admission cannot take an uncounted retirement gap.
+        if let Some(mut slot) = record.registration_slot.take() {
+            slot.release();
+        }
+        Some(record)
     }
 
     pub(super) fn insert(&mut self, id: u64, record: Record) -> Option<Record> {

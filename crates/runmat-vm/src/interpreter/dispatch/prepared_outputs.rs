@@ -1,3 +1,4 @@
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::object::indexing::ObjectIndexComponent;
 use runmat_runtime::sequence::{AssignmentStepSpec, SequenceEndpointSpec};
 use runmat_runtime::RuntimeError;
@@ -19,11 +20,11 @@ pub(super) struct PreparedOutputContext<'a> {
 pub(super) async fn dispatch(
     instruction: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     state: &mut SequenceState,
     context: PreparedOutputContext<'_>,
-    before_overwrite: &mut dyn FnMut(&Value, &Value),
-    after_store: &mut dyn FnMut(usize, &Value),
+    before_overwrite: &mut dyn FnMut(usize),
+    after_store: &mut dyn FnMut(usize),
 ) -> Result<bool, RuntimeError> {
     if legacy::dispatch(instruction, stack, vars, state).await? {
         return Ok(true);
@@ -57,7 +58,7 @@ pub(super) async fn dispatch(
                     Some(Box::new(seed.clone())),
                     *root_creation,
                 )?,
-                None => state.begin_destination(*root_slot, original, None, *root_creation)?,
+                None => state.begin_destination(*root_slot, &original, None, *root_creation)?,
             }
         }
         Instr::PrepareMemberPathStep(member) => {

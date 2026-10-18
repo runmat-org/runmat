@@ -1,15 +1,11 @@
 use runmat_mir::{MirIndexComponent, MirIndexing, MirOperand};
+use runmat_runtime::context::host_allocation::{
+    host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
+};
 use runmat_runtime::execution::{RootedValueLease, RootedValues};
-use runmat_runtime::indexing::plan::{
-    build_index_plan, build_indexed_store_plan, IndexPlan, IndexedStorePlanMode,
-};
+use runmat_runtime::indexing::plan::IndexPlan;
 use runmat_runtime::indexing::read_slice;
-use runmat_runtime::indexing::selectors::{build_slice_selectors, index_scalar_from_value};
-use runmat_runtime::indexing::value as index_value;
-use runmat_runtime::indexing::write_slice;
-use runmat_runtime::object::dispatch::{
-    invoke_resolved_object_index_path_method_in_context, resolve_object_index_protocol,
-};
+use runmat_runtime::object::dispatch::resolve_object_index_protocol;
 use runmat_runtime::object::indexing::{
     ObjectIndexComponent, ObjectIndexOp, ObjectIndexSelector, ObjectSubscript, ObjectSubscriptPath,
 };
@@ -19,8 +15,76 @@ use runmat_value::{LogicalArray, SymbolicArray, Value};
 
 use crate::{NativeExecutorError, NativeExecutorResult};
 
-use super::operand::materialize_operand;
+use super::operand::{materialize_operand, materialize_retained_operand};
 use super::state::HostState;
+
+mod assignment_operation;
+mod read_operation;
+
+/// A direct host completion allocates selector and result backing on the
+/// generated-code stack. Managed execution must use the admitted resumable
+/// operation owner instead; this policy probe grants no allocation itself.
+fn direct_host_indexing_allowed(state: &HostState) -> NativeExecutorResult<bool> {
+    HostAllocationReceipt::policy(Some(&state.runtime))
+        .map(|policy| policy == HostAllocationPolicy::Unbounded)
+        .map_err(|source| {
+            NativeExecutorError::from(host_allocation_runtime_error(
+                Some(&state.runtime),
+                "RunMat:Indexing:HostAllocation",
+                "host indexing policy inspection failed",
+                source,
+            ))
+        })
+}
+
+enum IndexedReadOutcome {
+    Ordinary(Vec<Value>),
+    Host(runmat_runtime::execution::RootedValues),
+}
+
+impl IndexedReadOutcome {
+    fn values(&self) -> &[Value] {
+        match self {
+            Self::Ordinary(values) => values,
+            Self::Host(values) => values.values(),
+        }
+    }
+
+    fn into_values(self) -> Vec<Value> {
+        match self {
+            Self::Ordinary(values) => values,
+            Self::Host(values) => values.with_owned_values(|values| values),
+        }
+    }
+}
+
+enum IndexedAssignmentOutcome {
+    Ordinary(Value),
+    Host(runmat_runtime::execution::RootedValues),
+}
+
+impl IndexedAssignmentOutcome {
+    fn values(&self) -> &[Value] {
+        match self {
+            Self::Ordinary(value) => std::slice::from_ref(value),
+            Self::Host(values) => values.values(),
+        }
+    }
+
+    fn into_value(self) -> NativeExecutorResult<Value> {
+        match self {
+            Self::Ordinary(value) => Ok(value),
+            Self::Host(values) => values.with_owned_values(|mut values| {
+                if values.len() != 1 {
+                    return Err(NativeExecutorError::Host(
+                        "host indexed assignment did not produce one receiver".into(),
+                    ));
+                }
+                Ok(values.remove(0))
+            }),
+        }
+    }
+}
 
 fn object_selector(selectors: &MaterializedSelectors) -> NativeExecutorResult<ObjectIndexSelector> {
     if selectors.end_mask != 0 {
@@ -55,17 +119,22 @@ pub(super) fn read(
     indexing: &MirIndexing,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
+    if let Some(values) = super::call_suspension::take_completed_semantic_operation(
+        state,
+        embedded.as_ref(),
+        super::call_suspension::SemanticOperationKind::IndexedRead,
+    )? {
+        return super::call_suspension::settle_completed_semantic_values(
+            state,
+            embedded.as_ref(),
+            values,
+        );
+    }
     let result = read_inner(state, base, indexing, requested_outputs, embedded.as_ref());
-    if let Ok(outputs) = &result {
-        state.cache_embedded_call(embedded.as_ref(), outputs);
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(outputs), Ok(())) => Ok(outputs),
-    }
+    state
+        .settle_embedded_result(embedded.as_ref(), result, IndexedReadOutcome::values)
+        .map(IndexedReadOutcome::into_values)
 }
 
 fn read_inner(
@@ -74,11 +143,15 @@ fn read_inner(
     indexing: &MirIndexing,
     requested_outputs: usize,
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<IndexedReadOutcome> {
     if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
-        return Ok(outputs);
+        return Ok(IndexedReadOutcome::Ordinary(outputs));
     }
-    let base = materialize_operand(state, base)?;
+    let base = if indexing_requires_retention(indexing) {
+        materialize_retained_operand(state, base)?.1
+    } else {
+        materialize_operand(state, base)?
+    };
     read_value_inner(state, base, indexing, requested_outputs, embedded)
 }
 
@@ -88,7 +161,18 @@ pub(super) fn read_value(
     indexing: &MirIndexing,
     requested_outputs: usize,
 ) -> NativeExecutorResult<Vec<Value>> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
+    if let Some(values) = super::call_suspension::take_completed_semantic_operation(
+        state,
+        embedded.as_ref(),
+        super::call_suspension::SemanticOperationKind::IndexedRead,
+    )? {
+        return super::call_suspension::settle_completed_semantic_values(
+            state,
+            embedded.as_ref(),
+            values,
+        );
+    }
     let result = read_value_inner_with_completion(
         state,
         base,
@@ -96,15 +180,9 @@ pub(super) fn read_value(
         requested_outputs,
         embedded.as_ref(),
     );
-    if let Ok(outputs) = &result {
-        state.cache_embedded_call(embedded.as_ref(), outputs);
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(outputs), Ok(())) => Ok(outputs),
-    }
+    state
+        .settle_embedded_result(embedded.as_ref(), result, IndexedReadOutcome::values)
+        .map(IndexedReadOutcome::into_values)
 }
 
 fn read_value_inner_with_completion(
@@ -113,9 +191,9 @@ fn read_value_inner_with_completion(
     indexing: &MirIndexing,
     requested_outputs: usize,
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
-) -> NativeExecutorResult<Vec<Value>> {
+) -> NativeExecutorResult<IndexedReadOutcome> {
     if let Some(outputs) = super::call_suspension::take_completed(state, embedded)? {
-        return Ok(outputs);
+        return Ok(IndexedReadOutcome::Ordinary(outputs));
     }
     read_value_inner(state, base, indexing, requested_outputs, embedded)
 }
@@ -126,11 +204,19 @@ fn read_value_inner(
     indexing: &MirIndexing,
     requested_outputs: usize,
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
-) -> NativeExecutorResult<Vec<Value>> {
-    let selectors = materialize_selectors(state, &base, indexing)?;
+) -> NativeExecutorResult<IndexedReadOutcome> {
+    // Owned-base reads are called only by mutation continuation `read_step`.
+    // Its PendingPlacePrepare owns and roots the original arena reference
+    // before selector preparation can suspend, so retaining another Value
+    // here would add a non-canonical clone without strengthening identity.
+    let retains_inputs = indexing_requires_retention(indexing);
+    let selectors = materialize_selectors(state, &base, indexing, retains_inputs)?;
     match indexing.kind {
-        IndexKind::Paren => read_paren(state, base, selectors, requested_outputs, embedded),
-        IndexKind::Brace => read_brace(base, selectors, indexing, requested_outputs),
+        IndexKind::Paren => {
+            read_operation::read_paren(state, base, selectors, requested_outputs, embedded)
+        }
+        IndexKind::Brace => read_brace(base, selectors, indexing, requested_outputs)
+            .map(IndexedReadOutcome::Ordinary),
     }
 }
 
@@ -141,18 +227,29 @@ pub(super) fn assign(
     rhs: Value,
     delete: bool,
 ) -> NativeExecutorResult<Value> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
+    if let Some(values) = super::call_suspension::take_completed_semantic_operation(
+        state,
+        embedded.as_ref(),
+        super::call_suspension::SemanticOperationKind::IndexedAssignment,
+    )? {
+        let mut values = super::call_suspension::settle_completed_semantic_values(
+            state,
+            embedded.as_ref(),
+            values,
+        )?;
+        if values.len() != 1 {
+            return Err(NativeExecutorError::Host(
+                "completed indexed assignment did not produce one receiver".into(),
+            ));
+        }
+        return Ok(values.remove(0));
+    }
     let result =
         assign_inner_with_completion(state, base, indexing, rhs, delete, embedded.as_ref());
-    if let Ok(value) = &result {
-        state.cache_embedded_call(embedded.as_ref(), std::slice::from_ref(value));
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(value), Ok(())) => Ok(value),
-    }
+    state
+        .settle_embedded_result(embedded.as_ref(), result, IndexedAssignmentOutcome::values)
+        .and_then(IndexedAssignmentOutcome::into_value)
 }
 
 fn assign_inner_with_completion(
@@ -162,18 +259,22 @@ fn assign_inner_with_completion(
     rhs: Value,
     delete: bool,
     embedded: Option<&super::state::EmbeddedOperationIdentity>,
-) -> NativeExecutorResult<Value> {
+) -> NativeExecutorResult<IndexedAssignmentOutcome> {
     if let Some(mut values) = super::call_suspension::take_completed(state, embedded)? {
         if values.len() != 1 {
             return Err(NativeExecutorError::Host(
                 "completed object assignment did not produce one receiver".into(),
             ));
         }
-        return Ok(values.remove(0));
+        return Ok(IndexedAssignmentOutcome::Ordinary(values.remove(0)));
     }
-    let selectors = materialize_selectors(state, &base, indexing)?;
+    // PendingAssign owns and roots both the receiver and RHS before write_step
+    // reaches selector preparation; a suspended selector resumes from those
+    // exact references rather than rereading either source binding.
+    let retains_inputs = indexing_requires_retention(indexing);
+    let selectors = materialize_selectors(state, &base, indexing, retains_inputs)?;
     if indexing.kind == IndexKind::Brace {
-        return assign_brace(base, selectors, rhs, delete);
+        return assign_brace(base, selectors, rhs, delete).map(IndexedAssignmentOutcome::Ordinary);
     }
     if matches!(
         base,
@@ -213,157 +314,53 @@ fn assign_inner_with_completion(
                     "object assignment did not produce one receiver".into(),
                 ));
             }
-            return Ok(outputs.remove(0));
-        }
-        if let Some(indices) = object_scalar_indices(state, &selectors)? {
-            return runmat_runtime::indexing::object::assign_scalar_indices(
-                base, &indices, rhs, delete,
-            )
-            .map_err(NativeExecutorError::from);
+            return Ok(IndexedAssignmentOutcome::Ordinary(outputs.remove(0)));
         }
     }
-    let plan = super::sync::complete(
-        &state.runtime,
-        plan_for_assignment(&base, &selectors, !delete),
-        "indexed assignment planning",
+    let direct_host = assignment_operation::host_assignment_eligible(&base, &rhs)
+        && direct_host_indexing_allowed(state)?;
+    let roots = RootedValueLease::for_values(
+        std::iter::once(&base)
+            .chain(selectors.numeric.iter())
+            .chain(std::iter::once(&rhs)),
     )
-    .finish(state)?;
-    let updated = match base {
-        value @ (Value::Num(_) | Value::Int(_)) => {
-            if delete {
-                let tensor =
-                    index_value::numeric_scalar_tensor(value).map_err(NativeExecutorError::from)?;
-                write_slice::delete_tensor_with_plan(tensor, &plan, &rhs)
-                    .map_err(NativeExecutorError::from)
-            } else {
-                super::sync::complete(
-                    &state.runtime,
-                    index_value::assign_with_plan(value, &plan, rhs),
-                    "scalar numeric indexed assignment",
-                )
-                .finish(state)
-            }
+    .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
+    if direct_host {
+        if let Some(plan) =
+            assignment_operation::plan_for_assignment_host(&base, &selectors, !delete)?
+        {
+            let updated = assignment_operation::assign_host_with_plan(base, &plan, rhs, delete)?;
+            let rooted = RootedValues::in_context(vec![updated], &state.runtime)
+                .map_err(NativeExecutorError::from)?;
+            drop(roots);
+            return Ok(IndexedAssignmentOutcome::Host(rooted));
         }
-        Value::Tensor(value) => {
-            if delete {
-                write_slice::delete_tensor_with_plan(value, &plan, &rhs)
-                    .map_err(NativeExecutorError::from)
-            } else {
-                super::sync::complete(
-                    &state.runtime,
-                    write_slice::assign_tensor_with_plan(value, &plan, &rhs),
-                    "tensor indexed assignment",
-                )
-                .finish(state)
-            }
-        }
-        Value::ComplexTensor(value) => {
-            if delete {
-                write_slice::delete_complex_with_plan(value, &plan, &rhs)
-                    .map_err(NativeExecutorError::from)
-            } else {
-                super::sync::complete(
-                    &state.runtime,
-                    write_slice::assign_complex_with_plan(value, &plan, &rhs),
-                    "complex indexed assignment",
-                )
-                .finish(state)
-            }
-        }
-        Value::SparseTensor(value) => {
-            if delete {
-                write_slice::delete_sparse_with_plan(value, &plan, &rhs)
-                    .map_err(NativeExecutorError::from)
-            } else {
-                super::sync::complete(
-                    &state.runtime,
-                    write_slice::assign_sparse_with_plan(value, &plan, &rhs),
-                    "sparse indexed assignment",
-                )
-                .finish(state)
-            }
-        }
-        Value::GpuTensor(value) => {
-            if delete {
-                super::sync::complete(
-                    &state.runtime,
-                    write_slice::delete_gpu_slice_with_plan(&value, &plan, &rhs),
-                    "GPU indexed deletion",
-                )
-                .finish(state)
-            } else {
-                super::sync::complete(
-                    &state.runtime,
-                    write_slice::assign_gpu_slice_with_plan(&value, &plan, &rhs),
-                    "GPU indexed assignment",
-                )
-                .finish(state)
-            }
-        }
-        Value::Cell(value) => {
-            let indices = plan
-                .indices
-                .iter()
-                .map(|index| *index as usize + 1)
-                .collect::<Vec<_>>();
-            runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
-                value, &indices, &rhs, delete,
-            )
-            .map_err(NativeExecutorError::from)
-        }
-        value @ (Value::Struct(_) | Value::StructArray(_)) => {
-            runmat_runtime::indexing::structure::assign_with_plan(value, &plan, rhs, delete)
-                .map_err(NativeExecutorError::from)
-        }
-        value @ (Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)) => {
-            runmat_runtime::indexing::object::assign_with_plan(value, &plan, rhs, delete)
-                .map_err(NativeExecutorError::from)
-        }
-        Value::StringArray(mut value) if !delete => {
-            if !plan.indices.is_empty() {
-                let rhs = write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
-                    .map_err(NativeExecutorError::from)?;
-                write_slice::scatter_string_with_plan(&mut value, &plan, &rhs)
-                    .map_err(NativeExecutorError::from)?;
-            }
-            Ok(Value::StringArray(value))
-        }
-        Value::LogicalArray(value) => assign_logical(state, value, &plan, &rhs, delete),
-        _ => Err(NativeExecutorError::from(semantic_error(
-            "SliceNonTensor",
-            "Indexed assignment is unsupported for this value",
-        ))),
-    }?;
-    Ok(updated)
-}
-
-fn object_scalar_indices(
-    state: &mut HostState,
-    selectors: &MaterializedSelectors,
-) -> NativeExecutorResult<Option<Vec<usize>>> {
-    if selectors.colon_mask != 0 || selectors.end_mask != 0 {
-        return Ok(None);
     }
-    let mut indices = Vec::with_capacity(selectors.positional.len());
-    for selector in &selectors.positional {
-        let Some(index) = super::sync::complete(
-            &state.runtime,
-            index_scalar_from_value(selector),
-            "object scalar index decoding",
-        )
-        .finish(state)?
-        else {
-            return Ok(None);
-        };
-        let index = index.positive_usize().ok_or_else(|| {
-            NativeExecutorError::from(semantic_error(
-                "IndexOutOfBounds",
-                "Object array index is out of bounds",
+    let runtime = state.runtime.clone();
+    let future = async move {
+        let _roots = roots;
+        let updated = runtime
+            .scope(assignment_operation::assign_paren_owned(
+                base, selectors, rhs, delete,
             ))
-        })?;
-        indices.push(index);
-    }
-    Ok(Some(indices))
+            .await?;
+        RootedValues::in_context(vec![updated], &runtime).map_err(NativeExecutorError::from)
+    };
+    let values = super::call_suspension::begin_semantic_operation(
+        state,
+        embedded.cloned(),
+        super::call_suspension::SemanticOperationKind::IndexedAssignment,
+        Vec::new(),
+        future,
+    )?;
+    values.with_owned_values(|mut values| {
+        if values.len() != 1 {
+            return Err(NativeExecutorError::Host(
+                "indexed assignment did not produce one receiver".into(),
+            ));
+        }
+        Ok(IndexedAssignmentOutcome::Ordinary(values.remove(0)))
+    })
 }
 
 struct MaterializedSelectors {
@@ -378,6 +375,7 @@ fn materialize_selectors(
     state: &mut HostState,
     base: &Value,
     indexing: &MirIndexing,
+    retains_inputs: bool,
 ) -> NativeExecutorResult<MaterializedSelectors> {
     if indexing.components.len() > u32::BITS as usize {
         return Err(NativeExecutorError::Host(
@@ -397,7 +395,16 @@ fn materialize_selectors(
                 positional.push(Value::String(":".into()));
             }
             MirIndexComponent::Expr(operand) => {
-                let value = materialize_operand(state, operand)?;
+                let value = if retains_inputs {
+                    materialize_retained_operand(state, operand)?.1
+                } else {
+                    materialize_operand(state, operand)?
+                };
+                numeric.push(value.clone());
+                positional.push(value);
+            }
+            MirIndexComponent::PreparedExpr(region) => {
+                let value = materialize_prepared_expression_region(state, region)?;
                 numeric.push(value.clone());
                 positional.push(value);
             }
@@ -418,12 +425,22 @@ fn materialize_selectors(
     })
 }
 
+pub(super) fn indexing_requires_retention(indexing: &MirIndexing) -> bool {
+    indexing.components.iter().any(|component| {
+        matches!(
+            component,
+            MirIndexComponent::ContextualExpr(_) | MirIndexComponent::PreparedExpr(_)
+        )
+    })
+}
+
 pub(super) fn materialize_index_components(
     state: &mut HostState,
     base: &Value,
     indexing: &MirIndexing,
 ) -> NativeExecutorResult<Vec<ObjectIndexComponent>> {
-    let selectors = materialize_selectors(state, base, indexing)?;
+    let selectors =
+        materialize_selectors(state, base, indexing, indexing_requires_retention(indexing))?;
     let mut values = selectors.positional.into_iter();
     indexing
         .components
@@ -433,7 +450,9 @@ pub(super) fn materialize_index_components(
                 let _ = values.next();
                 Ok(ObjectIndexComponent::Colon)
             }
-            MirIndexComponent::Expr(_) | MirIndexComponent::ContextualExpr(_) => values
+            MirIndexComponent::Expr(_)
+            | MirIndexComponent::PreparedExpr(_)
+            | MirIndexComponent::ContextualExpr(_) => values
                 .next()
                 .map(ObjectIndexComponent::Value)
                 .ok_or_else(|| {
@@ -450,7 +469,8 @@ pub(super) fn materialize_cell_expansion_source(
     base: Value,
     indexing: &MirIndexing,
 ) -> NativeExecutorResult<runmat_runtime::call::arguments::MaterializedExpansionSource> {
-    let selectors = materialize_selectors(state, &base, indexing)?;
+    let retains_inputs = indexing_requires_retention(indexing);
+    let selectors = materialize_selectors(state, &base, indexing, retains_inputs)?;
     Ok(
         runmat_runtime::call::arguments::MaterializedExpansionSource::CellContents {
             base,
@@ -472,7 +492,7 @@ pub(super) fn materialize_expression_region(
     region.validate().map_err(|error| {
         NativeExecutorError::Host(format!("invalid contextual selector: {error}"))
     })?;
-    let (ordinal, next_step, completed) = state.enter_contextual_region();
+    let (ordinal, next_step, completed) = state.enter_contextual_region()?;
     if let Some(result) = completed {
         let [result] = result.as_slice() else {
             return Err(NativeExecutorError::Host(
@@ -485,12 +505,56 @@ pub(super) fn materialize_expression_region(
     let result = (|| {
         execute_preparation_steps(state, ordinal, region.steps(), next_step)?;
         let result = super::operand::evaluate_operand(state, region.result())?;
-        state.finish_contextual_region(ordinal, vec![result]);
+        state.retain_expression_region_result(result)?;
+        state.finish_contextual_region(ordinal, result);
         state.arena.get(result).cloned()
     })();
     state.contextual_index_extents.pop();
     if result.is_err() && !matches!(&result, Err(NativeExecutorError::CallSuspended)) {
-        state.abandon_contextual_region(region.defined_sequences());
+        state.abandon_contextual_region(region.defined_sequences())?;
+    }
+    result
+}
+
+pub(super) fn materialize_prepared_expression_region(
+    state: &mut HostState,
+    region: &runmat_mir::MirPreparedExpressionRegion,
+) -> NativeExecutorResult<Value> {
+    region.validate().map_err(|error| {
+        NativeExecutorError::Host(format!("invalid prepared expression region: {error}"))
+    })?;
+    materialize_expression_region_body(
+        state,
+        region.steps(),
+        region.result(),
+        region.defined_sequences(),
+    )
+}
+
+fn materialize_expression_region_body<'a>(
+    state: &mut HostState,
+    steps: &[runmat_mir::MirExpressionStep],
+    result_operand: &runmat_mir::MirOperand,
+    defined_sequences: impl Iterator<Item = runmat_mir::MirSequenceLocalId> + 'a,
+) -> NativeExecutorResult<Value> {
+    let (ordinal, next_step, completed) = state.enter_contextual_region()?;
+    if let Some(result) = completed {
+        let [result] = result.as_slice() else {
+            return Err(NativeExecutorError::Host(
+                "prepared expression region completed with non-scalar result".into(),
+            ));
+        };
+        return state.arena.get(*result).cloned();
+    }
+    let result = (|| {
+        execute_preparation_steps(state, ordinal, steps, next_step)?;
+        let result = super::operand::evaluate_operand(state, result_operand)?;
+        state.retain_expression_region_result(result)?;
+        state.finish_contextual_region(ordinal, result);
+        state.arena.get(result).cloned()
+    })();
+    if result.is_err() && !matches!(&result, Err(NativeExecutorError::CallSuspended)) {
+        state.abandon_contextual_region(defined_sequences)?;
     }
     result
 }
@@ -502,7 +566,7 @@ pub(super) fn execute_preparation_steps(
     next_step: usize,
 ) -> NativeExecutorResult<()> {
     for (step_index, step) in steps.iter().enumerate().skip(next_step) {
-        state.enter_contextual_step(ordinal, step_index);
+        state.enter_contextual_step(ordinal, step_index)?;
         match step {
             runmat_mir::MirExpressionStep::Let { local, value, .. } => {
                 let native_local = u32::try_from(local.0)
@@ -543,95 +607,6 @@ fn selector_dimension_length(
         .map_err(NativeExecutorError::from)
 }
 
-fn read_paren(
-    state: &mut HostState,
-    base: Value,
-    selectors: MaterializedSelectors,
-    requested_outputs: usize,
-    embedded: Option<&super::state::EmbeddedOperationIdentity>,
-) -> NativeExecutorResult<Vec<Value>> {
-    if is_function_value(&base) {
-        if selectors.colon_mask != 0 || selectors.end_mask != 0 {
-            return Err(NativeExecutorError::from(semantic_error(
-                "UnsupportedFunctionHandleSelector",
-                "Function handle call does not support colon or end selector syntax",
-            )));
-        }
-        let roots =
-            RootedValueLease::for_values(std::iter::once(&base).chain(selectors.numeric.iter()))
-                .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
-        let runtime = state.runtime.clone();
-        let arguments = selectors.numeric;
-        return super::call_suspension::begin_rooted_arguments(
-            state,
-            embedded.cloned(),
-            Box::pin(async move {
-                let _roots = roots;
-                let sequence = runtime
-                    .scope(
-                        runmat_runtime::call_feval_sequence_async_with_outputs_in_context(
-                            &runtime,
-                            base,
-                            &arguments,
-                            requested_outputs,
-                        ),
-                    )
-                    .await?;
-                sequence.with_owned_sequence(|sequence| {
-                    let values = normalize_sequence_outputs(sequence, requested_outputs)
-                        .map_err(|error| *error)?;
-                    RootedValues::new(values).map_err(|error| error.into_runtime_error())
-                })
-            }),
-        );
-    }
-    if matches!(
-        base,
-        Value::Object(_) | Value::ObjectArray(_) | Value::HandleObject(_)
-    ) {
-        let resolution = resolve_object_index_protocol(&base, ObjectIndexOp::Subsref, None)?;
-        if resolution.is_some() {
-            let path = ObjectSubscriptPath::single(ObjectSubscript::parentheses(object_selector(
-                &selectors,
-            )?));
-            let roots = RootedValueLease::for_values(
-                std::iter::once(&base).chain(selectors.numeric.iter()),
-            )
-            .map_err(|error| NativeExecutorError::from(error.into_runtime_error()))?;
-            let runtime = state.runtime.clone();
-            return super::call_suspension::begin_rooted_arguments(
-                state,
-                embedded.cloned(),
-                Box::pin(async move {
-                    let _roots = roots;
-                    let sequence = runtime
-                        .scope(invoke_resolved_object_index_path_method_in_context(
-                            &runtime,
-                            &resolution,
-                            base,
-                            path,
-                            requested_outputs,
-                        ))
-                        .await?;
-                    sequence.with_owned_sequence(|sequence| {
-                        let values = normalize_sequence_outputs(sequence, requested_outputs)
-                            .map_err(|error| *error)?;
-                        RootedValues::new(values).map_err(|error| error.into_runtime_error())
-                    })
-                }),
-            );
-        }
-    }
-    let plan = super::sync::complete(
-        &state.runtime,
-        plan_for(&base, &selectors),
-        "indexed read planning",
-    )
-    .finish(state)?;
-    let value = read_with_plan(base, &plan)?;
-    normalize_outputs(value, requested_outputs)
-}
-
 fn read_brace(
     base: Value,
     selectors: MaterializedSelectors,
@@ -664,57 +639,6 @@ fn read_brace(
             "Cell brace indexing must select exactly one value in scalar context",
         ))),
     }
-}
-
-async fn plan_for(
-    base: &Value,
-    selectors: &MaterializedSelectors,
-) -> NativeExecutorResult<IndexPlan> {
-    let shape = value_shape(base);
-    let built = build_slice_selectors(
-        selectors.dims,
-        selectors.colon_mask,
-        selectors.end_mask,
-        &selectors.numeric,
-        &shape,
-    )
-    .await?;
-    build_index_plan(&built, selectors.dims, &shape).map_err(NativeExecutorError::from)
-}
-
-async fn plan_for_assignment(
-    base: &Value,
-    selectors: &MaterializedSelectors,
-    allow_growth: bool,
-) -> NativeExecutorResult<IndexPlan> {
-    let shape = value_shape(base);
-    let mode = if allow_growth
-        && matches!(
-            base,
-            Value::SparseTensor(_)
-                | Value::Struct(_)
-                | Value::StructArray(_)
-                | Value::Tensor(_)
-                | Value::Num(_)
-                | Value::Int(_)
-                | Value::LogicalArray(_)
-                | Value::GpuTensor(_)
-                | Value::ComplexTensor(_)
-        ) {
-        IndexedStorePlanMode::Grow
-    } else {
-        IndexedStorePlanMode::Bounded
-    };
-    build_indexed_store_plan(
-        selectors.dims,
-        selectors.colon_mask,
-        selectors.end_mask,
-        &selectors.numeric,
-        &shape,
-        mode,
-    )
-    .await
-    .map_err(NativeExecutorError::from)
 }
 
 fn assign_brace(
@@ -756,49 +680,6 @@ fn assign_brace(
     };
     runmat_runtime::object::cell::assign_cell_value_multi(cell, &positions, &values, |_, _| {})
         .map_err(NativeExecutorError::from)
-}
-
-fn assign_logical(
-    state: &mut HostState,
-    value: LogicalArray,
-    plan: &IndexPlan,
-    rhs: &Value,
-    delete: bool,
-) -> NativeExecutorResult<Value> {
-    let tensor = runmat_value::Tensor::new(
-        value
-            .data
-            .iter()
-            .map(|value| if *value != 0 { 1.0 } else { 0.0 })
-            .collect(),
-        value.shape,
-    )
-    .map_err(|error| NativeExecutorError::from(shape_error(error)))?;
-    let updated = if delete {
-        write_slice::delete_tensor_with_plan(tensor, plan, rhs)
-            .map_err(NativeExecutorError::from)?
-    } else {
-        super::sync::complete(
-            &state.runtime,
-            write_slice::assign_tensor_with_plan(tensor, plan, rhs),
-            "logical indexed assignment",
-        )
-        .finish(state)?
-    };
-    match updated {
-        Value::Num(value) => Ok(Value::Bool(value != 0.0)),
-        Value::Tensor(value) => {
-            let data = value
-                .materialize_f64()
-                .into_iter()
-                .map(|value| u8::from(value != 0.0))
-                .collect();
-            LogicalArray::new(data, value.shape().to_vec())
-                .map(Value::LogicalArray)
-                .map_err(|error| NativeExecutorError::from(shape_error(error)))
-        }
-        value => Ok(value),
-    }
 }
 
 fn read_with_plan(base: Value, plan: &IndexPlan) -> NativeExecutorResult<Value> {
@@ -924,7 +805,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::SparseTensor(value) => value.shape(),
         Value::GpuTensor(value) => value.shape().to_vec(),
         Value::StringArray(value) => value.shape.clone(),
-        Value::LogicalArray(value) => value.shape.clone(),
+        Value::LogicalArray(value) => value.shape.to_vec(),
         Value::CharArray(value) => value.shape().to_vec(),
         Value::Cell(value) => value.shape.clone(),
         Value::StructArray(value) => value.shape().to_vec(),
@@ -955,11 +836,46 @@ fn shape_error(error: impl std::fmt::Display) -> RuntimeError {
 
 #[cfg(test)]
 mod tests {
+    use super::assignment_operation::plan_for_assignment;
     use super::{
-        plan_for_assignment, read_with_plan, selector_dimension_length, MaterializedSelectors,
+        assign, read_value, read_with_plan, selector_dimension_length, MaterializedSelectors,
     };
+    use crate::execute::region::observation::test_support::observed_state;
+    use crate::region::placement_test_support::Probe;
+    use runmat_mir::{MirConstant, MirIndexComponent, MirIndexPlan, MirIndexing, MirOperand};
     use runmat_runtime::indexing::plan::IndexPlan;
-    use runmat_value::{CharArray, Value};
+    use runmat_types::{IndexKind, IndexResultContext};
+    use runmat_value::{CharArray, Tensor, Value};
+    use std::rc::Rc;
+
+    #[test]
+    fn host_index_read_and_write_finish_without_pending_semantic_call() {
+        runmat_gc::gc_test_context(|| {
+            let mut state = observed_state(&Rc::new(Probe::default()));
+            assert!(super::direct_host_indexing_allowed(&state).expect("unbounded host policy"));
+            let indexing = MirIndexing {
+                kind: IndexKind::Paren,
+                plan: MirIndexPlan::Slice,
+                components: vec![MirIndexComponent::Expr(MirOperand::Constant(
+                    MirConstant::Number("2".into()),
+                ))],
+                result_context: IndexResultContext::ReadSingle,
+                cell_expand_all: false,
+            };
+            let base = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap());
+            let read = read_value(&mut state, base.clone(), &indexing, 1)
+                .expect("host selector read must finish directly");
+            assert_eq!(read, vec![Value::Num(20.0)]);
+            assert!(state.pending_call.is_none());
+            let updated = assign(&mut state, base, &indexing, Value::Num(99.0), false)
+                .expect("host selector write must finish directly");
+            let Value::Tensor(updated) = updated else {
+                panic!("indexed write must preserve tensor class");
+            };
+            assert_eq!(updated.materialize_f64(), vec![10.0, 99.0, 30.0]);
+            assert!(state.pending_call.is_none());
+        });
+    }
 
     #[test]
     fn native_numeric_scalar_planning_uses_shared_bounded_and_growth_modes() {

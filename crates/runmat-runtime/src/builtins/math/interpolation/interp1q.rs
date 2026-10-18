@@ -314,7 +314,7 @@ async fn real_coordinate_data_from_value(
                 .into_iter()
                 .map(|bit| if bit != 0 { 1.0 } else { 0.0 })
                 .collect(),
-            array.shape,
+            array.shape.to_vec(),
         )),
         Value::Complex(re, im) => {
             validate_real_coordinate(operand, im)?;
@@ -331,7 +331,7 @@ async fn real_coordinate_data_from_value(
                     .into_iter()
                     .map(|(re, _)| re)
                     .collect(),
-                shape,
+                shape.to_vec(),
             ))
         }
         other => Err(error_with_detail(
@@ -373,7 +373,7 @@ async fn numeric_data_from_value(
                 .into_iter()
                 .map(|bit| (if bit != 0 { 1.0 } else { 0.0 }, 0.0))
                 .collect(),
-            array.shape,
+            array.shape.to_vec(),
             false,
         )),
         Value::Complex(re, im) => {
@@ -387,7 +387,7 @@ async fn numeric_data_from_value(
                     validate_real_coordinate(operand, im)?;
                 }
             }
-            Ok((storage.materialize_f64(), shape, true))
+            Ok((storage.materialize_f64(), shape.to_vec(), true))
         }
         other => Err(error_with_detail(
             &ERROR_INVALID_INPUT,

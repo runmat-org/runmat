@@ -140,7 +140,7 @@ pub(crate) async fn parse_ode_input(
                     .iter()
                     .map(|v| if *v == 0 { 0.0 } else { 1.0 })
                     .collect(),
-                logical.shape,
+                logical.shape.to_vec(),
                 false,
             )
         }

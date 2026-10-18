@@ -156,7 +156,7 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
             ))
         }
         Value::LogicalArray(array) => Ok(Value::LogicalArray(LogicalArray::zeros(
-            array.shape.clone(),
+            array.shape.to_vec(),
         ))),
         Value::Cell(cell) => {
             let mut data = Vec::with_capacity(cell.data.len());

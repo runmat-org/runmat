@@ -1,8 +1,9 @@
 use super::*;
 use crate::{infer_catalog_call, BuiltinDocumentationAuthority};
 use runmat_types::{
-    CallRequest, LiteralContext, LiteralValue, NumericClass, NumericDomain, NumericFact,
-    OutputSelection, RequestedOutputCount, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    CallRequest, CallableFact, LiteralContext, LiteralValue, NumericClass, NumericDomain,
+    NumericFact, OutputSelection, RequestedOutputCount, ResidencyFact, ShapeFact, StorageFact,
+    ValueFact, ValueKindFact,
 };
 
 fn matrix(rows: usize, columns: usize) -> ValueFact {
@@ -162,6 +163,90 @@ fn rectangular_lu_and_host_factor_classes_match_runtime_constructors() {
     let scalar_svd = infer_catalog_call(&SVD_CATALOG_ENTRY, &request(1, 3, 1));
     assert_eq!(scalar_svd.outputs[0].shape, ShapeFact::Scalar);
     assert_eq!(scalar_svd.outputs[0].storage, StorageFact::Scalar);
+}
+
+#[test]
+fn pcg_operator_forms_preserve_rhs_facts_and_diagnose_unsupported_inputs() {
+    // An operator handle's scalar shape and callable facts must not become
+    // the solution's numeric type or extent. Both entry forms return b's
+    // precision/domain, with real residual history in that precision.
+    let callable = ValueFact::scalar(ValueKindFact::Callable(CallableFact {
+        identity: None,
+        capabilities: Default::default(),
+        parameters: Vec::new(),
+        parameters_complete: false,
+        outputs: Vec::new(),
+        outputs_complete: false,
+        variadic_inputs: false,
+        variadic_outputs: false,
+        captures: Vec::new(),
+        captures_complete: false,
+    }));
+    for class in [NumericClass::Single, NumericClass::Double] {
+        for domain in [NumericDomain::Real, NumericDomain::Complex] {
+            let numeric = ValueKindFact::Numeric(NumericFact { class, domain });
+            let mut coefficient = matrix(3, 3);
+            coefficient.kind = numeric.clone();
+            let mut rhs = matrix(3, 1);
+            rhs.kind = numeric.clone();
+            for operator in [coefficient, callable.clone()] {
+                let inferred = infer_catalog_call(
+                    &PCG_CATALOG_ENTRY,
+                    &CallRequest {
+                        arguments: vec![operator, rhs.clone()],
+                        literals: LiteralContext::default(),
+                        outputs: OutputSelection::new(RequestedOutputCount::Exactly(5)),
+                    },
+                );
+                assert!(
+                    inferred.diagnostics.is_empty(),
+                    "{:?}",
+                    inferred.diagnostics
+                );
+                assert_eq!(inferred.outputs[0].kind, numeric);
+                assert_eq!(inferred.outputs[0].shape, rhs.shape);
+                assert_eq!(
+                    inferred.outputs[4].kind,
+                    ValueKindFact::Numeric(NumericFact {
+                        class,
+                        domain: NumericDomain::Real
+                    }),
+                );
+            }
+        }
+    }
+    let mut mixed = request(3, 3, 1);
+    mixed.arguments.push(matrix(3, 1));
+    for numeric in [
+        NumericFact {
+            class: NumericClass::Single,
+            domain: NumericDomain::Real,
+        },
+        NumericFact {
+            class: NumericClass::Double,
+            domain: NumericDomain::Complex,
+        },
+    ] {
+        mixed.arguments[1].kind = ValueKindFact::Numeric(numeric);
+        assert!(infer_catalog_call(&PCG_CATALOG_ENTRY, &mixed)
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "RM.PCG.UNSUPPORTED_INPUT"));
+    }
+    mixed.arguments[1] = matrix(3, 1);
+    for residency in [
+        ResidencyFact::Device { provider: None },
+        ResidencyFact::Remote { pool: None },
+    ] {
+        for index in 0..2 {
+            mixed.arguments[index].residency = residency.clone();
+            assert!(infer_catalog_call(&PCG_CATALOG_ENTRY, &mixed)
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "RM.PCG.UNSUPPORTED_INPUT"));
+            mixed.arguments[index].residency = ResidencyFact::Host;
+        }
+    }
 }
 
 fn request(rows: usize, columns: usize, count: usize) -> CallRequest {

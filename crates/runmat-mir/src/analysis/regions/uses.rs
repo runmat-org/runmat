@@ -416,6 +416,9 @@ fn indexing_uses(indexing: &MirIndexing, uses: &mut Locals) {
             MirIndexComponent::ContextualExpr(region) => {
                 region.visit_external_operands(|operand| operand_uses(operand, uses));
             }
+            MirIndexComponent::PreparedExpr(region) => {
+                region.visit_external_operands(|operand| operand_uses(operand, uses));
+            }
             MirIndexComponent::Colon => {}
         }
     }

@@ -563,7 +563,7 @@ pub(crate) async fn initial_guess_with_cooperation(
             }
             Ok(InitialGuess {
                 values: logical_values(&logical.data, cooperation).await?,
-                shape: logical.shape,
+                shape: logical.shape.to_vec(),
                 scalar: false,
             })
         }

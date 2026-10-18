@@ -8,9 +8,11 @@ mod callbacks;
 mod candidate;
 mod deoptimization;
 mod executor;
+mod global_target;
 mod indexing;
 mod invocation;
 mod mutation;
+mod operation_completion;
 mod operand;
 mod operator;
 mod osr;
@@ -19,10 +21,12 @@ mod short_circuit;
 mod site;
 mod state;
 mod subscript_path;
-mod sync;
 mod workspace;
 
-pub use workspace::{NativeWorkspaceBinding, NativeWorkspaceInput, NativeWorkspaceSnapshot};
+pub use workspace::{
+    NativeWorkspaceBinding, NativeWorkspaceGlobalBinding, NativeWorkspaceInput,
+    NativeWorkspaceSnapshot,
+};
 
 pub use executor::{
     NativeExecution, NativeExecutor, NativeExecutorOptions, NativeInvocationRequest,

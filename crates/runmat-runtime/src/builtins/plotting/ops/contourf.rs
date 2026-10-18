@@ -411,9 +411,6 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         Some(parse_contour_args(BUILTIN_NAME, first, rest).map_err(map_contourf_invalid_argument)?);
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_contourf_invalid_argument)?;
     let opts = PlotRenderOptions {
-        title: "Filled Contour Plot",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };

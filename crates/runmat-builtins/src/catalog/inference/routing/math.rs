@@ -14,6 +14,7 @@ pub(in crate::catalog::inference) fn infer(
         MathInferenceRule::Bsxfun => {
             crate::catalog::entries::math::elementwise::bsxfun::infer(request, entry)
         }
+        MathInferenceRule::BesselJ => super::super::math::bessel_functions::infer(request, entry),
         MathInferenceRule::BinaryArithmetic(rule) => {
             crate::catalog::entries::math::elementwise::binary_arithmetic::infer_binary_arithmetic(
                 rule, request, entry,

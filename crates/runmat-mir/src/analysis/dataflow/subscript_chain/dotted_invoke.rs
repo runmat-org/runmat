@@ -1,10 +1,9 @@
 use crate::{MirCallArg, MirCallArgumentRegion, MirDottedInvokeArgument, MirExpressionStep};
 use runmat_hir::{IndexKind, IndexResultContext};
-use runmat_types::{
-    DynamicReason, SequenceFactInference, ValueFact, ValueKindFact, ValueSequenceFact,
-};
+use runmat_types::{DynamicReason, SequenceFactInference, ValueFact, ValueSequenceFact};
 
 use super::super::{index_selector_for_operand, simple_rvalue_fact};
+use super::callable;
 use super::simple_operand_fact;
 
 /// Compatibility adapter for value-only inference callers. New sequence-aware
@@ -20,7 +19,7 @@ pub(super) fn infer_legacy_value(
     runmat_types::CapabilitySet,
 ) {
     let (inferred, effects, capabilities) = infer_sequence(member, arguments, sequence_use, facts);
-    let fact = legacy_selected_fact(&inferred.sequence, sequence_use);
+    let fact = callable::selected_fact(&inferred.sequence, sequence_use);
     (
         runmat_types::FactInference {
             fact,
@@ -60,7 +59,7 @@ pub(super) fn infer_sequence(
             Default::default(),
         );
     }
-    let ValueKindFact::Callable(callable) = &member.kind else {
+    if !matches!(&member.kind, runmat_types::ValueKindFact::Callable(_)) {
         // A non-callable member follows ordinary parentheses indexing. The
         // expression preparation remains call-shaped; unknown expanded widths
         // cannot be turned into a false scalar selector fact here.
@@ -89,9 +88,10 @@ pub(super) fn infer_sequence(
             IndexResultContext::ReadSingle,
         );
         return (inference, Default::default(), Default::default());
-    };
-    let request = runmat_types::CallRequest {
-        arguments: arguments
+    }
+    callable::infer(
+        member,
+        arguments
             .iter()
             .map(|component| match component {
                 MirDottedInvokeArgument::Call(region) => match &region.argument {
@@ -105,25 +105,10 @@ pub(super) fn infer_sequence(
                 }
             })
             .collect(),
-        literals: Default::default(),
-        outputs: runmat_types::OutputSelection::new(requested_outputs(sequence_use)),
-    };
-    let inferred = runmat_types::infer_call(
-        &callable.call_contract(DynamicReason::DynamicDispatch),
-        &request,
-    );
-    let sequence = ValueSequenceFact {
-        outputs: inferred.outputs,
-        variadic: inferred.dynamic_outputs,
-    };
-    (
-        SequenceFactInference {
-            sequence,
-            diagnostics: inferred.diagnostics,
-        },
-        inferred.effects,
-        inferred.capabilities,
+        vec![runmat_types::LiteralValue::Unknown; arguments.len()],
+        sequence_use,
     )
+    .expect("callable kind was established")
 }
 
 fn prepared_selector_fact(
@@ -145,39 +130,6 @@ fn prepared_selector_fact(
             runmat_types::IndexSelectorFact::Numeric(ValueFact::unknown(
                 DynamicReason::DynamicDispatch,
             ))
-        }
-    }
-}
-
-fn legacy_selected_fact(
-    sequence: &ValueSequenceFact,
-    sequence_use: runmat_types::SequenceUse,
-) -> ValueFact {
-    match sequence_use {
-        runmat_types::SequenceUse::Discard => ValueFact::scalar(ValueKindFact::Void),
-        runmat_types::SequenceUse::RequireSingle => {
-            sequence.first_or_else(|| ValueFact::unknown(DynamicReason::DynamicDispatch))
-        }
-        _ => ValueFact::scalar(ValueKindFact::OutputList(runmat_types::OutputListFact {
-            outputs: sequence.outputs.clone(),
-            variadic: sequence.variadic,
-        })),
-    }
-}
-
-fn requested_outputs(use_: runmat_types::SequenceUse) -> runmat_types::RequestedOutputCount {
-    match use_ {
-        runmat_types::SequenceUse::Discard => runmat_types::RequestedOutputCount::Zero,
-        runmat_types::SequenceUse::RequireSingle => runmat_types::RequestedOutputCount::One,
-        runmat_types::SequenceUse::SelectPrefix { count } => {
-            runmat_types::RequestedOutputCount::Exactly(count)
-        }
-        runmat_types::SequenceUse::SelectCurrentFunctionOutputs
-        | runmat_types::SequenceUse::ExpandAll => {
-            runmat_types::RequestedOutputCount::CurrentFunctionNargout
-        }
-        runmat_types::SequenceUse::SelectDestinationCardinality => {
-            runmat_types::RequestedOutputCount::DestinationSequenceCardinality
         }
     }
 }

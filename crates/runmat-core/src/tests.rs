@@ -28,6 +28,9 @@ mod native_deep_learning;
 #[path = "tests/native_object_indexing.rs"]
 mod native_object_indexing;
 #[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_semantic_suspension.rs"]
+mod native_semantic_suspension;
+#[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_method_expansion.rs"]
 mod native_method_expansion;
 #[cfg(not(target_arch = "wasm32"))]
@@ -54,6 +57,9 @@ mod native_deal;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_max.rs"]
 mod native_max;
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "tests/native_matrix_solve.rs"]
+mod native_matrix_solve;
 #[cfg(not(target_arch = "wasm32"))]
 #[path = "tests/native_textlines.rs"]
 mod native_textlines;
@@ -381,17 +387,11 @@ fn outcome_has_named_upsert(
     name: &str,
     expected: &runmat_value::Value,
 ) -> bool {
-    outcome.workspace_delta.upserts.iter().any(|upsert| {
-        let matches_name = match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive {
-                name: binding_name, ..
-            } => binding_name.0 == name,
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        };
-        matches_name && upsert.value == *expected
-    })
+    outcome
+        .workspace_delta
+        .upserts
+        .iter()
+        .any(|upsert| upsert.name.0 == name && upsert.value == *expected)
 }
 
 fn stdout_text(outcome: &abi::ExecutionOutcome) -> String {
@@ -437,17 +437,12 @@ fn outcome_named_upsert_value<'a>(
     outcome: &'a abi::ExecutionOutcome,
     name: &str,
 ) -> Option<&'a runmat_value::Value> {
-    outcome.workspace_delta.upserts.iter().find_map(|upsert| {
-        let matches_name = match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive {
-                name: binding_name, ..
-            } => binding_name.0 == name,
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        };
-        matches_name.then_some(&upsert.value)
-    })
+    outcome
+        .workspace_delta
+        .upserts
+        .iter()
+        .find(|upsert| upsert.name.0 == name)
+        .map(|upsert| &upsert.value)
 }
 
 fn comparable_path_text(path: &str) -> String {
@@ -475,14 +470,7 @@ fn outcome_has_upsert_name(outcome: &abi::ExecutionOutcome, name: &str) -> bool 
         .workspace_delta
         .upserts
         .iter()
-        .any(|upsert| match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive {
-                name: binding_name, ..
-            } => binding_name.0 == name,
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        })
+        .any(|upsert| upsert.name.0 == name)
 }
 
 #[test]
@@ -2123,13 +2111,7 @@ fn execute_request_supports_command_syntax_rewrites_through_semantic_pipeline() 
     .result
     .expect("command syntax should execute");
     let h_is_logical_scalar = outcome.workspace_delta.upserts.iter().any(|upsert| {
-        let is_h = match &upsert.key {
-            abi::WorkspaceBindingKey::Interactive { name, .. } => name.0 == "h",
-            abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == "h",
-            abi::WorkspaceBindingKey::Global { .. }
-            | abi::WorkspaceBindingKey::Persistent { .. } => false,
-        };
-        if !is_h {
+        if upsert.name.0 != "h" {
             return false;
         }
         match &upsert.value {
@@ -2175,15 +2157,7 @@ fn execute_text_request_resolves_bare_tic_toc_as_zero_arg_builtins() {
         "elapsedDrain",
     ] {
         let elapsed = outcome.workspace_delta.upserts.iter().find_map(|upsert| {
-            let matches_name = match &upsert.key {
-                abi::WorkspaceBindingKey::Interactive {
-                    name: binding_name, ..
-                } => binding_name.0 == name,
-                abi::WorkspaceBindingKey::SourceBinding { binding, .. } => binding.0 == name,
-                abi::WorkspaceBindingKey::Global { .. }
-                | abi::WorkspaceBindingKey::Persistent { .. } => false,
-            };
-            if !matches_name {
+            if upsert.name.0 != name {
                 return None;
             }
             match upsert.value {
@@ -2706,11 +2680,11 @@ fn execute_outcome_exposes_workspace_removals_and_effects() {
     execute_text_request(&mut session, "x = 1; y = 2;").expect("seed workspace");
     let outcome = execute_text_request(&mut session, "clear x;").expect("clear succeeds");
 
-    assert!(outcome.workspace_delta.removals.iter().any(|key| {
-        matches!(key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x")
+    assert!(outcome.workspace_delta.removals.iter().any(|binding| {
+        binding.name.0 == "x" && matches!(&binding.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "x")
     }));
-    assert!(!outcome.workspace_delta.removals.iter().any(|key| {
-        matches!(key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
+    assert!(!outcome.workspace_delta.removals.iter().any(|binding| {
+        binding.name.0 == "y" || matches!(&binding.key, abi::WorkspaceBindingKey::Interactive { name, .. } if name.0 == "y")
     }));
     assert!(outcome.effects.iter().any(|effect| {
         matches!(
@@ -10236,14 +10210,21 @@ fn dynamic_workspace_evalc_returns_empty_capture_for_silent_source() {
 #[test]
 fn dynamic_workspace_evalc_captures_implicit_expression_display() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
-    let outcome =
-        execute_text_request(&mut session, "captured = evalc('2 + 3');").expect("exec succeeds");
-    assert!(outcome_has_named_upsert(
-        &outcome,
-        "captured",
-        &runmat_value::Value::String("5\n".into())
-    ));
-    assert_eq!(stdout_text(&outcome), "");
+    for (source, expected) in [
+        ("2 + 3", "5\n"),
+        ("disp(4); 2 + 3", "4\n5\n"),
+        ("2 + 3;", ""),
+    ] {
+        let outcome = execute_text_request(&mut session, &format!("captured = evalc('{source}');"))
+            .expect("exec succeeds");
+        let expected = runmat_value::Value::String(expected.into());
+        assert_eq!(
+            outcome_named_upsert_value(&outcome, "captured"),
+            Some(&expected),
+            "evalc capture differs for source `{source}`"
+        );
+        assert_eq!(stdout_text(&outcome), "");
+    }
 }
 
 #[test]
@@ -16164,7 +16145,7 @@ fn deterministic_interactive_tiering_exposes_the_complete_workspace_to_dynamic_b
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
+fn deterministic_interactive_tiering_preserves_completed_prefix_without_replay_after_error() {
     let mut session = RunMatSession::with_options(true, false).expect("session init");
     session.set_native_tiering_config_for_testing(runmat_jit::tiering::TieringConfig {
         generic_hot_threshold: 1,
@@ -16173,7 +16154,7 @@ fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
         ..runmat_jit::tiering::TieringConfig::default()
     });
     execute_text_request(&mut session, "counter = 0;").expect("seed workspace");
-    for _ in 0..3 {
+    for attempt in 0..3 {
         let outcome = execute_text_request(&mut session, "counter = counter + 1; assert(false);")
             .expect("runtime failures are reported in the execution outcome");
         assert!(outcome
@@ -16182,7 +16163,8 @@ fn deterministic_interactive_tiering_never_commits_a_failed_native_workspace() {
             .any(|diagnostic| diagnostic.message.to_ascii_lowercase().contains("assert")));
         assert_eq!(
             session.get_variables().unwrap().get("counter"),
-            Some(&runmat_value::Value::Num(0.0))
+            Some(&runmat_value::Value::Num(f64::from(attempt + 1))),
+            "completed assignments survive a later error exactly once"
         );
     }
     // Failed native attempts intentionally report `used_jit = false`, but a published
@@ -17327,14 +17309,50 @@ fn forced_generic_native_executable_lane_matches_lexical_capture_calls_and_handl
     let source = ExecutableSource::new(
         "core-native-captures-test@1",
         "nativeCaptures.m",
-        "function [direct, sharedAfter, handled, anonymous, recursive, escaped] = nativeCaptures(x)\nshared = x;\nfunction y = bump(delta)\nshared = shared + delta;\ny = shared;\nend\ndirect = bump(2);\nsharedAfter = shared;\nhandle = @bump;\nhandled = feval(handle, 3);\noffset = 10;\nclosure = @(value) value + offset;\nanonymous = feval(closure, 1);\nrecursive = nestedRecursive(3);\nreturned = makeAdder(7);\nescaped = feval(returned, 2);\nfunction y = nestedRecursive(n)\nif n <= 1\ny = shared;\nelse\ny = shared + nestedRecursive(n - 1);\nend\nend\nfunction result = makeAdder(base)\nfunction y = add(value)\ny = base + value;\nend\nresult = @add;\nend\nend\n",
+        r#"function [direct, sharedAfter, handled, anonymous, recursive, escaped, transit] = nativeCaptures(x)
+shared = x;
+function y = bump(delta)
+shared = shared + delta;
+y = shared;
+end
+direct = bump(2);
+sharedAfter = shared;
+handle = @bump;
+handled = feval(handle, 3);
+offset = 10;
+closure = @(value) value + offset;
+anonymous = feval(closure, 1);
+recursive = nestedRecursive(3);
+returned = makeAdder(7);
+escaped = feval(returned, 2);
+reader = @() nestedRead() + shared;
+bump(1);
+transit = reader();
+function y = nestedRead()
+y = shared;
+end
+function y = nestedRecursive(n)
+if n <= 1
+y = shared;
+else
+y = shared + nestedRecursive(n - 1);
+end
+end
+function result = makeAdder(base)
+function y = add(value)
+y = base + value;
+end
+result = @add;
+end
+end
+"#,
     );
     let unit =
         block_on(session.compile_executable_unit(source, None)).expect("compile capture unit");
     let invocation = ProcedureInvocation {
         target: ProcedureTarget::Function("nativeCaptures".into()),
         arguments: vec![runmat_value::Value::Num(4.0)],
-        requested_outputs: 6,
+        requested_outputs: 7,
     };
     let established = block_on(session.invoke_executable(
         &unit,
@@ -17356,8 +17374,10 @@ fn forced_generic_native_executable_lane_matches_lexical_capture_calls_and_handl
             runmat_value::Value::Num(6.0),
             runmat_value::Value::Num(9.0),
             runmat_value::Value::Num(11.0),
-            runmat_value::Value::Num(18.0),
+            // feval published shared = 9; three recursive reads sum to 27.
+            runmat_value::Value::Num(27.0),
             runmat_value::Value::Num(9.0),
+            runmat_value::Value::Num(19.0),
         ],
     );
 }

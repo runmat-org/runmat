@@ -343,9 +343,11 @@ fn two_dimensional_spline_query_retains_exact_single_output_claim() {
     };
     assert_eq!(tensor.numeric_dtype(), NumericDType::F32);
     assert_eq!(tensor.shape(), &[2, 1]);
-    let retained =
-        runmat_value::ExactHostTensorAllocation::requested_bytes(NumericDType::F32, &[2, 1])
-            .unwrap() as u64;
+    let retained = crate::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+        NumericDType::F32,
+        &[2, 1],
+    )
+    .unwrap();
     assert_eq!(ledger.snapshot().live_reserved_bytes, retained);
     assert_eq!(ledger.snapshot().live_claimed_bytes, retained);
     drop(output);

@@ -98,6 +98,24 @@ impl WgpuProvider {
         readback::read_with_admitted(self.access.clone(), staging, context, decode, claim)
     }
 
+    pub(super) fn map_readback_with_admitted_stage<'a, T: 'a>(
+        &'a self,
+        staging: impl ReadbackResourceOwner + 'a,
+        context: &'a str,
+        decode: impl FnOnce(&[u8]) -> Result<T> + 'a,
+        claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+        callback_stage: runmat_accelerate_api::PreparedNumericDownloadStage,
+    ) -> impl std::future::Future<Output = Result<T>> + 'a {
+        readback::read_with_admitted_stage(
+            self.access.clone(),
+            staging,
+            context,
+            decode,
+            claim,
+            callback_stage,
+        )
+    }
+
     pub(super) fn map_readback_bytes_sync(
         &self,
         staging: wgpu::Buffer,

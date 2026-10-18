@@ -558,12 +558,7 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         Ok::<_, crate::RuntimeError>(plot)
     }
     .await?;
-    let opts = PlotRenderOptions {
-        title: "Quiver",
-        x_label: "X",
-        y_label: "Y",
-        ..Default::default()
-    };
+    let opts = PlotRenderOptions::default();
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();

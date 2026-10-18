@@ -45,7 +45,7 @@ pub(in super::super) async fn response_outcomes(
                 }
             }
             cooperation.completed((logical.data.len() % 16_384) as u64).await?;
-            numeric_outcomes(values, logical.shape, rows, cooperation).await
+            numeric_outcomes(values, logical.shape.to_vec(), rows, cooperation).await
         }
         Value::StringArray(array) => text_outcomes(array.data, array.shape, rows, cooperation).await,
         Value::String(text) if rows == 1 => text_outcomes(vec![text], vec![1, 1], rows, cooperation).await,

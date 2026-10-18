@@ -7,7 +7,13 @@ use crate::{MirOperand, MirOutputTarget, MirRvalue};
 
 use crate::analysis::engine::FlowState;
 
-use super::{collective_fact, distributed_fact, infer_mir_call, FunctionSummary};
+use super::call::{argument_facts, infer_mir_call_with_arguments};
+use super::{
+    collective_fact, distributed_fact, infer_binary_operator, infer_unary_operator, FunctionSummary,
+};
+use crate::analysis::workspace_effect::{
+    expansion_exposes_current_workspace, exposes_current_workspace,
+};
 
 pub(crate) fn infer_rvalue(
     value: &MirRvalue,
@@ -16,9 +22,31 @@ pub(crate) fn infer_rvalue(
     span: Span,
     diagnostics: &mut Vec<crate::MirDiagnostic>,
 ) -> ValueFact {
+    if !matches!(value, MirRvalue::Call(_)) && exposes_current_workspace(value) {
+        // A contextual selector or dotted preparation can mutate a source
+        // binding between evaluation steps. The ordinary single-snapshot
+        // inference below cannot prove a value across that boundary.
+        state.invalidate_current_workspace_bindings();
+        return dynamic_value();
+    }
     match value {
         MirRvalue::Use(MirOperand::FunctionHandle(identity)) => {
             function_handle_fact(identity, summaries)
+        }
+        MirRvalue::Aggregate {
+            kind,
+            row_lengths,
+            elements,
+        } => {
+            let inference =
+                infer_aggregate_with_summaries(kind, row_lengths, elements, state, summaries);
+            append_inference_diagnostics(
+                &inference.diagnostics,
+                span,
+                "aggregate-contract",
+                diagnostics,
+            );
+            inference.fact
         }
         MirRvalue::Future {
             function,
@@ -87,6 +115,35 @@ pub(crate) fn infer_rvalue(
         }
         MirRvalue::Distributed(operation) => distributed_fact(operation, state),
         MirRvalue::Collective(operation) => collective_fact(operation, state),
+        MirRvalue::Binary(left, operator, right) => {
+            let inference = infer_binary_operator(
+                *operator,
+                operand_fact_with_summaries(left, state, summaries),
+                operand_fact_with_summaries(right, state, summaries),
+                [operand_literal(left, state), operand_literal(right, state)],
+            );
+            append_inference_diagnostics(
+                &inference.diagnostics,
+                span,
+                "operator-contract",
+                diagnostics,
+            );
+            inference.fact
+        }
+        MirRvalue::Unary(operator, operand) => {
+            let inference = infer_unary_operator(
+                *operator,
+                operand_fact_with_summaries(operand, state, summaries),
+                operand_literal(operand, state),
+            );
+            append_inference_diagnostics(
+                &inference.diagnostics,
+                span,
+                "operator-contract",
+                diagnostics,
+            );
+            inference.fact
+        }
         MirRvalue::Range { start, step, end } => {
             let numeric = |operand: &MirOperand| {
                 runmat_types::LiteralContext::numeric_from_literal(&operand_literal(operand, state))
@@ -117,11 +174,52 @@ pub(crate) fn infer_rvalue(
     }
 }
 
+fn infer_aggregate_with_summaries(
+    kind: &crate::MirAggregateKind,
+    row_lengths: &[usize],
+    elements: &[crate::MirAggregateElement],
+    state: &FlowState,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> runmat_types::FactInference {
+    let mut offset = 0usize;
+    let mut rows = Vec::with_capacity(row_lengths.len());
+    for &length in row_lengths {
+        let Some(end) = offset.checked_add(length) else {
+            return runmat_types::FactInference::exact(dynamic_value());
+        };
+        let Some(row) = elements.get(offset..end) else {
+            return runmat_types::FactInference::exact(dynamic_value());
+        };
+        rows.push(
+            row.iter()
+                .map(|element| {
+                    element.operand().map_or_else(dynamic_value, |operand| {
+                        operand_fact_with_summaries(operand, state, summaries)
+                    })
+                })
+                .collect::<Vec<_>>(),
+        );
+        offset = end;
+    }
+    if offset != elements.len() {
+        return runmat_types::FactInference::exact(dynamic_value());
+    }
+    match kind {
+        crate::MirAggregateKind::Tensor => runmat_types::infer_tensor_aggregate(&rows),
+        crate::MirAggregateKind::Cell => runmat_types::infer_cell_aggregate(&rows),
+    }
+}
+
 pub(crate) fn infer_expansion_sequence(
     source: &crate::MirExpansionSource,
     state: &FlowState,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
 ) -> runmat_types::SequenceFactInference {
+    if expansion_exposes_current_workspace(source) {
+        return runmat_types::SequenceFactInference::exact(
+            runmat_types::ValueSequenceFact::dynamic(),
+        );
+    }
     match source {
         crate::MirExpansionSource::SubscriptChain(chain) => {
             crate::analysis::dataflow::infer_subscript_chain_sequence(chain, &state.value_facts())
@@ -147,12 +245,16 @@ pub(crate) fn infer_expansion_sequence(
 
 pub(crate) fn infer_rvalue_outputs(
     value: &MirRvalue,
-    state: &FlowState,
+    state: &mut FlowState,
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     targets: Option<&crate::MirOutputTargetList>,
     span: Span,
     diagnostics: &mut Vec<crate::MirDiagnostic>,
 ) -> Vec<ValueFact> {
+    if !matches!(value, MirRvalue::Call(_)) && exposes_current_workspace(value) {
+        state.invalidate_current_workspace_bindings();
+        return vec![dynamic_value()];
+    }
     if let MirRvalue::Distributed(operation) = value {
         if let Some(sequence) = super::distributed_output_sequence(operation) {
             return sequence.outputs;
@@ -198,8 +300,20 @@ pub(crate) fn infer_rvalue_outputs(
         }
     }
     let MirRvalue::Call(call) = value else {
-        let inference =
-            crate::analysis::dataflow::simple_rvalue_inference(value, &state.value_facts());
+        let inference = match value {
+            MirRvalue::Binary(left, operator, right) => infer_binary_operator(
+                *operator,
+                operand_fact_with_summaries(left, state, summaries),
+                operand_fact_with_summaries(right, state, summaries),
+                [operand_literal(left, state), operand_literal(right, state)],
+            ),
+            MirRvalue::Unary(operator, operand) => infer_unary_operator(
+                *operator,
+                operand_fact_with_summaries(operand, state, summaries),
+                operand_literal(operand, state),
+            ),
+            _ => crate::analysis::dataflow::simple_rvalue_inference(value, &state.value_facts()),
+        };
         append_inference_diagnostics(&inference.diagnostics, span, "fact-inference", diagnostics);
         return vec![inference.fact];
     };
@@ -211,16 +325,30 @@ pub(crate) fn infer_rvalue_outputs(
             }
         }
     }
-    let literals = call
-        .args
-        .iter()
-        .filter_map(|argument| argument.operand())
-        .map(|operand| operand_literal(operand, state))
-        .collect::<Vec<_>>();
-    let inference = infer_mir_call(
+    let callee_facts = state.value_facts();
+    let mut current_facts = callee_facts.clone();
+    let mut arguments = Vec::new();
+    let mut literals = Vec::new();
+    for argument in &call.args {
+        arguments.extend(argument_facts(
+            argument,
+            &current_facts,
+            state.sequence_facts(),
+            summaries,
+        ));
+        if let Some(operand) = argument.operand() {
+            literals.push(operand_literal(operand, state));
+        }
+        if matches!(argument, crate::MirCallArg::Expansion(source) if expansion_exposes_current_workspace(source))
+        {
+            state.invalidate_current_workspace_bindings();
+            current_facts = state.value_facts();
+        }
+    }
+    let inference = infer_mir_call_with_arguments(
         call,
-        &state.value_facts(),
-        state.sequence_facts(),
+        &callee_facts,
+        arguments,
         &literals,
         summaries,
         selection,

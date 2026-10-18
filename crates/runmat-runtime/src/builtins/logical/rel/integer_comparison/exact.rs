@@ -569,7 +569,7 @@ fn real_operand(value: &Value) -> Option<RealOperand<'_>> {
         }),
         Value::LogicalArray(array) => Some(RealOperand {
             source: RealSource::Logical { data: &array.data },
-            shape: array.shape.clone(),
+            shape: array.shape.to_vec(),
         }),
         Value::CharArray(array) => Some(RealOperand {
             source: RealSource::Char(array),

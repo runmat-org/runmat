@@ -11,7 +11,7 @@ fn unchanged_revision_skips_canonical_value_copy_but_recursive_write_refreshes()
             .store_persistent_named_and_slot("f", "x", 0, Value::Num(1.0))
             .unwrap();
         let mut aliases = PersistentAliases::new();
-        let mut vars = vec![Value::Num(0.0)];
+        let mut vars = InterpreterVars::from_owned(vec![Value::Num(0.0)]);
         declare(
             &mut aliases,
             &mut vars,
@@ -21,14 +21,22 @@ fn unchanged_revision_skips_canonical_value_copy_but_recursive_write_refreshes()
             PersistentAlias::Named("x".into()),
         )
         .unwrap();
-        vars[0] = Value::Num(99.0);
+        let _ = vars.replace_owned(0, Value::Num(99.0));
         refresh(&aliases, &mut vars, &authority, "f", 0).unwrap();
-        assert_eq!(vars[0], Value::Num(99.0), "unchanged binding is not copied");
+        assert_eq!(
+            *vars.get(0).unwrap(),
+            Value::Num(99.0),
+            "unchanged binding is not copied"
+        );
         authority
             .store_persistent_named_and_slot("f", "x", 0, Value::Num(3.0))
             .unwrap();
         refresh(&aliases, &mut vars, &authority, "f", 0).unwrap();
-        assert_eq!(vars[0], Value::Num(3.0), "nested write refreshes alias");
+        assert_eq!(
+            *vars.get(0).unwrap(),
+            Value::Num(3.0),
+            "nested write refreshes alias"
+        );
     });
 }
 
@@ -41,7 +49,7 @@ fn cleared_binding_cannot_be_republished_by_an_older_frame() {
             .store_persistent_named_and_slot("f", "x", 0, Value::Num(7.0))
             .unwrap();
         let mut aliases = PersistentAliases::new();
-        let mut vars = vec![Value::Num(0.0)];
+        let mut vars = InterpreterVars::from_owned(vec![Value::Num(0.0)]);
         declare(
             &mut aliases,
             &mut vars,
@@ -56,17 +64,17 @@ fn cleared_binding_cannot_be_republished_by_an_older_frame() {
         let after_clear = authority.persistent_revision().unwrap();
         assert_ne!(before_clear, after_clear);
         refresh(&aliases, &mut vars, &authority, "f", 0).unwrap();
-        assert_eq!(vars[0], empty_workspace_value());
+        assert_eq!(*vars.get(0).unwrap(), empty_workspace_value());
         finish_success(&aliases, &mut vars, &authority, "f").unwrap();
         assert_eq!(authority.persistent_named_value("f", "x").unwrap(), None);
         assert_eq!(authority.persistent_slot_value("f", 0).unwrap(), None);
-        assert_eq!(vars[0], empty_workspace_value());
+        assert_eq!(*vars.get(0).unwrap(), empty_workspace_value());
         authority
             .store_persistent_named_and_slot("f", "x", 0, Value::Num(3.0))
             .unwrap();
         assert_ne!(authority.persistent_revision().unwrap(), before_clear);
         refresh(&aliases, &mut vars, &authority, "f", 0).unwrap();
-        assert_eq!(vars[0], Value::Num(3.0));
+        assert_eq!(*vars.get(0).unwrap(), Value::Num(3.0));
     });
 }
 
@@ -80,7 +88,7 @@ fn clear_before_first_write_cannot_initialize_from_stale_frame() {
             let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
             let authority = runtime.session_variable_authority();
             let mut aliases = PersistentAliases::new();
-            let mut vars = vec![Value::Num(0.0)];
+            let mut vars = InterpreterVars::from_owned(vec![Value::Num(0.0)]);
             declare(&mut aliases, &mut vars, &authority, "f", 0, alias).unwrap();
             let declaration = authority.persistent_invalidation_revision("f").unwrap();
             authority.clear_persistent_function("f").unwrap();
@@ -90,13 +98,13 @@ fn clear_before_first_write_cannot_initialize_from_stale_frame() {
             );
             // No read between clear and successful old-frame completion.
             finish_success(&aliases, &mut vars, &authority, "f").unwrap();
-            assert_eq!(vars[0], empty_workspace_value());
+            assert_eq!(*vars.get(0).unwrap(), empty_workspace_value());
             assert_eq!(authority.persistent_slot_value("f", 0).unwrap(), None);
             assert_eq!(authority.persistent_named_value("f", "x").unwrap(), None);
 
             // An actual assignment after clear is a new publication, not a
             // replay of the declaration's stale local.
-            vars[0] = Value::Num(9.0);
+            let _ = vars.replace_owned(0, Value::Num(9.0));
             publish_store(&aliases, &vars, &authority, "f", 0).unwrap();
             finish_success(&aliases, &mut vars, &authority, "f").unwrap();
             assert_eq!(
@@ -129,17 +137,17 @@ fn native_continuation_keeps_preclear_generation_across_vm_resume() {
             0,
             PersistentBinding::from_native_continuation(saved, &authority, "f").unwrap(),
         );
-        let mut vars = vec![Value::Num(7.0)];
-        let mut first_read = vars.clone();
+        let mut vars = InterpreterVars::from_owned(vec![Value::Num(7.0)]);
+        let mut first_read = InterpreterVars::from_owned(vars.clone_values_for_test());
         let read_aliases = aliases.clone();
         refresh(&read_aliases, &mut first_read, &authority, "f", 0).unwrap();
-        assert_eq!(first_read[0], empty_workspace_value());
+        assert_eq!(first_read.get(0).as_deref(), Some(&empty_workspace_value()));
         finish_success(&aliases, &mut vars, &authority, "f").unwrap();
-        assert_eq!(vars[0], empty_workspace_value());
+        assert_eq!(*vars.get(0).unwrap(), empty_workspace_value());
         assert_eq!(old_ssa_operand, Value::Num(7.0));
         assert_eq!(authority.persistent_named_value("f", "x").unwrap(), None);
 
-        vars[0] = Value::Num(9.0);
+        let _ = vars.replace_owned(0, Value::Num(9.0));
         publish_store(&aliases, &vars, &authority, "f", 0).unwrap();
         finish_success(&aliases, &mut vars, &authority, "f").unwrap();
         assert_eq!(
@@ -156,7 +164,7 @@ fn named_store_publishes_exact_function_and_legacy_slot_then_refreshes_only_loca
         let _scope = runtime.enter();
         let authority = runtime.session_variable_authority();
         let mut aliases = PersistentAliases::new();
-        let mut vars = vec![Value::Num(0.0)];
+        let mut vars = InterpreterVars::from_owned(vec![Value::Num(0.0)]);
         declare(
             &mut aliases,
             &mut vars,
@@ -166,7 +174,7 @@ fn named_store_publishes_exact_function_and_legacy_slot_then_refreshes_only_loca
             PersistentAlias::Named("x".into()),
         )
         .unwrap();
-        vars[0] = Value::Num(0.0);
+        let _ = vars.replace_owned(0, Value::Num(0.0));
         publish_store(&aliases, &vars, &authority, "f", 0).unwrap();
         assert_eq!(
             authority.persistent_slot_value("f", 0).unwrap(),
@@ -178,18 +186,18 @@ fn named_store_publishes_exact_function_and_legacy_slot_then_refreshes_only_loca
         );
         assert_eq!(authority.persistent_named_value("g", "x").unwrap(), None);
 
-        let evaluated_stack_operand = vars[0].clone();
+        let evaluated_stack_operand = vars.get(0).unwrap().clone();
         authority
             .store_persistent_named_and_slot("f", "x", 0, Value::Num(3.0))
             .unwrap();
         refresh(&aliases, &mut vars, &authority, "f", 0).unwrap();
-        assert_eq!(vars[0], Value::Num(3.0));
+        assert_eq!(*vars.get(0).unwrap(), Value::Num(3.0));
         assert_eq!(evaluated_stack_operand, Value::Num(0.0));
         authority
             .store_persistent_named_and_slot("f", "x", 0, Value::Num(5.0))
             .unwrap();
         finish_success(&aliases, &mut vars, &authority, "f").unwrap();
-        assert_eq!(vars[0], Value::Num(5.0));
+        assert_eq!(*vars.get(0).unwrap(), Value::Num(5.0));
         assert_eq!(
             authority.persistent_named_value("f", "x").unwrap(),
             Some(Value::Num(5.0))
@@ -208,7 +216,7 @@ fn legacy_slot_and_named_fallback_keep_selected_context_authority() {
             .unwrap();
         let _other_scope = other.enter();
         let mut legacy = PersistentAliases::new();
-        let mut vars = vec![Value::Num(0.0); 3];
+        let mut vars = InterpreterVars::from_owned(vec![Value::Num(0.0); 3]);
         declare(
             &mut legacy,
             &mut vars,
@@ -218,7 +226,7 @@ fn legacy_slot_and_named_fallback_keep_selected_context_authority() {
             PersistentAlias::LegacySlot,
         )
         .unwrap();
-        assert_eq!(vars[2], Value::Num(7.0));
+        assert_eq!(*vars.get(2).unwrap(), Value::Num(7.0));
         let mut named = PersistentAliases::new();
         declare(
             &mut named,
@@ -229,7 +237,7 @@ fn legacy_slot_and_named_fallback_keep_selected_context_authority() {
             PersistentAlias::Named("x".into()),
         )
         .unwrap();
-        assert_eq!(vars[2], Value::Num(7.0));
+        assert_eq!(*vars.get(2).unwrap(), Value::Num(7.0));
         finish_success(&named, &mut vars, &authority, "f").unwrap();
         assert_eq!(
             authority.persistent_named_value("f", "x").unwrap(),
@@ -251,7 +259,7 @@ fn no_completion_replay_after_newer_recursive_or_failed_frame_effect() {
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let authority = runtime.session_variable_authority();
         let mut aliases = PersistentAliases::new();
-        let mut vars = vec![Value::Num(1.0)];
+        let mut vars = InterpreterVars::from_owned(vec![Value::Num(1.0)]);
         declare(
             &mut aliases,
             &mut vars,
@@ -261,7 +269,7 @@ fn no_completion_replay_after_newer_recursive_or_failed_frame_effect() {
             PersistentAlias::Named("x".into()),
         )
         .unwrap();
-        vars[0] = Value::Num(1.0);
+        let _ = vars.replace_owned(0, Value::Num(1.0));
         publish_store(&aliases, &vars, &authority, "f", 0).unwrap();
         authority
             .store_persistent_named_and_slot("f", "x", 0, Value::Num(2.0))
@@ -273,7 +281,7 @@ fn no_completion_replay_after_newer_recursive_or_failed_frame_effect() {
             Some(Value::Num(2.0))
         );
         finish_success(&aliases, &mut vars, &authority, "f").unwrap();
-        assert_eq!(vars[0], Value::Num(2.0));
+        assert_eq!(*vars.get(0).unwrap(), Value::Num(2.0));
         assert_eq!(
             authority.persistent_named_value("f", "x").unwrap(),
             Some(Value::Num(2.0))

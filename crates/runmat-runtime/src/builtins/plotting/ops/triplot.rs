@@ -323,12 +323,7 @@ pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let target_axes = parsed.axes_target.map(|(_, axes)| axes);
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Triangulation",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
             let plot = plot_slot

@@ -6,6 +6,7 @@ mod decomposition;
 mod eig;
 mod eigs;
 mod lu;
+mod pcg;
 mod qr;
 mod qz;
 mod schur;
@@ -26,6 +27,7 @@ pub use options::FactorOption;
 pub use ordeig::*;
 pub use ordqz::*;
 pub use ordschur::*;
+pub use pcg::*;
 pub use qr::*;
 pub use qz::*;
 pub use rsf2csf::*;
@@ -39,6 +41,7 @@ pub(super) fn extend_entries(entries: &mut Vec<&'static crate::BuiltinCatalogEnt
         &EIG_CATALOG_ENTRY,
         &EIGS_CATALOG_ENTRY,
         &LU_CATALOG_ENTRY,
+        &PCG_CATALOG_ENTRY,
         &QR_CATALOG_ENTRY,
         &QZ_CATALOG_ENTRY,
         &SCHUR_CATALOG_ENTRY,

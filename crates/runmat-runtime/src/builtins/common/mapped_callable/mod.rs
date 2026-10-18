@@ -2,14 +2,14 @@ mod invoke;
 mod parse;
 
 use runmat_builtins::BuiltinCatalogIdentity;
-use runmat_value::{Closure, Value};
+use runmat_value::Value;
 
 #[derive(Clone)]
 pub(crate) enum MappedCallable {
     Builtin { identity: BuiltinCatalogIdentity },
     DynamicName { name: String },
     ExternalName { name: String },
-    Closure(Closure),
+    Closure(crate::call::descriptor::RetainedClosureValue),
 }
 
 #[derive(Debug)]

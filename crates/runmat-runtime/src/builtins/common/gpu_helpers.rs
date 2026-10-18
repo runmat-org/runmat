@@ -1,7 +1,7 @@
 use runmat_accelerate_api::{
     AccelProvider, GpuTensorHandle, GpuTensorStorage, HostIntegerDataOwned, HostNumericDataOwned,
     HostNumericDataView, HostNumericTensorOwned, HostNumericTensorView, HostTensorOwned,
-    IntegerElementType, NumericElementType, ProviderPrecision,
+    IntegerElementType, NumericElementType, PreparedNumericDownloadStage, ProviderPrecision,
 };
 use runmat_types::{standard, ClassIdentity};
 use runmat_value::{
@@ -12,7 +12,7 @@ use runmat_value::{IntegerComplexStorage, NumericScalar, NumericStorage};
 use crate::build_runtime_error;
 
 mod residency_cleanup;
-mod complex_transfer;
+pub(crate) mod complex_transfer;
 pub use complex_transfer::native_complex_upload_workspace;
 pub(crate) use residency_cleanup::clear_input_residency;
 mod real_range;
@@ -218,18 +218,24 @@ pub(crate) fn value_from_numeric_download(
             return Err("logical payload must use real storage".into());
         }
         let bits = match host.data {
-            HostNumericDataOwned::F64(values) => values
-                .into_iter()
-                .map(|value| u8::from(value != 0.0))
-                .collect(),
-            HostNumericDataOwned::F32(values) => values
-                .into_iter()
-                .map(|value| u8::from(value != 0.0))
-                .collect(),
-            HostNumericDataOwned::U8(values) => values
-                .into_iter()
-                .map(|value| u8::from(value != 0))
-                .collect(),
+            HostNumericDataOwned::F64(values) => {
+                runmat_value::exact_capacity_vec_with(values.len(), |index| {
+                    u8::from(values[index] != 0.0)
+                })
+                .map_err(|error| error.to_string())?
+            }
+            HostNumericDataOwned::F32(values) => {
+                runmat_value::exact_capacity_vec_with(values.len(), |index| {
+                    u8::from(values[index] != 0.0)
+                })
+                .map_err(|error| error.to_string())?
+            }
+            HostNumericDataOwned::U8(values) => {
+                runmat_value::exact_capacity_vec_with(values.len(), |index| {
+                    u8::from(values[index] != 0)
+                })
+                .map_err(|error| error.to_string())?
+            }
             HostNumericDataOwned::I8(_)
             | HostNumericDataOwned::I16(_)
             | HostNumericDataOwned::I32(_)
@@ -237,7 +243,7 @@ pub(crate) fn value_from_numeric_download(
             | HostNumericDataOwned::U16(_)
             | HostNumericDataOwned::U32(_)
             | HostNumericDataOwned::U64(_) => {
-                return Err("logical payload cannot use native integer storage".into())
+                return Err("logical payload cannot use native integer storage".into());
             }
         };
         return LogicalArray::new(bits, host.shape).map(Value::LogicalArray);
@@ -443,6 +449,56 @@ pub async fn download_value_preserving_residency_async(
     provider: &dyn AccelProvider,
     handle: &GpuTensorHandle,
 ) -> crate::BuiltinResult<Value> {
+    download_value_preserving_residency_with_admission_async(
+        provider,
+        handle,
+        NumericDownloadAdmission::None,
+    )
+    .await
+}
+
+/// A selected finite readback carries the provider mapping callback's exact
+/// retained claim across cancellation; the native payload has a separate
+/// selected host-workspace grant.
+pub(crate) async fn download_value_preserving_residency_admitted_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    completion_claim: std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+) -> crate::BuiltinResult<Value> {
+    download_value_preserving_residency_with_admission_async(
+        provider,
+        handle,
+        NumericDownloadAdmission::Callback(completion_claim),
+    )
+    .await
+}
+
+/// A provider-issued stage proves selected physical scratch/queue ownership
+/// before download. This shares the ordinary decoder and source checks.
+pub(crate) async fn download_value_preserving_residency_staged_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    stage: PreparedNumericDownloadStage,
+) -> crate::BuiltinResult<Value> {
+    download_value_preserving_residency_with_admission_async(
+        provider,
+        handle,
+        NumericDownloadAdmission::Stage(stage),
+    )
+    .await
+}
+
+enum NumericDownloadAdmission {
+    None,
+    Callback(std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>),
+    Stage(PreparedNumericDownloadStage),
+}
+
+async fn download_value_preserving_residency_with_admission_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    admission: NumericDownloadAdmission,
+) -> crate::BuiltinResult<Value> {
     let _source_guard = ResidencyRestoreGuard::new(handle);
     if provider.device_id() != handle.device_id() {
         return Err(
@@ -458,7 +514,28 @@ pub async fn download_value_preserving_residency_async(
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
             .build()
     })?;
-    let host = provider.download_numeric(handle).await.map_err(|error| {
+    let native = match admission {
+        NumericDownloadAdmission::Callback(claim) => {
+            // The provider future's own captured claim would drop before its
+            // Box frame is deallocated. Keep an outer clone alive until that
+            // frame drops; the provider callback retains another clone if it
+            // outlives a cancelled waiter.
+            let frame_funding = claim.clone();
+            let future = provider.download_numeric_admitted(handle, claim);
+            let result = future.await;
+            drop(frame_funding);
+            result
+        }
+        NumericDownloadAdmission::None => provider.download_numeric(handle).await,
+        NumericDownloadAdmission::Stage(stage) => {
+            let frame_funding = stage.completion_claim();
+            let future = provider.download_numeric_admitted_stage(handle, stage);
+            let result = future.await;
+            drop(frame_funding);
+            result
+        }
+    };
+    let host = native.map_err(|error| {
         let fallback = build_runtime_error(format!("gpu download: {error}"))
             .with_identifier("RunMat:gpu:DownloadFailed")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
@@ -528,7 +605,7 @@ pub async fn download_native_values_async(
             data.extend(logical.data.into_iter().map(NumericScalar::U8));
             Ok(HostNativeTensorOwned {
                 data,
-                shape: logical.shape,
+                shape: logical.shape.to_vec(),
             })
         }
         Value::Num(value) => Ok(HostNativeTensorOwned {
@@ -647,7 +724,7 @@ pub async fn download_floating_projection_async(
             )
             .with_identifier("RunMat:gpu:IntegerFloatingProjection")
             .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-            .build())
+            .build());
         }
     };
     Ok(HostTensorOwned {
@@ -753,7 +830,7 @@ pub fn upload_complex_tensor_protecting(
     )
 }
 
-fn tensor_numeric_view(tensor: &Tensor) -> HostNumericDataView<'_> {
+pub(crate) fn tensor_numeric_view(tensor: &Tensor) -> HostNumericDataView<'_> {
     if let Some(values) = tensor.as_f64_slice() {
         return HostNumericDataView::F64(values);
     }

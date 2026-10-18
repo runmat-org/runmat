@@ -22,7 +22,7 @@ pub fn shape(value: &Value) -> Option<Vec<usize>> {
         Value::SparseTensor(value) => Some(value.shape()),
         Value::GpuTensor(value) => Some(value.shape().to_vec()),
         Value::StringArray(value) => Some(value.shape.clone()),
-        Value::LogicalArray(value) => Some(value.shape.clone()),
+        Value::LogicalArray(value) => Some(value.shape.to_vec()),
         Value::CharArray(value) => Some(value.shape().to_vec()),
         Value::Cell(value) => Some(value.shape.clone()),
         Value::StructArray(value) => Some(value.shape().to_vec()),

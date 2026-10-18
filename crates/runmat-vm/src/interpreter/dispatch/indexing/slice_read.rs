@@ -1,16 +1,17 @@
 use super::{
-    apply_symbolic_function_reference, build_index_plan, build_slice_selectors,
-    gather_cell_with_plan, gather_struct_array_with_plan, idx_read_slice,
-    invoke_resolved_object_index_path_method_in_context, logical_value_from_tensor,
+    build_index_plan, build_slice_selectors, gather_cell_with_plan, gather_struct_array_with_plan,
+    idx_read_slice, invoke_resolved_object_index_path_method_in_context, logical_value_from_tensor,
     map_slice_shape_error, object_slice_selector, read_scalar_like_slice,
     resolve_object_index_protocol, resolve_single_sequence, ObjectIndexOp, ObjectSubscript,
     ObjectSubscriptPath, RuntimeError, Value,
 };
+use crate::interpreter::vars::InterpreterVars;
+use runmat_runtime::indexing::symbolic::apply_function_reference as apply_symbolic_function_reference;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    _vars: &mut [Value],
+    _vars: &mut InterpreterVars,
     function_registry: &crate::bytecode::FunctionRegistry,
     _pc: usize,
     runtime: &runmat_runtime::context::RuntimeContext,

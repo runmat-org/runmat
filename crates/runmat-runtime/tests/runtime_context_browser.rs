@@ -54,7 +54,7 @@ fn interleaved_runtime_contexts_retain_their_host_services() {
 }
 
 async fn session_variable(label: &'static str, value: f64) {
-    store_global_named(label, Value::Num(value));
+    store_global_named(label, Value::Num(value)).expect("scoped global write should succeed");
     let mut yielded = false;
     std::future::poll_fn(move |_| {
         if yielded {

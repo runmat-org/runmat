@@ -4,9 +4,19 @@ use runmat_value::{Value, ValueSequence};
 
 #[path = "lexical/environment.rs"]
 mod environment;
+#[path = "lexical/completion.rs"]
+mod completion;
+pub use completion::{
+    LexicalBindingRevision, LexicalCompletionChange, LexicalCompletionScope,
+    PreparedLexicalCompletionBatch,
+};
 pub use environment::{
-    allocate_environment, read_binding, remove_binding, remove_owned_binding, root_environment,
-    write_binding, write_owned_binding,
+    allocate_environment, owned_binding_ids, read_binding, read_binding_lease,
+    read_binding_lease_with_context, remove_binding, remove_binding_with_context,
+    remove_owned_binding, remove_owned_binding_with_context, reserve_owned_binding,
+    reserve_owned_binding_with_context, root_environment, write_binding,
+    write_binding_with_context, write_owned_binding, write_owned_binding_with_context,
+    LexicalBindingReadLease,
 };
 
 /// One binding-keyed value shared with a lexically nested function.

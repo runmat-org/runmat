@@ -144,6 +144,7 @@ pub async fn evaluate_numeric_text_source_in_context(
         builtin: "str2num",
         ast: &ast,
         workspace_bindings: &names,
+        workspace_value_count: values.len(),
         lowering_bindings: &names,
         function_registry,
         source_ref: Some(source_ref),
@@ -217,6 +218,7 @@ pub async fn evaluate_numeric_text_source_in_context(
                             builtin: "str2num",
                             ast: &ast,
                             workspace_bindings: &names,
+                            workspace_value_count: values.len(),
                             lowering_bindings: &names,
                             function_registry,
                             source_ref: Some(source_ref),
@@ -236,10 +238,10 @@ pub async fn evaluate_numeric_text_source_in_context(
             }
         }
     }
-    let (bytecode, result_slot, runtime, _publication) = match compiled {
-        DynamicEvalCompiled::Ordinary(bytecode, result_slot) => (
+    let (bytecode, result, runtime, _publication) = match compiled {
+        DynamicEvalCompiled::Ordinary(bytecode, result) => (
             *bytecode,
-            result_slot,
+            result,
             runtime.without_selected_graph_program(),
             None,
         ),
@@ -254,13 +256,13 @@ pub async fn evaluate_numeric_text_source_in_context(
             )?;
             (
                 admitted.execution_bytecode,
-                admitted.result_slot,
+                admitted.result,
                 admitted.runtime,
                 Some(admitted.publication),
             )
         }
     };
-    let result_slot = result_slot.ok_or_else(|| {
+    let result = result.ok_or_else(|| {
         runmat_runtime::build_runtime_error(
             "numeric-text expression has no compiler-owned result slot",
         )
@@ -307,13 +309,17 @@ pub async fn evaluate_numeric_text_source_in_context(
     };
     completion.try_map_owned(
         |completion| {
-            let value = completion.values.get(result_slot).cloned().ok_or_else(|| {
-                runmat_runtime::build_runtime_error(
-                    "numeric-text result slot was not populated by its compiled expression",
-                )
-                .with_identifier("RunMat:SourceEvaluation:MissingNumericResult")
-                .build()
-            })?;
+            let value = completion
+                .values
+                .get(result.slot)
+                .map(|value| value.clone())
+                .ok_or_else(|| {
+                    runmat_runtime::build_runtime_error(
+                        "numeric-text result slot was not populated by its compiled expression",
+                    )
+                    .with_identifier("RunMat:SourceEvaluation:MissingNumericResult")
+                    .build()
+                })?;
             if method == NumericTextEvaluation::Restricted
                 && !runmat_runtime::builtins::common::validation::value_is_numeric_or_logical(
                     &value,
@@ -349,6 +355,7 @@ mod tests {
             builtin: "str2num",
             ast: &expression,
             workspace_bindings: &bindings,
+            workspace_value_count: 0,
             lowering_bindings: &bindings,
             function_registry: &registry,
             source_ref: None,
@@ -361,12 +368,12 @@ mod tests {
         .map_err(RuntimeError::from)
         .unwrap()
         .unwrap();
-        let DynamicEvalCompiled::Ordinary(bytecode, Some(slot)) = compiled else {
+        let DynamicEvalCompiled::Ordinary(bytecode, Some(result)) = compiled else {
             panic!("numeric expression has no compiler-owned output slot");
         };
         assert!(bytecode.instructions.windows(2).any(|pair| matches!(pair,
             [crate::bytecode::Instr::EmitStackTop { label: crate::bytecode::EmitLabel::InternalCapture }, crate::bytecode::Instr::StoreVar(output)]
-                if *output == slot
+                if *output == result.slot
         )));
     }
 

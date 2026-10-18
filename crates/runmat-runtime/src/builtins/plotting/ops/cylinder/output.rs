@@ -103,11 +103,10 @@ pub(super) async fn make_coordinates(
     let rows = profile.len();
     let cols = grid_size(rows, n)?;
     let outputs = if plot { 3 } else { requested.clamp(1, 3) };
-    let one = ExactHostTensor2dAllocation::requested_bytes(NumericDType::F64, rows, cols)
+    let one = HostAllocationPlan::retained_tensor_bytes(NumericDType::F64, &[rows, cols])
         .map_err(|source| allocation_error("grid geometry", source))?;
-    let retained = u64::try_from(one)
-        .ok()
-        .and_then(|bytes| bytes.checked_mul(outputs as u64))
+    let retained = one
+        .checked_mul(outputs as u64)
         .ok_or_else(|| error(2, "retained grid extent overflow"))?;
     let runtime = crate::context::legacy::active();
     let mut cooperation = runtime

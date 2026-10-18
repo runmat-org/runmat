@@ -5,7 +5,7 @@
 use faer::linalg::evd::ComputeEigenvectors;
 use faer::linalg::gevd::{self, GevdParams};
 use faer::{c64, Par, Spec};
-use runmat_value::{ExactHostComplexTensorAllocation, ExactHostTensorAllocation, NumericDType};
+use runmat_value::NumericDType;
 
 use crate::context::host_allocation::{HostAllocationError, HostAllocationPlan};
 
@@ -85,14 +85,12 @@ fn local_real_qz_stack(n: usize) -> Result<u64, HostAllocationError> {
 
 fn output_bytes(n: usize, dtype: NumericDType, mode: Mode) -> Result<u64, HostAllocationError> {
     let count = n.checked_mul(n).ok_or(HostAllocationError::Overflow)?;
-    let bytes = match mode {
-        Mode::Real => ExactHostTensorAllocation::requested_bytes_for_dimensions(dtype, count, 2),
+    match mode {
+        Mode::Real => HostAllocationPlan::retained_tensor_bytes_for_dimensions(dtype, count, 2),
         Mode::Complex => {
-            ExactHostComplexTensorAllocation::requested_bytes_for_dimensions(dtype, count, 2)
+            HostAllocationPlan::retained_complex_tensor_bytes_for_dimensions(dtype, count, 2)
         }
     }
-    .map_err(HostAllocationError::Numeric)?;
-    u64::try_from(bytes).map_err(|_| HostAllocationError::Overflow)
 }
 
 /// Count simultaneously live matrices and temporary column vectors at each
@@ -210,9 +208,7 @@ pub(super) fn eigenvalues_plan(
     let scratch = add(add(times(matrix, 2)?, local)?, add(pairs, small_columns)?)?;
     let output = if requested {
         // A real quasi-triangular block may still have complex eigenvalues.
-        let bytes = ExactHostComplexTensorAllocation::requested_bytes_for_dimensions(dtype, n, 2)
-            .map_err(HostAllocationError::Numeric)?;
-        u64::try_from(bytes).map_err(|_| HostAllocationError::Overflow)?
+        HostAllocationPlan::retained_complex_tensor_bytes_for_dimensions(dtype, n, 2)?
     } else {
         0
     };

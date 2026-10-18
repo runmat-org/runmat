@@ -17,12 +17,12 @@ mod source_ref;
 mod statement_pc;
 mod subscript;
 
-/// Portable schema for serialized [`Bytecode`] payloads. Version 23 adds
-/// expanded builtin calls whose output count comes from a VM slot.
-pub const BYTECODE_SCHEMA_VERSION: u16 = 23;
-/// Portable schema for serialized [`FunctionRegistry`] payloads. Version 17
-/// carries the same selected function-local layout in retained bodies.
-pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 17;
+/// Portable schema for serialized [`Bytecode`] payloads. Version 24 adds
+/// borrowed stochastic source operand descriptors and an exact For fallback.
+pub const BYTECODE_SCHEMA_VERSION: u16 = 24;
+/// Portable schema for serialized [`FunctionRegistry`] payloads. Version 18
+/// carries the borrowed stochastic opcode in retained function bodies.
+pub const FUNCTION_REGISTRY_SCHEMA_VERSION: u16 = 18;
 
 pub use artifact::{
     decode_interpreter_program_v2, decode_interpreter_script_v2, encode_interpreter_program_v2,
@@ -40,8 +40,10 @@ pub use fusion_stage::{CompiledFusionStageStatement, FusionStageProjection};
 pub use instr::{
     AggregateElementSpec, BytecodeCodistributedOverload, BytecodeCollectiveOp,
     BytecodeDistributedBuildValidation, BytecodeDistributedOp, BytecodeSpmdHeader, EmitLabel,
-    Instr, StackEffect,
+    Instr, StackEffect, StochasticSourceOperand,
 };
+#[cfg(feature = "native-accel")]
+pub(crate) use multi_store::CapturedImageInputs;
 #[cfg(feature = "native-accel")]
 pub use multi_store::{
     ImageCheckpoint, ImageLiveOut, ImageLiveOutSource, ImageNormalizePublicationJoin,

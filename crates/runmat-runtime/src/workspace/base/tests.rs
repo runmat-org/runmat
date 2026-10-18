@@ -1,10 +1,13 @@
 use crate::context::RuntimeWorkspaceService;
+use crate::workspace::GlobalBindingTarget;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_value::HandleRef;
 use runmat_value::{CellArray, Tensor, TransientValueError, Value};
 
 use super::values::RootedWorkspaceEntry;
 use super::*;
+
+mod foreign_retirement;
 
 fn assigned(name: &str, value: Value) -> WorkspaceDelta {
     let mut delta = WorkspaceDelta::new();
@@ -84,11 +87,36 @@ fn global_binding_and_shadow_removal_share_one_canonical_revision() {
     let revision = workspace.revision().unwrap();
     let mut delta = WorkspaceDelta::new();
     delta.bind_global("g");
-    workspace.commit(revision, delta).unwrap();
+    let commit = workspace.commit(revision, delta).unwrap();
+
+    assert!(matches!(
+        commit.changes().changes()[0].data(),
+        super::delta::WorkspaceChangeData::BindGlobal {
+            target: GlobalBindingTarget::Named(name),
+            ..
+        } if name.as_str() == "g"
+    ));
 
     let snapshot = workspace.snapshot().unwrap();
     assert!(snapshot.is_global("g"));
     assert_eq!(snapshot.get("g"), None);
+
+    let mut clear_and_bind = WorkspaceDelta::new();
+    clear_and_bind.clear();
+    clear_and_bind.bind_global_target("g", GlobalBindingTarget::LegacySlot(9));
+    let commit = workspace.apply(clear_and_bind).unwrap();
+    assert_eq!(commit.change_count(), 2);
+    assert!(matches!(
+        commit.changes().changes()[1].data(),
+        super::delta::WorkspaceChangeData::BindGlobal {
+            target: GlobalBindingTarget::LegacySlot(9),
+            ..
+        }
+    ));
+    assert_eq!(
+        workspace.snapshot().unwrap().global_target("g"),
+        Some(&GlobalBindingTarget::LegacySlot(9))
+    );
 }
 
 #[test]
@@ -187,6 +215,100 @@ fn clean_projection_reconciles_incrementally() {
         } if to.get() == 1
     ));
     assert_eq!(projection.lookup("external"), Some(&Value::Num(4.0)));
+}
+
+#[test]
+fn stable_capture_and_older_projection_publish_one_authoritative_binding() {
+    let context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let owner = BaseWorkspaceOwner::new();
+    owner.apply(assigned("x", Value::Num(1.0))).unwrap();
+    owner.apply(assigned("unrelated", Value::Num(7.0))).unwrap();
+    let mut projection = owner.begin_projection().unwrap();
+    let capture = owner.capture_stable_with_context(&context).unwrap();
+    assert_eq!(capture.get("x"), Some(&Value::Num(1.0)));
+
+    projection.assign("x", Value::Num(2.0)).unwrap();
+    projection.publish().unwrap();
+    let snapshot = owner.snapshot().unwrap();
+    assert_eq!(snapshot.len(), 2);
+    assert_eq!(snapshot.iter().filter(|(name, _)| *name == "x").count(), 1);
+    assert_eq!(snapshot.get("x"), Some(&Value::Num(2.0)));
+    assert_eq!(snapshot.get("unrelated"), Some(&Value::Num(7.0)));
+}
+
+#[test]
+fn first_projection_mutation_captures_complete_canonical_prefix_before_publication() {
+    let owner = BaseWorkspaceOwner::new();
+    owner.apply(assigned("x", Value::Num(1.0))).unwrap();
+    owner.apply(assigned("y", Value::Num(7.0))).unwrap();
+    let mut projection = owner.begin_projection().unwrap();
+    projection.assign("x", Value::Num(2.0)).unwrap();
+    owner.apply(assigned("z", Value::Num(9.0))).unwrap();
+
+    projection.publish().unwrap();
+    let snapshot = owner.snapshot().unwrap();
+    assert_eq!(snapshot.len(), 3);
+    for (name, value) in [("x", 2.0), ("y", 7.0), ("z", 9.0)] {
+        assert_eq!(
+            snapshot.iter().filter(|(found, _)| *found == name).count(),
+            1
+        );
+        assert_eq!(snapshot.get(name), Some(&Value::Num(value)));
+        assert_eq!(projection.lookup(name), Some(&Value::Num(value)));
+    }
+    assert_eq!(projection.iter().count(), 3);
+}
+
+#[test]
+fn clean_projection_adopts_same_revision_physical_capture_before_global_change() {
+    let context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let owner = BaseWorkspaceOwner::new();
+    owner.apply(assigned("g", Value::Num(1.0))).unwrap();
+    let mut projection = owner.begin_projection().unwrap();
+    owner.capture_stable_with_context(&context).unwrap();
+
+    // Direct application can already install a managed canonical generation;
+    // the physical reconciliation variant is not the public namespace result.
+    projection.reconcile().unwrap();
+    assert_eq!(
+        projection.iter().filter(|(name, _)| *name == "g").count(),
+        1
+    );
+    projection.bind_global("g").unwrap();
+    projection.publish().unwrap();
+    let snapshot = owner.snapshot().unwrap();
+    assert!(snapshot.is_global("g"));
+    assert_eq!(snapshot.get("g"), None);
+    assert_eq!(snapshot.len(), 0);
+
+    let mut later = owner.begin_projection().unwrap();
+    later.unbind_global("g").unwrap();
+    later.publish().unwrap();
+    assert_eq!(owner.snapshot().unwrap().get("g"), None);
+}
+
+#[test]
+fn captured_generation_reconciliation_keeps_unrelated_names_once_after_delta() {
+    let context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let owner = BaseWorkspaceOwner::new();
+    owner.apply(assigned("x", Value::Num(1.0))).unwrap();
+    owner.apply(assigned("y", Value::Num(2.0))).unwrap();
+    let mut projection = owner.begin_projection().unwrap();
+    owner.capture_stable_with_context(&context).unwrap();
+    let mut writer = owner.begin_projection().unwrap();
+    writer.assign("x", Value::Num(3.0)).unwrap();
+    writer.publish().unwrap();
+
+    projection.reconcile().unwrap();
+    assert_eq!(projection.iter().count(), 2);
+    assert_eq!(projection.lookup("x"), Some(&Value::Num(3.0)));
+    assert_eq!(projection.lookup("y"), Some(&Value::Num(2.0)));
 }
 
 #[test]
@@ -341,7 +463,8 @@ fn canonical_service_keeps_base_globals_and_persistents_as_separate_authorities(
     let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()))
         .with_service_ports(RuntimeServicePorts::default().with_workspace(service.clone()));
     let _scope = crate::context::RuntimeContextGuard::enter(runtime);
-    crate::workspace::session::store_global_named("global", Value::Num(2.0));
+    crate::workspace::session::store_global_named("global", Value::Num(2.0))
+        .expect("install the independent global binding");
     crate::workspace::session::store_persistent_named("f", "persistent", Value::Num(3.0));
 
     assert_eq!(service.try_lookup("base").unwrap(), Some(Value::Num(1.0)));
@@ -496,6 +619,27 @@ fn canonical_remove_releases_deleted_capture_immediately() {
         assert!(runmat_gc::gc_clone_value(&handle).is_err());
     });
 }
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn stable_capture_keeps_legacy_handle_root_until_last_generation_retires() {
+    runmat_gc::gc_test_context(|| {
+        let context = crate::context::RuntimeContext::new(std::rc::Rc::new(
+            crate::execution::RuntimeExecutionService::new(),
+        ));
+        let (initial, handle, value) = rooted_handle("captured");
+        let workspace = BaseWorkspaceOwner::new();
+        drop(workspace.apply(assigned("held", value)).unwrap());
+        let capture = workspace.capture_stable_with_context(&context).unwrap();
+        assert!(capture.get("held").is_some());
+        initial.unroot().unwrap();
+        drop(workspace.apply(removed("held")).unwrap());
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        drop(capture);
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    });
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
@@ -527,7 +671,7 @@ fn unpublished_ordered_delta_retains_intermediate_values_until_dropped() {
         let workspace = BaseWorkspaceOwner::new();
         let mut projection = workspace.begin_projection().unwrap();
         projection.assign("temporary", value).unwrap();
-        projection.remove("temporary");
+        projection.remove("temporary").unwrap();
         initial.unroot().unwrap();
 
         assert!(projection.lookup("temporary").is_none());
@@ -554,7 +698,7 @@ fn projection_clear_releases_its_capture_without_whole_workspace_reroot() {
 
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_ok());
-        projection.clear();
+        projection.clear().unwrap();
         runmat_gc::gc_collect_major().unwrap();
         assert!(runmat_gc::gc_clone_value(&handle).is_err());
     });

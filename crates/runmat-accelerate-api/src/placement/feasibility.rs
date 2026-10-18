@@ -71,6 +71,11 @@ pub struct ProviderWorkload {
     /// integer operation. Each batch has two authenticated API outputs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_integer_batch: Option<crate::random::GpuIntegerBatchWorkload>,
+    /// One selected caller-supplied-noise stochastic evolution. The workload
+    /// carries semantic arithmetic identity, never an ambient RNG route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stochastic_evolution:
+        Option<crate::stochastic_evolution::ProviderStochasticEvolutionWorkload>,
     /// Explicit physical ABI for the existing ordinary typed fusion owner.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fused_elementwise: Option<crate::ProviderFusedElementwiseWorkload>,
@@ -271,7 +276,49 @@ impl ProviderFeasibility {
     }
 }
 
+fn numeric_download_element_type(element: NumericElementType) -> ProviderElementType {
+    match element {
+        NumericElementType::F32 => ProviderElementType::F32,
+        NumericElementType::F64 => ProviderElementType::F64,
+        NumericElementType::I8 => ProviderElementType::I8,
+        NumericElementType::I16 => ProviderElementType::I16,
+        NumericElementType::I32 => ProviderElementType::I32,
+        NumericElementType::I64 => ProviderElementType::I64,
+        NumericElementType::U8 => ProviderElementType::U8,
+        NumericElementType::U16 => ProviderElementType::U16,
+        NumericElementType::U32 => ProviderElementType::U32,
+        NumericElementType::U64 => ProviderElementType::U64,
+    }
+}
+
+fn numeric_download_role_matches(
+    role: &ProviderRepresentation,
+    source: &GpuTensorHandle,
+    expected_element_type: ProviderElementType,
+    expected_layout: ProviderLayout,
+    expected_residency: ProviderResidency,
+) -> bool {
+    let ProviderRepresentation {
+        element_type,
+        storage,
+        layout,
+        shape,
+        residency,
+    } = role;
+    *element_type == expected_element_type
+        && *storage == ProviderStorage::DenseReal
+        && *layout == expected_layout
+        && *residency == expected_residency
+        && shape.len() == source.shape().len()
+        && shape
+            .iter()
+            .zip(source.shape())
+            .all(|(&actual, &expected)| u64::try_from(expected).ok() == Some(actual))
+}
+
 impl ProviderFeasibilityQuery {
+    const NUMERIC_DOWNLOAD_OPERATION: &'static str = "transfer.download";
+
     /// Construct the exact native real-numeric readback roles for one live
     /// source. Lazy views retain their strided input representation; the host
     /// payload is contiguous in logical shape. Complex/unsupported physical
@@ -280,23 +327,16 @@ impl ProviderFeasibilityQuery {
         if source.physical().storage() != GpuTensorStorage::Real {
             return None;
         }
-        let element_type = match source.physical().element_type() {
-            NumericElementType::F32 => ProviderElementType::F32,
-            NumericElementType::F64 => ProviderElementType::F64,
-            NumericElementType::I8 => ProviderElementType::I8,
-            NumericElementType::I16 => ProviderElementType::I16,
-            NumericElementType::I32 => ProviderElementType::I32,
-            NumericElementType::I64 => ProviderElementType::I64,
-            NumericElementType::U8 => ProviderElementType::U8,
-            NumericElementType::U16 => ProviderElementType::U16,
-            NumericElementType::U32 => ProviderElementType::U32,
-            NumericElementType::U64 => ProviderElementType::U64,
-        };
-        let shape = source
-            .shape()
-            .iter()
-            .map(|&extent| u64::try_from(extent).ok())
-            .collect::<Option<Vec<_>>>()?;
+        let element_type = numeric_download_element_type(source.physical().element_type());
+        // This exact query is also used by finite host-readback admission.
+        // Try-collecting through `Option` erases the iterator's lower size
+        // hint and may request a minimum Vec capacity larger than the rank.
+        // Reserve the authenticated rank before the first allocation.
+        let mut shape = Vec::new();
+        shape.try_reserve_exact(source.shape().len()).ok()?;
+        for &extent in source.shape() {
+            shape.push(u64::try_from(extent).ok()?);
+        }
         let input = ProviderRepresentation {
             element_type,
             storage: ProviderStorage::DenseReal,
@@ -316,7 +356,7 @@ impl ProviderFeasibilityQuery {
             residency: ProviderResidency::Host,
         };
         Some(Self {
-            operation: ProviderOperationIdentity::new("transfer.download"),
+            operation: ProviderOperationIdentity::new(Self::NUMERIC_DOWNLOAD_OPERATION),
             family: ProviderOperationFamily::Download,
             inputs: vec![input],
             outputs: vec![output],
@@ -331,7 +371,47 @@ impl ProviderFeasibilityQuery {
     /// source, but it may not reinterpret class, storage, shape, count, or
     /// host-output layout to turn another transfer query into that route.
     pub fn matches_numeric_download(&self, source: &GpuTensorHandle) -> bool {
-        Self::exact_numeric_download(source).as_ref() == Some(self)
+        // Validation must not allocate a second query inside the caller's
+        // already admitted query footprint. Compare borrowed roles instead.
+        let Self {
+            operation,
+            family,
+            inputs,
+            outputs,
+            workload,
+        } = self;
+        let ([input], [output]) = (inputs.as_slice(), outputs.as_slice()) else {
+            return false;
+        };
+        if source.physical().storage() != GpuTensorStorage::Real
+            || operation.0 != Self::NUMERIC_DOWNLOAD_OPERATION
+            || *family != ProviderOperationFamily::Download
+            || *workload
+                != (ProviderWorkload {
+                    requested_outputs: Some(1),
+                    ..ProviderWorkload::default()
+                })
+        {
+            return false;
+        }
+        let element_type = numeric_download_element_type(source.physical().element_type());
+        numeric_download_role_matches(
+            input,
+            source,
+            element_type,
+            if crate::handle_is_transposed(source) {
+                ProviderLayout::Strided
+            } else {
+                ProviderLayout::ColumnMajorContiguous
+            },
+            ProviderResidency::Device,
+        ) && numeric_download_role_matches(
+            output,
+            source,
+            element_type,
+            ProviderLayout::ColumnMajorContiguous,
+            ProviderResidency::Host,
+        )
     }
 
     pub(crate) fn conservative_transfer_feasibility(

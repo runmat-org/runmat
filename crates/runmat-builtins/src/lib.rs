@@ -4,6 +4,8 @@ wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
 pub use inventory;
 mod class_declarations;
 pub mod diagnostic_identifier;
+mod dynamic_workspace;
+pub use dynamic_workspace::DynamicWorkspaceBuiltin;
 pub mod warning_semantics;
 mod legacy_index;
 pub use class_declarations::{

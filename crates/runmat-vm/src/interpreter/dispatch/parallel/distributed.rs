@@ -7,27 +7,52 @@ mod construction;
 mod coordination;
 mod indices;
 
-pub(crate) async fn encode_spmd_output(
-    runtime: &runmat_runtime::context::RuntimeContext,
-    value: &Value,
-) -> Result<runmat_execution::SpmdOutputValue, RuntimeError> {
-    if let Value::Distributed(handle) = value {
-        runmat_runtime::parallel::lease::validate_distributed(runtime, handle)?;
-        let collective = runtime
-            .service_ports()
-            .require_collective("distributed SPMD output")
-            .map_err(super::capability_error)?;
-        let service = runtime
-            .service_ports()
-            .require_distributed("distributed SPMD output")
-            .map_err(super::capability_error)?;
-        return service
-            .export_local((**handle).clone(), collective.context().rank)
+/// Validate and retain export metadata before releasing a guarded slot. The
+/// returned future does not borrow `handle` and invokes the service only when
+/// polled, after the caller has released that slot guard.
+fn prepare_spmd_distributed_export<'runtime>(
+    runtime: &'runtime runmat_runtime::context::RuntimeContext,
+    handle: &runmat_execution::DistributedValueHandle,
+) -> Result<
+    impl std::future::Future<Output = Result<runmat_execution::SpmdOutputValue, RuntimeError>>
+        + use<'runtime>,
+    RuntimeError,
+> {
+    runmat_runtime::parallel::lease::validate_distributed(runtime, handle)?;
+    let rank = runtime
+        .service_ports()
+        .require_collective("distributed SPMD output")
+        .map_err(super::capability_error)?
+        .context()
+        .rank;
+    let service = runtime
+        .service_ports()
+        .require_distributed("distributed SPMD output")
+        .map_err(super::capability_error)?;
+    let handle = handle.clone();
+    Ok(async move {
+        service
+            .export_local(handle, rank)
             .await
             .map(Box::new)
-            .map(runmat_execution::SpmdOutputValue::Distributed);
+            .map(runmat_execution::SpmdOutputValue::Distributed)
+    })
+}
+
+/// Encode a completed interpreter slot without retaining its shared-control
+/// read guard across a distributed export suspension. Distributed export
+/// retains its existing handle metadata once, without cloning array payloads
+/// or adding a boxed Value; inline values are encoded synchronously.
+pub(crate) async fn encode_spmd_interpreter_output(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    value: crate::interpreter::vars::InterpreterValueRef<'_>,
+) -> Result<runmat_execution::SpmdOutputValue, RuntimeError> {
+    if let Value::Distributed(handle) = &*value {
+        let export = prepare_spmd_distributed_export(runtime, handle)?;
+        drop(value);
+        return export.await;
     }
-    runmat_runtime::execution::value_codec::encode_inline_value_in_context(value, runtime)
+    runmat_runtime::execution::value_codec::encode_inline_value_in_context(&value, runtime)
         .map(runmat_execution::SpmdOutputValue::Value)
         .map_err(super::value_codec_error)
 }

@@ -7,7 +7,7 @@ pub(super) use read_set::WorkspaceReadSet;
 
 pub(super) async fn ensure_workspace_entries<'a>(
     cache: &'a mut Option<Vec<(String, Value)>>,
-    workspace: &mut WorkspaceReadSet,
+    workspace: &mut WorkspaceReadSet<'_>,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<&'a Vec<(String, Value)>> {
     if cache.is_none() {
@@ -18,7 +18,7 @@ pub(super) async fn ensure_workspace_entries<'a>(
 }
 
 pub(super) async fn collect_workspace_entries(
-    workspace: &mut WorkspaceReadSet,
+    workspace: &mut WorkspaceReadSet<'_>,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     let snapshot = workspace
@@ -61,7 +61,7 @@ pub(super) async fn append_existing_entries(
     new_entries: Vec<(String, Value)>,
     runtime: Option<&crate::context::RuntimeContext>,
     cooperation: &mut MatCodecCooperation<'_>,
-    workspace: &mut WorkspaceReadSet,
+    workspace: &mut WorkspaceReadSet<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
     let entries = read_existing_entries_for_append(path, runtime, cooperation).await?;
     entries.with_owned(|entries| {
@@ -151,7 +151,7 @@ pub(super) async fn append_struct_fields(
 }
 
 pub(super) async fn lookup_workspace(
-    workspace: &mut WorkspaceReadSet,
+    workspace: &mut WorkspaceReadSet<'_>,
     name: &str,
 ) -> BuiltinResult<Value> {
     let value = workspace.lookup(name)?.ok_or_else(|| {

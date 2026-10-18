@@ -54,7 +54,6 @@ pub(super) async fn dispatch(
                     },
                 },
                 args,
-                refresh_workspace_state,
             )
             .await?
             {
@@ -80,7 +79,7 @@ pub(super) async fn dispatch(
             arg_count,
             out_count_slot,
         } => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             match handle_workspace_first_prepared_call(
                 calls::WorkspaceFirstCallContext {
@@ -106,7 +105,6 @@ pub(super) async fn dispatch(
                     },
                 },
                 args,
-                refresh_workspace_state,
             )
             .await?
             {

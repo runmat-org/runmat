@@ -1,4 +1,5 @@
-use runmat_runtime::builtins::common::tensor::{tensor_value_f64, tensor_values_f64_cow};
+use crate::interpreter::vars::InterpreterVars;
+use runmat_runtime::builtins::common::tensor::tensor_values_f64_cow;
 use runmat_runtime::call::arguments::expand_brace_values;
 use runmat_runtime::execution::{RootedValue, RootedValueSequence};
 use runmat_runtime::indexing::plan::{
@@ -19,7 +20,7 @@ use runmat_runtime::object::indexing::{
 };
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_runtime::{build_runtime_error, RuntimeError};
-use runmat_value::{CellArray, SymbolicExpr, Value};
+use runmat_value::{CellArray, Value};
 
 mod scalar_read_and_cell;
 mod scalar_store;
@@ -641,7 +642,7 @@ async fn execute_brace_operation(
 
 async fn execute_brace_operation_from_stack(
     stack: &mut Vec<Value>,
-    _vars: &mut [Value],
+    _vars: &mut InterpreterVars,
     request: BraceStackRequest,
     runtime: &runmat_runtime::context::RuntimeContext,
 ) -> Result<(), RuntimeError> {
@@ -754,7 +755,11 @@ pub async fn paren_index_sequence(
         | Value::Closure(_) => unreachable!("callable values returned above"),
         Value::Symbolic(expr) => {
             if let Some((name, parameters)) = expr.function_reference_signature() {
-                apply_symbolic_function_reference(name, parameters, &raw_indices)
+                runmat_runtime::indexing::symbolic::apply_function_reference(
+                    name,
+                    parameters,
+                    &raw_indices,
+                )
             } else {
                 let indices = linear_index_values(&raw_indices).await?;
                 if indices == [1] {
@@ -799,60 +804,10 @@ pub async fn paren_index_value(
     resolve_single_sequence(sequence)
 }
 
-fn symbolic_scalar_from_value(value: &Value) -> Result<SymbolicExpr, RuntimeError> {
-    match value {
-        Value::Symbolic(expr) => Ok(expr.clone()),
-        Value::Num(value) => Ok(SymbolicExpr::constant(*value)),
-        Value::Int(value) => Ok(SymbolicExpr::constant(value.to_f64())),
-        Value::Bool(value) => Ok(SymbolicExpr::constant(if *value { 1.0 } else { 0.0 })),
-        Value::Tensor(tensor)
-            if runmat_runtime::builtins::common::tensor::is_scalar_tensor(tensor) =>
-        {
-            Ok(SymbolicExpr::constant(tensor_value_f64(tensor, 0)))
-        }
-        Value::LogicalArray(logical) if logical.data.len() == 1 => {
-            Ok(SymbolicExpr::constant(if logical.data[0] != 0 {
-                1.0
-            } else {
-                0.0
-            }))
-        }
-        other => Err(crate::interpreter::errors::mex(
-            "InvalidSymbolicFunctionArgument",
-            &format!("symbolic function arguments must be scalar values, got {other:?}"),
-        )),
-    }
-}
-
-fn apply_symbolic_function_reference(
-    name: &str,
-    parameters: &[String],
-    raw_indices: &[Value],
-) -> Result<Value, RuntimeError> {
-    if raw_indices.len() != parameters.len() {
-        return Err(crate::interpreter::errors::mex(
-            "SymbolicFunctionArity",
-            &format!(
-                "symbolic function {name} expects {} argument(s), got {}",
-                parameters.len(),
-                raw_indices.len()
-            ),
-        ));
-    }
-    let args = raw_indices
-        .iter()
-        .map(symbolic_scalar_from_value)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(Value::Symbolic(SymbolicExpr::function_call(
-        name.to_string(),
-        args,
-    )))
-}
-
 pub async fn dispatch_indexing(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
     function_registry: &crate::bytecode::FunctionRegistry,
     pc: usize,
     runtime: &runmat_runtime::context::RuntimeContext,
@@ -918,8 +873,9 @@ pub async fn dispatch_indexing(
 
 #[cfg(test)]
 mod tests {
-    use super::{map_slice_plan_error, symbolic_scalar_from_value};
+    use super::map_slice_plan_error;
     use futures::executor::block_on;
+    use runmat_runtime::indexing::symbolic::scalar_from_value as symbolic_scalar_from_value;
     use runmat_value::{IntegerStorage, ObjectArray, ObjectInstance, SymbolicExpr, Tensor, Value};
 
     #[test]

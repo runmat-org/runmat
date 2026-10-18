@@ -31,7 +31,7 @@ pub(in crate::execute) fn take_completed_short_circuit_truth(
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("completed short-circuit truth has no active site".into())
     })?;
-    let identity = state.current_embedded_operation().ok_or_else(|| {
+    let identity = state.current_embedded_operation()?.ok_or_else(|| {
         NativeExecutorError::Host("short-circuit truth has no contextual step identity".into())
     })?;
     let completed = state
@@ -67,7 +67,7 @@ pub(in crate::execute) fn begin_short_circuit_truth(
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("pending short-circuit truth has no active site".into())
     })?;
-    let embedded = state.current_embedded_operation().ok_or_else(|| {
+    let embedded = state.current_embedded_operation()?.ok_or_else(|| {
         NativeExecutorError::Host("short-circuit truth has no contextual step identity".into())
     })?;
     let value = RootedValue::new(value)

@@ -253,6 +253,15 @@ impl NativeCompilationInput {
             options.runtime_binding_mode,
             options.builtin_bindings,
         )?;
+        // The optional provider path is an executable fact, not an object
+        // producer's declaration. Walk the exact MIR retained in this input.
+        program.provider_reachable = runmat_mir::analysis::analyze_reachability(
+            &self.mir,
+            &runmat_mir::analysis::ReachabilityNames::default(),
+        )
+        .nodes
+        .iter()
+        .any(|node| node.kind == runmat_mir::analysis::ReachabilityNodeKind::Provider);
         if let Some(selected) = selected {
             // Same verified selection as the object producer; no decoder or
             // absent-field fallback is allowed to infer this commitment.
@@ -315,6 +324,26 @@ impl NativeCompilationInput {
 }
 
 impl ExecutableUnit {
+    /// Resolve adaptive native entry through the same source-owned selection
+    /// used to prepare the compiled product, including function-file entry.
+    pub(crate) fn native_entrypoint_function(
+        &self,
+        preferred_function: Option<&str>,
+    ) -> Result<runmat_hir::FunctionId, runmat_runtime::RuntimeError> {
+        match super::portable_entrypoint::resolve(self, preferred_function)
+            .map_err(native_product_error)?
+        {
+            super::portable_entrypoint::PortableEntrypoint::Callable {
+                compiled_function, ..
+            } => Ok(compiled_function),
+            super::portable_entrypoint::PortableEntrypoint::DeclarationOnly(_) => {
+                Err(native_product_error(
+                    "declaration-only executable has no native callable entrypoint".into(),
+                ))
+            }
+        }
+    }
+
     pub fn prepare_native_compilation(
         &self,
     ) -> Result<NativeCompilationInput, runmat_runtime::RuntimeError> {

@@ -29,11 +29,13 @@ fn eps_finite_host_output_claim_is_admitted_before_sparse_expansion() {
         }
     }
 
-    let bytes =
-        runmat_value::ExactHostTensorAllocation::requested_bytes(NumericDType::F32, &[2, 2])
-            .unwrap();
+    let bytes = crate::context::host_allocation::HostAllocationPlan::retained_tensor_bytes(
+        NumericDType::F32,
+        &[2, 2],
+    )
+    .unwrap();
     let sparse = || SparseTensor::new_f32(2, 2, vec![0, 1, 1], vec![1], vec![2.0]).unwrap();
-    let limited = ManagedHostEffectLedger::new_with_epoch(u64::try_from(bytes).unwrap() - 1, 1);
+    let limited = ManagedHostEffectLedger::new_with_epoch(bytes - 1, 1);
     let runtime = |ledger: ManagedHostEffectLedger| {
         RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
             .with_service_ports(
@@ -47,7 +49,7 @@ fn eps_finite_host_output_claim_is_admitted_before_sparse_expansion() {
     .is_err());
     assert_eq!(limited.snapshot().live_reserved_bytes, 0);
 
-    let ledger = ManagedHostEffectLedger::new_with_epoch(u64::try_from(bytes).unwrap(), 1);
+    let ledger = ManagedHostEffectLedger::new_with_epoch(bytes, 1);
     let context = runtime(ledger.clone());
     let output = futures::executor::block_on(super::super::eps::value(
         &Value::SparseTensor(sparse()),
@@ -61,10 +63,7 @@ fn eps_finite_host_output_claim_is_admitted_before_sparse_expansion() {
         output.as_f32_slice().unwrap()[1],
         runmat_value::spacing_f32(2.0)
     );
-    assert_eq!(
-        ledger.snapshot().live_claimed_bytes,
-        u64::try_from(bytes).unwrap()
-    );
+    assert_eq!(ledger.snapshot().live_claimed_bytes, bytes);
     drop(output);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
 }

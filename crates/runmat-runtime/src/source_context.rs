@@ -1518,7 +1518,9 @@ mod lease_tests {
             lease_source_context_in_context(&runtime, "callback", None, "retained").unwrap();
         let id = lease.source_id();
         let retained = lease.source_info();
-        let child = runtime.fork_parallel_lab(RuntimeServicePorts::default());
+        let child = runtime
+            .fork_parallel_lab(RuntimeServicePorts::default())
+            .expect("idle session fork");
         drop(lease);
         assert!(source_info_in_context(&runtime, id).is_none());
         assert_eq!(retained.text.as_ref(), "retained");
@@ -1557,7 +1559,9 @@ mod lease_tests {
             .program_source_id(runmat_types::ProgramSourceId(1))
             .unwrap();
         let current = replace_current_source_id_in_context(&selected, Some(companion));
-        let child = selected.fork_parallel_lab(RuntimeServicePorts::default());
+        let child = selected
+            .fork_parallel_lab(RuntimeServicePorts::default())
+            .expect("idle session fork");
         drop(current);
         drop(selected);
         assert!(source_info_in_context(&session, primary).is_none());

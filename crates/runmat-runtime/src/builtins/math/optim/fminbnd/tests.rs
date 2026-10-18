@@ -296,7 +296,7 @@ fn logical_numeric_options_are_not_accepted_as_floating_controls() {
             "MaxIter",
             Value::LogicalArray(LogicalArray {
                 data: vec![1].into(),
-                shape: vec![1, 1],
+                shape: vec![1, 1].into(),
             }),
         ),
     ] {

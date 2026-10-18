@@ -1,9 +1,8 @@
 use super::*;
+#[path = "constructors/diag_launch.rs"]
+mod diag_launch;
 #[path = "constructors/optional.rs"]
 mod optional;
-
-const FILL_MAX_DISPATCH_WORKGROUPS: u64 =
-    crate::backend::wgpu_geometry::MAX_DISPATCH_WORKGROUPS as u64;
 
 #[cfg(test)]
 #[path = "constructors/typed_tests.rs"]
@@ -174,7 +173,7 @@ impl WgpuProvider {
         };
         crate::backend::wgpu_geometry::fill_physical_work(
             elements,
-            self.workgroup_config.scalar,
+            self.linear_launch.workgroup(),
             precision,
         )?
         .total_bytes()
@@ -199,6 +198,11 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let total_len = constructor_elements(shape)
             .ok_or_else(|| anyhow!("fill: tensor size exceeds GPU limits"))?;
+        let chunk_capacity = self
+            .pipelines
+            .fill
+            .linear_chunk_capacity()
+            .map_err(|cause| anyhow!("fill: {cause}"))?;
         let shape_vec = shape.to_vec();
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer =
@@ -232,14 +236,10 @@ impl WgpuProvider {
                 .expect("selected or legacy fill pipeline");
             // chunked dispatch below will build per-chunk params buffers
 
-            // Dispatch in chunks to satisfy per-dimension group limits (<= 65535)
-            let wg_size = self.workgroup_config.scalar;
-            let max_groups: u32 = FILL_MAX_DISPATCH_WORKGROUPS as u32;
-            let max_elems_per_dispatch = (max_groups as usize) * (wg_size as usize);
             let mut processed: usize = 0;
             while processed < total_len {
                 let remain = total_len - processed;
-                let chunk_len = remain.min(max_elems_per_dispatch);
+                let chunk_len = remain.min(chunk_capacity);
 
                 // Per-chunk params (length)
                 let params_buffer = match self.precision {
@@ -285,10 +285,7 @@ impl WgpuProvider {
                         ],
                     });
 
-                let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                    chunk_len as u32,
-                    wg_size,
-                );
+                let workgroups = self.pipelines.fill.linear_dispatch_groups(chunk_len)?;
                 crate::backend::wgpu::dispatch::creation::run(
                     emission,
                     pending,
@@ -505,6 +502,10 @@ impl WgpuProvider {
             "ndgrid: tensor length exceeds GPU dispatch limits"
         );
         let total_u32 = total_len as u32;
+        let chunk_capacity = self
+            .linear_launch
+            .chunk_capacity()
+            .ok_or_else(|| anyhow!("ndgrid: enabled launch extent overflow"))?;
         let strides = column_major_strides_checked(request.output_shape)?;
         let expected_element_type = match self.precision {
             NumericPrecision::F32 => runmat_accelerate_api::NumericElementType::F32,
@@ -550,7 +551,7 @@ impl WgpuProvider {
         };
 
         let buffers = self.with_emission(|emission, pending| -> Result<_> {
-            let shader = ndgrid_shader(self.precision);
+            let shader = ndgrid_shader(self.precision, self.linear_launch.workgroup());
             let shader_module =
                 emission
                     .device()
@@ -613,8 +614,6 @@ impl WgpuProvider {
                 },
             );
 
-            let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
-                * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
             let mut outputs = Vec::with_capacity(request.output_count);
             for dim in 0..request.output_count {
                 let out_buffer =
@@ -660,10 +659,12 @@ impl WgpuProvider {
                                         },
                                     ],
                                 });
-                        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                            chunk_len as u32,
-                            crate::backend::wgpu::config::WORKGROUP_SIZE,
-                        );
+                        let workgroups =
+                            self.linear_launch
+                                .dispatch_groups(chunk_len)
+                                .ok_or_else(|| {
+                                    anyhow!("ndgrid: chunk exceeds enabled launch limits")
+                                })?;
                         crate::backend::wgpu::dispatch::creation::run(
                             emission,
                             pending,
@@ -1160,9 +1161,6 @@ impl WgpuProvider {
         vector: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
-        let contiguous = self.reshape_exec(vector, vector.shape())?;
-        let vector = &contiguous;
-
         let entry = self.get_entry(vector)?;
         if entry.storage != GpuTensorStorage::Real {
             return Err(runmat_accelerate_api::unsupported_provider_operation(
@@ -1188,6 +1186,40 @@ impl WgpuProvider {
         out_rows: usize,
         out_cols: usize,
     ) -> Result<GpuTensorHandle> {
+        let declared = self.get_entry(vector)?;
+        if declared.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input requires a complex provider kernel",
+            ));
+        }
+        diag_ensure_shape(&declared.shape)?;
+        let (declared_rows, declared_cols) = diag_rows_cols(&declared.shape);
+        ensure!(
+            diag_is_vector_like(declared_rows, declared_cols, declared.shape.len()),
+            "diag: input must be a vector"
+        );
+        let declared_len = declared.len;
+        let total = out_rows
+            .checked_mul(out_cols)
+            .ok_or_else(|| anyhow!("diag: result size exceeds GPU dispatch limits"))?;
+        let dispatched_len =
+            diag_launch::vector_dispatch_len(declared_len, out_rows, out_cols, offset);
+        diag_launch::ensure_storage_domain(
+            declared.allocated_bytes,
+            total,
+            dispatched_len,
+            self.element_size,
+            &self.adapter_limits,
+        )?;
+        // A bound diagonal of length d requires at least d*d floating output
+        // elements. The WGPU storage-binding byte limit is u32-sized and a
+        // floating element is at least four bytes, so every admitted diagonal
+        // is smaller than even the WG=1, 65_535-group linear-launch capacity.
+        let workgroups = self
+            .pipelines
+            .diag_from_vector
+            .linear_dispatch_groups(dispatched_len)
+            .map_err(|cause| anyhow!("diag: {cause}"))?;
         let contiguous = self.reshape_exec(vector, vector.shape())?;
         let vector = &contiguous;
 
@@ -1206,26 +1238,26 @@ impl WgpuProvider {
 
         let len = entry.len;
         ensure!(
-            len <= u32::MAX as usize,
-            "diag: vector is too large for GPU dispatch"
+            len == declared_len,
+            "diag: authenticated vector size disagrees with its view"
+        );
+        ensure!(
+            dispatched_len <= u32::MAX as usize,
+            "diag: written diagonal is too large for GPU dispatch"
         );
         ensure!(
             out_rows <= u32::MAX as usize && out_cols <= u32::MAX as usize,
             "diag: result dimension exceeds GPU dispatch limits"
         );
-        let total = out_rows
-            .checked_mul(out_cols)
-            .ok_or_else(|| anyhow!("diag: result size exceeds GPU dispatch limits"))?;
         ensure!(
             total <= u32::MAX as usize,
             "diag: result size exceeds GPU dispatch limits"
         );
         let offset_i32 = i32::try_from(offset)
             .map_err(|_| anyhow!("diag: offset magnitude exceeds GPU limits"))?;
-
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer = self.create_storage_buffer(emission, total, "runmat-diag-vec-out")?;
-            if len == 0 || total == 0 {
+            if dispatched_len == 0 || total == 0 {
                 return Ok(out_buffer);
             }
             {
@@ -1245,7 +1277,7 @@ impl WgpuProvider {
             }
 
             let params = crate::backend::wgpu::params::DiagFromVectorParams {
-                len: len as u32,
+                len: dispatched_len as u32,
                 rows: out_rows as u32,
                 cols: out_cols as u32,
                 _pad0: 0,
@@ -1275,10 +1307,6 @@ impl WgpuProvider {
                         },
                     ],
                 });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                len as u32,
-                self.workgroup_config.scalar,
-            );
             crate::backend::wgpu::dispatch::diag::run(
                 emission,
                 pending,
@@ -1306,6 +1334,32 @@ impl WgpuProvider {
         matrix: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
+        let declared = self.get_entry(matrix)?;
+        if declared.storage != GpuTensorStorage::Real {
+            return Err(runmat_accelerate_api::unsupported_provider_operation(
+                "diag: complex input requires a complex provider kernel",
+            ));
+        }
+        diag_ensure_shape(&declared.shape)?;
+        let (declared_rows, declared_cols) = diag_rows_cols(&declared.shape);
+        ensure!(
+            !diag_is_vector_like(declared_rows, declared_cols, declared.shape.len()),
+            "diag: matrix input required"
+        );
+        let declared_diag_len = diag_length(declared_rows, declared_cols, offset);
+        diag_launch::ensure_storage_domain(
+            declared.allocated_bytes,
+            declared_diag_len,
+            declared_diag_len,
+            self.element_size,
+            &self.adapter_limits,
+        )?;
+        // The same d*d storage bound applies to the source matrix here.
+        let workgroups = self
+            .pipelines
+            .diag_extract
+            .linear_dispatch_groups(declared_diag_len)
+            .map_err(|cause| anyhow!("diag: {cause}"))?;
         let contiguous = self.reshape_exec(matrix, matrix.shape())?;
         let matrix = &contiguous;
 
@@ -1322,6 +1376,10 @@ impl WgpuProvider {
             "diag: matrix input required"
         );
         let diag_len = diag_length(rows, cols, offset);
+        ensure!(
+            rows == declared_rows && cols == declared_cols && diag_len == declared_diag_len,
+            "diag: authenticated matrix shape disagrees with its view"
+        );
         if diag_len == 0 {
             let out_buffer = self.with_emission(|emission, _| {
                 self.create_storage_buffer(emission, 0, "runmat-diag-extract-empty")
@@ -1342,7 +1400,6 @@ impl WgpuProvider {
         );
         let offset_i32 = i32::try_from(offset)
             .map_err(|_| anyhow!("diag: offset magnitude exceeds GPU limits"))?;
-
         let out_buffer = self.with_emission(|emission, pending| -> Result<_> {
             let out_buffer =
                 self.create_storage_buffer(emission, diag_len, "runmat-diag-extract-out")?;
@@ -1390,10 +1447,6 @@ impl WgpuProvider {
                         },
                     ],
                 });
-            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
-                diag_len as u32,
-                self.workgroup_config.scalar,
-            );
             crate::backend::wgpu::dispatch::diag::run(
                 emission,
                 pending,
@@ -1418,9 +1471,8 @@ impl WgpuProvider {
     }
 }
 
-fn ndgrid_shader(precision: NumericPrecision) -> String {
+fn ndgrid_shader(precision: NumericPrecision, workgroup: u32) -> String {
     let scalar = precision.as_str();
-    let workgroup = crate::backend::wgpu::config::WORKGROUP_SIZE;
     format!(
         r#"
 struct Tensor {{

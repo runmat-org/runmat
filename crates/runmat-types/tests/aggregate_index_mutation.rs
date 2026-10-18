@@ -2,9 +2,9 @@ use runmat_types::{
     infer_cell_aggregate, infer_concatenate, infer_index, infer_index_mutation,
     infer_index_sequence, infer_member_read, infer_member_sequence, infer_member_write,
     infer_mutation, infer_struct, infer_tensor_aggregate, AssignmentCreationPolicy,
-    AssignmentShapePolicy, IndexKind, IndexResultContext, IndexSelectorFact, MemberName,
-    MutationContract, NumericClass, NumericDomain, NumericFact, PlaceMutationKind, SequenceUse,
-    ShapeFact, ValueFact, ValueKindFact,
+    AssignmentShapePolicy, DynamicReason, IndexKind, IndexResultContext, IndexSelectorFact,
+    MemberName, MutationContract, NumericClass, NumericDomain, NumericFact, PlaceMutationKind,
+    SequenceUse, ShapeFact, ValueFact, ValueKindFact,
 };
 use std::collections::BTreeMap;
 
@@ -85,6 +85,47 @@ fn cells_preserve_positions_summary_and_brace_semantics() {
         panic!("expected output list");
     };
     assert_eq!(outputs.outputs, vec![first, second]);
+}
+
+#[test]
+fn unknown_brace_receivers_remain_dynamic_without_hiding_proven_errors() {
+    let unknown = ValueFact::unknown(DynamicReason::ExternalData);
+    let single = infer_index(
+        &unknown,
+        IndexKind::Brace,
+        &[IndexSelectorFact::KnownOneBasedIndex(1)],
+        IndexResultContext::ReadSingle,
+    );
+    assert!(single.diagnostics.is_empty());
+    assert_eq!(single.fact, unknown);
+
+    let sequence = infer_index_sequence(
+        &unknown,
+        IndexKind::Brace,
+        &[IndexSelectorFact::Colon],
+        IndexResultContext::ReadCommaList,
+    );
+    assert!(sequence.diagnostics.is_empty());
+    assert!(sequence.sequence.variadic);
+    assert!(sequence.sequence.outputs.is_empty());
+
+    let proven_noncell = infer_index(
+        &numeric(NumericClass::Double, ShapeFact::Scalar),
+        IndexKind::Brace,
+        &[IndexSelectorFact::KnownOneBasedIndex(1)],
+        IndexResultContext::ReadSingle,
+    );
+    assert_eq!(proven_noncell.diagnostics.len(), 1);
+    assert_eq!(proven_noncell.diagnostics[0].code, "RM-TYPE-BRACE-INDEX");
+
+    let invalid_selector = infer_index(
+        &unknown,
+        IndexKind::Brace,
+        &[IndexSelectorFact::KnownOneBasedIndex(0)],
+        IndexResultContext::ReadSingle,
+    );
+    assert_eq!(invalid_selector.diagnostics.len(), 1);
+    assert_eq!(invalid_selector.diagnostics[0].code, "RM-TYPE-INDEX-BOUNDS");
 }
 
 #[test]

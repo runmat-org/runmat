@@ -561,12 +561,7 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     if let Some(visible) = style_args.style.appearance.visible {
         plot.set_visible(visible);
     }
-    let opts = PlotRenderOptions {
-        title: "Scatter Plot",
-        x_label: "X",
-        y_label: "Y",
-        ..Default::default()
-    };
+    let opts = PlotRenderOptions::default();
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();

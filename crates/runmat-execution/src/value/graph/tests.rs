@@ -1,6 +1,27 @@
 use super::*;
 use crate::{Digest, ProgramFunctionId};
 
+#[test]
+fn callable_argument_revision_is_distinct_from_selected_value_revision() {
+    assert_eq!(
+        GraphRequiredSchema::from_version(GRAPH_REQUEST_SCHEMA_V10),
+        Some(GraphRequiredSchema::V10)
+    );
+    assert_eq!(
+        GraphRequiredSchema::from_version(GRAPH_REQUEST_SCHEMA_V11),
+        Some(GraphRequiredSchema::SelectedValuesV11)
+    );
+    assert_eq!(
+        GraphRequiredSchema::from_version(GRAPH_REQUEST_SCHEMA_V12),
+        Some(GraphRequiredSchema::CallableArgumentsV12)
+    );
+    assert_eq!(
+        GraphRequiredSchema::CallableArgumentsV12.required_capability(),
+        Some(crate::resource::Capability::GraphCallableArgumentsV12)
+    );
+    assert!(GraphRequiredSchema::CallableArgumentsV12 > GraphRequiredSchema::SelectedValuesV11);
+}
+
 mod negative;
 
 fn origin(function: u32) -> FunctionBindingOrigin {

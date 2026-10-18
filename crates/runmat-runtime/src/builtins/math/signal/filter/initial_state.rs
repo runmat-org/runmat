@@ -156,7 +156,7 @@ impl InitialState {
                 None,
             ),
             Value::LogicalArray(logical) => {
-                let shape = logical.shape.clone();
+                let shape = logical.shape.to_vec();
                 (
                     preparation::logical_array(&logical, cooperation).await?,
                     shape,

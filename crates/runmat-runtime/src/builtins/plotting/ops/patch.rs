@@ -163,12 +163,7 @@ pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Patch",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let patch = plot.take().expect("patch plot consumed once");
             let plot_index = figure.add_patch_plot_on_axes(patch, axes);
@@ -286,7 +281,7 @@ fn apply_positional_data(opts: &mut PatchOptions, args: &mut Vec<Value>) -> Buil
     Ok(())
 }
 
-fn is_color_literal(value: &Value) -> bool {
+pub(super) fn is_color_literal(value: &Value) -> bool {
     if value_as_string(value).is_some() {
         return parse_color_value(&LineStyleParseOptions::generic(BUILTIN_NAME), value).is_ok();
     }

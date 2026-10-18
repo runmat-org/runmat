@@ -59,7 +59,7 @@ impl DataProvenance {
             }
             (Self::Logical(original), Value::LogicalArray(current)) => {
                 current.shape == original.shape
-                    && current.shape == node.shape()
+                    && current.shape.as_slice() == node.shape()
                     && node.numeric_dtype() == Some(NumericDType::F64)
                     && current.data.shares_allocation_with(&original.data)
             }

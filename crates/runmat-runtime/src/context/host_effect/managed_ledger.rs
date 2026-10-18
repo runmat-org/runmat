@@ -5,7 +5,9 @@ use super::{
     HostEffectAllocationError, HostEffectLiveAllocationClaim, HostEffectLiveAllocationKind,
     HostEffectLiveAllocationReservation, HostEffectOutputHeadroom, HostEffectStageReservation,
 };
-use runmat_value::{ExactHostAllocationReservation, ExactHostNumericAllocationError};
+use runmat_value::{
+    ExactHostAllocationClaim, ExactHostAllocationReservation, ExactHostNumericAllocationError,
+};
 use std::fmt;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -14,6 +16,12 @@ use std::sync::{
 
 mod pool;
 pub use pool::{ManagedHostEffectStagePool, ManagedHostEffectStageSlot};
+mod output_claim;
+use output_claim::{OwnedOutputClaim, OwnedOutputClaimRefund};
+
+pub(crate) const fn owned_output_claim_metadata_bytes() -> usize {
+    OwnedOutputClaim::metadata_bytes()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ManagedHostEffectLedgerSnapshot {
@@ -38,8 +46,17 @@ impl ManagedHostEffectLedgerSnapshot {
     }
 }
 
+#[derive(Debug)]
 struct LedgerState {
     snapshot: ManagedHostEffectLedgerSnapshot,
+}
+
+impl OwnedOutputClaimRefund for Mutex<LedgerState> {
+    fn refund_exact_output_claim(&self, charged: u64) {
+        let mut state = self.lock().expect("host ledger lock");
+        state.snapshot.live_claimed_bytes -= charged;
+        state.snapshot.live_reserved_bytes -= charged;
+    }
 }
 
 #[derive(Clone)]
@@ -48,6 +65,45 @@ pub struct ManagedHostEffectLedger {
 }
 
 impl ManagedHostEffectLedger {
+    /// Issue one dynamically sized, exact temporary backing. Unlike a stage
+    /// precharge, this claim competes for live capacity at each actual growth;
+    /// the owned claim header is freed before its charge is refunded.
+    pub(crate) fn reserve_dynamic_scratch_claim(
+        &self,
+        bytes: usize,
+        epoch: u64,
+    ) -> Result<ExactHostAllocationClaim, HostEffectAllocationError> {
+        let charged = bytes
+            .checked_add(OwnedOutputClaim::metadata_bytes())
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        let mut state = self.state.lock().expect("host ledger lock");
+        if !state.snapshot.current || state.snapshot.epoch != epoch {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        let reserved = state
+            .snapshot
+            .live_reserved_bytes
+            .checked_add(charged)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        if reserved > state.snapshot.capacity_bytes {
+            return Err(HostEffectAllocationError::ExceedsCapacity);
+        }
+        let claimed = state
+            .snapshot
+            .live_claimed_bytes
+            .checked_add(charged)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        state.snapshot.live_reserved_bytes = reserved;
+        state.snapshot.peak_reserved_bytes = state.snapshot.peak_reserved_bytes.max(reserved);
+        state.snapshot.live_claimed_bytes = claimed;
+        state.snapshot.peak_claimed_bytes = state.snapshot.peak_claimed_bytes.max(claimed);
+        drop(state);
+        let owner: Arc<dyn OwnedOutputClaimRefund> = self.state.clone();
+        OwnedOutputClaim::allocate(owner, charged)
+            .map_err(|_| HostEffectAllocationError::AllocationFailed)
+    }
+
     /// Exact retained metadata outside a live invocation headroom, including
     /// a session-owned state or a view derived from an already published value.
     /// It competes with every stage/output reservation on the same ledger;
@@ -347,7 +403,9 @@ impl HostEffectStageReservation for ManagedHostEffectStageReservation {
         // handed to the sole Box owner without an intervening fallible step.
         unsafe {
             pointer.write(claim);
-            Ok(HostEffectLiveAllocationClaim::Owned(Box::from_raw(pointer)))
+            Ok(HostEffectLiveAllocationClaim::Owned(
+                runmat_async::ManagedDiagnosticAllocation::new(Box::from_raw(pointer)),
+            ))
         }
     }
 
@@ -386,19 +444,59 @@ impl fmt::Debug for TemporaryClaim {
     }
 }
 
+impl runmat_async::ManagedDiagnosticAllocationLease for TemporaryClaim {
+    fn retire_owned(self: Box<Self>) {
+        // SAFETY: the unique Box came from the global allocator with the
+        // exact TemporaryClaim layout and is retired exactly once.
+        unsafe {
+            Self::retire_owned_with(self, |pointer, layout| {
+                std::alloc::dealloc(pointer.as_ptr(), layout)
+            })
+        }
+    }
+}
+
 impl HostEffectLiveAllocationReservation for TemporaryClaim {}
 
-impl Drop for TemporaryClaim {
-    fn drop(&mut self) {
-        let mut temporary = self.stage.temporary.lock().expect("temporary ledger lock");
-        let mut ledger = self.stage.ledger.lock().expect("host ledger lock");
-        temporary.live_bytes -= self.bytes;
-        ledger.snapshot.live_claimed_bytes -= self.bytes;
+impl TemporaryClaim {
+    /// Release the claim header before refunding the bytes that funded it.
+    ///
+    /// # Safety
+    /// `deallocate` must release the supplied exact global-allocator block
+    /// once and must not unwind after ownership leaves its Box.
+    unsafe fn retire_owned_with(
+        claim: Box<Self>,
+        deallocate: impl FnOnce(std::ptr::NonNull<u8>, std::alloc::Layout),
+    ) {
+        let pointer = Box::into_raw(claim);
+        // SAFETY: consuming the unique Box makes the stage field uniquely
+        // owned until it is dropped after the refund below.
+        let stage = unsafe { std::ptr::read(std::ptr::addr_of!((*pointer).stage)) };
+        // SAFETY: the allocation remains live through this scalar read.
+        let bytes = unsafe { (*pointer).bytes };
+        deallocate(
+            unsafe { std::ptr::NonNull::new_unchecked(pointer.cast::<u8>()) },
+            std::alloc::Layout::new::<Self>(),
+        );
+        Self::refund(&stage, bytes);
+    }
+
+    fn refund(stage: &StageInner, bytes: u64) {
+        let mut temporary = stage.temporary.lock().expect("temporary ledger lock");
+        let mut ledger = stage.ledger.lock().expect("host ledger lock");
+        temporary.live_bytes -= bytes;
+        ledger.snapshot.live_claimed_bytes -= bytes;
         if temporary.live_bytes == 0 && temporary.retire_pending {
-            let reserved = self.stage.reserved_bytes.swap(0, Ordering::AcqRel);
+            let reserved = stage.reserved_bytes.swap(0, Ordering::AcqRel);
             ledger.snapshot.live_reserved_bytes -= reserved;
             temporary.retire_pending = false;
         }
+    }
+}
+
+impl Drop for TemporaryClaim {
+    fn drop(&mut self) {
+        Self::refund(&self.stage, self.bytes);
     }
 }
 
@@ -425,6 +523,14 @@ struct ManagedOutputHeadroom {
 struct HeadroomInner {
     ledger: Arc<Mutex<LedgerState>>,
     state: Mutex<HeadroomState>,
+}
+
+impl fmt::Debug for HeadroomInner {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HeadroomInner")
+            .finish_non_exhaustive()
+    }
 }
 
 struct HeadroomState {
@@ -470,6 +576,37 @@ impl HostEffectOutputHeadroom for ManagedOutputHeadroom {
         }))
     }
 
+    fn reserve_exact_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<runmat_value::ExactHostAllocationClaim, ExactHostNumericAllocationError> {
+        let metadata = OwnedOutputClaim::metadata_bytes();
+        let charged = bytes
+            .checked_add(metadata)
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or(ExactHostNumericAllocationError::ExceedsPermit)?;
+        let mut headroom = self.inner.state.lock().expect("output headroom lock");
+        if !headroom.active || charged > headroom.unallocated {
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let mut ledger = self.inner.ledger.lock().expect("host ledger lock");
+        if !ledger.snapshot.current {
+            return Err(ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let claimed = ledger
+            .snapshot
+            .live_claimed_bytes
+            .checked_add(charged)
+            .ok_or(ExactHostNumericAllocationError::ExceedsPermit)?;
+        headroom.unallocated -= charged;
+        ledger.snapshot.live_claimed_bytes = claimed;
+        ledger.snapshot.peak_claimed_bytes = ledger.snapshot.peak_claimed_bytes.max(claimed);
+        drop(ledger);
+        drop(headroom);
+        let owner: Arc<dyn OwnedOutputClaimRefund> = self.inner.clone();
+        OwnedOutputClaim::allocate(owner, charged)
+    }
+
     fn retire_invocation(&self) {
         let mut headroom = self.inner.state.lock().expect("output headroom lock");
         if !headroom.active {
@@ -479,6 +616,19 @@ impl HostEffectOutputHeadroom for ManagedOutputHeadroom {
         ledger.snapshot.live_reserved_bytes -= headroom.unallocated;
         headroom.unallocated = 0;
         headroom.active = false;
+    }
+}
+
+impl OwnedOutputClaimRefund for HeadroomInner {
+    fn refund_exact_output_claim(&self, charged: u64) {
+        let mut headroom = self.state.lock().expect("output headroom lock");
+        let mut state = self.ledger.lock().expect("host ledger lock");
+        if headroom.active {
+            headroom.unallocated += charged;
+        } else {
+            state.snapshot.live_reserved_bytes -= charged;
+        }
+        state.snapshot.live_claimed_bytes -= charged;
     }
 }
 

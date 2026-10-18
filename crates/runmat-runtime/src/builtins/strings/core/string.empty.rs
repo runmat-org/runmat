@@ -179,7 +179,7 @@ fn prototype_dims(proto: &Value) -> Vec<usize> {
         Value::CharArray(ca) => ca.shape.clone(),
         Value::Tensor(t) => t.shape().to_vec(),
         Value::ComplexTensor(t) => t.shape().to_vec(),
-        Value::LogicalArray(l) => l.shape.clone(),
+        Value::LogicalArray(l) => l.shape.to_vec(),
         Value::Cell(cell) => cell.shape.clone(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => vec![1, 1],

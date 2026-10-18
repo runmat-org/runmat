@@ -11,6 +11,8 @@ build = "build.rs"
 links = "runmat_runtime_native"
 
 [dependencies]
+allocator-api2 = "=0.2.21"
+hashbrown = "=0.16.1"
 async-trait = "0.1"
 runmat-value = { workspace = true }
 runmat-extension-abi = { workspace = true }
@@ -60,6 +62,7 @@ libc = "0.2"
 log = { workspace = true }
 tracing = "0.1"
 libm = "0.2"
+complex-bessel = { version = "=0.3.0", default-features = false }
 num-complex = "0.4"
 num-bigint = "0.4"
 num-traits = "0.2"

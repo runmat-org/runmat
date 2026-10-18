@@ -227,7 +227,7 @@ impl RealNumericView<'_> {
         match self {
             Self::Scalar(_) => vec![1, 1],
             Self::Tensor(value) => value.shape().to_vec(),
-            Self::Logical(value) => value.shape.clone(),
+            Self::Logical(value) => value.shape.to_vec(),
             Self::Char(value) => vec![value.rows, value.cols],
             Self::Sparse(value) => vec![value.rows, value.cols],
         }

@@ -6,15 +6,20 @@ use runmat_runtime::workspace::{DetachedWorkspaceValues, WorkspaceDetachSelectio
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
 
+#[cfg(test)]
+use super::workspace::workspace_frame_assign;
 use super::workspace::workspace_frame_for_service;
 use super::workspace::{
-    reconcile_workspace_frame, release_pending_workspace_service_frame,
-    reserve_workspace_service_frame, workspace_frame_assign, workspace_frame_assign_from_executor,
-    workspace_frame_clear, workspace_frame_declare_global, workspace_frame_detach_selected,
-    workspace_frame_lookup, workspace_frame_name_is_global, workspace_frame_publishes,
-    workspace_frame_remove, workspace_frame_snapshot, PendingWorkspaceAdmission, WorkspaceFrameId,
-    WorkspaceFrameLifecycle,
+    reconcile_workspace_frame_with_context, release_pending_workspace_service_frame,
+    reserve_workspace_service_frame, workspace_frame_detach_selected, workspace_frame_lookup,
+    workspace_frame_publishes, workspace_frame_snapshot, PendingWorkspaceAdmission,
+    WorkspaceFrameId, WorkspaceFrameLifecycle,
 };
+
+mod access;
+mod completion;
+mod declaration;
+mod mutations;
 
 /// Exact current-frame service installed around one interpreter invocation.
 /// Top-level frames delegate admitted mutations to the Runtime projection;
@@ -116,34 +121,52 @@ impl Drop for VmWorkspaceService {
 }
 
 impl RuntimeWorkspaceService for VmWorkspaceService {
+    fn caller_workspace_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Option<Rc<dyn RuntimeWorkspaceService>>, RuntimeError> {
+        self.ensure_effect_in_context(Some(context))?;
+        Ok(self.delegate())
+    }
+
+    fn capture_workspace_completion_identity_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Option<runmat_runtime::workspace::WorkspaceCompletionIdentity>, RuntimeError> {
+        self.capture_completion_in_context(context)
+    }
+
+    fn apply_workspace_completion_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        identity: runmat_runtime::workspace::WorkspaceCompletionIdentity,
+        source: &dyn runmat_runtime::workspace::WorkspaceCompletionSource,
+    ) -> Result<(), RuntimeError> {
+        self.apply_completion_in_context(context, identity, source)
+    }
+
+    fn prepare_workspace_completion_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        identity: runmat_runtime::workspace::WorkspaceCompletionIdentity,
+        source: &dyn runmat_runtime::workspace::WorkspaceCompletionSource,
+    ) -> Result<runmat_runtime::workspace::PreparedWorkspaceCompletion, RuntimeError> {
+        self.prepare_completion_in_context(context, identity, source)
+    }
+
     fn detach_selected(
         &self,
         selection: &WorkspaceDetachSelection,
     ) -> Result<DetachedWorkspaceValues, RuntimeError> {
-        self.ensure_frame_active()?;
-        self.ensure_effect_authority()?;
-        let delegate = self.should_publish().then(|| self.delegate()).flatten();
-        workspace_frame_detach_selected(self.frame, selection, |detached| {
-            let _retired_delegate = if let Some(delegate) = delegate {
-                let delegated = match selection {
-                    WorkspaceDetachSelection::All => WorkspaceDetachSelection::All,
-                    WorkspaceDetachSelection::Names(names) => {
-                        WorkspaceDetachSelection::Names(names.clone())
-                    }
-                    WorkspaceDetachSelection::Except(_) => WorkspaceDetachSelection::Names(
-                        detached
-                            .entries()
-                            .iter()
-                            .map(|(name, _)| name.clone())
-                            .collect(),
-                    ),
-                };
-                Some(delegate.detach_selected(&delegated)?)
-            } else {
-                None
-            };
-            Ok(())
-        })
+        self.detach_in_context(None, selection)
+    }
+
+    fn detach_selected_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        selection: &WorkspaceDetachSelection,
+    ) -> Result<DetachedWorkspaceValues, RuntimeError> {
+        self.detach_in_context(Some(context), selection)
     }
 
     fn visit_retained_values(&self, visitor: &mut dyn FnMut(&Value) -> Option<()>) -> Option<()> {
@@ -194,98 +217,96 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
     }
 
     fn try_lookup(&self, name: &str) -> Result<Option<Value>, RuntimeError> {
-        if !self.is_pending() {
-            self.ensure_frame_active()?;
-            self.ensure_effect_authority()?;
-            return Ok(workspace_frame_lookup(self.frame, name));
-        }
-        self.delegate()
-            .map(|delegate| delegate.try_lookup(name))
-            .unwrap_or(Ok(None))
+        self.lookup_in_context(None, name)
+    }
+
+    fn try_lookup_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+    ) -> Result<Option<Value>, RuntimeError> {
+        self.lookup_in_context(Some(context), name)
     }
 
     fn try_snapshot(&self) -> Result<Vec<(String, Value)>, RuntimeError> {
-        if self.is_pending() {
-            return self
-                .delegate()
-                .map(|delegate| delegate.try_snapshot())
-                .unwrap_or_else(|| Ok(Vec::new()));
-        }
-        self.ensure_frame_active()?;
-        self.ensure_effect_authority()?;
-        workspace_frame_snapshot(self.frame)
-            .ok_or_else(|| frame_error("RunMat:Workspace:FrameClosed", "workspace frame is closed"))
+        self.snapshot_in_context(None)
+    }
+
+    fn try_snapshot_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Vec<(String, Value)>, RuntimeError> {
+        self.snapshot_in_context(Some(context))
     }
 
     fn try_global_names(&self) -> Result<Vec<String>, RuntimeError> {
-        if !self.is_pending() {
-            self.ensure_effect_authority()?;
-        }
-        self.session_variables.global_names()
+        self.global_names_in_context(None)
+    }
+
+    fn try_global_names_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Vec<String>, RuntimeError> {
+        self.global_names_in_context(Some(context))
     }
 
     fn ensure_effect_authority(&self) -> Result<(), RuntimeError> {
-        self.ensure_frame_active()?;
-        if super::workspace::frame_is_detaching(self.frame) {
-            return Err(frame_error(
-                "RunMat:Workspace:FrameUnavailable",
-                "workspace frame has an active detach transaction",
-            ));
-        }
-        if let Some(delegate) = self.delegate() {
-            delegate.ensure_effect_authority()?;
-            if self.should_publish() {
-                let revision = delegate.workspace_revision()?;
-                if revision.is_some() && revision == self.delegate_revision.get() {
-                    return Ok(());
-                }
-                let canonical = delegate.try_snapshot()?;
-                reconcile_workspace_frame(self.frame, canonical)
-                    .map_err(workspace_operation_error)?;
-                self.delegate_revision.set(revision);
-            }
-        }
-        Ok(())
+        self.ensure_effect_in_context(None)
+    }
+
+    fn ensure_effect_authority_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_effect_in_context(Some(context))
     }
 
     fn workspace_revision(
         &self,
     ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, RuntimeError> {
-        self.ensure_effect_authority()?;
+        self.ensure_effect_in_context(None)?;
+        Ok(self.delegate_revision.get())
+    }
+
+    fn workspace_revision_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, RuntimeError> {
+        self.ensure_effect_in_context(Some(context))?;
         Ok(self.delegate_revision.get())
     }
 
     fn ensure_mutation_authority(&self) -> Result<(), RuntimeError> {
-        self.ensure_frame_active()?;
-        if super::workspace::frame_is_detaching(self.frame) {
-            return Err(frame_error(
-                "RunMat:Workspace:FrameUnavailable",
-                "workspace frame has an active detach transaction",
-            ));
-        }
-        if let Some(delegate) = self.delegate() {
-            delegate.ensure_mutation_authority()?;
-        }
-        Ok(())
+        self.ensure_mutation_in_context(None)
+    }
+
+    fn ensure_mutation_authority_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_mutation_in_context(Some(context))
     }
 
     fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
-        self.ensure_effect_authority()?;
-        runmat_runtime::execution::validate_storable_value(&value)?;
-        let global = workspace_frame_name_is_global(self.frame, name).unwrap_or(false);
-        if self.should_publish() {
-            if let Some(delegate) = self.delegate() {
-                if global {
-                    delegate.remove(name)?;
-                } else {
-                    delegate.assign(name, value.clone())?;
-                }
-            }
-        }
-        if global {
-            self.session_variables.store_global(name, value.clone())?;
-        }
-        workspace_frame_assign(self.frame, name, value).map_err(workspace_operation_error)
+        self.assign_in_context(None, name, value)
+    }
+
+    fn assign_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+        value: Value,
+    ) -> Result<(), RuntimeError> {
+        self.assign_in_context(Some(context), name, value)
+    }
+
+    fn assign_ref_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        self.assign_borrowed_in_context(context, name, value)
     }
 
     fn assign_executor_slot(
@@ -294,63 +315,93 @@ impl RuntimeWorkspaceService for VmWorkspaceService {
         name: &str,
         value: Value,
     ) -> Result<(), RuntimeError> {
-        self.ensure_mutation_authority()?;
-        runmat_runtime::execution::validate_storable_value(&value)?;
-        let global = workspace_frame_name_is_global(self.frame, name).unwrap_or(false);
-        if self.should_publish() {
-            if let Some(delegate) = self.delegate() {
-                if global {
-                    delegate.remove(name)?;
-                } else {
-                    delegate.assign_executor_slot(slot, name, value.clone())?;
-                }
-            }
-        }
-        if global {
-            self.session_variables.store_global(name, value.clone())?;
-        }
-        workspace_frame_assign_from_executor(self.frame, name, value)
-            .map_err(workspace_operation_error)
+        self.publish_assignment(
+            mutations::AssignmentPublication {
+                context: None,
+                executor_slot: Some(slot),
+                name,
+                value: &value,
+                retained: None,
+                reconcile_var: false,
+            },
+            |delegate, _context| delegate.assign_executor_slot(slot, name, value.clone()),
+        )
+    }
+
+    fn assign_executor_slot_ref(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        name: &str,
+        value: &Value,
+    ) -> Result<(), RuntimeError> {
+        self.publish_assignment(
+            mutations::AssignmentPublication {
+                context: Some(context),
+                executor_slot: Some(slot),
+                name,
+                value,
+                retained: None,
+                reconcile_var: false,
+            },
+            |delegate, _context| delegate.assign_executor_slot_ref(context, slot, name, value),
+        )
+    }
+
+    fn assign_executor_slot_lease_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        name: &str,
+        value: runmat_runtime::workspace::WorkspaceSlotReadLease,
+    ) -> Result<(), RuntimeError> {
+        self.publish_executor_assignment_lease(context, slot, name, value)
     }
 
     fn clear(&self) -> Result<(), RuntimeError> {
-        self.ensure_effect_authority()?;
-        if self.should_publish() {
-            if let Some(delegate) = self.delegate() {
-                delegate.clear()?;
-            }
-        }
-        workspace_frame_clear(self.frame).map_err(workspace_operation_error)
+        self.clear_in_context(None)
+    }
+
+    fn clear_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        self.clear_in_context(Some(context))
     }
 
     fn declare_global_binding(&self, slot: usize, name: &str) -> Result<(), RuntimeError> {
-        self.ensure_mutation_authority()?;
-        if self.should_publish() {
-            if let Some(delegate) = self.delegate() {
-                delegate.bind_base_global(name)?;
-            }
-        }
-        workspace_frame_declare_global(self.frame, slot, name.to_string()).ok_or_else(|| {
-            frame_error("RunMat:Workspace:FrameClosed", "workspace frame is closed")
-        })?;
-        let value = self.session_variables.declare_global(name)?;
-        workspace_frame_assign_from_executor(self.frame, name, value)
-            .map_err(workspace_operation_error)
+        self.declare_global_in_context(None, slot, name)
+    }
+
+    fn declare_global_binding_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        self.declare_global_in_context(Some(context), slot, name)
+    }
+
+    fn declare_legacy_global_binding_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        slot: usize,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        self.declare_legacy_global_in_context(context, slot, name)
     }
 
     fn remove(&self, name: &str) -> Result<(), RuntimeError> {
-        self.ensure_effect_authority()?;
-        if self.should_publish() {
-            if let Some(delegate) = self.delegate() {
-                delegate.unbind_base_global(name)?;
-            }
-        }
-        workspace_frame_remove(self.frame, name).map_err(workspace_operation_error)
+        self.remove_in_context(None, name)
     }
-}
 
-fn workspace_operation_error(message: String) -> RuntimeError {
-    runmat_runtime::runtime_error::semantic_error("RunMat:Workspace:OperationFailed", message)
+    fn remove_with_context(
+        &self,
+        context: &runmat_runtime::context::RuntimeContext,
+        name: &str,
+    ) -> Result<(), RuntimeError> {
+        self.remove_in_context(Some(context), name)
+    }
 }
 
 fn frame_error(identifier: &'static str, message: &'static str) -> RuntimeError {
@@ -408,7 +459,8 @@ mod tests {
             let activation =
                 super::super::workspace::frame_activation(runtime.local_identity(), service.frame);
             Box::pin(activation.scope(runtime.scope(async move {
-                let mut values = vec![Value::Num(value)];
+                let mut values =
+                    crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(value)]);
                 let _guard = super::super::workspace::set_workspace_state(
                     HashMap::from([("x".to_string(), 0)]),
                     HashSet::from(["x".to_string()]),
@@ -435,10 +487,12 @@ mod tests {
                     super::super::workspace::WorkspaceTarget::Base,
                 ] {
                     assert_eq!(
-                        super::super::workspace::capture_workspace_target(target)
+                        *super::super::workspace::capture_workspace_target(target)
                             .unwrap()
                             .1
-                            .vars[0],
+                            .vars
+                            .get(0)
+                            .expect("completed workspace slot"),
                         Value::Num(value)
                     );
                 }
@@ -462,7 +516,10 @@ mod tests {
         assert!(poll(first.as_mut()).is_ready());
         let first_completion =
             super::super::workspace::take_workspace_completion(first_service.frame).unwrap();
-        assert_eq!(first_completion.state.vars[0], Value::Num(1.0));
+        assert_eq!(
+            *first_completion.state.vars.get(0).unwrap(),
+            Value::Num(1.0)
+        );
         assert_eq!(
             second_service.try_lookup("x").unwrap(),
             Some(Value::Num(2.0))
@@ -471,7 +528,10 @@ mod tests {
         drop(second);
         let second_completion =
             super::super::workspace::take_workspace_completion(second_service.frame).unwrap();
-        assert_eq!(second_completion.state.vars[0], Value::Num(2.0));
+        assert_eq!(
+            *second_completion.state.vars.get(0).unwrap(),
+            Value::Num(2.0)
+        );
         assert!(first_service.try_lookup("x").is_err());
         assert!(second_service.try_lookup("x").is_err());
     }
@@ -508,6 +568,15 @@ mod tests {
             self.inner.ensure_mutation_authority()
         }
 
+        fn ensure_mutation_authority_with_context(
+            &self,
+            context: &runmat_runtime::context::RuntimeContext,
+        ) -> Result<(), RuntimeError> {
+            self.mutation_admissions
+                .set(self.mutation_admissions.get() + 1);
+            self.inner.ensure_mutation_authority_with_context(context)
+        }
+
         fn workspace_revision(
             &self,
         ) -> Result<Option<runmat_runtime::workspace::WorkspaceRevision>, RuntimeError> {
@@ -516,6 +585,17 @@ mod tests {
 
         fn assign(&self, name: &str, value: Value) -> Result<(), RuntimeError> {
             self.inner.assign(name, value)
+        }
+
+        fn assign_executor_slot_ref(
+            &self,
+            context: &runmat_runtime::context::RuntimeContext,
+            slot: usize,
+            name: &str,
+            value: &Value,
+        ) -> Result<(), RuntimeError> {
+            self.inner
+                .assign_executor_slot_ref(context, slot, name, value)
         }
 
         fn clear(&self) -> Result<(), RuntimeError> {
@@ -538,7 +618,8 @@ mod tests {
             outer_runtime.clone(),
             &outer_service,
             async {
-                let mut outer_values = vec![Value::Num(1.0)];
+                let mut outer_values =
+                    crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
                 let outer_guard = super::super::workspace::set_transient_workspace_state(
                     HashMap::from([("x".to_string(), 0)]),
                     HashSet::from(["x".to_string()]),
@@ -553,7 +634,9 @@ mod tests {
                 let (inner_runtime, inner_service) =
                     VmWorkspaceService::prepare(outer_runtime.clone(), None);
                 workspace_scope(inner_runtime, &inner_service, async {
-                    let mut inner_values = vec![Value::Num(2.0)];
+                    let mut inner_values = crate::interpreter::vars::InterpreterVars::from_owned(
+                        vec![Value::Num(2.0)],
+                    );
                     let inner_guard = super::super::workspace::set_transient_workspace_state(
                         HashMap::from([("x".to_string(), 0)]),
                         HashSet::from(["x".to_string()]),
@@ -609,7 +692,8 @@ mod tests {
 
         let call_runtime = runtime.clone();
         futures::executor::block_on(workspace_scope(runtime, &service, async {
-            let mut values = vec![Value::Num(1.0)];
+            let mut values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
                 HashSet::from(["x".to_string()]),
@@ -643,7 +727,7 @@ mod tests {
             .await
             .unwrap();
             super::super::workspace::reconcile_workspace_vars(&mut values);
-            assert_eq!(values[0], Value::Num(3.0));
+            assert_eq!(*values.get(0).unwrap(), Value::Num(3.0));
             assert_eq!(service.lookup("x"), Some(Value::Num(3.0)));
             assert_eq!(delegate.snapshots.get(), 2);
             drop(guard);
@@ -665,7 +749,8 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
         futures::executor::block_on(workspace_scope(runtime, &service, async {
-            let mut values = vec![Value::Num(1.0)];
+            let mut values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
                 HashSet::from(["x".to_string()]),
@@ -711,7 +796,8 @@ mod tests {
         let (outer_runtime, outer) =
             VmWorkspaceService::prepare(runtime.with_service_ports(ports), None);
         futures::executor::block_on(workspace_scope(outer_runtime.clone(), &outer, async {
-            let mut outer_values = vec![Value::Num(1.0)];
+            let mut outer_values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
             let outer_guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
                 HashSet::from(["x".to_string()]),
@@ -720,7 +806,8 @@ mod tests {
             );
             let (inner_runtime, inner) = VmWorkspaceService::prepare(outer_runtime, None);
             workspace_scope(inner_runtime, &inner, async {
-                let mut inner_values = vec![Value::Num(1.0)];
+                let mut inner_values =
+                    crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
                 let inner_guard = super::super::workspace::set_workspace_state(
                     HashMap::from([("x".to_string(), 0)]),
                     HashSet::from(["x".to_string()]),
@@ -748,7 +835,8 @@ mod tests {
         ));
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
         futures::executor::block_on(workspace_scope(runtime, &service, async {
-            let mut values = vec![Value::Num(1.0)];
+            let mut values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
             let mut guard = Some(super::super::workspace::set_transient_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
                 HashSet::from(["x".to_string()]),
@@ -788,7 +876,8 @@ mod tests {
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
         let completed = futures::executor::block_on(workspace_scope(runtime, &service, async {
-            let mut values = vec![Value::Num(1.0)];
+            let mut values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("g".to_string(), 0)]),
                 HashSet::from(["g".to_string()]),
@@ -812,10 +901,7 @@ mod tests {
 
         let projection = owner.snapshot().unwrap();
         assert_eq!(projection.get("g"), None);
-        assert_eq!(
-            completed.global_aliases.get(&0),
-            Some(&runmat_runtime::workspace::bindings::FrameGlobalBinding::Named("g".into()))
-        );
+        assert!(completed.global_aliases.is_bound(0, "g"));
     }
 
     #[test]
@@ -831,14 +917,41 @@ mod tests {
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
 
-        futures::executor::block_on(workspace_scope(runtime, &service, async {
-            let mut values = vec![Value::Num(1.0)];
+        futures::executor::block_on(workspace_scope(runtime.clone(), &service, async {
+            let mut values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(1.0)]);
             let guard = super::super::workspace::set_transient_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
                 HashSet::from(["x".to_string()]),
                 &mut values,
                 FrameGlobalBindings::default(),
             );
+            let foreign = runmat_runtime::context::RuntimeContext::new(Rc::new(
+                runmat_runtime::execution::RuntimeExecutionService::new(),
+            ));
+            let context_errors = [
+                service
+                    .assign_with_context(&foreign, "x", Value::Num(2.0))
+                    .unwrap_err(),
+                service
+                    .assign_executor_slot_ref(&foreign, 0, "x", &Value::Num(2.0))
+                    .unwrap_err(),
+                service.clear_with_context(&foreign).unwrap_err(),
+                service.remove_with_context(&foreign, "x").unwrap_err(),
+                service
+                    .declare_global_binding_with_context(&foreign, 0, "x")
+                    .unwrap_err(),
+                service
+                    .ensure_mutation_authority_with_context(&foreign)
+                    .unwrap_err(),
+            ];
+            assert!(context_errors
+                .iter()
+                .all(|error| { error.identifier() == Some("RunMat:Workspace:ContextMismatch") }));
+            assert_eq!(service.lookup("x"), Some(Value::Num(1.0)));
+            service
+                .ensure_mutation_authority_with_context(&runtime)
+                .unwrap();
             owner.close().unwrap();
 
             let error = service.try_lookup("x").unwrap_err();
@@ -867,8 +980,12 @@ mod tests {
                 .assign(&format!("seed_{index}"), Value::Num(index as f64))
                 .unwrap();
         }
-        let projection = runmat_runtime::workspace::BaseWorkspaceProjectionService::new(
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ));
+        let projection = runmat_runtime::workspace::BaseWorkspaceProjectionService::new_for_context(
             owner.begin_projection().unwrap(),
+            &runtime,
         );
         let projection: Rc<dyn RuntimeWorkspaceService> = Rc::new(projection);
         let delegate = Rc::new(CountingWorkspaceService {
@@ -876,18 +993,17 @@ mod tests {
             snapshots: Cell::new(0),
             mutation_admissions: Cell::new(0),
         });
-        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
-            runmat_runtime::execution::RuntimeExecutionService::new(),
-        ));
         let ports = runtime
             .service_ports()
             .clone()
             .with_workspace(delegate.clone());
         let runtime = runtime.with_service_ports(ports);
         let (runtime, service) = VmWorkspaceService::prepare(runtime, None);
+        let publication_context = runtime.clone();
 
         futures::executor::block_on(workspace_scope(runtime, &service, async {
-            let mut values = vec![Value::Num(0.0)];
+            let mut values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(0.0)]);
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
                 HashSet::from(["x".to_string()]),
@@ -895,8 +1011,9 @@ mod tests {
                 FrameGlobalBindings::default(),
             );
             for value in 1..=64 {
+                let value = Value::Num(value as f64);
                 service
-                    .assign_executor_slot(0, "x", Value::Num(value as f64))
+                    .assign_executor_slot_ref(&publication_context, 0, "x", &value)
                     .unwrap();
             }
             assert_eq!(delegate.mutation_admissions.get(), 64);
@@ -931,8 +1048,10 @@ mod tests {
         futures::executor::block_on(workspace_scope(runtime, &service, async {
             let aliases = FrameGlobalBindings::default();
             aliases.declare_named(0, "x".into());
-            runmat_runtime::workspace::session::store_global_named("x", Value::Num(9.0));
-            let mut values = vec![Value::Num(9.0)];
+            runmat_runtime::workspace::session::store_global_named("x", Value::Num(9.0))
+                .expect("seed named global");
+            let mut values =
+                crate::interpreter::vars::InterpreterVars::from_owned(vec![Value::Num(9.0)]);
             let guard = super::super::workspace::set_workspace_state(
                 HashMap::from([("x".to_string(), 0)]),
                 HashSet::from(["x".to_string()]),
@@ -993,7 +1112,7 @@ mod tests {
             allocation.unroot().unwrap();
 
             futures::executor::block_on(workspace_scope(runtime, &service, async {
-                let mut values = Vec::new();
+                let mut values = crate::interpreter::vars::InterpreterVars::from_owned(Vec::new());
                 let guard = super::super::workspace::set_workspace_state(
                     HashMap::new(),
                     HashSet::new(),

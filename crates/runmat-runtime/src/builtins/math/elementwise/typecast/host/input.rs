@@ -10,7 +10,7 @@ pub(super) fn shape(source: &Value) -> BuiltinResult<Vec<usize>> {
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
         Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::ComplexTensor(tensor) => Ok(tensor.shape().to_vec()),
-        Value::LogicalArray(array) => Ok(array.shape.clone()),
+        Value::LogicalArray(array) => Ok(array.shape.to_vec()),
         Value::SparseTensor(_) => Err(error::build(
             &TYPECAST_ERROR_INVALID_INPUT,
             "input must be full, not sparse",

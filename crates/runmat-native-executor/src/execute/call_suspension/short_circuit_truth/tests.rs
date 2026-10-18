@@ -10,10 +10,10 @@ use std::sync::Arc;
 fn enter_left(state: &mut HostState, request: NativeSiteRequest) {
     state.current_request = Some(request);
     state.begin_contextual_site(request).unwrap();
-    let (region, next, completed) = state.enter_contextual_region();
+    let (region, next, completed) = state.enter_contextual_region().unwrap();
     assert_eq!(next, 0);
     assert!(completed.is_none());
-    state.enter_contextual_step(region, 0);
+    state.enter_contextual_step(region, 0).unwrap();
 }
 
 fn request() -> NativeSiteRequest {
@@ -68,8 +68,8 @@ fn exact_region_step_rejects_other_site_without_consuming_truth() {
         ));
         assert!(state.completed_call.is_some());
         state.begin_contextual_site(request).unwrap();
-        let (region, _, _) = state.enter_contextual_region();
-        state.enter_contextual_step(region, 1);
+        let (region, _, _) = state.enter_contextual_region().unwrap();
+        state.enter_contextual_step(region, 1).unwrap();
         assert!(matches!(
             take_completed_short_circuit_truth(&mut state, ShortCircuitTruthStage::Left),
             Err(NativeExecutorError::Host(_))
@@ -165,9 +165,71 @@ fn invalid_truth_preserves_runtime_identifier_without_advancing_checkpoint() {
         assert!(state.pending_call.is_none());
         assert!(state.completed_call.is_none());
         state.begin_contextual_site(request()).unwrap();
-        let (region, next, completed) = state.enter_contextual_region();
+        let (region, next, completed) = state.enter_contextual_region().unwrap();
         assert_eq!(region, 0);
         assert_eq!(next, 0);
         assert!(completed.is_none());
+    });
+}
+
+#[test]
+fn retained_expression_input_survives_source_replacement_and_abandonment_releases_it() {
+    if crate::test_support::run_isolated_gc_test(concat!(
+        module_path!(),
+        "::retained_expression_input_survives_source_replacement_and_abandonment_releases_it"
+    )) {
+        return;
+    }
+    runmat_gc::gc_test_context(|| {
+        let mut state = observed_state(&Rc::new(Probe::default()));
+        let request = request();
+        state.begin_contextual_site(request).unwrap();
+        let allocation =
+            runmat_gc::gc_allocate_rooted(Value::String("retained selector".into())).unwrap();
+        let handle = allocation.handle();
+        let original = state.arena.insert(Value::HandleObject(HandleRef {
+            class_name: "PreparedSelectorInput".into(),
+            target: handle,
+            valid: true,
+        }));
+        state.retain_contextual_input(original).unwrap();
+        state.arena.release(original).unwrap();
+        let _replacement = state.arena.insert(Value::String("replacement".into()));
+        allocation.unroot().unwrap();
+
+        runmat_gc::gc_collect_major().unwrap();
+        assert!(runmat_gc::gc_clone_value(&handle).is_ok());
+        state.begin_contextual_site(request).unwrap();
+        assert_eq!(state.take_contextual_input(), Some(original));
+
+        state.abandon_site_continuations().unwrap();
+        let before = runmat_gc::gc_collection_epoch();
+        runmat_gc::gc_collect_major().unwrap();
+        assert_eq!(runmat_gc::gc_collection_epoch(), before + 1);
+        assert!(runmat_gc::gc_clone_value(&handle).is_err());
+    });
+}
+
+#[test]
+fn expression_site_retires_owned_region_results_but_preserves_borrowed_results() {
+    runmat_gc::gc_test_context(|| {
+        let mut state = observed_state(&Rc::new(Probe::default()));
+        state.begin_contextual_site(request()).unwrap();
+
+        let (owned_region, _, _) = state.enter_contextual_region().unwrap();
+        let owned = state.arena.insert(Value::Num(11.0));
+        state.finish_owned_contextual_reference(owned_region, owned);
+
+        let (borrowed_region, _, _) = state.enter_contextual_region().unwrap();
+        let borrowed = state.arena.insert(Value::Num(12.0));
+        state.finish_contextual_region(borrowed_region, borrowed);
+
+        state.finish_contextual_site().unwrap();
+        assert!(matches!(
+            state.arena.get(owned),
+            Err(NativeExecutorError::StaleValue)
+        ));
+        assert_eq!(state.arena.get(borrowed).unwrap(), &Value::Num(12.0));
+        state.arena.release(borrowed).unwrap();
     });
 }

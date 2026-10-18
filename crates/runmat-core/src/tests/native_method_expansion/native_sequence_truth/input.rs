@@ -51,7 +51,8 @@ pub(super) fn install_input(
             runmat_runtime::workspace::session::store_global_named(
                 "pending_member_witness",
                 Value::Num(0.0),
-            );
+            )
+            .expect("replace the observed pending-member witness");
         }
         if let Some(Value::Num(reads)) =
             runmat_runtime::workspace::session::global_value("member_reads")

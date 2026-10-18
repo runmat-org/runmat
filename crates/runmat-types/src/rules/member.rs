@@ -50,6 +50,30 @@ pub fn infer_member_sequence(base: &ValueFact, member: &MemberName) -> SequenceF
             },
             |fact| SequenceFactInference::exact(ValueSequenceFact::single(fact)),
         ),
+        ValueKindFact::Exception(_) => {
+            let fact = match crate::ExceptionProperty::from_name(&member.0) {
+                Some(crate::ExceptionProperty::Identifier | crate::ExceptionProperty::Message) => {
+                    ValueFact::proven(
+                        ValueKindFact::Character,
+                        // Nonempty text is a row; the empty character value
+                        // is 0-by-0. Neither dimension is known here.
+                        crate::ShapeFact::from(vec![None, None]),
+                        crate::StorageFact::Dense,
+                    )
+                }
+                Some(crate::ExceptionProperty::Stack) => ValueFact::proven(
+                    ValueKindFact::Cell(crate::CellFact {
+                        element: Box::new(ValueFact::scalar(ValueKindFact::String)),
+                        elements: Vec::new(),
+                        elements_complete: false,
+                    }),
+                    crate::ShapeFact::from(vec![None, Some(1)]),
+                    crate::StorageFact::Dense,
+                ),
+                None => return missing_member_sequence(member),
+            };
+            SequenceFactInference::exact(ValueSequenceFact::single(fact))
+        }
         ValueKindFact::Unknown => SequenceFactInference::exact(ValueSequenceFact::dynamic()),
         _ => SequenceFactInference {
             sequence: ValueSequenceFact::dynamic(),

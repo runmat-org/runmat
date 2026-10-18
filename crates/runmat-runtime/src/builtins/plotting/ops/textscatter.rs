@@ -788,16 +788,7 @@ fn render_textscatter_chart(
 
     let render_result = crate::builtins::plotting::state::render_active_plot(
         builtin,
-        PlotRenderOptions {
-            title: if is_3d {
-                "3-D Text Scatter"
-            } else {
-                "Text Scatter"
-            },
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             *axes_out.borrow_mut() = Some(axes);
             let visible_mask = density_mask(labels.len(), options.text_density_percentage);

@@ -6,6 +6,48 @@ use std::process::{Command, Output};
 use tempfile::TempDir;
 
 #[test]
+fn explicit_primary_outside_source_roots_runs_by_path_and_declared_entrypoint() {
+    let temp = TempDir::new().unwrap();
+    let project = temp.path().join("project");
+    let cache = temp.path().join("cache");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::create_dir_all(project.join("scripts")).unwrap();
+    fs::write(
+        project.join("src/helper.m"),
+        "function y = helper(); y = 2; end\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("runmat.toml"),
+        r#"[package]
+name = "primary-outside-roots"
+version = "1.0.0"
+
+[sources]
+roots = ["src"]
+
+[entrypoints.report]
+path = "scripts/report.m"
+"#,
+    )
+    .unwrap();
+    let script = project.join("scripts/report.m");
+    fs::write(&script, "answer = helper() + 40\n").unwrap();
+
+    for args in [&["run", "scripts/report.m"][..], &["run", "report"][..]] {
+        let output = runmat(&project, &cache, args);
+        assert!(output.status.success(), "{args:?}: {output:?}");
+    }
+
+    // The explicitly selected file is captured anew on the next invocation;
+    // its program identity cannot alias the previous driver bytes.
+    fs::write(&script, "answer = helper() + 41\n").unwrap();
+    let output = runmat(&project, &cache, &["run", "report"]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(String::from_utf8_lossy(&output.stdout).contains("answer = 43"));
+}
+
+#[test]
 fn package_inspect_emits_the_deterministic_release_contract() {
     let temp = TempDir::new().unwrap();
     let project = temp.path().join("project");

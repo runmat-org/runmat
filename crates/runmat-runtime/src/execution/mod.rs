@@ -7,6 +7,7 @@ mod errors;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod native_task;
 mod running_future;
+mod retained_value;
 pub(crate) mod rooted_continuation;
 mod services;
 mod storable;
@@ -21,7 +22,9 @@ pub use completion::{
     RootedResult, RootedValue, RootedValueLease, RootedValueSequence, RootedValues,
     RootedValuesBuilder,
 };
-pub(crate) use completion::{RootedValueChildren, RootedValueHandles, RootedValueMember};
+pub(crate) use completion::{
+    RootedValueAdmissionError, RootedValueChildren, RootedValueHandles, RootedValueMember,
+};
 pub use cooperation::{CpuCooperationBudget, CpuCooperationPolicy};
 pub use errors::{
     decode_runtime_failure, decode_runtime_failure_with_source_issuer_in_context,
@@ -33,8 +36,11 @@ pub use owned_builtin::{
     admit_owned_builtin_work, execute_owned_builtin_work, quote_owned_builtin_continuation,
     RuntimeOwnedBuiltinWorkService,
 };
+pub use retained_value::RetainedValueReadLease;
 pub use rooted_continuation::{
-    admit_executable_sequence, admit_stack_mutation, RuntimeContinuationFuture,
+    admit_domain_continuation_with, admit_dynamic_workspace_sequence, admit_executable_sequence,
+    admit_executable_sequence_with, admit_executable_sequence_with_error, admit_rooted_result_with,
+    admit_stack_mutation, RuntimeContinuationFuture,
 };
 pub use running_future::RunningFutureLease;
 pub use services::{

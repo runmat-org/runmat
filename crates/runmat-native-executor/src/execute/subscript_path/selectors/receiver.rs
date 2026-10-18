@@ -13,8 +13,8 @@ pub(super) fn prepare_receiver(
     prefix: Option<ObjectSubscriptPath>,
     access: runmat_runtime::object::protocol::ObjectAccessContext,
 ) -> NativeExecutorResult<runmat_runtime::object::protocol::PreparedSubscriptReceiver> {
-    let owner = state.current_embedded_operation();
-    let embedded = state.enter_embedded_call();
+    let owner = state.current_embedded_operation()?;
+    let embedded = state.enter_embedded_call()?;
     // A cached preparation still occupies its original call ordinal. Skipping
     // that scope renumbers subsequent preparations when a later one suspends.
     let result =
@@ -24,11 +24,12 @@ pub(super) fn prepare_receiver(
             }
             Ok(prepared)
         } else {
-            let result = prepare_receiver_inner(state, root, prefix, access, embedded.as_ref());
-            if let Ok(prepared) = &result {
-                state.cache_prepared_subscript_receiver(owner, step, prepared.clone());
+            match prepare_receiver_inner(state, root, prefix, access, embedded.as_ref()) {
+                Ok(prepared) => state
+                    .cache_prepared_subscript_receiver(owner, step, prepared.clone())
+                    .map(|()| prepared),
+                Err(error) => Err(error),
             }
-            result
         };
     let finished = state.finish_embedded_call(embedded.as_ref());
     match (result, finished) {

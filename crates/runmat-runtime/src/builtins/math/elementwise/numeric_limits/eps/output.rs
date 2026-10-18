@@ -1,4 +1,4 @@
-use runmat_value::{ExactHostTensorAllocation, NumericDType, Tensor, Value};
+use runmat_value::{NumericDType, Tensor, Value};
 
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
@@ -101,10 +101,8 @@ fn output_receipt(
     dtype: NumericDType,
     runtime: Option<&RuntimeContext>,
 ) -> BuiltinResult<Option<HostAllocationReceipt>> {
-    let bytes = ExactHostTensorAllocation::requested_bytes_for_dimensions(dtype, len, shape.len())
-        .map_err(|error| allocation_error(runtime, HostAllocationError::Numeric(error)))?;
-    let bytes = u64::try_from(bytes)
-        .map_err(|_| allocation_error(runtime, HostAllocationError::Overflow))?;
+    let bytes = HostAllocationPlan::retained_tensor_bytes_for_dimensions(dtype, len, shape.len())
+        .map_err(|error| allocation_error(runtime, error))?;
     let plan =
         HostAllocationPlan::new(0, bytes).map_err(|error| allocation_error(runtime, error))?;
     HostAllocationReceipt::admit(runtime, plan).map_err(|error| allocation_error(runtime, error))

@@ -181,7 +181,7 @@ pub async fn execute_prepared_graph_request(
             request,
             &selected,
             &selected_runtime,
-            &values,
+            values,
         ))
         .await
     {

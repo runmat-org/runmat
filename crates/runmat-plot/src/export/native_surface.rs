@@ -666,21 +666,9 @@ impl NativeSurfaceRenderContext {
                     font_scale: 1.25,
                     show_axes: true,
                     show_title: self.renderer.geometry_overlay().is_none(),
-                    title: self
-                        .renderer
-                        .overlay_title()
-                        .cloned()
-                        .or(Some("Plot".to_string())),
-                    x_label: self
-                        .renderer
-                        .overlay_x_label()
-                        .cloned()
-                        .or(Some("X".to_string())),
-                    y_label: self
-                        .renderer
-                        .overlay_y_label()
-                        .cloned()
-                        .or(Some("Y".to_string())),
+                    title: self.renderer.overlay_title().cloned(),
+                    x_label: self.renderer.overlay_x_label().cloned(),
+                    y_label: self.renderer.overlay_y_label().cloned(),
                     show_sidebar: false,
                     ..Default::default()
                 };

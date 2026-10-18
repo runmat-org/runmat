@@ -18,7 +18,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Execution boundaries",
         paragraphs: &[
-            "The active VM workspace owns script execution in native-hosted and browser sessions. A direct runtime call outside that workspace reports RunMat:run:RequiresVm. Compiled execution must retain that workspace boundary or report the capability limitation.",
+            "The selected workspace execution service runs the script in native-hosted and browser sessions. A direct call without an execution context reports RunMat:run:RequiresVm. Compiled execution uses the same source and workspace service boundary.",
             "The script path must be scalar text. Numeric and GPU-resident numeric paths reject before provider access. Script resolution is host-owned and forms a fusion boundary; operations inside the script retain their own acceleration, capability, and ownership rules.",
             "A script can perform arbitrary supported effects, call functions, and create or replace bindings. Its contents are not known from the path argument's static type, so scheduling and worker admission must retain that uncertainty.",
         ],

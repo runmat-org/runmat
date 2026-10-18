@@ -41,7 +41,7 @@ struct PreparedBoundInvocation {
 struct BoundInvocationState {
     _generation: Rc<FunctionRegistryGeneration>,
     selected: runmat_vm::FunctionRegistry,
-    arguments: runmat_runtime::execution::RootedValues,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
     runtime: RuntimeContext,
     selected_product: Option<Rc<runmat_vm::SelectedClassProduct>>,
     // Keep caller closure handles rooted until the invocation has settled.
@@ -477,9 +477,9 @@ pub(in crate::session) fn install_bound_invoker(
                     } = state;
                     // The exact parent body already has the caller's rooted
                     // Derived receiver and selected class projection.
-                    runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+                    runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
                         binding.function,
-                        arguments.values(),
+                        arguments,
                         requested_outputs,
                         &selected,
                         runtime,
@@ -511,8 +511,7 @@ pub(in crate::session) fn install_bound_invoker(
                                 .build()
                             })?
                             .invocation_runtime_with_binding(runtime, &selected, &binding)?;
-                        let arguments = Rc::new(arguments);
-                        let policy_arguments = Rc::clone(&arguments);
+                        let argument_count = arguments.supplied_count();
                         let invocation_owner = owner.clone();
                         let admitted_binding = binding.clone();
                         let constructor_dynamic_admission = dynamic_admission.clone();
@@ -521,9 +520,9 @@ pub(in crate::session) fn install_bound_invoker(
                                 Box::pin(async move {
                                     let selected_runtime = selected_runtime
                                         .with_constructor_receiver_for_method(Some(&invocation_owner))?;
-                                    runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+                                    runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
                                         binding.function,
-                                        arguments.values(),
+                                        arguments,
                                         requested_outputs,
                                         &selected,
                                         selected_runtime,
@@ -533,11 +532,11 @@ pub(in crate::session) fn install_bound_invoker(
                                     .await
                                 })
                             });
-                        runmat_runtime::dispatcher::call_prepared_constructor_sequence_in_context(
+                        runmat_runtime::dispatcher::call_prepared_constructor_sequence_with_argument_count_in_context(
                             &runtime,
                             owner,
                             admitted_binding,
-                            policy_arguments.values(),
+                            argument_count,
                             requested_outputs,
                             invoke,
                         )
@@ -557,9 +556,9 @@ pub(in crate::session) fn install_bound_invoker(
                         _environment_roots,
                         dynamic_admission,
                     } = state;
-                    runmat_vm::invoke_semantic_function_value_with_dynamic_admission_in_context(
+                    runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
                         binding.function,
-                        arguments.values(),
+                        arguments,
                         requested_outputs,
                         &selected,
                         runtime,

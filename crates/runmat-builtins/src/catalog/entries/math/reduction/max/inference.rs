@@ -1,12 +1,12 @@
 use super::super::support::{
-    admitted_max_pairwise_options, admitted_max_reduction_controls, inferred_empty_max_shape,
-    inferred_max_shape, is_empty_placeholder,
+    admitted_max_pairwise_options, admitted_max_reduction_controls, has_literal_zero_axis,
+    inferred_empty_max_shape, inferred_max_shape, is_empty_placeholder,
 };
 use crate::BuiltinCatalogEntry;
 use runmat_types::{
-    broadcast_shape_checked, infer_call, BroadcastShapeError, CallContract, CallInference,
-    CallRequest, DynamicReason, InferenceDiagnostic, LiteralValue, NumericClass, NumericDomain,
-    NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
+    broadcast_shape_checked, infer_call, infer_reduction, BroadcastShapeError, CallContract,
+    CallInference, CallRequest, DynamicReason, InferenceDiagnostic, LiteralValue, NumericClass,
+    NumericDomain, NumericFact, ResidencyFact, ShapeFact, StorageFact, ValueFact, ValueKindFact,
 };
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -103,6 +103,15 @@ fn reduction_outputs(
     option_start: usize,
     diagnostics: &mut Vec<InferenceDiagnostic>,
 ) -> Vec<ValueFact> {
+    if request
+        .literals
+        .literal_args
+        .get(option_start)
+        .is_some_and(has_literal_zero_axis)
+    {
+        diagnostics.extend(infer_reduction(input, Some(0)).diagnostics);
+        return dynamic_pair();
+    }
     if input.storage == StorageFact::Sparse {
         return dynamic_pair();
     }

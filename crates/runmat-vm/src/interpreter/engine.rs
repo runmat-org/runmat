@@ -2,10 +2,11 @@ use crate::bytecode::instr::Instr;
 #[cfg(feature = "native-accel")]
 use crate::bytecode::program::Bytecode;
 use crate::interpreter::timing::InterpreterTiming;
+use crate::interpreter::vars::InterpreterVars;
 use crate::runtime::gc::InterpretContext;
 use crate::runtime::workspace::{
-    has_exact_pending_workspace_service_frame, refresh_workspace_state,
-    set_transient_workspace_state, take_pending_workspace_state, WorkspaceStateGuard,
+    has_exact_pending_workspace_service_frame, take_pending_workspace_state,
+    try_set_transient_workspace_state, PendingWorkspaceInput, WorkspaceStateGuard,
 };
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -13,41 +14,58 @@ use std::collections::{HashMap, HashSet};
 
 pub fn prepare_workspace_guard(
     var_names: &HashMap<usize, String>,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
     initial_assigned_var_count: usize,
     initially_unassigned_slots: &HashSet<usize>,
     global_aliases: runmat_runtime::workspace::bindings::FrameGlobalBindings,
-) -> Option<WorkspaceStateGuard> {
+) -> Result<Option<WorkspaceStateGuard>, RuntimeError> {
     let pending_state = take_pending_workspace_state();
-    let guard = pending_state.map(|pending| {
-        let names = pending.names;
-        let assigned = pending.assigned;
-        global_aliases.replace_with_snapshot(pending.global_aliases.snapshot());
-        let filtered_assigned: HashSet<String> = assigned
-            .into_iter()
-            .filter(|name| names.contains_key(name))
-            .collect();
-        crate::runtime::workspace::set_workspace_state_with_policy(
-            names,
-            filtered_assigned,
-            vars,
-            pending.policy,
-            pending.base_target,
-            global_aliases.clone(),
-        )
-    });
+    let guard = pending_state
+        .map(|pending| match pending.input {
+            PendingWorkspaceInput::Legacy {
+                names,
+                assigned,
+                global_aliases: pending_aliases,
+            } => {
+                global_aliases.replace_with_owned(pending_aliases);
+                let filtered_assigned: HashSet<String> = assigned
+                    .into_iter()
+                    .filter(|name| names.contains_key(name))
+                    .collect();
+                crate::runtime::workspace::try_set_workspace_state_with_policy(
+                    names,
+                    filtered_assigned,
+                    vars,
+                    pending.policy,
+                    pending.base_target,
+                    global_aliases.clone(),
+                )
+            }
+            PendingWorkspaceInput::Admitted(metadata) => {
+                global_aliases.replace_with_owned(metadata.aliases.clone());
+                crate::runtime::workspace::install_admitted_workspace_state(
+                    metadata,
+                    vars,
+                    pending.policy,
+                    pending.base_target,
+                )
+            }
+        })
+        .transpose()?;
     if guard.is_some() {
-        refresh_workspace_state(vars);
-        return guard;
+        return Ok(guard);
     }
     if var_names.is_empty() {
         if !has_exact_pending_workspace_service_frame() {
-            return None;
+            return Ok(None);
         }
-        let guard =
-            set_transient_workspace_state(HashMap::new(), HashSet::new(), vars, global_aliases);
-        refresh_workspace_state(vars);
-        return Some(guard);
+        let guard = try_set_transient_workspace_state(
+            HashMap::new(),
+            HashSet::new(),
+            vars,
+            global_aliases,
+        )?;
+        return Ok(Some(guard));
     }
     let mut names = HashMap::new();
     let mut assigned = HashSet::new();
@@ -57,14 +75,13 @@ pub fn prepare_workspace_guard(
             assigned.insert(name.clone());
         }
     }
-    let guard = set_transient_workspace_state(names, assigned, vars, global_aliases);
-    refresh_workspace_state(vars);
-    Some(guard)
+    let guard = try_set_transient_workspace_state(names, assigned, vars, global_aliases)?;
+    Ok(Some(guard))
 }
 
 pub fn create_gc_context<'roots>(
     stack: &'roots Vec<Value>,
-    vars: &'roots Vec<Value>,
+    vars: &'roots InterpreterVars,
     locals: &'roots Vec<Value>,
     sequence: &'roots crate::interpreter::dispatch::SequenceState,
     thread_roots: Vec<Value>,

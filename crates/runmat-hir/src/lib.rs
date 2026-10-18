@@ -39,7 +39,7 @@ pub use hir::{
 };
 pub use ids::{BindingId, ClassId, EntrypointId, ExprId, FunctionId, ModuleId, SourceId, StmtId};
 pub use lowering::lower;
-pub use lowering_context::{FunctionOutputArity, LoweringContext};
+pub use lowering_context::{FunctionOutputArity, LoweringContext, WorkspaceBindingView};
 pub use runmat_types::{
     ClassDeclaration, ClassIdentity, ClassKind, EnumerationDeclaration, EventAccess,
     EventAttributes, EventDeclaration, InheritanceDeclaration, MemberAccess, MethodAttributes,

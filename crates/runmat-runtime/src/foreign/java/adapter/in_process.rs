@@ -289,9 +289,13 @@ impl JavaAdapter {
             .finish()
             .map_err(|error| JavaInvocationError::Callback(error.to_string()))?
             .with_owned_values_async(|arguments| async move {
-                let request =
-                    foreign_callback_request(&registration.callable, arguments, requested_outputs)
-                        .map_err(callback_error)?;
+                let request = foreign_callback_request(
+                    &context,
+                    &registration.callable,
+                    arguments,
+                    requested_outputs,
+                )
+                .map_err(callback_error)?;
                 let sequence = invoke_foreign_callback(context.clone(), request)
                     .await
                     .map_err(callback_error)?;

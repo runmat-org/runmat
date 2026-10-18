@@ -47,7 +47,7 @@ pub(crate) fn value_to_json(value: &Value, depth: usize) -> JsonValue {
             let cols = arr.shape.get(1).copied().unwrap_or(0);
             json!({
                 "kind": "logical-array",
-                "shape": arr.shape,
+                "shape": arr.shape.as_slice(),
                 "rows": rows,
                 "cols": cols,
                 "preview": preview.iter().map(|v| *v != 0).collect::<Vec<bool>>(),

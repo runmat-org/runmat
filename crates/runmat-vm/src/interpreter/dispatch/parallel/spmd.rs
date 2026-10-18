@@ -1,4 +1,5 @@
 use crate::bytecode::program::ExecutionContext;
+use crate::interpreter::vars::InterpreterVars;
 use crate::{InterpreterOutcome, InterpreterResumeState};
 use runmat_runtime::RuntimeError;
 use runmat_value::Value;
@@ -11,7 +12,7 @@ pub(super) async fn execute(
     executable: &crate::BytecodeSpmdRegion,
     header: crate::BytecodeSpmdHeader,
     operands: Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
     execution: &ExecutionContext,
     current_function_name: &str,
 ) -> Result<(), RuntimeError> {
@@ -35,12 +36,14 @@ pub(super) async fn execute(
         .captures
         .iter()
         .map(|capture| {
-            vars.get(capture.slot).cloned().ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "SpmdFrame",
-                    "SPMD capture is outside its compiler-bound VM frame",
-                )
-            })
+            vars.get(capture.slot)
+                .map(|value| value.clone())
+                .ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "SpmdFrame",
+                        "SPMD capture is outside its compiler-bound VM frame",
+                    )
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
     let spmd = execution
@@ -138,14 +141,7 @@ pub(super) async fn execute(
                     Value::Distributed(Box::new(handle))
                 }
             };
-            crate::runtime::workspace::admit_workspace_slot_write(output.slot, &value)?;
-            let destination = vars.get_mut(output.slot).ok_or_else(|| {
-                crate::interpreter::errors::mex(
-                    "SpmdFrame",
-                    "SPMD output is outside its compiler-bound VM frame",
-                )
-            })?;
-            *destination = value;
+            crate::runtime::workspace::commit_workspace_slot_value(vars, output.slot, None, value)?;
         }
         Ok(())
     }
@@ -169,16 +165,18 @@ async fn execute_spmd_in_process(
     for collective in labs {
         let rank = collective.context().rank;
         let gang = collective.context().gang.clone();
-        let mut frame = vec![None; bytecode.var_count];
+        let mut frame = InterpreterVars::from_owned(vec![Value::Num(0.0); bytecode.var_count]);
+        let mut assigned_slots = HashSet::new();
         for (capture, value) in executable.captures.iter().zip(&captures) {
-            frame[capture.slot] = Some(value.clone());
+            let _retired = frame.replace_owned(capture.slot, value.clone());
+            assigned_slots.insert(capture.slot);
         }
         let services = execution
             .runtime
             .service_ports()
             .clone()
             .with_collective(collective);
-        let runtime = execution.runtime.fork_parallel_lab(services);
+        let runtime = execution.runtime.fork_parallel_lab(services)?;
         let spmd = execution
             .runtime
             .service_ports()
@@ -197,6 +195,7 @@ async fn execute_spmd_in_process(
                     ),
                 ),
                 vars: frame,
+                assigned_slots,
                 supplied_inputs: 0,
                 requested_outputs: 0,
                 missing_input_slots: HashSet::new(),
@@ -241,7 +240,7 @@ async fn execute_spmd_in_process(
                 )
             })?;
             outputs.push(Some(
-                distributed::encode_spmd_output(&runtime, value).await?,
+                distributed::encode_spmd_interpreter_output(&runtime, value).await?,
             ));
         }
         results.push(runmat_runtime::execution::SpmdRankResult { rank, outputs });

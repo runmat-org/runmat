@@ -590,7 +590,7 @@ mod tests {
             Value::ComplexTensor(samples) => {
                 let len = samples.len();
                 let (_, shape) = samples.into_complex_storage_and_shape();
-                (len, shape)
+                (len, shape.to_vec())
             }
             _ => return Ok(Value::Complex(1.0, 1.0)),
         };

@@ -439,28 +439,13 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     chart.set_histogram_bin_edges(edges.clone());
     apply_bar_style(&mut chart, &style, HIST_DEFAULT_LABEL);
 
-    let y_label = match normalization.as_str() {
-        "count" => "Count",
-        "probability" => "Probability",
-        "percentage" => "Percentage",
-        "countdensity" => "CountDensity",
-        "pdf" => "PDF",
-        "cdf" => "CDF",
-        _ => HIST_DEFAULT_LABEL,
-    };
-
     let mut chart_opt = Some(chart);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Histogram",
-            x_label: "Bin",
-            y_label,
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
             let plot_index = figure.add_bar_chart_on_axes(

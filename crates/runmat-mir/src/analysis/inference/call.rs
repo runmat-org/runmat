@@ -26,32 +26,51 @@ pub(crate) fn infer_mir_call(
     summaries: &BTreeMap<FunctionId, FunctionSummary>,
     selection: OutputSelection,
 ) -> CallInference {
+    let arguments = call
+        .args
+        .iter()
+        .flat_map(|argument| argument_facts(argument, facts, sequences, summaries))
+        .collect();
+    infer_mir_call_with_arguments(call, facts, arguments, literals, summaries, selection)
+}
+
+pub(crate) fn argument_facts(
+    argument: &MirCallArg,
+    facts: &[Option<ValueFact>],
+    sequences: &BTreeMap<MirSequenceLocalId, ValueSequenceFact>,
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+) -> Vec<ValueFact> {
+    match argument {
+        MirCallArg::CapturedSequence(id) => {
+            let sequence = sequences
+                .get(id)
+                .cloned()
+                .unwrap_or_else(ValueSequenceFact::dynamic);
+            if sequence.outputs.is_empty() && sequence.variadic {
+                vec![ValueFact::unknown(DynamicReason::RuntimeValue)]
+            } else {
+                sequence.outputs
+            }
+        }
+        MirCallArg::Single(operand)
+        | MirCallArg::Expansion(
+            crate::MirExpansionSource::ReturnedOutputs(operand)
+            | crate::MirExpansionSource::Member { base: operand, .. },
+        ) => vec![operand_fact(operand, facts, summaries)],
+        MirCallArg::Expansion(source) => vec![operand_fact(source.base(), facts, summaries)],
+    }
+}
+
+pub(crate) fn infer_mir_call_with_arguments(
+    call: &MirCall,
+    facts: &[Option<ValueFact>],
+    arguments: Vec<ValueFact>,
+    literals: &[LiteralValue],
+    summaries: &BTreeMap<FunctionId, FunctionSummary>,
+    selection: OutputSelection,
+) -> CallInference {
     let request = CallRequest {
-        arguments: call
-            .args
-            .iter()
-            .flat_map(|argument| match argument {
-                MirCallArg::CapturedSequence(id) => {
-                    let sequence = sequences
-                        .get(id)
-                        .cloned()
-                        .unwrap_or_else(ValueSequenceFact::dynamic);
-                    if sequence.outputs.is_empty() && sequence.variadic {
-                        vec![ValueFact::unknown(DynamicReason::RuntimeValue)]
-                    } else {
-                        sequence.outputs
-                    }
-                }
-                MirCallArg::Single(operand)
-                | MirCallArg::Expansion(
-                    crate::MirExpansionSource::ReturnedOutputs(operand)
-                    | crate::MirExpansionSource::Member { base: operand, .. },
-                ) => vec![operand_fact(operand, facts, summaries)],
-                MirCallArg::Expansion(source) => {
-                    vec![operand_fact(source.base(), facts, summaries)]
-                }
-            })
-            .collect(),
+        arguments,
         literals: LiteralContext::new(literals.to_vec()),
         outputs: selection,
     };

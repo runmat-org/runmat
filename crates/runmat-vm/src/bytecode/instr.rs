@@ -10,6 +10,18 @@ pub struct StackEffect {
     pub pushes: usize,
 }
 
+/// Source operands retained in bytecode so speculative stochastic admission
+/// does not execute a `LoadVar` (including its alias refresh and allocation)
+/// before the ordinary For binding would be published.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum StochasticSourceOperand {
+    Slot(usize),
+    Number(f64),
+    Integer(IntValue),
+    Bool(bool),
+    String(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AggregateElementSpec {
     Single,
@@ -289,8 +301,18 @@ pub enum Instr {
     // Expands a single value into N outputs, padding with zero values when needed.
     Unpack(usize),
 
-    // Specialized lowering target for the stochastic evolution fast path.
-    StochasticEvolution,
+    // Source operands are borrowed only after a pure range/binding guard.
+    // Decline enters the separately compiled ordinary For terminator.
+    StochasticEvolution {
+        iteration_slot: usize,
+        noise_slot: usize,
+        state_slot: usize,
+        steps: StochasticSourceOperand,
+        drift: StochasticSourceOperand,
+        scale: StochasticSourceOperand,
+        randn_args: Vec<StochasticSourceOperand>,
+        fallback_pc: usize,
+    },
 
     // Array construction and direct indexing.
     CreateMatrix(usize, usize),
@@ -1076,8 +1098,7 @@ impl Instr {
                 },
             ),
             Instr::EmitStackTop { .. } => effect(1, 1),
-            Instr::EmitVar { .. } => effect(0, 0),
-            Instr::StochasticEvolution => None,
+            Instr::EmitVar { .. } | Instr::StochasticEvolution { .. } => effect(0, 0),
         }
     }
 }

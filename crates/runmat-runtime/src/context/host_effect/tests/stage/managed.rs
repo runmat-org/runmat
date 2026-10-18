@@ -1,4 +1,5 @@
 use super::*;
+use crate::context::host_allocation::HostAllocationPlan;
 use std::error::Error;
 
 struct ManagedResources {
@@ -48,18 +49,13 @@ impl RuntimeHostEffectResourceService for PooledResources {
             && Arc::ptr_eq(request.filesystem, fixture_fs())
             && matches!(facts, HostEffectFinalFacts::TestOnly(_)))
         .then(|| {
-            let value_bytes = runmat_value::ExactHostTensor2dAllocation::requested_bytes(
-                runmat_value::NumericDType::U64,
-                1,
-                1,
-            )
-            .expect("known exact output layout") as u64;
-            let claim_bytes =
-                ManagedHostEffectStagePool::owned_output_claim_metadata_bytes() as u64;
+            let value_bytes =
+                HostAllocationPlan::retained_tensor_bytes(runmat_value::NumericDType::U64, &[1, 1])
+                    .expect("known exact output layout and claims");
             test_admission(HostEffectResourceEvidence {
                 authority_revision: self.revision,
                 scratch_bytes: ResourceByteBound::Known(8),
-                returned_value_bytes: ResourceByteBound::Known(value_bytes + claim_bytes),
+                returned_value_bytes: ResourceByteBound::Known(value_bytes),
             })
         })
     }
@@ -121,17 +117,10 @@ fn pooled_receipt_charges_exact_output_claim_until_value_drop() {
     let permit = receipt
         .output_allocation_permit()
         .expect("pooled output owner");
-    let value_bytes = runmat_value::ExactHostTensor2dAllocation::requested_bytes(
-        runmat_value::NumericDType::U64,
-        1,
-        1,
-    )
-    .unwrap() as u64;
-    let claim_bytes = ManagedHostEffectStagePool::owned_output_claim_metadata_bytes() as u64;
-    assert_eq!(
-        ledger.snapshot().live_reserved_bytes,
-        8 + value_bytes + claim_bytes
-    );
+    let value_bytes =
+        HostAllocationPlan::retained_tensor_bytes(runmat_value::NumericDType::U64, &[1, 1])
+            .unwrap();
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 8 + value_bytes);
     let tensor = runmat_value::ExactHostTensor2dAllocation::new(
         runmat_value::NumericDType::U64,
         1,
@@ -141,15 +130,9 @@ fn pooled_receipt_charges_exact_output_claim_until_value_drop() {
     .unwrap()
     .into_tensor()
     .unwrap();
-    assert_eq!(
-        ledger.snapshot().live_claimed_bytes,
-        value_bytes + claim_bytes
-    );
+    assert_eq!(ledger.snapshot().live_claimed_bytes, value_bytes);
     receipt.finish(WholeWorkObservationOutcome::Success);
-    assert_eq!(
-        ledger.snapshot().live_reserved_bytes,
-        value_bytes + claim_bytes
-    );
+    assert_eq!(ledger.snapshot().live_reserved_bytes, value_bytes);
     assert!(matches!(
         runmat_value::ExactHostTensor2dAllocation::new(
             runmat_value::NumericDType::U64,
@@ -160,10 +143,7 @@ fn pooled_receipt_charges_exact_output_claim_until_value_drop() {
         Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)
     ));
     drop(permit);
-    assert_eq!(
-        ledger.snapshot().live_reserved_bytes,
-        value_bytes + claim_bytes
-    );
+    assert_eq!(ledger.snapshot().live_reserved_bytes, value_bytes);
     drop(tensor);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);

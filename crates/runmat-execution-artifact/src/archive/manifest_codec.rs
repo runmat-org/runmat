@@ -492,6 +492,7 @@ fn encode_capability(
 ) -> ArtifactResult<()> {
     match capability {
         Capability::GraphSelectedValuesV11 => encoder.array(1).and_then(|encoder| encoder.u8(5)),
+        Capability::GraphCallableArgumentsV12 => encoder.array(1).and_then(|encoder| encoder.u8(6)),
         Capability::ProcessIsolation => encoder.array(1).and_then(|encoder| encoder.u8(0)),
         Capability::BrowserWorker => encoder.array(1).and_then(|encoder| encoder.u8(1)),
         Capability::NetworkDenied => encoder.array(1).and_then(|encoder| encoder.u8(2)),
@@ -513,6 +514,7 @@ fn decode_capability(decoder: &mut Decoder<'_>) -> ArtifactResult<Capability> {
     let tag = decoder.u8().map_err(decode_error)?;
     match (tag, length) {
         (5, 1) => Ok(Capability::GraphSelectedValuesV11),
+        (6, 1) => Ok(Capability::GraphCallableArgumentsV12),
         (0, 1) => Ok(Capability::ProcessIsolation),
         (1, 1) => Ok(Capability::BrowserWorker),
         (2, 1) => Ok(Capability::NetworkDenied),

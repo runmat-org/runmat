@@ -445,12 +445,7 @@ pub async fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         }
     };
     apply_axes_target(axes_target, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?;
-    let opts = PlotRenderOptions {
-        title: "Stairs",
-        x_label: "X",
-        y_label: "Y",
-        ..Default::default()
-    };
+    let opts = PlotRenderOptions::default();
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();

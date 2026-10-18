@@ -1035,27 +1035,27 @@ impl LoweringCtx {
 
     fn seed_existing_workspace_bindings(
         &mut self,
-        variables: &HashMap<String, usize>,
+        variables: &dyn crate::WorkspaceBindingView,
         owner: FunctionId,
     ) {
-        let mut variables = variables.iter().collect::<Vec<_>>();
-        variables.sort_by_key(|(_, slot)| **slot);
-        for (name, _) in variables {
+        variables.visit_in_slot_order(&mut |name, _| {
             if self.current_scope().bindings.contains_key(name) {
-                continue;
+                return;
             }
             let id = self.alloc_binding_id();
-            self.current_scope_mut().bindings.insert(name.clone(), id);
+            self.current_scope_mut()
+                .bindings
+                .insert(name.to_owned(), id);
             self.assembly.bindings.push(HirBinding {
                 id,
                 owner: BindingOwner::Function(owner),
-                name: BindingName(name.clone()),
+                name: BindingName(name.to_owned()),
                 role: BindingRole::IncomingWorkspace,
                 storage: BindingStorage::Lexical,
                 workspace_visibility: WorkspaceVisibility::TopLevel,
                 declared_span: Span { start: 0, end: 0 },
             });
-        }
+        });
     }
 
     fn binding_for_write(&mut self, name: &str, span: Span) -> BindingId {
@@ -2861,6 +2861,17 @@ impl LoweringCtx {
                         self.call_for_name(name, args, CallSyntax::Plain, requested_outputs, span)?;
                     if self.current_scope().external_bindings_visible {
                         call.workspace_first_name = Some(SymbolName(name.clone()));
+                    }
+                    // The typed call has now been resolved after its arguments.
+                    // A nested current-workspace eval/run can expose a name to
+                    // later operands or statements just as a top-level call can;
+                    // shadowed/imported calls and evalin on another workspace
+                    // must not grant that visibility.
+                    if self
+                        .stmt_expr_call_exposes_external_bindings(expr)?
+                        .is_some()
+                    {
+                        self.mark_external_bindings_visible();
                     }
                     HirExprKind::Call(call)
                 }

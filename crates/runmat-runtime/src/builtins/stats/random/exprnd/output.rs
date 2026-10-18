@@ -24,11 +24,9 @@ pub(super) async fn generate(
         OutputPrecision::Double => NumericDType::F64,
         OutputPrecision::Single => NumericDType::F32,
     };
-    let requested = ExactHostTensorAllocation::requested_bytes(dtype, &parsed.shape)
-        .map_err(|error| exprnd_internal_error(format!("exprnd: {error}")))?;
+    let bytes =
+        HostAllocationPlan::retained_tensor_bytes(dtype, &parsed.shape).map_err(resource_error)?;
     if let Some(runtime) = turn.owner().cloned() {
-        let bytes = u64::try_from(requested)
-            .map_err(|_| exprnd_internal_error("exprnd: output allocation size overflow"))?;
         let plan = HostAllocationPlan::new(0, bytes).map_err(resource_error)?;
         if let Some(receipt) =
             HostAllocationReceipt::admit(Some(&runtime), plan).map_err(resource_error)?

@@ -19,6 +19,19 @@ impl PreparedSequenceDestination {
         builder.finish(endpoint).await
     }
 
+    /// Prepare a destination from an already detached root without cloning it.
+    pub async fn prepare_owned(
+        root: Value,
+        steps: Vec<AssignmentStepSpec>,
+        endpoint: SequenceEndpointSpec,
+    ) -> Result<Self, RuntimeError> {
+        let mut builder = SequenceDestinationBuilder::from_owned(root)?;
+        for step in steps {
+            builder.push_step(step, None).await?;
+        }
+        builder.finish(endpoint).await
+    }
+
     pub const fn cardinality(&self) -> usize {
         match &self.kind {
             PreparedDestinationKind::Structural { endpoint, .. } => endpoint.cardinality(),

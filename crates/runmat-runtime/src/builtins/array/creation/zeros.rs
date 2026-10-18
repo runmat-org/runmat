@@ -597,7 +597,7 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::Tensor(t) => Ok(t.shape().to_vec()),
         Value::SparseTensor(t) => Ok(t.shape()),
         Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
-        Value::LogicalArray(l) => Ok(l.shape.clone()),
+        Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(normalize_scalar_shape(h.shape())),
         Value::CharArray(ca) => Ok(ca.shape.clone()),
         Value::Cell(cell) => Ok(cell.shape.clone()),

@@ -121,6 +121,10 @@ fn failure_feedback_may_be_taken_before_late_final_owner_retirement() {
         receipt.poll_resource_retirement(&mut context),
         Poll::Pending
     );
+    assert_eq!(
+        receipt.poll_resource_quiescence(&mut context),
+        Poll::Pending
+    );
     drop(ticket);
     assert_eq!(counter.0.load(Ordering::SeqCst), 0);
     assert_eq!(
@@ -136,9 +140,36 @@ fn failure_feedback_may_be_taken_before_late_final_owner_retirement() {
     assert_eq!(snapshot.requested_live_bytes, 0);
     assert!(!snapshot.scopes[0].finished);
     assert_eq!(
+        receipt.poll_resource_quiescence(&mut context),
+        Poll::Ready(Err(ProviderObservationFailure::Cancelled))
+    );
+    assert_eq!(
         receipt.status(),
         ProviderObservationStatus::Failed(ProviderObservationFailure::Cancelled)
     );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn operation_metadata_survives_dropped_waiter_until_final_ticket() {
+    let mut receipt = ProviderOperationReceipt::new();
+    let funding = Arc::new(AtomicUsize::new(0));
+    let retained = Arc::downgrade(&funding);
+    receipt.retain_operation_host_metadata(funding).unwrap();
+    let scope = receipt
+        .recorder()
+        .begin_resource_scope(ProviderResourcePhasePlan::new([8]).unwrap())
+        .unwrap();
+    scope.begin_next_phase().unwrap();
+    let ticket = scope.issue_resource_ticket(8).unwrap();
+    drop(scope);
+    drop(receipt);
+    assert!(
+        retained.upgrade().is_some(),
+        "callback owner retains funding"
+    );
+    drop(ticket);
+    assert!(retained.upgrade().is_none(), "last owner releases funding");
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

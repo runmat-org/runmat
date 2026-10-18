@@ -1,4 +1,7 @@
-use runmat_value::{ExactHostNumericAllocation, ExactHostNumericAllocationError, NumericDType};
+use runmat_value::{
+    ExactHostComplexTensorAllocation, ExactHostLogicalTensorAllocation, ExactHostNumericAllocation,
+    ExactHostNumericAllocationError, ExactHostTensorAllocation, NumericDType,
+};
 
 use super::HostAllocationError;
 
@@ -28,6 +31,83 @@ impl HostAllocationPlan {
         payload_bytes
             .checked_add(crate::context::host_effect::retained_claim_host_upper_bytes())
             .ok_or(HostAllocationError::Overflow)
+    }
+
+    /// Exact-output physical bytes plus the canonical managed permit's
+    /// separate claim-control allocation for each retained owner. A tensor
+    /// with independently claimed payload and shape supplies two claims.
+    pub fn retained_exact_output_bytes(
+        physical_bytes: u64,
+        retained_claims: usize,
+    ) -> Result<u64, HostAllocationError> {
+        let per_claim =
+            u64::try_from(crate::context::host_effect::owned_output_claim_metadata_bytes())
+                .map_err(|_| HostAllocationError::Overflow)?;
+        let controls = u64::try_from(retained_claims)
+            .ok()
+            .and_then(|count| count.checked_mul(per_claim))
+            .ok_or(HostAllocationError::Overflow)?;
+        physical_bytes
+            .checked_add(controls)
+            .ok_or(HostAllocationError::Overflow)
+    }
+
+    /// One retained exact dense tensor, including its separately claimed
+    /// payload and immutable shape. This is a final-output charge, not a
+    /// transient computation scratch bound.
+    pub fn retained_tensor_bytes(
+        dtype: NumericDType,
+        shape: &[usize],
+    ) -> Result<u64, HostAllocationError> {
+        let raw = ExactHostTensorAllocation::requested_bytes(dtype, shape)?;
+        Self::retained_exact_output_bytes(
+            u64::try_from(raw).map_err(|_| HostAllocationError::Overflow)?,
+            ExactHostTensorAllocation::retained_claim_count(),
+        )
+    }
+
+    pub fn retained_tensor_bytes_for_dimensions(
+        dtype: NumericDType,
+        count: usize,
+        rank: usize,
+    ) -> Result<u64, HostAllocationError> {
+        let raw = ExactHostTensorAllocation::requested_bytes_for_dimensions(dtype, count, rank)?;
+        Self::retained_exact_output_bytes(
+            u64::try_from(raw).map_err(|_| HostAllocationError::Overflow)?,
+            ExactHostTensorAllocation::retained_claim_count(),
+        )
+    }
+
+    pub fn retained_complex_tensor_bytes(
+        dtype: NumericDType,
+        shape: &[usize],
+    ) -> Result<u64, HostAllocationError> {
+        let raw = ExactHostComplexTensorAllocation::requested_bytes(dtype, shape)?;
+        Self::retained_exact_output_bytes(
+            u64::try_from(raw).map_err(|_| HostAllocationError::Overflow)?,
+            ExactHostComplexTensorAllocation::retained_claim_count(),
+        )
+    }
+
+    pub fn retained_complex_tensor_bytes_for_dimensions(
+        dtype: NumericDType,
+        count: usize,
+        rank: usize,
+    ) -> Result<u64, HostAllocationError> {
+        let raw =
+            ExactHostComplexTensorAllocation::requested_bytes_for_dimensions(dtype, count, rank)?;
+        Self::retained_exact_output_bytes(
+            u64::try_from(raw).map_err(|_| HostAllocationError::Overflow)?,
+            ExactHostComplexTensorAllocation::retained_claim_count(),
+        )
+    }
+
+    pub fn retained_logical_tensor_bytes(shape: &[usize]) -> Result<u64, HostAllocationError> {
+        let raw = ExactHostLogicalTensorAllocation::requested_bytes(shape)?;
+        Self::retained_exact_output_bytes(
+            u64::try_from(raw).map_err(|_| HostAllocationError::Overflow)?,
+            ExactHostLogicalTensorAllocation::retained_claim_count(),
+        )
     }
     pub fn new(
         scratch_peak_bytes: u64,
@@ -83,5 +163,22 @@ impl HostAllocationPlan {
 impl From<ExactHostNumericAllocationError> for HostAllocationError {
     fn from(error: ExactHostNumericAllocationError) -> Self {
         Self::Numeric(error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exact_tensor_quote_includes_two_independent_retained_claims() {
+        let shape = [2, 3];
+        let raw = ExactHostTensorAllocation::requested_bytes(NumericDType::F32, &shape).unwrap();
+        let controls =
+            2_u64 * crate::context::host_effect::owned_output_claim_metadata_bytes() as u64;
+        assert_eq!(
+            HostAllocationPlan::retained_tensor_bytes(NumericDType::F32, &shape).unwrap(),
+            raw as u64 + controls
+        );
     }
 }

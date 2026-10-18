@@ -25,6 +25,117 @@ fn solves_square_system() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn solves_native_precision_sparse_triangles_without_densifying_coefficients() {
+    let _accel_guard = test_support::accel_test_lock();
+    clear_accel_provider_state();
+    let context = RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let solve = |lhs, rhs| {
+        block_on(super::super::mldivide_builtin(
+            Some(context.clone()),
+            lhs,
+            rhs,
+        ))
+    };
+    let lower = runmat_value::SparseTensor::new_f32(
+        2,
+        2,
+        vec![0, 2, 3],
+        vec![0, 1, 1],
+        vec![2.0, 1.0, 3.0],
+    )
+    .unwrap();
+    let rhs = Tensor::from_f32(vec![2.0, 4.0, 4.0, 8.0], vec![2, 2]).unwrap();
+    let Value::Tensor(solution) = solve(Value::SparseTensor(lower), Value::Tensor(rhs)).unwrap()
+    else {
+        panic!("sparse single triangular solve must retain a dense single result");
+    };
+    assert_eq!(solution.as_f32_slice(), Some(&[1.0, 1.0, 2.0, 2.0][..]));
+
+    let empty_lower = runmat_value::SparseTensor::new_f32(
+        2,
+        2,
+        vec![0, 2, 3],
+        vec![0, 1, 1],
+        vec![2.0, 1.0, 3.0],
+    )
+    .unwrap();
+    let empty_rhs = Tensor::from_f32(Vec::new(), vec![2, 0]).unwrap();
+    let Value::Tensor(empty) =
+        solve(Value::SparseTensor(empty_lower), Value::Tensor(empty_rhs)).unwrap()
+    else {
+        panic!("zero-column RHS must remain a native single tensor");
+    };
+    assert_eq!(empty.shape(), [2, 0]);
+
+    let upper =
+        runmat_value::SparseTensor::new(2, 2, vec![0, 1, 3], vec![0, 0, 1], vec![2.0, 1.0, 3.0])
+            .unwrap();
+    let rhs = Tensor::new(vec![3.0, 3.0], vec![2, 1]).unwrap();
+    let Value::Tensor(solution) = solve(Value::SparseTensor(upper), Value::Tensor(rhs)).unwrap()
+    else {
+        panic!("sparse upper triangular solve must retain a dense result");
+    };
+    assert_eq!(solution.as_f64_slice(), Some(&[1.0, 1.0][..]));
+
+    let complex = runmat_value::SparseTensor::new_complex(
+        2,
+        2,
+        vec![0, 2, 3],
+        vec![0, 1, 1],
+        vec![(2.0, 0.0), (0.0, 1.0), (1.0, 1.0)],
+    )
+    .unwrap();
+    let rhs = ComplexTensor::new(vec![(2.0, 0.0), (1.0, 2.0)], vec![2, 1]).unwrap();
+    let Value::ComplexTensor(solution) =
+        solve(Value::SparseTensor(complex), Value::ComplexTensor(rhs)).unwrap()
+    else {
+        panic!("sparse complex triangular solve must retain a complex result");
+    };
+    let values = solution.as_f64_slice().unwrap();
+    assert!((values[0].0 - 1.0).abs() < 1e-12);
+    assert!(values[0].1.abs() < 1e-12);
+    assert!((values[1].0 - 1.0).abs() < 1e-12);
+    assert!(values[1].1.abs() < 1e-12);
+
+    let scalar_matrix =
+        runmat_value::SparseTensor::new(1, 1, vec![0, 1], vec![0], vec![2.0]).unwrap();
+    assert!(matches!(
+        solve(Value::SparseTensor(scalar_matrix), Value::Num(4.0)).unwrap(),
+        Value::Num(2.0)
+    ));
+    let scalar_complex =
+        runmat_value::SparseTensor::new_complex(1, 1, vec![0, 1], vec![0], vec![(2.0, 0.0)])
+            .unwrap();
+    assert!(matches!(
+        solve(
+            Value::SparseTensor(scalar_complex),
+            Value::Complex(4.0, 2.0)
+        )
+        .unwrap(),
+        Value::Complex(2.0, 1.0)
+    ));
+
+    let complex_single =
+        runmat_value::SparseTensor::new_complex_f32(1, 1, vec![0, 1], vec![0], vec![(2.0, 0.0)])
+            .unwrap();
+    let single_rhs = ComplexTensor::from_f32(vec![(4.0, 2.0)], vec![1, 1]).unwrap();
+    let Value::ComplexTensor(single) = solve(
+        Value::SparseTensor(complex_single),
+        Value::ComplexTensor(single_rhs),
+    )
+    .unwrap() else {
+        panic!("complex single solve must retain its native class");
+    };
+    assert_eq!(
+        single.as_f32_slice().unwrap()[0],
+        runmat_value::ComplexElement(2.0, 1.0)
+    );
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn solves_least_squares() {
     let _accel_guard = test_support::accel_test_lock();
     clear_accel_provider_state();

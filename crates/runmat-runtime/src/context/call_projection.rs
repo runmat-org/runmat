@@ -341,7 +341,9 @@ mod tests {
         let parent = runtime();
         let _entered = parent.enter();
         let _parent_function = user_functions::push_active_semantic_function(11);
-        let lab = parent.fork_parallel_lab(parent.service_ports().clone());
+        let lab = parent
+            .fork_parallel_lab(parent.service_ports().clone())
+            .expect("idle session fork");
         let independent = runtime();
         for (child, inherited) in [(lab, Some(11)), (independent, None)] {
             let entered = child.enter();

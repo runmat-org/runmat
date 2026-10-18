@@ -18,6 +18,7 @@ pub use graph::{
     GraphSelectedDynamicPropertyMetadata, GraphSelectedObject, GraphSelectedObjectArray,
     GraphSelectedObjectKind, GraphStaticCaller, GraphStaticDependency, GraphStaticReferenceSite,
     PayloadGraph, GRAPH_MAX_SELECTED_UNITS, GRAPH_REQUEST_SCHEMA_V10, GRAPH_REQUEST_SCHEMA_V11,
+    GRAPH_REQUEST_SCHEMA_V12,
 };
 pub use validation::{ValuePayloadValidationCursor, ValueValidationProgress};
 #[cfg(test)]

@@ -6,7 +6,7 @@ fn recursive_activation_owns_its_binding_while_child_writes_parent_cell() {
     runmat_gc::gc_test_context(|| {
         let binding = BindingId(17);
         let (parent, _parent_roots) = allocate_environment(None).expect("parent activation");
-        assert!(parent.reserve_owned_binding(binding));
+        assert!(reserve_owned_binding(&parent, binding).unwrap());
         write_owned_binding(&parent, binding, Value::Num(2.0)).expect("parent write");
 
         let (child, _child_roots) =
@@ -23,7 +23,7 @@ fn recursive_activation_owns_its_binding_while_child_writes_parent_cell() {
 
         let (recursive, _recursive_roots) =
             allocate_environment(Some(child.clone())).expect("recursive activation");
-        assert!(recursive.reserve_owned_binding(binding));
+        assert!(reserve_owned_binding(&recursive, binding).unwrap());
         write_owned_binding(&recursive, binding, Value::Num(11.0))
             .expect("recursive activation has a distinct cell");
         assert_eq!(
@@ -43,7 +43,7 @@ fn clear_retires_old_value_then_reuses_only_its_owned_slot() {
     runmat_gc::gc_test_context(|| {
         let binding = BindingId(23);
         let (parent, _roots) = allocate_environment(None).expect("activation");
-        assert!(parent.reserve_owned_binding(binding));
+        assert!(reserve_owned_binding(&parent, binding).unwrap());
         let original =
             runmat_gc::gc_allocate_rooted(Value::String("old".into())).expect("managed old value");
         let handle = original.handle();
@@ -81,7 +81,7 @@ fn retired_environment_handle_preserves_typed_gc_cause() {
     runmat_gc::gc_test_context(|| {
         let binding = BindingId(29);
         let (environment, roots) = allocate_environment(None).expect("activation");
-        assert!(environment.reserve_owned_binding(binding));
+        assert!(reserve_owned_binding(&environment, binding).unwrap());
         write_owned_binding(&environment, binding, Value::Num(4.0)).expect("published cell");
         drop(roots);
         runmat_gc::gc_collect_major().expect("retire unrooted activation");

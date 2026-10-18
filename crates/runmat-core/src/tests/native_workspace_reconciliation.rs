@@ -33,10 +33,12 @@ fn completed_register_metadata_cannot_overwrite_newer_canonical_state() {
         let outcome = execute_text_request_for_testing(&mut session, "x = 99;").unwrap();
         assert!(outcome.error.is_none(), "{:?}", outcome.error);
 
-        session.refresh_workspace_binding_slots(
-            &HashMap::from([("x".to_string(), (0, runmat_value::Value::Num(1.0)))]),
-            &Default::default(),
-        );
+        session
+            .refresh_workspace_binding_slots(
+                &HashMap::from([("x".to_string(), (0, runmat_value::Value::Num(1.0)))]),
+                |_, _| Ok(None),
+            )
+            .expect("slot refresh");
 
         assert_eq!(
             session.get_variables().unwrap().get("x"),
@@ -66,7 +68,7 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
                 .workspace_delta
                 .upserts
                 .iter()
-                .find(|entry| workspace_key_name(&entry.key) == "g")
+                .find(|entry| entry.name.0 == "g")
                 .expect("local g upsert")
                 .key
                 .clone();
@@ -87,7 +89,11 @@ fn top_level_global_binding_survives_requests_without_copying_its_value_into_bas
                         && entry.value == runmat_value::Value::Num(9.0)
                 )
             }));
-            assert!(binding.workspace_delta.removals.contains(&local_key));
+            assert!(binding
+                .workspace_delta
+                .removals
+                .iter()
+                .any(|removed| removed.name.0 == "g" && removed.key == local_key));
             assert_eq!(session.base_workspace_snapshot().unwrap().get("g"), None);
 
             let read =
@@ -144,7 +150,11 @@ fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_
             .clone();
 
         let local = execute_workspace_outcome(&mut session, "clear g; g = 3;");
-        assert!(local.workspace_delta.removals.contains(&global_key));
+        assert!(local
+            .workspace_delta
+            .removals
+            .iter()
+            .any(|removed| removed.name.0 == "g" && removed.key == global_key));
         assert!(local.workspace_delta.upserts.iter().any(|entry| {
             matches!(
                 &entry.key,
@@ -170,15 +180,6 @@ fn clearing_a_durable_global_binding_restores_local_then_redeclare_reads_global_
             Some(&runmat_value::Value::Num(9.0))
         );
     });
-}
-
-fn workspace_key_name(key: &crate::abi::WorkspaceBindingKey) -> &str {
-    match key {
-        crate::abi::WorkspaceBindingKey::SourceBinding { binding, .. } => &binding.0,
-        crate::abi::WorkspaceBindingKey::Interactive { name, .. }
-        | crate::abi::WorkspaceBindingKey::Global { name, .. }
-        | crate::abi::WorkspaceBindingKey::Persistent { name, .. } => &name.0,
-    }
 }
 
 #[test]
@@ -220,7 +221,16 @@ fn native_calls_publish_dynamic_workspace_writes_before_following_reads() {
             deterministic: true,
             ..Default::default()
         });
-        let source = "alpha = 17; syms alpha; assert(isa(alpha, 'sym')); assert(strcmp(char(alpha), 'alpha'));";
+        let source = concat!(
+            "alpha = 17; syms alpha; assert(isa(alpha, 'sym')); assert(strcmp(char(alpha), 'alpha'));",
+            "original = 7; ordered = plus(original, eval('original = 9; 0'));",
+            "assert(ordered == 7); assert(original == 9);",
+            "original = 11; ordered = original + eval('original = 13; 0');",
+            "assert(ordered == 11); assert(original == 13);",
+            "C = {[7 8]}; ordered = C{1}(eval('C = {[9 10]}; 1'));",
+            "assert(ordered == 7); assert(isequal(C, {[9 10]}));",
+            "assert(isequal(C{1}, [9 10]));",
+        );
         let mut entered_native = false;
         for _ in 0..6 {
             let outcome = execute_text_request_for_testing(&mut session, source).unwrap();
@@ -485,8 +495,8 @@ fn native_assignment_before_suspended_cancellation_remains_in_base_workspace() {
             deterministic: true,
             ..Default::default()
         });
-        execute_text_request_for_testing(&mut session, "delay = 0;").unwrap();
-        let source = "committed_before_cancel = 91; pause(delay);";
+        execute_text_request_for_testing(&mut session, "delay = 0; prefix_value = 91;").unwrap();
+        let source = "committed_before_cancel = prefix_value; pause(delay);";
         let mut entered_native = false;
         for _ in 0..6 {
             let outcome = execute_text_request_for_testing(&mut session, source).unwrap();
@@ -497,7 +507,7 @@ fn native_assignment_before_suspended_cancellation_remains_in_base_workspace() {
             entered_native,
             "cancellation witness must warm native execution"
         );
-        execute_text_request_for_testing(&mut session, "delay = 30;").unwrap();
+        execute_text_request_for_testing(&mut session, "delay = 30; prefix_value = 123;").unwrap();
 
         let interrupt = session.interrupt_handle();
         let request = crate::abi::ExecutionRequest::for_source(
@@ -520,16 +530,19 @@ fn native_assignment_before_suspended_cancellation_remains_in_base_workspace() {
                 diagnostic.code == "RunMat:ExecutionCancelled"
                     || diagnostic.code == "ExecutionCancelled"
             })),
-            Err(crate::RunError::Runtime(error)) => assert!(matches!(
-                error.identifier(),
-                Some("RunMat:ExecutionCancelled" | "ExecutionCancelled")
-            )),
+            Err(crate::RunError::Runtime(error)) => assert!(
+                matches!(
+                    error.identifier(),
+                    Some("RunMat:ExecutionCancelled" | "ExecutionCancelled")
+                ),
+                "unexpected runtime cancellation error: {error:?}"
+            ),
             Err(error) => panic!("unexpected cancellation error: {error}"),
         }
 
         let verification = execute_text_request_for_testing(
             &mut session,
-            "assert(committed_before_cancel == 91);",
+            "assert(committed_before_cancel == 123);",
         )
         .unwrap();
         assert!(verification.error.is_none(), "{:?}", verification.error);

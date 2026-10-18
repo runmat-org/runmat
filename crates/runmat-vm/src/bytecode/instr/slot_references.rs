@@ -3,7 +3,7 @@
 
 use crate::bytecode::{
     AggregateElementSpec, BytecodeDottedInvokeArgument, BytecodeSubscriptSelector,
-    BytecodeSubscriptStep, EmitLabel, Instr,
+    BytecodeSubscriptStep, EmitLabel, Instr, StochasticSourceOperand,
 };
 use runmat_runtime::call::arguments::{ArgumentExpansionSpec, ArgumentSpec};
 
@@ -19,6 +19,30 @@ impl Instr {
         match self {
             Instr::StoreVar(index) => visit(*index, VmSlotAccess::StoreVar),
             Instr::LoadVar(index) => visit(*index, VmSlotAccess::LoadVar),
+            Instr::StochasticEvolution {
+                iteration_slot,
+                noise_slot,
+                state_slot,
+                steps,
+                drift,
+                scale,
+                randn_args,
+                ..
+            } => {
+                for slot in [*iteration_slot, *noise_slot, *state_slot] {
+                    visit(slot, VmSlotAccess::StoreVar);
+                }
+                visit(*state_slot, VmSlotAccess::LoadVar);
+                for operand in std::iter::once(steps)
+                    .chain(std::iter::once(drift))
+                    .chain(std::iter::once(scale))
+                    .chain(randn_args)
+                {
+                    if let StochasticSourceOperand::Slot(slot) = operand {
+                        visit(*slot, VmSlotAccess::LoadVar);
+                    }
+                }
+            }
             Instr::LoadVarForIndexAssignment(index)
             | Instr::LoadVarForCellAssignment(index)
             | Instr::LoadVarForStructAssignment(index)
@@ -210,7 +234,6 @@ impl Instr {
             | Instr::Jump(..)
             | Instr::Pop
             | Instr::Unpack(..)
-            | Instr::StochasticEvolution
             | Instr::CreateMatrix(..)
             | Instr::CreateMatrixDynamic(..)
             | Instr::CreateRange(..)

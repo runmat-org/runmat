@@ -1103,7 +1103,7 @@ fn unique_complex_from_tensor(
 
 fn unique_floating_complex<T: SetFloat, S: ComplexSequence<T>>(
     values: S,
-    shape: Vec<usize>,
+    shape: runmat_value::SharedShape,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if opts.rows {
@@ -1115,7 +1115,7 @@ fn unique_floating_complex<T: SetFloat, S: ComplexSequence<T>>(
 
 fn unique_complex_elements<T: SetFloat, S: ComplexSequence<T>>(
     input: S,
-    shape: Vec<usize>,
+    shape: runmat_value::SharedShape,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     let len = input.len();
@@ -1218,7 +1218,7 @@ fn unique_complex_elements<T: SetFloat, S: ComplexSequence<T>>(
 
 fn unique_complex_rows<T: SetFloat, S: ComplexSequence<T>>(
     input: S,
-    shape: Vec<usize>,
+    shape: runmat_value::SharedShape,
     opts: &UniqueOptions,
 ) -> crate::BuiltinResult<UniqueEvaluation> {
     if shape.len() != 2 {

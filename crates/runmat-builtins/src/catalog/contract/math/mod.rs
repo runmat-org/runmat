@@ -13,6 +13,7 @@ pub enum MathInferenceRule {
     AngleConversion(AngleConversionInferenceRule),
     Atan2,
     Bsxfun,
+    BesselJ,
     BinaryArithmetic(BinaryArithmeticInferenceRule),
     MatrixArithmetic(MatrixArithmeticInferenceRule),
     Bitwise(BitwiseInferenceRule),

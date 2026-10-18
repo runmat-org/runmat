@@ -664,6 +664,18 @@ impl runmat_runtime::context::RuntimePlacementService for PlacementSession {
         Some(super::revision::whole_work(program, provider, self.config))
     }
 
+    fn whole_work_revision_ref<'a>(
+        &self,
+        program: Option<&'a runmat_execution::ProgramRevision>,
+        provider: Digest,
+    ) -> Option<runmat_execution::PlacementRevisionRef<'a>> {
+        Some(super::revision::whole_work_ref(
+            program,
+            provider,
+            self.config,
+        ))
+    }
+
     fn whole_work_runtime_binding_session_revision(
         &self,
         program: Option<runmat_execution::ProgramRevision>,

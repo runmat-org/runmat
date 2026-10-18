@@ -67,7 +67,7 @@ fn select_outputs(output: Value, edges: Option<Value>) -> BuiltinResult<Value> {
 fn shape_of(value: &Value) -> Vec<usize> {
     match value {
         Value::Tensor(value) => value.shape().to_vec(),
-        Value::LogicalArray(value) => value.shape.clone(),
+        Value::LogicalArray(value) => value.shape.to_vec(),
         Value::SparseTensor(value) => vec![value.rows, value.cols],
         _ => vec![1, 1],
     }

@@ -525,12 +525,7 @@ pub async fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         Ok::<_, crate::RuntimeError>(plots)
     }
     .await?;
-    let opts = PlotRenderOptions {
-        title: "Error Bars",
-        x_label: "X",
-        y_label: "Y",
-        ..Default::default()
-    };
+    let opts = PlotRenderOptions::default();
     let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();

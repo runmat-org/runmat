@@ -958,49 +958,53 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        let previous_source_name = self.active_source_name.clone();
-        let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
-        let previous_pending = self.pending_companion_source_discovery.take();
-        self.active_source_name = primary_access_path
-            .clone()
-            .unwrap_or_else(|| source.relative_path.clone());
-        self.active_source_fullpath_name = primary_access_path;
+        let result = {
+            let mut scope = super::source_scope::SourceCompositionScope::enter(self);
+            let session = scope.session();
+            session.active_source_name = primary_access_path
+                .clone()
+                .unwrap_or_else(|| source.relative_path.clone());
+            session.active_source_fullpath_name = primary_access_path;
 
-        let companion_result = if let Some(handoff) = self.project_handoff.as_ref() {
-            companion_source_statements_from_handoff_async(
-                self.active_source_name.as_str(),
-                self.compat_mode,
-                handoff,
-                test_authority,
-            )
-            .await
-        } else if test_authority.is_some() {
-            Ok(CompanionSourceDiscovery::default())
-        } else {
-            discover_companion_source_statements_async(&source.relative_path, self.compat_mode)
+            let companion_result = if let Some(handoff) = session.project_handoff.as_ref() {
+                companion_source_statements_from_handoff_async(
+                    session.active_source_name.as_str(),
+                    session.compat_mode,
+                    handoff,
+                    test_authority,
+                )
                 .await
-        };
-        let companion_result = companion_result.and_then(|mut companion| {
-            if let Some(authority) = test_authority {
-                authority.add_companions(&mut companion, self.compat_mode)?;
+            } else if test_authority.is_some() {
+                Ok(CompanionSourceDiscovery::default())
+            } else {
+                discover_companion_source_statements_async(
+                    &source.relative_path,
+                    session.compat_mode,
+                )
+                .await
+            };
+            let companion_result = companion_result.and_then(|mut companion| {
+                if let Some(authority) = test_authority {
+                    authority.add_companions(&mut companion, session.compat_mode)?;
+                }
+                Ok(companion)
+            });
+            match companion_result {
+                Ok(companion) => {
+                    session.pending_companion_source_discovery = Some(companion);
+                    session.compile_input_with_portable_source(
+                        &source.text,
+                        Some(&source),
+                        test_authority,
+                    )
+                }
+                Err(error) => Err(RunError::Runtime(
+                    build_runtime_error(format!("project composition failed: {error}"))
+                        .with_identifier("RunMat:ProjectComposition")
+                        .build(),
+                )),
             }
-            Ok(companion)
-        });
-        let result = match companion_result {
-            Ok(companion) => {
-                self.pending_companion_source_discovery = Some(companion);
-                self.compile_input_with_portable_source(&source.text, Some(&source), test_authority)
-            }
-            Err(error) => Err(RunError::Runtime(
-                build_runtime_error(format!("project composition failed: {error}"))
-                    .with_identifier("RunMat:ProjectComposition")
-                    .build(),
-            )),
         };
-
-        self.active_source_name = previous_source_name;
-        self.active_source_fullpath_name = previous_source_fullpath_name;
-        self.pending_companion_source_discovery = previous_pending;
 
         let mut prepared = result?;
         let source_map = prepared
@@ -1145,27 +1149,32 @@ impl RunMatSession {
     }
 
     #[cfg(test)]
+    pub(crate) fn published_function_registry_for_testing(&self) -> runmat_vm::FunctionRegistry {
+        self.function_registry.clone()
+    }
+
+    #[cfg(test)]
     pub(crate) fn compile_input_for_source_name(
         &mut self,
         source_name: &str,
         input: &str,
     ) -> std::result::Result<PreparedExecution, RunError> {
-        let previous_source_name = self.active_source_name.clone();
-        let previous_source_fullpath_name = self.active_source_fullpath_name.clone();
-        self.active_source_name = source_name.to_string();
-        self.active_source_fullpath_name = None;
-        let handoff = self.project_handoff.clone();
+        let mut scope = super::source_scope::SourceCompositionScope::enter(self);
+        let session = scope.session();
+        session.active_source_name = source_name.to_string();
+        session.active_source_fullpath_name = None;
+        let handoff = session.project_handoff.clone();
         let companion = futures::executor::block_on(async {
             if let Some(handoff) = handoff.as_ref() {
                 companion_source_statements_from_handoff_async(
                     source_name,
-                    self.compat_mode,
+                    session.compat_mode,
                     handoff,
                     None,
                 )
                 .await
             } else {
-                discover_companion_source_statements_async(source_name, self.compat_mode).await
+                discover_companion_source_statements_async(source_name, session.compat_mode).await
             }
         })
         .map_err(|error| {
@@ -1175,11 +1184,8 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        self.pending_companion_source_discovery = Some(companion);
-        let result = self.compile_input(input);
-        self.active_source_name = previous_source_name;
-        self.active_source_fullpath_name = previous_source_fullpath_name;
-        result
+        session.pending_companion_source_discovery = Some(companion);
+        session.compile_input(input)
     }
 
     pub(crate) fn compile_input(
@@ -1194,6 +1200,35 @@ impl RunMatSession {
         input: &str,
     ) -> std::result::Result<crate::ExecutableSource, RunError> {
         let display_name = self.current_source_name();
+        if let Some(captured) = self.active_primary_source.as_ref() {
+            let source = crate::ExecutableSource::with_captured_primary(input, captured.clone())
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build(),
+                    )
+                })?;
+            captured
+                .validate(
+                    self.project_handoff.as_ref().ok_or_else(|| {
+                        RunError::Runtime(
+                            build_runtime_error("captured primary has no installed project")
+                                .with_identifier("RunMat:ExecutableSourceIdentity")
+                                .build(),
+                        )
+                    })?,
+                    &source,
+                )
+                .map_err(|error| {
+                    RunError::Runtime(
+                        build_runtime_error(error)
+                            .with_identifier("RunMat:ExecutableSourceIdentity")
+                            .build(),
+                    )
+                })?;
+            return Ok(source);
+        }
         let fallback = crate::ExecutableSource::new("interactive", display_name, input);
         let (owner_identity, relative_path) = executable_source_identity(
             &fallback,

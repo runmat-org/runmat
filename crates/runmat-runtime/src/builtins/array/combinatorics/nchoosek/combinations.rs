@@ -18,10 +18,10 @@ pub(super) fn value(value: Value, selection: usize) -> BuiltinResult<Value> {
         Value::Complex(real, imaginary) => {
             complex_values(vec![(real, imaginary)], vec![1, 1], selection)
         }
-        Value::Bool(flag) => logical(vec![u8::from(flag)], vec![1, 1], selection),
+        Value::Bool(flag) => logical(vec![u8::from(flag)], &[1, 1], selection),
         Value::Tensor(tensor) => numeric(tensor, selection),
         Value::ComplexTensor(tensor) => complex(tensor, selection),
-        Value::LogicalArray(array) => logical(array.data.into_vec(), array.shape, selection),
+        Value::LogicalArray(array) => logical(array.data.into_vec(), &array.shape, selection),
         Value::CharArray(array) => characters(array, selection),
         Value::Num(_) | Value::Int(_) => Err(error::with_message(
             &NCHOOSEK_ERROR_INVALID_INPUT,
@@ -104,8 +104,8 @@ fn complex_values(
         .map_err(internal)
 }
 
-fn logical(data: Vec<u8>, shape: Vec<usize>, selection: usize) -> BuiltinResult<Value> {
-    let population = arguments::vector_len(&shape)?;
+fn logical(data: Vec<u8>, shape: &[usize], selection: usize) -> BuiltinResult<Value> {
+    let population = arguments::vector_len(shape)?;
     let rows = output_rows(population, selection)?;
     LogicalArray::new(columns(&data, rows, selection)?, vec![rows, selection])
         .map(Value::LogicalArray)

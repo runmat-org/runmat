@@ -367,10 +367,14 @@ async fn load_scalar_member_with_context(
         )),
         Value::Cell(_) => Err(mex("LoadMember", "LoadMember on non-object")),
         Value::MException(mexn) => {
-            let value = match field.as_str() {
-                "identifier" => Value::String(mexn.identifier.clone()),
-                "message" => Value::String(mexn.message.clone()),
-                "stack" => {
+            let value = match runmat_types::ExceptionProperty::from_name(field.as_str()) {
+                Some(runmat_types::ExceptionProperty::Identifier) => {
+                    exception_text_value(&mexn.identifier)
+                }
+                Some(runmat_types::ExceptionProperty::Message) => {
+                    exception_text_value(&mexn.message)
+                }
+                Some(runmat_types::ExceptionProperty::Stack) => {
                     let values: Vec<Value> = mexn
                         .stack
                         .iter()
@@ -381,7 +385,7 @@ async fn load_scalar_member_with_context(
                         .map_err(|e| format!("MException.stack: {e}"))?;
                     Value::Cell(cell)
                 }
-                other => return Err(format!("Reference to non-existent field '{}'.", other).into()),
+                None => return Err(format!("Reference to non-existent field '{}'.", field).into()),
             };
             RootedValue::new(value).map_err(|error| error.into_runtime_error())
         }

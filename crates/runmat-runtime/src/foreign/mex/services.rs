@@ -270,7 +270,7 @@ impl MexHostServices for RuntimeMexHostServices {
                 .service_ports()
                 .require_workspace("read the MEX caller workspace")
                 .map_err(capability_diagnostic)?
-                .try_lookup(name)
+                .try_lookup_with_context(&self.runtime, name)
                 .map_err(runtime_diagnostic),
             MexWorkspace::Base => {
                 let owner = self
@@ -304,7 +304,7 @@ impl MexHostServices for RuntimeMexHostServices {
                 .service_ports()
                 .require_workspace("write the MEX caller workspace")
                 .map_err(capability_diagnostic)?
-                .assign(name, value)
+                .assign_with_context(&self.runtime, name, value)
                 .map_err(runtime_diagnostic),
             MexWorkspace::Base => {
                 let owner = self
@@ -313,9 +313,10 @@ impl MexHostServices for RuntimeMexHostServices {
                     .require_base_workspace("write the MEX base workspace")
                     .map_err(capability_diagnostic)?
                     .owner();
-                crate::workspace::assign_logical_base_value(
+                crate::workspace::assign_logical_base_value_with_context(
                     &owner,
                     &self.runtime.session_variable_authority(),
+                    &self.runtime,
                     name,
                     value,
                 )
@@ -325,7 +326,7 @@ impl MexHostServices for RuntimeMexHostServices {
                 crate::execution::validate_storable_value(&value).map_err(runtime_diagnostic)?;
                 self.runtime
                     .session_variable_authority()
-                    .store_global(name, value)
+                    .store_global_with_context(&self.runtime, name, value)
                     .map_err(runtime_diagnostic)
             }
         }

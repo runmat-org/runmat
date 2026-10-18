@@ -13,6 +13,7 @@ on:
       - "scripts/regenerate-wasm-registry.mjs"
       - "scripts/test-wasm-headless.sh"
       - "scripts/runtime/**"
+      - "scripts/distribution/**"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/wasm-bindings.yml"
@@ -311,6 +312,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          node ../../scripts/distribution/third-party-notices.cjs verify dist
           archive_json="$(npm pack --ignore-scripts --json)"
           archive="$(PACKAGE_ARCHIVE_JSON="$archive_json" node -e 'const value=JSON.parse(process.env.PACKAGE_ARCHIVE_JSON); if (!Array.isArray(value) || value.length !== 1 || typeof value[0].filename !== "string") throw new Error("npm pack returned no unique archive"); process.stdout.write(value[0].filename)')"
           test -f "$archive"
@@ -319,6 +321,8 @@ jobs:
           tar -xzf "$archive" -C "$packed_root"
           cmp dist/pkg-web/runmat_wasm_web.js "$packed_root/package/dist/pkg-web/runmat_wasm_web.js"
           cmp dist/pkg-web/runmat_wasm_web_bg.wasm "$packed_root/package/dist/pkg-web/runmat_wasm_web_bg.wasm"
+          cmp dist/THIRD_PARTY_NOTICES.txt "$packed_root/package/dist/THIRD_PARTY_NOTICES.txt"
+          cmp dist/pkg-web/THIRD_PARTY_NOTICES.txt "$packed_root/package/dist/pkg-web/THIRD_PARTY_NOTICES.txt"
           echo "archive=$archive" >> "$GITHUB_OUTPUT"
 
       - name: Publish bindings package to npm

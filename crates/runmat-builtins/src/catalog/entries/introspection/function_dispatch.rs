@@ -15,6 +15,9 @@ use runmat_types::EffectKind;
 
 use super::documentation::FEVAL_DOCUMENTATION;
 
+mod dynamic_workspace;
+pub use dynamic_workspace::*;
+
 const FEVAL_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
     name: "varargout",
     ty: BuiltinParamType::Any,
@@ -167,4 +170,10 @@ pub const FEVAL_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
     suppress_auto_output: false,
 };
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&FEVAL_CATALOG_ENTRY];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
+    &FEVAL_CATALOG_ENTRY,
+    &EVAL_CATALOG_ENTRY,
+    &EVALC_CATALOG_ENTRY,
+    &EVALIN_CATALOG_ENTRY,
+    &ASSIGNIN_CATALOG_ENTRY,
+];

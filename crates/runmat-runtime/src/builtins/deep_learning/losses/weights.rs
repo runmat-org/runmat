@@ -14,7 +14,7 @@ impl LossWeights {
             }),
             Value::LogicalArray(array) => Ok(Self {
                 data: array.data.iter().map(|value| f64::from(*value)).collect(),
-                shape: array.shape.clone(),
+                shape: array.shape.to_vec(),
             }),
             _ => {
                 let payload = LossPayload::parse(value, label)?;

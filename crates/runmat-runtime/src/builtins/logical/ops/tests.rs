@@ -469,7 +469,7 @@ fn logical_wgpu_matches_cpu_conversion() {
                 .iter()
                 .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                 .collect(),
-            arr.shape.clone(),
+            arr.shape.to_vec(),
         ),
         Value::Bool(flag) => (vec![if flag { 1.0 } else { 0.0 }], vec![1, 1]),
         other => panic!("unexpected cpu result {other:?}"),

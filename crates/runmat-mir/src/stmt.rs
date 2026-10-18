@@ -12,19 +12,32 @@ pub struct MirStmt {
 }
 
 impl MirStmt {
-    pub fn visit_expression_regions(&self, mut visitor: impl FnMut(&crate::MirExpressionRegion)) {
+    pub fn visit_expression_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
         self.kind.visit_expression_regions_dyn(&mut visitor);
     }
 }
 
 impl MirStmtKind {
-    pub fn visit_expression_regions(&self, mut visitor: impl FnMut(&crate::MirExpressionRegion)) {
+    /// Visits every operand in this statement, including owned selector and
+    /// expression-preparation regions. Native continuation geometry uses the
+    /// same canonical traversal as MIR's statement semantics.
+    pub fn visit_operands(&self, mut visitor: impl FnMut(&crate::MirOperand)) {
+        crate::rvalue::visit_stmt_kind_operands(self, &mut visitor);
+    }
+
+    pub fn visit_expression_regions(
+        &self,
+        mut visitor: impl FnMut(crate::MirExpressionRegionRef<'_>),
+    ) {
         self.visit_expression_regions_dyn(&mut visitor);
     }
 
     pub(crate) fn visit_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         self.visit_direct_expression_regions_dyn(&mut |region| {
             visitor(region);
@@ -34,11 +47,11 @@ impl MirStmtKind {
 
     pub(crate) fn visit_direct_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
         fn visit_place(
             place_value: &MirPlace,
-            visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+            visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
         ) {
             match place_value {
                 MirPlace::Local(_) | MirPlace::Binding(_) => {}
@@ -102,9 +115,12 @@ impl MirStmtKind {
     /// excluded so effects and safepoints have one owner.
     pub(crate) fn visit_statement_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&crate::MirExpressionRegion),
+        visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
     ) {
-        fn visit_place(place: &MirPlace, visitor: &mut dyn FnMut(&crate::MirExpressionRegion)) {
+        fn visit_place(
+            place: &MirPlace,
+            visitor: &mut dyn FnMut(crate::MirExpressionRegionRef<'_>),
+        ) {
             match place {
                 MirPlace::Local(_) | MirPlace::Binding(_) => {}
                 MirPlace::Member(base, _) | MirPlace::DynamicMember(base, _) => {

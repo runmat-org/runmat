@@ -38,6 +38,40 @@ fn two_temporary_claims_share_one_precharged_envelope() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn owned_temporary_header_retires_before_refund_and_survives_diagnostic_transfer() {
+    let metadata = std::mem::size_of::<TemporaryClaim>();
+    let ledger = ManagedHostEffectLedger::new(metadata as u64);
+    let stage = ledger
+        .reserve_stage(metadata as u64)
+        .expect("metadata stage");
+    let claim = Box::new(
+        stage
+            .claim_temporary(0, metadata)
+            .expect("owned temporary claim"),
+    );
+    // SAFETY: the test Box owns one exact TemporaryClaim allocation; the
+    // callback releases it once with its original layout.
+    unsafe {
+        TemporaryClaim::retire_owned_with(claim, |pointer, layout| {
+            assert_eq!(ledger.snapshot().live_claimed_bytes, metadata as u64);
+            std::alloc::dealloc(pointer.as_ptr(), layout);
+        })
+    };
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+    let claim = stage
+        .reserve_live_exact_claim(HostEffectLiveAllocationKind::Diagnostic, 0)
+        .expect("diagnostic claim");
+    let retained = claim.into_diagnostic_retention();
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, metadata as u64);
+    drop(retained);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn one_opened_source_promotes_the_same_stage_without_recharging_temporary_claims() {
     let ledger = ManagedHostEffectLedger::new(8);
     let stage = ledger.reserve_stage(4).expect("pre-open chunk envelope");
@@ -88,6 +122,32 @@ fn retained_output_adds_global_charge_during_stage_overlap() {
     drop(output);
     assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn dynamic_and_pooled_outputs_share_the_exact_owned_claim_control() {
+    let metadata = owned_output_claim_metadata_bytes();
+    let charged = metadata as u64 + 4;
+    let ledger = ManagedHostEffectLedger::new(charged);
+    let stage = ledger.reserve_stage(0).expect("dynamic stage");
+    let headroom = stage
+        .reserve_output_headroom(charged)
+        .expect("exact output headroom");
+    let claim = headroom
+        .reserve_exact_claim(4)
+        .expect("dynamic owned claim");
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(headroom);
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, charged);
+    drop(claim);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(
+        ManagedHostEffectStagePool::owned_output_claim_metadata_bytes(),
+        metadata
+    );
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

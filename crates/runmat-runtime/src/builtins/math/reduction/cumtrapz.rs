@@ -338,7 +338,7 @@ fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::LogicalArray(array) => Some(if array.shape.is_empty() {
             vec![array.data.len(), 1]
         } else {
-            array.shape.clone()
+            array.shape.to_vec()
         }),
         Value::GpuTensor(handle) => Some(if handle.shape().is_empty() {
             vec![1, 1]

@@ -5,6 +5,7 @@ mod provider;
 
 use runmat_value::{Tensor, Value};
 
+use crate::context::RuntimeContext;
 use crate::BuiltinResult;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,15 @@ pub(in crate::builtins::math::linalg) async fn evaluate(
     lhs: &Value,
     rhs: &Value,
 ) -> BuiltinResult<Value> {
+    evaluate_with_context(orientation, lhs, rhs, None).await
+}
+
+pub(in crate::builtins::math::linalg) async fn evaluate_with_context(
+    orientation: SolveOrientation,
+    lhs: &Value,
+    rhs: &Value,
+    context: Option<&RuntimeContext>,
+) -> BuiltinResult<Value> {
     if crate::builtins::common::validation::is_typed_complex_integer(lhs)
         || crate::builtins::common::validation::is_typed_complex_integer(rhs)
     {
@@ -40,6 +50,13 @@ pub(in crate::builtins::math::linalg) async fn evaluate(
     }
     if let Some(result) = provider::try_solve(orientation, lhs, rhs).await? {
         return Ok(result);
+    }
+    // This new host route requires the actual execution policy issuer. Legacy
+    // context-free callers retain their prior sparse behavior.
+    if let (SolveOrientation::Left, Some(context)) = (orientation, context) {
+        if let Some(result) = host::try_sparse_triangular(lhs, rhs, context)? {
+            return Ok(result);
+        }
     }
     let lhs = crate::dispatcher::gather_if_needed_async(lhs)
         .await

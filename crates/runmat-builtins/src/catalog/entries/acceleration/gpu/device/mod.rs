@@ -1,5 +1,5 @@
 use crate::*;
-use runmat_types::{EffectKind, ExecutionStackRequirement};
+use runmat_types::{CapabilityRequirement, EffectKind, ExecutionStackRequirement};
 
 mod contract;
 mod documentation;
@@ -34,12 +34,12 @@ pub const GPU_DEVICE_CATALOG_ENTRY: BuiltinCatalogEntry = BuiltinCatalogEntry {
         workspace_effect: None,
         environment_effect: None,
         effects: &[EffectKind::EnvironmentRead, EffectKind::MayThrow],
-        capabilities: &[],
+        capabilities: &[CapabilityRequirement::Accelerator],
     },
     placement: BuiltinPlacementContract {
         preparation: BuiltinOperandPreparation::RuntimeOwned,
         portability: BuiltinPortability::NativeAndWasm,
-        accelerator: BuiltinAcceleratorPolicy::Optional,
+        accelerator: BuiltinAcceleratorPolicy::Required,
         residency: BuiltinResidencyPolicy::Host,
         fusion: BuiltinFusionPolicy::Boundary,
         distributed: BuiltinDistributedPolicy::Unsupported,

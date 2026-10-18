@@ -199,10 +199,14 @@ impl RunMatSession {
         let session = Self {
             verbose,
             stats: ExecutionStats::default(),
-            workspace_bindings: Rc::new(RefCell::new(HashMap::new())),
+            workspace_bindings: workspace::binding_control::BindingControl::new_for_context(
+                &runtime_context,
+                workspace::binding_table::BindingTable::new_for_context(&runtime_context)?,
+            )?,
             base_workspace,
             abi_workspace_handle: crate::abi::WorkspaceHandle(Uuid::new_v4()),
             active_source_identity: None,
+            active_primary_source: None,
             function_registry: runmat_vm::FunctionRegistry::default(),
             next_semantic_function_id: 0,
             dynamic_function_cache: Rc::new(dynamic_cache::DynamicFunctionCache::default()),

@@ -64,7 +64,8 @@ pub(crate) mod image_stages;
 #[cfg(feature = "wgpu")]
 pub use image_stages::ImageVmOriginalRoute;
 pub use image_stages::{
-    ImageVmCheckpoint, ImageVmPreparation, ImageVmSelectedRoute, ImageVmStages,
+    ImageVmCheckpoint, ImageVmPreparation, ImageVmSelectedRoute, ImageVmSourceFallbackRoute,
+    ImageVmStages,
 };
 #[cfg(test)]
 mod ownership_tests;
@@ -656,6 +657,7 @@ fn select_fusion_provider_with_implementation(
                 gpu_random: None,
                 gpu_integer: None,
                 gpu_integer_batch: None,
+                stochastic_evolution: None,
                 fused_elementwise: elementwise_abi,
                 real_power_mode: None,
                 real_power_scalar: None,

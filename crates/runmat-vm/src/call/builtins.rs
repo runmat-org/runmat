@@ -3,10 +3,11 @@ use crate::interpreter::api::InterpreterOutcome;
 use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop_args;
 use crate::runtime::workspace::{
-    base_target_authority, capture_workspace_target, workspace_assign_target, BaseTargetAuthority,
-    WorkspaceAssignedReport, WorkspaceTarget, WorkspaceTargetIdentity, WorkspaceTargetSnapshot,
-    WorkspaceValueSnapshot,
+    base_target_authority, capture_workspace_target, has_workspace_target_in_context,
+    AdmittedDynamicInput, BaseTargetAuthority, WorkspaceAssignedReport, WorkspaceFrameFuture,
+    WorkspaceTarget, WorkspaceTargetIdentity, WorkspaceTargetSnapshot, WorkspaceValueSnapshot,
 };
+use runmat_builtins::DynamicWorkspaceBuiltin;
 use runmat_hir::{FunctionId, QualifiedName, SymbolName};
 use runmat_parser::{parse_with_options, CompatMode, ParserOptions};
 use runmat_runtime::RuntimeError;
@@ -20,8 +21,17 @@ mod eval_hir_sites;
 mod dynamic_base_target;
 #[path = "builtins/eval_static_selection.rs"]
 mod eval_static_selection;
+#[path = "builtins/native_target.rs"]
+mod native_target;
+#[path = "builtins/result_capture.rs"]
+mod result_capture;
 pub(crate) use eval_hir_sites::PendingClosurePlan;
 pub(crate) use eval_hir_sites::SelectedClosureCapture;
+pub use result_capture::DynamicEvalResult;
+use result_capture::{
+    prepare_dynamic_result_capture, retain_dynamic_result_slot, DynamicEvalResultCapture,
+    DynamicTerminalOutput, PreparedDynamicEvalResultCapture,
+};
 mod source_evaluation;
 pub use eval_static_selection::EvalSelectedSource;
 pub use source_evaluation::{
@@ -33,38 +43,6 @@ pub use source_evaluation::{
 enum VmIntrinsicBuiltin {
     Nargin,
     Nargout,
-}
-
-#[derive(Clone, Copy)]
-enum VmDynamicWorkspaceBuiltin {
-    Eval,
-    Evalc,
-    Evalin,
-    Assignin,
-    Run,
-}
-
-impl VmDynamicWorkspaceBuiltin {
-    fn classify(name: &str) -> Option<Self> {
-        match name {
-            runmat_hir::EVAL_BUILTIN_NAME => Some(Self::Eval),
-            runmat_hir::EVALC_BUILTIN_NAME => Some(Self::Evalc),
-            runmat_hir::EVALIN_BUILTIN_NAME => Some(Self::Evalin),
-            runmat_hir::ASSIGNIN_BUILTIN_NAME => Some(Self::Assignin),
-            runmat_hir::RUN_BUILTIN_NAME => Some(Self::Run),
-            _ => None,
-        }
-    }
-
-    fn name(self) -> &'static str {
-        match self {
-            Self::Eval => runmat_hir::EVAL_BUILTIN_NAME,
-            Self::Evalc => runmat_hir::EVALC_BUILTIN_NAME,
-            Self::Evalin => runmat_hir::EVALIN_BUILTIN_NAME,
-            Self::Assignin => runmat_hir::ASSIGNIN_BUILTIN_NAME,
-            Self::Run => runmat_hir::RUN_BUILTIN_NAME,
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -190,7 +168,7 @@ pub fn is_vm_intrinsic_builtin(name: &str) -> bool {
 }
 
 pub fn is_vm_dynamic_workspace_builtin(name: &str) -> bool {
-    VmDynamicWorkspaceBuiltin::classify(name).is_some()
+    DynamicWorkspaceBuiltin::for_canonical_name(name).is_some()
 }
 
 #[cfg(test)]
@@ -270,6 +248,7 @@ pub async fn vm_dynamic_workspace_builtin(
         DynamicBuiltinSource {
             source_id,
             driver: None,
+            dynamic_admission: None,
         },
     )
     .await
@@ -278,6 +257,7 @@ pub async fn vm_dynamic_workspace_builtin(
 pub(crate) struct DynamicBuiltinSource {
     pub source_id: Option<runmat_hir::SourceId>,
     pub driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
+    pub dynamic_admission: Option<crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort>,
 }
 
 pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
@@ -289,11 +269,7 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
     function_registry: &FunctionRegistry,
     selected: DynamicBuiltinSource,
 ) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
-    let DynamicBuiltinSource { source_id, driver } = selected;
-    let dynamic_admission = driver
-        .as_ref()
-        .and_then(|driver| driver.dynamic_admission());
-    let Some(builtin) = VmDynamicWorkspaceBuiltin::classify(name) else {
+    let Some(builtin) = DynamicWorkspaceBuiltin::for_canonical_name(name) else {
         return Err(mex(
             "UndefinedFunction",
             &format!("unknown VM dynamic workspace builtin '{name}'"),
@@ -301,8 +277,37 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
     };
     let args = collect_call_args(stack, arg_count)?;
     let _roots = crate::call::root_values(&args)?;
+    execute_dynamic_workspace_builtin(
+        runtime,
+        &args,
+        builtin,
+        requested_outputs,
+        function_registry,
+        selected,
+    )
+    .await
+}
+
+async fn execute_dynamic_workspace_builtin(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    args: &[Value],
+    builtin: DynamicWorkspaceBuiltin,
+    requested_outputs: usize,
+    function_registry: &FunctionRegistry,
+    selected: DynamicBuiltinSource,
+) -> Result<runmat_runtime::execution::RootedValue, RuntimeError> {
+    let DynamicBuiltinSource {
+        source_id,
+        driver,
+        dynamic_admission,
+    } = selected;
+    let dynamic_admission = dynamic_admission.or_else(|| {
+        driver
+            .as_ref()
+            .and_then(|driver| driver.dynamic_admission())
+    });
     match builtin {
-        VmDynamicWorkspaceBuiltin::Eval => {
+        DynamicWorkspaceBuiltin::Eval => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
             let source_lease = dynamic_source_context(runtime, "<eval>", &source, source_id)?;
@@ -320,14 +325,14 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
                     driver: driver.clone(),
                     runtime: runtime.clone(),
                     commit_workspace_on_error: false,
-                    capture_display_output: false,
+                    terminal_output: DynamicTerminalOutput::Preserve,
                     empty_value_when_no_result: false,
                 },
                 function_registry,
             )
             .await
         }
-        VmDynamicWorkspaceBuiltin::Evalc => {
+        DynamicWorkspaceBuiltin::Evalc => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             let source = workspace_text_arg(builtin.name(), &args[0])?;
             let source_lease = dynamic_source_context(runtime, "<evalc>", &source, source_id)?;
@@ -351,7 +356,11 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
                     driver: driver.clone(),
                     runtime: runtime.clone(),
                     commit_workspace_on_error: false,
-                    capture_display_output: requested_outputs == 1,
+                    terminal_output: if requested_outputs == 1 {
+                        DynamicTerminalOutput::Capture
+                    } else {
+                        DynamicTerminalOutput::Suppress
+                    },
                     empty_value_when_no_result: requested_outputs > 1,
                 },
                 function_registry,
@@ -363,7 +372,7 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
                 |error| error.into_runtime_error(),
             )
         }
-        VmDynamicWorkspaceBuiltin::Evalin => {
+        DynamicWorkspaceBuiltin::Evalin => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 2)?;
             let target = workspace_target_arg(builtin.name(), &args[0])?;
             let source = workspace_text_arg(builtin.name(), &args[1])?;
@@ -382,56 +391,19 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
                     driver: driver.clone(),
                     runtime: runtime.clone(),
                     commit_workspace_on_error: false,
-                    capture_display_output: false,
+                    terminal_output: DynamicTerminalOutput::Preserve,
                     empty_value_when_no_result: false,
                 },
                 function_registry,
             )
             .await
         }
-        VmDynamicWorkspaceBuiltin::Assignin => {
-            validate_intrinsic_arg_count(builtin.name(), args.len(), 3)?;
-            if requested_outputs > 0 {
-                return Err(
-                    runmat_runtime::builtins::introspection::dynamic_workspace::assignin_too_many_outputs_error(),
-                );
-            }
-            let target = workspace_target_arg(builtin.name(), &args[0])?;
-            let name = workspace_text_arg(builtin.name(), &args[1])?;
-            if !runmat_runtime::builtins::common::identifiers::is_valid_varname(&name) {
-                return Err(mex(
-                    "DynamicWorkspaceName",
-                    &format!(
-                        "{}: invalid workspace variable name '{name}'",
-                        builtin.name()
-                    ),
-                ));
-            }
-            let assigned = if target == WorkspaceTarget::Base
-                && matches!(
-                    base_target_authority(),
-                    Some(BaseTargetAuthority::CanonicalService)
-                ) {
-                dynamic_base_target::ExplicitBaseTarget::assign(runtime, &name, args[2].clone())
-            } else {
-                workspace_assign_target(target, &name, args[2].clone())
-            };
-            assigned.map_err(|err| {
-                let failure_origin = err.failure_origin;
-                let gpu_gather_retry = err.gpu_gather_retry;
-                let mut failure = runmat_runtime::runtime_error::semantic_error_with_source(
-                    "DynamicWorkspaceUnavailable",
-                    format!("{}: {err}", builtin.name()),
-                    err,
-                );
-                failure.failure_origin = failure_origin;
-                failure.gpu_gather_retry = gpu_gather_retry;
-                failure
-            })?;
+        DynamicWorkspaceBuiltin::Assignin => {
+            runmat_runtime::context::execute_assignin_effect(runtime, args, requested_outputs)?;
             runmat_runtime::execution::RootedValue::new(Value::Num(0.0))
                 .map_err(|error| error.into_runtime_error())
         }
-        VmDynamicWorkspaceBuiltin::Run => {
+        DynamicWorkspaceBuiltin::Run => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
             if requested_outputs > 0 {
                 return Err(runmat_runtime::builtins::io::repl_fs::run::too_many_outputs_error());
@@ -460,7 +432,7 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
                     driver,
                     runtime: runtime.clone(),
                     commit_workspace_on_error: true,
-                    capture_display_output: false,
+                    terminal_output: DynamicTerminalOutput::Preserve,
                     empty_value_when_no_result: false,
                 },
                 function_registry,
@@ -468,6 +440,38 @@ pub(crate) async fn vm_dynamic_workspace_builtin_with_driver(
             .await
         }
     }
+}
+
+/// Shared executor engine entered by the catalog-selected Runtime builtin
+/// body. Core supplies the immutable executable generation and its selected
+/// dynamic-source admission; the engine never rediscovers a callable name.
+pub async fn evaluate_dynamic_workspace_in_context(
+    runtime: &runmat_runtime::context::RuntimeContext,
+    invocation: runmat_runtime::context::DynamicWorkspaceInvocation<'_>,
+    function_registry: &FunctionRegistry,
+    dynamic_admission: Option<crate::interpreter::dynamic_admission::DynamicEvalAdmissionPort>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, RuntimeError> {
+    let source_id = invocation
+        .callsite
+        .as_ref()
+        .and_then(|callsite| callsite.source_id);
+    let value = execute_dynamic_workspace_builtin(
+        runtime,
+        invocation.arguments,
+        invocation.builtin,
+        invocation.requested_outputs,
+        function_registry,
+        DynamicBuiltinSource {
+            source_id,
+            driver: None,
+            dynamic_admission,
+        },
+    )
+    .await?;
+    value.try_map_owned(
+        runmat_runtime::call::arguments::adapt_legacy_builtin_result,
+        |error| error.into_runtime_error(),
+    )
 }
 
 fn evalc_output_value(
@@ -544,7 +548,7 @@ struct WorkspaceEvalRequest {
     driver: Option<crate::interpreter::process_driver::ProcessDriverHandle>,
     runtime: runmat_runtime::context::RuntimeContext,
     commit_workspace_on_error: bool,
-    capture_display_output: bool,
+    terminal_output: DynamicTerminalOutput,
     empty_value_when_no_result: bool,
 }
 
@@ -560,7 +564,7 @@ pub struct DynamicEvalCompileProduct {
     pub execution_bytecode: Bytecode,
     pub function_remap: HashMap<FunctionId, FunctionId>,
     pub workspace_slot_remap: HashMap<usize, usize>,
-    pub result_slot: Option<usize>,
+    pub result: Option<DynamicEvalResult>,
     /// Compiler-only aliases paired with exact no-invoke source selections.
     /// Core consumes these at sealed-site admission; they never enter names.
     pub selected_sources: Vec<EvalSelectedSource>,
@@ -568,9 +572,9 @@ pub struct DynamicEvalCompileProduct {
     /// Installed native selections observed at this closure's unresolved HIR
     /// sites. Core must reprove them against the exact prepared project scope.
     pub(crate) selected_natives: Vec<eval_static_selection::EvalSelectedNative>,
-    workspace_bindings: HashMap<String, usize>,
+    workspace_extent: usize,
     requested_outputs: usize,
-    result_capture: DynamicEvalResultCapture,
+    result_capture: PreparedDynamicEvalResultCapture,
     source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
 }
 
@@ -645,20 +649,18 @@ impl DynamicEvalCompileProduct {
                     &format!("admitted eval function remap: {error}"),
                 )
             })?;
-        let slots = remap_dynamic_workspace_slots(&mut admitted, &self.workspace_bindings);
-        if slots != self.workspace_slot_remap {
-            return Err(mex(
-                "DynamicWorkspaceCompile",
-                "admitted eval workspace layout differs from the compiler projection",
-            ));
-        }
-        let result_slot = retain_dynamic_result_slot(
+        remap_dynamic_workspace_slots_with_plan(
+            &mut admitted,
+            &self.workspace_slot_remap,
+            self.workspace_extent,
+        )?;
+        let result = retain_dynamic_result_slot(
             &mut admitted,
             self.requested_outputs,
-            &self.workspace_bindings,
+            self.workspace_extent,
             self.result_capture,
-        );
-        if result_slot != self.result_slot {
+        )?;
+        if result != self.result {
             return Err(mex(
                 "DynamicWorkspaceCompile",
                 "admitted eval output slot differs from the compiler projection",
@@ -919,7 +921,7 @@ impl DynamicEvalCompileProduct {
 }
 
 enum DynamicEvalCompiled {
-    Ordinary(Box<Bytecode>, Option<usize>),
+    Ordinary(Box<Bytecode>, Option<DynamicEvalResult>),
     Selected(Box<DynamicEvalCompileProduct>),
 }
 
@@ -949,20 +951,12 @@ impl From<DynamicEvalCompileFailure> for RuntimeError {
 type DynamicProductSelector<'a> =
     &'a dyn Fn(&Bytecode, &FunctionRegistry) -> Result<bool, RuntimeError>;
 
-/// The internal numeric-text source is one bracketed expression statement.
-/// Await lowering can put its output before a trailing control-flow return, so
-/// it cannot use eval's historical terminal-Pop capture rule.
-#[derive(Clone, Copy)]
-enum DynamicEvalResultCapture {
-    TerminalPop,
-    ExpressionStatement,
-}
-
 struct DynamicEvalCompileRequest<'a> {
     builtin: &'a str,
     ast: &'a runmat_parser::Program,
-    workspace_bindings: &'a HashMap<String, usize>,
-    lowering_bindings: &'a HashMap<String, usize>,
+    workspace_bindings: &'a dyn runmat_hir::WorkspaceBindingView,
+    workspace_value_count: usize,
+    lowering_bindings: &'a dyn runmat_hir::WorkspaceBindingView,
     function_registry: &'a FunctionRegistry,
     source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     requested_outputs: usize,
@@ -979,6 +973,90 @@ fn parse_dynamic_eval(builtin: &str, source: &str) -> Result<runmat_parser::Prog
             &format!("{builtin}: parse error: {err}"),
         )
     })
+}
+
+#[derive(Clone)]
+enum DynamicEvalTarget {
+    Frame {
+        identity: WorkspaceTargetIdentity,
+        explicit_base: Option<std::rc::Rc<dynamic_base_target::ExplicitBaseTarget>>,
+    },
+    Service(runmat_runtime::workspace::DynamicWorkspaceTargetCapture),
+    Base(std::rc::Rc<dynamic_base_target::ExplicitBaseTarget>),
+}
+
+impl DynamicEvalTarget {
+    fn scope<F: std::future::Future>(&self, future: F) -> WorkspaceFrameFuture<F> {
+        match self {
+            Self::Frame { identity, .. } => identity.scope(future),
+            Self::Service(_) | Self::Base(_) => WorkspaceFrameFuture::without_frame(future),
+        }
+    }
+
+    fn ensure_effect_authority(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+    ) -> Result<(), RuntimeError> {
+        match self {
+            Self::Frame {
+                explicit_base: Some(base),
+                ..
+            }
+            | Self::Base(base) => base.ensure_effect_authority(),
+            Self::Service(captured) => {
+                let live = captured
+                    .issuer()
+                    .capture_workspace_completion_identity_with_context(runtime)?;
+                if live != Some(captured.identity()) {
+                    return Err(mex(
+                        "DynamicWorkspaceUnavailable",
+                        "captured workspace target changed before execution",
+                    ));
+                }
+                Ok(())
+            }
+            Self::Frame {
+                explicit_base: None,
+                ..
+            } => Ok(()),
+        }
+    }
+
+    fn commit(
+        &self,
+        runtime: &runmat_runtime::context::RuntimeContext,
+        snapshot: WorkspaceValueSnapshot,
+        report: WorkspaceAssignedReport,
+    ) -> Result<(), RuntimeError> {
+        match self {
+            Self::Frame {
+                identity,
+                explicit_base,
+            } => commit_dynamic_workspace_target(
+                runtime,
+                *identity,
+                explicit_base.as_deref(),
+                snapshot,
+                report,
+            ),
+            Self::Base(base) => base.commit(runtime, snapshot, report),
+            Self::Service(captured) => {
+                let source = native_target::NativeCompletionSource::prepare(
+                    runtime, &snapshot, &report, captured,
+                )?;
+                captured.issuer().apply_workspace_completion_with_context(
+                    runtime,
+                    captured.identity(),
+                    &source,
+                )
+            }
+        }
+    }
+}
+
+enum DynamicEvalInput {
+    Frame(RootedDynamicEvalInput),
+    Admitted(AdmittedDynamicInput),
 }
 
 async fn eval_workspace_source(
@@ -998,7 +1076,7 @@ async fn eval_workspace_source(
         driver,
         runtime,
         commit_workspace_on_error,
-        capture_display_output,
+        terminal_output,
         empty_value_when_no_result,
     } = request;
     let options = current_dynamic_eval_options();
@@ -1011,49 +1089,129 @@ async fn eval_workspace_source(
     // An explicit base selector in a detached source-evaluation frame must
     // not alias that frame. Its typed admission selects the session owner;
     // ordinary VM frames retain their installed base-frame authority.
-    let (identity, explicit_base, frame) = if target == WorkspaceTarget::Base
-        && matches!(
-            base_target_authority(),
-            Some(BaseTargetAuthority::CanonicalService)
-        ) {
-        let (identity, _) = capture_workspace_target(WorkspaceTarget::Current)
-            .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+    let (target, frame) = if has_workspace_target_in_context(&runtime, target) {
+        if target == WorkspaceTarget::Base
+            && matches!(
+                base_target_authority(),
+                Some(BaseTargetAuthority::CanonicalService)
+            )
+        {
+            let (identity, _) = capture_workspace_target(WorkspaceTarget::Current)
+                .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+            let (base, frame) = dynamic_base_target::ExplicitBaseTarget::capture(&runtime)?;
+            (
+                DynamicEvalTarget::Frame {
+                    identity,
+                    explicit_base: Some(std::rc::Rc::new(base)),
+                },
+                DynamicEvalInput::Frame(RootedDynamicEvalInput::new(frame)?),
+            )
+        } else {
+            let (identity, frame) = capture_workspace_target(target)
+                .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
+            (
+                DynamicEvalTarget::Frame {
+                    identity,
+                    explicit_base: None,
+                },
+                DynamicEvalInput::Frame(RootedDynamicEvalInput::new(frame)?),
+            )
+        }
+    } else if target == WorkspaceTarget::Base {
         let (base, frame) = dynamic_base_target::ExplicitBaseTarget::capture(&runtime)?;
-        (identity, Some(std::rc::Rc::new(base)), frame)
+        (
+            DynamicEvalTarget::Base(std::rc::Rc::new(base)),
+            DynamicEvalInput::Frame(RootedDynamicEvalInput::new(frame)?),
+        )
     } else {
-        let (identity, frame) = capture_workspace_target(target)
-            .map_err(|err| mex("DynamicWorkspaceUnavailable", &format!("{builtin}: {err}")))?;
-        (identity, None, frame)
+        let service = runtime
+            .service_ports()
+            .require_workspace("capture dynamic workspace target")
+            .map_err(runmat_runtime::context::RuntimeCapabilityError::into_runtime_error)?
+            .clone();
+        let service = if target == WorkspaceTarget::Caller {
+            service
+                .caller_workspace_with_context(&runtime)?
+                .ok_or_else(|| {
+                    mex(
+                        "DynamicWorkspaceUnavailable",
+                        "caller workspace is unavailable",
+                    )
+                })?
+        } else {
+            service
+        };
+        let captured = service
+            .capture_dynamic_workspace_target_with_context(&runtime)?
+            .ok_or_else(|| {
+                mex(
+                    "DynamicWorkspaceUnavailable",
+                    "exact workspace target is unavailable",
+                )
+            })?;
+        let admitted = AdmittedDynamicInput::capture(&runtime, &captured)?;
+        (
+            DynamicEvalTarget::Service(captured),
+            DynamicEvalInput::Admitted(admitted),
+        )
     };
-    let frame = RootedDynamicEvalInput::new(frame)?;
     // FunctionRegistry is an Rc-backed immutable execution snapshot. This
     // clone carries the exact pre-eval code owner into the queued request; it
     // does not duplicate bodies or resolve a later published name.
     let function_registry = function_registry.clone();
     let continuation_runtime = runtime.clone();
     let work_runtime = runtime.clone();
-    let base_at_entry = explicit_base.clone();
+    let execution_target = target.clone();
     let work = async move {
-        if let Some(base) = &base_at_entry {
-            base.ensure_effect_authority()?;
-        }
+        execution_target.ensure_effect_authority(&runtime)?;
         if current_dynamic_eval_options() != options {
             return Err(mex(
                 "DynamicWorkspaceCompile",
                 "eval language options changed before its owned request began",
             ));
         }
-        let (_frame_roots, frame) = frame.into_parts();
         // The frame reserves slots for identifiers that have never been assigned.
         // Such a slot must not make a function call into a captured workspace
         // variable. Keep all slots for the later remap, but expose only assigned
         // bindings to HIR name classification.
-        let lowering_bindings = frame
-            .names
-            .iter()
-            .filter(|(name, _)| frame.assigned.contains(*name))
-            .map(|(name, slot)| (name.clone(), *slot))
-            .collect::<HashMap<_, _>>();
+        let legacy_lowering = match &frame {
+            DynamicEvalInput::Frame(frame) => Some(
+                frame
+                    .frame
+                    .names
+                    .iter()
+                    .filter(|(name, _)| frame.frame.assigned.contains(*name))
+                    .map(|(name, slot)| (name.clone(), *slot))
+                    .collect::<HashMap<_, _>>(),
+            ),
+            DynamicEvalInput::Admitted(_) => None,
+        };
+        let admitted_bindings = match &frame {
+            DynamicEvalInput::Admitted(input) => Some(input.bindings()),
+            DynamicEvalInput::Frame(_) => None,
+        };
+        let admitted_lowering = match &frame {
+            DynamicEvalInput::Admitted(input) => Some(input.assigned_bindings()),
+            DynamicEvalInput::Frame(_) => None,
+        };
+        let workspace_bindings: &dyn runmat_hir::WorkspaceBindingView = match &frame {
+            DynamicEvalInput::Frame(frame) => &frame.frame.names,
+            DynamicEvalInput::Admitted(_) => admitted_bindings
+                .as_ref()
+                .expect("admitted binding view belongs to admitted input"),
+        };
+        let lowering_bindings: &dyn runmat_hir::WorkspaceBindingView = match &frame {
+            DynamicEvalInput::Frame(_) => legacy_lowering
+                .as_ref()
+                .expect("legacy lowering map belongs to legacy input"),
+            DynamicEvalInput::Admitted(_) => admitted_lowering
+                .as_ref()
+                .expect("admitted lowering view belongs to admitted input"),
+        };
+        let workspace_value_count = match &frame {
+            DynamicEvalInput::Frame(frame) => frame.frame.vars.len(),
+            DynamicEvalInput::Admitted(input) => input.slot_count(),
+        };
         let requires_product = |canonical: &Bytecode, inherited: &FunctionRegistry| {
             dynamic_admission.as_ref().map_or(Ok(false), |port| {
                 port.host().requires_selected_product(canonical, inherited)
@@ -1067,12 +1225,13 @@ async fn eval_workspace_source(
         let Some(compiled) = compile_dynamic_workspace_eval_inner(DynamicEvalCompileRequest {
             builtin,
             ast: ast.as_ref(),
-            workspace_bindings: &frame.names,
-            lowering_bindings: &lowering_bindings,
+            workspace_bindings,
+            workspace_value_count,
+            lowering_bindings,
             function_registry: &function_registry,
             source_ref,
             requested_outputs,
-            result_capture: DynamicEvalResultCapture::TerminalPop,
+            result_capture: DynamicEvalResultCapture::TerminalExpression(terminal_output),
             select_product: dynamic_admission
                 .as_ref()
                 .map(|_| &requires_product as DynamicProductSelector<'_>),
@@ -1082,10 +1241,10 @@ async fn eval_workspace_source(
             return Ok(None);
         };
         let mut dynamic_admission = dynamic_admission;
-        let (bytecode, result_slot, runtime, publication) = match compiled {
-            DynamicEvalCompiled::Ordinary(bytecode, result_slot) => (
+        let (bytecode, result, runtime, publication) = match compiled {
+            DynamicEvalCompiled::Ordinary(bytecode, result) => (
                 *bytecode,
-                result_slot,
+                result,
                 runtime.without_selected_graph_program(),
                 None,
             ),
@@ -1121,27 +1280,39 @@ async fn eval_workspace_source(
                 }
                 (
                     admitted.execution_bytecode,
-                    admitted.result_slot,
+                    admitted.result,
                     admitted.runtime,
                     Some(admitted.publication),
                 )
             }
         };
-        let (outcome, updated_workspace, effects) = interpret_dynamic_workspace_eval(
-            bytecode,
-            frame.vars,
-            frame.names,
-            frame.assigned,
-            frame.global_aliases,
-            source_label,
-            DynamicEvalRuntime {
-                runtime,
-                admission: dynamic_admission,
-            },
-        )
-        .await?;
+        let execution = DynamicEvalRuntime {
+            runtime,
+            admission: dynamic_admission,
+        };
+        let (outcome, updated_workspace, effects) = match frame {
+            DynamicEvalInput::Frame(frame) => {
+                let frame =
+                    frame.prepare_compiled_extent(&execution.runtime, bytecode.var_count)?;
+                let (_frame_roots, frame) = frame.into_parts();
+                interpret_dynamic_workspace_eval(
+                    bytecode,
+                    frame.vars,
+                    frame.names,
+                    frame.assigned,
+                    frame.global_aliases,
+                    source_label,
+                    execution,
+                )
+                .await?
+            }
+            DynamicEvalInput::Admitted(frame) => {
+                interpret_admitted_dynamic_workspace_eval(bytecode, frame, source_label, execution)
+                    .await?
+            }
+        };
         Ok(Some(DynamicEvalWorkResult {
-            result_slot,
+            result,
             outcome,
             updated_workspace,
             effects,
@@ -1153,14 +1324,14 @@ async fn eval_workspace_source(
     // native and WASM. Submit the whole parse/compile/admit/interpret request
     // to that driver, not merely its final interpreter phase. Bare callers
     // retain the existing canonical local-host/direct placement.
-    let work = identity.scope(work);
+    let work = target.scope(work);
     let completed = if let Some(driver) = driver {
         driver.enqueue_owned(work_runtime.scope(work))?.await?
     } else {
         runmat_runtime::context::run_owned_request_continuation(&continuation_runtime, work).await?
     };
     let Some(DynamicEvalWorkResult {
-        result_slot,
+        result: captured_result,
         outcome,
         updated_workspace,
         effects,
@@ -1175,43 +1346,47 @@ async fn eval_workspace_source(
         Ok(crate::interpreter::api::InterpreterOutcome::Completed(completion)) => completion
             .with_owned(|completion| {
                 let vars = completion.values;
-                if let Some(snapshot) = updated_workspace {
-                    let (_workspace_roots, snapshot) = snapshot.into_parts();
-                    commit_dynamic_workspace_target(
-                        identity,
-                        explicit_base.as_deref(),
-                        snapshot,
-                        effects.workspace_report.clone(),
-                    )
-                    .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
-                }
+                // Target completion deliberately trims the child's private
+                // compiler slots. The result slot is one of those slots, and
+                // `vars` shares its backing with the workspace snapshot.
+                // Root the selected value before committing that trim, while
+                // retaining the existing single public-result Value clone.
                 let value = if requested_outputs == 0 {
-                    Value::OutputList(Vec::new())
-                } else if let Some(slot) = result_slot {
-                    let value = vars.get(slot).cloned().unwrap_or(Value::Num(0.0));
-                    if capture_display_output {
-                        runmat_runtime::console::record_value_output(None, &value);
-                    }
-                    value
+                    Ok(Value::OutputList(Vec::new()))
+                } else if let Some(result) = captured_result {
+                    vars.get(result.slot)
+                        .map(|value| value.clone())
+                        .ok_or_else(|| {
+                            mex(
+                                "DynamicWorkspaceResult",
+                                "selected dynamic workspace result slot is missing",
+                            )
+                        })
                 } else if empty_value_when_no_result {
-                    Value::OutputList(Vec::new())
+                    Ok(Value::OutputList(Vec::new()))
                 } else {
-                    Value::Num(0.0)
+                    Ok(Value::Num(0.0))
                 };
-                runmat_runtime::execution::RootedValue::new(value)
-                    .map_err(|error| error.into_runtime_error())
+                let rooted_result = value.and_then(|value| {
+                    runmat_runtime::execution::RootedValue::new(value)
+                        .map_err(|error| error.into_runtime_error())
+                });
+                if let Some(snapshot) = updated_workspace {
+                    let (_workspace_roots, snapshot, report) = snapshot.into_parts();
+                    target
+                        .commit(&continuation_runtime, snapshot, report)
+                        .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
+                }
+                let result = rooted_result?;
+                Ok::<_, RuntimeError>(result)
             })?,
         Err(err) => {
             if commit_workspace_on_error {
                 if let Some(snapshot) = updated_workspace {
-                    let (_workspace_roots, snapshot) = snapshot.into_parts();
-                    commit_dynamic_workspace_target(
-                        identity,
-                        explicit_base.as_deref(),
-                        snapshot,
-                        effects.workspace_report.clone(),
-                    )
-                    .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
+                    let (_workspace_roots, snapshot, report) = snapshot.into_parts();
+                    target
+                        .commit(&continuation_runtime, snapshot, report)
+                        .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
                 }
             }
             effects.replay();
@@ -1220,7 +1395,25 @@ async fn eval_workspace_source(
         }
     };
     effects.replay();
+    // The source's earlier effects precede its captured final expression.
+    // Use the same provider-aware emitter as ordinary statement output while
+    // the rooted result and workspace publication remain live.
+    let emission = if requested_outputs != 0
+        && captured_result.is_some_and(|result| result.source_display)
+        && terminal_output == DynamicTerminalOutput::Capture
+    {
+        continuation_runtime
+            .scope(runmat_runtime::console::emit_statement_value(
+                &continuation_runtime,
+                None,
+                result.value(),
+            ))
+            .await
+    } else {
+        Ok(())
+    };
     drop(publication);
+    emission?;
     Ok(result)
 }
 
@@ -1254,11 +1447,10 @@ struct DynamicThreadEffects {
     console: Vec<runmat_runtime::console::ConsoleEntry>,
     warnings: Vec<runmat_runtime::warning_store::RuntimeWarning>,
     recent_figures: Vec<u32>,
-    workspace_report: WorkspaceAssignedReport,
 }
 
 struct DynamicEvalWorkResult {
-    result_slot: Option<usize>,
+    result: Option<DynamicEvalResult>,
     outcome: Result<InterpreterOutcome, RuntimeError>,
     updated_workspace: Option<RootedDynamicWorkspaceSnapshot>,
     effects: DynamicThreadEffects,
@@ -1271,6 +1463,7 @@ struct DynamicEvalWorkResult {
 // commit, including the error-commit route, without cloning the workspace.
 struct RootedDynamicWorkspaceSnapshot {
     state: WorkspaceValueSnapshot,
+    report: WorkspaceAssignedReport,
     roots: runmat_runtime::execution::RootedValueLease,
 }
 
@@ -1284,9 +1477,22 @@ struct RootedDynamicEvalInput {
 
 impl RootedDynamicEvalInput {
     fn new(frame: WorkspaceTargetSnapshot) -> Result<Self, RuntimeError> {
-        let roots = runmat_runtime::execution::RootedValueLease::for_values(frame.vars.iter())
+        let roots = runmat_runtime::execution::RootedValueLease::for_traced(&frame.vars)
             .map_err(|error| error.into_runtime_error())?;
         Ok(Self { frame, roots })
+    }
+
+    fn prepare_compiled_extent(
+        mut self,
+        context: &runmat_runtime::context::RuntimeContext,
+        extent: usize,
+    ) -> Result<Self, RuntimeError> {
+        let vars = std::mem::replace(
+            &mut self.frame.vars,
+            crate::interpreter::vars::InterpreterVars::from_owned(Vec::new()),
+        );
+        self.frame.vars = vars.prepare_owned_extent(context, extent)?;
+        Ok(self)
     }
 
     fn into_parts(
@@ -1300,10 +1506,17 @@ impl RootedDynamicEvalInput {
 }
 
 impl RootedDynamicWorkspaceSnapshot {
-    fn new(state: WorkspaceValueSnapshot) -> Result<Self, RuntimeError> {
-        let roots = runmat_runtime::execution::RootedValueLease::for_values(state.vars.iter())
+    fn new(
+        state: WorkspaceValueSnapshot,
+        report: WorkspaceAssignedReport,
+    ) -> Result<Self, RuntimeError> {
+        let roots = runmat_runtime::execution::RootedValueLease::for_traced(&state.vars)
             .map_err(|error| error.into_runtime_error())?;
-        Ok(Self { state, roots })
+        Ok(Self {
+            state,
+            report,
+            roots,
+        })
     }
 
     fn into_parts(
@@ -1311,8 +1524,9 @@ impl RootedDynamicWorkspaceSnapshot {
     ) -> (
         runmat_runtime::execution::RootedValueLease,
         WorkspaceValueSnapshot,
+        WorkspaceAssignedReport,
     ) {
-        (self.roots, self.state)
+        (self.roots, self.state, self.report)
     }
 }
 
@@ -1331,7 +1545,7 @@ struct DynamicEvalRuntime {
 
 async fn interpret_dynamic_workspace_eval(
     bytecode: Bytecode,
-    mut target_vars: Vec<Value>,
+    target_vars: crate::interpreter::vars::InterpreterVars,
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
     global_aliases: HashMap<usize, runmat_runtime::workspace::bindings::FrameGlobalBinding>,
@@ -1351,10 +1565,59 @@ async fn interpret_dynamic_workspace_eval(
             assigned,
             runmat_runtime::workspace::bindings::FrameGlobalBindings::from_snapshot(global_aliases),
         );
+    interpret_dynamic_workspace_eval_with_admission(
+        bytecode,
+        target_vars,
+        source_label,
+        selected,
+        admission,
+    )
+    .await
+}
+
+async fn interpret_admitted_dynamic_workspace_eval(
+    bytecode: Bytecode,
+    input: AdmittedDynamicInput,
+    source_label: String,
+    selected: DynamicEvalRuntime,
+) -> Result<
+    (
+        Result<InterpreterOutcome, RuntimeError>,
+        Option<RootedDynamicWorkspaceSnapshot>,
+        DynamicThreadEffects,
+    ),
+    RuntimeError,
+> {
+    let input = input.prepare_compiled_extent(&selected.runtime, bytecode.var_count)?;
+    let (vars, metadata) = input.into_execution_parts();
+    interpret_dynamic_workspace_eval_with_admission(
+        bytecode,
+        vars,
+        source_label,
+        selected,
+        crate::runtime::workspace::PendingWorkspaceAdmission::admitted(metadata),
+    )
+    .await
+}
+
+async fn interpret_dynamic_workspace_eval_with_admission(
+    bytecode: Bytecode,
+    target_vars: crate::interpreter::vars::InterpreterVars,
+    source_label: String,
+    selected: DynamicEvalRuntime,
+    admission: crate::runtime::workspace::PendingWorkspaceAdmission,
+) -> Result<
+    (
+        Result<InterpreterOutcome, RuntimeError>,
+        Option<RootedDynamicWorkspaceSnapshot>,
+        DynamicThreadEffects,
+    ),
+    RuntimeError,
+> {
     let execution =
-        crate::interpreter::runner::interpret_with_workspace_and_dynamic_admission_in_context(
+        crate::interpreter::runner::interpret_with_workspace_vars_and_dynamic_admission_in_context(
             &bytecode,
-            &mut target_vars,
+            target_vars,
             Some(&source_label),
             selected.runtime,
             Some(admission),
@@ -1362,28 +1625,20 @@ async fn interpret_dynamic_workspace_eval(
         )
         .await;
     let mut outcome = execution.outcome;
-    let (updated_workspace, workspace_report) = match execution.workspace {
+    let updated_workspace = match execution.workspace {
         Some(completion) => {
-            let workspace_report = completion.assigned;
-            match RootedDynamicWorkspaceSnapshot::new(completion.state) {
-                Ok(snapshot) => (Some(snapshot), workspace_report),
+            match RootedDynamicWorkspaceSnapshot::new(completion.state, completion.assigned) {
+                Ok(snapshot) => Some(snapshot),
                 Err(error) => {
                     outcome =
                         runmat_runtime::runtime_error::complete_with_cleanup(outcome, Err(error));
-                    (None, workspace_report)
+                    None
                 }
             }
         }
-        None => (None, WorkspaceAssignedReport::default()),
+        None => None,
     };
-    Ok((
-        outcome,
-        updated_workspace,
-        DynamicThreadEffects {
-            workspace_report,
-            ..DynamicThreadEffects::default()
-        },
-    ))
+    Ok((outcome, updated_workspace, DynamicThreadEffects::default()))
 }
 
 fn dynamic_workspace_commit_error(builtin: &str, source: RuntimeError) -> RuntimeError {
@@ -1394,28 +1649,17 @@ fn dynamic_workspace_commit_error(builtin: &str, source: RuntimeError) -> Runtim
 }
 
 fn commit_dynamic_workspace_target(
+    runtime: &runmat_runtime::context::RuntimeContext,
     identity: WorkspaceTargetIdentity,
     explicit_base: Option<&dynamic_base_target::ExplicitBaseTarget>,
     snapshot: WorkspaceValueSnapshot,
     report: WorkspaceAssignedReport,
 ) -> Result<(), RuntimeError> {
     if let Some(base) = explicit_base {
-        identity.ensure_current()?;
-        base.commit(
-            snapshot.vars,
-            snapshot.names,
-            snapshot.assigned,
-            snapshot.global_aliases,
-            report,
-        )
+        identity.ensure_current(runtime)?;
+        base.commit(runtime, snapshot, report)
     } else {
-        identity.commit(
-            snapshot.vars,
-            snapshot.names,
-            snapshot.assigned,
-            snapshot.global_aliases,
-            report,
-        )
+        identity.commit(runtime, snapshot, report)
     }
 }
 
@@ -1427,23 +1671,26 @@ fn compile_dynamic_workspace_eval(
     function_registry: &FunctionRegistry,
     source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
     requested_outputs: usize,
-) -> Result<Option<(Bytecode, Option<usize>)>, RuntimeError> {
+) -> Result<Option<(Bytecode, Option<DynamicEvalResult>)>, RuntimeError> {
     let ast = parse_dynamic_eval(builtin, source)?;
     compile_dynamic_workspace_eval_inner(DynamicEvalCompileRequest {
         builtin,
         ast: &ast,
         workspace_bindings,
+        workspace_value_count: workspace_binding_extent(workspace_bindings)?,
         lowering_bindings: workspace_bindings,
         function_registry,
         source_ref,
         requested_outputs,
-        result_capture: DynamicEvalResultCapture::TerminalPop,
+        result_capture: DynamicEvalResultCapture::TerminalExpression(
+            DynamicTerminalOutput::Preserve,
+        ),
         select_product: None,
         selected_sources: eval_static_selection::EvalSelectedSources::default(),
     })
     .map(|compiled| {
         compiled.map(|compiled| match compiled {
-            DynamicEvalCompiled::Ordinary(bytecode, result_slot) => (*bytecode, result_slot),
+            DynamicEvalCompiled::Ordinary(bytecode, result) => (*bytecode, result),
             DynamicEvalCompiled::Selected(_) => unreachable!("ordinary eval requested no product"),
         })
     })
@@ -1464,11 +1711,14 @@ pub fn compile_dynamic_workspace_eval_product(
         builtin,
         ast: &ast,
         workspace_bindings,
+        workspace_value_count: workspace_binding_extent(workspace_bindings)?,
         lowering_bindings: workspace_bindings,
         function_registry,
         source_ref,
         requested_outputs,
-        result_capture: DynamicEvalResultCapture::TerminalPop,
+        result_capture: DynamicEvalResultCapture::TerminalExpression(
+            DynamicTerminalOutput::Preserve,
+        ),
         select_product: Some(&|_, _| Ok(true)),
         selected_sources: eval_static_selection::EvalSelectedSources::default(),
     })
@@ -1493,6 +1743,7 @@ fn compile_dynamic_workspace_eval_inner_typed(
         builtin,
         ast,
         workspace_bindings,
+        workspace_value_count,
         lowering_bindings,
         function_registry,
         source_ref,
@@ -1577,6 +1828,8 @@ fn compile_dynamic_workspace_eval_inner_typed(
             &format!("{builtin}: MIR lowering error: {err}"),
         )
     })?;
+    let result_capture =
+        prepare_dynamic_result_capture(result_capture, &lowering.assembly, entrypoint.target)?;
     let mut bytecode =
         crate::bytecode::compile(&lowering.assembly, &mir, entrypoint.id).map_err(|err| {
             mex(
@@ -1624,13 +1877,15 @@ fn compile_dynamic_workspace_eval_inner_typed(
             )
         })?;
     }
-    let workspace_slot_remap = remap_dynamic_workspace_slots(&mut bytecode, workspace_bindings);
-    let result_slot = retain_dynamic_result_slot(
+    let workspace_extent = workspace_value_count.max(workspace_binding_extent(workspace_bindings)?);
+    let workspace_slot_remap =
+        remap_dynamic_workspace_slots(&mut bytecode, workspace_bindings, workspace_extent)?;
+    let result = retain_dynamic_result_slot(
         &mut bytecode,
         requested_outputs,
-        workspace_bindings,
+        workspace_extent,
         result_capture,
-    );
+    )?;
     Ok(Some(match canonical_bytecode {
         Some(canonical_bytecode) => {
             DynamicEvalCompiled::Selected(Box::new(DynamicEvalCompileProduct {
@@ -1641,17 +1896,17 @@ fn compile_dynamic_workspace_eval_inner_typed(
                 execution_bytecode: bytecode,
                 function_remap,
                 workspace_slot_remap,
-                result_slot,
+                result,
                 selected_sources: selected_sources.sources,
                 selected_external_sources: selected_sources.external_sources,
                 selected_natives: selected_sources.natives,
-                workspace_bindings: workspace_bindings.clone(),
+                workspace_extent,
                 requested_outputs,
                 result_capture,
                 source_ref,
             }))
         }
-        None => DynamicEvalCompiled::Ordinary(Box::new(bytecode), result_slot),
+        None => DynamicEvalCompiled::Ordinary(Box::new(bytecode), result),
     }))
 }
 
@@ -1698,13 +1953,17 @@ pub(crate) async fn compile_pending_closure(
             "eval language options changed before closure issuance",
         ));
     }
-    let (issuing_frame, workspace_bindings, assigned) =
-        crate::runtime::workspace::workspace_binding_state().ok_or_else(|| {
-            mex(
-                "DynamicWorkspaceUnavailable",
-                "pending eval closure has no live workspace frame",
-            )
-        })?;
+    let crate::runtime::workspace::WorkspaceBindingState {
+        frame: issuing_frame,
+        names: workspace_bindings,
+        assigned,
+        value_count: workspace_value_count,
+    } = crate::runtime::workspace::workspace_binding_state().ok_or_else(|| {
+        mex(
+            "DynamicWorkspaceUnavailable",
+            "pending eval closure has no live workspace frame",
+        )
+    })?;
     let lowering_bindings = workspace_bindings
         .iter()
         .filter(|(name, _)| assigned.contains(*name))
@@ -1723,11 +1982,14 @@ pub(crate) async fn compile_pending_closure(
         builtin: "eval",
         ast: plan.ast.as_ref(),
         workspace_bindings: &workspace_bindings,
+        workspace_value_count,
         lowering_bindings: &lowering_bindings,
         function_registry: &plan.inherited,
         source_ref: plan.source_ref,
         requested_outputs: plan.requested_outputs,
-        result_capture: DynamicEvalResultCapture::TerminalPop,
+        result_capture: DynamicEvalResultCapture::TerminalExpression(
+            DynamicTerminalOutput::Preserve,
+        ),
         select_product: Some(&|_, _| Ok(true)),
         selected_sources,
     })?
@@ -1785,94 +2047,100 @@ pub(crate) async fn compile_pending_closure(
     })
 }
 
-fn retain_dynamic_result_slot(
-    bytecode: &mut Bytecode,
-    requested_outputs: usize,
-    workspace_bindings: &HashMap<String, usize>,
-    capture: DynamicEvalResultCapture,
-) -> Option<usize> {
-    if requested_outputs == 0 {
-        return None;
-    }
-    let expression_pop = match capture {
-        DynamicEvalResultCapture::TerminalPop => {
-            matches!(bytecode.instructions.last(), Some(Instr::Pop))
-                .then_some(bytecode.instructions.len().saturating_sub(1))
-        }
-        DynamicEvalResultCapture::ExpressionStatement => {
-            let mut positions =
-                bytecode
-                    .instructions
-                    .windows(2)
-                    .enumerate()
-                    .filter_map(|(pc, pair)| {
-                        matches!(pair, [Instr::EmitStackTop { .. }, Instr::Pop]).then_some(pc + 1)
-                    });
-            let position = positions.next()?;
-            positions.next().is_none().then_some(position)
-        }
-    }?;
-    let next_workspace_slot = workspace_bindings
-        .values()
-        .copied()
-        .max()
-        .map(|slot| slot + 1)
-        .unwrap_or(0);
-    let temp_slot = bytecode.var_count.max(next_workspace_slot);
-    match capture {
-        DynamicEvalResultCapture::TerminalPop => {
-            bytecode.instructions.pop();
-            bytecode.instructions.push(Instr::StoreVar(temp_slot));
-        }
-        DynamicEvalResultCapture::ExpressionStatement => {
-            // Keep the instruction count and all resume-point PCs unchanged.
-            // The preceding typed statement-output opcode proves this Pop
-            // consumes the expression being converted. Its capture-only label
-            // prevents internal conversion from publishing an `ans` echo or
-            // gathering a resident result solely for display.
-            let Instr::EmitStackTop { label } = &mut bytecode.instructions[expression_pop - 1]
-            else {
-                unreachable!("expression capture site must follow a statement output");
-            };
-            *label = crate::bytecode::EmitLabel::InternalCapture;
-            bytecode.instructions[expression_pop] = Instr::StoreVar(temp_slot);
-        }
-    }
-    bytecode.var_count = temp_slot + 1;
-    Some(temp_slot)
-}
-
 fn remap_dynamic_workspace_slots(
     bytecode: &mut Bytecode,
-    workspace_bindings: &HashMap<String, usize>,
-) -> HashMap<usize, usize> {
+    workspace_bindings: &dyn runmat_hir::WorkspaceBindingView,
+    workspace_extent: usize,
+) -> Result<HashMap<usize, usize>, RuntimeError> {
+    let mut alias_slots = HashSet::with_capacity(workspace_bindings.len());
+    let mut duplicate_slot = false;
+    workspace_bindings.visit(&mut |_, slot| {
+        if !alias_slots.insert(slot) {
+            duplicate_slot = true;
+        }
+    });
+    if duplicate_slot {
+        return Err(mex(
+            "DynamicWorkspaceCompile",
+            "dynamic workspace names share a target slot",
+        ));
+    }
     if bytecode.var_count == 0 {
-        return HashMap::new();
+        // Keep the type table sparse rather than allocating one Unknown entry
+        // per inherited slot. Type consumers canonically treat a missing
+        // entry as Unknown; there is no compiler-local type to remap here.
+        bytecode.var_count = workspace_extent;
+        return Ok(HashMap::new());
     }
 
     let original_var_count = bytecode.var_count;
-    let original_var_names = bytecode.var_names.clone();
-    let original_initially_unassigned_slots = bytecode.initially_unassigned_slots.clone();
-    let mut used_slots = workspace_bindings.values().copied().collect::<HashSet<_>>();
-    let mut next_slot = used_slots
-        .iter()
-        .copied()
-        .max()
-        .map(|slot| slot + 1)
-        .unwrap_or(0);
+    let original_var_names = &bytecode.var_names;
+    let mut next_slot = workspace_extent;
     let mut slot_remap = HashMap::new();
 
-    for old_slot in 0..original_var_count {
+    // Map language-visible names before compiler-only storage. New dynamic
+    // names thereby occupy the target frame's next slots, while temporaries
+    // remain a trailing execution detail that completion can retire.
+    let named = (0..original_var_count).filter(|slot| original_var_names.contains_key(slot));
+    let unnamed = (0..original_var_count).filter(|slot| !original_var_names.contains_key(slot));
+    for old_slot in named.chain(unnamed) {
         let new_slot = original_var_names
             .get(&old_slot)
-            .and_then(|name| workspace_bindings.get(name).copied())
-            .unwrap_or_else(|| allocate_dynamic_workspace_slot(&mut used_slots, &mut next_slot));
-        used_slots.insert(new_slot);
+            .and_then(|name| workspace_bindings.get(name))
+            .map(Ok)
+            .unwrap_or_else(|| {
+                let slot = next_slot;
+                next_slot = next_slot
+                    .checked_add(1)
+                    .ok_or_else(dynamic_workspace_slot_overflow)?;
+                Ok::<usize, RuntimeError>(slot)
+            })?;
         slot_remap.insert(old_slot, new_slot);
     }
 
+    remap_dynamic_workspace_slots_with_plan(bytecode, &slot_remap, workspace_extent)?;
+    Ok(slot_remap)
+}
+
+/// Replay the exact compiler-derived workspace projection on a separately
+/// admitted copy of the same canonical bytecode. The selected product retains
+/// this numeric plan rather than cloning the source workspace name map.
+fn remap_dynamic_workspace_slots_with_plan(
+    bytecode: &mut Bytecode,
+    slot_remap: &HashMap<usize, usize>,
+    workspace_extent: usize,
+) -> Result<(), RuntimeError> {
+    let original_var_count = bytecode.var_count;
+    if slot_remap.len() != original_var_count
+        || (0..original_var_count).any(|slot| !slot_remap.contains_key(&slot))
+    {
+        return Err(mex(
+            "DynamicWorkspaceCompile",
+            "admitted eval workspace layout differs from the compiler projection",
+        ));
+    }
+    let mut projected_slots = HashSet::with_capacity(slot_remap.len());
+    if slot_remap
+        .values()
+        .any(|slot| !projected_slots.insert(*slot))
+    {
+        return Err(mex(
+            "DynamicWorkspaceCompile",
+            "admitted eval workspace projection aliases compiler slots",
+        ));
+    }
+
+    if original_var_count == 0 {
+        bytecode.var_count = workspace_extent;
+        return Ok(());
+    }
+
+    let original_var_names = std::mem::take(&mut bytecode.var_names);
+    let original_initially_unassigned_slots =
+        std::mem::take(&mut bytecode.initially_unassigned_slots);
+
     for instr in &mut bytecode.instructions {
-        remap_instr_slots(instr, &slot_remap);
+        remap_instr_slots(instr, slot_remap);
     }
 
     let mut remapped_var_names = HashMap::new();
@@ -1887,15 +2155,16 @@ fn remap_dynamic_workspace_slots(
         .filter_map(|old_slot| slot_remap.get(&old_slot).copied())
         .collect();
 
-    let new_var_count = slot_remap
-        .values()
-        .copied()
-        .max()
-        .map(|slot| slot + 1)
-        .unwrap_or(original_var_count);
+    let new_var_count = match slot_remap.values().copied().max() {
+        Some(slot) => workspace_extent.max(
+            slot.checked_add(1)
+                .ok_or_else(dynamic_workspace_slot_overflow)?,
+        ),
+        None => workspace_extent.max(original_var_count),
+    };
     let old_var_types = std::mem::take(&mut bytecode.var_types);
     let mut new_var_types = vec![runmat_builtins::Type::Unknown; new_var_count];
-    for (old_slot, new_slot) in &slot_remap {
+    for (old_slot, new_slot) in slot_remap {
         if let (Some(old_ty), Some(new_ty)) = (
             old_var_types.get(*old_slot),
             new_var_types.get_mut(*new_slot),
@@ -1905,20 +2174,29 @@ fn remap_dynamic_workspace_slots(
     }
     bytecode.var_types = new_var_types;
     bytecode.var_count = new_var_count;
-    slot_remap
+    Ok(())
 }
 
-fn allocate_dynamic_workspace_slot(
-    used_slots: &mut HashSet<usize>,
-    next_slot: &mut usize,
-) -> usize {
-    while used_slots.contains(next_slot) {
-        *next_slot += 1;
+fn workspace_binding_extent(
+    workspace_bindings: &dyn runmat_hir::WorkspaceBindingView,
+) -> Result<usize, RuntimeError> {
+    let mut maximum = None;
+    workspace_bindings.visit(&mut |_, slot| {
+        maximum = Some(maximum.map_or(slot, |current: usize| current.max(slot)));
+    });
+    match maximum {
+        Some(slot) => slot
+            .checked_add(1)
+            .ok_or_else(dynamic_workspace_slot_overflow),
+        None => Ok(0),
     }
-    let slot = *next_slot;
-    used_slots.insert(slot);
-    *next_slot += 1;
-    slot
+}
+
+fn dynamic_workspace_slot_overflow() -> RuntimeError {
+    mex(
+        "DynamicWorkspaceCompile",
+        "dynamic workspace slot extent exceeds the supported range",
+    )
 }
 
 fn remap_slot(slot: &mut usize, slot_remap: &HashMap<usize, usize>) {
@@ -2184,7 +2462,8 @@ mod tests {
     use super::{
         compile_dynamic_workspace_eval, compile_dynamic_workspace_eval_product,
         current_dynamic_eval_options, dynamic_source_context, imported_builtin_qualified_name,
-        merge_eval_function_registry, push_dynamic_eval_options,
+        merge_eval_function_registry, push_dynamic_eval_options, remap_dynamic_workspace_slots,
+        retain_dynamic_result_slot, DynamicEvalResult, PreparedDynamicEvalResultCapture,
     };
     use crate::bytecode::{FunctionBytecode, FunctionRegistry, Instr};
     use crate::{Bytecode, DynamicEvalCompileProduct};
@@ -2239,7 +2518,7 @@ mod tests {
         assert_eq!(product.hir.entrypoints.len(), 1);
         assert_eq!(product.mir.entrypoints.len(), 1);
         assert!(product.function_remap.is_empty());
-        assert!(product.result_slot.is_none());
+        assert!(product.result.is_none());
         let admitted = product
             .project_admitted_bytecode(admitted_eval_candidate(&product), &registry)
             .expect("exact decorated canonical body projects to eval execution");
@@ -2264,7 +2543,38 @@ mod tests {
                 .expect("selected instruction encoding")
         );
         assert_eq!(ordinary.var_names, product.execution_bytecode.var_names);
-        assert_eq!(ordinary_result, product.result_slot);
+        assert_eq!(ordinary_result, product.result);
+
+        let mut literal = compile_test_source("1;");
+        let empty_bindings = HashMap::new();
+        remap_dynamic_workspace_slots(&mut literal, &empty_bindings, 8)
+            .expect("reserve unnamed target extent");
+        let literal_result = retain_dynamic_result_slot(
+            &mut literal,
+            1,
+            8,
+            PreparedDynamicEvalResultCapture::TerminalExpression {
+                source_display: false,
+                output: super::DynamicTerminalOutput::Preserve,
+            },
+        )
+        .expect("capture literal result beyond target extent");
+        assert_eq!(
+            literal_result,
+            Some(DynamicEvalResult {
+                slot: 8,
+                source_display: false,
+            })
+        );
+        assert_eq!(literal.var_count, 9);
+
+        let mut named = compile_test_source("x = 1;");
+        let named_binding = HashMap::from([("x".to_string(), 0)]);
+        remap_dynamic_workspace_slots(&mut named, &named_binding, 8)
+            .expect("preserve target extent around an existing named slot");
+        assert_eq!(named.var_names.get(&0), Some(&"x".into()));
+        assert!(named.var_count >= 8);
+        assert!(named.var_types.len() >= 8);
     }
 
     #[test]

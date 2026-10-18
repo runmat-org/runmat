@@ -403,6 +403,19 @@ pub(super) fn materialize_operand(
     state.arena.get(reference).cloned()
 }
 
+pub(super) fn materialize_retained_operand(
+    state: &mut HostState,
+    operand: &MirOperand,
+) -> NativeExecutorResult<(NativeValueRef, Value)> {
+    let reference = if let Some(reference) = state.take_contextual_input() {
+        reference
+    } else {
+        let reference = evaluate_operand(state, operand)?;
+        state.retain_contextual_input(reference)?
+    };
+    Ok((reference, state.arena.get(reference)?.clone()))
+}
+
 pub(super) fn evaluate_operand(
     state: &mut HostState,
     operand: &MirOperand,
@@ -481,7 +494,7 @@ pub(super) fn evaluate_operand(
                                 binding.kind
                                     == runmat_native_codegen::NativeLexicalBindingKind::Transit
                             }));
-                    let captures = state.lexical_captures(function)?.unwrap_or_default();
+                    let captures = state.callable_capture_values(function)?;
                     let value = if captures.is_empty()
                         && source_role != runmat_types::FunctionSourceRole::Nested
                     {
@@ -498,7 +511,7 @@ pub(super) fn evaluate_operand(
                         runmat_runtime::call::closures::semantic_closure_value(
                             runmat_types::FunctionId(function.0 as usize),
                             name,
-                            captures.into_iter().map(|capture| capture.value).collect(),
+                            captures,
                             source_role,
                             carries_environment
                                 .then(|| state.lexical_environment.clone())

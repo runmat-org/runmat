@@ -88,7 +88,7 @@ impl DenseOutput {
         Ok(match self {
             Self::Logical(v) => DenseAdmission::Ready(Value::LogicalArray(LogicalArray {
                 data: runmat_value::HostLogicalBuffer::new(v),
-                shape,
+                shape: shape.into(),
             })),
             Self::F32(v) => DenseAdmission::Numeric(NumericTensorAdmission::from_numeric_storage(
                 NumericStorage::F32(v),

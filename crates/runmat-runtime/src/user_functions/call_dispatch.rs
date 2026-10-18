@@ -8,7 +8,6 @@ pub struct CallableRequest {
     args: Vec<Value>,
     requested_outputs: usize,
     function_input_callsite: Option<crate::callsite::CallsiteInfo>,
-    lexical_environment: Option<runmat_value::LexicalEnvironment>,
     selected_runtime: Option<crate::context::RuntimeContext>,
 }
 
@@ -21,7 +20,6 @@ impl CallableRequest {
             args,
             requested_outputs,
             function_input_callsite: None,
-            lexical_environment: None,
             selected_runtime: None,
         }
     }
@@ -38,7 +36,6 @@ impl CallableRequest {
             args,
             requested_outputs,
             function_input_callsite: None,
-            lexical_environment: None,
             selected_runtime: None,
         }
     }
@@ -56,7 +53,6 @@ impl CallableRequest {
             args,
             requested_outputs,
             function_input_callsite: None,
-            lexical_environment: None,
             selected_runtime: None,
         }
     }
@@ -66,14 +62,6 @@ impl CallableRequest {
         callsite: Option<crate::callsite::CallsiteInfo>,
     ) -> Self {
         self.function_input_callsite = callsite;
-        self
-    }
-
-    pub(crate) fn with_lexical_environment(
-        mut self,
-        environment: Option<runmat_value::LexicalEnvironment>,
-    ) -> Self {
-        self.lexical_environment = environment;
         self
     }
 
@@ -142,7 +130,16 @@ pub async fn try_call_bound_function(
         Ok(args) => args,
         Err(error) => return Some(Err(error.into_runtime_error())),
     };
-    Some(invoker(runtime, binding, args, requested_outputs, None).await)
+    Some(
+        invoker(
+            runtime,
+            binding,
+            crate::call::RootedFunctionArguments::ordinary(args),
+            requested_outputs,
+            None,
+        )
+        .await,
+    )
 }
 
 pub async fn try_call_bound_function_in_context(
@@ -178,56 +175,143 @@ pub fn try_call_bound_function_with_environment_in_context<'a>(
         .transpose()
         .and_then(|roots| {
             crate::execution::RootedValues::new(args.to_vec())
-                .map(|args| (roots.unwrap_or_default(), args))
+                .map(|args| {
+                    (
+                        roots.unwrap_or_default(),
+                        crate::call::RootedFunctionArguments::ordinary(args),
+                    )
+                })
                 .map_err(|error| error.into_runtime_error())
         });
-    async move {
-        let (_environment_roots, args) = match admission {
-            Ok(admission) => admission,
-            Err(error) => return Some(Err(error)),
+    invoke_rooted_bound_function_with_environment_in_context(
+        runtime,
+        binding,
+        admission,
+        requested_outputs,
+        lexical_environment,
+    )
+}
+
+/// Execute one already-rooted, segmented function entry without flattening a
+/// closure's immutable capture generation into its supplied argument vector.
+pub fn try_call_rooted_bound_function_with_environment_in_context<'a>(
+    runtime: &'a crate::context::RuntimeContext,
+    binding: runmat_value::BoundFunctionBinding,
+    arguments: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> impl std::future::Future<
+    Output = Option<Result<crate::execution::RootedValueSequence, RuntimeError>>,
+> + 'a {
+    let admission = if let Some(callable) = arguments.callable() {
+        // The callable's external root lease already traces its exact lexical
+        // ancestor chain. Re-rooting each activation here would manufacture
+        // another unadmitted root Vec for every repeated selected call.
+        let captured_environment = match callable.value() {
+            runmat_value::Value::Closure(closure) => closure.lexical_environment.as_ref(),
+            _ => None,
         };
-        if let runmat_value::BoundFunctionAuthority::SelectedNative { origin, lease } =
-            &binding.authority
-        {
-            return Some(
-                super::source_facts::invoke_selected_native_lease(
-                    runtime.clone(),
-                    binding.function,
-                    *origin,
-                    Rc::clone(lease),
-                    args.values().to_vec(),
-                    requested_outputs,
-                    lexical_environment,
-                )
-                .await,
-            );
-        }
-        if matches!(
-            &binding.authority,
-            runmat_value::BoundFunctionAuthority::Local { .. }
-        ) && !binding.authority.admits_local(&runtime.session_lease())
-        {
-            return Some(Err(crate::runtime_error::semantic_error(
+        if captured_environment != lexical_environment.as_ref() {
+            Err(crate::runtime_error::semantic_error(
                 "UnavailableBoundFunction",
-                "bound function belongs to another or ended session",
-            )));
+                "selected callable and lexical environment disagree",
+            ))
+        } else {
+            Ok((Vec::new(), arguments))
         }
-        let invoker = runtime
-            .selected_call_projection()
-            .borrow()
-            .bound_invoker()
-            .unwrap_or_else(|| runtime.state().call.borrow().bound_invoker.clone())?;
-        Some(
-            invoker(
+    } else {
+        lexical_environment
+            .as_ref()
+            .map(crate::call::lexical::root_environment)
+            .transpose()
+            .map(|roots| (roots.unwrap_or_default(), arguments))
+    };
+    invoke_rooted_bound_function_with_environment_in_context(
+        runtime,
+        binding,
+        admission,
+        requested_outputs,
+        lexical_environment,
+    )
+}
+
+/// Legacy-context adapter for an already-rooted selected call. It never
+/// flattens a captured prefix; absence of an active context remains an
+/// unavailable invoker, not an implicit ambient fallback.
+pub async fn try_call_rooted_bound_function(
+    binding: runmat_value::BoundFunctionBinding,
+    arguments: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    let runtime = crate::context::legacy::active()?;
+    try_call_rooted_bound_function_with_environment_in_context(
+        &runtime,
+        binding,
+        arguments,
+        requested_outputs,
+        None,
+    )
+    .await
+}
+
+async fn invoke_rooted_bound_function_with_environment_in_context(
+    runtime: &crate::context::RuntimeContext,
+    binding: runmat_value::BoundFunctionBinding,
+    admission: Result<
+        (
+            Vec<runmat_gc::ExplicitRoot>,
+            crate::call::RootedFunctionArguments,
+        ),
+        RuntimeError,
+    >,
+    requested_outputs: usize,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    let (_environment_roots, args) = match admission {
+        Ok(admission) => admission,
+        Err(error) => return Some(Err(error)),
+    };
+    if let runmat_value::BoundFunctionAuthority::SelectedNative { origin, lease } =
+        &binding.authority
+    {
+        return Some(
+            super::source_facts::invoke_selected_native_lease(
                 runtime.clone(),
-                binding,
+                binding.function,
+                *origin,
+                Rc::clone(lease),
                 args,
                 requested_outputs,
                 lexical_environment,
             )
             .await,
-        )
+        );
     }
+    if matches!(
+        &binding.authority,
+        runmat_value::BoundFunctionAuthority::Local { .. }
+    ) && !binding.authority.admits_local(&runtime.session_lease())
+    {
+        return Some(Err(crate::runtime_error::semantic_error(
+            "UnavailableBoundFunction",
+            "bound function belongs to another or ended session",
+        )));
+    }
+    let invoker = runtime
+        .selected_call_projection()
+        .borrow()
+        .bound_invoker()
+        .unwrap_or_else(|| runtime.state().call.borrow().bound_invoker.clone())?;
+    Some(
+        invoker(
+            runtime.clone(),
+            binding,
+            args,
+            requested_outputs,
+            lexical_environment,
+        )
+        .await,
+    )
 }
 
 pub async fn try_call_external_function(
@@ -433,24 +517,19 @@ pub async fn try_call_semantic_descriptor(
         args,
         requested_outputs,
         function_input_callsite,
-        lexical_environment,
         selected_runtime,
     } = request;
     if let CallableIdentity::BoundFunction(function) = identity {
         if let Some(binding) = bound {
-            if let Some(context) = selected_runtime.clone().or_else(|| {
-                lexical_environment
-                    .as_ref()
-                    .and_then(|_| crate::context::legacy::active())
-            }) {
+            if let Some(context) = selected_runtime.as_ref() {
                 return crate::callsite::with_function_input_callsite(
                     function_input_callsite,
                     try_call_bound_function_with_environment_in_context(
-                        &context,
+                        context,
                         binding,
                         &args,
                         requested_outputs,
-                        lexical_environment,
+                        None,
                     ),
                 )
                 .await;

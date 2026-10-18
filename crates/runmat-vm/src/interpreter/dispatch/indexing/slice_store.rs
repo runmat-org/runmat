@@ -4,12 +4,13 @@ use super::{
     resolve_object_index_protocol, ObjectIndexOp, ObjectSubscript, ObjectSubscriptPath,
     RuntimeError, Value,
 };
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::indexing::plan::{build_indexed_store_plan, IndexedStorePlanMode};
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    _vars: &mut [Value],
+    _vars: &mut InterpreterVars,
     _function_registry: &crate::bytecode::FunctionRegistry,
     _pc: usize,
     runtime: &runmat_runtime::context::RuntimeContext,

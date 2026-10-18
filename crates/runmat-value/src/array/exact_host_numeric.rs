@@ -3,7 +3,7 @@
 
 use super::{
     AdoptedHostAllocation, HostAllocationProvenance, HostAllocationRelease, HostNumericBuffer,
-    Tensor,
+    SharedShape, Tensor,
 };
 use crate::IntegerStorage;
 use crate::NumericDType;
@@ -11,14 +11,17 @@ use crate::NumericScalar;
 use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
 use std::borrow::Cow;
 use std::fmt;
+use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Arc;
 
 mod integer;
 mod complex;
+mod logical;
 pub use complex::ExactHostComplexTensorAllocation;
 use integer::{allocate_integer, integer_layout, ExactIntegerStorage};
+pub use logical::ExactHostLogicalTensorAllocation;
 
 macro_rules! integer_slice_mut {
     ($self:expr, $variant:ident) => {
@@ -67,6 +70,12 @@ impl std::error::Error for ExactHostNumericAllocationError {}
 pub trait ExactHostAllocationReservation:
     runmat_execution::resource::RetainedHostAllocationClaim
 {
+    /// Retire a uniquely owned claim. Implementations whose admitted bytes
+    /// include their Box backing override this method so that backing is
+    /// released before the physical reservation is refunded.
+    fn retire_owned(self: Box<Self>) {
+        drop(self);
+    }
 }
 
 /// Retains a quota claim through the physical output allocation's lifetime.
@@ -75,7 +84,23 @@ pub trait ExactHostAllocationReservation:
 #[derive(Debug)]
 pub enum ExactHostAllocationClaim {
     Shared(Arc<dyn ExactHostAllocationReservation>),
-    Owned(Box<dyn ExactHostAllocationReservation>),
+    Owned(ManuallyDrop<Box<dyn ExactHostAllocationReservation>>),
+}
+
+impl ExactHostAllocationClaim {
+    pub fn owned(claim: Box<dyn ExactHostAllocationReservation>) -> Self {
+        Self::Owned(ManuallyDrop::new(claim))
+    }
+}
+
+impl Drop for ExactHostAllocationClaim {
+    fn drop(&mut self) {
+        if let Self::Owned(claim) = self {
+            // SAFETY: the field is taken only from this enum's unique Drop.
+            let claim = unsafe { ManuallyDrop::take(claim) };
+            claim.retire_owned();
+        }
+    }
 }
 
 pub trait ExactHostAllocationPermit: fmt::Debug + Send + Sync {
@@ -135,6 +160,33 @@ impl RustExactRelease {
             Ok(Box::from_raw(pointer))
         }
     }
+
+    /// Retire the numeric block and this known-layout release header before
+    /// ending the retained allocation claim that funded both.
+    ///
+    /// # Safety
+    /// Both callbacks must release the supplied exact global-allocator block
+    /// once and must not unwind after ownership has transferred from its Box.
+    unsafe fn release_owned_with(
+        owner: Box<Self>,
+        pointer: NonNull<u8>,
+        deallocate_payload: impl FnOnce(NonNull<u8>, Layout),
+        deallocate_owner: impl FnOnce(NonNull<u8>, Layout),
+    ) {
+        let owner = Box::into_raw(owner);
+        // SAFETY: consuming the sole Box makes both fields uniquely owned.
+        let layout = unsafe { (*owner).layout };
+        let reservation = unsafe { std::ptr::read(std::ptr::addr_of!((*owner)._reservation)) };
+        if layout.size() != 0 {
+            deallocate_payload(pointer, layout);
+        }
+        // SAFETY: `owner` came from a Box<Self> with this exact layout.
+        deallocate_owner(
+            unsafe { NonNull::new_unchecked(owner.cast::<u8>()) },
+            Layout::new::<Self>(),
+        );
+        drop(reservation);
+    }
 }
 
 impl HostAllocationRelease for RustExactRelease {
@@ -143,6 +195,19 @@ impl HostAllocationRelease for RustExactRelease {
             // SAFETY: this is the original pointer and layout allocated by
             // `ExactHostNumericAllocation::new`, and ownership transfers once.
             unsafe { dealloc(pointer.as_ptr(), self.layout) };
+        }
+    }
+
+    unsafe fn release_owned(self: Box<Self>, pointer: NonNull<u8>) {
+        // SAFETY: both pointers retain their exact original global-allocator
+        // layouts and this consumes the unique release authority.
+        unsafe {
+            Self::release_owned_with(
+                self,
+                pointer,
+                |pointer, layout| dealloc(pointer.as_ptr(), layout),
+                |pointer, layout| dealloc(pointer.as_ptr(), layout),
+            )
         }
     }
 }
@@ -156,25 +221,46 @@ pub struct ExactHostNumericAllocation {
     len: usize,
 }
 
-/// One initial exact numeric payload plus its exact two-element tensor shape.
-/// A single reservation covers both producer allocations before either is
-/// created and remains through their initial retained ownership. A later
-/// Tensor clone/reshape is a separate operation and must account for its own
-/// new shape or payload; this claim does not certify those future allocations
-/// or the remaining fixed Tensor/Arc metadata overhead.
+/// One initial exact numeric payload plus its independently admitted shape.
+/// The two retained allocations take distinct claims from the same permit, so
+/// sharing or replacing either owner never transfers the other's quota claim.
 pub struct ExactHostTensor2dAllocation {
+    shape: SharedShape,
     numeric: ExactHostNumericAllocation,
-    shape: [usize; 2],
 }
 
 /// Exact floating payload and exact initial shape for an arbitrary-rank
-/// retained tensor. The claim follows the adopted payload after publication.
+/// retained tensor. Payload and shape retain independent physical claims.
 pub struct ExactHostTensorAllocation {
+    shape: SharedShape,
     numeric: ExactHostNumericAllocation,
-    shape: Vec<usize>,
 }
 
 impl ExactHostTensorAllocation {
+    /// Exact backing bytes for an ordinary Rust-owned tensor constructed
+    /// without retained allocation claims. This includes the typed payload,
+    /// its shared host owner, and the independently shared shape owner.
+    pub fn unmanaged_requested_bytes(
+        dtype: NumericDType,
+        shape: &[usize],
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        let count = shape
+            .iter()
+            .try_fold(1usize, |n, dim| n.checked_mul(*dim))
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        Self::unmanaged_requested_bytes_for_dimensions(dtype, count, shape.len())
+    }
+
+    pub fn unmanaged_requested_bytes_for_dimensions(
+        dtype: NumericDType,
+        count: usize,
+        rank: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        ExactHostNumericAllocation::unmanaged_requested_bytes(dtype, count)?
+            .checked_add(SharedShape::requested_bytes_for_rank(rank)?)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
     pub fn requested_bytes(
         dtype: NumericDType,
         shape: &[usize],
@@ -191,10 +277,14 @@ impl ExactHostTensorAllocation {
         count: usize,
         rank: usize,
     ) -> Result<usize, ExactHostNumericAllocationError> {
-        let shape_bytes = Layout::array::<usize>(rank)
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
-            .size();
-        ExactHostNumericAllocation::requested_bytes_with_shape(dtype, count, shape_bytes)
+        ExactHostNumericAllocation::requested_bytes(dtype, count)?
+            .checked_add(SharedShape::requested_bytes_for_rank(rank)?)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    /// Payload and shape each retain one claim from the supplied permit.
+    pub const fn retained_claim_count() -> usize {
+        2
     }
 
     pub fn new(
@@ -206,42 +296,17 @@ impl ExactHostTensorAllocation {
             .iter()
             .try_fold(1usize, |n, dim| n.checked_mul(*dim))
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-        let shape_bytes = Layout::array::<usize>(shape.len())
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
-            .size();
+        let admitted_shape = SharedShape::new_admitted_from_slice(shape, permit)?;
+        let numeric = ExactHostNumericAllocation::new(dtype, count, permit)?;
         Ok(Self {
-            numeric: ExactHostNumericAllocation::new_with_reserved_shape(
-                dtype,
-                count,
-                shape_bytes,
-                permit,
-            )?,
-            shape: exact_shape(shape)?,
+            shape: admitted_shape,
+            numeric,
         })
     }
 
     pub fn into_tensor(self) -> Result<Tensor, ExactHostNumericAllocationError> {
-        Tensor::from_host_buffer(self.numeric.try_into_host_buffer()?, self.shape)
+        Tensor::from_shared_host_buffer(self.numeric.try_into_host_buffer()?, self.shape)
             .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
-    }
-}
-
-fn exact_shape(shape: &[usize]) -> Result<Vec<usize>, ExactHostNumericAllocationError> {
-    if shape.is_empty() {
-        return Ok(Vec::new());
-    }
-    let layout = Layout::array::<usize>(shape.len())
-        .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
-    let pointer = NonNull::new(unsafe { alloc(layout) })
-        .ok_or(ExactHostNumericAllocationError::AllocationFailed)?
-        .cast::<usize>();
-    unsafe {
-        std::ptr::copy_nonoverlapping(shape.as_ptr(), pointer.as_ptr(), shape.len());
-        Ok(Vec::from_raw_parts(
-            pointer.as_ptr(),
-            shape.len(),
-            shape.len(),
-        ))
     }
 }
 
@@ -269,10 +334,14 @@ impl ExactHostTensor2dAllocation {
         let count = rows
             .checked_mul(columns)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-        let shape_bytes = Layout::array::<usize>(2)
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
-            .size();
-        ExactHostNumericAllocation::requested_bytes_with_shape(dtype, count, shape_bytes)
+        ExactHostNumericAllocation::requested_bytes(dtype, count)?
+            .checked_add(SharedShape::requested_bytes_for_rank(2)?)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    /// Payload and shape each retain one claim from the supplied permit.
+    pub const fn retained_claim_count() -> usize {
+        2
     }
 
     pub fn new(
@@ -284,34 +353,17 @@ impl ExactHostTensor2dAllocation {
         let count = rows
             .checked_mul(columns)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
-        let shape_bytes = Layout::array::<usize>(2)
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
-            .size();
+        let shape = [rows, columns];
+        let admitted_shape = SharedShape::new_admitted_from_slice(&shape, permit)?;
+        let numeric = ExactHostNumericAllocation::new(dtype, count, permit)?;
         Ok(Self {
-            numeric: ExactHostNumericAllocation::new_with_reserved_shape(
-                dtype,
-                count,
-                shape_bytes,
-                permit,
-            )?,
-            shape: [rows, columns],
+            shape: admitted_shape,
+            numeric,
         })
     }
 
     pub fn into_tensor(self) -> Result<Tensor, ExactHostNumericAllocationError> {
-        let layout = Layout::array::<usize>(2)
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?;
-        // SAFETY: the exact two-element layout is nonzero and aligned for
-        // usize. `Vec::from_raw_parts` takes the only owner with capacity two.
-        let pointer = NonNull::new(unsafe { alloc(layout) })
-            .ok_or(ExactHostNumericAllocationError::AllocationFailed)?
-            .cast::<usize>();
-        unsafe {
-            pointer.as_ptr().write(self.shape[0]);
-            pointer.as_ptr().add(1).write(self.shape[1]);
-        }
-        let shape = unsafe { Vec::from_raw_parts(pointer.as_ptr(), 2, 2) };
-        Tensor::from_host_buffer(self.numeric.try_into_host_buffer()?, shape)
+        Tensor::from_shared_host_buffer(self.numeric.try_into_host_buffer()?, self.shape)
             .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
     }
 }
@@ -336,17 +388,19 @@ enum ExactAllocation {
 }
 
 impl ExactHostNumericAllocation {
-    pub fn requested_bytes(
+    fn unmanaged_requested_bytes(
         dtype: NumericDType,
         len: usize,
     ) -> Result<usize, ExactHostNumericAllocationError> {
-        Self::requested_bytes_with_shape(dtype, len, 0)
+        Self::payload_layout(dtype, len)?
+            .size()
+            .checked_add(HostNumericBuffer::exact_metadata_bytes())
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
     }
 
-    fn requested_bytes_with_shape(
+    pub fn requested_bytes(
         dtype: NumericDType,
         len: usize,
-        shape_bytes: usize,
     ) -> Result<usize, ExactHostNumericAllocationError> {
         let layout = Self::payload_layout(dtype, len)?;
         let release_bytes = if dtype.integer_class().is_some() {
@@ -356,8 +410,7 @@ impl ExactHostNumericAllocation {
         };
         layout
             .size()
-            .checked_add(shape_bytes)
-            .and_then(|bytes| bytes.checked_add(release_bytes))
+            .checked_add(release_bytes)
             .and_then(|bytes| bytes.checked_add(HostNumericBuffer::exact_metadata_bytes()))
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
     }
@@ -379,17 +432,8 @@ impl ExactHostNumericAllocation {
         len: usize,
         permit: &dyn ExactHostAllocationPermit,
     ) -> Result<Self, ExactHostNumericAllocationError> {
-        Self::new_with_reserved_shape(dtype, len, 0, permit)
-    }
-
-    fn new_with_reserved_shape(
-        dtype: NumericDType,
-        len: usize,
-        shape_bytes: usize,
-        permit: &dyn ExactHostAllocationPermit,
-    ) -> Result<Self, ExactHostNumericAllocationError> {
         let layout = Self::payload_layout(dtype, len)?;
-        let charged = Self::requested_bytes_with_shape(dtype, len, shape_bytes)?;
+        let charged = Self::requested_bytes(dtype, len)?;
         let reservation = permit.reserve_exact_claim(charged)?;
         if dtype.integer_class().is_some() {
             return Ok(Self {

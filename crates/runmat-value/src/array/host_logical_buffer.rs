@@ -12,6 +12,10 @@ pub struct HostLogicalBuffer {
 }
 
 impl HostLogicalBuffer {
+    pub(crate) const fn exact_metadata_bytes() -> usize {
+        HostBuffer::<HostData<u8>>::exact_metadata_bytes()
+    }
+
     pub fn new(mut values: Vec<u8>) -> Self {
         values
             .iter_mut()
@@ -25,6 +29,25 @@ impl HostLogicalBuffer {
         allocation: AdoptedHostAllocation,
         len: usize,
     ) -> Result<Self, (AdoptedHostAllocation, String)> {
+        Self::try_adopt_storage(allocation, len).map(|storage| Self {
+            storage: HostBuffer::new(storage),
+        })
+    }
+
+    pub(crate) fn try_adopt_exact(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<Self, String> {
+        let storage = Self::try_adopt_storage(allocation, len).map_err(|(_, detail)| detail)?;
+        let storage = HostBuffer::try_new_exact(storage)
+            .map_err(|_| "exact logical owner allocation failed".to_string())?;
+        Ok(Self { storage })
+    }
+
+    fn try_adopt_storage(
+        allocation: AdoptedHostAllocation,
+        len: usize,
+    ) -> Result<HostData<u8>, (AdoptedHostAllocation, String)> {
         if allocation.provenance().byte_length < len {
             return Err((
                 allocation,
@@ -39,9 +62,7 @@ impl HostLogicalBuffer {
                 "logical allocation contains noncanonical bytes".into(),
             ));
         }
-        HostData::try_adopt(allocation, len).map(|storage| Self {
-            storage: HostBuffer::new(storage),
-        })
+        HostData::try_adopt(allocation, len)
     }
 
     pub fn len(&self) -> usize {

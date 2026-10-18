@@ -116,6 +116,28 @@ fn ordinary_numeric_result_is_not_relabelled_as_logical() {
 
 #[test]
 fn default_logical_unsupported_is_certified_before_effects() {
+    #[derive(Debug)]
+    struct Admission;
+    impl runmat_execution::resource::ProviderHostMetadataAdmission for Admission {
+        fn claim_view(
+            &self,
+            _: u64,
+        ) -> Result<
+            Box<dyn runmat_execution::resource::RetainedHostViewGrant>,
+            runmat_execution::resource::ProviderHostMetadataError,
+        > {
+            panic!("unsupported hook must not consume view admission")
+        }
+        fn claim_record(
+            &self,
+            _: u64,
+        ) -> Result<
+            std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>,
+            runmat_execution::resource::ProviderHostMetadataError,
+        > {
+            panic!("unsupported hook must not consume record admission")
+        }
+    }
     struct Unavailable;
     impl AccelProvider for Unavailable {
         fn device_id(&self) -> u32 {
@@ -147,4 +169,16 @@ fn default_logical_unsupported_is_certified_before_effects() {
         error.is_unsupported(),
         "default unsupported is certified before effects"
     );
+    let error = upload_logical_protecting_admitted(
+        &Unavailable,
+        &HostLogicalTensorView {
+            data: &[1],
+            shape: &[1, 1],
+        },
+        &[],
+        Some(&Admission),
+        None,
+    )
+    .expect_err("missing admitted hook cannot use ordinary logical upload");
+    assert!(matches!(error, NumericUploadError::Provider(error) if error.is_unsupported()));
 }

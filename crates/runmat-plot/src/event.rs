@@ -783,10 +783,12 @@ impl FigureScene {
             figure.axes_metadata = axes_metadata.into_iter().map(AxesMetadata::from).collect();
             figure.set_active_axes_index(figure.active_axes_index);
         } else {
-            figure.title = self.metadata.title;
-            figure.x_label = self.metadata.x_label;
-            figure.y_label = self.metadata.y_label;
-            figure.legend_enabled = self.metadata.legend_enabled;
+            figure.set_active_axes_index(figure.active_axes_index);
+            let axes = &mut figure.axes_metadata[figure.active_axes_index];
+            axes.title = self.metadata.title;
+            axes.x_label = self.metadata.x_label;
+            axes.y_label = self.metadata.y_label;
+            figure.set_axes_legend_enabled(figure.active_axes_index, self.metadata.legend_enabled);
             figure.set_axes_data_aspect_ratio(
                 figure.active_axes_index,
                 self.metadata.data_aspect_ratio,
@@ -4812,7 +4814,10 @@ mod tests {
                 .is_err()
         );
 
-        let mut legacy_figure = Figure::new();
+        let mut legacy_figure = Figure::new()
+            .with_title("Legacy title")
+            .with_labels("Time", "Value")
+            .with_legend(true);
         legacy_figure.add_line_plot(
             LinePlot::from_numeric_data(
                 NumericPlotData::new(NumericStorage::F64(vec![1.0, -0.0]), vec![1, 2]).unwrap(),
@@ -4822,11 +4827,17 @@ mod tests {
         );
         let mut legacy = FigureScene::capture(&legacy_figure);
         legacy.schema_version = 1;
+        legacy.metadata.axes_metadata = None;
         let finite_legacy = serde_json::to_string(&legacy).unwrap();
-        serde_json::from_str::<FigureScene>(&finite_legacy)
+        let rebuilt = serde_json::from_str::<FigureScene>(&finite_legacy)
             .unwrap()
             .into_figure()
             .expect("finite legacy scene remains readable");
+        assert!(rebuilt.legend_enabled);
+        assert!(rebuilt.axes_metadata(0).unwrap().legend_enabled);
+        assert_eq!(rebuilt.title.as_deref(), Some("Legacy title"));
+        assert_eq!(rebuilt.x_label.as_deref(), Some("Time"));
+        assert_eq!(rebuilt.y_label.as_deref(), Some("Value"));
     }
 
     #[test]

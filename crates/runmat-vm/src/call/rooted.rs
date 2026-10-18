@@ -19,7 +19,8 @@ impl CallableDescriptorRoots {
     fn new(descriptor: &CallableDescriptor) -> Result<Self, RuntimeError> {
         let callable = match &descriptor.target {
             CallableTarget::FevalForward(value) => Some(value),
-            CallableTarget::BoundLexical { closure, .. } => Some(closure.as_value()),
+            CallableTarget::BoundLexical { closure, .. }
+            | CallableTarget::CapturedResolved { closure, .. } => Some(closure.as_value()),
             CallableTarget::Bound(_) | CallableTarget::Resolved { .. } => None,
         };
         let callable = callable

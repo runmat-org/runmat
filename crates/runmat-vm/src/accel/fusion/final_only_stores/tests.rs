@@ -62,7 +62,7 @@ fn ordinary_vm_path_preserves_both_stores_when_final_only_span_is_deferred() {
     ));
     let bytecode = Bytecode::with_instructions(instructions, 3);
     let vars = futures::executor::block_on(crate::interpret(&bytecode)).expect("ordinary stores");
-    assert_eq!(vars[0], Value::Num(7.0));
-    assert_eq!(vars[1], Value::Num(9.0));
-    assert_eq!(vars[2], Value::Num(11.0));
+    assert_eq!(*vars.first().unwrap(), Value::Num(7.0));
+    assert_eq!(*vars.get(1).unwrap(), Value::Num(9.0));
+    assert_eq!(*vars.get(2).unwrap(), Value::Num(11.0));
 }

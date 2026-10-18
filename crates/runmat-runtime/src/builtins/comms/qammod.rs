@@ -398,7 +398,9 @@ impl SymbolInput {
     ) -> BuiltinResult<Self> {
         match input_type {
             InputType::Integer => Err(qammod_error("qammod: logical X requires InputType='bit'")),
-            InputType::Bit => bits_to_symbols(logical.data.into_vec(), logical.shape, order),
+            InputType::Bit => {
+                bits_to_symbols(logical.data.into_vec(), logical.shape.to_vec(), order)
+            }
         }
     }
 }

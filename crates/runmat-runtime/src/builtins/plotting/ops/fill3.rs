@@ -381,9 +381,6 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "3-D Filled Polygons",
-            x_label: "X",
-            y_label: "Y",
             axis_equal: true,
             ..Default::default()
         },
@@ -446,7 +443,7 @@ fn parse_fill3_patch_arg_groups(args: Vec<Value>) -> crate::BuiltinResult<Vec<Ve
             ));
         }
 
-        let color_name = if is_string_like(&positional[offset + 3]) {
+        let color_name = if super::patch::is_color_literal(&positional[offset + 3]) {
             "FaceColor"
         } else {
             "CData"

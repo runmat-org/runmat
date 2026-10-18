@@ -170,7 +170,9 @@ fn fork_keeps_issued_origin_and_exact_text_after_parent_lease_retires() {
     let lease = lease_source_context_in_context(&parent, "captured.m", None, "captured = 42;")
         .expect("parent source");
     let reference = lease.source_ref();
-    let child = parent.fork_parallel_lab(crate::context::RuntimeServicePorts::default());
+    let child = parent
+        .fork_parallel_lab(crate::context::RuntimeServicePorts::default())
+        .expect("idle session fork");
     assert_eq!(reference.resolve_in(&child), Some(lease.source_id()));
     drop(lease);
     assert_eq!(reference.resolve_in(&parent), None);

@@ -1118,9 +1118,6 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f
     apply_axes_target(parsed.axes_target, BUILTIN_NAME).map_err(map_contour_invalid_argument)?;
     let mut call = Some(parsed);
     let opts = PlotRenderOptions {
-        title: "Contour Plot",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };

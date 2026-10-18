@@ -114,32 +114,40 @@ pub struct ProviderInputStageDemands {
 
 impl ProviderInputStageDemands {
     pub fn sequential(stages: impl IntoIterator<Item = ProviderInputStageDemand>) -> Option<Self> {
-        let mut by_device = std::collections::BTreeMap::new();
+        // The canonical wire carrier already bounds the provider set. Build
+        // its sorted prefix directly, without an unadmitted temporary map.
+        let mut set = Self::default();
         for stage in stages {
             if stage.queue_slots == 0 && stage.incremental_peak_bytes != ResourceByteBound::Known(0)
             {
                 return None;
             }
-            let current: &mut ProviderInputStageDemand =
-                by_device.entry(stage.device_id).or_insert(stage);
-            current.queue_slots = current.queue_slots.max(stage.queue_slots);
-            current.incremental_peak_bytes =
-                match (current.incremental_peak_bytes, stage.incremental_peak_bytes) {
-                    (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
-                        ResourceByteBound::Known(left.max(right))
-                    }
-                    (ResourceByteBound::Unavailable(reason), _)
-                    | (_, ResourceByteBound::Unavailable(reason)) => {
-                        ResourceByteBound::Unavailable(reason)
-                    }
-                };
-        }
-        if by_device.len() > 16 {
-            return None;
-        }
-        let mut set = Self::default();
-        for (slot, demand) in set.entries.iter_mut().zip(by_device.into_values()) {
-            *slot = Some(demand);
+            let index = set.entries.iter().position(|entry| {
+                entry.is_none_or(|current| current.device_id >= stage.device_id)
+            })?;
+            if let Some(current) = set.entries[index]
+                .as_mut()
+                .filter(|current| current.device_id == stage.device_id)
+            {
+                current.queue_slots = current.queue_slots.max(stage.queue_slots);
+                current.incremental_peak_bytes =
+                    match (current.incremental_peak_bytes, stage.incremental_peak_bytes) {
+                        (ResourceByteBound::Known(left), ResourceByteBound::Known(right)) => {
+                            ResourceByteBound::Known(left.max(right))
+                        }
+                        (ResourceByteBound::Unavailable(reason), _)
+                        | (_, ResourceByteBound::Unavailable(reason)) => {
+                            ResourceByteBound::Unavailable(reason)
+                        }
+                    };
+            } else {
+                let last = set.entries.len() - 1;
+                if set.entries[last].is_some() {
+                    return None;
+                }
+                set.entries.copy_within(index..last, index + 1);
+                set.entries[index] = Some(stage);
+            }
         }
         Some(set)
     }
@@ -231,6 +239,21 @@ mod provider_input_stage_tests {
                 },
             ]
         );
+        let stage = |device_id| ProviderInputStageDemand {
+            device_id,
+            incremental_peak_bytes: ResourceByteBound::Known(u64::from(device_id)),
+            queue_slots: 1,
+        };
+        let full =
+            ProviderInputStageDemands::sequential((0..16).rev().map(stage).chain([stage(8)]))
+                .expect("full bounded set still accepts a repeated owner");
+        assert!(full.is_canonical());
+        assert_eq!(
+            full.iter().map(|entry| entry.device_id).collect::<Vec<_>>(),
+            (0..16).collect::<Vec<_>>()
+        );
+        assert!(ProviderInputStageDemands::sequential((0..17).map(stage)).is_none());
+        assert!(ProviderInputStageDemands::sequential((0..17).rev().map(stage)).is_none());
     }
 }
 

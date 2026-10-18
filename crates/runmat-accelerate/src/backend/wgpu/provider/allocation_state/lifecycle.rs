@@ -37,6 +37,7 @@ pub(super) enum Phase {
 }
 
 pub(super) struct Record {
+    pub(super) registration_slot: Option<runmat_execution::resource::ProviderRegistrationSlot>,
     pub(super) phase: Phase,
     pub(super) entry: Option<BufferEntry>,
     /// Includes a temporarily detached retirement ticket, until released.

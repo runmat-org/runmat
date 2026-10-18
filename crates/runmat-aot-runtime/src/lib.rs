@@ -1,6 +1,7 @@
 //! Process-image runtime host linked into standalone RunMat programs.
 
 mod builtin;
+mod accelerator_profile;
 mod execute;
 mod foreign_policy;
 mod foreign_retirement;

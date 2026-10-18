@@ -144,7 +144,7 @@ fn preflight_known_option_value(
                     ensure_documented_alpha_class(alpha)?;
                     alpha.shape().to_vec()
                 }
-                Value::LogicalArray(alpha) => alpha.shape.clone(),
+                Value::LogicalArray(alpha) => alpha.shape.to_vec(),
                 Value::Num(_) | Value::Bool(_) | Value::Int(IntValue::U8(_) | IntValue::U16(_)) => {
                     vec![1, 1]
                 }

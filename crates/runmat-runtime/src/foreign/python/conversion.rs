@@ -141,7 +141,7 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
             }))
         }
         Value::LogicalArray(value) => {
-            let shape = value.shape.clone();
+            let shape = value.shape.to_vec();
             let owner = Arc::new(LogicalOwner(value.data.clone()));
             Ok(PythonValue::Array(PythonArray {
                 dtype: PythonDType::Bool,

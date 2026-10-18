@@ -18,6 +18,16 @@ use crate::RuntimeError;
 use runmat_types::ClassIdentity;
 use runmat_value::{Closure, StructValue, Tensor, Value};
 
+/// Preserve character-vector shape at both exception property access paths.
+pub(crate) fn exception_text_value(text: &str) -> Value {
+    let chars = if text.is_empty() {
+        runmat_value::CharArray::new(Vec::new(), 0, 0).expect("empty character array")
+    } else {
+        runmat_value::CharArray::new_row(text)
+    };
+    Value::CharArray(chars)
+}
+
 const IDENT_PROPERTY_PRIVATE_ACCESS: &str = "RunMat:PropertyPrivateAccess";
 const IDENT_PROPERTY_READ_ONLY: &str = "RunMat:PropertyReadOnly";
 

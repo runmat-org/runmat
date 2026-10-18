@@ -12,7 +12,7 @@ impl AllocationState {
         handle: &GpuTensorHandle,
     ) -> Result<BufferEntry> {
         self.check_identity(handle.allocation_identity())?;
-        let (mut entry, weak) = {
+        let (entry, weak) = {
             let records = self.lock_records()?;
             let record = records
                 .get(&handle.buffer_id())
@@ -20,11 +20,27 @@ impl AllocationState {
             if record.phase != Phase::Live {
                 return Err(AllocationAcquisitionError::NotLive.into());
             }
+            let stored = record
+                .entry
+                .as_ref()
+                .ok_or(AllocationAcquisitionError::NotLive)?;
             (
-                record
-                    .entry
-                    .clone()
-                    .ok_or(AllocationAcquisitionError::NotLive)?,
+                // The stored physical shape may have a different rank from
+                // this view's logical shape. Construct the authenticated
+                // operation entry directly rather than first allocating a
+                // clone of that obsolete physical shape and replacing it.
+                BufferEntry {
+                    logical: handle.view().is_logical(),
+                    buffer: stored.buffer.clone(),
+                    len: stored.len,
+                    shape: runmat_value::exact_capacity_vec_from_slice(handle.shape())?,
+                    storage: stored.storage,
+                    element_type: stored.element_type,
+                    precision: stored.precision,
+                    allocated_bytes: stored.allocated_bytes,
+                    usage: stored.usage,
+                    last_submission_id: stored.last_submission_id,
+                },
                 record
                     .lease
                     .clone()
@@ -41,8 +57,6 @@ impl AllocationState {
         if handle.shape().contains(&0) && lease.physical().element_capacity() != 0 {
             return Err(AllocationAcquisitionError::Unsupported.into());
         }
-        entry.shape = handle.shape().to_vec();
-        entry.logical = handle.view().is_logical();
         Ok(entry)
     }
 

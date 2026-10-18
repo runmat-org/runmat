@@ -7,7 +7,7 @@ impl HostState {
     pub fn new(input: HostStateInput) -> NativeExecutorResult<(Self, Vec<NativeValueRef>)> {
         let HostStateInput {
             function,
-            arguments,
+            inputs,
             requested_outputs,
             runtime,
             program_capture,
@@ -40,7 +40,10 @@ impl HostState {
             runmat_runtime::context::RuntimeInvocationArity::Script
         } else {
             runmat_runtime::context::RuntimeInvocationArity::function(
-                arguments.len(),
+                match &inputs {
+                    NativeFunctionInputs::Legacy(arguments) => arguments.len(),
+                    NativeFunctionInputs::Prepared(prepared) => prepared.nargin,
+                },
                 requested_outputs,
             )
         };
@@ -70,45 +73,43 @@ impl HostState {
                 source_id,
                 span: frame_span,
             });
-        let inherited_catch = runtime.active_catch_exception_shared();
-        let construction_values = arguments
-            .iter()
-            .cloned()
-            .chain(captures.iter().map(|capture| capture.value.clone()))
-            .collect();
-        let _construction_roots =
-            ScopedValueRoots::register(construction_values, "native_invocation_construction")?;
-        let input_specs = function
-            .argument_validations
-            .iter()
-            .map(|validation| {
-                let input_index = function
-                    .abi
-                    .fixed_inputs
-                    .iter()
-                    .position(|local| *local == validation.input)
-                    .ok_or_else(|| {
-                        NativeExecutorError::Host(
-                            "native argument validation does not name a fixed input".into(),
-                        )
-                    })?;
-                Ok(FunctionInputSpec {
-                    input_index,
-                    size: validation.size.as_ref(),
-                    class_name: validation.class_name.as_deref(),
-                    validators: &validation.validators,
-                    default_value: validation.default_value.as_ref(),
-                })
-            })
-            .collect::<NativeExecutorResult<Vec<_>>>()?;
-        let supplied_inputs = arguments.len();
-        let prepared = prepare_function_inputs(
-            &function.name,
-            &arguments,
-            function.abi.fixed_inputs.len(),
-            function.abi.varargin.is_some(),
-            &input_specs,
+        // Admit every exact-capacity continuation buffer before argument
+        // preparation, workspace attachment, or lexical publication can run.
+        let contextual_regions = expression_regions::ExpressionRegionState::prepare(
+            &runtime,
+            function.expression_continuation_geometry,
         )?;
+        let inherited_catch = runtime.active_catch_exception_shared();
+        // Compatibility entry owns a second Value forest for the direct ABI.
+        // Selected retained entry arrives with one already validated, move-only
+        // prepared input set and retains its original roots outside this frame.
+        let (arguments, prepared, _construction_roots) = match inputs {
+            NativeFunctionInputs::Legacy(arguments) => {
+                let construction_values = arguments
+                    .iter()
+                    .cloned()
+                    .chain(captures.iter().filter_map(|capture| match capture {
+                        NativeCaptureInput::Owned(capture) => Some(capture.value.clone()),
+                        NativeCaptureInput::Retained { .. } => None,
+                    }))
+                    .collect();
+                let roots = ScopedValueRoots::register(
+                    construction_values,
+                    "native_invocation_construction",
+                )?;
+                let input_specs = function_input_specs(&function)?;
+                let prepared = prepare_function_inputs(
+                    &function.name,
+                    &arguments,
+                    function.abi.fixed_inputs.len(),
+                    function.abi.varargin.is_some(),
+                    &input_specs,
+                )?;
+                (Some(arguments), prepared, Some(roots))
+            }
+            NativeFunctionInputs::Prepared(prepared) => (None, prepared, None),
+        };
+        let supplied_inputs = prepared.nargin;
         let missing_input_locals = function
             .abi
             .fixed_inputs
@@ -118,25 +119,27 @@ impl HostState {
             .collect();
         let global_bindings = workspace
             .as_ref()
-            .map(|input| input.frame_global_bindings(&function))
+            .map(|input| input.frame_global_bindings(&function, &runtime))
             .transpose()?
             .unwrap_or_default();
         let canonical_workspace = runtime.service_ports().workspace().cloned();
         let workspace = if let Some(input) = workspace {
-            NativeWorkspaceState::new(
+            NativeWorkspaceState::new_for_context(
                 &function,
                 input,
                 global_bindings.clone(),
                 canonical_workspace,
                 Some(runtime.session_variable_authority()),
+                &runtime,
             )?
         } else {
-            NativeWorkspaceState::function_frame(
+            NativeWorkspaceState::function_frame_for_context(
                 &function,
                 global_bindings.clone(),
                 canonical_workspace,
                 Some(runtime.session_variable_authority()),
-            )
+                &runtime,
+            )?
         };
         workspace.attach_lexical_bindings(&function, lexical_environment.as_ref())?;
         let ports = runtime
@@ -145,15 +148,23 @@ impl HostState {
             .with_workspace(workspace.service());
         let runtime = runtime.with_service_ports(ports);
         let mut arena = ValueArena::new()?;
-        let argument_refs = arguments
+        let selected_inputs = arguments.is_none();
+        let mut argument_refs = arguments
+            .unwrap_or_default()
             .into_iter()
             .map(|value| arena.insert(value))
             .collect::<Vec<_>>();
         let mut locals = vec![NativeValueRef::NULL; function.local_count()];
         let capture_locals = function
-            .locals
+            .closure_captures
             .iter()
-            .filter(|local| local.kind == NativeLocalKind::Capture)
+            .filter(|capture| {
+                matches!(
+                    capture.disposition,
+                    runmat_native_codegen::NativeClosureCaptureDisposition::ByValue
+                        | runmat_native_codegen::NativeClosureCaptureDisposition::TransitSnapshot
+                )
+            })
             .collect::<Vec<_>>();
         if capture_locals.len() != captures.len() {
             return Err(NativeExecutorError::Host(format!(
@@ -162,17 +173,50 @@ impl HostState {
                 captures.len()
             )));
         }
-        for local in capture_locals {
-            let binding = local.binding.ok_or_else(|| {
-                NativeExecutorError::Host("native capture local has no semantic binding".into())
+        for capture in &captures {
+            let (local, value) = match capture {
+                NativeCaptureInput::Owned(capture) => {
+                    let local = capture_locals
+                        .iter()
+                        .find(|layout| layout.binding == capture.binding)
+                        .ok_or_else(|| {
+                            NativeExecutorError::Host(
+                                "native lexical capture binding is missing".into(),
+                            )
+                        })?;
+                    (local.local, arena.insert(capture.value.clone()))
+                }
+                NativeCaptureInput::Retained {
+                    binding,
+                    local,
+                    value,
+                } => {
+                    let matches_layout = function.closure_captures.iter().any(|layout| {
+                        layout.binding == *binding
+                            && layout.local == *local
+                            && matches!(
+                                layout.disposition,
+                                runmat_native_codegen::NativeClosureCaptureDisposition::ByValue
+                                    | runmat_native_codegen::NativeClosureCaptureDisposition::TransitSnapshot
+                            )
+                    });
+                    if !matches_layout {
+                        return Err(NativeExecutorError::Host(
+                            "retained capture disagrees with the verified Native layout".into(),
+                        ));
+                    }
+                    (*local, arena.insert_capture_lease(value.clone()))
+                }
+            };
+            let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
+                NativeExecutorError::Host("native capture local is out of bounds".into())
             })?;
-            let capture = captures
-                .iter()
-                .find(|capture| capture.binding == binding)
-                .ok_or_else(|| {
-                    NativeExecutorError::Host("native lexical capture binding is missing".into())
-                })?;
-            locals[local.id.0 as usize] = arena.insert(capture.value.clone());
+            if !slot.is_null() {
+                return Err(NativeExecutorError::Host(
+                    "native capture local is initialized more than once".into(),
+                ));
+            }
+            *slot = value;
         }
         if let Some(receiver) = runtime.captured_constructor_receiver().filter(|_| {
             function
@@ -198,21 +242,42 @@ impl HostState {
             })?;
             *slot = arena.insert(receiver.clone());
         }
-        for (local, value) in function.abi.fixed_inputs.iter().zip(&prepared.fixed) {
+        for (local, value) in function.abi.fixed_inputs.iter().zip(prepared.fixed) {
             let slot = locals.get_mut(local.0 as usize).ok_or_else(|| {
                 NativeExecutorError::Host("function ABI input local is out of bounds".into())
             })?;
             if let Some(value) = value {
-                *slot = arena.insert(value.clone());
+                *slot = match workspace.initialize_local_owned_or_return(
+                    &runtime,
+                    local.0 as usize,
+                    value,
+                )? {
+                    Some(value) => arena.insert(value),
+                    None => NativeValueRef::NULL,
+                };
             }
         }
         if let (Some(local), Some(varargin)) = (function.abi.varargin, prepared.varargin) {
-            locals[local.0 as usize] = arena.insert(runmat_value::Value::Cell(varargin));
+            locals[local.0 as usize] = match workspace.initialize_local_owned_or_return(
+                &runtime,
+                local.0 as usize,
+                runmat_value::Value::Cell(varargin),
+            )? {
+                Some(value) => arena.insert(value),
+                None => NativeValueRef::NULL,
+            };
         }
         if let Some(local) = function.abi.varargout {
             let empty = runmat_value::CellArray::new(Vec::new(), 1, 0)
                 .map_err(|error| NativeExecutorError::Host(format!("varargout: {error}")))?;
-            locals[local.0 as usize] = arena.insert(runmat_value::Value::Cell(empty));
+            locals[local.0 as usize] = match workspace.initialize_local_owned_or_return(
+                &runtime,
+                local.0 as usize,
+                runmat_value::Value::Cell(empty),
+            )? {
+                Some(value) => arena.insert(value),
+                None => NativeValueRef::NULL,
+            };
         }
         if let Some(local) = function.abi.implicit_nargin {
             locals[local.0 as usize] =
@@ -230,29 +295,21 @@ impl HostState {
                     "transit lexical binding has no admitted activation".into(),
                 ));
             }
-            if binding.kind == runmat_native_codegen::NativeLexicalBindingKind::Inherited {
-                let environment = lexical_environment.as_ref().ok_or_else(|| {
-                    NativeExecutorError::Host("inherited lexical binding has no activation".into())
-                })?;
-                let local = locals.get_mut(binding.local.0 as usize).ok_or_else(|| {
-                    NativeExecutorError::Host("inherited lexical local is out of bounds".into())
-                })?;
-                if let Some(value) =
-                    runmat_runtime::call::lexical::read_binding(environment, binding.binding)?
-                {
-                    *local = arena.insert(value);
-                } else {
-                    *local = NativeValueRef::NULL;
-                }
-            }
         }
         for (slot, local) in locals.iter_mut().enumerate() {
-            if let Some(value) = workspace.initial_value(slot) {
-                *local = arena.insert(value);
+            if let Some(value) = workspace.initial_value_lease(&runtime, slot)? {
+                *local = arena.insert_retained_lease(value);
+                // The canonical workspace already owns this binding. Seeding
+                // its native read reference is not another workspace write.
+                continue;
             }
             let reference = *local;
             if !reference.is_null() {
-                workspace.initialize_local(slot, arena.get(reference)?.clone())?;
+                workspace.initialize_local_with_context(
+                    &runtime,
+                    slot,
+                    arena.get(reference)?.clone(),
+                )?;
             }
         }
         for binding in &function.lexical_bindings {
@@ -260,7 +317,11 @@ impl HostState {
                 let environment = lexical_environment.as_ref().ok_or_else(|| {
                     NativeExecutorError::Host("owned lexical binding has no activation".into())
                 })?;
-                if !environment.reserve_owned_binding(binding.binding) {
+                if !runmat_runtime::call::lexical::reserve_owned_binding_with_context(
+                    environment,
+                    binding.binding,
+                    &runtime,
+                )? {
                     return Err(NativeExecutorError::Host(
                         "owned lexical binding was reserved twice".into(),
                     ));
@@ -269,11 +330,35 @@ impl HostState {
                     NativeExecutorError::Host("owned lexical local is out of bounds".into())
                 })?;
                 if !reference.is_null() {
-                    runmat_runtime::call::lexical::write_owned_binding(
+                    runmat_runtime::call::lexical::write_owned_binding_with_context(
                         environment,
                         binding.binding,
                         arena.get(reference)?.clone(),
+                        &runtime,
                     )?;
+                }
+            }
+        }
+        if selected_inputs && supplied_inputs != 0 {
+            // The selected entry moved its supplied Values into fixed locals
+            // and the canonical `varargin` cell. Reuse those owners for the
+            // direct ABI instead of keeping a second payload forest.
+            for local in function.abi.fixed_inputs.iter().take(supplied_inputs) {
+                let reference = *locals.get(local.0 as usize).ok_or_else(|| {
+                    NativeExecutorError::Host("function ABI input local is out of bounds".into())
+                })?;
+                arena.retain(reference)?;
+                argument_refs.push(reference);
+            }
+            if supplied_inputs > function.abi.fixed_inputs.len() {
+                let local = function.abi.varargin.ok_or_else(|| {
+                    NativeExecutorError::Host("native varargin local is missing".into())
+                })?;
+                let parent = *locals.get(local.0 as usize).ok_or_else(|| {
+                    NativeExecutorError::Host("native varargin local is out of bounds".into())
+                })?;
+                for index in 0..supplied_inputs - function.abi.fixed_inputs.len() {
+                    argument_refs.push(arena.insert_cell_element(parent, index)?);
                 }
             }
         }
@@ -322,7 +407,7 @@ impl HostState {
             captured_sequences: BTreeMap::new(),
             contextual_index_extents: Vec::new(),
             subscript_end_receivers: Vec::new(),
-            contextual_regions: contextual_regions::ContextualRegionState::default(),
+            contextual_regions,
             current_request: None,
             resume_target: None,
             current_block: None,
@@ -372,4 +457,32 @@ impl HostState {
         state.enter_block(state.function.entry)?;
         Ok((state, argument_refs))
     }
+}
+
+pub(in crate::execute) fn function_input_specs(
+    function: &runmat_native_codegen::NativeFunction,
+) -> NativeExecutorResult<Vec<FunctionInputSpec<'_>>> {
+    function
+        .argument_validations
+        .iter()
+        .map(|validation| {
+            let input_index = function
+                .abi
+                .fixed_inputs
+                .iter()
+                .position(|local| *local == validation.input)
+                .ok_or_else(|| {
+                    NativeExecutorError::Host(
+                        "native argument validation does not name a fixed input".into(),
+                    )
+                })?;
+            Ok(FunctionInputSpec {
+                input_index,
+                size: validation.size.as_ref(),
+                class_name: validation.class_name.as_deref(),
+                validators: &validation.validators,
+                default_value: validation.default_value.as_ref(),
+            })
+        })
+        .collect()
 }

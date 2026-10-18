@@ -29,7 +29,7 @@ mod workspace;
 pub(in crate::interpreter::dispatch) struct CallDispatchContext<'a> {
     pub instr: &'a Instr,
     pub stack: &'a mut Vec<Value>,
-    pub vars: &'a mut Vec<Value>,
+    pub vars: &'a mut crate::interpreter::vars::InterpreterVars,
     pub sequence_register: &'a mut SequenceState,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,

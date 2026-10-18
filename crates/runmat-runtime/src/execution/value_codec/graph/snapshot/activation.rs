@@ -12,7 +12,8 @@ impl<'a> Encoder<'a> {
             .parent()
             .map(|parent| self.push_activation(parent, work))
             .transpose()?;
-        let owned = environment.owned_binding_ids();
+        let owned = crate::call::lexical::owned_binding_ids(&environment)
+            .map_err(|error| invalid(error.to_string()))?;
         let mut bindings = Vec::with_capacity(owned.len());
         for binding in owned {
             let value = crate::call::lexical::read_binding(&environment, binding)

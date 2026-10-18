@@ -426,7 +426,7 @@ fn value_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::ComplexTensor(tensor) => Ok(tensor.shape().to_vec()),
-        Value::LogicalArray(array) => Ok(array.shape.clone()),
+        Value::LogicalArray(array) => Ok(array.shape.to_vec()),
         Value::StringArray(array) => Ok(array.shape.clone()),
         Value::CharArray(array) => Ok(array.shape.clone()),
         Value::Cell(array) => Ok(array.shape.clone()),

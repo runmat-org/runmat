@@ -3,7 +3,7 @@ use runmat_native_codegen::{aot::NATIVE_OBJECT_SCHEMA_VERSION, NativeTarget};
 
 use crate::{AotError, AotResult};
 
-pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 7;
+pub const RUNTIME_ARCHIVE_SCHEMA_VERSION: u16 = 8;
 pub const MAX_RUNTIME_ARCHIVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 pub const MAX_RUNTIME_PAYLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 const MAX_LINK_TOKENS: usize = 256;
@@ -24,6 +24,9 @@ pub struct RuntimeArchiveCapabilities {
     pub plot_core: bool,
     pub dynamic_source_loading: bool,
     pub closed_world_linking: bool,
+    /// Backend code compiled into these exact target archive bytes. This is
+    /// not a discovered device or a per-program deployment grant.
+    pub accelerators: runmat_execution::host::NativeAcceleratorProfile,
 }
 
 impl RuntimeArchiveCapabilities {
@@ -34,6 +37,7 @@ impl RuntimeArchiveCapabilities {
             plot_core: true,
             dynamic_source_loading: false,
             closed_world_linking: true,
+            accelerators: runmat_execution::host::NativeAcceleratorProfile::NONE,
         }
     }
 

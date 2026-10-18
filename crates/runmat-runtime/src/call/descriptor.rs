@@ -97,30 +97,60 @@ impl CallableMetadata {
 
 /// One closure stored in its canonical Value representation so root scans can
 /// borrow the complete capture and lexical-activation graph without cloning it.
-#[derive(Debug, Clone, PartialEq)]
-pub struct RetainedClosureValue(Box<Value>);
+#[derive(Debug, Clone)]
+pub struct RetainedClosureValue(runmat_value::SharedValueGeneration);
 
 impl RetainedClosureValue {
     pub fn new(closure: Closure) -> Self {
-        Self(Box::new(Value::Closure(closure)))
+        Self(runmat_value::SharedValueGeneration::unbounded(
+            Value::Closure(closure),
+        ))
     }
 
     pub fn as_value(&self) -> &Value {
-        self.0.as_ref()
+        self.0.value()
     }
 
     pub fn as_closure(&self) -> &Closure {
-        match self.0.as_ref() {
+        match self.0.value() {
             Value::Closure(closure) => closure,
             _ => unreachable!("retained closure is constructed only from Closure"),
         }
     }
 
-    pub fn into_closure(self) -> Closure {
-        match *self.0 {
-            Value::Closure(closure) => closure,
-            _ => unreachable!("retained closure is constructed only from Closure"),
+    /// Reuse an already-rooted callable generation without cloning its
+    /// capture payload. The caller retains the supplied read lease until this
+    /// root-free descriptor owner is installed in another rooted boundary.
+    pub(crate) fn from_read_lease(
+        lease: &crate::execution::RetainedValueReadLease,
+    ) -> Result<Self, RuntimeError> {
+        if !matches!(lease.value(), Value::Closure(_)) {
+            return Err(crate::runtime_error::semantic_error(
+                "CallableArguments",
+                "retained callable owner is not a closure",
+            ));
         }
+        Ok(Self(lease.shared_generation()))
+    }
+
+    pub(crate) fn generation(&self) -> runmat_value::SharedValueGeneration {
+        self.0.clone()
+    }
+
+    pub(crate) fn retain_for_call(
+        &self,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> Result<crate::execution::RetainedValueReadLease, RuntimeError> {
+        crate::execution::RetainedValueReadLease::retain_shared_generation(
+            self.generation(),
+            runtime,
+        )
+    }
+}
+
+impl PartialEq for RetainedClosureValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_value() == other.as_value()
     }
 }
 
@@ -131,6 +161,11 @@ pub enum CallableTarget {
     /// queued callback admission; flattened captures alone are insufficient.
     BoundLexical {
         binding: runmat_value::BoundFunctionBinding,
+        closure: RetainedClosureValue,
+    },
+    CapturedResolved {
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
         closure: RetainedClosureValue,
     },
     Resolved {
@@ -147,7 +182,9 @@ impl CallableTarget {
         visitor: &mut dyn FnMut(&Value) -> Option<()>,
     ) -> Option<()> {
         match self {
-            Self::BoundLexical { closure, .. } => visitor(closure.as_value()),
+            Self::BoundLexical { closure, .. } | Self::CapturedResolved { closure, .. } => {
+                visitor(closure.as_value())
+            }
             Self::FevalForward(value) => visitor(value),
             Self::Bound(_) | Self::Resolved { .. } => Some(()),
         }
@@ -226,25 +263,6 @@ impl CallableDescriptor {
         segments.len() > 1 && segments.iter().all(|segment| !segment.is_empty())
     }
 
-    fn function_inner(
-        function: usize,
-        name: Option<String>,
-        fallback_policy: CallableFallbackPolicy,
-        args: Vec<Value>,
-        requested_outputs: usize,
-        metadata: CallableMetadata,
-    ) -> Self {
-        let identity = CallableIdentity::BoundFunction(FunctionId(function));
-        Self::resolved_inner(
-            identity,
-            name,
-            fallback_policy,
-            args,
-            requested_outputs,
-            metadata,
-        )
-    }
-
     fn resolved_inner(
         identity: CallableIdentity,
         display_name: Option<String>,
@@ -266,23 +284,6 @@ impl CallableDescriptor {
             requested_outputs,
             metadata,
         }
-    }
-
-    fn feval_semantic(
-        function: usize,
-        name: String,
-        fallback_policy: CallableFallbackPolicy,
-        args: Vec<Value>,
-        requested_outputs: usize,
-    ) -> Self {
-        Self::function_inner(
-            function,
-            Some(name.clone()),
-            fallback_policy,
-            args,
-            requested_outputs,
-            CallableMetadata::feval(Some(name)),
-        )
     }
 
     fn feval_bound(
@@ -487,39 +488,28 @@ impl CallableDescriptor {
         function_resolver: &impl FunctionNameResolver,
     ) -> Self {
         let name = closure.function_name.clone();
-        let mut call_args = closure.captures.clone();
-        call_args.extend(args);
         if let Some(binding) = closure.binding.clone() {
-            if closure.lexical_environment.is_some() {
-                return Self {
-                    target: CallableTarget::BoundLexical {
-                        binding,
-                        closure: RetainedClosureValue::new(closure),
-                    },
-                    args: call_args,
-                    requested_outputs,
-                    metadata: CallableMetadata::feval(Some(name)),
-                };
-            }
-            return Self::feval_bound(binding, name, call_args, requested_outputs);
-        }
-        if let Some(function) = function_resolver.resolve_function(&name) {
-            return Self::feval_semantic(
-                function.0,
-                name,
-                CallableFallbackPolicy::None,
-                call_args,
+            return Self {
+                target: CallableTarget::BoundLexical {
+                    binding,
+                    closure: RetainedClosureValue::new(closure),
+                },
+                args,
                 requested_outputs,
-            );
+                metadata: CallableMetadata::feval(Some(name)),
+            };
         }
         let (identity, fallback_policy) = Self::resolve_named_target(&name, function_resolver);
-        Self::feval_resolved_name(
-            identity,
-            name,
-            fallback_policy,
-            call_args,
+        Self {
+            target: CallableTarget::CapturedResolved {
+                identity,
+                fallback_policy,
+                closure: RetainedClosureValue::new(closure),
+            },
+            args,
             requested_outputs,
-        )
+            metadata: CallableMetadata::feval(Some(name)),
+        }
     }
 }
 
@@ -653,6 +643,7 @@ async fn forward_named_fallback(
 
 #[path = "descriptor/execution.rs"]
 mod execution;
+pub(crate) use execution::try_execute_retained_bound_closure_in_context;
 
 #[path = "descriptor/resolved_execution.rs"]
 mod resolved_execution;

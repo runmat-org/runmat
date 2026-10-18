@@ -34,7 +34,7 @@ impl Trace for NativeExecution {
     fn trace(&self, tracer: &mut dyn Tracer) {
         self.outputs.trace(tracer);
         if let Some(workspace) = &self.workspace {
-            for value in workspace.values.values() {
+            for (_, value) in workspace.iter() {
                 value.trace(tracer);
             }
         }
@@ -261,12 +261,10 @@ pub(crate) async fn invoke(
     ));
 
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
-    let direct_invoker = user_functions::current_semantic_function_invoker();
     let bound_registry = Rc::clone(&registry);
     let bound_dynamic_admission = dynamic_admission.clone();
     let bound_executor = Rc::clone(&published.executor);
     let bound_unit = unit.clone();
-    let bound_capture_bindings = Arc::new(capture_bindings);
     let bound_native_functions = native_functions.clone();
     let bound_program = unit
         .revision()
@@ -276,12 +274,10 @@ pub(crate) async fn invoke(
     let bound_invoker = user_functions::install_local_bound_function_invoker(Rc::new(
         move |runtime, binding, arguments, requested_outputs, lexical_environment| {
             let previous = previous_bound_invoker.clone();
-            let direct = direct_invoker.clone();
             let registry = Rc::clone(&bound_registry);
             let dynamic_admission = bound_dynamic_admission.clone();
             let executor = Rc::clone(&bound_executor);
             let unit = bound_unit.clone();
-            let capture_bindings = Arc::clone(&bound_capture_bindings);
             let is_native = u32::try_from(binding.function)
                 .map(ProgramFunctionId)
                 .is_ok_and(|function| bound_native_functions.contains(&function));
@@ -377,8 +373,6 @@ pub(crate) async fn invoke(
                             registry: view.map(Rc::new).unwrap_or_else(|| Rc::clone(&registry)),
                             unit,
                             executor,
-                            capture_bindings,
-                            direct: direct.filter(|_| current_definition && native_selected_body),
                             arguments,
                             requested_outputs,
                             lexical_environment,
@@ -397,7 +391,7 @@ pub(crate) async fn invoke(
                 }
                 if current_definition {
                     let runtime = isolated_procedure_runtime(runtime);
-                    if native_selected_body && lexical_environment.is_some() {
+                    if native_selected_body {
                         let function = program_function(function)?;
                         let method_owner = unit
                             .mir()
@@ -414,42 +408,23 @@ pub(crate) async fn invoke(
                         )?;
                         let selected = runtime.clone();
                         return selected
-                            .scope(native_semantic::invoke(
+                            .scope(native_semantic::invoke_rooted(
                                 &unit,
-                                super::deopt::DeoptimizationRequest {
-                                    executor,
+                                executor,
+                                native_semantic::RootedInvocation {
                                     function,
-                                    captures: Vec::new(),
-                                    lexical_environment,
-                                    arguments: arguments.values().to_vec(),
+                                    arguments,
                                     requested_outputs,
                                     runtime,
-                                    dynamic_admission: dynamic_admission.clone(),
-                                    osr: None,
-                                    workspace: None,
+                                    lexical_environment,
+                                    dynamic_admission,
                                 },
-                                capture_bindings
-                                    .get(&function)
-                                    .map(Vec::as_slice)
-                                    .unwrap_or(&[]),
                             ))
                             .await;
                     }
-                    if let Some(direct) =
-                        direct.filter(|_| native_selected_body && lexical_environment.is_none())
-                    {
-                        return runtime
-                            .scope(direct(
-                                Some(runtime.clone()),
-                                binding.function,
-                                arguments.values(),
-                                requested_outputs,
-                            ))
-                            .await;
-                    }
-                    return invoke_vm_with_admission(
+                    return invoke_vm_with_rooted_admission(
                         binding.function,
-                        arguments.values(),
+                        arguments,
                         requested_outputs,
                         &registry,
                         runtime,
@@ -460,9 +435,9 @@ pub(crate) async fn invoke(
                 }
                 if let Some(view) = view {
                     let runtime = isolated_procedure_runtime(runtime);
-                    return invoke_vm_with_admission(
+                    return invoke_vm_with_rooted_admission(
                         binding.function,
-                        arguments.values(),
+                        arguments,
                         requested_outputs,
                         &view,
                         runtime,
@@ -768,6 +743,27 @@ async fn invoke_vm_with_admission(
         )
         .await
     }
+}
+
+async fn invoke_vm_with_rooted_admission(
+    function: usize,
+    arguments: runmat_runtime::call::RootedFunctionArguments,
+    requested_outputs: usize,
+    registry: &runmat_vm::FunctionRegistry,
+    runtime: runmat_runtime::context::RuntimeContext,
+    lexical_environment: Option<runmat_value::LexicalEnvironment>,
+    dynamic_admission: Option<runmat_vm::DynamicEvalAdmissionPort>,
+) -> Result<runmat_runtime::execution::RootedValueSequence, runmat_runtime::RuntimeError> {
+    runmat_vm::invoke_semantic_function_with_rooted_arguments_and_dynamic_admission_in_context(
+        function,
+        arguments,
+        requested_outputs,
+        registry,
+        runtime,
+        lexical_environment,
+        dynamic_admission,
+    )
+    .await
 }
 
 fn program_function(

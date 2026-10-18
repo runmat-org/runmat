@@ -309,6 +309,34 @@ impl ObjectInstance {
         }
     }
 
+    pub(crate) fn trace_native_value_at(&self, index: usize) -> Option<&Value> {
+        match self.native_payload.as_deref() {
+            Some(NativeObjectPayload::ContainersMap(storage)) => storage.trace_value_at(index),
+            Some(NativeObjectPayload::MemmapReceiver(receiver)) => {
+                if index == 0 {
+                    if let MemmapReceiverAuthority::Detached(snapshot) = &receiver.authority {
+                        return Some(snapshot);
+                    }
+                }
+                None
+            }
+            Some(
+                NativeObjectPayload::ForeignHostControl(_)
+                | NativeObjectPayload::DatasetAuthority(_)
+                | NativeObjectPayload::MatFileAuthority(_)
+                | NativeObjectPayload::TcpAuthority(_)
+                | NativeObjectPayload::GraphicsReceiver(_),
+            )
+            | None => None,
+        }
+    }
+
+    pub(crate) fn trace_dynamic_property_values(
+        &self,
+    ) -> Option<std::collections::hash_map::Values<'_, String, DynamicPropertyDef>> {
+        self.dynamic_properties.as_deref().map(HashMap::values)
+    }
+
     pub(crate) fn trace_native_payload(&self, tracer: &mut dyn Tracer) {
         if let Some(payload) = &self.native_payload {
             payload.trace(tracer);

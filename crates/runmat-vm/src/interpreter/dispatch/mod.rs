@@ -12,15 +12,14 @@ mod parallel;
 mod prepared_outputs;
 mod route;
 mod slot_authority;
-pub(crate) use parallel::encode_spmd_output;
+pub(crate) use parallel::encode_spmd_interpreter_output;
 mod stack;
 
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
 use crate::interpreter::persistent::{self, PersistentAlias};
-use crate::runtime::workspace::{
-    refresh_workspace_slot, refresh_workspace_state, workspace_slot_assigned, workspace_slot_name,
-};
+use crate::interpreter::vars::InterpreterVars;
+use crate::runtime::workspace::{workspace_slot_assigned, workspace_slot_name};
 use runmat_runtime::RuntimeError;
 use runmat_value::{ObjectInstance, StructValue, Tensor, Value};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -46,6 +45,7 @@ pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_int,
     load_local, load_string, load_var, store_local, store_var,
 };
+pub(crate) use stack::{publish_var_value, BindingPublicationFrame};
 
 use runmat_runtime::builtin::builtin_constant_value;
 
@@ -68,7 +68,7 @@ pub struct DispatchMeta<'a> {
 
 pub struct DispatchState<'a> {
     pub stack: &'a mut Vec<Value>,
-    pub vars: &'a mut Vec<Value>,
+    pub vars: &'a mut InterpreterVars,
     pub sequence_register: &'a mut SequenceState,
     pub context: &'a mut crate::bytecode::program::ExecutionContext,
     pub try_stack: &'a mut Vec<crate::interpreter::state::ActiveTryHandler>,
@@ -556,12 +556,12 @@ impl SequenceState {
 }
 
 pub struct DispatchHooks<'a> {
-    pub store_var_before_overwrite: &'a mut dyn FnMut(&Value, &Value),
-    pub store_var_after_store: &'a mut dyn FnMut(usize, &Value),
+    pub store_var_before_overwrite: &'a mut dyn FnMut(usize),
+    pub store_var_after_store: &'a mut dyn FnMut(usize),
     pub store_local_before_local_overwrite: &'a mut dyn FnMut(&Value, &Value),
-    pub store_local_before_var_overwrite: &'a mut dyn FnMut(&Value, &Value),
+    pub store_local_before_var_overwrite: &'a mut dyn FnMut(usize),
     pub store_local_after_store: &'a mut dyn FnMut(usize, &Value),
-    pub store_local_after_fallback_store: &'a mut dyn FnMut(&str, usize, &Value),
+    pub store_local_after_fallback_store: &'a mut dyn FnMut(&str, usize),
 }
 
 fn materialize_aggregate_rows(
@@ -634,7 +634,7 @@ fn materialize_aggregate_rows(
 }
 
 pub(super) fn requested_outputs_from_slot(
-    vars: &[Value],
+    vars: &InterpreterVars,
     slot: usize,
 ) -> Result<usize, RuntimeError> {
     let value = vars.get(slot).ok_or_else(|| {
@@ -643,7 +643,7 @@ pub(super) fn requested_outputs_from_slot(
             "requested output slot is out of bounds",
         )
     })?;
-    match value {
+    match &*value {
         Value::Num(n) => {
             if !n.is_finite() || *n < 0.0 || (*n - n.round()).abs() > f64::EPSILON {
                 return Err(crate::interpreter::errors::mex(
@@ -830,10 +830,10 @@ fn dispatch_immediate(
                 crate::runtime::globals::current_bound_value(global_aliases, *index)
             {
                 if *index >= vars.len() {
-                    vars.resize(*index + 1, Value::Num(0.0));
+                    vars.resize_owned(*index + 1, Value::Num(0.0));
                 }
-                vars[*index] = global_value;
-                refresh_workspace_slot(*index, &vars[*index]);
+                let _retired = vars.replace_owned(*index, global_value);
+                crate::runtime::workspace::refresh_workspace_slot_from_vars(*index, vars);
             }
             persistent::refresh(
                 persistent_aliases,
@@ -885,7 +885,10 @@ fn dispatch_immediate(
                     return Err(error);
                 }
             }
-            let value = vars[*index].clone();
+            let value = vars
+                .get(*index)
+                .expect("loaded variable slot lies within frame extent")
+                .clone();
             debug::trace_load_var(*pc, *index, &value);
             load_var(stack, vars, *index);
             Ok(Some(DispatchHandled::Generic(
@@ -935,7 +938,10 @@ fn dispatch_immediate(
                     DispatchDecision::FallThrough,
                 )));
             }
-            let value = vars[*index].clone();
+            let value = vars
+                .get(*index)
+                .expect("assignment base slot lies within frame extent")
+                .clone();
             debug::trace_load_var(*pc, *index, &value);
             load_var(stack, vars, *index);
             Ok(Some(DispatchHandled::Generic(
@@ -951,23 +957,21 @@ fn dispatch_immediate(
                     "stack underflow",
                 ))?;
             debug::trace_store_var(*pc, *index, &preview);
-            store_var(
-                stack,
-                vars,
+            let value = crate::interpreter::stack::pop_value(stack)?;
+            publish_var_value(
+                value,
                 *index,
-                var_names,
+                BindingPublicationFrame {
+                    vars,
+                    context,
+                    var_names,
+                    persistent_aliases,
+                    missing_input_slots,
+                    current_function_name,
+                },
                 store_var_before_overwrite,
                 store_var_after_store,
             )?;
-            missing_input_slots.remove(index);
-            persistent::publish_store(
-                persistent_aliases,
-                vars,
-                &context.runtime.session_variable_authority(),
-                current_function_name,
-                *index,
-            )?;
-            lexical::publish(context, vars, *index)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -980,8 +984,8 @@ fn dispatch_immediate(
                     *offset,
                     var_names,
                     store_local_before_var_overwrite,
-                    |stored_index, stored_value| {
-                        store_local_after_fallback_store("<main>", stored_index, stored_value);
+                    |stored_index| {
+                        store_local_after_fallback_store("<main>", stored_index);
                     },
                 )?;
                 missing_input_slots.remove(offset);
@@ -1069,18 +1073,13 @@ fn dispatch_immediate(
             )))
         }
         Instr::DeclareGlobal(indices) => {
-            crate::runtime::globals::declare_global(indices.clone(), vars, global_aliases);
+            crate::runtime::globals::declare_global(indices, vars, global_aliases)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
         }
         Instr::DeclareGlobalNamed(indices, names) => {
-            crate::runtime::globals::declare_global_named(
-                indices.clone(),
-                names.clone(),
-                vars,
-                global_aliases,
-            )?;
+            crate::runtime::globals::declare_global_named(indices, names, vars, global_aliases)?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))
@@ -1088,6 +1087,14 @@ fn dispatch_immediate(
         Instr::DeclarePersistent(indices) => {
             let authority = context.runtime.session_variable_authority();
             for &slot in indices {
+                let prepared = crate::runtime::workspace::prepare_workspace_persistent_slot(
+                    context.runtime.local_identity(),
+                    slot,
+                    &context.runtime,
+                )?;
+                if let Some(prepared) = &prepared {
+                    prepared.checkpoint_before_publication()?;
+                }
                 persistent::declare(
                     persistent_aliases,
                     vars,
@@ -1096,11 +1103,13 @@ fn dispatch_immediate(
                     slot,
                     PersistentAlias::LegacySlot,
                 )?;
-                crate::runtime::workspace::declare_workspace_persistent_slot(
-                    context.runtime.local_identity(),
-                    slot,
-                    &vars[slot],
-                );
+                if let Some(prepared) = prepared {
+                    let value = vars
+                        .get(slot)
+                        .expect("persistent slot lies within frame extent")
+                        .clone();
+                    prepared.commit_owned_value(value);
+                }
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -1113,6 +1122,14 @@ fn dispatch_immediate(
                     .get(position)
                     .cloned()
                     .unwrap_or_else(|| format!("var_{slot}"));
+                let prepared = crate::runtime::workspace::prepare_workspace_persistent_slot(
+                    context.runtime.local_identity(),
+                    slot,
+                    &context.runtime,
+                )?;
+                if let Some(prepared) = &prepared {
+                    prepared.checkpoint_before_publication()?;
+                }
                 persistent::declare(
                     persistent_aliases,
                     vars,
@@ -1121,11 +1138,13 @@ fn dispatch_immediate(
                     slot,
                     PersistentAlias::Named(name),
                 )?;
-                crate::runtime::workspace::declare_workspace_persistent_slot(
-                    context.runtime.local_identity(),
-                    slot,
-                    &vars[slot],
-                );
+                if let Some(prepared) = prepared {
+                    let value = vars
+                        .get(slot)
+                        .expect("persistent slot lies within frame extent")
+                        .clone();
+                    prepared.commit_owned_value(value);
+                }
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,

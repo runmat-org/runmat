@@ -121,6 +121,7 @@ impl MirLoweringContext {
         &mut self,
         function: &HirFunction,
         incoming_workspace: &HashSet<BindingId>,
+        external_workspace: &HashSet<BindingId>,
     ) -> Vec<MirLocal> {
         let mut locals: Vec<_> = function
             .locals
@@ -135,6 +136,8 @@ impl MirLoweringContext {
                     MirLocalKind::Output
                 } else if incoming_workspace.contains(binding) {
                     MirLocalKind::IncomingWorkspace
+                } else if external_workspace.contains(binding) {
+                    MirLocalKind::ExternalWorkspace
                 } else {
                     MirLocalKind::Binding
                 };

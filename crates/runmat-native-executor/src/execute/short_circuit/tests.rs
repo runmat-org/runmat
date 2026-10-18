@@ -51,7 +51,7 @@ fn false_left_skips_rhs_without_materializing_its_missing_local() {
         assert_eq!(values.len(), 1);
         assert_eq!(state.arena.get(values[0]).unwrap(), &Value::Bool(false));
         assert!(state.pending_call.is_none());
-        state.finish_contextual_site();
+        state.finish_contextual_site().unwrap();
     });
 }
 
@@ -109,6 +109,6 @@ fn rhs_statement_is_not_replayed_when_final_truth_suspends() {
         .expect("resume final truth without replaying assignment");
         assert_eq!(state.locals[0], assigned);
         assert_eq!(state.arena.get(values[0]).unwrap(), &Value::Bool(true));
-        state.finish_contextual_site();
+        state.finish_contextual_site().unwrap();
     });
 }

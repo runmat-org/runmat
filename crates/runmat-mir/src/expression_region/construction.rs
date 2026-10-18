@@ -1,4 +1,4 @@
-use super::{MirExpressionRegion, MirExpressionStep};
+use super::{MirExpressionRegion, MirExpressionStep, MirPreparedExpressionRegion};
 use crate::{MirOperand, MirStmt, MirStmtKind};
 
 impl MirExpressionRegion {
@@ -43,5 +43,17 @@ impl MirExpressionRegion {
             steps.push(step);
         }
         Ok(steps)
+    }
+}
+
+impl MirPreparedExpressionRegion {
+    pub fn from_lowered(
+        statements: Vec<MirStmt>,
+        result: MirOperand,
+    ) -> Result<Self, runmat_hir::HirError> {
+        let steps = MirExpressionRegion::steps_from_lowered(statements)?;
+        let region = Self { steps, result };
+        region.validate().map_err(runmat_hir::HirError::new)?;
+        Ok(region)
     }
 }

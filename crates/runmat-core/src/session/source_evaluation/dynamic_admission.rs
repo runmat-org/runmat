@@ -487,7 +487,7 @@ impl DynamicEvalProductAdmission for CoreDynamicEvalAdmission {
         Ok(AdmittedDynamicEval {
             runtime: selected_runtime,
             execution_bytecode,
-            result_slot: product.result_slot,
+            result: product.result,
             publication: Box::new(DynamicSelectedPublication {
                 _publication: publication,
                 _selected_sources: selected_sources,

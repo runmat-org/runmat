@@ -22,6 +22,11 @@ mod retirement;
 mod record_table;
 #[path = "allocation_state/managed_admission.rs"]
 mod managed_admission;
+#[path = "allocation_state/numeric_download_stage.rs"]
+mod numeric_download_stage;
+pub(super) use numeric_download_stage::{
+    numeric_download_stage_host_bytes, NumericDownloadStageHandle,
+};
 #[path = "allocation_state/owner.rs"]
 mod owner;
 use lifecycle::{AllocationStateError, Disposition, Failure, Phase, Record, Stage};
@@ -30,6 +35,7 @@ use record_table::RecordTable;
 pub(super) struct AllocationState {
     device_id: u32,
     buffers: Mutex<RecordTable>,
+    numeric_download_staging: Mutex<numeric_download_stage::LiveNumericDownloadStaging>,
     next_id: AtomicU64,
     lost: AtomicBool,
     pool: BufferResidency,
@@ -52,6 +58,9 @@ impl AllocationState {
         Self {
             device_id,
             buffers: Mutex::new(RecordTable::default()),
+            numeric_download_staging: Mutex::new(
+                numeric_download_stage::LiveNumericDownloadStaging::default(),
+            ),
             next_id: AtomicU64::new(1),
             lost: AtomicBool::new(false),
             pool: BufferResidency::new(pool_limit),
@@ -179,3 +188,7 @@ mod tests;
 #[cfg(test)]
 #[path = "allocation_state/transition_tests.rs"]
 mod transition_tests;
+
+#[cfg(test)]
+#[path = "allocation_state/reusable_registration_tests.rs"]
+mod reusable_registration_tests;

@@ -1,4 +1,7 @@
-use crate::{MirCallArg, MirExpressionRegion, MirExpressionStep, MirOperand, MirSequenceLocalId};
+use crate::{
+    MirCallArg, MirExpressionRegion, MirExpressionRegionRef, MirExpressionStep, MirOperand,
+    MirSequenceLocalId,
+};
 use runmat_types::Span;
 use serde::{Deserialize, Serialize};
 
@@ -76,17 +79,20 @@ impl MirDottedInvokeArgument {
         }
     }
 
-    pub(super) fn visit_expression_regions(&self, visitor: &mut dyn FnMut(&MirExpressionRegion)) {
+    pub(super) fn visit_expression_regions(
+        &self,
+        visitor: &mut dyn FnMut(MirExpressionRegionRef<'_>),
+    ) {
         match self {
             Self::Colon => {}
-            Self::Contextual(region) => visitor(region),
+            Self::Contextual(region) => visitor(MirExpressionRegionRef::Contextual(region)),
             Self::Call(region) => region.visit_expression_regions(visitor),
         }
     }
 
     pub(super) fn visit_direct_expression_regions_dyn(
         &self,
-        visitor: &mut dyn FnMut(&MirExpressionRegion),
+        visitor: &mut dyn FnMut(MirExpressionRegionRef<'_>),
     ) {
         self.visit_expression_regions(visitor);
     }
@@ -288,7 +294,7 @@ impl MirCallArgumentRegion {
         self.argument.visit_operands_mut(visitor);
     }
 
-    pub fn visit_expression_regions(&self, visitor: &mut dyn FnMut(&MirExpressionRegion)) {
+    pub fn visit_expression_regions(&self, visitor: &mut dyn FnMut(MirExpressionRegionRef<'_>)) {
         for step in &self.steps {
             match step {
                 MirExpressionStep::Let { value, .. } => value.visit_expression_regions_dyn(visitor),

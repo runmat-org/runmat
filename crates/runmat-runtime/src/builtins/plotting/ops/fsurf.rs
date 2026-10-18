@@ -976,9 +976,6 @@ fn render_fsurf(surface: SurfacePlot, parsed: &ParsedFsurf) -> BuiltinResult<f64
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Function Surface",
-            x_label: "X",
-            y_label: "Y",
             axis_equal: false,
             ..Default::default()
         },

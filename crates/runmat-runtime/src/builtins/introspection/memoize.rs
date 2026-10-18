@@ -1401,9 +1401,15 @@ mod tests {
         let guard = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
             move |runtime, actual, arguments, outputs, _lexical_environment| {
                 assert_eq!(actual, expected, "wrong memoized callback binding");
+                assert_eq!(arguments.capture_count(), 0);
                 let invoker = crate::user_functions::current_semantic_function_invoker()
                     .expect("numeric unit callback fixture");
-                let future = invoker(Some(runtime), actual.function, arguments.values(), outputs);
+                let future = invoker(
+                    Some(runtime),
+                    actual.function,
+                    arguments.supplied(),
+                    outputs,
+                );
                 Box::pin(async move {
                     let _arguments = arguments;
                     future.await

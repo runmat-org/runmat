@@ -121,7 +121,7 @@ impl StdPrimitivePipelineKind {
             ),
             Self::Fill => (
                 provider.pipelines.fill.frozen_shader_source(),
-                crate::backend::wgpu::config::WORKGROUP_SIZE,
+                provider.linear_launch.workgroup(),
             ),
         };
         super::pipeline_recipe::PipelineRecipe {

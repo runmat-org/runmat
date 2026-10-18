@@ -40,7 +40,7 @@ pub(super) fn value(value: Value) -> BuiltinResult<CellEntry> {
         },
         Value::ComplexTensor(tensor) => {
             let (storage, shape) = tensor.into_complex_storage_and_shape();
-            let shape = normalized_shape(shape);
+            let shape = normalized_shape(shape.to_vec());
             match storage {
                 ComplexStorage::Integer(storage) => CellEntry {
                     kind: ElementKind::TypedComplexInteger,
@@ -82,7 +82,7 @@ fn numeric_scalar(storage: NumericStorage) -> CellEntry {
 fn logical(array: LogicalArray) -> CellEntry {
     CellEntry {
         kind: ElementKind::Logical,
-        shape: normalized_shape(array.shape),
+        shape: normalized_shape(array.shape.to_vec()),
         data: EntryData::Logical(array.data.to_vec()),
     }
 }

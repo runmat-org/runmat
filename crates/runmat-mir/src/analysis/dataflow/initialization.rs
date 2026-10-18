@@ -6,6 +6,9 @@ use crate::{
 use runmat_types::ShapeFact;
 
 use super::{mark_declared_storage, mark_place_assigned, simple_rvalue_fact, InitFact};
+use crate::analysis::workspace_effect::{
+    current_scope_bindings, statement_exposes_current_workspace,
+};
 
 pub(super) struct InitDataflowResult {
     pub(super) in_states: Vec<Option<Vec<InitFact>>>,
@@ -16,6 +19,7 @@ pub(super) fn compute_init_dataflow(
     constructor_instance: Option<MirLocalId>,
 ) -> InitDataflowResult {
     let local_count = body.locals.len();
+    let current_bindings = current_scope_bindings(body);
     if body.blocks.is_empty() {
         return InitDataflowResult {
             in_states: Vec::new(),
@@ -70,6 +74,8 @@ pub(super) fn compute_init_dataflow(
         ) || implicit_input
         {
             initial[local.id.0] = InitFact::DefinitelyAssigned;
+        } else if matches!(local.kind, MirLocalKind::ExternalWorkspace) {
+            initial[local.id.0] = InitFact::RuntimeWorkspaceLookup;
         }
     }
     if let Some(local) = constructor_instance {
@@ -85,13 +91,13 @@ pub(super) fn compute_init_dataflow(
             continue;
         };
         let block = &body.blocks[block_idx];
-        let output = transfer_block(block, input);
+        let output = transfer_block(block, input, &current_bindings);
 
         for successor in successors(&block.terminator.kind) {
             let Some(&successor_idx) = block_index.get(&successor) else {
                 continue;
             };
-            let edge_output =
+            let mut edge_output =
                 if let MirTerminatorKind::For { exit_block, .. } = &block.terminator.kind {
                     if reentry_sources[block_idx].is_some() && successor == *exit_block {
                         // No zero-iteration exit. A break inside the body still
@@ -99,13 +105,23 @@ pub(super) fn compute_init_dataflow(
                         let Some(reentry) = &reentry_states[block_idx] else {
                             continue;
                         };
-                        transfer_block(block, reentry.clone())
+                        transfer_block(block, reentry.clone(), &current_bindings)
                     } else {
                         output.clone()
                     }
                 } else {
                     output.clone()
                 };
+            if let MirTerminatorKind::TryCatch {
+                catch_block,
+                catch_binding: Some(binding),
+                ..
+            } = &block.terminator.kind
+            {
+                if successor == *catch_block {
+                    edge_output[binding.0] = InitFact::DefinitelyAssigned;
+                }
+            }
             let reentry_changed = if reentry_sources[successor_idx]
                 .as_ref()
                 .is_some_and(|sources| sources.contains(&block_idx))
@@ -196,10 +212,21 @@ fn loop_reentry_sources(
     sources
 }
 
-fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<InitFact> {
+fn transfer_block(
+    block: &crate::BasicBlock,
+    mut state: Vec<InitFact>,
+    current_bindings: &[MirLocalId],
+) -> Vec<InitFact> {
     for stmt in &block.statements {
+        if statement_exposes_current_workspace(&stmt.kind) {
+            for binding in current_bindings {
+                state[binding.0] = InitFact::RuntimeWorkspaceLookup;
+            }
+        }
         match &stmt.kind {
-            MirStmtKind::Assign { place, .. } => mark_place_assigned(place, &mut state),
+            MirStmtKind::Assign { place, .. } => {
+                mark_place_assigned(place, &mut state);
+            }
             MirStmtKind::MultiAssign { targets, .. } => {
                 for target in &targets.targets {
                     match target {
@@ -225,8 +252,8 @@ fn transfer_block(block: &crate::BasicBlock, mut state: Vec<InitFact>) -> Vec<In
                 mark_declared_storage(effect, bindings, &mut state);
             }
             MirStmtKind::CaptureSequence { .. } => {}
-            MirStmtKind::Expr(_)
-            | MirStmtKind::StatementOutput(_)
+            MirStmtKind::Expr(_) => {}
+            MirStmtKind::StatementOutput(_)
             | MirStmtKind::PlaceMutation(_)
             | MirStmtKind::EnvironmentEffect(_) => {}
         }
@@ -305,6 +332,9 @@ fn join_init(left: InitFact, right: InitFact) -> InitFact {
         (InitFact::Unassigned, InitFact::Unassigned) => InitFact::Unassigned,
         (InitFact::DefinitelyAssigned, InitFact::DefinitelyAssigned) => {
             InitFact::DefinitelyAssigned
+        }
+        (InitFact::RuntimeWorkspaceLookup, _) | (_, InitFact::RuntimeWorkspaceLookup) => {
+            InitFact::RuntimeWorkspaceLookup
         }
         _ => InitFact::MaybeAssigned,
     }

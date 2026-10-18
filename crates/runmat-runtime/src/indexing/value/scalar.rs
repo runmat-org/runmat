@@ -67,7 +67,7 @@ pub(super) fn assign_logical(
     let target_len = checked_shape_len(&plan.base_shape)?;
     if value.data.len() < target_len {
         value.data.resize(target_len, 0);
-        value.shape = plan.base_shape.clone();
+        value.shape = runmat_value::SharedShape::new_unmanaged(plan.base_shape.clone());
     }
     let replacements = match rhs {
         Value::Bool(value) => vec![u8::from(*value); plan.indices.len()],

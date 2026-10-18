@@ -5,6 +5,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::{Tensor, Value};
 
 mod gpu_child;
+mod host_output;
 
 #[cfg(test)]
 #[path = "randperm/owning_tests.rs"]
@@ -79,7 +80,69 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 async fn randperm_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let parsed = ParsedRandPerm::parse(args).await?;
     if let OutputTemplate::Like(Value::GpuTensor(handle)) = &parsed.template {
-        return gpu_child::like(handle, parsed.n, parsed.k).await;
+        return match random::gpu_like::intent("randperm", handle)? {
+            random::gpu_like::GpuLikeIntent::ExplicitGpuStream => {
+                gpu_child::like(handle, parsed.n, parsed.k).await
+            }
+            random::gpu_like::GpuLikeIntent::AutomaticHostStream => {
+                match random::gpu_like::class(handle) {
+                    Some(random::gpu_like::GpuLikeClass::Floating { complex: false, .. })
+                    | Some(random::gpu_like::GpuLikeClass::Integer { complex: false, .. }) => {
+                        let shape = [1, parsed.k];
+                        let output_class = random::gpu_like::GpuLikeClass::Floating {
+                            precision: runmat_accelerate_api::ProviderPrecision::F64,
+                            complex: false,
+                        };
+                        let host_mode = random::gpu_like::host_random_mode(
+                            crate::context::legacy::active().as_ref(),
+                        );
+                        let result_bytes = random::gpu_like::host_result_bytes(
+                            "randperm", &shape, output_class, host_mode,
+                        )?;
+                        let scratch = random::gpu_like::exact_host_workspace(
+                            "randperm",
+                            random::gpu_like::ExactHostRandomWorkspace::Permutation {
+                                population: parsed.n,
+                                count: parsed.k,
+                            },
+                            host_mode,
+                        )?;
+                        let presentation = random::gpu_like::select_presentation(
+                            "randperm",
+                            handle,
+                            &shape,
+                            output_class,
+                            result_bytes,
+                            scratch,
+                            scratch,
+                            0,
+                            host_mode,
+                        )?;
+                        let mut turn = random::acquire_turn(presentation.runtime(), "randperm").await?;
+                        presentation.checkpoint_for_turn(&turn)?;
+                        let result = host_output::double(
+                            &mut turn,
+                            parsed.n,
+                            parsed.k,
+                            presentation.mode(),
+                        );
+                        presentation.finish_result(
+                            "randperm",
+                            result,
+                            &shape,
+                        )
+                    }
+                    Some(random::gpu_like::GpuLikeClass::Floating { complex: true, .. })
+                    | Some(random::gpu_like::GpuLikeClass::Integer { complex: true, .. }) => {
+                        Err(builtin_error("randperm: complex prototypes are not supported"))
+                    }
+                    Some(random::gpu_like::GpuLikeClass::Logical) => Err(builtin_error(
+                        "randperm: logical prototypes cannot represent permutation values (requires numeric output)",
+                    )),
+                    None => Err(builtin_error("randperm: unsupported gpuArray prototype class")),
+                }
+            }
+        };
     }
     let mut turn = random::acquire_turn(None, "randperm").await?;
     build_output(&mut turn, parsed)
@@ -567,7 +630,11 @@ pub(crate) mod tests {
                 data: &proto_tensor.materialize_f64(),
                 shape: proto_tensor.shape(),
             };
-            let proto_handle = provider.upload(&view).expect("upload prototype");
+            let proto_handle = provider
+                .upload(&view)
+                .expect("upload prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+                .expect("explicit gpuArray prototype");
             let args = vec![
                 Value::from(6),
                 Value::from(3),
@@ -597,6 +664,37 @@ pub(crate) mod tests {
                     .position,
                 6
             );
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn automatic_like_permutation_uses_ordered_cpu_stream() {
+        let _guard = random::test_guard();
+        random::reset_rng();
+        test_support::with_test_provider(|provider| {
+            let values = [0.0_f64; 2];
+            let source = provider
+                .upload(&HostTensorView {
+                    data: &values,
+                    shape: &[1, 2],
+                })
+                .expect("upload prototype")
+                .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+                .expect("automatic prototype");
+            let child_before = random::gpu::snapshot().expect("child before");
+            let expected =
+                randperm_builtin(vec![Value::from(6), Value::from(3)]).expect("host permutation");
+            random::reset_rng();
+            let actual = randperm_builtin(vec![
+                Value::from(6),
+                Value::from(3),
+                Value::from("like"),
+                Value::GpuTensor(source),
+            ])
+            .expect("automatic permutation");
+            assert_eq!(actual, expected);
+            assert_eq!(random::gpu::snapshot().expect("child after"), child_before);
         });
     }
 
@@ -641,7 +739,11 @@ pub(crate) mod tests {
             data: &proto_data,
             shape: &proto_shape,
         };
-        let proto_handle = provider.upload(&proto_view).expect("upload prototype");
+        let proto_handle = provider
+            .upload(&proto_view)
+            .expect("upload prototype")
+            .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
+            .expect("explicit gpuArray prototype");
 
         let args = vec![
             Value::from(12),

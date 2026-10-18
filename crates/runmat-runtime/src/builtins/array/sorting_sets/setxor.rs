@@ -1036,9 +1036,9 @@ fn setxor_complex(
 
 fn setxor_promoted_complex_f64(
     a: ComplexStorage,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: ComplexStorage,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     setxor_floating_complex(
@@ -1052,9 +1052,9 @@ fn setxor_promoted_complex_f64(
 
 fn setxor_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
     a: A,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: B,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     if opts.rows {
@@ -1094,9 +1094,9 @@ fn setxor_floating_complex<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequenc
 
 fn setxor_complex_rows<T: SetFloat, A: ComplexSequence<T>, B: ComplexSequence<T>>(
     a: A,
-    a_shape: Vec<usize>,
+    a_shape: runmat_value::SharedShape,
     b: B,
-    b_shape: Vec<usize>,
+    b_shape: runmat_value::SharedShape,
     opts: &SetxorOptions,
 ) -> crate::BuiltinResult<SetxorEvaluation> {
     if a_shape.len() != 2 || b_shape.len() != 2 {

@@ -379,9 +379,6 @@ fn render_sphere_plot(x: Tensor, y: Tensor, z: Tensor) -> BuiltinResult<()> {
             .map_err(|err| sphere_error(&SPHERE_ERROR_INTERNAL, err))?,
     );
     let opts = PlotRenderOptions {
-        title: "Sphere",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };

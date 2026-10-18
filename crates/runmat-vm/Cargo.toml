@@ -32,6 +32,8 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 futures = "0.3"
 pin-project-lite = "0.2.17"
+allocator-api2 = "=0.2.21"
+hashbrown = "=0.16.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 stacker = "0.1"

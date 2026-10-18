@@ -199,7 +199,7 @@ impl SignalInput {
                 })
             }
             Value::LogicalArray(logical) => {
-                let shape = logical.shape.clone();
+                let shape = logical.shape.to_vec();
                 let data = preparation::logical_array(&logical, cooperation).await?;
                 Ok(Self {
                     payload: SignalPayload::Host(data),

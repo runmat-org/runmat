@@ -1,6 +1,7 @@
 //! One exact compound authority per receipt; variants cannot borrow or replace
 //! one another's consumed-recipe proof. No source leases/runtime live here.
 use super::real_unary::RealUnaryObservation;
+use super::stochastic_transfer::StochasticEvolutionTransferObservation;
 use super::*;
 use crate::power_service::{
     PowerPairCompound, PowerPairExecutionEvidence, PowerScalarExecutionEvidence,
@@ -11,19 +12,38 @@ pub(super) enum CompoundObservation {
     RealUnary(RealUnaryObservation),
     PowerPair(PowerPairObservation),
     PowerScalar(PowerScalarObservation),
+    StochasticEvolutionTransfer(StochasticEvolutionTransferObservation),
 }
 
 impl CompoundObservation {
     pub(super) fn unary(&self) -> Option<&RealUnaryObservation> {
         match self {
             Self::RealUnary(value) => Some(value),
-            Self::PowerPair(_) | Self::PowerScalar(_) => None,
+            Self::PowerPair(_) | Self::PowerScalar(_) | Self::StochasticEvolutionTransfer(_) => {
+                None
+            }
         }
     }
     pub(super) fn unary_mut(&mut self) -> Option<&mut RealUnaryObservation> {
         match self {
             Self::RealUnary(value) => Some(value),
-            Self::PowerPair(_) | Self::PowerScalar(_) => None,
+            Self::PowerPair(_) | Self::PowerScalar(_) | Self::StochasticEvolutionTransfer(_) => {
+                None
+            }
+        }
+    }
+
+    /// Most compound recipes own their own typed completion protocol and must
+    /// reject the generic provider confirmer. A selected stochastic source is
+    /// the narrow exception: its compound authority governs preparation
+    /// transfers while its arithmetic tiles retain the canonical provider
+    /// execution witness.
+    pub(super) fn allows_provider_execution_confirmation(&self, device_id: u32) -> bool {
+        match self {
+            Self::StochasticEvolutionTransfer(value) => {
+                value.allows_provider_execution_confirmation(device_id)
+            }
+            Self::RealUnary(_) | Self::PowerPair(_) | Self::PowerScalar(_) => false,
         }
     }
 }

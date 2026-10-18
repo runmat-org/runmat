@@ -1,8 +1,7 @@
 //! Exact physical-submission completion owners for native and browser WGPU.
-use futures::channel::oneshot;
 use runmat_accelerate_api::observation::{
     ProviderCompletedSubmission, ProviderObservationFailure, ProviderOperationRecorder,
-    WgpuSubmissionMeasurement,
+    StochasticEvolutionSourceTransferRetirementNotifier, WgpuSubmissionMeasurement,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_accelerate_api::observation::{
@@ -11,33 +10,57 @@ use runmat_accelerate_api::observation::{
 use runmat_accelerate_api::WgpuDeviceAccess;
 use runmat_execution::profiling::{CommandPhysicalSubmission, PhysicalSubmissionTerminal};
 
+use super::completion_signal::{self, Receiver};
 use super::compute_pass::{DecodedTimestamps, TimestampReadback};
 use super::probe_ticket::ProbeFenceTicket;
+use super::submitted_retention::SubmittedAllocationRetention;
+use super::InlineSlots;
 
-#[cfg(not(target_arch = "wasm32"))]
-mod native_map;
+pub(super) struct SourceTransferRetirement {
+    notifier: Option<StochasticEvolutionSourceTransferRetirementNotifier>,
+    succeeded: bool,
+}
 
-pub(super) fn map_timing(readback: &TimestampReadback) -> oneshot::Receiver<bool> {
-    let (send, result) = oneshot::channel();
+impl SourceTransferRetirement {
+    pub(super) fn new(notifier: StochasticEvolutionSourceTransferRetirementNotifier) -> Self {
+        Self {
+            notifier: Some(notifier),
+            succeeded: false,
+        }
+    }
+
+    fn complete(&mut self, succeeded: bool) {
+        self.succeeded = succeeded;
+    }
+}
+
+impl Drop for SourceTransferRetirement {
+    fn drop(&mut self) {
+        if let Some(notifier) = self.notifier.take() {
+            notifier.finish(self.succeeded);
+        }
+    }
+}
+
+pub(super) fn map_timing(readback: &TimestampReadback) -> Receiver<bool> {
+    let (send, result) = completion_signal::channel();
     readback
         .staging
         .slice(..)
         .map_async(wgpu::MapMode::Read, move |status| {
             // The callback never enters runtime or WGPU cleanup authority.
-            let _ = send.send(status.is_ok());
+            send.send(status.is_ok());
         });
     result
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn map_direct_fence(
-    fence: &runmat_accelerate_api::WgpuBufferOwner,
-) -> oneshot::Receiver<bool> {
-    let (send, result) = oneshot::channel();
+pub(super) fn map_direct_fence(fence: &runmat_accelerate_api::WgpuBufferOwner) -> Receiver<bool> {
+    let (send, result) = completion_signal::channel();
     fence
         .slice(..)
         .map_async(wgpu::MapMode::Read, move |status| {
-            let _ = send.send(status.is_ok());
+            send.send(status.is_ok());
         });
     result
 }
@@ -50,9 +73,13 @@ pub(super) struct DirectCompletion {
     pub(super) fence: Option<runmat_accelerate_api::WgpuBufferOwner>,
     #[cfg(target_arch = "wasm32")]
     pub(super) _fence_permit: Option<runmat_accelerate_api::observation::WgpuQueryPermit>,
-    pub(super) result: Option<oneshot::Receiver<bool>>,
+    pub(super) result: Option<Receiver<bool>>,
     pub(super) physical: Option<CommandPhysicalSubmission>,
     pub(super) measurement: WgpuSubmissionMeasurement,
+    pub(super) submitted_allocation_retention: Option<SubmittedAllocationRetention>,
+    // Last field: the waiter is released only after preceding completion
+    // resources and retained owners have been dropped.
+    pub(super) source_transfer_retirement: Option<SourceTransferRetirement>,
 }
 
 impl DirectCompletion {
@@ -73,6 +100,7 @@ impl DirectCompletion {
                 elapsed.unwrap_or_default()
             })
         }));
+        let cleaned = matches!(&elapsed, Ok(Ok(_)));
         if let Some(physical) = self.physical.take() {
             match elapsed {
                 Ok(Ok(elapsed)) if progressed => {
@@ -84,6 +112,12 @@ impl DirectCompletion {
                 _ => physical.complete(PhysicalSubmissionTerminal::Failed),
             }
         }
+        if let Some(retention) = self.submitted_allocation_retention.take() {
+            retention.retire(progressed && cleaned);
+        }
+        if let Some(retirement) = self.source_transfer_retirement.as_mut() {
+            retirement.complete(progressed && cleaned);
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -93,7 +127,10 @@ impl DirectCompletion {
                 settle_failed_progress(&self.access, submission, self.readback.as_ref());
             }
         }
-        let mapped = native_map::settle_after_progress(status.is_ok(), self.result.as_mut())
+        let mapped = self
+            .result
+            .as_mut()
+            .and_then(|result| result.take_after_progress(status.is_ok()))
             .unwrap_or(false);
         // Keep the exact submission in this owner through a successful map
         // wait, so unwind still takes the Drop retirement path before unmap.
@@ -104,7 +141,7 @@ impl DirectCompletion {
     #[cfg(target_arch = "wasm32")]
     pub(super) async fn after_callback(mut self) {
         let mapped = match self.result.take() {
-            Some(result) => result.await.unwrap_or(false),
+            Some(mut result) => result.receive().await.unwrap_or(false),
             None => false,
         };
         self.retire(mapped, mapped);
@@ -138,6 +175,10 @@ impl Drop for DirectCompletion {
                 log::error!("WGPU direct completion fence teardown failed");
             }
         }
+        drop(self.physical.take());
+        if let Some(retention) = self.submitted_allocation_retention.take() {
+            retention.retire(false);
+        }
         // A remaining physical submission records Missing on drop.
     }
 }
@@ -148,14 +189,18 @@ pub(super) struct FenceCompletion {
     pub(super) unretired_submission: Option<wgpu::SubmissionIndex>,
     pub(super) fence: Option<runmat_accelerate_api::WgpuBufferOwner>,
     pub(super) recorder: ProviderOperationRecorder,
-    pub(super) result: oneshot::Receiver<Option<ProviderCompletedSubmission>>,
+    pub(super) result: Receiver<Option<ProviderCompletedSubmission>>,
     pub(super) measurement: WgpuSubmissionMeasurement,
     pub(super) readback: Option<TimestampReadback>,
-    pub(super) readback_result: Option<oneshot::Receiver<bool>>,
+    pub(super) readback_result: Option<Receiver<bool>>,
     pub(super) probe: Option<ProbeFenceTicket>,
     pub(super) resource_ticket: Option<runmat_accelerate_api::observation::ProviderResourceTicket>,
-    pub(super) submitted_resources: Vec<runmat_accelerate_api::observation::ProviderResourceTicket>,
+    pub(super) submitted_resources:
+        InlineSlots<runmat_accelerate_api::observation::ProviderResourceTicket, 3>,
+    pub(super) submitted_allocation_retention: Option<SubmittedAllocationRetention>,
     pub(super) physical: Option<CommandPhysicalSubmission>,
+    // Last field for exact host-control/resource retirement ordering.
+    pub(super) source_transfer_retirement: Option<SourceTransferRetirement>,
 }
 
 impl FenceCompletion {
@@ -185,7 +230,7 @@ impl FenceCompletion {
             if let Some(ticket) = &self.resource_ticket {
                 ticket.fail_owner();
             }
-            for ticket in &self.submitted_resources {
+            for ticket in self.submitted_resources.iter() {
                 ticket.fail_owner();
             }
         }
@@ -202,7 +247,8 @@ impl FenceCompletion {
             "WGPU provider observation cleanup: progress_ok={progress_ok}, fence_delivered={}, timing_mapped={timing_mapped}",
             completed.is_some()
         );
-        if !progress_ok || completed.is_none() {
+        let completion_delivered = completed.is_some();
+        if !progress_ok || !completion_delivered {
             self.recorder
                 .fail(ProviderObservationFailure::ProviderFailed);
         }
@@ -247,6 +293,14 @@ impl FenceCompletion {
                 probe.fail();
             }
         }
+        drop(self.resource_ticket.take());
+        self.submitted_resources.clear();
+        if let Some(retention) = self.submitted_allocation_retention.take() {
+            retention.retire(progress_ok && cleaned && completion_delivered);
+        }
+        if let Some(retirement) = self.source_transfer_retirement.as_mut() {
+            retirement.complete(progress_ok && cleaned && completion_delivered);
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -257,20 +311,21 @@ impl FenceCompletion {
                 settle_failed_progress(&self.access, submission, self.readback.as_ref());
             }
         }
-        let completed =
-            native_map::settle_after_progress(status.is_ok(), Some(&mut self.result)).flatten();
-        let timing_mapped =
-            native_map::settle_after_progress(status.is_ok(), self.readback_result.as_mut())
-                .unwrap_or(false);
+        let completed = self.result.take_after_progress(status.is_ok()).flatten();
+        let timing_mapped = self
+            .readback_result
+            .as_mut()
+            .and_then(|result| result.take_after_progress(status.is_ok()))
+            .unwrap_or(false);
         self.unretired_submission = None;
         self.cleanup(completed, status.is_ok(), timing_mapped);
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(super) async fn after_callback(mut self) {
-        let completed = (&mut self.result).await.ok().flatten();
+        let completed = self.result.receive().await.flatten();
         let timing_mapped = match self.readback_result.take() {
-            Some(result) => result.await.unwrap_or(false),
+            Some(mut result) => result.receive().await.unwrap_or(false),
             None => false,
         };
         self.cleanup(completed, true, timing_mapped);
@@ -323,6 +378,12 @@ impl Drop for FenceCompletion {
             if !self.release_fence(false).0 {
                 log::error!("WGPU observation fence teardown failed; no retry attempted");
             }
+        }
+        drop(self.physical.take());
+        drop(self.resource_ticket.take());
+        self.submitted_resources.clear();
+        if let Some(retention) = self.submitted_allocation_retention.take() {
+            retention.retire(false);
         }
     }
 }

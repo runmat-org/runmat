@@ -3,11 +3,12 @@ use super::{
     pop_index_values, BraceIndexOperation, BraceIndexOutcome, BraceOutcomeExpectation,
     BraceStackRequest, RuntimeError, Value,
 };
+use crate::interpreter::vars::InterpreterVars;
 
 pub(super) async fn dispatch(
     instr: &crate::bytecode::Instr,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut InterpreterVars,
     function_registry: &crate::bytecode::FunctionRegistry,
     _pc: usize,
     runtime: &runmat_runtime::context::RuntimeContext,

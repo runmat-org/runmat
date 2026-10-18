@@ -13,6 +13,10 @@ use std::collections::HashMap;
 
 use super::MirLoweringContext;
 
+#[path = "expr/ordering.rs"]
+mod ordering;
+use ordering::{append_after_prior, capture_binding_before_later_preparation, is_bound_operand};
+
 pub(crate) fn lower_expr_with_replacements(
     ctx: &MirLoweringContext,
     expr: &HirExpr,
@@ -67,20 +71,51 @@ pub(crate) fn lower_expr_with_replacements(
                     right,
                 }
             }
-            _ => MirRvalue::Binary(
-                lower_operand_with_replacements(ctx, left, temps, await_replacements)?,
-                *op,
-                lower_operand_with_replacements(ctx, right, temps, await_replacements)?,
-            ),
+            _ => {
+                let mut left_operand =
+                    lower_operand_with_replacements(ctx, left, temps, await_replacements)?;
+                let mut preparation = Vec::new();
+                let right = lower_operand_with_replacements(
+                    ctx,
+                    right,
+                    &mut preparation,
+                    await_replacements,
+                )?;
+                append_after_prior(ctx, [(&mut left_operand, left.span)], preparation, temps);
+                MirRvalue::Binary(left_operand, *op, right)
+            }
         },
-        HirExprKind::Range(start, step, end) => MirRvalue::Range {
-            start: lower_operand_with_replacements(ctx, start, temps, await_replacements)?,
-            step: step
-                .as_ref()
-                .map(|step| lower_operand_with_replacements(ctx, step, temps, await_replacements))
-                .transpose()?,
-            end: lower_operand_with_replacements(ctx, end, temps, await_replacements)?,
-        },
+        HirExprKind::Range(start, step, end) => {
+            let mut start_operand =
+                lower_operand_with_replacements(ctx, start, temps, await_replacements)?;
+            let mut step_operand = None;
+            if let Some(step) = step {
+                let mut preparation = Vec::new();
+                let value = lower_operand_with_replacements(
+                    ctx,
+                    step,
+                    &mut preparation,
+                    await_replacements,
+                )?;
+                append_after_prior(ctx, [(&mut start_operand, start.span)], preparation, temps);
+                step_operand = Some(value);
+            }
+            let mut preparation = Vec::new();
+            let end_operand =
+                lower_operand_with_replacements(ctx, end, &mut preparation, await_replacements)?;
+            let preceding = std::iter::once((&mut start_operand, start.span)).chain(
+                step_operand
+                    .iter_mut()
+                    .zip(step.iter())
+                    .map(|(operand, source)| (operand, source.span)),
+            );
+            append_after_prior(ctx, preceding, preparation, temps);
+            MirRvalue::Range {
+                start: start_operand,
+                step: step_operand,
+                end: end_operand,
+            }
+        }
         HirExprKind::Tensor(rows) => MirRvalue::Aggregate {
             kind: MirAggregateKind::Tensor,
             row_lengths: rows.iter().map(Vec::len).collect(),
@@ -92,45 +127,63 @@ pub(crate) fn lower_expr_with_replacements(
             elements: lower_aggregate_elements(ctx, rows, temps, await_replacements)?,
         },
         HirExprKind::StructLiteral(fields) => MirRvalue::StructLiteral {
-            fields: fields
-                .iter()
-                .map(|(name, expr)| {
-                    Ok((
-                        name.clone(),
-                        lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
-                    ))
-                })
-                .collect::<Result<_, HirError>>()?,
+            fields: lower_ordered_fields(ctx, fields, temps, await_replacements)?,
         },
         HirExprKind::ObjectLiteral { class_name, fields } => MirRvalue::ObjectLiteral {
             class_name: class_name.clone(),
-            fields: fields
-                .iter()
-                .map(|(name, expr)| {
-                    Ok((
-                        name.clone(),
-                        lower_operand_with_replacements(ctx, expr, temps, await_replacements)?,
-                    ))
-                })
-                .collect::<Result<_, HirError>>()?,
+            fields: lower_ordered_fields(ctx, fields, temps, await_replacements)?,
         },
         HirExprKind::Call(call) => {
             let mut arg_spans: Vec<runmat_hir::Span> =
                 call.args.iter().map(|arg| arg.span).collect();
-            let mut args: Vec<MirCallArg> = call
-                .args
-                .iter()
-                .map(|arg| lower_call_arg(ctx, arg, temps, await_replacements))
-                .collect::<Result<_, _>>()?;
+            // A dynamic callee is evaluated before its arguments. In particular,
+            // argument preparation may mutate the binding holding that callee.
+            let mut dynamic_callee = match &call.callee {
+                HirCallableRef::DynamicExpr(callee) => Some(lower_operand_with_replacements(
+                    ctx,
+                    callee,
+                    temps,
+                    await_replacements,
+                )?),
+                _ => None,
+            };
+            let mut args: Vec<MirCallArg> = Vec::with_capacity(call.args.len());
+            let mut pending_bindings = Vec::new();
+            let mut pending_callee = dynamic_callee
+                .as_ref()
+                .is_some_and(|callee| is_bound_operand(ctx, callee));
+            for arg in &call.args {
+                let mut preparation = Vec::new();
+                let lowered = lower_call_arg(ctx, arg, &mut preparation, await_replacements)?;
+                if !preparation.is_empty() {
+                    if pending_callee {
+                        let (Some(callee), HirCallableRef::DynamicExpr(source)) =
+                            (dynamic_callee.as_mut(), &call.callee)
+                        else {
+                            unreachable!("pending callee is a dynamic binding");
+                        };
+                        capture_binding_before_later_preparation(ctx, callee, source.span, temps);
+                        pending_callee = false;
+                    }
+                    for (index, span) in pending_bindings.drain(..) {
+                        let MirCallArg::Single(operand) = &mut args[index] else {
+                            unreachable!("only single arguments hold pending bindings");
+                        };
+                        capture_binding_before_later_preparation(ctx, operand, span, temps);
+                    }
+                    temps.extend(preparation);
+                }
+                if let MirCallArg::Single(operand) = &lowered {
+                    if is_bound_operand(ctx, operand) {
+                        pending_bindings.push((args.len(), arg.span));
+                    }
+                }
+                args.push(lowered);
+            }
             if let Some(value) = lower_parallel_intrinsic(ctx, call, &args)? {
                 value
-            } else if let HirCallableRef::DynamicExpr(callee) = &call.callee {
-                dynamic_call_rvalue(
-                    call,
-                    lower_operand_with_replacements(ctx, callee, temps, await_replacements)?,
-                    args,
-                    arg_spans,
-                )?
+            } else if let Some(callee) = dynamic_callee {
+                dynamic_call_rvalue(call, callee, args, arg_spans)?
             } else if call.callee.is_feval_builtin_like() && call.workspace_first_name.is_none() {
                 if args.is_empty() {
                     return Err(HirError::new("feval: missing function argument"));
@@ -164,10 +217,22 @@ pub(crate) fn lower_expr_with_replacements(
             }
         }
         HirExprKind::CommandCall(call) => lower_command_call(call)?,
-        HirExprKind::Index(base, indexing) => MirRvalue::Index {
-            base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
-            indexing: lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?,
-        },
+        HirExprKind::Index(base, indexing) => {
+            let mut base_operand =
+                lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
+            let mut preparation = Vec::new();
+            let indexing = lower_indexing_with_replacements(
+                ctx,
+                indexing,
+                &mut preparation,
+                await_replacements,
+            )?;
+            append_after_prior(ctx, [(&mut base_operand, base.span)], preparation, temps);
+            MirRvalue::Index {
+                base: base_operand,
+                indexing,
+            }
+        }
         HirExprKind::SubscriptChain(chain) => MirRvalue::SubscriptChain(lower_subscript_chain(
             ctx,
             chain,
@@ -187,11 +252,19 @@ pub(crate) fn lower_expr_with_replacements(
             base,
             member,
             sequence_use,
-        } => MirRvalue::DynamicMember {
-            base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
-            member: lower_operand_with_replacements(ctx, member, temps, await_replacements)?,
-            sequence_use: *sequence_use,
-        },
+        } => {
+            let mut base_operand =
+                lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
+            let mut preparation = Vec::new();
+            let member_operand =
+                lower_operand_with_replacements(ctx, member, &mut preparation, await_replacements)?;
+            append_after_prior(ctx, [(&mut base_operand, base.span)], preparation, temps);
+            MirRvalue::DynamicMember {
+                base: base_operand,
+                member: member_operand,
+                sequence_use: *sequence_use,
+            }
+        }
         HirExprKind::WorkspaceFirstStaticProperty {
             workspace_name,
             class_name,
@@ -235,18 +308,26 @@ fn lower_subscript_chain(
     for step in &chain.steps {
         steps.push(match step {
             runmat_hir::HirSubscriptStep::Index(indexing) => crate::MirSubscriptStep::Index(
-                lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?,
+                lower_chain_indexing(ctx, indexing, await_replacements)?,
             ),
             runmat_hir::HirSubscriptStep::Member(member) => {
                 crate::MirSubscriptStep::Member(member.clone())
             }
             runmat_hir::HirSubscriptStep::DynamicMember(member) => {
-                crate::MirSubscriptStep::DynamicMember(lower_operand_with_replacements(
+                let mut preparation = Vec::new();
+                let operand = lower_operand_with_replacements(
                     ctx,
                     member,
-                    temps,
+                    &mut preparation,
                     await_replacements,
-                )?)
+                )?;
+                if preparation.is_empty() {
+                    crate::MirSubscriptStep::DynamicMember(operand)
+                } else {
+                    crate::MirSubscriptStep::PreparedDynamicMember(
+                        crate::MirPreparedExpressionRegion::from_lowered(preparation, operand)?,
+                    )
+                }
             }
             runmat_hir::HirSubscriptStep::DottedInvoke {
                 member,
@@ -293,6 +374,64 @@ fn lower_subscript_chain(
         steps,
         sequence_use: chain.sequence_use,
         context: chain.context,
+    })
+}
+
+fn lower_chain_indexing(
+    ctx: &MirLoweringContext,
+    indexing: &IndexingSemantics,
+    await_replacements: &HashMap<ExprId, MirOperand>,
+) -> Result<MirIndexing, HirError> {
+    let mut components = Vec::with_capacity(indexing.components.len());
+    for (dim, source) in indexing.components.iter().enumerate() {
+        let mut preparation = Vec::new();
+        let component =
+            lower_index_component(ctx, dim, source, &mut preparation, await_replacements)?;
+        if !preparation.is_empty() {
+            // Earlier selectors must be read before this selector's preparation,
+            // even though the enclosing path is dispatched only after all
+            // selector values have been assembled.
+            for (position, earlier) in components.iter_mut().enumerate() {
+                if let MirIndexComponent::Expr(operand) = earlier {
+                    let mut snapshot = Vec::new();
+                    let span = match &indexing.components[position] {
+                        IndexComponent::Expr(expr) | IndexComponent::Logical(expr) => expr.span,
+                        IndexComponent::Colon | IndexComponent::End { .. } => {
+                            unreachable!("plain selector comes from an expression")
+                        }
+                    };
+                    capture_binding_before_later_preparation(ctx, operand, span, &mut snapshot);
+                    if !snapshot.is_empty() {
+                        *earlier = MirIndexComponent::PreparedExpr(
+                            crate::MirPreparedExpressionRegion::from_lowered(
+                                snapshot,
+                                operand.clone(),
+                            )?,
+                        );
+                    }
+                }
+            }
+        }
+        components.push(match component {
+            MirIndexComponent::Expr(operand) if !preparation.is_empty() => {
+                MirIndexComponent::PreparedExpr(crate::MirPreparedExpressionRegion::from_lowered(
+                    preparation,
+                    operand,
+                )?)
+            }
+            other => other,
+        });
+    }
+    Ok(MirIndexing {
+        kind: indexing.kind,
+        plan: classify_mir_index_plan(indexing),
+        components,
+        result_context: indexing.result_context,
+        cell_expand_all: indexing.kind == IndexKind::Brace
+            && indexing
+                .components
+                .iter()
+                .all(|component| matches!(component, IndexComponent::Colon)),
     })
 }
 
@@ -610,9 +749,15 @@ fn lower_call_arg(
             member,
             sequence_use: runmat_types::SequenceUse::ExpandAll,
         } => {
+            let mut base_operand =
+                lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
+            let mut preparation = Vec::new();
+            let member_operand =
+                lower_operand_with_replacements(ctx, member, &mut preparation, await_replacements)?;
+            append_after_prior(ctx, [(&mut base_operand, base.span)], preparation, temps);
             let source = MirExpansionSource::DynamicMember {
-                base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
-                member: lower_operand_with_replacements(ctx, member, temps, await_replacements)?,
+                base: base_operand,
+                member: member_operand,
             };
             return Ok(capture_call_sequence(ctx, source, temps, arg.span));
         }
@@ -644,11 +789,18 @@ fn lower_call_arg(
                 "comma-list expansion requires cell/content indexing",
             ));
         }
-        let base = lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
-        let indexing = lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?;
+        let mut base_operand =
+            lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
+        let mut preparation = Vec::new();
+        let indexing =
+            lower_indexing_with_replacements(ctx, indexing, &mut preparation, await_replacements)?;
+        append_after_prior(ctx, [(&mut base_operand, base.span)], preparation, temps);
         Ok(capture_call_sequence(
             ctx,
-            MirExpansionSource::CellContents { base, indexing },
+            MirExpansionSource::CellContents {
+                base: base_operand,
+                indexing,
+            },
             temps,
             arg.span,
         ))
@@ -675,75 +827,160 @@ fn capture_call_sequence(
     MirCallArg::CapturedSequence(destination)
 }
 
+fn lower_ordered_fields(
+    ctx: &MirLoweringContext,
+    fields: &[(runmat_types::MemberName, HirExpr)],
+    temps: &mut Vec<MirStmt>,
+    await_replacements: &HashMap<ExprId, MirOperand>,
+) -> Result<Vec<(runmat_types::MemberName, MirOperand)>, HirError> {
+    let mut lowered: Vec<(runmat_types::MemberName, MirOperand)> = Vec::with_capacity(fields.len());
+    let mut pending_bindings: Vec<(usize, runmat_hir::Span)> = Vec::new();
+    for (name, source) in fields {
+        let mut preparation = Vec::new();
+        let operand =
+            lower_operand_with_replacements(ctx, source, &mut preparation, await_replacements)?;
+        if !preparation.is_empty() {
+            for (index, span) in pending_bindings.drain(..) {
+                capture_binding_before_later_preparation(ctx, &mut lowered[index].1, span, temps);
+            }
+            temps.extend(preparation);
+        }
+        if is_bound_operand(ctx, &operand) {
+            pending_bindings.push((lowered.len(), source.span));
+        }
+        lowered.push((name.clone(), operand));
+    }
+    Ok(lowered)
+}
+
 fn lower_aggregate_elements(
     ctx: &MirLoweringContext,
     rows: &[Vec<HirExpr>],
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<Vec<crate::MirAggregateElement>, HirError> {
-    rows.iter()
-        .flat_map(|row| row.iter())
-        .map(|element| {
-            let source = match &element.kind {
-                HirExprKind::Member {
+    let mut lowered: Vec<(crate::MirAggregateElement, runmat_hir::Span)> = Vec::new();
+    let mut pending_bindings: Vec<(usize, runmat_hir::Span)> = Vec::new();
+    for element in rows.iter().flatten() {
+        let mut preparation = Vec::new();
+        let source = match &element.kind {
+            HirExprKind::Member {
+                base,
+                member,
+                sequence_use: runmat_types::SequenceUse::ExpandAll,
+            } => Some(MirExpansionSource::Member {
+                base: lower_operand_with_replacements(
+                    ctx,
                     base,
-                    member,
-                    sequence_use: runmat_types::SequenceUse::ExpandAll,
-                } => Some(MirExpansionSource::Member {
-                    base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
-                    member: member.clone(),
-                }),
-                HirExprKind::MemberDynamic {
+                    &mut preparation,
+                    await_replacements,
+                )?,
+                member: member.clone(),
+            }),
+            HirExprKind::MemberDynamic {
+                base,
+                member,
+                sequence_use: runmat_types::SequenceUse::ExpandAll,
+            } => {
+                let mut base_operand = lower_operand_with_replacements(
+                    ctx,
                     base,
+                    &mut preparation,
+                    await_replacements,
+                )?;
+                let mut member_preparation = Vec::new();
+                let member_operand = lower_operand_with_replacements(
+                    ctx,
                     member,
-                    sequence_use: runmat_types::SequenceUse::ExpandAll,
-                } => Some(MirExpansionSource::DynamicMember {
-                    base: lower_operand_with_replacements(ctx, base, temps, await_replacements)?,
-                    member: lower_operand_with_replacements(
-                        ctx,
-                        member,
-                        temps,
-                        await_replacements,
-                    )?,
-                }),
-                HirExprKind::Index(base, indexing)
-                    if indexing.kind == IndexKind::Brace
-                        && matches!(indexing.result_context, IndexResultContext::ReadCommaList) =>
-                {
-                    let base =
-                        lower_operand_with_replacements(ctx, base, temps, await_replacements)?;
-                    let indexing =
-                        lower_indexing_with_replacements(ctx, indexing, temps, await_replacements)?;
-                    Some(MirExpansionSource::CellContents { base, indexing })
-                }
-                HirExprKind::SubscriptChain(chain)
-                    if chain.sequence_use == runmat_types::SequenceUse::ExpandAll =>
-                {
-                    Some(MirExpansionSource::SubscriptChain(lower_subscript_chain(
-                        ctx,
-                        chain,
-                        temps,
-                        await_replacements,
-                    )?))
-                }
-                _ => None,
-            };
-            if let Some(source) = source {
-                let destination = ctx.fresh_sequence_local();
-                temps.push(MirStmt {
-                    kind: MirStmtKind::CaptureSequence {
-                        destination,
-                        source,
-                    },
-                    span: element.span,
-                });
-                Ok(crate::MirAggregateElement::CapturedSequence(destination))
-            } else {
-                lower_operand_with_replacements(ctx, element, temps, await_replacements)
-                    .map(crate::MirAggregateElement::Single)
+                    &mut member_preparation,
+                    await_replacements,
+                )?;
+                append_after_prior(
+                    ctx,
+                    [(&mut base_operand, base.span)],
+                    member_preparation,
+                    &mut preparation,
+                );
+                Some(MirExpansionSource::DynamicMember {
+                    base: base_operand,
+                    member: member_operand,
+                })
             }
-        })
-        .collect()
+            HirExprKind::Index(base, indexing)
+                if indexing.kind == IndexKind::Brace
+                    && matches!(indexing.result_context, IndexResultContext::ReadCommaList) =>
+            {
+                let mut base_operand = lower_operand_with_replacements(
+                    ctx,
+                    base,
+                    &mut preparation,
+                    await_replacements,
+                )?;
+                let mut indexing_preparation = Vec::new();
+                let indexing = lower_indexing_with_replacements(
+                    ctx,
+                    indexing,
+                    &mut indexing_preparation,
+                    await_replacements,
+                )?;
+                append_after_prior(
+                    ctx,
+                    [(&mut base_operand, base.span)],
+                    indexing_preparation,
+                    &mut preparation,
+                );
+                Some(MirExpansionSource::CellContents {
+                    base: base_operand,
+                    indexing,
+                })
+            }
+            HirExprKind::SubscriptChain(chain)
+                if chain.sequence_use == runmat_types::SequenceUse::ExpandAll =>
+            {
+                Some(MirExpansionSource::SubscriptChain(lower_subscript_chain(
+                    ctx,
+                    chain,
+                    &mut preparation,
+                    await_replacements,
+                )?))
+            }
+            _ => None,
+        };
+        let value = if let Some(source) = source {
+            let destination = ctx.fresh_sequence_local();
+            preparation.push(MirStmt {
+                kind: MirStmtKind::CaptureSequence {
+                    destination,
+                    source,
+                },
+                span: element.span,
+            });
+            crate::MirAggregateElement::CapturedSequence(destination)
+        } else {
+            crate::MirAggregateElement::Single(lower_operand_with_replacements(
+                ctx,
+                element,
+                &mut preparation,
+                await_replacements,
+            )?)
+        };
+        if !preparation.is_empty() {
+            for (index, span) in pending_bindings.drain(..) {
+                let crate::MirAggregateElement::Single(operand) = &mut lowered[index].0 else {
+                    unreachable!("only single elements hold pending bindings");
+                };
+                capture_binding_before_later_preparation(ctx, operand, span, temps);
+            }
+            temps.extend(preparation);
+        }
+        if let crate::MirAggregateElement::Single(operand) = &value {
+            if is_bound_operand(ctx, operand) {
+                pending_bindings.push((lowered.len(), element.span));
+            }
+        }
+        lowered.push((value, element.span));
+    }
+    Ok(lowered.into_iter().map(|(value, _)| value).collect())
 }
 
 pub(crate) fn lower_indexing(
@@ -760,17 +997,38 @@ pub(crate) fn lower_indexing_with_replacements(
     temps: &mut Vec<MirStmt>,
     await_replacements: &HashMap<ExprId, MirOperand>,
 ) -> Result<MirIndexing, HirError> {
+    let mut components: Vec<MirIndexComponent> = Vec::with_capacity(indexing.components.len());
+    let mut pending_bindings = Vec::new();
+    for (dim, component) in indexing.components.iter().enumerate() {
+        let mut preparation = Vec::new();
+        let lowered =
+            lower_index_component(ctx, dim, component, &mut preparation, await_replacements)?;
+        if !preparation.is_empty() {
+            for (index, span) in pending_bindings.drain(..) {
+                let MirIndexComponent::Expr(operand) = &mut components[index] else {
+                    unreachable!("only value selectors hold pending bindings");
+                };
+                capture_binding_before_later_preparation(ctx, operand, span, temps);
+            }
+            temps.extend(preparation);
+        }
+        if let MirIndexComponent::Expr(operand) = &lowered {
+            if is_bound_operand(ctx, operand) {
+                let span = match component {
+                    IndexComponent::Expr(source) | IndexComponent::Logical(source) => source.span,
+                    IndexComponent::Colon | IndexComponent::End { .. } => {
+                        unreachable!("value selector comes from an expression")
+                    }
+                };
+                pending_bindings.push((components.len(), span));
+            }
+        }
+        components.push(lowered);
+    }
     Ok(MirIndexing {
         kind: indexing.kind,
         plan: classify_mir_index_plan(indexing),
-        components: indexing
-            .components
-            .iter()
-            .enumerate()
-            .map(|(dim, component)| {
-                lower_index_component(ctx, dim, component, temps, await_replacements)
-            })
-            .collect::<Result<_, _>>()?,
+        components,
         result_context: indexing.result_context,
         cell_expand_all: indexing.kind == IndexKind::Brace
             && indexing

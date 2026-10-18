@@ -504,7 +504,7 @@ impl Figure {
             axis_equal: false,
             data_aspect_ratio: [1.0, 1.0, 1.0],
             data_aspect_ratio_mode: "auto".into(),
-            legend_enabled: true,
+            legend_enabled: false,
             colorbar_enabled: false,
             colormap: ColorMap::Parula,
             colormap_length: 256,
@@ -526,7 +526,7 @@ impl Figure {
             x_label: None,
             y_label: None,
             z_label: None,
-            legend_enabled: true,
+            legend_enabled: false,
             grid_enabled: true,
             minor_grid_enabled: false,
             box_enabled: true,
@@ -717,6 +717,28 @@ impl Figure {
     /// Set axis labels in-place
     pub fn set_axis_labels<S: Into<String>>(&mut self, x_label: S, y_label: S) {
         self.set_axes_labels(self.active_axes_index, x_label, y_label);
+        self.dirty = true;
+    }
+
+    /// Clear axes annotations when a plot replaces the axes' previous contents.
+    /// Figure/window names and the figure-wide title are unaffected.
+    pub fn reset_axes_text(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title = None;
+            meta.subtitle = None;
+            meta.x_label = None;
+            meta.y_label = None;
+            meta.z_label = None;
+            meta.title_style = TextStyle::default();
+            meta.subtitle_style = TextStyle::default();
+            meta.x_label_style = TextStyle::default();
+            meta.y_label_style = TextStyle::default();
+            meta.z_label_style = TextStyle::default();
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
 
@@ -2691,7 +2713,8 @@ mod tests {
 
         assert_eq!(figure.len(), 0);
         assert!(figure.is_empty());
-        assert!(figure.legend_enabled);
+        assert!(!figure.legend_enabled);
+        assert!(!figure.axes_metadata(0).unwrap().legend_enabled);
         assert!(figure.grid_enabled);
     }
 
@@ -2772,7 +2795,7 @@ mod tests {
 
     #[test]
     fn test_mixed_plot_types() {
-        let mut figure = Figure::new();
+        let mut figure = Figure::new().with_legend(true);
 
         // Add different plot types
         let line = LinePlot::new(vec![0.0, 1.0, 2.0], vec![1.0, 2.0, 3.0])

@@ -2,7 +2,7 @@
 use runmat_accelerate_api::{ProviderElementType, ProviderRepresentation, ProviderStorage};
 use runmat_value::ComplexElement;
 
-pub(super) fn interleave<T: Copy>(pairs: &[ComplexElement<T>]) -> Result<Vec<T>, String> {
+pub(crate) fn interleave<T: Copy>(pairs: &[ComplexElement<T>]) -> Result<Vec<T>, String> {
     let count = pairs
         .len()
         .checked_mul(2)

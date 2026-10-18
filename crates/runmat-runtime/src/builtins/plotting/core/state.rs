@@ -507,8 +507,7 @@ struct FigureState {
 
 impl FigureState {
     fn new(handle: FigureHandle) -> Self {
-        let title = format!("Figure {}", handle.as_u32());
-        let figure = default_figure(&title, "X", "Y");
+        let figure = default_figure("", "", "");
         Self {
             figure: figure.into(),
             scene_lease: GraphicsSceneLease::candidate(handle.as_u32()),
@@ -4547,8 +4546,8 @@ impl<'a> Default for PlotRenderOptions<'a> {
     fn default() -> Self {
         Self {
             title: "",
-            x_label: "X",
-            y_label: "Y",
+            x_label: "",
+            y_label: "",
             grid: true,
             axis_equal: false,
         }

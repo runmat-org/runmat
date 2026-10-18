@@ -150,24 +150,38 @@ struct LoadExecution {
     receipt: Option<HostEffectReceipt>,
 }
 
-enum LoadWorkspaceTarget {
+enum LoadWorkspaceTarget<'a> {
     Canonical(crate::workspace::BaseWorkspaceProjection),
-    Service(Rc<dyn crate::context::RuntimeWorkspaceService>),
+    Service {
+        service: Rc<dyn crate::context::RuntimeWorkspaceService>,
+        runtime: &'a crate::context::RuntimeContext,
+    },
     Facade,
 }
 
-impl LoadWorkspaceTarget {
-    fn capture(runtime: Option<&crate::context::RuntimeContext>) -> BuiltinResult<Self> {
-        let Some(service) = runtime.and_then(|runtime| runtime.service_ports().workspace()) else {
+impl<'a> LoadWorkspaceTarget<'a> {
+    fn capture(runtime: Option<&'a crate::context::RuntimeContext>) -> BuiltinResult<Self> {
+        let Some((runtime, service)) = runtime.and_then(|runtime| {
+            runtime
+                .service_ports()
+                .workspace()
+                .map(|service| (runtime, service))
+        }) else {
             return Ok(Self::Facade);
         };
+        service
+            .ensure_effect_authority_with_context(runtime)
+            .map_err(load_workspace_flow)?;
         if let Some(projection) = service
             .begin_workspace_projection()
             .map_err(load_workspace_flow)?
         {
             return Ok(Self::Canonical(projection));
         }
-        Ok(Self::Service(service.clone()))
+        Ok(Self::Service {
+            service: service.clone(),
+            runtime,
+        })
     }
 
     fn assign_all(
@@ -191,11 +205,11 @@ impl LoadWorkspaceTarget {
                     .map_err(crate::workspace::base_workspace_error_to_runtime)
                     .map_err(load_workspace_flow)
             }
-            Self::Service(service) => {
+            Self::Service { service, runtime } => {
                 for (name, value) in variables {
                     checkpoint(receipt)?;
                     service
-                        .assign(name, value.clone())
+                        .assign_ref_with_context(runtime, name, value)
                         .map_err(load_workspace_flow)?;
                 }
                 Ok(())

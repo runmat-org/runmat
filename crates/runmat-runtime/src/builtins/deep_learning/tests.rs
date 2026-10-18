@@ -3387,7 +3387,7 @@ fn padsequences_uniform_mixed_storage_applies_padding_in_result_class() {
     let Value::LogicalArray(mask) = &outputs[1] else {
         panic!("logical validity mask")
     };
-    assert_eq!(mask.shape, data.shape());
+    assert_eq!(mask.shape.as_slice(), data.shape());
     assert_eq!(mask.data, vec![1, 1, 1, 0]);
 }
 
@@ -3476,7 +3476,7 @@ fn padsequences_preserves_wide_integer_class_and_returns_logical_mask() {
         data.numeric_value_at(3),
         Some(runmat_value::NumericScalar::U64(0))
     );
-    assert_eq!(mask.shape, data.shape());
+    assert_eq!(mask.shape.as_slice(), data.shape());
     assert_eq!(mask.data.as_slice(), &[1, 1, 1, 0]);
     drop(_guard);
 

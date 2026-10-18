@@ -1,4 +1,5 @@
 pub(super) mod angle_conversion;
+pub(super) mod bessel_functions;
 pub(super) mod binary_containers;
 pub(super) mod bitwise;
 pub(super) mod complex_components;

@@ -161,8 +161,12 @@ pub fn upload_numeric_protecting_admitted<P: AccelProvider + ?Sized>(
     admission: Option<&dyn runmat_execution::resource::ProviderHostMetadataAdmission>,
 ) -> NumericUploadResult<GpuTensorHandle> {
     host.validate()?;
-    let _borrowed_metadata: Vec<_> = protected
+    let _first_borrowed_metadata = protected
+        .first()
+        .map(|handle| crate::ResidencyRestoreGuard::new(handle));
+    let _remaining_borrowed_metadata: Vec<_> = protected
         .iter()
+        .skip(1)
         .map(|handle| crate::ResidencyRestoreGuard::new(handle))
         .collect();
     let handle = provider.upload_numeric_raw_admitted(host, admission)?;

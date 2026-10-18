@@ -723,9 +723,13 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
     fn drain_scope(&self, _reason: CancellationReason) {
         let mut state = self.state.lock().expect("execution service state poisoned");
         let mut completed = Vec::new();
+        let mut retired = Vec::new();
         for future in state.futures.values_mut() {
             if !matches!(future, FutureState::Completed(_)) {
-                *future = FutureState::Cancelled;
+                let prior = std::mem::replace(future, FutureState::Cancelled);
+                if let FutureState::Deferred(call) = prior {
+                    retired.push(call);
+                }
             }
         }
         for task in state.tasks.values_mut() {
@@ -735,6 +739,11 @@ impl RuntimeExecutionServices for RuntimeExecutionService {
         for future_id in completed {
             record_completion(&mut state, future_id);
         }
+        drop(state);
+        // A deferred argument or callable generation may own a Foreign lease.
+        // Its release callback is allowed to reenter the execution service, so
+        // retire deferred calls only after releasing the service-state lock.
+        drop(retired);
     }
 }
 
@@ -776,6 +785,18 @@ fn future_state(state: &FutureState) -> ExecutionHandleState {
 mod tests {
     use super::*;
     use crate::execution::RootedValueSequence;
+    use runmat_types::{ForeignAffinity, ForeignLifetime, ForeignOwnership, ForeignTypeIdentity};
+    use runmat_value::{ForeignRef, ForeignResourceKey, ForeignResourceRelease};
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    thread_local! {
+        static REENTRANT_DEFERRED_SERVICE: RefCell<Option<Rc<RuntimeExecutionService>>> =
+            const { RefCell::new(None) };
+        static REENTRANT_DEFERRED_RELEASES: Cell<usize> = const { Cell::new(0) };
+        static REENTRANT_DEFERRED_OBSERVED_UNLOCKED: Cell<bool> = const { Cell::new(false) };
+    }
 
     impl RuntimeExecutionService {
         fn retained_values(&self) -> Option<Vec<Value>> {
@@ -818,6 +839,61 @@ mod tests {
             capabilities: Default::default(),
             program: DeferredProgram::Local,
         }
+    }
+
+    #[derive(Debug)]
+    struct ReentrantDeferredRelease;
+
+    impl ForeignResourceRelease for ReentrantDeferredRelease {
+        fn release(&self, _key: &ForeignResourceKey) {
+            REENTRANT_DEFERRED_RELEASES.set(REENTRANT_DEFERRED_RELEASES.get() + 1);
+            let service = REENTRANT_DEFERRED_SERVICE.with(|current| current.borrow().clone());
+            let unlocked = service.is_some_and(|service| service.state.try_lock().is_ok());
+            REENTRANT_DEFERRED_OBSERVED_UNLOCKED.set(unlocked);
+        }
+    }
+
+    fn reentrant_foreign(release: Arc<ReentrantDeferredRelease>) -> Value {
+        Value::Foreign(ForeignRef::managed(
+            ForeignResourceKey {
+                host_identity: "deferred-release-probe".into(),
+                handle: 7,
+                generation: 1,
+            },
+            ForeignTypeIdentity {
+                family: "native-ffi".into(),
+                name: "test.deferred".into(),
+                version: 1,
+            },
+            ForeignOwnership::Shared,
+            ForeignAffinity::AnyThread,
+            ForeignLifetime::Session,
+            release,
+        ))
+    }
+
+    #[test]
+    fn draining_scope_retires_deferred_values_after_unlocking_service_state() {
+        let service = Rc::new(RuntimeExecutionService::new());
+        REENTRANT_DEFERRED_SERVICE.with(|current| {
+            *current.borrow_mut() = Some(Rc::clone(&service));
+        });
+        REENTRANT_DEFERRED_RELEASES.set(0);
+        REENTRANT_DEFERRED_OBSERVED_UNLOCKED.set(false);
+        service
+            .create_future(deferred_call(
+                1,
+                vec![reentrant_foreign(Arc::new(ReentrantDeferredRelease))],
+            ))
+            .unwrap();
+
+        service.drain_scope(CancellationReason::Shutdown);
+
+        assert_eq!(REENTRANT_DEFERRED_RELEASES.get(), 1);
+        assert!(REENTRANT_DEFERRED_OBSERVED_UNLOCKED.get());
+        REENTRANT_DEFERRED_SERVICE.with(|current| {
+            current.borrow_mut().take();
+        });
     }
 
     #[test]

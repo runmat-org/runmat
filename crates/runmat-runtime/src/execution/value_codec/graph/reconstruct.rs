@@ -477,7 +477,9 @@ impl Decoder<'_> {
                 .map_err(|error| invalid(error.to_string()))?;
             self.environment_roots.extend(roots);
             for binding in &activation.bindings {
-                if !environment.reserve_owned_binding(binding.binding) {
+                if !crate::call::lexical::reserve_owned_binding(&environment, binding.binding)
+                    .map_err(|error| invalid(error.to_string()))?
+                {
                     return Err(invalid("duplicate reconstructed lexical binding"));
                 }
             }

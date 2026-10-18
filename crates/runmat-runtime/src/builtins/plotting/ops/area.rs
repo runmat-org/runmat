@@ -608,12 +608,7 @@ pub async fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Area",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
             for plot in prepared.drain(..) {
@@ -1441,6 +1436,10 @@ mod tests {
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plots().count(), 2);
+        let axes = fig.axes_metadata(0).expect("area axes");
+        assert_eq!(axes.title, None);
+        assert_eq!(axes.x_label, None);
+        assert_eq!(axes.y_label, None);
         let PlotElement::Area(first) = fig.plots().next().unwrap() else {
             panic!("expected area")
         };

@@ -71,6 +71,14 @@ impl RuntimeArchive {
                 ));
             }
         }
+        if super::read_native_accelerator_profile(&archive)?
+            != self.manifest.capabilities.accelerators
+        {
+            return Err(AotError::contract(
+                "aot.archive.accelerator_profile",
+                "runtime accelerator inventory differs from target-built archive",
+            ));
+        }
         Ok(archive)
     }
 }
@@ -109,6 +117,12 @@ pub(super) fn build_archive(
         return Err(AotError::contract(
             "aot.archive.size",
             "runtime archive is empty or exceeds its bound",
+        ));
+    }
+    if capabilities.accelerators != super::read_native_accelerator_profile(archive)? {
+        return Err(AotError::contract(
+            "aot.archive.accelerator_profile",
+            "declared accelerator inventory differs from target-built archive",
         ));
     }
     let payload = match encoding {
@@ -172,21 +186,49 @@ mod tests {
 
     #[test]
     fn compressed_archive_is_exact_and_tamper_evident() {
+        let bytes = super::super::test_archive::archive(
+            runmat_execution::host::NativeAcceleratorProfile::NONE,
+        );
         let archive = build_runtime_archive(
-            b"!<arch>\nrepeated repeated repeated repeated",
+            &bytes,
             &environment(),
             vec!["-lm".into()],
             RuntimeArchiveEncoding::Zstd,
             RuntimeArchiveCapabilities::standalone_host(),
         )
         .unwrap();
-        assert_eq!(
-            archive.decode().unwrap(),
-            b"!<arch>\nrepeated repeated repeated repeated"
-        );
+        assert_eq!(archive.decode().unwrap(), bytes);
         let mut tampered = archive.clone();
         tampered.payload[0] ^= 1;
         assert!(RuntimeArchive::new(tampered.manifest, tampered.payload).is_err());
+
+        let mut misstated = archive;
+        misstated.manifest.capabilities.accelerators =
+            runmat_execution::host::NativeAcceleratorProfile {
+                wgpu: true,
+                cuda: false,
+            };
+        assert!(misstated.decode().is_err());
+    }
+
+    #[test]
+    fn archive_rejects_declared_none_for_physical_acceleration() {
+        let bytes =
+            super::super::test_archive::archive(runmat_execution::host::NativeAcceleratorProfile {
+                wgpu: true,
+                cuda: false,
+            });
+        let error = build_runtime_archive(
+            &bytes,
+            &environment(),
+            Vec::new(),
+            RuntimeArchiveEncoding::Raw,
+            RuntimeArchiveCapabilities::standalone_host(),
+        )
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("aot.archive.accelerator_profile"));
     }
 
     #[test]

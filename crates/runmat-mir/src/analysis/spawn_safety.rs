@@ -231,7 +231,11 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                             match argument {
                                 crate::MirDottedInvokeArgument::Colon => {}
                                 crate::MirDottedInvokeArgument::Contextual(region) => {
-                                    scan_expression_region(body, region, reads_captures)
+                                    scan_expression_region(
+                                        body,
+                                        crate::MirExpressionRegionRef::Contextual(region),
+                                        reads_captures,
+                                    )
                                 }
                                 crate::MirDottedInvokeArgument::Call(region) => {
                                     for step in &region.steps {
@@ -256,6 +260,13 @@ fn scan_rvalue(body: &MirBody, value: &MirRvalue, reads_captures: &mut BTreeSet<
                     }
                     crate::MirSubscriptStep::DynamicMember(member) => {
                         scan_operand(body, member, reads_captures)
+                    }
+                    crate::MirSubscriptStep::PreparedDynamicMember(region) => {
+                        scan_expression_region(
+                            body,
+                            crate::MirExpressionRegionRef::Prepared(region),
+                            reads_captures,
+                        )
                     }
                     crate::MirSubscriptStep::Member(_) => {}
                 }
@@ -303,9 +314,16 @@ fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BT
             MirIndexComponent::Expr(operand) => {
                 scan_operand(body, operand, reads_captures);
             }
-            MirIndexComponent::ContextualExpr(region) => {
-                scan_expression_region(body, region, reads_captures);
-            }
+            MirIndexComponent::ContextualExpr(region) => scan_expression_region(
+                body,
+                crate::MirExpressionRegionRef::Contextual(region),
+                reads_captures,
+            ),
+            MirIndexComponent::PreparedExpr(region) => scan_expression_region(
+                body,
+                crate::MirExpressionRegionRef::Prepared(region),
+                reads_captures,
+            ),
             MirIndexComponent::Colon => {}
         }
     }
@@ -313,7 +331,7 @@ fn scan_indexing(body: &MirBody, indexing: &MirIndexing, reads_captures: &mut BT
 
 fn scan_expression_region(
     body: &MirBody,
-    region: &crate::MirExpressionRegion,
+    region: crate::MirExpressionRegionRef<'_>,
     reads_captures: &mut BTreeSet<BindingId>,
 ) {
     for step in region.steps() {

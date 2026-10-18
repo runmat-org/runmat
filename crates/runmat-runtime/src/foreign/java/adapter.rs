@@ -63,8 +63,7 @@ pub struct JavaAdapter {
 }
 
 struct JavaCallbackRegistration {
-    callable: Value,
-    _roots: crate::execution::RootedValueLease,
+    callable: crate::execution::RetainedValueReadLease,
     origin: crate::context::RuntimeContextLocalId,
     context: RuntimeContext,
     foreign: std::rc::Weak<dyn crate::context::RuntimeForeignService>,
@@ -333,7 +332,7 @@ impl JavaAdapter {
                 .expect("every callable value has a physical instance");
             if let Some((token, _)) = self.callbacks.borrow().iter().find(|(_, registration)| {
                 registration.origin == context.local_identity()
-                    && registration.callable.callable_instance_key() == Some(instance)
+                    && registration.callable.value().callable_instance_key() == Some(instance)
             }) {
                 return Ok(JavaValue::Callback(*token));
             }
@@ -348,16 +347,14 @@ impl JavaAdapter {
                     invalid_conversion("Java callback identity space is exhausted")
                 })?,
             );
-            let roots = crate::execution::RootedValueLease::for_values(std::iter::once(&value))
-                .map_err(|error| error.into_runtime_error())?;
+            let callable = crate::execution::RetainedValueReadLease::prepare_owned(value, context)?;
             let callback_context = context
                 .clone()
                 .with_service_ports(context.service_ports().clone().without_foreign());
             self.callbacks.borrow_mut().insert(
                 token,
                 Rc::new(JavaCallbackRegistration {
-                    callable: value,
-                    _roots: roots,
+                    callable,
                     origin: context.local_identity(),
                     context: callback_context,
                     foreign,

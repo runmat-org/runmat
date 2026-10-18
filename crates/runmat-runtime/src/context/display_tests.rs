@@ -90,7 +90,9 @@ fn pending_sessions_keep_format_effects_through_nested_entry_ready_and_cancel() 
     assert_eq!(get_display_format(), FormatMode::Long);
     assert_eq!(left.display_format_owner().get(), FormatMode::Hex);
     assert_eq!(right.display_format_owner().get(), FormatMode::ShortE);
-    let lab = left.fork_parallel_lab(left.service_ports().clone());
+    let lab = left
+        .fork_parallel_lab(left.service_ports().clone())
+        .expect("idle session fork");
     assert_eq!(lab.display_format_owner().get(), FormatMode::Hex);
     lab.display_format_owner().set(FormatMode::Rational);
     assert_eq!(left.display_format_owner().get(), FormatMode::Hex);

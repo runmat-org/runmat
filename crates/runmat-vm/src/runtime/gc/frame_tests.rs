@@ -1,6 +1,7 @@
 use super::InterpretContext;
 use crate::bytecode::program::ExecutionContext;
 use crate::interpreter::dispatch::{SequenceRegister, SequenceState};
+use crate::interpreter::vars::InterpreterVars;
 use runmat_value::Value;
 
 #[test]
@@ -15,7 +16,7 @@ fn frame_registration_does_not_own_physical_gpu_retirement() {
             .unwrap();
         let returned_alias = allocation.handle.clone();
         let stack = vec![Value::GpuTensor(allocation.handle)];
-        let vars = Vec::new();
+        let vars = InterpreterVars::from_owned(Vec::new());
         let locals = Vec::new();
         let sequence = SequenceState::default();
         let registrations = InterpretContext::new_frame(&stack, &vars, &locals, &sequence).unwrap();
@@ -36,7 +37,7 @@ fn frame_registration_does_not_own_physical_gpu_retirement() {
 fn complete_frame_registration_allows_mutation_and_remains_live_across_await() {
     runmat_gc::gc_test_context(|| {
         let mut stack = Vec::new();
-        let mut vars = Vec::new();
+        let mut vars = InterpreterVars::from_owned(Vec::new());
         let mut execution = ExecutionContext::default();
         let mut sequence = SequenceState::default();
         let registrations =
@@ -51,7 +52,7 @@ fn complete_frame_registration_allows_mutation_and_remains_live_across_await() {
 
         futures::executor::block_on(async {
             stack.push(Value::Num(1.0));
-            vars.push(Value::Num(2.0));
+            vars.push_owned(Value::Num(2.0));
             mutate_context(&mut execution);
             sequence.assignment = Some(SequenceRegister { start: 0, len: 1 });
             let mut resumed = false;

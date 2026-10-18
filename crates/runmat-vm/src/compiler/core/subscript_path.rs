@@ -48,7 +48,8 @@ impl Compiler {
                     IDENT_MIR_CELL_EXPAND_PLAN_INVALID
                 }
                 runmat_mir::MirSubscriptChainError::Empty
-                | runmat_mir::MirSubscriptChainError::InvalidDottedArgumentRegion => {
+                | runmat_mir::MirSubscriptChainError::InvalidDottedArgumentRegion
+                | runmat_mir::MirSubscriptChainError::InvalidPreparedRegion => {
                     IDENT_MIR_SUBSCRIPT_CHAIN_INVALID
                 }
             };
@@ -64,6 +65,10 @@ impl Compiler {
                 }
                 MirSubscriptStep::DynamicMember(member) => {
                     self.compile_mir_operand(member)?;
+                    steps.push(BytecodeSubscriptStep::DynamicMember);
+                }
+                MirSubscriptStep::PreparedDynamicMember(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
                     steps.push(BytecodeSubscriptStep::DynamicMember);
                 }
                 MirSubscriptStep::Index(indexing) => {
@@ -202,6 +207,11 @@ impl Compiler {
                 MirIndexComponent::Colon => selectors.push(BytecodeSubscriptSelector::Colon),
                 MirIndexComponent::Expr(operand) => {
                     self.compile_mir_operand(operand)?;
+                    selectors.push(BytecodeSubscriptSelector::Value);
+                    operand_count += 1;
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.compile_mir_prepared_expression_region(region)?;
                     selectors.push(BytecodeSubscriptSelector::Value);
                     operand_count += 1;
                 }

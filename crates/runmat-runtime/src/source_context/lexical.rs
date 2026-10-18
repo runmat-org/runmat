@@ -163,7 +163,9 @@ mod tests {
             "the same dynamic text in different lexical files is distinct provenance"
         );
 
-        let child = runtime.fork_parallel_lab(RuntimeServicePorts::default());
+        let child = runtime
+            .fork_parallel_lab(RuntimeServicePorts::default())
+            .expect("idle session fork");
         drop(first_nested);
         let inherited = source_info_in_context(&child, first.source_id.expect("nested source id"))
             .expect("parallel snapshot retains admitted nested provenance");

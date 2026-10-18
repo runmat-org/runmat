@@ -363,6 +363,13 @@ fn huge_empty_shape_does_not_overflow_before_zero_dimension() {
     assert_eq!(handle.shape(), shape.as_slice());
     assert_eq!(handle.physical().element_capacity(), 0);
     assert_eq!(handle.physical().payload_bytes(), 0);
+    assert_eq!(handle.view().checked_element_count(), Ok(0));
+    assert!(handle
+        .view()
+        .clone()
+        .with_shape(vec![usize::MAX, usize::MAX])
+        .checked_element_count()
+        .is_err());
 }
 
 #[test]

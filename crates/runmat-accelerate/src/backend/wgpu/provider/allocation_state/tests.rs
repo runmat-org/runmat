@@ -134,6 +134,7 @@ fn nonowning_identifiers_cannot_acquire_or_validate_unpublished_records() {
         state.buffers.lock().unwrap().insert(
             id,
             Record {
+                registration_slot: None,
                 phase,
                 entry: None,
                 retained_bytes: 11,

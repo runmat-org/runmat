@@ -52,7 +52,7 @@ pub trait HostEffectLiveAllocationReservation:
 #[derive(Debug)]
 pub enum HostEffectLiveAllocationClaim {
     Shared(Arc<dyn HostEffectLiveAllocationReservation>),
-    Owned(Box<dyn HostEffectLiveAllocationReservation>),
+    Owned(runmat_async::ManagedDiagnosticAllocation),
 }
 
 impl HostEffectLiveAllocationClaim {
@@ -61,7 +61,7 @@ impl HostEffectLiveAllocationClaim {
     pub fn into_diagnostic_retention(self) -> runmat_async::RetainedDiagnosticAllocation {
         match self {
             Self::Shared(claim) => runmat_async::RetainedDiagnosticAllocation::Shared(claim),
-            Self::Owned(claim) => runmat_async::RetainedDiagnosticAllocation::Owned(claim),
+            Self::Owned(claim) => runmat_async::RetainedDiagnosticAllocation::ManagedOwned(claim),
         }
     }
 }
@@ -76,6 +76,15 @@ pub trait HostEffectOutputHeadroom: std::fmt::Debug + Send + Sync {
         Arc<dyn runmat_value::ExactHostAllocationReservation>,
         runmat_value::ExactHostNumericAllocationError,
     >;
+
+    fn reserve_exact_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<runmat_value::ExactHostAllocationClaim, runmat_value::ExactHostNumericAllocationError>
+    {
+        self.reserve_exact(bytes)
+            .map(runmat_value::ExactHostAllocationClaim::Shared)
+    }
 
     /// End this invocation's ability to allocate output and release any
     /// unclaimed precharge. Claims already transferred to values remain live
@@ -187,24 +196,7 @@ struct StagedOutputPermit {
     session_generation_owner: Arc<AtomicU64>,
     session_generation: u64,
     max_output_bytes: u64,
-    live_output_bytes: Arc<AtomicU64>,
 }
-
-#[derive(Debug)]
-struct StagedOutputReservation {
-    _authority_reservation: Arc<dyn runmat_value::ExactHostAllocationReservation>,
-    live_output_bytes: Arc<AtomicU64>,
-    bytes: u64,
-}
-
-impl Drop for StagedOutputReservation {
-    fn drop(&mut self) {
-        self.live_output_bytes
-            .fetch_sub(self.bytes, Ordering::SeqCst);
-    }
-}
-
-impl runmat_value::ExactHostAllocationReservation for StagedOutputReservation {}
 
 impl std::fmt::Debug for StagedOutputPermit {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -237,34 +229,49 @@ impl runmat_value::ExactHostAllocationPermit for StagedOutputPermit {
         if !reservation.is_current() {
             return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
         }
-        self.live_output_bytes
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |live| {
-                live.checked_add(requested)
-                    .filter(|total| *total <= self.max_output_bytes)
-            })
-            .map_err(|_| runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
-        let authority_reservation = match self.headroom.reserve_exact(bytes) {
-            Ok(reservation) => reservation,
-            Err(error) => {
-                self.live_output_bytes
-                    .fetch_sub(requested, Ordering::SeqCst);
-                return Err(error);
-            }
-        };
+        if requested > self.max_output_bytes {
+            return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let authority_reservation = self.headroom.reserve_exact(bytes)?;
         if !self.active_epoch.load(Ordering::Acquire)
             || self.cancellation.is_cancelled()
             || !reservation.is_current()
             || self.session_generation_owner.load(Ordering::Acquire) != self.session_generation
         {
-            self.live_output_bytes
-                .fetch_sub(requested, Ordering::SeqCst);
             return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
         }
-        Ok(Arc::new(StagedOutputReservation {
-            _authority_reservation: authority_reservation,
-            live_output_bytes: self.live_output_bytes.clone(),
-            bytes: requested,
-        }))
+        Ok(authority_reservation)
+    }
+
+    fn reserve_exact_claim(
+        &self,
+        bytes: usize,
+    ) -> Result<runmat_value::ExactHostAllocationClaim, runmat_value::ExactHostNumericAllocationError>
+    {
+        if !self.active_epoch.load(Ordering::Acquire)
+            || self.cancellation.is_cancelled()
+            || self.session_generation_owner.load(Ordering::Acquire) != self.session_generation
+        {
+            return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let reservation = self
+            .reservation
+            .upgrade()
+            .ok_or(runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
+        let requested = u64::try_from(bytes)
+            .map_err(|_| runmat_value::ExactHostNumericAllocationError::ExceedsPermit)?;
+        if requested > self.max_output_bytes || !reservation.is_current() {
+            return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        let claim = self.headroom.reserve_exact_claim(bytes)?;
+        if !self.active_epoch.load(Ordering::Acquire)
+            || self.cancellation.is_cancelled()
+            || !reservation.is_current()
+            || self.session_generation_owner.load(Ordering::Acquire) != self.session_generation
+        {
+            return Err(runmat_value::ExactHostNumericAllocationError::ExceedsPermit);
+        }
+        Ok(claim)
     }
 }
 
@@ -519,7 +526,6 @@ impl HostEffectStagePermit {
             session_generation_owner: self.session_generation_owner.clone(),
             session_generation: self.session_generation,
             max_output_bytes,
-            live_output_bytes: Arc::new(AtomicU64::new(0)),
         });
         Ok(StageOutputAdmission {
             permit,

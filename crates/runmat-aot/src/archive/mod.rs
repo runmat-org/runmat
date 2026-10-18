@@ -1,3 +1,4 @@
+mod accelerator_profile;
 mod embedded;
 mod manifest;
 #[cfg(target_os = "windows")]
@@ -5,7 +6,10 @@ mod msvc;
 mod product;
 mod probe;
 mod selected;
+#[cfg(test)]
+pub(crate) mod test_archive;
 
+pub use accelerator_profile::read_native_accelerator_profile;
 pub use embedded::embedded_runtime_archive;
 pub use manifest::{
     RuntimeArchiveCapabilities, RuntimeArchiveEncoding, RuntimeArchiveManifest,

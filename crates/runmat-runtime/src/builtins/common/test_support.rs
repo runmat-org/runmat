@@ -1,6 +1,6 @@
 use crate::build_runtime_error;
 use futures::executor::block_on;
-use runmat_value::{LogicalArray, Tensor, Value};
+use runmat_value::{HostNumericBuffer, LogicalArray, NumericStorage, Tensor, Value};
 use std::cell::Cell;
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
@@ -402,8 +402,11 @@ pub fn gather(value: Value) -> Result<Tensor, crate::RuntimeError> {
                 .iter()
                 .map(|&b| if b != 0 { 1.0 } else { 0.0 })
                 .collect();
-            Tensor::new(dense, shape.clone())
-                .map_err(|e| build_runtime_error(format!("gather: {e}")).build())
+            Tensor::from_shared_host_buffer(
+                HostNumericBuffer::from_numeric_storage(NumericStorage::F64(dense)),
+                shape,
+            )
+            .map_err(|e| build_runtime_error(format!("gather: {e}")).build())
         }
         other => Err(build_runtime_error(format!("gather: unsupported value {other:?}")).build()),
     }

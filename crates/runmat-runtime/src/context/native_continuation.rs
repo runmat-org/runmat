@@ -6,7 +6,7 @@ use std::{future::Future, rc::Rc};
 use futures::channel::oneshot;
 
 use super::{CanonicalLocalTaskAdmission, RuntimeContext};
-use crate::{execution::RootedValueLease, RuntimeError};
+use crate::{call::RootedFunctionArguments, execution::RootedValueLease, RuntimeError};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NativeContinuationPlacement {
@@ -57,6 +57,36 @@ where
     T: 'static,
     F: Future<Output = Result<T, RuntimeError>> + 'static,
 {
+    run_native_continuation_with_roots(runtime, placement, Some(roots), future).await
+}
+
+/// A selected callable already carries its capture generation and supplied
+/// input roots. Move that exact owner into the child future before queueing;
+/// no second traversal, registration, or empty proof lease is fabricated.
+pub async fn run_rooted_function_native_continuation<T, F>(
+    runtime: &RuntimeContext,
+    placement: NativeContinuationPlacement,
+    arguments: RootedFunctionArguments,
+    consume: impl FnOnce(RootedFunctionArguments) -> F + 'static,
+) -> Result<T, RuntimeError>
+where
+    T: 'static,
+    F: Future<Output = Result<T, RuntimeError>> + 'static,
+{
+    let future = async move { consume(arguments).await };
+    run_native_continuation_with_roots(runtime, placement, None, future).await
+}
+
+async fn run_native_continuation_with_roots<T, F>(
+    runtime: &RuntimeContext,
+    placement: NativeContinuationPlacement,
+    roots: Option<RootedValueLease>,
+    future: F,
+) -> Result<T, RuntimeError>
+where
+    T: 'static,
+    F: Future<Output = Result<T, RuntimeError>> + 'static,
+{
     if placement.is_direct() {
         let _roots = roots;
         return runtime.scope(future).await;
@@ -70,13 +100,15 @@ where
             .with_identifier("RunMat:RuntimeContext:NativeContinuationHost")
             .build()
     })?;
-    spawn_foreground_sibling(runtime, admission, Some(roots), future).await
+    spawn_foreground_sibling(runtime, admission, roots, future).await
 }
 
 /// An already-owned callback may outlive its caller's poll. When the selected
 /// host has a canonical local-task driver, poll it as a sibling so a nested VM
 /// or native callback cannot consume the suspended caller's stack. Bare hosts
-/// retain their existing direct completion path.
+/// retain their existing direct completion path. A configured but idle task
+/// host is also direct: queueing there would wait for a driver that the caller
+/// is not running.
 pub async fn run_selected_callback_continuation<T, F>(
     runtime: &RuntimeContext,
     future: F,
@@ -92,6 +124,9 @@ where
     else {
         return runtime.scope(future).await;
     };
+    if !admission.is_active_driver() {
+        return runtime.scope(future).await;
+    }
     spawn_foreground_sibling(runtime, admission, None, future).await
 }
 
@@ -188,12 +223,23 @@ mod tests {
     }
 
     #[test]
-    fn bare_callback_preserves_direct_completion_without_a_task_host() {
-        let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        let result = host().block_on(run_selected_callback_continuation(&runtime, async {
-            Ok::<_, RuntimeError>(5)
-        }));
-        assert_eq!(result.expect("bare native site completion"), 5);
+    fn callback_preserves_direct_completion_without_an_active_task_driver() {
+        let supervisor = super::super::RuntimeLocalTaskSupervisor::new();
+        let bare = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let ports = RuntimeServicePorts::default()
+            .with_local_tasks(supervisor.submission_port(bare.local_identity()));
+        let idle = bare.clone().with_service_ports(ports);
+        for runtime in [bare, idle] {
+            let result = host().block_on(async {
+                let mut completion =
+                    std::pin::pin!(run_selected_callback_continuation(&runtime, async {
+                        Ok::<_, RuntimeError>(5)
+                    },));
+                futures::future::poll_fn(|cx| std::task::Poll::Ready(completion.as_mut().poll(cx)))
+                    .await
+            });
+            assert!(matches!(result, std::task::Poll::Ready(Ok(5))));
+        }
     }
 
     #[test]

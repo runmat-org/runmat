@@ -2,26 +2,37 @@ use super::super::{save_error_with_source, save_workspace_flow, SAVE_ERROR_WORKS
 use crate::{workspace, BuiltinResult};
 use runmat_value::Value;
 
-pub(in crate::builtins::io::mat::save) struct WorkspaceReadSet {
-    target: WorkspaceReadTarget,
+pub(in crate::builtins::io::mat::save) struct WorkspaceReadSet<'a> {
+    target: WorkspaceReadTarget<'a>,
     _roots: Vec<crate::execution::RootedValueHandles>,
 }
 
-enum WorkspaceReadTarget {
-    Service(std::rc::Rc<dyn crate::context::RuntimeWorkspaceService>),
+enum WorkspaceReadTarget<'a> {
+    Service {
+        service: std::rc::Rc<dyn crate::context::RuntimeWorkspaceService>,
+        runtime: &'a crate::context::RuntimeContext,
+    },
     Facade,
 }
 
-impl WorkspaceReadSet {
+impl<'a> WorkspaceReadSet<'a> {
     pub(in crate::builtins::io::mat::save) fn capture(
-        runtime: Option<&crate::context::RuntimeContext>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
     ) -> BuiltinResult<Self> {
-        let target = match runtime.and_then(|runtime| runtime.service_ports().workspace()) {
-            Some(service) => {
+        let target = match runtime.and_then(|runtime| {
+            runtime
+                .service_ports()
+                .workspace()
+                .map(|service| (runtime, service))
+        }) {
+            Some((runtime, service)) => {
                 service
-                    .ensure_effect_authority()
+                    .ensure_effect_authority_with_context(runtime)
                     .map_err(save_workspace_flow)?;
-                WorkspaceReadTarget::Service(service.clone())
+                WorkspaceReadTarget::Service {
+                    service: service.clone(),
+                    runtime,
+                }
             }
             None => WorkspaceReadTarget::Facade,
         };
@@ -35,7 +46,7 @@ impl WorkspaceReadSet {
         &self,
     ) -> Option<std::rc::Rc<dyn crate::context::RuntimeWorkspaceService>> {
         match &self.target {
-            WorkspaceReadTarget::Service(service) => Some(service.clone()),
+            WorkspaceReadTarget::Service { service, .. } => Some(service.clone()),
             WorkspaceReadTarget::Facade => None,
         }
     }
@@ -44,13 +55,15 @@ impl WorkspaceReadSet {
         &self,
     ) -> BuiltinResult<Option<Vec<(String, Value)>>> {
         match &self.target {
-            WorkspaceReadTarget::Service(service) => {
+            WorkspaceReadTarget::Service { service, runtime } => {
                 service
-                    .ensure_effect_authority()
+                    .ensure_effect_authority_with_context(runtime)
                     .map_err(save_workspace_flow)?;
-                let snapshot = service.try_snapshot().map_err(save_workspace_flow)?;
+                let snapshot = service
+                    .try_snapshot_with_context(runtime)
+                    .map_err(save_workspace_flow)?;
                 service
-                    .ensure_effect_authority()
+                    .ensure_effect_authority_with_context(runtime)
                     .map_err(save_workspace_flow)?;
                 Ok(Some(snapshot))
             }
@@ -63,13 +76,15 @@ impl WorkspaceReadSet {
         name: &str,
     ) -> BuiltinResult<Option<Value>> {
         match &self.target {
-            WorkspaceReadTarget::Service(service) => {
+            WorkspaceReadTarget::Service { service, runtime } => {
                 service
-                    .ensure_effect_authority()
+                    .ensure_effect_authority_with_context(runtime)
                     .map_err(save_workspace_flow)?;
-                let value = service.try_lookup(name).map_err(save_workspace_flow)?;
+                let value = service
+                    .try_lookup_with_context(runtime, name)
+                    .map_err(save_workspace_flow)?;
                 service
-                    .ensure_effect_authority()
+                    .ensure_effect_authority_with_context(runtime)
                     .map_err(save_workspace_flow)?;
                 Ok(value)
             }
@@ -77,9 +92,9 @@ impl WorkspaceReadSet {
         }
     }
 
-    pub(in crate::builtins::io::mat::save) fn retain_values<'a>(
+    pub(in crate::builtins::io::mat::save) fn retain_values<'value>(
         &mut self,
-        values: impl Iterator<Item = &'a Value>,
+        values: impl Iterator<Item = &'value Value>,
     ) -> BuiltinResult<()> {
         let roots = crate::execution::RootedValueHandles::for_values(values).map_err(|error| {
             save_error_with_source(

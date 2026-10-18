@@ -56,7 +56,7 @@ impl WritableData {
             }),
             Value::LogicalArray(array) => Ok(Self::Logical {
                 data: array.data.into_iter().map(|v| v != 0).collect(),
-                shape: array.shape,
+                shape: array.shape.to_vec(),
             }),
             Value::String(text) => Ok(Self::Strings {
                 data: encode_strings(builtin, &[text])?,

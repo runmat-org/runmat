@@ -3,6 +3,53 @@ use runmat_types::{ExternalClassDeclaration, ProgramSourceId};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
+/// Read-only compiler view of an existing workspace name-to-slot index.
+///
+/// The compiler never owns or mutates this index. Keeping the interface
+/// callback-based lets operation-admitted workspace metadata participate
+/// without first detaching every name into a second `HashMap`.
+pub trait WorkspaceBindingView {
+    fn len(&self) -> usize;
+
+    fn get(&self, name: &str) -> Option<usize>;
+
+    fn visit(&self, visitor: &mut dyn FnMut(&str, usize));
+
+    /// Visit in deterministic `(slot, name)` order. Implementations may use
+    /// transient compiler scratch, but must not detach or retain the names.
+    fn visit_in_slot_order(&self, visitor: &mut dyn FnMut(&str, usize));
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+impl WorkspaceBindingView for HashMap<String, usize> {
+    fn len(&self) -> usize {
+        HashMap::len(self)
+    }
+
+    fn get(&self, name: &str) -> Option<usize> {
+        HashMap::get(self, name).copied()
+    }
+
+    fn visit(&self, visitor: &mut dyn FnMut(&str, usize)) {
+        for (name, slot) in self {
+            visitor(name, *slot);
+        }
+    }
+
+    fn visit_in_slot_order(&self, visitor: &mut dyn FnMut(&str, usize)) {
+        let mut ordered = self.iter().collect::<Vec<_>>();
+        ordered.sort_unstable_by(|(left_name, left_slot), (right_name, right_slot)| {
+            (**left_slot, left_name.as_str()).cmp(&(**right_slot, right_name.as_str()))
+        });
+        for (name, slot) in ordered {
+            visitor(name, *slot);
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FunctionOutputArity {
     pub fixed_outputs: usize,
@@ -33,7 +80,7 @@ impl FunctionOutputArity {
 }
 
 pub struct LoweringContext<'a> {
-    pub variables: &'a HashMap<String, usize>,
+    pub variables: &'a dyn WorkspaceBindingView,
     pub bound_functions: &'a HashMap<String, FunctionId>,
     pub function_output_arities: &'a HashMap<FunctionId, FunctionOutputArity>,
     pub known_project_symbols: &'a HashSet<String>,
@@ -52,7 +99,7 @@ pub struct LoweringContext<'a> {
 }
 
 impl<'a> LoweringContext<'a> {
-    pub fn new(variables: &'a HashMap<String, usize>) -> Self {
+    pub fn new(variables: &'a dyn WorkspaceBindingView) -> Self {
         Self {
             variables,
             bound_functions: empty_bound_functions(),

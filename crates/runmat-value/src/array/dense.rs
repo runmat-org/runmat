@@ -2,33 +2,39 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tensor {
-    shape: Vec<usize>, // Column-major layout
-    // Keep storage last: an exact producer reservation attached to storage
-    // may also account for this tensor's initial shape allocation. Field
-    // drop order must release that claim only after shape deallocation.
+    shape: SharedShape, // Column-major layout
+    // Payload and immutable shape each retain their own allocation claim.
     storage: HostNumericBuffer,
 }
 
 impl Tensor {
-    pub fn new(data: Vec<f64>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn new(data: Vec<f64>, shape: impl Into<HostShapeInput>) -> Result<Self, String> {
         Self::from_numeric_storage(NumericStorage::F64(data), shape)
     }
 
     /// Constructs a dense tensor from one authoritative native numeric buffer.
     pub fn from_numeric_storage(
         storage: NumericStorage,
-        shape: Vec<usize>,
+        shape: impl Into<HostShapeInput>,
     ) -> Result<Self, String> {
-        Ok(NumericTensorAdmission::from_numeric_storage(storage, shape)
-            .finish_synchronously()?
-            .into_tensor())
+        match shape.into() {
+            HostShapeInput::Owned(shape) => {
+                Ok(NumericTensorAdmission::from_numeric_storage(storage, shape)
+                    .finish_synchronously()?
+                    .into_tensor())
+            }
+            HostShapeInput::Shared(shape) => Self::from_shared_host_buffer(
+                HostNumericBuffer::from_numeric_storage(storage),
+                shape,
+            ),
+        }
     }
 
     pub fn new_2d(data: Vec<f64>, rows: usize, cols: usize) -> Result<Self, String> {
         Self::new(data, vec![rows, cols])
     }
 
-    pub fn from_f32(data: Vec<f32>, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn from_f32(data: Vec<f32>, shape: impl Into<HostShapeInput>) -> Result<Self, String> {
         Self::from_numeric_storage(NumericStorage::F32(data), shape)
     }
 
@@ -38,9 +44,10 @@ impl Tensor {
 
     pub fn new_with_dtype(
         data: Vec<f64>,
-        shape: Vec<usize>,
+        shape: impl Into<HostShapeInput>,
         dtype: NumericDType,
     ) -> Result<Self, String> {
+        let shape = shape.into();
         match dtype {
             NumericDType::F64 => Self::from_numeric_storage(NumericStorage::F64(data), shape),
             NumericDType::F32 => Self::from_numeric_storage(
@@ -60,7 +67,10 @@ impl Tensor {
     }
 
     /// Construct a tensor backed by an exact homogeneous integer buffer.
-    pub fn new_integer(storage: IntegerStorage, shape: Vec<usize>) -> Result<Self, String> {
+    pub fn new_integer(
+        storage: IntegerStorage,
+        shape: impl Into<HostShapeInput>,
+    ) -> Result<Self, String> {
         Self::from_numeric_storage(NumericStorage::from_integer_storage(storage), shape)
     }
 
@@ -72,15 +82,37 @@ impl Tensor {
         &self.storage
     }
 
-    pub fn from_host_buffer(storage: HostNumericBuffer, shape: Vec<usize>) -> Result<Self, String> {
-        Ok(NumericTensorAdmission::from_host_buffer(storage, shape)
-            .finish_synchronously()?
-            .into_tensor())
+    pub fn from_host_buffer(
+        storage: HostNumericBuffer,
+        shape: impl Into<HostShapeInput>,
+    ) -> Result<Self, String> {
+        match shape.into() {
+            HostShapeInput::Owned(shape) => {
+                Ok(NumericTensorAdmission::from_host_buffer(storage, shape)
+                    .finish_synchronously()?
+                    .into_tensor())
+            }
+            HostShapeInput::Shared(shape) => Self::from_shared_host_buffer(storage, shape),
+        }
+    }
+
+    /// Reuses an already admitted shape owner without materializing a second
+    /// dimension vector or retaining the source payload's quota claim.
+    pub fn from_shared_host_buffer(
+        storage: HostNumericBuffer,
+        shape: SharedShape,
+    ) -> Result<Self, String> {
+        let tensor = Self { shape, storage };
+        tensor.validate_shape()?;
+        Ok(tensor)
     }
 
     pub(super) fn from_validated_parts(parts: ValidatedNumericTensorParts) -> Self {
         let (storage, shape, _, _) = parts.into_components();
-        Self { storage, shape }
+        Self {
+            storage,
+            shape: SharedShape::new_unmanaged(shape),
+        }
     }
 
     pub fn numeric_dtype(&self) -> NumericDType {
@@ -163,6 +195,24 @@ impl Tensor {
         Ok(self)
     }
 
+    /// Installs shape metadata admitted by the *current* operation. The
+    /// source tensor's retained claim does not authorize this new shape.
+    pub fn reshape_with_shared_shape(&mut self, shape: SharedShape) -> Result<(), String> {
+        let class = self.numeric_dtype().class_name();
+        let expected = BorrowedShapeAdmission::new(&shape).finish_synchronously(|dimensions| {
+            format!("{class} tensor shape {dimensions:?} overflows usize")
+        })?;
+        if expected != self.len() {
+            return Err(format!(
+                "{class} tensor data length {} doesn't match shape {:?} ({expected} elements)",
+                self.len(),
+                shape
+            ));
+        }
+        self.shape = shape;
+        Ok(())
+    }
+
     /// Atomically replace shape metadata after canonical checked admission.
     ///
     /// A failed admission leaves both the payload and existing dimensions
@@ -199,7 +249,7 @@ impl Tensor {
 
     fn apply_validated_shape(&mut self, shape: ValidatedShape) {
         let (shape, _, _) = shape.into_components();
-        self.shape = shape;
+        self.shape = SharedShape::new_unmanaged(shape);
     }
 
     pub fn zeros(shape: Vec<usize>) -> Self {
@@ -232,6 +282,12 @@ impl Tensor {
     /// Borrows the authoritative column-major dimensions.
     pub fn shape(&self) -> &[usize] {
         &self.shape
+    }
+
+    /// Share the immutable dimension allocation with another value. This
+    /// carries only the shape claim, never this tensor's payload claim.
+    pub fn shared_shape(&self) -> SharedShape {
+        self.shape.clone()
     }
 
     #[cfg(test)]

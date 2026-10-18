@@ -1,6 +1,7 @@
 //! Frame-owned persistent aliases. Stack operands remain evaluated snapshots;
 //! only an aliasing variable slot is refreshed from canonical session storage.
 
+use crate::interpreter::vars::InterpreterVars;
 use runmat_runtime::{workspace::session::SessionVariableAuthority, RuntimeError};
 use runmat_value::Value;
 use std::cell::{Cell, RefCell};
@@ -139,7 +140,7 @@ fn publish(
 
 pub(crate) fn declare(
     aliases: &mut PersistentAliases,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     authority: &SessionVariableAuthority,
     function: &str,
     slot: usize,
@@ -163,7 +164,7 @@ pub(crate) fn declare(
 
 pub(crate) fn refresh(
     aliases: &PersistentAliases,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     authority: &SessionVariableAuthority,
     _function: &str,
     slot: usize,
@@ -195,7 +196,7 @@ pub(crate) fn refresh(
 
 pub(crate) fn publish_store(
     aliases: &PersistentAliases,
-    vars: &[Value],
+    vars: &InterpreterVars,
     authority: &SessionVariableAuthority,
     _function: &str,
     slot: usize,
@@ -215,7 +216,7 @@ pub(crate) fn publish_store(
 /// newly declared, never-written persistent absent from canonical storage.
 pub(crate) fn finish_success(
     aliases: &PersistentAliases,
-    vars: &mut Vec<Value>,
+    vars: &mut InterpreterVars,
     authority: &SessionVariableAuthority,
     _function: &str,
 ) -> Result<(), RuntimeError> {
@@ -262,12 +263,14 @@ fn empty_workspace_value() -> Value {
     )
 }
 
-fn set_slot(vars: &mut Vec<Value>, slot: usize, value: Value) {
+fn set_slot(vars: &mut InterpreterVars, slot: usize, value: Value) {
     if slot >= vars.len() {
-        vars.resize(slot + 1, Value::Num(0.0));
+        vars.resize_owned(slot + 1, Value::Num(0.0));
     }
-    vars[slot] = value;
-    crate::runtime::workspace::refresh_workspace_slot(slot, &vars[slot]);
+    let _retired = vars
+        .replace_owned(slot, value)
+        .expect("slot was resized before replacement");
+    crate::runtime::workspace::refresh_workspace_slot_from_vars(slot, vars);
 }
 
 #[cfg(test)]

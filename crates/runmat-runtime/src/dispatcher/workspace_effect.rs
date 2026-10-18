@@ -9,8 +9,9 @@ use runmat_value::ValueSequence;
 
 /// Retains the exact workspace port selected for one contextual call and
 /// reconciles reentrant effects before execution resumes in its caller.
-pub(super) struct PostCallWorkspaceEffectFence {
+pub(super) struct PostCallWorkspaceEffectFence<'a> {
     workspace: Option<Rc<dyn RuntimeWorkspaceService>>,
+    context: Option<&'a RuntimeContext>,
 }
 
 /// Whether the entire outer boundary is attributable to its selected call.
@@ -23,10 +24,11 @@ pub(super) enum PostCallObservationOutcome {
     Unattributable,
 }
 
-impl PostCallWorkspaceEffectFence {
-    pub(super) fn capture(context: Option<&RuntimeContext>) -> Self {
+impl<'a> PostCallWorkspaceEffectFence<'a> {
+    pub(super) fn capture(context: Option<&'a RuntimeContext>) -> Self {
         Self {
             workspace: context.and_then(|context| context.service_ports().workspace().cloned()),
+            context,
         }
     }
 
@@ -205,7 +207,10 @@ impl PostCallWorkspaceEffectFence {
     fn checkpoint(&self) -> Result<(), RuntimeError> {
         self.workspace
             .as_ref()
-            .map_or(Ok(()), |workspace| workspace.ensure_effect_authority())
+            .map_or(Ok(()), |workspace| match self.context {
+                Some(context) => workspace.ensure_effect_authority_with_context(context),
+                None => workspace.ensure_effect_authority(),
+            })
     }
 }
 
@@ -309,10 +314,19 @@ mod tests {
     struct CollectingWorkspace {
         initial_roots: std::cell::RefCell<Option<Vec<runmat_gc::ExplicitRoot>>>,
         retained_during_checkpoint: std::cell::Cell<bool>,
+        expected_context: std::cell::Cell<Option<crate::context::RuntimeContextLocalId>>,
         handles: Vec<runmat_gc::GcHandle>,
     }
 
     impl RuntimeWorkspaceService for CollectingWorkspace {
+        fn ensure_effect_authority_with_context(
+            &self,
+            context: &RuntimeContext,
+        ) -> Result<(), RuntimeError> {
+            assert_eq!(self.expected_context.get(), Some(context.local_identity()));
+            self.ensure_effect_authority()
+        }
+
         fn lookup(&self, _name: &str) -> Option<Value> {
             None
         }
@@ -368,9 +382,11 @@ mod tests {
             let service = Rc::new(CollectingWorkspace {
                 initial_roots: std::cell::RefCell::new(Some(vec![initial, second])),
                 retained_during_checkpoint: std::cell::Cell::new(false),
+                expected_context: std::cell::Cell::new(None),
                 handles: vec![handle, second_handle],
             });
             let runtime = runtime_with_workspace(service.clone());
+            service.expected_context.set(Some(runtime.local_identity()));
             let result = ValueSequence::comma_separated(vec![
                 Value::HandleObject(HandleRef {
                     class_name: "PostCallFenceFixture".into(),

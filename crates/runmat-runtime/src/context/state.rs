@@ -50,6 +50,9 @@ pub struct RuntimeContextState {
     pub(crate) call: RefCell<CallState>,
     pub(crate) workspace: RefCell<Option<crate::workspace::WorkspaceResolver>>,
     pub(crate) session_variables: RefCell<crate::workspace::session::SessionVariableState>,
+    /// Inline reservation for one prepared session-global mutation. It sits
+    /// outside the RefCell so cancellation/drop can release it during reads.
+    pub(crate) session_global_mutation: crate::workspace::session::SessionMutationGate,
     pub(crate) warnings: RefCell<Vec<crate::warning_store::RuntimeWarning>>,
     pub(crate) warning_policy: RefCell<crate::warnings::WarningPolicy>,
     pub(crate) timing: RefCell<super::timing::TimingSessionState>,
@@ -97,6 +100,7 @@ impl RuntimeContextState {
             session_variables: RefCell::new(
                 crate::workspace::session::SessionVariableState::default(),
             ),
+            session_global_mutation: crate::workspace::session::SessionMutationGate::default(),
             warnings: RefCell::new(Vec::new()),
             warning_policy: RefCell::new(crate::warnings::WarningPolicy::default()),
             timing: RefCell::new(super::timing::TimingSessionState::default()),

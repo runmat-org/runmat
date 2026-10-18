@@ -257,7 +257,7 @@ pub async fn probe_real_extrema_observed(
                     builtin,
                     "reduce_max",
                     failure.after_effect(),
-                ))
+                ));
             }
         }
     }

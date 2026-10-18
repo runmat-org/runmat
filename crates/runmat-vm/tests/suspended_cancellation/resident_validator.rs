@@ -229,10 +229,17 @@ fn run_case(terminal: Terminal) {
                     .iter()
                     .find_map(|(slot, name)| (name == "x").then_some(*slot))
                     .unwrap();
-                let Value::GpuTensor(handle) = &completion.values[slot] else {
-                    panic!("successful validator must return the resident argument");
+                let handle = {
+                    let value = completion
+                        .values
+                        .get(slot)
+                        .expect("completed resident value remains in its compiled slot");
+                    let Value::GpuTensor(handle) = &*value else {
+                        panic!("successful validator must return the resident argument");
+                    };
+                    handle.clone()
                 };
-                published = Some(handle.clone());
+                published = Some(handle);
             } else {
                 assert!(result.is_err(), "download failure must remain an error");
             }

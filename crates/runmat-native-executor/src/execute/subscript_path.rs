@@ -4,7 +4,7 @@ use runmat_runtime::object::indexing::{ObjectIndexSelector, ObjectSubscript, Obj
 use runmat_runtime::sequence::ResolveValueSequence;
 use runmat_value::Value;
 
-use super::operand::materialize_operand;
+use super::operand::{materialize_operand, materialize_retained_operand};
 use super::state::HostState;
 use crate::memory::ScopedValueRoots;
 use crate::{NativeExecutorError, NativeExecutorResult};
@@ -25,17 +25,9 @@ pub(super) fn read(
     chain.validate().map_err(|error| {
         NativeExecutorError::Host(format!("invalid MIR subscript chain: {error}"))
     })?;
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = read_inner(state, chain, requested_outputs, embedded.as_ref());
-    if let Ok(outputs) = &result {
-        state.cache_embedded_call(embedded.as_ref(), outputs);
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(outputs), Ok(())) => Ok(outputs),
-    }
+    state.settle_embedded_result(embedded.as_ref(), result, Vec::as_slice)
 }
 
 fn read_inner(
@@ -47,7 +39,25 @@ fn read_inner(
     if let Some(outputs) = super::call_suspension::take_completed_subscript_path(state, embedded)? {
         return Ok(outputs);
     }
-    let mut root = materialize_operand(state, &chain.root)?;
+    let retains_inputs = chain.steps.iter().any(|step| match step {
+        MirSubscriptStep::PreparedDynamicMember(_) => true,
+        MirSubscriptStep::Index(indexing) => indexing.components.iter().any(|component| {
+            matches!(
+                component,
+                runmat_mir::MirIndexComponent::ContextualExpr(_)
+                    | runmat_mir::MirIndexComponent::PreparedExpr(_)
+            )
+        }),
+        MirSubscriptStep::DottedInvoke { arguments, .. } => arguments
+            .iter()
+            .any(|argument| !matches!(argument, runmat_mir::MirDottedInvokeArgument::Colon)),
+        MirSubscriptStep::Member(_) | MirSubscriptStep::DynamicMember(_) => false,
+    });
+    let mut root = if retains_inputs {
+        materialize_retained_operand(state, &chain.root)?.1
+    } else {
+        materialize_operand(state, &chain.root)?
+    };
     let access = frame_access(state)?;
     let mut steps = Vec::new();
     for (step_index, step) in chain.steps.iter().enumerate() {
@@ -56,18 +66,39 @@ fn read_inner(
                 steps.push(ObjectSubscript::member(member.clone()));
             }
             MirSubscriptStep::DynamicMember(member) => {
-                let member =
-                    String::try_from(&materialize_operand(state, member)?).map_err(|error| {
-                        NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
-                            "DynamicFieldName",
-                            error,
-                        ))
-                    })?;
+                let member_value = if retains_inputs {
+                    materialize_retained_operand(state, member)?.1
+                } else {
+                    materialize_operand(state, member)?
+                };
+                let member = String::try_from(&member_value).map_err(|error| {
+                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
+                        "DynamicFieldName",
+                        error,
+                    ))
+                })?;
+                steps.push(ObjectSubscript::member(member));
+            }
+            MirSubscriptStep::PreparedDynamicMember(region) => {
+                let value = super::indexing::materialize_prepared_expression_region(state, region)?;
+                let member = String::try_from(&value).map_err(|error| {
+                    NativeExecutorError::from(runmat_runtime::runtime_error::semantic_error(
+                        "DynamicFieldName",
+                        error,
+                    ))
+                })?;
                 steps.push(ObjectSubscript::member(member));
             }
             MirSubscriptStep::Index(indexing) => {
-                let materialized =
-                    materialize_selectors(state, step_index, &root, &steps, indexing, &access)?;
+                let materialized = materialize_selectors(
+                    state,
+                    step_index,
+                    &root,
+                    &steps,
+                    indexing,
+                    &access,
+                    retains_inputs,
+                )?;
                 if let Some(receiver) = materialized.prepared_receiver {
                     root = receiver;
                     steps.clear();

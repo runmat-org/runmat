@@ -206,7 +206,9 @@ mod tests {
             }],
         )
         .expect("host path is local presentation only");
-        let fork = bound.fork_parallel_lab(crate::context::RuntimeServicePorts::default());
+        let fork = bound
+            .fork_parallel_lab(crate::context::RuntimeServicePorts::default())
+            .expect("idle session fork");
         assert_eq!(fork.portable_program_source_map(), Some(&map()));
         assert_eq!(
             super::super::source_info_in_context(

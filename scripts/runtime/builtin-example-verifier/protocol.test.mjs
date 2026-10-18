@@ -12,6 +12,7 @@ import { buildExecutionMatrix, validateExecutionMatrix } from "./execution-matri
 import { buildPlan, PLAN_SCHEMA, TOPOLOGY_SCHEMA, validatePlan } from "./plan.mjs";
 import { buildProductProbe, DESKTOP_HOST_PROTOCOL_PROBE, NATIVE_EMBEDDED_AOT_PROBE, runDesktopHostProtocolProbe, runNativeEmbeddedAotProbe, validateProductProbe } from "./product-probe.mjs";
 import { stageNativeProduct } from "./product-staging.mjs";
+import { NOTICE_FILE_NAME, thirdPartyNoticeBytes } from "../../distribution/third-party-notices.cjs";
 import { reconcileShardResults, validateReconciliation } from "./reconcile.mjs";
 import { buildShardResult, validateShardResult } from "./result-manifest.mjs";
 import { executeShard, normalizeRunnerRecords } from "./runner-process.mjs";
@@ -303,8 +304,9 @@ test("native product staging preserves the executable and closes Windows depende
         writeFileSync(join(first, "runtime.dll"), "same");
         writeFileSync(join(second, "RUNTIME.DLL"), "different");
         const staged = stageNativeProduct({ binary, destination: join(directory, "product"), dependencyDirectories: [first] });
-        assert.equal(staged.fileCount, 2);
+        assert.equal(staged.fileCount, 3);
         assert.equal(readFileSync(join(staged.destination, "runtime.dll"), "utf8"), "same");
+        assert.deepEqual(readFileSync(join(staged.destination, NOTICE_FILE_NAME)), thirdPartyNoticeBytes());
         assert.throws(() => stageNativeProduct({ binary, destination: join(directory, "conflict"), dependencyDirectories: [first, second] }), /Conflicting native dependency bytes/);
     } finally {
         rmSync(directory, { recursive: true, force: true });

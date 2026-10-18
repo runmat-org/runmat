@@ -58,6 +58,15 @@ pub(crate) fn is_empty_placeholder(literal: &LiteralValue) -> bool {
     }
 }
 
+/// A known zero in the selected reduction axis is invalid, including vecdim.
+/// Unknown controls stay dynamic; a pairwise second operand is never an axis.
+pub(crate) fn has_literal_zero_axis(literal: &LiteralValue) -> bool {
+    match literal {
+        LiteralValue::Vector(values) => values.iter().any(has_literal_zero_axis),
+        other => ResolveContext::numeric_from_literal(other) == Some(0.0),
+    }
+}
+
 pub(super) fn admitted_literal_controls(
     argument_count: usize,
     context: &ResolveContext,

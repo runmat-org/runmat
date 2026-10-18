@@ -40,11 +40,12 @@ fn materialize_call_region(
     state: &mut HostState,
     region: &MirCallArgumentRegion,
 ) -> NativeExecutorResult<Vec<Value>> {
-    let (ordinal, next_step, completed) = state.enter_contextual_region();
+    let (ordinal, next_step, completed) = state.enter_contextual_region()?;
     if let Some(references) = completed {
         return references
-            .into_iter()
-            .map(|reference| state.arena.get(reference).cloned())
+            .as_slice()
+            .iter()
+            .map(|reference| state.arena.get(*reference).cloned())
             .collect();
     }
     let result = (|| {
@@ -55,18 +56,16 @@ fn materialize_call_region(
             next_step,
         )?;
         let argument_step = region.steps.len();
-        state.enter_contextual_step(ordinal, argument_step);
+        state.enter_contextual_step(ordinal, argument_step)?;
         let values = super::super::call::materialize_arguments(
             state,
             std::slice::from_ref(&region.argument),
         )?;
         state.finish_contextual_step(ordinal, argument_step, argument_step + 1)?;
-        let references = values
-            .iter()
-            .cloned()
-            .map(|value| state.arena.insert(value))
-            .collect();
-        state.finish_contextual_region(ordinal, references);
+        // These references exist only to replay the completed argument region;
+        // the returned Values are detached clones. Transfer their initial arena
+        // ownership to the expression-region state for exact site retirement.
+        state.finish_owned_contextual_values(ordinal, &values)?;
         Ok(values)
     })();
     if result.is_err() && !matches!(&result, Err(NativeExecutorError::CallSuspended)) {
@@ -75,7 +74,7 @@ fn materialize_call_region(
                 Some(*destination)
             }
             runmat_mir::MirExpressionStep::Let { .. } => None,
-        }));
+        }))?;
     }
     result
 }

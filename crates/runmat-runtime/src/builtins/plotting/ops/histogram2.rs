@@ -610,15 +610,8 @@ fn render_histogram2(
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
-    let render_result = render_active_plot(
-        NAME,
-        PlotRenderOptions {
-            title: "Histogram2",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
-        move |figure, axes| {
+    let render_result =
+        render_active_plot(NAME, PlotRenderOptions::default(), move |figure, axes| {
             let plot_index = figure.add_surface_plot_on_axes(
                 surface.take().expect("histogram2 plot consumed once"),
                 axes,
@@ -626,8 +619,7 @@ fn render_histogram2(
             figure.set_axes_colorbar_enabled(axes, true);
             *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
-        },
-    );
+        });
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };

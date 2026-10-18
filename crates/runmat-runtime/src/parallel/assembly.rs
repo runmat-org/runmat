@@ -148,7 +148,7 @@ pub(crate) fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::Tensor(value) => Some(value.shape().to_vec()),
         Value::ComplexTensor(value) => Some(value.shape().to_vec()),
         Value::SparseTensor(value) => Some(value.shape()),
-        Value::LogicalArray(value) => Some(value.shape.clone()),
+        Value::LogicalArray(value) => Some(value.shape.to_vec()),
         Value::Cell(value) => Some(value.shape.clone()),
         _ => None,
     }

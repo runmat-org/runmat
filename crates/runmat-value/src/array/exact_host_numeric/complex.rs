@@ -1,7 +1,7 @@
-//! Exact interleaved complex output with one retained physical quota claim.
+//! Exact interleaved complex output with independent payload and shape claims.
 
 use super::{
-    exact_shape, ExactHostAllocationPermit, ExactHostNumericAllocationError, RustExactRelease,
+    ExactHostAllocationPermit, ExactHostNumericAllocationError, RustExactRelease, SharedShape,
 };
 use crate::{
     AdoptedHostAllocation, ComplexElement, ComplexStorage, ComplexTensor, HostAllocationProvenance,
@@ -12,13 +12,36 @@ use std::borrow::Cow;
 use std::ptr::NonNull;
 
 pub struct ExactHostComplexTensorAllocation {
+    shape: SharedShape,
     allocation: AdoptedHostAllocation,
     dtype: NumericDType,
     len: usize,
-    shape: Vec<usize>,
 }
 
 impl ExactHostComplexTensorAllocation {
+    /// Exact backing bytes for an ordinary Rust-owned complex tensor. No
+    /// release authority or retained-claim header exists on this path.
+    pub fn unmanaged_requested_bytes(
+        dtype: NumericDType,
+        shape: &[usize],
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        let count = shape
+            .iter()
+            .try_fold(1usize, |n, dim| n.checked_mul(*dim))
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
+        Self::unmanaged_requested_bytes_for_dimensions(dtype, count, shape.len())
+    }
+
+    pub fn unmanaged_requested_bytes_for_dimensions(
+        dtype: NumericDType,
+        count: usize,
+        rank: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        unmanaged_payload_bytes(dtype, count)?
+            .checked_add(SharedShape::requested_bytes_for_rank(rank)?)
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
     pub fn requested_bytes(
         dtype: NumericDType,
         shape: &[usize],
@@ -35,18 +58,15 @@ impl ExactHostComplexTensorAllocation {
         count: usize,
         rank: usize,
     ) -> Result<usize, ExactHostNumericAllocationError> {
-        let payload = payload_layout(dtype, count)?;
-        let metadata = match dtype {
-            NumericDType::F32 => HostComplexBuffer::<f32>::exact_metadata_bytes(),
-            NumericDType::F64 => HostComplexBuffer::<f64>::exact_metadata_bytes(),
-            _ => return Err(ExactHostNumericAllocationError::UnsupportedClass),
-        };
-        payload
-            .size()
-            .checked_add(Layout::new::<RustExactRelease>().size())
-            .and_then(|bytes| bytes.checked_add(metadata))
-            .and_then(|bytes| bytes.checked_add(Layout::array::<usize>(rank).ok()?.size()))
+        let payload_bytes = requested_payload_bytes(dtype, count)?;
+        payload_bytes
+            .checked_add(SharedShape::requested_bytes_for_rank(rank)?)
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+    }
+
+    /// Payload and shape each retain one claim from the supplied permit.
+    pub const fn retained_claim_count() -> usize {
+        2
     }
 
     pub fn new(
@@ -59,8 +79,9 @@ impl ExactHostComplexTensorAllocation {
             .try_fold(1usize, |n, dim| n.checked_mul(*dim))
             .ok_or(ExactHostNumericAllocationError::LayoutOverflow)?;
         let layout = payload_layout(dtype, len)?;
-        let charged = Self::requested_bytes(dtype, shape)?;
-        let claim = permit.reserve_exact_claim(charged)?;
+        let admitted_shape = SharedShape::new_admitted_from_slice(shape, permit)?;
+        let payload_bytes = requested_payload_bytes(dtype, len)?;
+        let claim = permit.reserve_exact_claim(payload_bytes)?;
         let release = RustExactRelease::try_new(layout, claim)?;
         let pointer = if layout.size() == 0 {
             match dtype {
@@ -80,10 +101,10 @@ impl ExactHostComplexTensorAllocation {
         };
         let allocation = unsafe { AdoptedHostAllocation::new_owned(pointer, provenance, release) };
         Ok(Self {
+            shape: admitted_shape,
             allocation,
             dtype,
             len,
-            shape: exact_shape(shape)?,
         })
     }
 
@@ -130,7 +151,7 @@ impl ExactHostComplexTensorAllocation {
             ),
             _ => unreachable!("admitted floating class"),
         };
-        ComplexTensor::from_complex_storage(storage, self.shape)
+        ComplexTensor::from_shared_host_buffer(storage, self.shape)
             .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
     }
 }
@@ -145,4 +166,35 @@ fn payload_layout(
         _ => return Err(ExactHostNumericAllocationError::UnsupportedClass),
     }
     .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)
+}
+
+fn requested_payload_bytes(
+    dtype: NumericDType,
+    count: usize,
+) -> Result<usize, ExactHostNumericAllocationError> {
+    let metadata = match dtype {
+        NumericDType::F32 => HostComplexBuffer::<f32>::exact_metadata_bytes(),
+        NumericDType::F64 => HostComplexBuffer::<f64>::exact_metadata_bytes(),
+        _ => return Err(ExactHostNumericAllocationError::UnsupportedClass),
+    };
+    payload_layout(dtype, count)?
+        .size()
+        .checked_add(Layout::new::<RustExactRelease>().size())
+        .and_then(|bytes| bytes.checked_add(metadata))
+        .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+}
+
+fn unmanaged_payload_bytes(
+    dtype: NumericDType,
+    count: usize,
+) -> Result<usize, ExactHostNumericAllocationError> {
+    let metadata = match dtype {
+        NumericDType::F32 => HostComplexBuffer::<f32>::exact_metadata_bytes(),
+        NumericDType::F64 => HostComplexBuffer::<f64>::exact_metadata_bytes(),
+        _ => return Err(ExactHostNumericAllocationError::UnsupportedClass),
+    };
+    payload_layout(dtype, count)?
+        .size()
+        .checked_add(metadata)
+        .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
 }

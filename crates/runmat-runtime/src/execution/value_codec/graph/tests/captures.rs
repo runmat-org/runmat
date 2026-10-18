@@ -100,7 +100,7 @@ fn admitted_nested_copies_and_anonymous_by_value_captures_round_trip() {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let (environment, _roots) = crate::call::lexical::allocate_environment(None).unwrap();
-        assert!(environment.reserve_owned_binding(BindingId(7)));
+        assert!(crate::call::lexical::reserve_owned_binding(&environment, BindingId(7)).unwrap());
         let nested = Value::Closure(Closure::from_data(runmat_value::ClosureData {
             function_name: "nested".into(),
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),

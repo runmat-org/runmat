@@ -1237,7 +1237,7 @@ fn sample_value_axis(
         }
         Value::LogicalArray(array) => sample_logical_axis(
             &array.data,
-            &normalize_shape(array.shape),
+            &normalize_shape(array.shape.to_vec()),
             axis,
             indices,
             name,
@@ -1266,7 +1266,7 @@ fn sample_value_axis(
 fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => Ok(normalize_shape(t.shape().to_vec())),
-        Value::LogicalArray(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::LogicalArray(a) => Ok(normalize_shape(a.shape.to_vec())),
         Value::StringArray(a) => Ok(normalize_shape(a.shape.clone())),
         Value::CharArray(a) => Ok(vec![a.rows, a.cols]),
         Value::Cell(a) => Ok(normalize_shape(a.shape.clone())),

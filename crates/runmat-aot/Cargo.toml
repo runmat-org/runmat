@@ -22,6 +22,7 @@ runmat-native-ffi = { workspace = true }
 runmat-mex = { workspace = true }
 runmat-java = { workspace = true }
 runmat-python = { workspace = true }
+runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-types = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -36,7 +37,6 @@ object = { version = "0.37.3", default-features = false, features = ["read", "st
 ar_archive_writer = "0.5.2"
 
 [dev-dependencies]
-runmat-runtime = { workspace = true, features = ["plot-core"] }
 object = { version = "0.37.3", default-features = false, features = ["write"] }
 ar_archive_writer = "0.5.2"
 

@@ -63,6 +63,22 @@ async fn vertcat_builtin(args: Vec<Value>) -> crate::BuiltinResult<crate::execut
     }
 }
 
+pub(crate) fn is_canonical_host_binding(binding: crate::builtin::RuntimeBuiltinBinding) -> bool {
+    binding.identity.builtin.name == "vertcat"
+        && binding.identity.variant == "default"
+        && std::ptr::fn_addr_eq(
+            binding.implementation,
+            __rt_wrap_vertcat_builtin as crate::builtin::RuntimeBuiltinImplementation,
+        )
+        && binding.continuation_layout.is_some_and(|layout| {
+            std::ptr::fn_addr_eq(
+                layout,
+                __rt_owned_layout_vertcat_builtin
+                    as crate::builtin::RuntimeBuiltinContinuationLayout,
+            )
+        })
+}
+
 fn empty_double() -> crate::BuiltinResult<Value> {
     Tensor::new(Vec::new(), vec![0, 0])
         .map(Value::Tensor)
@@ -84,6 +100,17 @@ fn adapt_cat_error(mut error: RuntimeError) -> RuntimeError {
     error.message = adjusted;
     error.context = error.context.with_builtin("vertcat");
     error
+}
+
+/// Selected pure-host literal path, using the same `cat` assembly and
+/// `vertcat` error translation as the async builtin route.
+pub(crate) fn concatenate_host_values(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    match args.len() {
+        0 => empty_double(),
+        1 => Ok(args.into_iter().next().expect("one argument")),
+        _ => crate::builtins::array::shape::cat::concatenate_host_values(0, args)
+            .map_err(adapt_cat_error),
+    }
 }
 
 #[cfg(test)]

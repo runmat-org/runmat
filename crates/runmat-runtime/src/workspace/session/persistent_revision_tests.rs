@@ -31,8 +31,16 @@ fn selected_persistent_authority_is_independent_of_ambient_context() {
     let second_initial = second_authority.persistent_revision().unwrap();
     {
         let _ambient_second = second.enter();
+        let wrong = first_authority
+            .store_persistent_named_with_context(&second, "f", "x", Value::Num(8.0))
+            .unwrap_err();
+        assert_eq!(wrong.identifier(), Some("RunMat:Workspace:SessionOwner"));
+        assert_eq!(
+            first_authority.persistent_revision().unwrap(),
+            first_initial
+        );
         first_authority
-            .store_persistent_named("f", "x", Value::Num(7.0))
+            .store_persistent_named_with_context(&first, "f", "x", Value::Num(7.0))
             .unwrap();
         assert_eq!(
             first_authority.persistent_named_value("f", "x").unwrap(),

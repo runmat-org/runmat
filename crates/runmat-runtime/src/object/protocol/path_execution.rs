@@ -14,8 +14,10 @@ use crate::RuntimeError;
 
 mod default_indexing;
 mod dotted_invoke;
+mod callable;
 mod owned;
 mod request;
+mod selected_paren;
 use default_indexing::{assign_default_steps, read_default_step, read_default_step_sequence};
 pub use owned::{
     execute_owned_subsasgn, execute_owned_subsasgn_in_context, execute_owned_subsasgn_with_context,
@@ -225,6 +227,65 @@ fn read_default_steps<'a>(
                     return Ok(sequence);
                 }
                 base = resolve_single(sequence)?;
+                continue;
+            }
+            // A prior brace/member read may have selected a callable value.
+            // Its following parentheses are an invocation, not numeric
+            // indexing of the handle. The selected receiver is never read or
+            // invoked again after this boundary.
+            if callable::is_callable_value(base.value())
+                && steps.front().is_some_and(|step| {
+                    step.kind() == crate::object::indexing::ObjectIndexKind::Paren
+                })
+            {
+                let step = steps.pop_front().ok_or_else(|| {
+                    semantic_error(
+                        "InvalidObjectSubscriptPath",
+                        "object subscript path is empty",
+                    )
+                })?;
+                let requested_outputs = if steps.is_empty() {
+                    request.known_requested_outputs()?.ok_or_else(|| {
+                        semantic_error(
+                            "SequenceOutputContextUnavailable",
+                            "callable invocation requires an explicit output count",
+                        )
+                    })?
+                } else {
+                    1
+                };
+                let arguments = callable::paren_arguments(step)?;
+                let sequence = base
+                    .with_owned_async(|target| {
+                        callable::invoke(runtime, target, arguments, requested_outputs)
+                    })
+                    .await?;
+                if steps.is_empty() {
+                    return Ok(sequence);
+                }
+                base = resolve_single(sequence)?;
+                continue;
+            }
+            if selected_paren::supports(base.value(), steps.front()) {
+                let step = steps.pop_front().ok_or_else(|| {
+                    semantic_error(
+                        "InvalidObjectSubscriptPath",
+                        "object subscript path is empty",
+                    )
+                })?;
+                let value = base
+                    .with_owned_async(|target| selected_paren::execute(target, step))
+                    .await?;
+                if steps.is_empty() {
+                    return value.try_map_owned(
+                        |value| {
+                            ValueSequence::single(value)
+                                .map_err(crate::sequence::sequence_error_to_runtime)
+                        },
+                        |error| error.into_runtime_error(),
+                    );
+                }
+                base = value;
                 continue;
             }
             let step = steps.pop_front().ok_or_else(|| {

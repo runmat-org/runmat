@@ -8,6 +8,8 @@ use crate::{input::LinkedAotProcessInput, AotProcessInput};
 
 #[path = "execute/linked_selected.rs"]
 mod linked_selected;
+#[path = "execute/acceleration.rs"]
+mod acceleration;
 
 pub fn execute(input: AotProcessInput) -> Result<(), String> {
     execute_with_linked_authority(input, false, std::ptr::null())
@@ -97,6 +99,7 @@ fn execute_with_linked_authority(
     if !function.abi.fixed_inputs.is_empty() || function.abi.varargin.is_some() {
         return Err("standalone entrypoint requires unsupported command-line inputs".into());
     }
+    acceleration::initialize_for_program(&program, &assembly, linked_selected.as_ref())?;
     let requested_outputs = function.abi.fixed_outputs.len();
     let native_id = runmat_types::ForeignAdapterId::new(runmat_native_ffi::NATIVE_FFI_ADAPTER_ID)
         .map_err(|error| error.to_string())?;
@@ -237,18 +240,20 @@ fn execute_with_linked_authority(
                     .iter()
                     .filter_map(|local| local.binding.zip(local.name.clone()))
                     .collect();
-                crate::program::invoke_workspace(
-                    Rc::clone(&executor),
-                    &program,
-                    entrypoint,
-                    NativeWorkspaceInput {
-                        local_names,
-                        ..NativeWorkspaceInput::default()
-                    },
-                    requested_outputs,
-                    runtime.clone(),
-                )
-                .await
+                match NativeWorkspaceInput::empty_for_context(&runtime, local_names) {
+                    Ok(workspace) => {
+                        crate::program::invoke_workspace(
+                            Rc::clone(&executor),
+                            &program,
+                            entrypoint,
+                            workspace,
+                            requested_outputs,
+                            runtime.clone(),
+                        )
+                        .await
+                    }
+                    Err(error) => Err(*error),
+                }
             } else {
                 crate::program::invoke(
                     Rc::clone(&executor),

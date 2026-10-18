@@ -8,7 +8,7 @@ use crate::{
 use super::{Certainty, Kind, Reason, Walker};
 
 impl Walker<'_> {
-    fn region(&mut self, from: &str, region: &crate::MirExpressionRegion) {
+    fn region(&mut self, from: &str, region: crate::MirExpressionRegionRef<'_>) {
         for step in region.steps() {
             match step {
                 crate::MirExpressionStep::Let { value, .. } => self.rvalue(from, value),
@@ -43,7 +43,10 @@ impl Walker<'_> {
                     self.operand(from, operand, Reason::FunctionHandle)
                 }
                 MirIndexComponent::ContextualExpr(region) => {
-                    self.region(from, region);
+                    self.region(from, crate::MirExpressionRegionRef::Contextual(region))
+                }
+                MirIndexComponent::PreparedExpr(region) => {
+                    self.region(from, crate::MirExpressionRegionRef::Prepared(region))
                 }
                 MirIndexComponent::Colon => {}
             }
@@ -221,9 +224,11 @@ impl Walker<'_> {
                             for argument in arguments {
                                 match argument {
                                     crate::MirDottedInvokeArgument::Colon => {}
-                                    crate::MirDottedInvokeArgument::Contextual(region) => {
-                                        self.region(from, region)
-                                    }
+                                    crate::MirDottedInvokeArgument::Contextual(region) => self
+                                        .region(
+                                            from,
+                                            crate::MirExpressionRegionRef::Contextual(region),
+                                        ),
                                     crate::MirDottedInvokeArgument::Call(region) => {
                                         for step in &region.steps {
                                             match step {
@@ -249,6 +254,9 @@ impl Walker<'_> {
                         }
                         crate::MirSubscriptStep::DynamicMember(member) => {
                             self.operand(from, member, Reason::FunctionHandle)
+                        }
+                        crate::MirSubscriptStep::PreparedDynamicMember(region) => {
+                            self.region(from, crate::MirExpressionRegionRef::Prepared(region))
                         }
                         crate::MirSubscriptStep::Member(_) => {}
                     }

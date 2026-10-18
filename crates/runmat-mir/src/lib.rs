@@ -48,4 +48,4 @@ pub use terminator::*;
 /// Portable schema for [`MirAssembly`] payloads retained in executable units.
 /// Version 14 identifies admitted incoming-workspace locals separately from
 /// newly declared locals so their entry initialization survives serialization.
-pub const MIR_SCHEMA_VERSION: u16 = 14;
+pub const MIR_SCHEMA_VERSION: u16 = 15;

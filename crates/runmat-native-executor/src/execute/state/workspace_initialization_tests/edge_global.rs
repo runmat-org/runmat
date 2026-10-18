@@ -100,7 +100,8 @@ fn inherited_global_alias_survives_every_edge_without_replaying_saved_ssa() {
                     case.argument(NativeLocalId(1), NativeValueId(41)),
                 ],
             );
-            runmat_runtime::workspace::session::store_global_named("x", Value::Num(1.0));
+            runmat_runtime::workspace::session::store_global_named("x", Value::Num(1.0))
+                .expect("store edge session global");
             let revision = runmat_runtime::workspace::session::global_revision();
             let (loop_iteration, transferred_value) = case.transfer(NativeLocalId(1), transferred);
             crate::execute::site::take_edge(

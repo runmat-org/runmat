@@ -98,7 +98,7 @@ mod provider;
 mod wgpu;
 
 fn mldivide_builtin(lhs: Value, rhs: Value) -> BuiltinResult<Value> {
-    block_on(super::mldivide_builtin(lhs, rhs))
+    block_on(super::mldivide_builtin(None, lhs, rhs))
 }
 
 fn mldivide_eval(lhs: &Value, rhs: &Value) -> BuiltinResult<Value> {

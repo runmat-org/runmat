@@ -17,19 +17,23 @@ impl MappedCallable {
             Value::ExternalFunctionHandle(name) => Ok(Self::resolve_name(name.into_name())),
             Value::BoundFunctionHandle(handle) => {
                 let data = handle.into_data();
-                Ok(Self::Closure(Closure::new(
-                    data.name,
-                    Some(runmat_value::BoundFunctionBinding {
-                        function: data.function,
-                        authority: data.authority,
-                    }),
-                    data.source_role,
-                    data.source_file,
-                    Vec::new(),
-                    None,
-                )))
+                Ok(Self::Closure(
+                    crate::call::descriptor::RetainedClosureValue::new(Closure::new(
+                        data.name,
+                        Some(runmat_value::BoundFunctionBinding {
+                            function: data.function,
+                            authority: data.authority,
+                        }),
+                        data.source_role,
+                        data.source_file,
+                        Vec::new(),
+                        None,
+                    )),
+                ))
             }
-            Value::Closure(closure) => Ok(Self::bind_closure(closure)),
+            Value::Closure(closure) => Ok(Self::Closure(
+                crate::call::descriptor::RetainedClosureValue::new(Self::bind_closure(closure)),
+            )),
             Value::Num(_) | Value::Int(_) | Value::Bool(_) => Err(CallableParseError::ScalarValue),
             value => Err(CallableParseError::UnsupportedValue(value)),
         }
@@ -50,14 +54,16 @@ impl MappedCallable {
 
     fn resolve_name(name: String) -> Self {
         if let Some(function) = user_functions::resolve_semantic_function_by_name(&name) {
-            return Self::Closure(Closure::new(
-                name,
-                Some(user_functions::bound_function_binding_for(function)),
-                user_functions::source_function_for(function)
-                    .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
-                user_functions::source_file_for(function),
-                Vec::new(),
-                None,
+            return Self::Closure(crate::call::descriptor::RetainedClosureValue::new(
+                Closure::new(
+                    name,
+                    Some(user_functions::bound_function_binding_for(function)),
+                    user_functions::source_function_for(function)
+                        .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
+                    user_functions::source_file_for(function),
+                    Vec::new(),
+                    None,
+                ),
             ));
         }
         if crate::is_well_formed_qualified_name(&name) {
@@ -70,21 +76,19 @@ impl MappedCallable {
             .unwrap_or(Self::DynamicName { name })
     }
 
-    fn bind_closure(closure: Closure) -> Self {
+    fn bind_closure(closure: Closure) -> Closure {
         if closure.binding.is_none() {
             if let Some(function) =
                 user_functions::resolve_semantic_function_by_name(&closure.function_name)
             {
-                return Self::Closure(
-                    closure.bind_resolved(
-                        user_functions::bound_function_binding_for(function),
-                        user_functions::source_function_for(function)
-                            .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
-                        user_functions::source_file_for(function),
-                    ),
+                return closure.bind_resolved(
+                    user_functions::bound_function_binding_for(function),
+                    user_functions::source_function_for(function)
+                        .map_or(runmat_types::FunctionSourceRole::Unknown, |info| info.role),
+                    user_functions::source_file_for(function),
                 );
             }
         }
-        Self::Closure(closure)
+        closure
     }
 }

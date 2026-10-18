@@ -207,7 +207,9 @@ fn real_store_rejection_and_caught_rejection_never_publish_reduction_feedback() 
             if caught {
                 result.expect("ordinary catch handles the real store failure");
                 assert_eq!(
-                    vars[caught_slot.expect("caught branch has slot")],
+                    *vars
+                        .get(caught_slot.expect("caught branch has slot"))
+                        .unwrap(),
                     Value::String("RunMat:TransientSequenceNotStorable".into()),
                     "catch must observe the checked StoreVar rejection"
                 );

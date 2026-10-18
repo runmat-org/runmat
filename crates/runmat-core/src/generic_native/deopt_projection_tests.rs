@@ -93,6 +93,9 @@ fn native_deopt_projection_releases_discarded_slots_on_success_and_output_error(
             )))
             .unwrap();
             let first = PROVIDER.outputs.lock().unwrap().len();
+            let runtime = unit
+                .bind_runtime_sources(session.runtime_context().clone())
+                .expect("bind exact projected native source for VM resume");
             let result = block_on(super::invoke_with_policy(
                 &unit,
                 super::DeoptimizationInvocation {
@@ -102,7 +105,7 @@ fn native_deopt_projection_releases_discarded_slots_on_success_and_output_error(
                     lexical_environment: None,
                     arguments: vec![Value::GpuTensor(input.clone())],
                     requested_outputs,
-                    runtime: session.runtime_context().clone(),
+                    runtime,
                     policy: DeoptimizationPolicy {
                         target: ResumeTarget::Interpreter,
                         ..Default::default()

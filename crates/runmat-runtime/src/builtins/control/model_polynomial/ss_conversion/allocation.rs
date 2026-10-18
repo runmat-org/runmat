@@ -1,7 +1,7 @@
 //! Checked, source-shape-derived host geometry for state polynomial work.
 use crate::context::host_allocation::{HostAllocationError, HostAllocationPlan};
 use num_complex::Complex64;
-use runmat_value::{ExactHostTensor2dAllocation, NumericDType, Value};
+use runmat_value::{NumericDType, Value};
 
 use super::{conversion_error, ConversionErrorKind, ConversionResult};
 use crate::BuiltinResult;
@@ -92,16 +92,13 @@ impl SsPolynomialGeometry {
             0
         } else {
             let numerator =
-                ExactHostTensor2dAllocation::requested_bytes(dtype, self.outputs, degree)?;
+                HostAllocationPlan::retained_tensor_bytes(dtype, &[self.outputs, degree])?;
             let denominator = if requested >= 2 {
-                ExactHostTensor2dAllocation::requested_bytes(dtype, 1, degree)?
+                HostAllocationPlan::retained_tensor_bytes(dtype, &[1, degree])?
             } else {
                 0
             };
-            add(
-                u64::try_from(numerator).map_err(|_| HostAllocationError::Overflow)?,
-                u64::try_from(denominator).map_err(|_| HostAllocationError::Overflow)?,
-            )?
+            add(numerator, denominator)?
         };
         HostAllocationPlan::new(scratch, output)
     }

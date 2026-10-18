@@ -51,6 +51,23 @@ pub(super) fn whole_work(
     )
 }
 
+/// Managed provider revision borrows program-domain contributions. The
+/// authority and policy are identical to the portable revision; only the
+/// temporary ownership of the program facts differs.
+pub(super) fn whole_work_ref<'a>(
+    program: Option<&'a ProgramRevision>,
+    provider: Digest,
+    config: PlacementSessionConfig,
+) -> PlacementRevisionRef<'a> {
+    PlacementRevisionRef {
+        program,
+        catalog: Digest::sha256(b"runmat-placement-catalog-v1"),
+        compiler: Digest::sha256(b"runmat-placement-compiler-v1"),
+        authority: PlacementExecutionAuthorityRevision::Provider(provider),
+        policy: whole_work_policy(config),
+    }
+}
+
 pub(super) fn whole_work_runtime_binding_session(
     program: Option<ProgramRevision>,
     authority: Digest,
@@ -111,6 +128,18 @@ pub(super) fn whole_work_host_service(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn borrowed_provider_revision_matches_portable_identity() {
+        let provider = Digest::sha256(b"provider");
+        let config = PlacementSessionConfig::default();
+        let owned = whole_work(None, provider, config);
+        let borrowed = whole_work_ref(None, provider, config);
+        assert_eq!(
+            serde_json::to_vec(&borrowed).unwrap(),
+            serde_json::to_vec(&owned).unwrap()
+        );
+    }
 
     #[test]
     fn borrowed_host_revision_and_streamed_policy_preserve_owned_wire_identity() {

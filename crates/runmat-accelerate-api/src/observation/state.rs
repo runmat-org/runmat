@@ -12,8 +12,15 @@ pub use resources::{
     ProviderResourceSnapshot, ProviderResourceTicket, ProviderScopedResourceSnapshot,
 };
 use wgpu_measurement::WgpuMeasurementAggregate;
-mod real_unary;
 mod compound;
+mod real_unary;
+mod stochastic_transfer;
+pub use stochastic_transfer::{
+    stochastic_evolution_source_transfer_retirement_host_upper_bytes,
+    StochasticEvolutionSourceTransferRetirement,
+    StochasticEvolutionSourceTransferRetirementNotifier,
+};
+mod host_metadata;
 
 struct State {
     compound: Option<compound::CompoundObservation>,
@@ -39,10 +46,21 @@ struct State {
     resources: ResourceState,
     waiter: Option<Waker>,
     resource_waiter: Option<Waker>,
+    operation_host_metadata:
+        Option<Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>>,
 }
 
 impl State {
     fn observation(&self, status: ProviderObservationStatus) -> ProviderOperationObservation {
+        let mut observation = self.timing_observation(status);
+        observation.resources = self.resources.snapshot();
+        observation
+    }
+
+    fn timing_observation(
+        &self,
+        status: ProviderObservationStatus,
+    ) -> ProviderOperationObservation {
         let wgpu = self.wgpu.snapshot(self.registered, status);
         ProviderOperationObservation {
             status,
@@ -52,7 +70,7 @@ impl State {
             verified_wgpu_dispatches: wgpu.dispatches,
             wgpu_query_allocations: wgpu.query_allocations,
             pipelines: self.pipelines,
-            resources: self.resources.snapshot(),
+            resources: None,
         }
     }
 
@@ -231,6 +249,7 @@ impl ProviderOperationReceipt {
                     resources: ResourceState::default(),
                     waiter: None,
                     resource_waiter: None,
+                    operation_host_metadata: None,
                 }),
                 clock,
                 budget,
@@ -523,6 +542,24 @@ impl ProviderOperationReceipt {
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<Option<ProviderOperationObservation>> {
+        self.poll_completion(cx, true)
+    }
+
+    /// Consume timing evidence without allocating a diagnostic resource
+    /// snapshot. Shares the ordinary completion authority and taken bit;
+    /// callers needing per-scope evidence must use `poll_completed` instead.
+    pub fn poll_completed_timing(
+        &mut self,
+        cx: &mut Context<'_>,
+    ) -> Poll<Option<ProviderOperationObservation>> {
+        self.poll_completion(cx, false)
+    }
+
+    fn poll_completion(
+        &mut self,
+        cx: &mut Context<'_>,
+        include_resources: bool,
+    ) -> Poll<Option<ProviderOperationObservation>> {
         let mut next = Some(cx.waker().clone());
         let (result, old) = self.0.with(|state| {
             if state.taken {
@@ -536,7 +573,12 @@ impl ProviderOperationReceipt {
                 );
             }
             state.taken = true;
-            (Poll::Ready(Some(state.observation(status))), None)
+            let observation = if include_resources {
+                state.observation(status)
+            } else {
+                state.timing_observation(status)
+            };
+            (Poll::Ready(Some(observation)), None)
         });
         drop(old);
         result
@@ -708,7 +750,10 @@ impl ProviderOperationRecorder {
         operation: &crate::ProviderOperationIdentity,
     ) {
         self.0.with(|state| {
-            if state.compound.is_some()
+            let compound_rejects = state.compound.as_ref().is_some_and(|compound| {
+                !compound.allows_provider_execution_confirmation(device_id)
+            });
+            if compound_rejects
                 || state.publication.is_some()
                 || state.taken
                 || state.provider_host_mediated_allowed

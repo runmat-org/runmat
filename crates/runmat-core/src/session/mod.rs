@@ -11,7 +11,6 @@ use runmat_runtime::{
     runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
 };
 use runmat_time::Instant;
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
@@ -80,6 +79,7 @@ mod run;
 mod s1_compiled_call_tests;
 pub(crate) mod semantic_definition;
 mod source_evaluation;
+mod source_scope;
 pub use source_evaluation::SelectedNativeSourceEvaluator;
 #[cfg(not(target_arch = "wasm32"))]
 mod tcp_host;
@@ -100,7 +100,7 @@ pub struct RunMatSession {
     /// Execution statistics
     stats: ExecutionStats,
     /// Current workspace bindings with stable ABI identity and current VM slot.
-    workspace_bindings: Rc<RefCell<HashMap<String, SessionWorkspaceBinding>>>,
+    workspace_bindings: workspace::binding_control::BindingControl,
     /// Canonical, rooted base-workspace state for this session. Executors use
     /// invocation-local slot projections and publish ordered mutations here.
     base_workspace: runmat_runtime::workspace::BaseWorkspaceOwner,
@@ -108,6 +108,8 @@ pub struct RunMatSession {
     abi_workspace_handle: crate::abi::WorkspaceHandle,
     /// Source identity for the active execution request (if source-scoped).
     active_source_identity: Option<crate::abi::SourceIdentity>,
+    /// One explicitly read, non-indexed project primary for this request only.
+    active_primary_source: Option<crate::executable::CapturedPrimarySource>,
     /// Semantic function registry persisted across interactive inputs.
     function_registry: runmat_vm::FunctionRegistry,
     next_semantic_function_id: usize,
@@ -269,10 +271,39 @@ impl PreparedExecution {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct SessionWorkspaceBinding {
     pub(crate) key: crate::abi::WorkspaceBindingKey,
     pub(crate) slot: usize,
+    _key_claim: Option<runmat_value::ExactHostAllocationClaim>,
+}
+
+impl SessionWorkspaceBinding {
+    #[cfg(test)]
+    fn unbounded(key: crate::abi::WorkspaceBindingKey, slot: usize) -> Self {
+        Self {
+            key,
+            slot,
+            _key_claim: None,
+        }
+    }
+
+    fn admitted(key: workspace::binding_key::RetainedBindingKey, slot: usize) -> Self {
+        let (key, claim) = key.into_parts();
+        Self {
+            key,
+            slot,
+            _key_claim: claim,
+        }
+    }
+
+    fn replace_key(&mut self, key: workspace::binding_key::RetainedBindingKey) {
+        let (key, claim) = key.into_parts();
+        let old_key = std::mem::replace(&mut self.key, key);
+        let old_claim = std::mem::replace(&mut self._key_claim, claim);
+        drop(old_key);
+        drop(old_claim);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -417,6 +448,7 @@ impl Drop for ActiveExecutionGuard {
 
 impl Drop for RunMatSession {
     fn drop(&mut self) {
+        self.workspace_bindings.close();
         self.retire_graphics_host();
         if let Some(callbacks) = self.graphics_callbacks.take() {
             callbacks.close();

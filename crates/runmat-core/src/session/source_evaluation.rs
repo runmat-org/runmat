@@ -363,7 +363,7 @@ impl SessionSourceEvaluator {
             .collect())
     }
 
-    pub(super) fn dynamic_admission_port(self: &Rc<Self>) -> runmat_vm::DynamicEvalAdmissionPort {
+    pub(super) fn dynamic_admission_port(&self) -> runmat_vm::DynamicEvalAdmissionPort {
         self.dynamic_admission_port_for(
             self.project_sources(),
             self.foreign_preparation(),
@@ -420,13 +420,13 @@ impl SessionSourceEvaluator {
     }
 
     fn dynamic_admission_port_for(
-        self: &Rc<Self>,
+        &self,
         project_sources: Option<Rc<ProjectSourceIdentityIndex>>,
         foreign_preparation: Option<ForeignPreparation>,
         foreign_issuance_source: Option<ForeignIssuanceSource>,
     ) -> runmat_vm::DynamicEvalAdmissionPort {
         runmat_vm::DynamicEvalAdmissionPort::new(Rc::new(CoreDynamicEvalAdmission::new(
-            Rc::downgrade(self),
+            self.self_weak.clone(),
             project_sources,
             foreign_preparation,
             foreign_issuance_source,
@@ -666,6 +666,31 @@ impl RuntimeSourceEvaluationService for SessionSourceEvaluator {
         };
         authority.evaluate(runtime, request)
     }
+
+    fn evaluate_dynamic_workspace<'a>(
+        &'a self,
+        runtime: &'a RuntimeContext,
+        invocation: runmat_runtime::context::DynamicWorkspaceInvocation<'a>,
+    ) -> Result<
+        runmat_runtime::execution::RuntimeContinuationFuture<
+            'a,
+            runmat_runtime::execution::RootedValueSequence,
+        >,
+        RuntimeError,
+    > {
+        self.ensure_runtime_owner(runtime)?;
+        let registry = self.current_generation().registry()?;
+        let admission = self.dynamic_admission_port();
+        runmat_runtime::execution::admit_dynamic_workspace_sequence(runtime, async move {
+            runmat_vm::evaluate_dynamic_workspace_in_context(
+                runtime,
+                invocation,
+                registry.as_ref(),
+                Some(admission),
+            )
+            .await
+        })
+    }
 }
 
 impl RuntimeSourceEvaluationService for BoundSessionSourceEvaluator {
@@ -705,6 +730,51 @@ impl RuntimeSourceEvaluationService for BoundSessionSourceEvaluator {
             });
         };
         authority.evaluate(runtime, request)
+    }
+
+    fn evaluate_dynamic_workspace<'a>(
+        &'a self,
+        runtime: &'a RuntimeContext,
+        invocation: runmat_runtime::context::DynamicWorkspaceInvocation<'a>,
+    ) -> Result<
+        runmat_runtime::execution::RuntimeContinuationFuture<
+            'a,
+            runmat_runtime::execution::RootedValueSequence,
+        >,
+        RuntimeError,
+    > {
+        let evaluator = self.evaluator.upgrade().ok_or_else(|| {
+            build_runtime_error("dynamic source session has ended")
+                .with_identifier("RunMat:DynamicEval:RetiredSession")
+                .build()
+        })?;
+        evaluator.ensure_runtime_owner(runtime)?;
+        let registry = self.generation.registry()?;
+        let admission = match &self.admission_scope {
+            AdmissionScope::Selected(admission) => admission.clone().ok_or_else(|| {
+                build_runtime_error("selected executable has no dynamic-source authority")
+                    .with_identifier("RunMat:DynamicEval:SourceUnavailable")
+                    .build()
+            })?,
+            AdmissionScope::Session {
+                project_sources,
+                foreign_preparation,
+                foreign_issuance_source,
+            } => evaluator.dynamic_admission_port_for(
+                project_sources.clone(),
+                foreign_preparation.clone(),
+                foreign_issuance_source.clone(),
+            ),
+        };
+        runmat_runtime::execution::admit_dynamic_workspace_sequence(runtime, async move {
+            runmat_vm::evaluate_dynamic_workspace_in_context(
+                runtime,
+                invocation,
+                registry.as_ref(),
+                Some(admission),
+            )
+            .await
+        })
     }
 }
 

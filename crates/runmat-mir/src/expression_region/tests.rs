@@ -85,6 +85,55 @@ fn validates_ordered_local_and_sequence_definitions() {
 }
 
 #[test]
+fn prepared_region_keeps_contextual_end_validation_distinct() {
+    let steps = vec![let_step(
+        1,
+        MirRvalue::Use(MirOperand::Constant(crate::MirConstant::Bool(true))),
+    )];
+    let result = MirOperand::Local(MirLocalId(1));
+    assert!(MirPreparedExpressionRegion {
+        steps: steps.clone(),
+        result: result.clone(),
+    }
+    .validate()
+    .is_ok());
+    assert!(MirExpressionRegion { steps, result }
+        .validate()
+        .unwrap_err()
+        .contains("does not depend on the indexing context"));
+
+    assert!(MirPreparedExpressionRegion {
+        steps: vec![let_step(1, MirRvalue::End)],
+        result: MirOperand::Local(MirLocalId(1)),
+    }
+    .validate()
+    .unwrap_err()
+    .contains("without its own indexing receiver"));
+
+    let nested_contextual = MirExpressionRegion {
+        steps: vec![let_step(3, MirRvalue::End)],
+        result: MirOperand::Local(MirLocalId(3)),
+    };
+    let owned_end = MirPreparedExpressionRegion {
+        steps: vec![let_step(
+            4,
+            MirRvalue::Index {
+                base: MirOperand::Constant(crate::MirConstant::EmptyArray),
+                indexing: crate::MirIndexing {
+                    kind: runmat_hir::IndexKind::Paren,
+                    plan: crate::MirIndexPlan::Scalar,
+                    components: vec![crate::MirIndexComponent::ContextualExpr(nested_contextual)],
+                    result_context: runmat_hir::IndexResultContext::ReadSingle,
+                    cell_expand_all: false,
+                },
+            },
+        )],
+        result: MirOperand::Local(MirLocalId(4)),
+    };
+    assert!(owned_end.validate().is_ok());
+}
+
+#[test]
 fn operand_traversal_includes_steps_sources_and_result() {
     let mut region = MirExpressionRegion {
         steps: vec![

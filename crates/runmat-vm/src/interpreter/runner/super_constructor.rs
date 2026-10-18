@@ -5,7 +5,7 @@ use super::{mex, Bytecode, FunctionRegistry, ProcessDriverHandle, VmResult};
 pub(super) async fn invoke_selected_bound(
     runtime: runmat_runtime::context::RuntimeContext,
     binding: runmat_value::BoundFunctionBinding,
-    args: runmat_runtime::execution::RootedValues,
+    args: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     registry: FunctionRegistry,
     driver: Option<ProcessDriverHandle>,
@@ -23,9 +23,9 @@ pub(super) async fn invoke_selected_bound(
             .as_ref()
             .is_none_or(|owner| owner.role != runmat_types::ClassMethodRole::Constructor)
     {
-        return super::invoke_semantic_function_value_with_capture_updates(
+        return super::invoke_semantic_function_with_rooted_captures(
             binding.function,
-            args.values(),
+            args,
             requested_outputs,
             &registry,
             runtime,
@@ -66,17 +66,16 @@ pub(super) async fn invoke_selected_bound(
         false
     };
     let runtime = product.invocation_runtime(runtime)?;
-    let args = std::rc::Rc::new(args);
-    let policy_args = std::rc::Rc::clone(&args);
+    let argument_count = args.supplied_count();
     let invocation_owner = owner.clone();
     let invoked_function = binding.function;
     let invoke: runmat_runtime::dispatcher::PreparedConstructorInvoke = Box::new(move |selected| {
         Box::pin(async move {
             let selected =
                 selected.with_constructor_receiver_for_method(Some(&invocation_owner))?;
-            super::invoke_semantic_function_value_with_capture_updates(
+            super::invoke_semantic_function_with_rooted_captures(
                 invoked_function,
-                args.values(),
+                args,
                 requested_outputs,
                 &registry,
                 selected,
@@ -88,21 +87,21 @@ pub(super) async fn invoke_selected_bound(
         })
     });
     if portable {
-        runmat_runtime::dispatcher::call_portable_prepared_constructor_sequence_in_context(
+        runmat_runtime::dispatcher::call_portable_prepared_constructor_sequence_with_argument_count_in_context(
             &runtime,
             owner,
             binding,
-            policy_args.values(),
+            argument_count,
             requested_outputs,
             invoke,
         )
         .await
     } else {
-        runmat_runtime::dispatcher::call_prepared_constructor_sequence_in_context(
+        runmat_runtime::dispatcher::call_prepared_constructor_sequence_with_argument_count_in_context(
             &runtime,
             owner,
             binding,
-            policy_args.values(),
+            argument_count,
             requested_outputs,
             invoke,
         )

@@ -25,7 +25,11 @@ pub(super) async fn dispatch(
             let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
             for slot in capture_slots {
                 crate::interpreter::dispatch::lexical::refresh(context, vars, *slot)?;
-                call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+                call_args.push(
+                    vars.get(*slot)
+                        .map(|value| value.clone())
+                        .unwrap_or(Value::Num(0.0)),
+                );
             }
             call_args.extend(args);
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
@@ -51,8 +55,9 @@ pub(super) async fn dispatch(
                 }
                 for (slot, value) in capture_slots.iter().zip(captures.into_iter()) {
                     if *slot < vars.len() {
-                        crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
-                        vars[*slot] = value;
+                        crate::runtime::workspace::commit_workspace_slot_value(
+                            vars, *slot, None, value,
+                        )?;
                     }
                 }
                 Ok::<_, RuntimeError>(())
@@ -68,12 +73,16 @@ pub(super) async fn dispatch(
             arg_count,
             out_count_slot,
         } => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             let args = crate::call::builtins::collect_call_args(stack, *arg_count)?;
             let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
             for slot in capture_slots {
                 crate::interpreter::dispatch::lexical::refresh(context, vars, *slot)?;
-                call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+                call_args.push(
+                    vars.get(*slot)
+                        .map(|value| value.clone())
+                        .unwrap_or(Value::Num(0.0)),
+                );
             }
             call_args.extend(args);
             let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
@@ -99,8 +108,9 @@ pub(super) async fn dispatch(
                 }
                 for (slot, value) in capture_slots.iter().zip(captures.into_iter()) {
                     if *slot < vars.len() {
-                        crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
-                        vars[*slot] = value;
+                        crate::runtime::workspace::commit_workspace_slot_value(
+                            vars, *slot, None, value,
+                        )?;
                     }
                 }
                 Ok::<_, RuntimeError>(())

@@ -1047,9 +1047,6 @@ fn render_fcontour(sampled: SampledFcontour, parsed: &ParsedFcontour) -> Builtin
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Function Contour",
-            x_label: "X",
-            y_label: "Y",
             axis_equal: true,
             ..Default::default()
         },

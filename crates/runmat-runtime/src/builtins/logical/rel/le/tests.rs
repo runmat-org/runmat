@@ -193,7 +193,7 @@ fn le_wgpu_matches_host() {
 
     match (cpu, gathered) {
         (Value::LogicalArray(host), tensor) => {
-            assert_eq!(tensor.shape(), host.shape);
+            assert_eq!(tensor.shape(), host.shape.as_slice());
             let expected: Vec<f64> = host
                 .data
                 .iter()

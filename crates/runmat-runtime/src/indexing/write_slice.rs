@@ -1,5 +1,5 @@
 use crate::builtins::common::tensor::{
-    self, complex_tensor_element_len, complex_tensor_values_complex64, tensor_element_len,
+    complex_tensor_element_len, complex_tensor_values_complex64, tensor_element_len,
     tensor_value_f64,
 };
 use crate::indexing::integer_assignment::{
@@ -167,6 +167,7 @@ pub(crate) fn delete_integer_complex_storage_positions(
 
 mod empty_rhs;
 mod growth;
+mod host_rhs;
 mod rhs_shape;
 use growth::{grow_complex_tensor, grow_numeric_tensor};
 use rhs_shape::{checked_assignment_element_count, validated_assignment_rhs_shape};
@@ -587,15 +588,23 @@ pub async fn materialize_rhs_real_for_plan(
     rhs: &Value,
     plan: &IndexPlan,
 ) -> Result<Vec<f64>, RuntimeError> {
+    let host_rhs = crate::dispatcher::gather_if_needed_async(rhs).await?;
+    materialize_rhs_real_for_plan_host(&host_rhs, plan)
+}
+
+pub fn materialize_rhs_real_for_plan_host(
+    rhs: &Value,
+    plan: &IndexPlan,
+) -> Result<Vec<f64>, RuntimeError> {
     if plan.dims == 1 {
         let count = plan.selection_lengths.first().copied().unwrap_or(0);
-        materialize_rhs_linear_real(rhs, count).await
+        materialize_rhs_linear_real_host(rhs, count)
     } else {
-        materialize_rhs_nd_real(rhs, &plan.selection_lengths).await
+        materialize_rhs_nd_real_host(rhs, &plan.selection_lengths)
     }
 }
 
-pub(crate) async fn materialize_integer_rhs_for_plan(
+fn materialize_integer_rhs_for_plan_host(
     rhs: &Value,
     plan: &IndexPlan,
 ) -> Result<Vec<IntegerAssignmentValue>, RuntimeError> {
@@ -607,20 +616,12 @@ pub(crate) async fn materialize_integer_rhs_for_plan(
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             materialize_integer_tensor_rhs_for_plan(tensor, plan)
         }
-        Value::GpuTensor(handle)
-            if runmat_accelerate_api::handle_integer_type(handle).is_some() =>
-        {
-            let tensor = download_integer_tensor(handle).await?;
-            materialize_integer_tensor_rhs_for_plan(&tensor, plan)
-        }
-        _ => materialize_rhs_real_for_plan(rhs, plan)
-            .await
-            .map(|values| {
-                values
-                    .into_iter()
-                    .map(IntegerAssignmentValue::Float)
-                    .collect()
-            }),
+        _ => materialize_rhs_real_for_plan_host(rhs, plan).map(|values| {
+            values
+                .into_iter()
+                .map(IntegerAssignmentValue::Float)
+                .collect()
+        }),
     }
 }
 
@@ -645,7 +646,7 @@ fn materialize_integer_tensor_rhs_for_plan(
         .collect()
 }
 
-async fn materialize_complex_integer_rhs_for_plan(
+fn materialize_complex_integer_rhs_for_plan_host(
     rhs: &Value,
     plan: &IndexPlan,
 ) -> Result<Vec<ComplexIntegerAssignmentValue>, RuntimeError> {
@@ -687,17 +688,15 @@ async fn materialize_complex_integer_rhs_for_plan(
             };
             materialize_complex_integer_values_for_plan(values, tensor.shape(), plan)
         }
-        _ => materialize_integer_rhs_for_plan(rhs, plan)
-            .await
-            .map(|values| {
-                values
-                    .into_iter()
-                    .map(|real| ComplexIntegerAssignmentValue {
-                        real,
-                        imag: IntegerAssignmentValue::Float(0.0),
-                    })
-                    .collect()
-            }),
+        _ => materialize_integer_rhs_for_plan_host(rhs, plan).map(|values| {
+            values
+                .into_iter()
+                .map(|real| ComplexIntegerAssignmentValue {
+                    real,
+                    imag: IntegerAssignmentValue::Float(0.0),
+                })
+                .collect()
+        }),
     }
 }
 
@@ -775,6 +774,29 @@ pub async fn assign_sparse_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if !matches!(rhs, Value::GpuTensor(_)) || plan.indices.is_empty() || sparse.is_complex() {
+        return assign_sparse_with_plan_host(sparse, plan, rhs);
+    }
+    preflight_sparse_assignment(&sparse, plan, rhs)?;
+    let sparse = expand_sparse_for_plan(sparse, plan)?;
+    let host_rhs = gather_assignment_rhs(rhs, sparse.integer_storage().is_some()).await?;
+    apply_sparse_assignment_host(sparse, plan, &host_rhs)
+}
+
+async fn gather_assignment_rhs(rhs: &Value, integer_target: bool) -> Result<Value, RuntimeError> {
+    if let Value::GpuTensor(handle) = rhs {
+        if integer_target && runmat_accelerate_api::handle_integer_type(handle).is_some() {
+            return download_integer_tensor(handle).await.map(Value::Tensor);
+        }
+    }
+    crate::dispatcher::gather_if_needed_async(rhs).await
+}
+
+fn preflight_sparse_assignment(
+    sparse: &SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<(), RuntimeError> {
     if sparse.integer_storage().is_some() {
         crate::compatibility::ensure_sparse_integer_extension_enabled("indexed assignment")?;
     }
@@ -787,22 +809,46 @@ pub async fn assign_sparse_with_plan(
         ));
     }
     if plan.indices.is_empty() {
-        empty_rhs::validate_sparse_rhs(&sparse, rhs, plan)?;
+        empty_rhs::validate_sparse_rhs(sparse, rhs, plan)?;
     }
+    Ok(())
+}
+
+pub fn assign_sparse_with_plan_host(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    preflight_sparse_assignment(&sparse, plan, rhs)?;
+    let sparse = expand_sparse_for_plan(sparse, plan)?;
+    apply_sparse_assignment_host(sparse, plan, rhs)
+}
+
+fn expand_sparse_for_plan(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+) -> Result<SparseTensor, RuntimeError> {
     let target_rows = plan.base_shape.first().copied().unwrap_or(sparse.rows);
     let target_cols = plan.base_shape.get(1).copied().unwrap_or(sparse.cols);
-    let sparse = if target_rows != sparse.rows || target_cols != sparse.cols {
+    if target_rows != sparse.rows || target_cols != sparse.cols {
         sparse
             .with_expanded_shape(target_rows, target_cols)
-            .map_err(|error| map_slice_shape_error("sparse slice expansion", error))?
+            .map_err(|error| map_slice_shape_error("sparse slice expansion", error))
     } else {
-        sparse
-    };
+        Ok(sparse)
+    }
+}
+
+fn apply_sparse_assignment_host(
+    sparse: SparseTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
         return Ok(Value::SparseTensor(sparse));
     }
     let updated = if sparse.is_logical() {
-        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -813,7 +859,7 @@ pub async fn assign_sparse_with_plan(
             .with_updated_logical_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else if let Some(storage) = sparse.integer_storage() {
-        let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_integer_rhs_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -841,7 +887,7 @@ pub async fn assign_sparse_with_plan(
             .with_updated_complex_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else if sparse.numeric_dtype() == Some(NumericDType::F32) {
-        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -852,7 +898,7 @@ pub async fn assign_sparse_with_plan(
             .with_updated_f32_linear_values(&updates)
             .map_err(|error| map_slice_shape_error("sparse slice assign", error))?
     } else {
-        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
         let updates = plan
             .indices
             .iter()
@@ -960,13 +1006,32 @@ pub async fn assign_tensor_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if !matches!(rhs, Value::GpuTensor(_)) || plan.indices.is_empty() {
+        return assign_tensor_with_plan_host(t, plan, rhs);
+    }
+    preflight_tensor_assignment(&t, plan, rhs)?;
+    let host_rhs = gather_assignment_rhs(rhs, t.integer_storage().is_some()).await?;
+    if matches!(host_rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        // Resident RHS gathering did not historically authorize real-target
+        // complex promotion; that route is selected by a host complex RHS.
+        materialize_rhs_real_for_plan_host(&host_rhs, plan)?;
+    }
+    assign_tensor_with_plan_host(t, plan, &host_rhs)
+}
+
+fn preflight_tensor_assignment(
+    t: &Tensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<(), RuntimeError> {
     if plan.indices.is_empty() {
         empty_rhs::validate_real_or_host_complex_rhs(rhs, plan)?;
-        return Ok(Value::Tensor(t));
+        return Ok(());
     }
     if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
-        let tensor = real_tensor_to_complex(t, "slice complex promotion")?;
-        return assign_complex_with_plan(tensor, plan, rhs).await;
+        t.validate_shape()
+            .map_err(|error| map_slice_shape_error("slice complex promotion", error))?;
+        return Ok(());
     }
     let target_len = plan.base_shape.iter().try_fold(1usize, |len, extent| {
         len.checked_mul(*extent).ok_or_else(|| {
@@ -984,8 +1049,32 @@ pub async fn assign_tensor_with_plan(
             "slice assignment plan cannot shrink numeric storage",
         ));
     }
+    Ok(())
+}
+
+pub fn assign_tensor_with_plan_host(
+    t: Tensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    preflight_tensor_assignment(&t, plan, rhs)?;
+    if plan.indices.is_empty() {
+        return Ok(Value::Tensor(t));
+    }
+    if matches!(rhs, Value::Complex(_, _) | Value::ComplexTensor(_)) {
+        let tensor = real_tensor_to_complex(t, "slice complex promotion")?;
+        return assign_complex_with_plan_host(tensor, plan, rhs);
+    }
+    let target_len = plan.base_shape.iter().try_fold(1usize, |len, extent| {
+        len.checked_mul(*extent).ok_or_else(|| {
+            mex(
+                "ShapeOverflow",
+                "slice assignment target shape overflows usize",
+            )
+        })
+    })?;
     let storage = if t.integer_storage().is_some() {
-        let rhs_values = materialize_integer_rhs_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_integer_rhs_for_plan_host(rhs, plan)?;
         let storage = grow_numeric_tensor(t, &plan.base_shape, target_len)?;
         let Ok(mut storage) = storage.into_integer_storage() else {
             unreachable!("typed growth retains integer class")
@@ -993,7 +1082,7 @@ pub async fn assign_tensor_with_plan(
         integer_assignment::scatter(&mut storage, plan, &rhs_values)?;
         NumericStorage::from_integer_storage(storage)
     } else {
-        let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_rhs_real_for_plan_host(rhs, plan)?;
         let mut storage = grow_numeric_tensor(t, &plan.base_shape, target_len)?;
         scatter_real_with_plan(&mut storage, plan, &rhs_values)?;
         storage
@@ -1008,12 +1097,27 @@ pub async fn assign_complex_with_plan(
     plan: &IndexPlan,
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
+    if !matches!(rhs, Value::GpuTensor(_))
+        || plan.indices.is_empty()
+        || tensor.integer_storage().is_none()
+    {
+        return assign_complex_with_plan_host(tensor, plan, rhs);
+    }
+    let host_rhs = gather_assignment_rhs(rhs, true).await?;
+    assign_complex_with_plan_host(tensor, plan, &host_rhs)
+}
+
+pub fn assign_complex_with_plan_host(
+    tensor: ComplexTensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
         empty_rhs::validate_complex_rhs(rhs, plan, tensor.integer_storage().is_some())?;
         return Ok(Value::ComplexTensor(tensor));
     }
     if tensor.integer_storage().is_some() {
-        let rhs_values = materialize_complex_integer_rhs_for_plan(rhs, plan).await?;
+        let rhs_values = materialize_complex_integer_rhs_for_plan_host(rhs, plan)?;
         let tensor = grow_complex_tensor(tensor, &plan.base_shape)?;
         let (storage, shape) = tensor.into_complex_storage_and_shape();
         let ComplexStorage::Integer(storage) = storage else {
@@ -1191,39 +1295,14 @@ pub async fn materialize_rhs_linear_real(
     count: usize,
 ) -> Result<Vec<f64>, RuntimeError> {
     let host_rhs = crate::dispatcher::gather_if_needed_async(rhs).await?;
-    match host_rhs {
-        Value::Num(n) => Ok(vec![n; count]),
-        Value::Int(int_val) => Ok(vec![int_val.to_f64(); count]),
-        Value::Bool(b) => Ok(vec![if b { 1.0 } else { 0.0 }; count]),
-        Value::Tensor(t) => {
-            let len = tensor_element_len(&t);
-            if len == count {
-                Ok(tensor::tensor_into_values_f64(t))
-            } else if len == 1 {
-                Ok(vec![tensor_value_f64(&t, 0); count])
-            } else {
-                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-            }
-        }
-        Value::LogicalArray(la) => {
-            if la.data.len() == count {
-                Ok(la
-                    .data
-                    .into_iter()
-                    .map(|b| if b != 0 { 1.0 } else { 0.0 })
-                    .collect())
-            } else if la.data.len() == 1 {
-                let val = if la.data[0] != 0 { 1.0 } else { 0.0 };
-                Ok(vec![val; count])
-            } else {
-                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
-            }
-        }
-        other => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            format!("slice assign: unsupported RHS type {:?}", other),
-        )),
-    }
+    materialize_rhs_linear_real_host(&host_rhs, count)
+}
+
+pub fn materialize_rhs_linear_real_host(
+    rhs: &Value,
+    count: usize,
+) -> Result<Vec<f64>, RuntimeError> {
+    host_rhs::linear(rhs, count)
 }
 
 pub async fn materialize_rhs_nd_real(
@@ -1231,108 +1310,14 @@ pub async fn materialize_rhs_nd_real(
     selection_lengths: &[usize],
 ) -> Result<Vec<f64>, RuntimeError> {
     let rhs_host = crate::dispatcher::gather_if_needed_async(rhs).await?;
-    enum RhsView {
-        Scalar(f64),
-        Tensor {
-            data: Vec<f64>,
-            shape: Vec<usize>,
-            strides: Vec<usize>,
-        },
-    }
-    let view = match rhs_host {
-        Value::Num(n) => RhsView::Scalar(n),
-        Value::Int(iv) => RhsView::Scalar(iv.to_f64()),
-        Value::Bool(b) => RhsView::Scalar(if b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) => {
-            let shape = validated_assignment_rhs_shape(
-                t.shape(),
-                tensor_element_len(&t),
-                selection_lengths,
-            )?;
-            let mut strides = vec![1usize; selection_lengths.len()];
-            for d in 1..selection_lengths.len() {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            let data = tensor::tensor_into_values_f64(t);
-            if data.len() != checked_assignment_element_count(&shape)? {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            }
-        }
-        Value::LogicalArray(la) => {
-            let shape =
-                validated_assignment_rhs_shape(&la.shape, la.data.len(), selection_lengths)?;
-            let mut strides = vec![1usize; selection_lengths.len()];
-            for d in 1..selection_lengths.len() {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            if la.data.len() != checked_assignment_element_count(&shape)? {
-                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-            }
-            let data: Vec<f64> = la
-                .data
-                .into_iter()
-                .map(|b| if b != 0 { 1.0 } else { 0.0 })
-                .collect();
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            }
-        }
-        other => {
-            return Err(mex(
-                "InvalidSliceAssignmentRhs",
-                format!("slice assign: unsupported RHS type {:?}", other),
-            ))
-        }
-    };
+    materialize_rhs_nd_real_host(&rhs_host, selection_lengths)
+}
 
-    let total = checked_assignment_element_count(selection_lengths)?;
-    let mut out = Vec::with_capacity(total);
-    let mut idx = vec![0usize; selection_lengths.len()];
-    if total == 0 || selection_lengths.is_empty() {
-        return Ok(out);
-    }
-    loop {
-        match &view {
-            RhsView::Scalar(val) => out.push(*val),
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            } => {
-                let mut rlin = 0usize;
-                for d in 0..idx.len() {
-                    let rhs_len = shape[d];
-                    let pos = if rhs_len == 1 { 0 } else { idx[d] };
-                    rlin += pos * strides[d];
-                }
-                out.push(
-                    *data
-                        .get(rlin)
-                        .ok_or_else(|| mex("ShapeMismatch", "shape mismatch for slice assign"))?,
-                );
-            }
-        }
-        let mut d = 0usize;
-        while d < idx.len() {
-            idx[d] += 1;
-            if idx[d] < selection_lengths[d].max(1) {
-                break;
-            }
-            idx[d] = 0;
-            d += 1;
-        }
-        if d == idx.len() {
-            break;
-        }
-    }
-    Ok(out)
+pub fn materialize_rhs_nd_real_host(
+    rhs: &Value,
+    selection_lengths: &[usize],
+) -> Result<Vec<f64>, RuntimeError> {
+    host_rhs::multidimensional(rhs, selection_lengths)
 }
 
 pub(crate) async fn download_integer_tensor(

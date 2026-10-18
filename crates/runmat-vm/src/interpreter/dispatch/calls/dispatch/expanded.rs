@@ -35,7 +35,7 @@ pub(super) async fn dispatch(
                 Instr::CallBuiltinExpandMultiOutputUsingOutputSlot(name, specs, slot) => (
                     name,
                     specs,
-                    requested_outputs_from_slot(vars.as_slice(), *slot)?,
+                    requested_outputs_from_slot(vars, *slot)?,
                     OutputPublication::Sequence,
                 ),
                 _ => unreachable!(),
@@ -178,7 +178,6 @@ pub(super) async fn dispatch(
                             },
                         },
                         args,
-                        refresh_workspace_state,
                     )
                 })
                 .await?
@@ -238,7 +237,6 @@ pub(super) async fn dispatch(
                             },
                         },
                         args,
-                        refresh_workspace_state,
                     )
                 })
                 .await?
@@ -265,7 +263,7 @@ pub(super) async fn dispatch(
             specs,
             out_count_slot,
         } => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             let args = build_user_function_expand_multi_args(
                 stack,
                 specs,
@@ -299,7 +297,6 @@ pub(super) async fn dispatch(
                             },
                         },
                         args,
-                        refresh_workspace_state,
                     )
                 })
                 .await?
@@ -353,7 +350,6 @@ pub(super) async fn dispatch(
                             },
                         },
                         args,
-                        refresh_workspace_state,
                     )
                 })
                 .await?
@@ -389,7 +385,11 @@ pub(super) async fn dispatch(
                 let mut call_args = Vec::with_capacity(capture_slots.len() + args.len());
                 for slot in capture_slots {
                     crate::interpreter::dispatch::lexical::refresh(context, vars, *slot)?;
-                    call_args.push(vars.get(*slot).cloned().unwrap_or(Value::Num(0.0)));
+                    call_args.push(
+                        vars.get(*slot)
+                            .map(|value| value.clone())
+                            .unwrap_or(Value::Num(0.0)),
+                    );
                 }
                 call_args.extend(args);
                 runmat_runtime::execution::RootedValues::new(call_args)
@@ -411,8 +411,9 @@ pub(super) async fn dispatch(
                 if context.lexical_environment.is_none() {
                     for (slot, value) in capture_slots.iter().zip(captures.into_iter()) {
                         if *slot < vars.len() {
-                            crate::runtime::workspace::admit_workspace_slot_write(*slot, &value)?;
-                            vars[*slot] = value;
+                            crate::runtime::workspace::commit_workspace_slot_value(
+                                vars, *slot, None, value,
+                            )?;
                         }
                     }
                 }

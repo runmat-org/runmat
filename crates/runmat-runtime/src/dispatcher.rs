@@ -10,12 +10,14 @@ use std::cell::RefCell;
 #[path = "dispatcher/constructor.rs"]
 mod constructor;
 pub(crate) mod direct_call_observation;
-use constructor::ConstructorInvocationTarget;
 pub use constructor::{
     call_bound_constructor_sequence_in_context,
     call_portable_prepared_constructor_sequence_in_context,
-    call_prepared_constructor_sequence_in_context, PreparedConstructorInvoke,
+    call_portable_prepared_constructor_sequence_with_argument_count_in_context,
+    call_prepared_constructor_sequence_in_context,
+    call_prepared_constructor_sequence_with_argument_count_in_context, PreparedConstructorInvoke,
 };
+use constructor::{ConstructorArguments, ConstructorInvocationTarget};
 #[path = "dispatcher/owned_gather.rs"]
 mod owned_gather;
 #[path = "dispatcher/owned_gpu.rs"]
@@ -1126,7 +1128,7 @@ async fn call_registered_class_constructor(
     })?;
     call_class_constructor(
         class_identity,
-        args,
+        ConstructorArguments::Borrowed(args),
         output_count,
         context,
         ConstructorInvocationTarget::Registered,
@@ -1136,7 +1138,7 @@ async fn call_registered_class_constructor(
 
 async fn call_class_constructor(
     class_identity: ClassIdentity,
-    args: &[Value],
+    args: ConstructorArguments<'_>,
     output_count: Option<usize>,
     context: Option<&crate::context::RuntimeContext>,
     target: ConstructorInvocationTarget,
@@ -1244,7 +1246,7 @@ async fn call_class_constructor(
                     let result = crate::user_functions::try_call_bound_function_in_context(
                         selected,
                         binding,
-                        args,
+                        args.borrowed()?,
                         requested_outputs,
                     )
                     .await
@@ -1284,7 +1286,7 @@ async fn call_class_constructor(
                         let result = crate::user_functions::try_call_bound_function_in_context(
                             selected,
                             bound,
-                            args,
+                            args.borrowed()?,
                             requested_outputs,
                         )
                         .await
@@ -1301,7 +1303,7 @@ async fn call_class_constructor(
                 crate::user_functions::try_call_semantic_function_by_name_in_context(
                     context,
                     &ctor.function_name,
-                    args,
+                    args.borrowed()?,
                     requested_outputs,
                 )
                 .await
@@ -1315,7 +1317,7 @@ async fn call_class_constructor(
             {
                 let result = call_builtin_async_impl(
                     &ctor.function_name,
-                    args,
+                    args.borrowed()?,
                     output_count,
                     context.cloned(),
                 )
@@ -1326,7 +1328,7 @@ async fn call_class_constructor(
                 crate::user_functions::try_call_semantic_function_by_name_in_context(
                     context,
                     &owner_qualified,
-                    args,
+                    args.borrowed()?,
                     requested_outputs,
                 )
                 .await
@@ -1338,9 +1340,13 @@ async fn call_class_constructor(
             if runmat_builtins::builtin_name_is_known(&owner_qualified)
                 && owner_qualified != class_identity.display_name()
             {
-                let result =
-                    call_builtin_async_impl(&owner_qualified, args, output_count, context.cloned())
-                        .await?;
+                let result = call_builtin_async_impl(
+                    &owner_qualified,
+                    args.borrowed()?,
+                    output_count,
+                    context.cloned(),
+                )
+                .await?;
                 return Ok::<Option<crate::execution::RootedValue>, RuntimeError>(Some(result));
             }
             Ok::<Option<crate::execution::RootedValue>, RuntimeError>(None)
@@ -1478,7 +1484,8 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     output_count: usize,
     context: Option<crate::context::RuntimeContext>,
 ) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
-    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(context.as_ref());
+    let fence_context = context.clone();
+    let fence = workspace_effect::PostCallWorkspaceEffectFence::capture(fence_context.as_ref());
     let observation =
         direct_call_observation::CallObservation::capture(context.as_ref()).map(std::rc::Rc::new);
     let inner_observation = observation.clone();

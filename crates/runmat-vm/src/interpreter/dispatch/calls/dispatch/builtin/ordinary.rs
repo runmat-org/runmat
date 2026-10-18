@@ -29,7 +29,7 @@ pub(super) async fn dispatch(
             OutputPublication::Fixed(*out_count),
         ),
         Instr::CallBuiltinMultiUsingOutputSlot(name, arg_count, out_count_slot) => {
-            let out_count = requested_outputs_from_slot(vars.as_slice(), *out_count_slot)?;
+            let out_count = requested_outputs_from_slot(vars, *out_count_slot)?;
             (name, *arg_count, out_count, OutputPublication::Sequence)
         }
         _ => unreachable!("ordinary builtin route received another instruction"),
@@ -55,7 +55,6 @@ pub(super) async fn dispatch(
             },
         },
         out_count,
-        refresh_workspace_state,
     )
     .await?;
     match result {

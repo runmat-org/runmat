@@ -43,26 +43,43 @@ fn qr_cholesky_and_stochastic_evolution_validate() {
         8,
         RequiredCaps::None,
     );
+    use runmat_accelerate_api::scalar_program::ScalarLiteral;
+    use runmat_accelerate_api::stochastic_evolution::StochasticEvolutionArithmetic;
+    use runmat_types::NumericClass;
     for workgroup in [64, 128, 256] {
-        for (precision, source, caps) in [
-            (
-                "f32",
-                stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F32,
-                RequiredCaps::None,
-            ),
-            (
-                "f64",
-                stochastic_evolution::STOCHASTIC_EVOLUTION_SHADER_F64,
-                RequiredCaps::Float64,
-            ),
-        ] {
-            validate_generated(
-                &format!("stochastic-evolution-{precision}-wg{workgroup}"),
-                source,
+        for state in [NumericClass::Single, NumericClass::Double] {
+            for noise in [NumericClass::Single, NumericClass::Double] {
+                for drift in [NumericClass::Single, NumericClass::Double] {
+                    for scale in [NumericClass::Single, NumericClass::Double] {
+                        let literal = |class| match class {
+                            NumericClass::Single => ScalarLiteral::F32Bits(0),
+                            NumericClass::Double => ScalarLiteral::F64Bits(0),
+                            _ => unreachable!(),
+                        };
+                        let arithmetic = StochasticEvolutionArithmetic::new(
+                            state,
+                            noise,
+                            literal(drift),
+                            literal(scale),
+                        )
+                        .unwrap();
+                        let source =
+                            stochastic_evolution::source(arithmetic.class_identity()).unwrap();
+                        let caps = if arithmetic.requires_f64() {
+                            RequiredCaps::Float64
+                        } else {
+                            RequiredCaps::None
+                        };
+                        validate_generated(
+                &format!("stochastic-evolution-{state:?}-{noise:?}-{drift:?}-{scale:?}-wg{workgroup}"),
+                &source,
                 workgroup,
                 8,
                 caps,
             );
+                    }
+                }
+            }
         }
     }
 }

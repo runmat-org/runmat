@@ -10,7 +10,7 @@ pub fn build_selected_runtime_archive(
     selected: &SelectedNativeProduct<'_>,
     environment: &ProgramEnvironment,
     encoding: RuntimeArchiveEncoding,
-    capabilities: RuntimeArchiveCapabilities,
+    mut capabilities: RuntimeArchiveCapabilities,
 ) -> AotResult<RuntimeArchive> {
     let contents = selected.contents();
     let manifest = contents.manifest();
@@ -37,6 +37,14 @@ pub fn build_selected_runtime_archive(
             "target-built runtime probe differs from retained probe",
         ));
     }
+    let physical = super::read_native_accelerator_profile(bytes)?;
+    if capabilities.accelerators.has_backend() && capabilities.accelerators != physical {
+        return Err(AotError::contract(
+            "aot.archive.accelerator_profile",
+            "selected capability claim differs from target-built backend inventory",
+        ));
+    }
+    capabilities.accelerators = physical;
     super::product::build_archive(
         bytes,
         environment,

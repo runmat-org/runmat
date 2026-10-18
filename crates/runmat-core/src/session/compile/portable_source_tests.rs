@@ -405,6 +405,18 @@ fn dropped_pending_public_eval_retires_only_its_source() {
     use std::sync::{Arc, Mutex};
 
     let mut session = crate::RunMatSession::with_options(false, false).expect("session");
+    session.top_level_await_enabled = false;
+    session.dynamic_eval_enabled = false;
+    let previous_source_name = session.active_source_name.clone();
+    let previous_source_path = session.active_source_fullpath_name.clone();
+    let previous_source_identity = session.active_source_identity.clone();
+    let previous_primary = session.active_primary_source.clone();
+    let previous_workspace = session.workspace_handle();
+    let previous_policy = (
+        session.compat_mode,
+        session.top_level_await_enabled,
+        session.dynamic_eval_enabled,
+    );
     let runtime = session.runtime_context.clone();
     let sibling = runmat_runtime::source_context::lease_source_context_in_context(
         &runtime,
@@ -467,6 +479,20 @@ fn dropped_pending_public_eval_retires_only_its_source() {
     assert_eq!(pending_eval.text.as_ref(), eval_source.text.as_ref());
     assert_eq!(pending_eval.lexical_file_name(), "pending_eval.m");
     drop(future);
+    assert_eq!(session.active_source_name, previous_source_name);
+    assert_eq!(session.active_source_fullpath_name, previous_source_path);
+    assert_eq!(session.active_source_identity, previous_source_identity);
+    assert_eq!(session.active_primary_source, previous_primary);
+    assert_eq!(session.workspace_handle(), previous_workspace);
+    assert_eq!(
+        (
+            session.compat_mode,
+            session.top_level_await_enabled,
+            session.dynamic_eval_enabled,
+        ),
+        previous_policy
+    );
+    assert!(session.pending_companion_source_discovery.is_none());
     assert!(runmat_runtime::source_context::source_info_in_context(&runtime, eval_id).is_none());
     assert_eq!(
         runmat_runtime::source_context::source_info_in_context(&runtime, sibling.source_id())

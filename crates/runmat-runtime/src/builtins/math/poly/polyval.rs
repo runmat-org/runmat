@@ -520,7 +520,7 @@ async fn convert_points(value: Value) -> BuiltinResult<(NumericArray, bool)> {
                     .iter()
                     .map(|&bit| Complex64::new(if bit != 0 { 1.0 } else { 0.0 }, 0.0))
                     .collect(),
-                shape: array.shape.clone(),
+                shape: array.shape.to_vec(),
                 all_real: true,
             },
             false,

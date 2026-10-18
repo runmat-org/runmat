@@ -224,8 +224,11 @@ impl PythonAdapter {
             .finish()
             .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?
             .with_owned_values_async(|arguments| async move {
-                let request = foreign_callback_request(registration.callback.value(), arguments, 1)
-                    .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;
+                let request =
+                    foreign_callback_request(&context, &registration.callback, arguments, 1)
+                        .map_err(|error| {
+                            PythonError::host("PythonCallbackError", error.to_string())
+                        })?;
                 let sequence = invoke_foreign_callback(context.clone(), request)
                     .await
                     .map_err(|error| PythonError::host("PythonCallbackError", error.to_string()))?;

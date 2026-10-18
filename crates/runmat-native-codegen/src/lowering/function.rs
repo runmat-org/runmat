@@ -66,6 +66,16 @@ pub(super) fn lower_function(
             })
         })
         .collect::<NativeCodegenResult<Vec<_>>>()?;
+    let mut binding_locals = locals
+        .iter()
+        .filter_map(|local| {
+            local.binding.map(|binding| NativeBindingLocal {
+                binding,
+                local: local.id,
+            })
+        })
+        .collect::<Vec<_>>();
+    binding_locals.sort_by_key(|entry| entry.binding);
     let projection = assembly
         .lexical_environment_projection(runmat_hir::FunctionId(function.0 as usize))
         .map_err(|error| {
@@ -153,6 +163,60 @@ pub(super) fn lower_function(
                 name,
                 owner_function,
                 kind,
+            })
+        })
+        .collect::<NativeCodegenResult<Vec<_>>>()?;
+    let closure_captures = metadata
+        .captures
+        .iter()
+        .map(|capture| {
+            let by_value = locals.iter().find(|local| {
+                local.binding == Some(capture.binding) && local.kind == NativeLocalKind::Capture
+            });
+            let lexical = lexical_bindings.iter().find(|binding| {
+                binding.binding == capture.binding
+                    && matches!(
+                        binding.kind,
+                        NativeLexicalBindingKind::Inherited | NativeLexicalBindingKind::Transit
+                    )
+            });
+            let storage = inherited_storage_bindings
+                .iter()
+                .find(|binding| binding.binding == capture.binding);
+            let (local, disposition) = match (by_value, lexical, storage) {
+                (Some(local), None, None) => (local.id, NativeClosureCaptureDisposition::ByValue),
+                (Some(local), Some(binding), None)
+                    if binding.kind == NativeLexicalBindingKind::Transit
+                        && binding.local == local.id =>
+                {
+                    (local.id, NativeClosureCaptureDisposition::TransitSnapshot)
+                }
+                (local, Some(binding), None)
+                    if binding.kind == NativeLexicalBindingKind::Inherited
+                        && local.is_none_or(|local| local.id == binding.local) =>
+                {
+                    (binding.local, NativeClosureCaptureDisposition::Lexical)
+                }
+                (local, None, Some(binding))
+                    if local.is_none_or(|local| local.id == binding.local) =>
+                {
+                    (
+                        binding.local,
+                        NativeClosureCaptureDisposition::InheritedStorage,
+                    )
+                }
+                _ => {
+                    return Err(NativeCodegenError::new(
+                        "native.lowering.closure_capture",
+                        "closure capture has no coherent Native frame authority",
+                    )
+                    .at_function(function))
+                }
+            };
+            Ok(NativeClosureCapture {
+                binding: capture.binding,
+                local,
+                disposition,
             })
         })
         .collect::<NativeCodegenResult<Vec<_>>>()?;
@@ -336,6 +400,14 @@ pub(super) fn lower_function(
         })?
         .capabilities
         .clone();
+    let expression_continuation_geometry =
+        crate::NativeExpressionContinuationGeometry::for_blocks(&blocks).ok_or_else(|| {
+            NativeCodegenError::new(
+                "native.lowering.expression_continuation_geometry",
+                "expression continuation geometry exceeds portable capacity",
+            )
+            .at_function(function)
+        })?;
     Ok(NativeFunction {
         id: function,
         source: metadata.source,
@@ -357,11 +429,14 @@ pub(super) fn lower_function(
         abi,
         argument_validations,
         locals,
+        binding_locals,
+        closure_captures,
         lexical_bindings,
         inherited_storage_bindings,
         creates_lexical_environment: projection.creates_activation,
         entry: checked_block(entry.id, function)?,
         blocks,
+        expression_continuation_geometry,
         expected_sites,
     })
 }

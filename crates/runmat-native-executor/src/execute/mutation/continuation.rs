@@ -126,7 +126,7 @@ pub(super) fn prepare_place_write(
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("native place preparation has no active rvalue site".into())
     })?;
-    let (region, next_step, _) = state.enter_contextual_region();
+    let (region, next_step, _) = state.enter_contextual_region()?;
     let mut cursor = match state.pending_place_prepare.take() {
         Some(cursor)
             if cursor.request == request
@@ -159,7 +159,7 @@ pub(super) fn prepare_place_write(
     };
     while cursor.step < cursor.segments.len() {
         let step = cursor.step;
-        state.enter_contextual_step(region, step);
+        state.enter_contextual_step(region, step)?;
         let parent = state.arena.get(cursor.current)?.clone();
         let segment = cursor.segments[step].clone();
         let result = read_step(state, parent, &segment, false);
@@ -178,7 +178,7 @@ pub(super) fn prepare_place_write(
         }
     }
     let current = state.arena.get(cursor.current)?.clone();
-    state.finish_contextual_region(region, vec![cursor.current]);
+    state.finish_contextual_region(region, cursor.current);
     Ok((
         PreparedPlaceWrite {
             root: cursor.root,
@@ -201,7 +201,7 @@ pub(super) fn skip_completed(state: &mut HostState, place: &MirPlace) -> NativeE
 }
 
 pub(in crate::execute) fn skip_completed_region(state: &mut HostState) -> NativeExecutorResult<()> {
-    let (_, _, completed) = state.enter_contextual_region();
+    let (_, _, completed) = state.enter_contextual_region()?;
     if completed.is_none() {
         return Err(NativeExecutorError::Host(
             "completed multi-assignment target has no retained result".into(),
@@ -317,7 +317,7 @@ fn member_call(
         Box<dyn std::future::Future<Output = Result<RootedValueSequence, RuntimeError>> + 'static>,
     >,
 ) -> NativeExecutorResult<Value> {
-    let embedded = state.enter_embedded_call();
+    let embedded = state.enter_embedded_call()?;
     let result = (|| {
         if let Some(mut values) =
             super::super::call_suspension::take_completed(state, embedded.as_ref())?
@@ -342,15 +342,7 @@ fn member_call(
         }
         Ok(values.remove(0))
     })();
-    if let Ok(value) = &result {
-        state.cache_embedded_call(embedded.as_ref(), std::slice::from_ref(value));
-    }
-    let finished = state.finish_embedded_call(embedded.as_ref());
-    match (result, finished) {
-        (Err(error), _) => Err(error),
-        (Ok(_), Err(error)) => Err(error),
-        (Ok(value), Ok(())) => Ok(value),
-    }
+    state.settle_embedded_result(embedded.as_ref(), result, std::slice::from_ref)
 }
 
 fn single_member_sequence(value: RootedValue) -> Result<RootedValueSequence, Box<RuntimeError>> {
@@ -471,7 +463,7 @@ fn drive(
     let request = state.current_request.ok_or_else(|| {
         NativeExecutorError::Host("native mutation has no active statement site".into())
     })?;
-    let (region, next_step, _) = state.enter_contextual_region();
+    let (region, next_step, _) = state.enter_contextual_region()?;
     let mut cursor = match state.pending_assign.take() {
         Some(cursor)
             if cursor.request == request
@@ -500,14 +492,14 @@ fn drive(
     };
     loop {
         let step = cursor.step;
-        state.enter_contextual_step(region, step);
+        state.enter_contextual_step(region, step)?;
         let result = cursor.advance(state);
         let next_step = if result.is_ok() { cursor.step } else { step };
         state.finish_contextual_step(region, step, next_step)?;
         match result {
             Ok(true) => {
                 let reference = cursor.current;
-                state.finish_contextual_region(region, vec![reference]);
+                state.finish_contextual_region(region, reference);
                 return Ok((cursor.root, reference));
             }
             Ok(false) => {}

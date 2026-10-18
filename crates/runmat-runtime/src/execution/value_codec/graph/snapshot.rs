@@ -79,6 +79,12 @@ pub fn prepare_invocation<'a>(
             let target = match &descriptor.target {
                 CallableTarget::Bound(binding) => Input::BoundTarget(binding),
                 CallableTarget::BoundLexical { closure, .. } => Input::Borrowed(closure.as_value()),
+                CallableTarget::CapturedResolved { .. } => {
+                    return Err(ValueCodecError::unsupported(
+                        "$",
+                        "captured callable has no exact selected graph target authority",
+                    ));
+                }
                 CallableTarget::FevalForward(value) => Input::Borrowed(value),
                 CallableTarget::Resolved { .. } => {
                     return Err(ValueCodecError::unsupported(

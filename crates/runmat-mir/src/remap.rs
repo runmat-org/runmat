@@ -155,6 +155,13 @@ fn remap_indexing(indexing: &mut MirIndexing, remap: &RemapContext<'_>) -> Resul
                 })?;
                 remap_operand(region.result_mut(), remap);
             }
+            MirIndexComponent::PreparedExpr(region) => {
+                region.try_visit_rvalues_mut(|value| remap_rvalue(value, remap))?;
+                region.try_visit_capture_sources_mut(|source| {
+                    remap_expansion_source(source, remap)
+                })?;
+                remap_operand(region.result_mut(), remap);
+            }
             MirIndexComponent::Colon => {}
         }
     }
@@ -202,6 +209,13 @@ fn remap_chain(
                 }
             }
             crate::MirSubscriptStep::DynamicMember(member) => remap_operand(member, remap),
+            crate::MirSubscriptStep::PreparedDynamicMember(region) => {
+                region.try_visit_rvalues_mut(|value| remap_rvalue(value, remap))?;
+                region.try_visit_capture_sources_mut(|source| {
+                    remap_expansion_source(source, remap)
+                })?;
+                remap_operand(region.result_mut(), remap);
+            }
             crate::MirSubscriptStep::Member(_) => {}
         }
     }
