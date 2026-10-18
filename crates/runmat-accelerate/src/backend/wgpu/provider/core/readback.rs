@@ -112,6 +112,9 @@ impl ReadbackResourceOwner for wgpu::Buffer {}
 
 impl ReadbackResourceOwner for std::sync::Arc<wgpu::Buffer> {}
 
+#[cfg(target_arch = "wasm32")]
+impl ReadbackResourceOwner for std::rc::Rc<wgpu::Buffer> {}
+
 #[cfg(test)]
 #[path = "readback/tests.rs"]
 mod tests;

@@ -7,7 +7,7 @@ use runmat_execution_artifact::{ProgramExecutionRequest, ProgramExecutionRespons
 
 use super::request::BrowserWorkerRequest;
 
-pub(super) async fn execute_local_worker_program(
+pub(crate) async fn execute_local_worker_program(
     request: BrowserWorkerRequest,
 ) -> ProgramExecutionResponse {
     match request {

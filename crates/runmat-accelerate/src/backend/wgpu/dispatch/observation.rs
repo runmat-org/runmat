@@ -134,6 +134,7 @@ use completion::{
     map_timing, DirectCompletion, FenceCompletion, PendingDirectObservation, PendingObservation,
     SourceTransferRetirement,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use host_control::observed_completion_callback_fits_bound;
 pub(crate) use host_control::observed_submission_dispatch_host_control_upper_bytes;
 use inline_slots::InlineSlots;

@@ -10,7 +10,8 @@ mod path;
 pub(crate) use decode::decode_inline_value_rooted;
 pub use decode::{
     decode_durable_values_cooperatively, decode_inline_value, decode_inline_value_owned,
-    decode_inline_values_cooperatively, CooperativeValueCodecError,
+    decode_inline_value_owned_with_limits, decode_inline_values_cooperatively,
+    CooperativeValueCodecError,
 };
 pub use durable::{decode_durable_value, encode_durable_value, validate_durable_preparation};
 pub use encode::{encode_inline_value, encode_inline_value_in_context};

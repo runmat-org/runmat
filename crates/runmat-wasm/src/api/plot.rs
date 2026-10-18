@@ -582,6 +582,14 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
     let payload = js_sys::Object::new();
     let message = err.to_string();
     let code = match err {
+        FigureError::ReceiverIdentity(source) => {
+            let _ = Reflect::set(
+                &payload,
+                &JsValue::from_str("details"),
+                &JsValue::from_str(&source.to_string()),
+            );
+            "ReceiverIdentity"
+        }
         FigureError::InvalidHandle(handle) => {
             let _ = Reflect::set(
                 &payload,
@@ -667,6 +675,27 @@ mod error_tests {
                 .as_string()
                 .as_deref(),
             Some("plot changed while reading its GPU data")
+        );
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn receiver_identity_preserves_typed_source() {
+        let error = figure_error_to_js(FigureError::ReceiverIdentity(
+            runmat_runtime::builtins::plotting::GraphicsReceiverIssueError,
+        ));
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("code"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("ReceiverIdentity")
+        );
+        assert_eq!(
+            Reflect::get(&error, &JsValue::from_str("details"))
+                .unwrap()
+                .as_string()
+                .as_deref(),
+            Some("graphics receiver identity space exhausted")
         );
     }
 }

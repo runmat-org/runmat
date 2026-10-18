@@ -76,7 +76,7 @@ impl WgpuProvider {
                 .map_err(|_| ProviderExecutionError::from(anyhow!("WGPU tail callback dropped")))?;
             self.access
                 .with_cleanup(|cleanup| cleanup.unmap_buffer(&retired_buffer))
-                .map_err(ProviderExecutionError::from)?;
+                .map_err(|error| ProviderExecutionError::from_source(error).after_effect())?;
             if !mapped {
                 return Err(ProviderExecutionError::from(anyhow!(
                     "WGPU tail fence map failed"

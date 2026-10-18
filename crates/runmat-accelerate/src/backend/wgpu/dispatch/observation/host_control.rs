@@ -17,6 +17,7 @@ pub(crate) fn observed_submission_dispatch_host_control_upper_bytes() -> Option<
     .checked_add(boxed_upper::<FenceCompletion>()?)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn observed_completion_callback_fits_bound<T>(callback: &T) -> bool {
     std::mem::size_of_val(callback) <= std::mem::size_of::<FenceCompletion>()
         && std::mem::align_of_val(callback) <= std::mem::align_of::<FenceCompletion>()
