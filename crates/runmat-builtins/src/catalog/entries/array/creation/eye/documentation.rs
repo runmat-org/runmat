@@ -51,7 +51,10 @@ BuiltinDocumentationLink { label: "randperm", target: BuiltinDocumentationLinkTa
 BuiltinDocumentationLink { label: "range", target: BuiltinDocumentationLinkTarget::Documentation("./range") },
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/eye.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/eye.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/eye.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/eye.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "eye unit tests", location: "builtins::array::creation::eye::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "eye resident prototype test", location: "builtins::array::creation::eye::tests::eye_gpu_like_alloc" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

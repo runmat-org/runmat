@@ -447,11 +447,12 @@ pub(super) fn selected_resolution_receipt(
     Ok(resolved)
 }
 
-fn require_provider_class(class: NumericClass, buffer_type: ScalarType) -> Result<()> {
+pub(super) fn require_provider_class(class: NumericClass, buffer_type: ScalarType) -> Result<()> {
     if class == NumericClass::Double && buffer_type == ScalarType::F32 {
-        return Err(anyhow!(
-            "provider cannot represent a Double scalar operation"
-        ));
+        return Err(super::geometry::CountedRecipeUnavailable(
+            "provider cannot represent a Double scalar operation",
+        )
+        .into());
     }
     Ok(())
 }

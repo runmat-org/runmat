@@ -2229,6 +2229,9 @@ pub trait AccelProvider: AcceleratorThreadBound {
 
     /// Consume the exact selected staging authority. An implementation must
     /// retain the stage through physical callback retirement on cancellation.
+    /// On successful return, its callback and all staging leases must already
+    /// be physically retired; a consumer may then reassign its settled host
+    /// scratch reservation to the returned native payload's retained owner.
     fn download_numeric_admitted_stage<'a>(
         &'a self,
         _source: &'a GpuTensorHandle,

@@ -99,6 +99,59 @@ fn scalar_multiply_uses_exact_words_without_changing_double_semantics() {
 }
 
 #[test]
+fn nested_single_intrinsics_retain_the_exact_product_geometry() {
+    let source = plan(
+        vec![
+            FusionOp::Primitive {
+                op: PrimitiveOp::UPlus,
+                inputs: vec![0],
+                output: Some(2),
+            },
+            FusionOp::Primitive {
+                op: PrimitiveOp::Neg,
+                inputs: vec![2],
+                output: Some(3),
+            },
+            FusionOp::Primitive {
+                op: PrimitiveOp::Mul,
+                inputs: vec![1, 3],
+                output: Some(4),
+            },
+        ],
+        4,
+    );
+    let inputs = [
+        Value::Tensor(Tensor::from_f32(vec![1.0, 2.0], vec![1, 2]).unwrap()),
+        Value::Num(2.0),
+    ];
+    let resolved = resolve_policy(
+        &source,
+        &inputs,
+        ProviderPrecision::F32,
+        PrecisionPolicy::Exact,
+    )
+    .unwrap();
+    assert!(resolved.exact_product(4).is_some());
+
+    let bound = source
+        .measured_typed_shader_preparation_bytes(&[4], &resolved, ScalarType::F32, 1)
+        .expect("exact product geometry must not measure its unreachable Double expression");
+    let shader = source
+        .prepare_typed_shader_with_inputs_bounded(
+            &[4],
+            &resolved,
+            ScalarType::F32,
+            &[0],
+            Some(bound.body_bytes),
+        )
+        .unwrap();
+    assert!(shader.uses_exact_product_words());
+    assert!(shader
+        .source()
+        .contains("rm_exact_product_bits(typed1_bits, 0x40000000u)"));
+}
+
+#[test]
 fn emitted_work_tracks_actual_slice_not_all_semantic_receipts() {
     let mut source = source(None, false);
     source.operations.push(FusionOp::Primitive {

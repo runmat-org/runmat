@@ -113,6 +113,21 @@ impl ManagedHostEffectStagePool {
 }
 
 impl HostEffectStageReservation for PooledStageSlot {
+    fn transfer_settled_stage_bytes(
+        &self,
+        bytes: u64,
+        epoch: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        let _mutation = self.mutation.lock().expect("managed stage slot lock");
+        if !self.live_reservation.load(Ordering::Acquire)
+            || !self.active_epoch.load(Ordering::Acquire)
+        {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        self.output
+            .transfer_settled_stage_bytes(&self.reservation, bytes, epoch)
+    }
+
     fn managed_ledger(&self) -> Option<ManagedHostEffectLedger> {
         self.reservation.managed_ledger()
     }
@@ -231,6 +246,41 @@ mod tests {
     use super::*;
     use runmat_execution::cancellation::CancellationSource;
     use std::sync::Barrier;
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn pooled_settled_stage_transfer_uses_the_existing_output_permit() {
+        let bytes = 4 + ManagedHostEffectStagePool::owned_output_claim_metadata_bytes() as u64;
+        let ledger = ManagedHostEffectLedger::new_with_epoch(bytes, 3);
+        let pool = ManagedHostEffectStagePool::new(&ledger, 1).unwrap();
+        let slot = pool.acquire(bytes).unwrap();
+        let session = Arc::new(AtomicU64::new(1));
+        let cancellation = CancellationSource::new();
+        let permit = slot
+            .reservation()
+            .reserve_preallocated_output_permit(0, cancellation.token(), session, 1)
+            .unwrap()
+            .unwrap();
+        slot.reservation()
+            .transfer_settled_stage_bytes(bytes, 3)
+            .expect("settled pooled stage");
+        assert_eq!(slot.reservation().reserved_bytes(), 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
+        let claim = permit.reserve_exact_claim(4).expect("retained payload");
+        assert_eq!(ledger.snapshot().peak_reserved_bytes, bytes);
+        cancellation.cancel(runmat_execution::CancellationReason::User);
+        assert_eq!(
+            slot.reservation().transfer_settled_stage_bytes(1, 3),
+            Err(HostEffectAllocationError::Cancelled)
+        );
+        slot.reservation().retire_invocation();
+        drop(slot);
+        drop(permit);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, bytes);
+        drop(claim);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    }
 
     #[test]
     fn slot_retires_once_and_reuse_requires_all_old_references_to_drop() {

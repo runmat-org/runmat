@@ -5,9 +5,7 @@ use crate::context::host_allocation::{
 };
 use runmat_builtins::BuiltinPreparationOperation;
 use runmat_types::{NumericClass, NumericDomain};
-use runmat_value::{
-    ExactHostComplexTensorAllocation, ExactHostTensorAllocation, NumericDType, Value,
-};
+use runmat_value::{ComplexTensor, ExactHostComplexTensorAllocation, NumericDType, Tensor, Value};
 
 mod cast;
 mod promoting;
@@ -28,8 +26,8 @@ pub struct PreparedHostNumericalOutput {
 }
 
 struct NumericalAllocation {
-    real: Option<ExactHostTensorAllocation>,
-    complex: Option<ExactHostComplexTensorAllocation>,
+    real: Option<Tensor>,
+    complex: Option<ComplexTensor>,
 }
 
 impl PreparedHostNumericalOutput {
@@ -64,20 +62,44 @@ impl PreparedHostNumericalOutput {
         };
         let allocation = match resources.output_domain {
             FusionHostOutputDomain::Exact(NumericDomain::Real) => NumericalAllocation {
-                real: Some(receipt.exact_output_tensor(context, dtype, &resources.output_shape)?),
+                real: Some(
+                    receipt
+                        .exact_output_tensor(context, dtype, &resources.output_shape)?
+                        .into_tensor()
+                        .map_err(HostAllocationError::Numeric)?,
+                ),
                 complex: None,
             },
             FusionHostOutputDomain::Exact(NumericDomain::Complex) => NumericalAllocation {
                 real: None,
-                complex: Some(receipt.with_output_allocation(context, |permit| {
-                    ExactHostComplexTensorAllocation::new(dtype, &resources.output_shape, permit)
-                })?),
+                complex: Some(
+                    receipt
+                        .with_output_allocation(context, |permit| {
+                            ExactHostComplexTensorAllocation::new(
+                                dtype,
+                                &resources.output_shape,
+                                permit,
+                            )
+                        })?
+                        .into_tensor()
+                        .map_err(HostAllocationError::Numeric)?,
+                ),
             },
             FusionHostOutputDomain::RealOrComplex => {
-                let real = receipt.exact_output_tensor(context, dtype, &resources.output_shape)?;
-                let complex = receipt.with_output_allocation(context, |permit| {
-                    ExactHostComplexTensorAllocation::new(dtype, &resources.output_shape, permit)
-                })?;
+                let real = receipt
+                    .exact_output_tensor(context, dtype, &resources.output_shape)?
+                    .into_tensor()
+                    .map_err(HostAllocationError::Numeric)?;
+                let complex = receipt
+                    .with_output_allocation(context, |permit| {
+                        ExactHostComplexTensorAllocation::new(
+                            dtype,
+                            &resources.output_shape,
+                            permit,
+                        )
+                    })?
+                    .into_tensor()
+                    .map_err(HostAllocationError::Numeric)?;
                 NumericalAllocation {
                     real: Some(real),
                     complex: Some(complex),
@@ -132,13 +154,8 @@ impl PreparedHostNumericalOutput {
         self.allocation
             .real
             .as_ref()
-            .map(ExactHostTensorAllocation::shape)
-            .or_else(|| {
-                self.allocation
-                    .complex
-                    .as_ref()
-                    .map(ExactHostComplexTensorAllocation::shape)
-            })
+            .map(Tensor::shape)
+            .or_else(|| self.allocation.complex.as_ref().map(ComplexTensor::shape))
             .expect("prepared numerical output owns one physical result")
     }
 
@@ -156,7 +173,7 @@ impl PreparedHostNumericalOutput {
         let (receipt, allocation) = (&self.receipt, &mut self.allocation);
         let output = real_allocation_mut(allocation)
             .map_err(|error| numerical_output_error(context, error))?
-            .as_f32_slice_mut()
+            .try_as_f32_slice_mut_unique()
             .ok_or_else(unsupported_output)?;
         for (index, output) in output.iter_mut().enumerate() {
             if index % Self::COPY_CHUNK == 0 {
@@ -179,7 +196,7 @@ impl PreparedHostNumericalOutput {
         let (receipt, allocation) = (&self.receipt, &mut self.allocation);
         let output = real_allocation_mut(allocation)
             .map_err(|error| numerical_output_error(context, error))?
-            .as_f64_slice_mut()
+            .try_as_f64_slice_mut_unique()
             .ok_or_else(unsupported_output)?;
         for (index, output) in output.iter_mut().enumerate() {
             if index % Self::COPY_CHUNK == 0 {
@@ -207,7 +224,7 @@ impl PreparedHostNumericalOutput {
             .real
             .as_mut()
             .ok_or_else(unsupported_output)?
-            .as_f32_slice_mut()
+            .try_as_f32_slice_mut_unique()
             .ok_or_else(unsupported_output)?;
         for (offset, (target, source)) in target.iter_mut().zip(source).enumerate() {
             if offset % Self::COPY_CHUNK == 0 {
@@ -235,7 +252,7 @@ impl PreparedHostNumericalOutput {
             .real
             .as_mut()
             .ok_or_else(unsupported_output)?
-            .as_f64_slice_mut()
+            .try_as_f64_slice_mut_unique()
             .ok_or_else(unsupported_output)?;
         for (offset, (target, source)) in target.iter_mut().zip(source).enumerate() {
             if offset % Self::COPY_CHUNK == 0 {
@@ -250,7 +267,7 @@ impl PreparedHostNumericalOutput {
             .map_err(|error| numerical_output_error(context, error))
     }
 
-    fn into_real_allocation(self) -> Result<ExactHostTensorAllocation, HostAllocationError> {
+    fn into_real_allocation(self) -> Result<Tensor, HostAllocationError> {
         self.allocation.real.ok_or(HostAllocationError::Numeric(
             runmat_value::ExactHostNumericAllocationError::UnsupportedClass,
         ))
@@ -273,7 +290,7 @@ fn allocation_len(shape: &[usize]) -> Result<usize, HostAllocationError> {
 
 fn real_allocation_mut(
     allocation: &mut NumericalAllocation,
-) -> Result<&mut ExactHostTensorAllocation, HostAllocationError> {
+) -> Result<&mut Tensor, HostAllocationError> {
     allocation.real.as_mut().ok_or(HostAllocationError::Numeric(
         runmat_value::ExactHostNumericAllocationError::UnsupportedClass,
     ))

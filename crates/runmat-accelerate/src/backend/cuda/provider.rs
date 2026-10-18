@@ -309,7 +309,18 @@ impl AccelProvider for CudaProvider {
     ) -> runmat_execution::ResourceByteBound {
         // `zeroed_numeric` is downloaded into place and returned without a
         // second host copy; the CUDA allocation itself is provider memory.
+        // The result also owns one copied shape Vec.
         runmat_accelerate_api::checked_numeric_download_host_payload_bytes(handle)
+            .and_then(|payload| {
+                u64::try_from(
+                    handle
+                        .shape()
+                        .len()
+                        .checked_mul(std::mem::size_of::<usize>())?,
+                )
+                .ok()
+                .and_then(|shape| payload.checked_add(shape))
+            })
             .map(runmat_execution::ResourceByteBound::Known)
             .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
                 runmat_execution::ResourceBoundUnavailable::NoScratchBound,

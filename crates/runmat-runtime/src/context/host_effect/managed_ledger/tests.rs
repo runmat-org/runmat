@@ -126,6 +126,96 @@ fn retained_output_adds_global_charge_during_stage_overlap() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
+fn settled_stage_shares_transfer_without_recharge_and_retained_claims_survive() {
+    let ledger = ManagedHostEffectLedger::new_with_epoch(32, 7);
+    let stage = ledger.reserve_stage(32).expect("two-source stage peak");
+    let live = temp(&stage, 8).expect("still-live source metadata");
+    let output = stage.reserve_output_headroom(0).expect("selected output");
+    assert_eq!(
+        output.transfer_settled_stage_bytes(&stage, 25, 7),
+        Err(HostEffectAllocationError::ExceedsStageEnvelope)
+    );
+    output
+        .transfer_settled_stage_bytes(&stage, 12, 7)
+        .expect("first settled source");
+    let first = output.reserve_exact(12).expect("first retained source");
+    output
+        .transfer_settled_stage_bytes(&stage, 4, 7)
+        .expect("second settled source");
+    let second = output.reserve_exact(4).expect("second retained source");
+    assert_eq!(stage.reserved_bytes(), 16);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 32);
+    assert_eq!(ledger.snapshot().peak_reserved_bytes, 32);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 24);
+
+    let foreign = ManagedHostEffectLedger::new_with_epoch(8, 7);
+    let foreign_output = foreign
+        .reserve_stage(0)
+        .unwrap()
+        .reserve_output_headroom(0)
+        .unwrap();
+    assert_eq!(
+        foreign_output.transfer_settled_stage_bytes(&stage, 1, 7),
+        Err(HostEffectAllocationError::InvalidInvocation)
+    );
+    let other_stage = ledger.reserve_stage(0).expect("other invocation");
+    let other_output = other_stage
+        .reserve_output_headroom(0)
+        .expect("other invocation output");
+    assert_eq!(
+        other_output.transfer_settled_stage_bytes(&stage, 1, 7),
+        Err(HostEffectAllocationError::InvalidInvocation)
+    );
+    assert_eq!(
+        output.transfer_settled_stage_bytes(&stage, 1, 8),
+        Err(HostEffectAllocationError::Revoked)
+    );
+    ledger.revoke();
+    assert_eq!(
+        output.transfer_settled_stage_bytes(&stage, 1, 7),
+        Err(HostEffectAllocationError::Revoked)
+    );
+    drop(live);
+    drop(stage);
+    output.retire_invocation();
+    drop(output);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 16);
+    drop(first);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 4);
+    drop(second);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn settled_stage_transfer_overflow_leaves_both_shares_unchanged() {
+    let ledger = ManagedHostEffectLedger::new_with_epoch(1, 2);
+    let stage = ledger.reserve_stage(1).unwrap();
+    let output = HeadroomInner {
+        ledger: stage.inner.ledger.clone(),
+        stage: Arc::downgrade(&stage.inner),
+        state: Mutex::new(HeadroomState {
+            // Force the otherwise capacity-unreachable arithmetic edge.
+            unallocated: u64::MAX,
+            active: true,
+        }),
+    };
+    assert_eq!(
+        stage.transfer_to_headroom(&output, 1, 2),
+        Err(HostEffectAllocationError::Overflow)
+    );
+    assert_eq!(stage.reserved_bytes(), 1);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 1);
+    assert_eq!(output.state.lock().unwrap().unallocated, u64::MAX);
+    output.state.lock().unwrap().unallocated = 0;
+    drop(output);
+    drop(stage);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
 fn dynamic_and_pooled_outputs_share_the_exact_owned_claim_control() {
     let metadata = owned_output_claim_metadata_bytes();
     let charged = metadata as u64 + 4;

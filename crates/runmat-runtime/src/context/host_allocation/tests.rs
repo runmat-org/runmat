@@ -162,6 +162,38 @@ fn console_text_retains_one_backing_through_clones_and_rejects_partial_formattin
 }
 
 #[test]
+fn settled_scratch_handoff_respects_cancellation_and_retained_lifetime() {
+    let ledger = ManagedHostEffectLedger::new_with_epoch(16, 5);
+    let cancellation = CancellationSource::new();
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    )
+    .with_cancellation_token(cancellation.token());
+    let receipt =
+        HostAllocationReceipt::admit(Some(&context), HostAllocationPlan::new(16, 0).unwrap())
+            .unwrap()
+            .unwrap();
+    receipt
+        .transfer_settled_scratch_to_output(&context, 8)
+        .expect("settled capacity transfer");
+    let claim = receipt
+        .output_permit(&context)
+        .unwrap()
+        .reserve_exact(8)
+        .expect("retained backing");
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 16);
+    cancellation.cancel(CancellationReason::User);
+    assert_eq!(
+        receipt.transfer_settled_scratch_to_output(&context, 1),
+        Err(HostAllocationError::Cancelled)
+    );
+    drop(receipt);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 8);
+    drop(claim);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+}
+
+#[test]
 fn trace_scratch_growth_claims_exact_live_bytes_and_revokes_new_growth() {
     let ledger = ManagedHostEffectLedger::new_with_epoch(4_096, 7);
     let cancellation = CancellationSource::new();

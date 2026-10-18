@@ -31,7 +31,7 @@ BuiltinDocumentationFaq { question: "What happens with empty vectors?", answer: 
 BuiltinDocumentationFaq { question: "Can I use integer vectors?", answer: "Yes. Each output preserves the class of its corresponding input axis, including exact values from all eight integer classes." },
 BuiltinDocumentationFaq { question: "Does `meshgrid` support complex numbers?", answer: "Complex axes are a RunMat-only extension available in `runmat` compatibility mode. Their imaginary components and precision propagate to complex outputs, including exact paired-integer components and complex-interleaved GPU output when a provider is active." },
 BuiltinDocumentationFaq { question: "What does `'like'` do?", answer: "It is a RunMat-only selector available in `runmat` compatibility mode. It matches the numeric class and residency of the prototype array; ordinary MATLAB-compatible code controls class and residency through the input axes." },
-BuiltinDocumentationFaq { question: "How can providers avoid the host fall-back?", answer: "Implement the `meshgrid` custom hook in the acceleration provider. RunMat will automatically dispatch to it once available." },
+BuiltinDocumentationFaq { question: "How can providers avoid the host fall-back?", answer: "For supported real resident vector axes on one device, RunMat uses the owning provider's `reshape` and `repmat` hooks to construct resident grids. Other admitted forms use host construction, restoring GPU output to the requesting owner when applicable and supported. An operational provider-hook failure is returned as an error." },
 BuiltinDocumentationFaq { question: "Is the output always dense?", answer: "Yes. `meshgrid` produces dense arrays. Use `ndgrid` when you need permuted axes or higher-dimensional grids beyond three inputs." },
 BuiltinDocumentationFaq { question: "What error do I get if I omit all inputs?", answer: "RunMat raises the MATLAB-compatible error `meshgrid: at least one input vector is required`." }],
     links: &[BuiltinDocumentationLink { label: "linspace", target: BuiltinDocumentationLinkTarget::Documentation("./linspace") },
@@ -52,7 +52,10 @@ BuiltinDocumentationLink { label: "randperm", target: BuiltinDocumentationLinkTa
 BuiltinDocumentationLink { label: "range", target: BuiltinDocumentationLinkTarget::Documentation("./range") },
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/meshgrid.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "meshgrid unit tests", location: "builtins::array::creation::meshgrid::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "meshgrid resident input roundtrip test", location: "builtins::array::creation::meshgrid::tests::meshgrid_gpu_inputs_roundtrip" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

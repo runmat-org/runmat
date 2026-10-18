@@ -11,7 +11,7 @@ use runmat_value::{
 use std::fmt;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, Weak,
 };
 
 mod pool;
@@ -242,6 +242,46 @@ pub struct ManagedHostEffectStageReservation {
 }
 
 impl ManagedHostEffectStageReservation {
+    fn transfer_to_headroom(
+        &self,
+        headroom: &HeadroomInner,
+        bytes: u64,
+        epoch: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        if !Arc::ptr_eq(&self.inner.ledger, &headroom.ledger)
+            || !Weak::ptr_eq(&Arc::downgrade(&self.inner), &headroom.stage)
+        {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        let temporary = self.inner.temporary.lock().expect("temporary ledger lock");
+        let mut output = headroom.state.lock().expect("output headroom lock");
+        let ledger = self.inner.ledger.lock().expect("host ledger lock");
+        if !ledger.snapshot.current || ledger.snapshot.epoch != epoch {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        if !output.active || temporary.retire_pending {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        let reserved = self.inner.reserved_bytes.load(Ordering::Acquire);
+        let remaining = reserved
+            .checked_sub(bytes)
+            .ok_or(HostEffectAllocationError::ExceedsStageEnvelope)?;
+        if remaining < temporary.live_bytes {
+            return Err(HostEffectAllocationError::ExceedsStageEnvelope);
+        }
+        let next_output = output
+            .unallocated
+            .checked_add(bytes)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        // The global reservation is unchanged: both shares belong to the
+        // same ledger, and all checks above precede either mutation.
+        self.inner
+            .reserved_bytes
+            .store(remaining, Ordering::Release);
+        output.unallocated = next_output;
+        Ok(())
+    }
+
     /// Exact metadata retained by one owned temporary claim. Ordinary
     /// numeric workspaces use the same stage claim and must include this in
     /// their checked phase peak.
@@ -317,6 +357,7 @@ impl ManagedHostEffectStageReservation {
         Ok(Arc::new(ManagedOutputHeadroom {
             inner: Arc::new(HeadroomInner {
                 ledger: self.inner.ledger.clone(),
+                stage: Arc::downgrade(&self.inner),
                 state: Mutex::new(HeadroomState {
                     unallocated: bytes,
                     active: true,
@@ -522,6 +563,7 @@ struct ManagedOutputHeadroom {
 
 struct HeadroomInner {
     ledger: Arc<Mutex<LedgerState>>,
+    stage: Weak<StageInner>,
     state: Mutex<HeadroomState>,
 }
 
@@ -547,6 +589,15 @@ impl fmt::Debug for ManagedOutputHeadroom {
 }
 
 impl HostEffectOutputHeadroom for ManagedOutputHeadroom {
+    fn transfer_settled_stage_bytes(
+        &self,
+        stage: &ManagedHostEffectStageReservation,
+        bytes: u64,
+        epoch: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        stage.transfer_to_headroom(&self.inner, bytes, epoch)
+    }
+
     fn reserve_exact(
         &self,
         bytes: usize,

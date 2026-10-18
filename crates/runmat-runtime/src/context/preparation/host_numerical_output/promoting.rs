@@ -1,10 +1,9 @@
 use super::{
     numerical_output_error, unsupported_output, NumericalAllocation, PreparedHostNumericalOutput,
 };
-use crate::context::host_allocation::HostAllocationError;
 use crate::context::RuntimeContext;
 use runmat_types::NumericDomain;
-use runmat_value::Value;
+use runmat_value::{ComplexElement, Value};
 
 impl PreparedHostNumericalOutput {
     pub(crate) fn generate_promoting_f32(
@@ -13,6 +12,7 @@ impl PreparedHostNumericalOutput {
         mut generate: impl FnMut(usize) -> Result<(NumericDomain, (f32, f32)), crate::RuntimeError>,
     ) -> Result<Value, crate::RuntimeError> {
         let mut publish_complex = false;
+        let mut output = BorrowedFloatingOutput::f32(&mut self.allocation)?;
         for index in 0..self.len {
             if index % Self::COPY_CHUNK == 0 {
                 self.receipt
@@ -21,14 +21,7 @@ impl PreparedHostNumericalOutput {
             }
             let (domain, (real, imaginary)) = generate(index)?;
             publish_complex |= domain == NumericDomain::Complex;
-            write_f32(
-                context,
-                &mut self.allocation,
-                index,
-                domain,
-                real,
-                imaginary,
-            )?;
+            output.write(index, domain, real, imaginary)?;
         }
         self.finish_promoting(context, publish_complex)
     }
@@ -39,6 +32,7 @@ impl PreparedHostNumericalOutput {
         mut generate: impl FnMut(usize) -> Result<(NumericDomain, (f64, f64)), crate::RuntimeError>,
     ) -> Result<Value, crate::RuntimeError> {
         let mut publish_complex = false;
+        let mut output = BorrowedFloatingOutput::f64(&mut self.allocation)?;
         for index in 0..self.len {
             if index % Self::COPY_CHUNK == 0 {
                 self.receipt
@@ -47,14 +41,7 @@ impl PreparedHostNumericalOutput {
             }
             let (domain, (real, imaginary)) = generate(index)?;
             publish_complex |= domain == NumericDomain::Complex;
-            write_f64(
-                context,
-                &mut self.allocation,
-                index,
-                domain,
-                real,
-                imaginary,
-            )?;
+            output.write(index, domain, real, imaginary)?;
         }
         self.finish_promoting(context, publish_complex)
     }
@@ -67,6 +54,7 @@ impl PreparedHostNumericalOutput {
         mut map: impl FnMut(f32) -> Result<(f32, f32), crate::RuntimeError>,
     ) -> Result<Value, crate::RuntimeError> {
         self.ensure_source_len(source.len())?;
+        let mut output = BorrowedFloatingOutput::f32(&mut self.allocation)?;
         for (index, source) in source.iter().copied().enumerate() {
             if index % Self::COPY_CHUNK == 0 {
                 self.receipt
@@ -79,14 +67,7 @@ impl PreparedHostNumericalOutput {
             } else {
                 NumericDomain::Real
             };
-            write_f32(
-                context,
-                &mut self.allocation,
-                index,
-                domain,
-                real,
-                imaginary,
-            )?;
+            output.write(index, domain, real, imaginary)?;
         }
         self.finish_promoting(context, publish_complex)
     }
@@ -99,6 +80,7 @@ impl PreparedHostNumericalOutput {
         mut map: impl FnMut(f64) -> Result<(f64, f64), crate::RuntimeError>,
     ) -> Result<Value, crate::RuntimeError> {
         self.ensure_source_len(source.len())?;
+        let mut output = BorrowedFloatingOutput::f64(&mut self.allocation)?;
         for (index, source) in source.iter().copied().enumerate() {
             if index % Self::COPY_CHUNK == 0 {
                 self.receipt
@@ -111,14 +93,7 @@ impl PreparedHostNumericalOutput {
             } else {
                 NumericDomain::Real
             };
-            write_f64(
-                context,
-                &mut self.allocation,
-                index,
-                domain,
-                real,
-                imaginary,
-            )?;
+            output.write(index, domain, real, imaginary)?;
         }
         self.finish_promoting(context, publish_complex)
     }
@@ -146,54 +121,86 @@ impl PreparedHostNumericalOutput {
     }
 }
 
-fn write_f32(
-    context: &RuntimeContext,
-    allocation: &mut NumericalAllocation,
-    index: usize,
-    domain: NumericDomain,
-    real: f32,
-    imaginary: f32,
-) -> Result<(), crate::RuntimeError> {
-    if let Some(target) = allocation.real.as_mut() {
-        if domain != NumericDomain::Real && allocation.complex.is_none() {
-            return Err(unsupported_output());
-        }
-        target.as_f32_slice_mut().ok_or_else(unsupported_output)?[index] = real;
-    }
-    if let Some(target) = allocation.complex.as_mut() {
-        target
-            .set(index, f64::from(real), f64::from(imaginary))
-            .map_err(|error| {
-                numerical_output_error(context, HostAllocationError::Numeric(error))
-            })?;
-    }
-    if allocation.real.is_none() && allocation.complex.is_none() {
-        return Err(unsupported_output());
-    }
-    Ok(())
+struct BorrowedFloatingOutput<'a, T> {
+    real: Option<&'a mut [T]>,
+    complex: Option<&'a mut [ComplexElement<T>]>,
 }
 
-fn write_f64(
-    context: &RuntimeContext,
-    allocation: &mut NumericalAllocation,
-    index: usize,
-    domain: NumericDomain,
-    real: f64,
-    imaginary: f64,
-) -> Result<(), crate::RuntimeError> {
-    if let Some(target) = allocation.real.as_mut() {
-        if domain != NumericDomain::Real && allocation.complex.is_none() {
+impl<'a> BorrowedFloatingOutput<'a, f32> {
+    fn f32(allocation: &'a mut NumericalAllocation) -> Result<Self, crate::RuntimeError> {
+        let real = allocation
+            .real
+            .as_mut()
+            .map(|target| {
+                target
+                    .try_as_f32_slice_mut_unique()
+                    .ok_or_else(unsupported_output)
+            })
+            .transpose()?;
+        let complex = allocation
+            .complex
+            .as_mut()
+            .map(|target| {
+                target
+                    .try_as_f32_slice_mut_unique()
+                    .ok_or_else(unsupported_output)
+            })
+            .transpose()?;
+        Self::new(real, complex)
+    }
+}
+
+impl<'a> BorrowedFloatingOutput<'a, f64> {
+    fn f64(allocation: &'a mut NumericalAllocation) -> Result<Self, crate::RuntimeError> {
+        let real = allocation
+            .real
+            .as_mut()
+            .map(|target| {
+                target
+                    .try_as_f64_slice_mut_unique()
+                    .ok_or_else(unsupported_output)
+            })
+            .transpose()?;
+        let complex = allocation
+            .complex
+            .as_mut()
+            .map(|target| {
+                target
+                    .try_as_f64_slice_mut_unique()
+                    .ok_or_else(unsupported_output)
+            })
+            .transpose()?;
+        Self::new(real, complex)
+    }
+}
+
+impl<'a, T: Copy> BorrowedFloatingOutput<'a, T> {
+    fn new(
+        real: Option<&'a mut [T]>,
+        complex: Option<&'a mut [ComplexElement<T>]>,
+    ) -> Result<Self, crate::RuntimeError> {
+        if real.is_none() && complex.is_none() {
             return Err(unsupported_output());
         }
-        target.as_f64_slice_mut().ok_or_else(unsupported_output)?[index] = real;
+        Ok(Self { real, complex })
     }
-    if let Some(target) = allocation.complex.as_mut() {
-        target.set(index, real, imaginary).map_err(|error| {
-            numerical_output_error(context, HostAllocationError::Numeric(error))
-        })?;
+
+    fn write(
+        &mut self,
+        index: usize,
+        domain: NumericDomain,
+        real: T,
+        imaginary: T,
+    ) -> Result<(), crate::RuntimeError> {
+        if let Some(target) = self.real.as_mut() {
+            if domain != NumericDomain::Real && self.complex.is_none() {
+                return Err(unsupported_output());
+            }
+            target[index] = real;
+        }
+        if let Some(target) = self.complex.as_mut() {
+            target[index] = ComplexElement(real, imaginary);
+        }
+        Ok(())
     }
-    if allocation.real.is_none() && allocation.complex.is_none() {
-        return Err(unsupported_output());
-    }
-    Ok(())
 }

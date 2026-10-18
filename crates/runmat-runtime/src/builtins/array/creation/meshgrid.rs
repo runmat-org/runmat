@@ -21,7 +21,7 @@ use crate::builtins::common::random_args::{complex_tensor_into_value, keyword_of
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+    ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
 
@@ -31,14 +31,14 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     op_kind: GpuOpKind::Custom("array_construct"),
     supported_precisions: &[ScalarType::F32, ScalarType::F64],
     broadcast: BroadcastSemantics::Matlab,
-    provider_hooks: &[ProviderHook::Custom("meshgrid")],
+    provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
     residency: ResidencyPolicy::NewHandle,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Providers may supply a dedicated meshgrid hook; until then the runtime builds grids on the host and uploads them when GPU residency is requested.",
+    notes: "Supported real resident vector axes use the owning provider's reshape and repmat operations. Other admitted forms construct grids on the host and restore requested GPU residency when supported; this builtin does not dispatch the dedicated meshgrid hook.",
 };
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {

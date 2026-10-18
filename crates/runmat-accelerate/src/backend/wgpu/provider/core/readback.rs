@@ -79,13 +79,17 @@ impl MapCompletion {
 
 struct MapCallback {
     completion: FundedMapCompletion,
-    _numeric_stage: Option<runmat_accelerate_api::PreparedNumericDownloadStage>,
+    numeric_stage: Option<runmat_accelerate_api::PreparedNumericDownloadStage>,
     invoked: bool,
 }
 
 impl MapCallback {
     fn complete(&mut self, result: std::result::Result<(), wgpu::BufferAsyncError>) {
         self.invoked = true;
+        // The waiter may run as soon as complete() wakes it. Retire this
+        // callback's physical staging lease before exposing completion; the
+        // awaiting path retires its own staging lease during cleanup.
+        drop(self.numeric_stage.take());
         self.completion
             .state
             .get()
@@ -304,7 +308,7 @@ fn read_with_optional_claim<'a, T: 'a>(
             };
             let mut callback = MapCallback {
                 completion: completion.clone(),
-                _numeric_stage: callback_stage,
+                numeric_stage: callback_stage,
                 invoked: false,
             };
             staging.access.with_shared(|_| {

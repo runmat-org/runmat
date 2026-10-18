@@ -27,6 +27,58 @@ pub(super) struct PooledOutputPermit {
 }
 
 impl PooledOutputPermit {
+    pub(super) fn transfer_settled_stage_bytes(
+        &self,
+        stage: &ManagedHostEffectStageReservation,
+        bytes: u64,
+        epoch: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        if !Arc::ptr_eq(&stage.inner.ledger, &self.ledger) {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        let temporary = stage.inner.temporary.lock().expect("temporary ledger lock");
+        let mut output = self.state.lock().expect("pooled output lock");
+        let ledger = stage.inner.ledger.lock().expect("host ledger lock");
+        if !ledger.snapshot.current || ledger.snapshot.epoch != epoch {
+            return Err(HostEffectAllocationError::Revoked);
+        }
+        if output
+            .cancellation
+            .as_ref()
+            .is_some_and(|token| token.is_cancelled())
+        {
+            return Err(HostEffectAllocationError::Cancelled);
+        }
+        if !output.active
+            || !self.active_epoch.load(Ordering::Acquire)
+            || temporary.retire_pending
+            || output.cancellation.is_none()
+            || output
+                .session_owner
+                .as_ref()
+                .is_none_or(|owner| owner.load(Ordering::Acquire) != output.session_generation)
+        {
+            return Err(HostEffectAllocationError::InvalidInvocation);
+        }
+        let reserved = stage.inner.reserved_bytes.load(Ordering::Acquire);
+        let remaining = reserved
+            .checked_sub(bytes)
+            .ok_or(HostEffectAllocationError::ExceedsStageEnvelope)?;
+        if remaining < temporary.live_bytes {
+            return Err(HostEffectAllocationError::ExceedsStageEnvelope);
+        }
+        let next_output = output
+            .remaining
+            .checked_add(bytes)
+            .ok_or(HostEffectAllocationError::Overflow)?;
+        stage
+            .inner
+            .reserved_bytes
+            .store(remaining, Ordering::Release);
+        output.remaining = next_output;
+        Ok(())
+    }
+
     pub(super) fn new(
         ledger: &ManagedHostEffectLedger,
         active_epoch: Arc<AtomicBool>,

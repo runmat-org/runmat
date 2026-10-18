@@ -44,12 +44,7 @@ impl From<SharedShape> for HostShapeInput {
 impl SharedShape {
     /// Physical shape bytes, excluding the permit's claim-control charge.
     pub fn requested_bytes_for_rank(rank: usize) -> Result<usize, ExactHostNumericAllocationError> {
-        let backing = Layout::array::<usize>(rank)
-            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
-            .size();
-        backing
-            .checked_add(ExactShared::<ShapePayload>::requested_bytes())
-            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
+        Self::requested_bytes_for_capacity(rank)
     }
 
     /// Claim acquisition precedes both backing and owner allocations.
@@ -67,6 +62,33 @@ impl SharedShape {
         ExactShared::try_new(payload)
             .map(Self)
             .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
+    }
+
+    /// Move an existing Rust shape backing into the canonical shared owner.
+    /// Its claim covers the actual capacity and the ExactShared header.
+    pub(crate) fn new_admitted_from_owned(
+        dimensions: Vec<usize>,
+        permit: &dyn ExactHostAllocationPermit,
+    ) -> Result<Self, ExactHostNumericAllocationError> {
+        let requested = Self::requested_bytes_for_capacity(dimensions.capacity())?;
+        let claim = permit.reserve_exact_claim(requested)?;
+        let payload = ShapePayload {
+            dimensions,
+            _retained_claim: Some(claim),
+        };
+        ExactShared::try_new(payload)
+            .map(Self)
+            .map_err(|_| ExactHostNumericAllocationError::AllocationFailed)
+    }
+
+    pub(crate) fn requested_bytes_for_capacity(
+        capacity: usize,
+    ) -> Result<usize, ExactHostNumericAllocationError> {
+        Layout::array::<usize>(capacity)
+            .map_err(|_| ExactHostNumericAllocationError::LayoutOverflow)?
+            .size()
+            .checked_add(ExactShared::<ShapePayload>::requested_bytes())
+            .ok_or(ExactHostNumericAllocationError::LayoutOverflow)
     }
 
     /// Only callers without finite output admission may create this owner.

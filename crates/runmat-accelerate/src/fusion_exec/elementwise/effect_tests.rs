@@ -573,6 +573,44 @@ fn certified_double_control_is_not_a_physical_upload_and_empty_fusion_is_pre_eff
                 assert_eq!(provider.dispatches.load(Ordering::SeqCst), 1);
             }
         }
+        // A Double scalar without an exact binary32 product receipt is real
+        // Double computation, not an F32 shader recipe. Finite preparation
+        // must retain the original CPU operation before any provider work.
+        let provider = FailingProvider::with_precision(usize::MAX, ProviderPrecision::F32);
+        let _selected = ThreadProviderGuard::set(Some(provider));
+        let ledger = runmat_runtime::context::host_effect::ManagedHostEffectLedger::new_with_epoch(
+            1 << 20,
+            31,
+        );
+        let runtime = runmat_runtime::context::RuntimeContext::new(Rc::new(
+            runmat_runtime::execution::RuntimeExecutionService::new(),
+        ))
+        .with_service_ports(
+            runmat_runtime::context::RuntimeServicePorts::default()
+                .with_parallel(Rc::new(FinitePreparationOwner(ledger.clone()))),
+        );
+        let mut source = plan();
+        source.operations = vec![crate::fusion::FusionOp::Primitive {
+            op: crate::graph::PrimitiveOp::ElemMul,
+            inputs: vec![0, 1],
+            output: Some(2),
+        }];
+        let request = FusionExecutionRequest {
+            plan: &source,
+            inputs: vec![
+                Value::Tensor(runmat_value::Tensor::from_f32(vec![1.0, 2.0], vec![2]).unwrap()),
+                Value::Num(1.1),
+            ],
+            placement: None,
+            runtime: Some(runtime),
+        };
+        assert!(matches!(
+            futures::executor::block_on(execute_elementwise_placed(request)),
+            Ok(FusionExecutionOutcome::SharedRuntime(_))
+        ));
+        assert_eq!(provider.uploads.load(Ordering::SeqCst), 0);
+        assert_eq!(provider.dispatches.load(Ordering::SeqCst), 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
     });
 }
 

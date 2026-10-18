@@ -27,11 +27,11 @@ impl PreparedHostNumericalOutput {
     ) -> Result<(), HostAllocationError> {
         let (receipt, allocation) = (&self.receipt, &mut self.allocation);
         receipt.checkpoint(context)?;
-        let target = real_allocation_mut(allocation)?.as_f32_slice_mut().ok_or(
-            HostAllocationError::Numeric(
+        let target = real_allocation_mut(allocation)?
+            .try_as_f32_slice_mut_unique()
+            .ok_or(HostAllocationError::Numeric(
                 runmat_value::ExactHostNumericAllocationError::UnsupportedClass,
-            ),
-        )?;
+            ))?;
         ensure_same_len(target.len(), source.len())?;
         for (target, source) in target
             .chunks_mut(Self::COPY_CHUNK)
@@ -50,11 +50,11 @@ impl PreparedHostNumericalOutput {
     ) -> Result<(), HostAllocationError> {
         let (receipt, allocation) = (&self.receipt, &mut self.allocation);
         receipt.checkpoint(context)?;
-        let target = real_allocation_mut(allocation)?.as_f32_slice_mut().ok_or(
-            HostAllocationError::Numeric(
+        let target = real_allocation_mut(allocation)?
+            .try_as_f32_slice_mut_unique()
+            .ok_or(HostAllocationError::Numeric(
                 runmat_value::ExactHostNumericAllocationError::UnsupportedClass,
-            ),
-        )?;
+            ))?;
         ensure_same_len(target.len(), source.len())?;
         for (target, source) in target
             .chunks_mut(Self::COPY_CHUNK)
@@ -75,11 +75,11 @@ impl PreparedHostNumericalOutput {
     ) -> Result<(), HostAllocationError> {
         let (receipt, allocation) = (&self.receipt, &mut self.allocation);
         receipt.checkpoint(context)?;
-        let target = real_allocation_mut(allocation)?.as_f64_slice_mut().ok_or(
-            HostAllocationError::Numeric(
+        let target = real_allocation_mut(allocation)?
+            .try_as_f64_slice_mut_unique()
+            .ok_or(HostAllocationError::Numeric(
                 runmat_value::ExactHostNumericAllocationError::UnsupportedClass,
-            ),
-        )?;
+            ))?;
         ensure_same_len(target.len(), source.len())?;
         for (target, source) in target
             .chunks_mut(Self::COPY_CHUNK)
@@ -100,11 +100,11 @@ impl PreparedHostNumericalOutput {
     ) -> Result<(), HostAllocationError> {
         let (receipt, allocation) = (&self.receipt, &mut self.allocation);
         receipt.checkpoint(context)?;
-        let target = real_allocation_mut(allocation)?.as_f64_slice_mut().ok_or(
-            HostAllocationError::Numeric(
+        let target = real_allocation_mut(allocation)?
+            .try_as_f64_slice_mut_unique()
+            .ok_or(HostAllocationError::Numeric(
                 runmat_value::ExactHostNumericAllocationError::UnsupportedClass,
-            ),
-        )?;
+            ))?;
         ensure_same_len(target.len(), source.len())?;
         for (target, source) in target
             .chunks_mut(Self::COPY_CHUNK)
@@ -121,9 +121,7 @@ impl PreparedHostNumericalOutput {
         context: &RuntimeContext,
     ) -> Result<Tensor, HostAllocationError> {
         self.receipt.checkpoint(context)?;
-        self.into_real_allocation()?
-            .into_tensor()
-            .map_err(HostAllocationError::Numeric)
+        self.into_real_allocation()
     }
 
     pub(crate) fn into_complex_tensor(
@@ -132,9 +130,7 @@ impl PreparedHostNumericalOutput {
     ) -> Result<ComplexTensor, HostAllocationError> {
         self.receipt.checkpoint(context)?;
         let allocation = self.allocation.complex.ok_or_else(unsupported_class)?;
-        allocation
-            .into_tensor()
-            .map_err(HostAllocationError::Numeric)
+        Ok(allocation)
     }
 }
 

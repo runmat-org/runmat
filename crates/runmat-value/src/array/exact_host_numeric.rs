@@ -16,6 +16,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Arc;
 
+mod adopted_vec;
 mod integer;
 mod complex;
 mod logical;

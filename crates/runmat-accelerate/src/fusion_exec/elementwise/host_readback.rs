@@ -298,10 +298,10 @@ fn admit_inputs(
         let selected = if managed {
             match canonical[index] {
                 VmFusionHostOperation::Intrinsic(runmat_types::OperatorKind::UnaryPlus) => {
-                    // A directly downloaded resident operand owns payload only
-                    // through the region's readback receipt. Unary plus can
-                    // return that alias beyond region cleanup, so admit only
-                    // pre-existing host inputs or claimed prior VM outputs.
+                    // Managed readback attaches retained claims to the decoded
+                    // payload and shape. Unary plus can therefore return that
+                    // same owner beyond region cleanup without another output
+                    // allocation, just as it can for a pre-existing host input.
                     if !matches!(
                         operation,
                         FusionOp::Primitive {
@@ -309,14 +309,6 @@ fn admit_inputs(
                             ..
                         }
                     ) || inputs.len() != 1
-                        || request
-                            .plan
-                            .inputs
-                            .iter()
-                            .zip(&request.inputs)
-                            .any(|(&id, value)| {
-                                id == inputs[0] && matches!(value, Value::GpuTensor(_))
-                            })
                     {
                         return None;
                     }

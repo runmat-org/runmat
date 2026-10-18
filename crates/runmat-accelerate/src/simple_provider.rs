@@ -4387,8 +4387,19 @@ impl AccelProvider for InProcessProvider {
         &self,
         handle: &GpuTensorHandle,
     ) -> runmat_execution::ResourceByteBound {
-        // The registry clone is moved into the returned host payload.
+        // The registry clone is moved into the returned host payload. The
+        // returned shape is one additional owned Vec.
         runmat_accelerate_api::checked_numeric_download_host_payload_bytes(handle)
+            .and_then(|payload| {
+                u64::try_from(
+                    handle
+                        .shape()
+                        .len()
+                        .checked_mul(std::mem::size_of::<usize>())?,
+                )
+                .ok()
+                .and_then(|shape| payload.checked_add(shape))
+            })
             .map(runmat_execution::ResourceByteBound::Known)
             .unwrap_or(runmat_execution::ResourceByteBound::Unavailable(
                 runmat_execution::ResourceBoundUnavailable::NoScratchBound,

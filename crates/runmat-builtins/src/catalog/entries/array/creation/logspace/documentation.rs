@@ -53,7 +53,11 @@ BuiltinDocumentationLink { label: "randperm", target: BuiltinDocumentationLinkTa
 BuiltinDocumentationLink { label: "range", target: BuiltinDocumentationLinkTarget::Documentation("./range") },
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/logspace.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/logspace.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/logspace.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/logspace.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "logspace unit tests", location: "builtins::array::creation::logspace::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "logspace provider roundtrip test", location: "builtins::array::creation::logspace::tests::logspace_gpu_roundtrip" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "logspace WGPU comparison test", location: "builtins::array::creation::logspace::tests::logspace_wgpu_matches_cpu" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

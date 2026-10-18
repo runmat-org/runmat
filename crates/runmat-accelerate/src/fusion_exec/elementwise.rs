@@ -29,6 +29,26 @@ struct TypedProducerPreparation {
     fallback: abi::ShaderBodyPreparation,
 }
 
+fn classify_producer_preparation_error(
+    program: &crate::fusion::semantics::ResolvedProgram,
+    error: anyhow::Error,
+) -> crate::fusion::semantics::FusionResolveFailure {
+    use crate::fusion::semantics::FusionResolveFailure;
+    if error
+        .downcast_ref::<crate::fusion::typed_producer::CountedRecipeUnavailable>()
+        .is_some()
+    {
+        let failure = FusionResolveFailure::Structural(error);
+        if program.observed_provider_probe() {
+            failure.after_observed_probe()
+        } else {
+            failure
+        }
+    } else {
+        FusionResolveFailure::Admission(error)
+    }
+}
+
 /// Typed admission for the floating elementwise implementation.
 ///
 /// Native integer values are valid runtime inputs, but this implementation
@@ -109,18 +129,27 @@ fn admit_typed_producer_preparation(
         )
         .map_err(FusionResolveFailure::Admission)?
         {
-            let single = request
-                .plan
-                .measured_typed_shader_preparation_bytes(
-                    outputs,
-                    program,
-                    ScalarType::F32,
-                    single_indices.len(),
-                )
-                .map_err(FusionResolveFailure::Admission)?;
-            f32_body_capacity = Some(single.body_bytes);
-            peak = peak.max(single.requested_bytes);
-            f32_route = Some((single_indices, single));
+            let single = request.plan.measured_typed_shader_preparation_bytes(
+                outputs,
+                program,
+                ScalarType::F32,
+                single_indices.len(),
+            );
+            match single {
+                Ok(single) => {
+                    f32_body_capacity = Some(single.body_bytes);
+                    peak = peak.max(single.requested_bytes);
+                    f32_route = Some((single_indices, single));
+                }
+                Err(error)
+                    if error
+                        .downcast_ref::<crate::fusion::typed_producer::CountedRecipeUnavailable>()
+                        .is_some() =>
+                {
+                    log::debug!("finite fusion Single ABI has no counted recipe: {error}");
+                }
+                Err(error) => return Err(FusionResolveFailure::Admission(error)),
+            }
         }
     }
     let default_bound = request.plan.measured_typed_shader_preparation_bytes(
@@ -143,7 +172,7 @@ fn admit_typed_producer_preparation(
             log::debug!("finite fusion default ABI has no counted recipe: {error}");
             None
         }
-        Err(error) => return Err(FusionResolveFailure::Admission(error)),
+        Err(error) => return Err(classify_producer_preparation_error(program, error)),
     };
     let mut default_fallback_body_capacity = None;
     let mut f32_fallback_body_capacity = None;
@@ -159,7 +188,7 @@ fn admit_typed_producer_preparation(
                         scalar,
                         indices.len(),
                     )
-                    .map_err(FusionResolveFailure::Admission)?;
+                    .map_err(|error| classify_producer_preparation_error(program, error))?;
                 body = body.max(single.body_bytes);
                 let overlap = retained
                     .checked_add(single.requested_bytes)
@@ -377,14 +406,15 @@ async fn execute_elementwise_outputs(
             producer_preparation.primary,
         )
         .map_err(|error| {
-            if finite_host_preparation
-                && error
-                    .downcast_ref::<crate::fusion::typed_producer::CountedRecipeUnavailable>()
-                    .is_none()
-            {
-                crate::fusion::semantics::FusionResolveFailure::Admission(error)
+            if finite_host_preparation {
+                classify_producer_preparation_error(&program, error)
             } else {
-                crate::fusion::semantics::FusionResolveFailure::Structural(error)
+                let failure = crate::fusion::semantics::FusionResolveFailure::Structural(error);
+                if program.observed_provider_probe() {
+                    failure.after_observed_probe()
+                } else {
+                    failure
+                }
             }
         })?;
         FusionPlacementObserver::new(request.placement).shader_source_generation(started);

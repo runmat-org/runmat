@@ -264,7 +264,7 @@ impl From<runmat_runtime::RuntimeError> for FusionResolveFailure {
 }
 
 impl FusionResolveFailure {
-    fn after_observed_probe(self) -> Self {
+    pub(crate) fn after_observed_probe(self) -> Self {
         match self {
             Self::DomainIneligible(_) => self,
             other => Self::ObservedProbe(Box::new(other)),

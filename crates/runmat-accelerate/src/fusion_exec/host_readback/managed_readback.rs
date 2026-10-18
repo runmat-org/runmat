@@ -3,7 +3,7 @@
 //! external effect, including earlier sources still live in the invocation.
 use super::{source_matches, CpuReadbackFailure, CpuReadbackPlan, PreparedVmHostInputs};
 use runmat_accelerate_api::{
-    NumericElementType, ProviderFeasibilityQuery, ProviderQueryMetadataFootprint,
+    GpuTensorStorage, NumericElementType, ProviderFeasibilityQuery, ProviderQueryMetadataFootprint,
 };
 use runmat_runtime::context::host_allocation::{
     host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
@@ -12,6 +12,9 @@ use runmat_runtime::context::RuntimeContext;
 use runmat_runtime::{build_runtime_error, runtime_error, GpuGatherRetry, RuntimeError};
 use runmat_value::{ExactHostTensorAllocation, NumericDType, Value};
 use std::mem::size_of;
+
+mod adoption;
+use adoption::adopt_settled_download;
 
 fn invalid(message: &'static str) -> RuntimeError {
     let mut error = build_runtime_error(message)
@@ -76,6 +79,13 @@ fn quote_checked(sources: &[super::Source]) -> Result<ReadbackQuote, QuoteError>
     let mut callback_claims = 0_u64;
     let mut entry_count = 0_usize;
     for source in sources {
+        if source.handle.descriptor().storage != Some(GpuTensorStorage::Real)
+            || runmat_accelerate_api::handle_is_logical(&source.handle)
+        {
+            return Err(QuoteError(
+                "selected finite readback requires native real floating storage",
+            ));
+        }
         let shape = source.handle.shape();
         let dtype = match source.handle.physical().element_type() {
             NumericElementType::F32 => NumericDType::F32,
@@ -101,20 +111,51 @@ fn quote_checked(sources: &[super::Source]) -> Result<ReadbackQuote, QuoteError>
             .checked_mul(size_of::<usize>())
             .and_then(|bytes| u64::try_from(bytes).ok())
             .ok_or(QuoteError("selected host shape extent overflows"))?;
-        let full_value = ExactHostTensorAllocation::unmanaged_requested_bytes(dtype, shape)
-            .ok()
-            .and_then(|bytes| u64::try_from(bytes).ok())
+        if source
+            .payload_bytes
+            .checked_add(shape_bytes)
+            .is_none_or(|minimum| source.host_workspace < minimum)
+        {
+            return Err(QuoteError(
+                "selected provider host workspace omits returned native backing",
+            ));
+        }
+        let expected_capacity = shape
+            .iter()
+            .try_fold(1_usize, |count, dimension| count.checked_mul(*dimension))
             .ok_or(QuoteError("selected host value extent overflows"))?;
-        let wrapper = full_value
+        let adopted_raw =
+            ExactHostTensorAllocation::adopted_requested_bytes(dtype, expected_capacity, rank)
+                .ok()
+                .and_then(|bytes| u64::try_from(bytes).ok())
+                .ok_or(QuoteError("selected host value extent overflows"))?;
+        let overhead = adopted_raw
             .checked_sub(source.payload_bytes)
             .and_then(|bytes| bytes.checked_sub(shape_bytes))
             .ok_or(QuoteError("selected host wrapper extent overflows"))?;
+        let controls = HostAllocationPlan::retained_exact_output_bytes(
+            0,
+            ExactHostTensorAllocation::retained_claim_count(),
+        )
+        .map_err(|_| QuoteError("selected host claim extent overflows"))?;
+        // The provider's host-workspace bound covers the returned Vec backing
+        // at its actual capacity, even when it exceeds the logical length.
+        // It may also include transient transpose/work buffers, so using the
+        // entire bound for each retained mirror is conservative admission,
+        // not a statement that those transient bytes remain physically live.
+        // Fixed adoption metadata and both claim controls are additional.
+        let full_value = source
+            .host_workspace
+            .checked_add(overhead)
+            .and_then(|bytes| bytes.checked_add(controls))
+            .ok_or(QuoteError("selected host retained extent overflows"))?;
         // Earlier decoded values remain live while the next native provider
         // workspace and its query/stage are allocated. Only one download is
         // active at a time; each finished value joins the retained mirrors.
         let active = retained_values
             .checked_add(source.host_workspace)
-            .and_then(|bytes| bytes.checked_add(wrapper))
+            .and_then(|bytes| bytes.checked_add(overhead))
+            .and_then(|bytes| bytes.checked_add(controls))
             .and_then(|bytes| bytes.checked_add(query.checked_mul(2)?))
             .and_then(|bytes| bytes.checked_add(shape_bytes.checked_mul(2)?))
             .ok_or(QuoteError("selected host readback peak overflows"))?;
@@ -270,7 +311,7 @@ impl CpuReadbackPlan {
                 .checkpoint(runtime)
                 .map_err(|cause| admission_error(runtime, cause, prior_effect))?;
             prior_effect = true;
-            let value = runmat_runtime::builtins::common::gpu_helpers::download_value_preserving_residency_staged_async(
+            let host = runmat_runtime::builtins::common::gpu_helpers::download_numeric_preserving_residency_staged_async(
                 source.owner,
                 &source.handle,
                 stage,
@@ -290,6 +331,8 @@ impl CpuReadbackPlan {
                     "selected host source changed during readback",
                 )));
             }
+            let value =
+                adopt_settled_download(host, &source, runtime, &receipt).map_err(|error| *error)?;
             entry.extend(source.offsets.iter().map(|&offset| (offset, value.clone())));
             mirrors.push((source, value));
         }

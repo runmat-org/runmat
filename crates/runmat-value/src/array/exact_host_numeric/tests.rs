@@ -726,6 +726,91 @@ fn simultaneous_reservations_are_charged_until_each_owner_drops() {
 }
 
 #[test]
+fn adopted_rust_vecs_keep_payload_and_shape_backings_until_exact_claim_refund() {
+    let mut f32_values = Vec::with_capacity(8);
+    f32_values.extend([1.0_f32, 2.0]);
+    let f32_pointer = f32_values.as_ptr();
+    let mut f32_shape = Vec::with_capacity(4);
+    f32_shape.extend([1_usize, 2]);
+    let f32_shape_pointer = f32_shape.as_ptr();
+    let f32_shape_capacity = f32_shape.capacity();
+    let f32_charge = ExactHostTensorAllocation::adopted_requested_bytes(
+        NumericDType::F32,
+        f32_values.capacity(),
+        f32_shape.capacity(),
+    )
+    .unwrap();
+
+    let mut f64_values = Vec::with_capacity(6);
+    f64_values.extend([3.0_f64, 4.0]);
+    let f64_pointer = f64_values.as_ptr();
+    let mut f64_shape = Vec::with_capacity(3);
+    f64_shape.extend([2_usize, 1]);
+    let f64_shape_pointer = f64_shape.as_ptr();
+    let f64_shape_capacity = f64_shape.capacity();
+    let f64_charge = ExactHostTensorAllocation::adopted_requested_bytes(
+        NumericDType::F64,
+        f64_values.capacity(),
+        f64_shape.capacity(),
+    )
+    .unwrap();
+
+    let quota = permit(f32_charge + f64_charge);
+    let f32_tensor = ExactHostTensorAllocation::adopt_f32_vec(f32_values, f32_shape, &quota)
+        .expect("adopt F32 Vec");
+    let f64_tensor = ExactHostTensorAllocation::adopt_f64_vec(f64_values, f64_shape, &quota)
+        .expect("adopt F64 Vec");
+    assert_eq!(f32_tensor.as_f32_slice().unwrap().as_ptr(), f32_pointer);
+    assert_eq!(f32_tensor.shape().as_ptr(), f32_shape_pointer);
+    assert_eq!(f32_tensor.shape_capacity_for_testing(), f32_shape_capacity);
+    assert_eq!(f64_tensor.as_f64_slice().unwrap().as_ptr(), f64_pointer);
+    assert_eq!(f64_tensor.shape().as_ptr(), f64_shape_pointer);
+    assert_eq!(f64_tensor.shape_capacity_for_testing(), f64_shape_capacity);
+    assert_eq!(
+        quota.retained.load(Ordering::SeqCst),
+        f32_charge + f64_charge
+    );
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 4);
+    drop(f32_tensor);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), f64_charge);
+    drop(f64_tensor);
+    assert_eq!(quota.retained.load(Ordering::SeqCst), 0);
+    assert_eq!(quota.claims.load(Ordering::SeqCst), 0);
+
+    let empty_shape = vec![0_usize, 2];
+    let empty_charge = ExactHostTensorAllocation::adopted_requested_bytes(
+        NumericDType::F32,
+        0,
+        empty_shape.capacity(),
+    )
+    .unwrap();
+    let empty_quota = permit(empty_charge);
+    let empty = ExactHostTensorAllocation::adopt_f32_vec(Vec::new(), empty_shape, &empty_quota)
+        .expect("zero-capacity payload adoption");
+    assert!(empty.as_f32_slice().unwrap().is_empty());
+    assert_eq!(empty_quota.retained.load(Ordering::SeqCst), empty_charge);
+    drop(empty);
+    assert_eq!(empty_quota.retained.load(Ordering::SeqCst), 0);
+
+    let mut refused_values = Vec::with_capacity(5);
+    refused_values.extend([7.0_f32, 8.0]);
+    let refused_shape = vec![1_usize, 2];
+    let refused_charge = ExactHostTensorAllocation::adopted_requested_bytes(
+        NumericDType::F32,
+        refused_values.capacity(),
+        refused_shape.capacity(),
+    )
+    .unwrap();
+    let refused = permit(refused_charge - 1);
+    assert!(matches!(
+        ExactHostTensorAllocation::adopt_f32_vec(refused_values, refused_shape, &refused),
+        Err(ExactHostNumericAllocationError::ExceedsPermit)
+    ));
+    assert_eq!(refused.retained.load(Ordering::SeqCst), 0);
+    assert_eq!(refused.claims.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn unmanaged_tensor_quotes_match_the_real_owner_layout_without_claim_headers() {
     let shape = [2, 3];
     let release_bytes = Layout::new::<RustExactRelease>().size();

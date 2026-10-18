@@ -9,6 +9,7 @@ use runmat_runtime::{build_runtime_error, RuntimeError};
 use runmat_value::Value;
 use std::borrow::Cow;
 
+#[derive(Debug)]
 pub enum CpuReadbackFailure {
     BeforeEffect(RuntimeError),
     AfterEffect(RuntimeError),

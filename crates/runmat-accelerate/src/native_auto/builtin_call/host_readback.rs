@@ -12,10 +12,32 @@ pub(super) struct Admission {
     pub identity: Digest,
 }
 
+pub(super) fn resources_for_envelope(
+    sources: &[Source],
+    envelope: &runmat_runtime::context::preparation::AdmittedHostResources,
+    managed: bool,
+) -> Option<(CpuHostResources, Digest)> {
+    let resources = crate::fusion_exec::host_readback::resources(
+        sources,
+        envelope.bound.retained_bytes,
+        envelope.bound.scratch_bytes,
+        envelope.operand_metadata,
+        managed,
+    )?;
+    let identity = Digest::sha256_serialized(&(
+        "prepared-host-envelope-v2",
+        envelope.identity,
+        resources.resources,
+    ))
+    .ok()?;
+    Some((resources, identity))
+}
+
 pub(super) fn admit(
     auto: &NativeAutoOffload,
     context: &RuntimeContext,
     request: &AdmittedBuiltinPreparation,
+    managed: bool,
 ) -> Option<Admission> {
     if !runmat_runtime::context::preparation::PreparedHostExecution::supports_form(request.form()) {
         return None;
@@ -41,10 +63,6 @@ pub(super) fn admit(
     if sources.is_empty() {
         return None;
     }
-    let managed =
-        runmat_runtime::context::host_allocation::HostAllocationReceipt::policy(Some(context))
-            .ok()?
-            == runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed;
     if managed
         && sources
             .iter()
@@ -52,19 +70,7 @@ pub(super) fn admit(
     {
         return None;
     }
-    let resources = crate::fusion_exec::host_readback::resources(
-        &sources,
-        envelope.bound.retained_bytes,
-        envelope.bound.scratch_bytes,
-        envelope.operand_metadata,
-        managed,
-    )?;
-    let identity = Digest::sha256_serialized(&(
-        "prepared-host-envelope-v2",
-        envelope.identity,
-        resources.resources,
-    ))
-    .ok()?;
+    let (resources, identity) = resources_for_envelope(&sources, &envelope, managed)?;
     let resident_offsets = sources
         .iter()
         .flat_map(|source| source.offsets.iter().copied())

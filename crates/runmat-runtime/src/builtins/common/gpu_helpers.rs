@@ -488,6 +488,23 @@ pub async fn download_value_preserving_residency_staged_async(
     .await
 }
 
+/// Preserve the provider's owned native payload and shape for an admitted
+/// consumer that can retain those exact backings. The stage is physically
+/// settled on successful return; provider implementations must retire their
+/// callback staging lease before completing this future.
+pub async fn download_numeric_preserving_residency_staged_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    stage: PreparedNumericDownloadStage,
+) -> crate::BuiltinResult<HostNumericTensorOwned> {
+    download_numeric_preserving_residency_with_admission_async(
+        provider,
+        handle,
+        NumericDownloadAdmission::Stage(stage),
+    )
+    .await
+}
+
 enum NumericDownloadAdmission {
     None,
     Callback(std::sync::Arc<dyn runmat_execution::resource::RetainedHostAllocationClaim>),
@@ -499,6 +516,24 @@ async fn download_value_preserving_residency_with_admission_async(
     handle: &GpuTensorHandle,
     admission: NumericDownloadAdmission,
 ) -> crate::BuiltinResult<Value> {
+    let host =
+        download_numeric_preserving_residency_with_admission_async(provider, handle, admission)
+            .await?;
+    value_from_numeric_download(host, runmat_accelerate_api::handle_is_logical(handle)).map_err(
+        |error| {
+            build_runtime_error(format!("gpu download: {error}"))
+                .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
+                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                .build()
+        },
+    )
+}
+
+async fn download_numeric_preserving_residency_with_admission_async(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    admission: NumericDownloadAdmission,
+) -> crate::BuiltinResult<HostNumericTensorOwned> {
     let _source_guard = ResidencyRestoreGuard::new(handle);
     if provider.device_id() != handle.device_id() {
         return Err(
@@ -558,14 +593,7 @@ async fn download_value_preserving_residency_with_admission_async(
             ),
         ));
     }
-    value_from_numeric_download(host, runmat_accelerate_api::handle_is_logical(handle)).map_err(
-        |error| {
-            build_runtime_error(format!("gpu download: {error}"))
-                .with_identifier("RunMat:gpu:ProviderPayloadMismatch")
-                .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
-                .build()
-        },
-    )
+    Ok(host)
 }
 
 /// Exact native scalar values decoded from a provider-owned real numeric payload.

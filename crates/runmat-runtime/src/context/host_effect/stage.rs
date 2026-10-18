@@ -69,6 +69,19 @@ impl HostEffectLiveAllocationClaim {
 /// Owns output capacity selected for one whole call. An exact returned-value
 /// allocation transfers its bytes out of this precharge into its own lifetime.
 pub trait HostEffectOutputHeadroom: std::fmt::Debug + Send + Sync {
+    /// Reassign already-precharged, unclaimed stage bytes to this same-ledger
+    /// output owner. Only the canonical managed owner implements this; the
+    /// caller must first prove that the physical stage work has settled and
+    /// that its retained allocation capacities fit the transferred amount.
+    fn transfer_settled_stage_bytes(
+        &self,
+        _stage: &super::ManagedHostEffectStageReservation,
+        _bytes: u64,
+        _epoch: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        Err(HostEffectAllocationError::Unavailable)
+    }
+
     fn reserve_exact(
         &self,
         bytes: usize,
@@ -111,6 +124,16 @@ pub struct HostEffectStageEvidence {
 /// same managed-byte ledger. A size assertion or separate output budget is
 /// not a valid implementation of this trait.
 pub trait HostEffectStageReservation: Send + Sync {
+    /// Move already-precharged unclaimed stage capacity to this invocation's
+    /// setup-owned output permit. External stage owners fail closed. This is
+    /// an accounting transfer, not evidence that provider work has settled.
+    fn transfer_settled_stage_bytes(
+        &self,
+        _bytes: u64,
+        _epoch: u64,
+    ) -> Result<(), HostEffectAllocationError> {
+        Err(HostEffectAllocationError::Unavailable)
+    }
     /// Exact managed host allocation owner that atomically backs this stage.
     /// A finite stage without the parallel service's same owner is invalid.
     fn managed_ledger(&self) -> Option<super::ManagedHostEffectLedger> {

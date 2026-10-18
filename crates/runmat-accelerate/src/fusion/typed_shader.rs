@@ -101,8 +101,13 @@ impl FusionGroupPlan {
         } else {
             buffer_name
         };
-        let (body, max_expression) =
-            super::typed_producer::body_upper_bytes(self, program, buffer_type, input_count)?;
+        let (body, max_expression) = super::typed_producer::body_upper_bytes(
+            self,
+            outputs,
+            program,
+            buffer_type,
+            input_count,
+        )?;
         let preamble = super::typed_producer::preamble_upper_bytes(self, program)?;
         let max_operand = super::typed_producer::max_operand_bytes(self, input_count)?;
         let mut max_rank = 2usize;

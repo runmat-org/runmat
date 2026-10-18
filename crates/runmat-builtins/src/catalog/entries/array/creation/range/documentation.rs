@@ -57,7 +57,11 @@ BuiltinDocumentationLink { label: "randperm", target: BuiltinDocumentationLinkTa
 BuiltinDocumentationLink { label: "true", target: BuiltinDocumentationLinkTarget::Documentation("./true") },
 BuiltinDocumentationLink { label: "zeros", target: BuiltinDocumentationLinkTarget::Documentation("./zeros") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/range.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/range.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/range.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/range.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Runtime unit tests", location: "builtins::array::creation::range::tests" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::IntegrationTest, label: "Provider roundtrip", location: "builtins::array::creation::range::tests::range_gpu_provider_roundtrip" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::WgpuTest, label: "WGPU dimension parity", location: "builtins::array::creation::range::tests::range_wgpu_dim2_matches_cpu" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

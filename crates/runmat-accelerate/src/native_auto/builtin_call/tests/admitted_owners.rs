@@ -33,6 +33,25 @@ async fn fixture_numeric_stage_future(
     stage: Option<PreparedNumericDownloadStage>,
 ) -> anyhow::Result<runmat_accelerate_api::HostNumericTensorOwned> {
     let native = owner.inner.download_numeric(source).await;
+    if let Ok(host) = &native {
+        let payload = match &host.data {
+            runmat_accelerate_api::HostNumericDataOwned::F32(values) => {
+                Some((values.as_ptr() as usize, values.capacity()))
+            }
+            runmat_accelerate_api::HostNumericDataOwned::F64(values) => {
+                Some((values.as_ptr() as usize, values.capacity()))
+            }
+            _ => None,
+        };
+        if let Some((payload_pointer, payload_capacity)) = payload {
+            *owner.last_staged_native.lock().unwrap() = Some((
+                payload_pointer,
+                payload_capacity,
+                host.shape.as_ptr() as usize,
+                host.shape.capacity(),
+            ));
+        }
+    }
     drop(stage);
     native
 }
@@ -63,6 +82,7 @@ pub(super) struct Owner {
     uploads: AtomicUsize,
     downloads: AtomicUsize,
     staged_downloads: AtomicUsize,
+    last_staged_native: Mutex<Option<(usize, usize, usize, usize)>>,
     allocations: Mutex<Vec<WeakGpuTensorHandle>>,
     reject_upload: bool,
     execution_ns: u64,
@@ -314,6 +334,7 @@ fn owner_with_cast_preparation(
         uploads: AtomicUsize::new(0),
         downloads: AtomicUsize::new(0),
         staged_downloads: AtomicUsize::new(0),
+        last_staged_native: Mutex::new(None),
         allocations: Mutex::new(Vec::new()),
         reject_upload,
         execution_ns,
@@ -818,7 +839,11 @@ fn managed_plain_cast_retains_exact_output_and_refuses_before_underfunded_readba
         let output = futures::executor::block_on(context.scope(
             runmat_runtime::dispatcher::call_builtin_async_in_context(&context, name, &[input]),
         ))
-        .expect("managed host cast has an exact output or scalar identity");
+        .unwrap_or_else(|error| {
+            panic!(
+                "managed {name} host cast expected {expected_dtype:?} {expected_shape:?}: {error:?}"
+            )
+        });
         if let Some(expected_dtype) = expected_dtype {
             let Value::Tensor(tensor) = output.value() else {
                 panic!(
@@ -913,6 +938,74 @@ fn managed_plain_cast_retains_exact_output_and_refuses_before_underfunded_readba
     );
     assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
     assert_eq!(provider.staged_downloads.load(Ordering::Relaxed), 0);
+}
+
+#[test]
+fn managed_selected_readback_moves_native_vecs_into_retained_alias() {
+    use crate::fusion_exec::host_readback::{CpuReadbackPlan, Source};
+    use runmat_runtime::context::host_effect::ManagedHostEffectLedger;
+    use std::borrow::Cow;
+
+    let provider = owner_with_quote_and_failure(1_000_000_000, false, false);
+    let source = provider
+        .input(&[0.25, 0.5])
+        .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Automatic)
+        .unwrap();
+    let ledger = ManagedHostEffectLedger::new_with_epoch(1 << 20, 35);
+    let context = RuntimeContext::new(Rc::new(
+        runmat_runtime::execution::RuntimeExecutionService::new(),
+    ))
+    .with_service_ports(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedCastOwner(ledger.clone()))),
+    );
+    let stack = [Value::GpuTensor(source.clone())];
+    let host_workspace = provider.download_numeric_host_workspace_bound(&source);
+    let runmat_execution::ResourceByteBound::Known(host_workspace) = host_workspace else {
+        panic!("fixture native download needs a finite workspace bound")
+    };
+    let plan = CpuReadbackPlan {
+        sources: vec![Source {
+            handle: source.clone(),
+            owner: provider,
+            offsets: vec![0],
+            loads: Vec::new(),
+            capabilities: Cow::Borrowed(provider.capability_snapshot_ref().unwrap()),
+            payload_bytes: runmat_accelerate_api::checked_numeric_download_host_payload_bytes(
+                &source,
+            )
+            .unwrap(),
+            host_workspace,
+            provider_scratch: provider.download_numeric_provider_scratch_bound(&source),
+            queue_slots: provider.download_numeric_queue_slots(&source),
+        }],
+        stack_len: stack.len(),
+        resident_offsets: vec![0],
+    };
+    let prepared =
+        futures::executor::block_on(context.scope(plan.prepare_inputs_managed(&stack, &context)))
+            .expect("selected native readback");
+    let alias = prepared.entry[0].1.clone();
+    let (payload_pointer, payload_capacity, shape_pointer, shape_capacity) = provider
+        .last_staged_native
+        .lock()
+        .unwrap()
+        .expect("fixture recorded native Vec ownership");
+    let Value::Tensor(tensor) = &alias else {
+        panic!("native real readback retains a Tensor")
+    };
+    assert_eq!(
+        tensor.as_f64_slice().unwrap().as_ptr() as usize,
+        payload_pointer
+    );
+    assert_eq!(tensor.shape().as_ptr() as usize, shape_pointer);
+    assert_eq!(tensor.as_f64_slice().unwrap().len(), payload_capacity);
+    assert_eq!(tensor.shape().len(), shape_capacity);
+    prepared.cleanup().expect("release selected source");
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(alias);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    drop((stack, source));
+    assert_eq!(provider.live_count(), 0);
 }
 
 #[test]

@@ -30,6 +30,8 @@ mod cpu_publication_tests;
 mod elementwise_publication_tests;
 #[path = "publication_lifecycle_tests/graph.rs"]
 mod graph;
+#[path = "publication_lifecycle_tests/managed_intrinsic_tests.rs"]
+mod managed_intrinsic_tests;
 
 const FOLDED_MIN: &str =
     "x = gpuArray(reshape(single(1:16384),128,128)); y = min(x+x); z = gather(y);";
@@ -49,8 +51,15 @@ fn compile_source(source: &str) -> crate::bytecode::Bytecode {
 }
 
 fn compile_source_raw(source: &str) -> crate::bytecode::Bytecode {
+    compile_source_with_bindings(source, &std::collections::HashMap::<String, usize>::new())
+}
+
+fn compile_source_with_bindings(
+    source: &str,
+    variables: &dyn runmat_hir::WorkspaceBindingView,
+) -> crate::bytecode::Bytecode {
     let ast = runmat_parser::parse(source).expect("parse actual folded source");
-    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::empty()).expect("HIR");
+    let hir = runmat_hir::lower(&ast, &runmat_hir::LoweringContext::new(variables)).expect("HIR");
     let mir = runmat_mir::lowering::lower_assembly(&hir.assembly).expect("MIR");
     crate::bytecode::compile(&hir.assembly, &mir, hir.assembly.entrypoints[0].id)
         .expect("compile actual folded source")

@@ -9,50 +9,33 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+
+#[path = "export_builtin_documentation/cli.rs"]
+mod cli;
+
+use cli::{parse_options, ExportMode};
 
 const EXPORT_SCHEMA_VERSION: u32 = 2;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let mut output = None;
-    let mut check_only = false;
-    let mut transition = false;
-    let mut identities = BTreeSet::new();
-    let mut arguments = env::args_os().skip(1);
-    while let Some(argument) = arguments.next() {
-        if argument == "--check" {
-            check_only = true;
-        } else if argument == "--transition" {
-            transition = true;
-        } else if argument == "--output" {
-            let path = arguments.next().ok_or("--output requires a path")?;
-            output = Some(PathBuf::from(path));
-        } else if argument == "--identity" {
-            let name = arguments.next().ok_or("--identity requires a name")?;
-            let name = name.into_string().map_err(|_| "identity must be UTF-8")?;
-            if !identities.insert(name.to_ascii_lowercase()) {
-                return Err(format!("duplicate documentation identity: {name}").into());
-            }
-        } else {
-            return Err(
-                format!("unexpected argument: {}", PathBuf::from(argument).display()).into(),
-            );
-        }
-    }
-
-    if check_only && output.is_some() {
-        return Err("--check and --output cannot be combined".into());
-    }
-
+    let options = parse_options(env::args_os().skip(1))?;
     let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let legacy_directory = repository.join("docs/builtins/reference");
-    let export = build_export(&legacy_directory, transition, &identities)?;
-    if check_only {
+    let export = match options.mode {
+        ExportMode::Normal { transition } => {
+            build_export(&legacy_directory, transition, &options.identities)?
+        }
+        ExportMode::CatalogPreview => {
+            build_export_mode(&legacy_directory, options.mode, &options.identities)?
+        }
+    };
+    if options.check_only {
         return Ok(());
     }
 
     let encoded = format!("{}\n", serde_json::to_string_pretty(&export)?);
-    if let Some(path) = output {
+    if let Some(path) = options.output {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
@@ -68,7 +51,29 @@ fn build_export(
     transition: bool,
     identities: &BTreeSet<String>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let mut legacy = read_legacy_documents(legacy_directory)?;
+    build_export_mode(
+        legacy_directory,
+        ExportMode::Normal { transition },
+        identities,
+    )
+}
+
+fn build_export_mode(
+    legacy_directory: &Path,
+    mode: ExportMode,
+    identities: &BTreeSet<String>,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    build_export_with_legacy(read_legacy_documents(legacy_directory)?, mode, identities)
+}
+
+fn build_export_with_legacy(
+    mut legacy: BTreeMap<String, Value>,
+    mode: ExportMode,
+    identities: &BTreeSet<String>,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    if mode == ExportMode::CatalogPreview && identities.is_empty() {
+        return Err("catalog preview requires selected identities".into());
+    }
     for entry in builtin_catalog_entries()
         .iter()
         .filter(|entry| entry.audience == BuiltinCatalogAudience::Fixture)
@@ -106,6 +111,22 @@ fn build_export(
     if let Some(name) = identities.difference(&complete_names).next() {
         return Err(format!("unknown documentation identity: {name}").into());
     }
+    if mode == ExportMode::CatalogPreview {
+        let canonical_names = catalog_entries
+            .iter()
+            .filter(|entry| entry.documentation.authority == BuiltinDocumentationAuthority::Catalog)
+            .map(|entry| entry.identity.name.to_ascii_lowercase())
+            .chain(
+                builtin_constant_catalog_entries()
+                    .iter()
+                    .filter(|entry| entry.documentation.is_some())
+                    .map(|entry| entry.name.to_ascii_lowercase()),
+            )
+            .collect::<BTreeSet<_>>();
+        if let Some(name) = identities.difference(&canonical_names).next() {
+            return Err(format!("catalog preview requires canonical documentation: {name}").into());
+        }
+    }
     // A scoped export remains strict about duplicate ownership and missing
     // documentation within its scope. Links resolve against the full catalog.
     // Unrelated unfinished cutovers cannot block field-conservation checks.
@@ -124,7 +145,7 @@ fn build_export(
         let key = entry.identity.name.to_ascii_lowercase();
         match entry.documentation.authority {
             BuiltinDocumentationAuthority::Catalog => {
-                if legacy.contains_key(&key) {
+                if legacy.contains_key(&key) && mode != ExportMode::CatalogPreview {
                     return Err(format!(
                         "{} has canonical catalog documentation and a legacy sidecar",
                         entry.identity.name
@@ -134,6 +155,9 @@ fn build_export(
                 validate_catalog_documentation(entry, &complete_names)?;
                 let document = catalog_document(entry);
                 record_document(&mut documents, &mut slugs, key, document)?;
+                if mode == ExportMode::CatalogPreview {
+                    legacy.remove(&entry.identity.name.to_ascii_lowercase());
+                }
             }
             BuiltinDocumentationAuthority::LegacySidecar => {
                 let Some(mut document) = legacy.remove(&key) else {
@@ -146,7 +170,7 @@ fn build_export(
         }
     }
 
-    if !missing_legacy.is_empty() && !transition {
+    if !missing_legacy.is_empty() && mode == (ExportMode::Normal { transition: false }) {
         return Err(format!(
             "catalog identities declare legacy documentation but have no sidecar: {}",
             missing_legacy.join(", ")
@@ -173,7 +197,7 @@ fn build_export(
             )
             .into());
         }
-        if legacy.contains_key(&key) {
+        if legacy.contains_key(&key) && mode != ExportMode::CatalogPreview {
             return Err(format!(
                 "{} has canonical constant documentation and a legacy sidecar",
                 entry.name
@@ -195,6 +219,9 @@ fn build_export(
             key,
             constant_document(entry, documentation),
         )?;
+        if mode == ExportMode::CatalogPreview {
+            legacy.remove(&entry.name.to_ascii_lowercase());
+        }
     }
 
     for (key, mut document) in legacy {
@@ -202,7 +229,7 @@ fn build_export(
         record_document(&mut documents, &mut slugs, key, document)?;
     }
 
-    Ok(json!({
+    let mut export = json!({
         "schema_version": EXPORT_SCHEMA_VERSION,
         "inventory": {
             "documents": documents.len(),
@@ -211,7 +238,15 @@ fn build_export(
             "missing_catalog_documentation": missing_legacy,
         },
         "builtins": documents.into_values().collect::<Vec<_>>(),
-    }))
+    });
+    if mode == ExportMode::CatalogPreview {
+        export["preview"] = json!({
+            "kind": "catalog",
+            "final_acceptance": false,
+            "sidecars_still_present": legacy_sidecar_count,
+        });
+    }
+    Ok(export)
 }
 
 fn read_legacy_documents(
@@ -479,6 +514,13 @@ fn documentation_document(
 mod tests {
     use super::*;
 
+    fn synthetic_legacy(names: &[&str]) -> BTreeMap<String, Value> {
+        names
+            .iter()
+            .map(|name| (name.to_string(), json!({ "title": name })))
+            .collect()
+    }
+
     #[test]
     fn constant_documentation_exports_bare_value_examples_without_callable_contracts() {
         use runmat_builtins::{
@@ -528,53 +570,95 @@ mod tests {
 
     #[test]
     fn scoped_export_validates_ownership_and_identity_without_unrelated_cutovers() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let directory = repository.join("docs/builtins/reference");
         let selected = BTreeSet::from(["minreal".to_string()]);
-        let export = build_export(&directory, false, &selected).expect("canonical minreal");
+        let export = build_export_with_legacy(
+            BTreeMap::new(),
+            ExportMode::Normal { transition: false },
+            &selected,
+        )
+        .expect("canonical minreal");
         assert_eq!(export["inventory"]["documents"], 1);
         assert_eq!(export["inventory"]["legacy_sidecars"], 0);
         assert_eq!(export["builtins"][0]["key"], "minreal");
         assert_eq!(export["builtins"][0]["authority"], "catalog");
+        assert!(export.get("preview").is_none());
         let unknown = BTreeSet::from(["missing_documentation_identity".to_string()]);
-        assert!(build_export(&directory, true, &unknown)
-            .expect_err("unknown identity")
-            .to_string()
-            .contains("unknown documentation identity"));
+        assert!(build_export_with_legacy(
+            BTreeMap::new(),
+            ExportMode::Normal { transition: true },
+            &unknown,
+        )
+        .expect_err("unknown identity")
+        .to_string()
+        .contains("unknown documentation identity"));
     }
 
     #[test]
-    fn current_transition_export_is_complete_and_deterministic() {
-        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let directory = repository.join("docs/builtins/reference");
-        let first = build_export(&directory, true, &BTreeSet::new()).expect("first export");
-        let second = build_export(&directory, true, &BTreeSet::new()).expect("second export");
+    fn catalog_preview_is_selected_and_does_not_weaken_normal_ownership() {
+        let selected = BTreeSet::from(["colon".to_string()]);
+        assert!(build_export_with_legacy(
+            synthetic_legacy(&["colon"]),
+            ExportMode::Normal { transition: false },
+            &selected,
+        )
+        .expect_err("normal export rejects duplicate authority")
+        .to_string()
+        .contains("canonical catalog documentation and a legacy sidecar"));
+
+        let preview = build_export_with_legacy(
+            synthetic_legacy(&["colon"]),
+            ExportMode::CatalogPreview,
+            &selected,
+        )
+        .expect("selected canonical preview");
+        assert_eq!(preview["inventory"]["documents"], 1);
+        assert_eq!(preview["inventory"]["legacy_sidecars"], 1);
+        assert_eq!(preview["preview"]["final_acceptance"], false);
+        assert_eq!(preview["builtins"][0]["key"], "colon");
+        assert_eq!(preview["builtins"][0]["authority"], "catalog");
+        assert!(build_export_with_legacy(
+            synthetic_legacy(&["colon"]),
+            ExportMode::CatalogPreview,
+            &BTreeSet::new(),
+        )
+        .is_err());
+        assert!(build_export_with_legacy(
+            synthetic_legacy(&["synthetic_legacy_only_documentation_fixture"]),
+            ExportMode::CatalogPreview,
+            &BTreeSet::from(["synthetic_legacy_only_documentation_fixture".to_string()]),
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn catalog_preview_cli_requires_selection_and_excludes_acceptance_modes() {
+        let parse = |arguments: &[&str]| {
+            parse_options(arguments.iter().map(std::ffi::OsString::from))
+                .map(|options| (options.mode, options.identities))
+        };
+        assert!(parse(&["--catalog-preview"]).is_err());
+        assert!(parse(&["--catalog-preview", "--identity", "colon", "--check"]).is_err());
+        assert!(parse(&["--catalog-preview", "--identity", "colon", "--transition"]).is_err());
+        let (mode, identities) =
+            parse(&["--catalog-preview", "--identity", "colon"]).expect("valid preview");
+        assert!(mode == ExportMode::CatalogPreview);
+        assert_eq!(identities, BTreeSet::from(["colon".to_string()]));
+    }
+
+    #[test]
+    fn current_catalog_preview_is_deterministic_without_accepting_duplicate_authority() {
+        let selected = BTreeSet::from(["colon".to_string(), "range".to_string()]);
+        let legacy = synthetic_legacy(&["colon", "range"]);
+        let first = build_export_with_legacy(legacy.clone(), ExportMode::CatalogPreview, &selected)
+            .expect("first preview");
+        let second =
+            build_export_with_legacy(legacy.clone(), ExportMode::CatalogPreview, &selected)
+                .expect("second preview");
         assert_eq!(first, second);
-        let expected_documents = read_legacy_documents(&directory)
-            .expect("legacy documents")
-            .into_keys()
-            .chain(
-                public_builtin_catalog_entries()
-                    .iter()
-                    .filter(|entry| {
-                        entry.documentation.authority == BuiltinDocumentationAuthority::Catalog
-                    })
-                    .map(|entry| entry.identity.name.to_ascii_lowercase()),
-            )
-            .chain(
-                builtin_constant_catalog_entries()
-                    .iter()
-                    .filter(|entry| entry.documentation.is_some())
-                    .map(|entry| entry.name.to_ascii_lowercase()),
-            )
-            .collect::<BTreeSet<_>>()
-            .len();
-        assert_eq!(
-            first["builtins"].as_array().map(Vec::len),
-            Some(expected_documents),
-            "the transition must preserve the complete current documentation inventory"
-        );
+        assert_eq!(first["inventory"]["documents"], 2);
+        assert_eq!(first["inventory"]["legacy_sidecars"], 2);
         assert_eq!(first["schema_version"], EXPORT_SCHEMA_VERSION);
+        assert_eq!(first["preview"]["final_acceptance"], false);
         assert!(first["builtins"]
             .as_array()
             .expect("documentation rows")
@@ -594,13 +678,12 @@ mod tests {
                 assert!(example.get("requirements").is_some());
             }
         }
-        let has_missing = first["inventory"]["missing_catalog_documentation"]
-            .as_array()
-            .is_some_and(|missing| !missing.is_empty());
-        assert_eq!(
-            build_export(&directory, false, &BTreeSet::new()).is_err(),
-            has_missing
-        );
+        assert!(build_export_with_legacy(
+            legacy,
+            ExportMode::Normal { transition: true },
+            &selected,
+        )
+        .is_err());
     }
 
     #[test]

@@ -457,6 +457,25 @@ impl HostAllocationReceipt {
         self.fence.check()
     }
 
+    /// Reassign settled, unclaimed scratch precharge to this receipt's
+    /// retained-output headroom without increasing the ledger reservation.
+    /// The caller must first prove every provider download/callback touching
+    /// these bytes has physically retired and that the actual retained Vec
+    /// capacities fit the transferred headroom. This method does not inspect
+    /// or authorize provider data. A failed post-transfer checkpoint leaves
+    /// coherent shares but forbids publication.
+    pub fn transfer_settled_scratch_to_output(
+        &self,
+        runtime: &RuntimeContext,
+        bytes: u64,
+    ) -> Result<(), HostAllocationError> {
+        self.checkpoint(runtime)?;
+        self.output
+            .headroom
+            .transfer_settled_stage_bytes(&self.stage, bytes, self.fence.epoch)?;
+        self.checkpoint(runtime)
+    }
+
     /// Revalidate a held continuation against the exact context captured at
     /// admission. No caller-supplied context can substitute a newer session.
     pub fn checkpoint_captured(&self) -> Result<(), HostAllocationError> {

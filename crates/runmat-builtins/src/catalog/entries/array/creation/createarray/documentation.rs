@@ -25,7 +25,9 @@ BuiltinExample { id: "example-3", title: "Complex FillValue with a real prototyp
 BuiltinDocumentationLink { label: "zeros", target: BuiltinDocumentationLinkTarget::Documentation("./zeros") },
 BuiltinDocumentationLink { label: "ones", target: BuiltinDocumentationLinkTarget::Documentation("./ones") }],
     media: &[],
-    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/fill.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/fill.rs") }], verification: &[], notes: &[] },
+    evidence: BuiltinDocumentationEvidence { implementation: &[BuiltinDocumentationLink { label: "`crates/runmat-runtime/src/builtins/array/creation/fill.rs`", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/fill.rs") }], verification: &[
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Runtime unit tests", location: "builtins::array::creation::fill::tests" },
+    ], notes: &[] },
     introduced: None,
     status: Some(BuiltinDocumentationStatus::Stable),
 };

@@ -183,14 +183,17 @@ pub(in crate::fusion) fn max_operand_bytes(
 }
 
 /// A checked upper bound on the one retained producer body. Every source
-/// operation is counted even when the final root slice selects fewer. Exact
-/// POWER/product branches are compared with, not added to, their ordinary
-/// expression branch because the emitter takes only one branch per operation.
+/// operation is counted even when the final root slice selects fewer. An
+/// authenticated exact-product branch replaces its unrepresentable ordinary
+/// expression exactly as it does in the emitter; exact POWER and remaining
+/// alternatives retain their conservative maximum because only one branch is
+/// emitted per operation.
 /// Measure in source order with the same selected represented-output facts as
 /// checked and legacy emission. This temporary projection is charged to the
 /// live phase-one receipt before the phase-two producer reservation exists.
 pub(in crate::fusion) fn body_upper_bytes(
     plan: &FusionGroupPlan,
+    outputs: &[crate::graph::ValueId],
     program: &ResolvedProgram,
     buffer_type: ScalarType,
     input_count: usize,
@@ -200,6 +203,15 @@ pub(in crate::fusion) fn body_upper_bytes(
     let mut max_expression = 0usize;
     let mut represented: Vec<(crate::graph::ValueId, ValueFact)> = Vec::new();
     represented.try_reserve_exact(plan.operations.len())?;
+    let embedded_controls = if buffer_type == ScalarType::F32 {
+        program.embedded_controls_sorted_for_precision(
+            plan,
+            outputs,
+            runmat_accelerate_api::ProviderPrecision::F32,
+        )?
+    } else {
+        Vec::new()
+    };
     for &id in plan.const_values.keys() {
         let word = measured(|writer| {
             write!(writer, "    let control{id}_bits: u32 = 0xffffffffu;\n    let control{id} = bitcast<f32>(control{id}_bits);\n")?;
@@ -226,17 +238,41 @@ pub(in crate::fusion) fn body_upper_bytes(
         let name = scalar_name(scalar)?;
         let identity =
             program::resolved_operation_with_represented(program, operation, &represented)?;
-        let ordinary = expression_bytes(program, operation, buffer_type, operand_bytes, identity)?;
-        max_expression = max_expression.max(ordinary);
-        let mut upper = measured(|writer| {
-            writeln!(
-                writer,
-                "    let typed{index}: {name} = {};",
-                MeasuredFragment(ordinary)
-            )?;
-            Ok(())
-        })?;
-        if buffer_type == ScalarType::F32 {
+        let exact_product = (buffer_type == ScalarType::F32)
+            .then(|| program.exact_product(output))
+            .flatten()
+            .filter(|receipt| embedded_controls.binary_search(&receipt.control).is_ok());
+        if exact_product.is_none() {
+            program::require_provider_class(program.floating_class(output)?, buffer_type)?;
+        }
+        let mut upper = if exact_product.is_some() {
+            // The emitter consumes the authenticated Double control as
+            // metadata and writes the word-preserving product directly. Its
+            // ordinary mixed-Double expression is unreachable in this ABI
+            // and may legitimately be unrepresentable by an F32 provider.
+            max_expression = max_expression.max(operand_bytes);
+            measured(|writer| {
+                writeln!(
+                    writer,
+                    "    let typed{index}_bits: u32 = rm_exact_product_bits({}, 0xffffffffu);",
+                    MeasuredFragment(operand_bytes)
+                )?;
+                Ok(())
+            })?
+        } else {
+            let ordinary =
+                expression_bytes(program, operation, buffer_type, operand_bytes, identity)?;
+            max_expression = max_expression.max(ordinary);
+            measured(|writer| {
+                writeln!(
+                    writer,
+                    "    let typed{index}: {name} = {};",
+                    MeasuredFragment(ordinary)
+                )?;
+                Ok(())
+            })?
+        };
+        if buffer_type == ScalarType::F32 && exact_product.is_none() {
             let capture = measured(|writer| {
                 writeln!(
                     writer,
@@ -247,15 +283,6 @@ pub(in crate::fusion) fn body_upper_bytes(
             upper = upper
                 .checked_add(capture)
                 .ok_or_else(|| anyhow!("finite producer word capture overflows"))?;
-            let exact_product = measured(|writer| {
-                writeln!(
-                    writer,
-                    "    let typed{index}_bits: u32 = rm_exact_product_bits({}, 0xffffffffu);",
-                    MeasuredFragment(operand_bytes)
-                )?;
-                Ok(())
-            })?;
-            upper = upper.max(exact_product);
             if let Some(control) = program.exact_single_base_power(output) {
                 let entry = crate::kernel_math::power_exact::entrypoint(control);
                 let exact_power = measured(|writer| {

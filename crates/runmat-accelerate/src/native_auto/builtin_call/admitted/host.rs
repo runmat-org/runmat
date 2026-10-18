@@ -2,7 +2,7 @@
 //! dispatcher retains the outer FullCall clock and final publication fence.
 use super::*;
 use runmat_runtime::context::host_allocation::{
-    host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
+    host_allocation_runtime_error, HostAllocationError, HostAllocationPolicy, HostAllocationReceipt,
 };
 
 pub(in crate::native_auto::builtin_call) async fn prepare_async(
@@ -18,14 +18,45 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         .map_err(Box::new)?;
     let complete_host = request.has_prepared_completion_right()
         && runmat_runtime::context::preparation::PreparedHostExecution::supports_form(form);
-    let admission = request
-        .has_prepared_completion_right()
-        .then(|| super::super::host_readback::admit(auto, context, &request))
-        .flatten();
+    // Host policy is needed to price a host candidate, but a missing or stale
+    // host ledger cannot reject a provider-only or unobserved preparation.
+    let host_policy = complete_host.then(|| HostAllocationReceipt::policy(Some(context)));
+    let managed = matches!(host_policy, Some(Ok(HostAllocationPolicy::Managed)));
+    let initial_host_epoch = host_policy
+        .as_ref()
+        .filter(|policy| policy.is_ok())
+        .and_then(|_| {
+            context
+                .service_ports()
+                .parallel()
+                .map(|parallel| parallel.placement_resources().epoch)
+        });
+    let initial_host_owner = if managed {
+        context
+            .service_ports()
+            .parallel()
+            .and_then(|parallel| parallel.managed_host_effect_ledger())
+    } else {
+        None
+    };
+    let admission = host_policy
+        .as_ref()
+        .filter(|policy| policy.is_ok())
+        .and_then(|_| super::super::host_readback::admit(auto, context, &request, managed));
     // A host-only selected call has no resident-source Admission, but its
     // canonical resource envelope is still authenticated by this request.
-    let host_only_envelope = if admission.is_none() && complete_host {
-        request.host_resource_bound(context)
+    let host_only = if admission.is_none()
+        && host_policy.as_ref().is_some_and(Result::is_ok)
+        && !request
+            .operands()
+            .iter()
+            .any(runmat_runtime::dispatcher::value_contains_gpu)
+    {
+        request.host_resource_bound(context).and_then(|envelope| {
+            let (resources, identity) =
+                super::super::host_readback::resources_for_envelope(&[], &envelope, managed)?;
+            Some((envelope, resources, identity))
+        })
     } else {
         None
     };
@@ -57,7 +88,12 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         request,
         admission
             .as_ref()
-            .map(|admission| (&admission.resources, admission.identity)),
+            .map(|admission| (&admission.resources, admission.identity))
+            .or_else(|| {
+                host_only
+                    .as_ref()
+                    .map(|(_, resources, identity)| (resources, *identity))
+            }),
         compound.as_ref(),
     )?
     .with_request_input_root(root);
@@ -85,19 +121,47 @@ pub(in crate::native_auto::builtin_call) async fn prepare_async(
         observation.preparation_failed();
         return Err(failed("prepared host authority expired before readback"));
     }
-    let managed = HostAllocationReceipt::policy(Some(context)).map_err(|cause| {
-        Box::new(host_allocation_runtime_error(
-            Some(context),
-            "RunMat:Placement:HostCastOutput",
-            "selected host allocation policy changed",
-            cause,
-        ))
-    })? == HostAllocationPolicy::Managed;
+    let Some(initial_policy) = host_policy else {
+        observation.preparation_failed();
+        return Err(failed("selected host call has no prepared host policy"));
+    };
+    let initial_policy = initial_policy.map_err(|cause| {
+        observation.preparation_failed();
+        policy_error(context, cause)
+    })?;
+    let current_policy = HostAllocationReceipt::policy(Some(context)).map_err(|cause| {
+        observation.preparation_failed();
+        policy_error(context, cause)
+    })?;
+    let current_host_epoch = context
+        .service_ports()
+        .parallel()
+        .map(|parallel| parallel.placement_resources().epoch);
+    let current_host_owner = if managed {
+        context
+            .service_ports()
+            .parallel()
+            .and_then(|parallel| parallel.managed_host_effect_ledger())
+    } else {
+        None
+    };
+    let same_host_owner = !managed
+        || initial_host_owner
+            .as_ref()
+            .zip(current_host_owner.as_ref())
+            .is_some_and(|(initial, current)| initial.same_owner(current));
+    if current_policy != initial_policy
+        || current_host_epoch != initial_host_epoch
+        || !same_host_owner
+    {
+        observation.preparation_failed();
+        return Err(policy_error(context, HostAllocationError::StaleAuthority));
+    }
     if managed {
         let Some(envelope) = admission
             .as_ref()
             .map(|admission| &admission.envelope)
-            .or(host_only_envelope.as_ref())
+            .or_else(|| host_only.as_ref().map(|(envelope, _, _)| envelope))
         else {
             observation.preparation_failed();
             return Err(failed(
@@ -163,4 +227,13 @@ fn failed(message: &'static str) -> Box<RuntimeError> {
         .build();
     error.gpu_gather_retry = runmat_runtime::GpuGatherRetry::Never;
     Box::new(error)
+}
+
+fn policy_error(context: &RuntimeContext, cause: HostAllocationError) -> Box<RuntimeError> {
+    Box::new(host_allocation_runtime_error(
+        Some(context),
+        "RunMat:Placement:HostNumericalOutput",
+        "selected host allocation policy changed",
+        cause,
+    ))
 }
