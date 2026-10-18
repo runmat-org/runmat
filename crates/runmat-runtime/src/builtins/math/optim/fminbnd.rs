@@ -447,7 +447,7 @@ fn finalize(outcome: Outcome, options: &FminbndOptions) -> BuiltinResult<Value> 
     let exit_flag = if outcome.inner.converged { 1 } else { 0 };
     let message = build_message(&outcome.inner);
 
-    emit_summary(&outcome.inner, exit_flag, &message, options);
+    emit_summary(&outcome.inner, exit_flag, &message, options)?;
 
     let x = Value::Num(outcome.inner.x);
     let fval = Value::Num(outcome.inner.fval);
@@ -476,7 +476,7 @@ fn finalize(outcome: Outcome, options: &FminbndOptions) -> BuiltinResult<Value> 
 
 fn finalize_inconsistent_bounds(options: &FminbndOptions) -> BuiltinResult<Value> {
     let message = "Exiting: The bounds are inconsistent because x1 > x2.".to_string();
-    emit_invalid_summary(-2, &message, options);
+    emit_invalid_summary(-2, &message, options)?;
 
     let x = empty_double();
     let fval = empty_double();
@@ -539,24 +539,33 @@ fn build_message(result: &BrentMinResult) -> String {
     }
 }
 
-fn emit_summary(result: &BrentMinResult, exit_flag: i32, message: &str, options: &FminbndOptions) {
+fn emit_summary(
+    result: &BrentMinResult,
+    exit_flag: i32,
+    message: &str,
+    options: &FminbndOptions,
+) -> BuiltinResult<()> {
     let should_emit = match options.display {
         OptimDisplay::Off | OptimDisplay::None => false,
         OptimDisplay::Final | OptimDisplay::Iter => true,
         OptimDisplay::Notify => exit_flag != 1,
     };
     if !should_emit {
-        return;
+        return Ok(());
     }
     let line = format!(
         "fminbnd: x = {x:.6}, fval = {fval:.6}, exitflag = {exit_flag}. {message}",
         x = result.x,
         fval = result.fval,
     );
-    crate::console::record_console_line(crate::console::ConsoleStream::Stdout, line);
+    crate::console::record_console_line(crate::console::ConsoleStream::Stdout, line)
 }
 
-fn emit_invalid_summary(exit_flag: i32, message: &str, options: &FminbndOptions) {
+fn emit_invalid_summary(
+    exit_flag: i32,
+    message: &str,
+    options: &FminbndOptions,
+) -> BuiltinResult<()> {
     let should_emit = match options.display {
         OptimDisplay::Off | OptimDisplay::None => false,
         OptimDisplay::Final | OptimDisplay::Iter => true,
@@ -566,8 +575,9 @@ fn emit_invalid_summary(exit_flag: i32, message: &str, options: &FminbndOptions)
         crate::console::record_console_line(
             crate::console::ConsoleStream::Stdout,
             format!("fminbnd: exitflag = {exit_flag}. {message}"),
-        );
+        )?;
     }
+    Ok(())
 }
 
 struct IterDisplay {
@@ -592,15 +602,15 @@ impl BrentMinObserver for IterDisplay {
         x: f64,
         fx: f64,
         step_kind: BrentStepKind,
-    ) {
+    ) -> BuiltinResult<()> {
         if !matches!(self.mode, OptimDisplay::Iter) {
-            return;
+            return Ok(());
         }
         if !self.printed_header {
             crate::console::record_console_line(
                 crate::console::ConsoleStream::Stdout,
                 " Func-count        x          f(x)          Procedure",
-            );
+            )?;
             self.printed_header = true;
         }
         let procedure = match step_kind {
@@ -610,7 +620,7 @@ impl BrentMinObserver for IterDisplay {
         };
         let line =
             format!("    {func_count:>5}    {x:13.6e} {fx:13.6e}    {procedure}    (iter {iter})");
-        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, line);
+        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, line)
     }
 }
 

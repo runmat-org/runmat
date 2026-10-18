@@ -23,7 +23,7 @@ fn explicit_edges_compare_wide_integers_exactly() {
 
 #[test]
 fn computed_edges_honor_requested_output_count() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let output = call(
         Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),
         Value::Int(IntValue::U8(2)),
@@ -42,7 +42,7 @@ fn computed_edges_honor_requested_output_count() {
 
 #[test]
 fn explicit_edges_reject_a_second_output() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = call(
         Value::Num(0.5),
         Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap()),

@@ -2197,7 +2197,7 @@ pub(crate) mod tests {
 
     #[test]
     fn split_empty_input_honors_requested_output_count() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let input = StringArray::new(Vec::new(), vec![0, 1]).expect("empty input");
         let result = split_builtin(Value::StringArray(input), Vec::new()).expect("empty split");
         let Value::OutputList(outputs) = result else {
@@ -2215,7 +2215,7 @@ pub(crate) mod tests {
 
     #[test]
     fn split_second_output_contains_matched_delimiters_in_requested_orientation() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = split_builtin(
             Value::String("a,b,c".into()),
             vec![Value::String(",".into()), Value::Num(2.0)],
@@ -2272,7 +2272,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strsplit_multi_output_returns_matches() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = strsplit_builtin(
             Value::String("a,,b,".into()),
             vec![Value::String(",".into())],
@@ -2304,7 +2304,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strsplit_regular_expression_mode() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = strsplit_builtin(
             Value::String("1.21m/s 1.985 m/s".into()),
             vec![

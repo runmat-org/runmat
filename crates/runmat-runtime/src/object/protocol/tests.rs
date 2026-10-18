@@ -394,7 +394,8 @@ fn semantic_fallback_failure_does_not_replay_the_invocation() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let path = ObjectSubscriptPath::new(
         ObjectSubscript::dotted_invoke_components_with_fallback(
             "bump",
@@ -430,7 +431,8 @@ fn owned_path_suffix_uses_selected_session_after_first_step() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "OwnedSuffixSession.subsref").then_some(943)
-        })));
+        })))
+        .expect("call-port scope");
     let class = runmat_types::ClassIdentity::from("OwnedSuffixSession");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         events: Default::default(),
@@ -467,7 +469,8 @@ fn owned_path_suffix_uses_selected_session_after_first_step() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(7.0))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(selected_setup);
     let path = ObjectSubscriptPath::new(vec![
         ObjectSubscript::member("child"),
@@ -509,7 +512,8 @@ fn object_array_without_member_keeps_whole_array_receiver_for_semantic_fallback(
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(5.0))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let array = runmat_value::ObjectArray::from_objects(
         "ArrayMethodFixture",
         vec![

@@ -3,7 +3,7 @@ use runmat_builtins::WEBWRITE_DESCRIPTOR;
 
 #[test]
 fn webwrite_rejects_excess_outputs_before_input_or_http_service() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = futures::executor::block_on(webwrite_builtin(None, Value::Num(1.0), vec![]))
         .expect_err("excess outputs");
     assert_eq!(error.identifier(), Some("RunMat:webwrite:TooManyOutputs"));

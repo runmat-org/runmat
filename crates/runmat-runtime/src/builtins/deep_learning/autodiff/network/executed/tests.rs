@@ -236,7 +236,7 @@ fn feature_input_and_both_output_layers_preserve_the_public_tape() {
 
 fn hidden_state(net: &Value, x: Value) -> Value {
     let outputs = {
-        let _count = crate::output_count::push_output_count(Some(2));
+        let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         block_on(forward_builtin(net.clone(), x, vec![])).unwrap()
     };
     let Value::OutputList(outputs) = outputs else {
@@ -325,7 +325,7 @@ fn returned_recurrent_state_is_an_output_of_the_shared_forward_trace() {
 
 fn prediction_and_states(net: &Value, x: Value) -> [Value; 3] {
     let outputs = {
-        let _count = crate::output_count::push_output_count(Some(2));
+        let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         block_on(forward_builtin(net.clone(), x, vec![])).unwrap()
     };
     let Value::OutputList(outputs) = outputs else {

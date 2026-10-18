@@ -358,7 +358,7 @@ fn host_visible_scalar_errors_precede_resident_transfer_and_preserve_borrowed_le
     assert_eq!(bad_initial.identifier(), Some("RunMat:fzero:InvalidInput"));
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
-    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let bad_outputs = block_on(super::fminbnd::fminbnd_builtin(
         function(),
         resident(),

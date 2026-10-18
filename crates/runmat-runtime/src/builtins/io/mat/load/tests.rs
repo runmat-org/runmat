@@ -130,7 +130,7 @@ fn nested_implicit_load_does_not_inherit_outer_zero_output_workspace_mode() {
     )]))
     .expect("encode fixture");
     std::fs::write(&path, bytes).expect("write fixture");
-    let _presentation = crate::output_context::push_output_count(0);
+    let _presentation = crate::output_context::push_output_count(0).expect("output-count scope");
     let value = block_on(crate::dispatcher::call_builtin_async(
         "load",
         &[Value::String(path.to_string_lossy().into_owned())],
@@ -156,7 +156,7 @@ fn current_zero_output_load_publishes_workspace_despite_outer_captured_mode() {
     )]))
     .expect("encode fixture");
     std::fs::write(&path, bytes).expect("write fixture");
-    let _presentation = crate::output_context::push_output_count(1);
+    let _presentation = crate::output_context::push_output_count(1).expect("output-count scope");
     let result = block_on(crate::dispatcher::call_builtin_async_with_outputs(
         "load",
         &[Value::String(path.to_string_lossy().into_owned())],

@@ -192,7 +192,7 @@ fn quartet_builtin_fixture(case: SearchControlCase) -> runmat_native_codegen::Na
 fn pending_statement_output_fixture() -> runmat_native_codegen::NativeAssembly {
     let first = Span { start: 0, end: 1 };
     let second = Span { start: 2, end: 3 };
-    lower_body_with_inputs(
+    lower_body_with_inputs_and_capabilities(
         "pending_statement_output",
         1,
         vec![
@@ -224,6 +224,7 @@ fn pending_statement_output_fixture() -> runmat_native_codegen::NativeAssembly {
         MirOperand::Constant(MirConstant::Number("9".into())),
         first,
         vec![BindingId(0)],
+        CapabilitySet([CapabilityRequirement::UserInterface].into_iter().collect()),
     )
 }
 

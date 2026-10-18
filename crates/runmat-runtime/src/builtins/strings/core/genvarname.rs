@@ -321,7 +321,7 @@ mod tests {
         let chars = CharArray::new_with_shape(vec!['a', 'b'], vec![1, 1, 2]).unwrap();
         let error = block_on(genvarname_builtin(Value::CharArray(chars), vec![])).unwrap_err();
         assert_eq!(error.identifier(), ERROR_INVALID_INPUT.identifier);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(genvarname_builtin(Value::from("A"), vec![])).unwrap_err();
         assert_eq!(
             error.identifier(),

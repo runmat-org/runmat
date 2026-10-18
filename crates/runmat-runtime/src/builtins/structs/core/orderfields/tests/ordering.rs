@@ -4,7 +4,7 @@ use runmat_value::{CellArray, CharArray, StringArray, Tensor};
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn numeric_permutations_accept_rank_zero_and_rank_one_vectors() {
-    let _outputs = crate::output_count::push_output_count(None);
+    let _outputs = crate::output_count::push_output_count(None).expect("output-count scope");
     for (input, order, expected) in [
         (
             structure(&[("a", 1.0.into())]),

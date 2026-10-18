@@ -547,7 +547,7 @@ async fn expand_bracket(
 fn finalize(result: BrentZeroResult, options: &FzeroOptions, single: bool) -> BuiltinResult<Value> {
     let exit_flag = if result.converged { 1 } else { 0 };
     let message = build_message(&result);
-    emit_summary(&result, exit_flag, &message, options);
+    emit_summary(&result, exit_flag, &message, options)?;
 
     let scalar = |value: f64| -> BuiltinResult<Value> {
         if single {
@@ -606,9 +606,14 @@ fn build_message(result: &BrentZeroResult) -> String {
     }
 }
 
-fn emit_summary(result: &BrentZeroResult, exit_flag: i32, message: &str, options: &FzeroOptions) {
+fn emit_summary(
+    result: &BrentZeroResult,
+    exit_flag: i32,
+    message: &str,
+    options: &FzeroOptions,
+) -> BuiltinResult<()> {
     if !matches!(options.display, OptimDisplay::Final | OptimDisplay::Iter) {
-        return;
+        return Ok(());
     }
     crate::console::record_console_line(
         crate::console::ConsoleStream::Stdout,
@@ -617,7 +622,7 @@ fn emit_summary(result: &BrentZeroResult, exit_flag: i32, message: &str, options
             x = result.x,
             fval = result.fval,
         ),
-    );
+    )
 }
 
 struct IterDisplay {
@@ -642,15 +647,15 @@ impl BrentZeroObserver for IterDisplay {
         x: f64,
         fx: f64,
         step_kind: BrentZeroStepKind,
-    ) {
+    ) -> BuiltinResult<()> {
         if !matches!(self.mode, OptimDisplay::Iter) {
-            return;
+            return Ok(());
         }
         if !self.printed_header {
             crate::console::record_console_line(
                 crate::console::ConsoleStream::Stdout,
                 " Func-count        x          f(x)          Procedure",
-            );
+            )?;
             self.printed_header = true;
         }
         let procedure = match step_kind {
@@ -660,7 +665,7 @@ impl BrentZeroObserver for IterDisplay {
         };
         let line =
             format!("    {func_count:>5}    {x:13.6e} {fx:13.6e}    {procedure}    (iter {iter})");
-        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, line);
+        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, line)
     }
 }
 

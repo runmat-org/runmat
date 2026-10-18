@@ -46,10 +46,8 @@ fn evaluate_inner(
         .ok_or_else(|| {
             NativeExecutorError::Host("native source is absent from invocation binding".into())
         })?;
-    let input_callsite = CallsiteInfo {
-        source_id: Some(source_id),
-        arg_spans: call.arg_spans.clone(),
-    };
+    let input_callsite =
+        CallsiteInfo::from_borrowed_in_context(Some(source_id), &call.arg_spans, &state.runtime)?;
     if matches!(
         call.syntax,
         runmat_types::CallSyntax::Method | runmat_types::CallSyntax::DottedInvoke
@@ -126,7 +124,7 @@ fn evaluate_inner(
                     );
                     let future = Box::pin(async move {
                         let _call_roots = _call_roots;
-                        future.await
+                        future.await?
                     });
                     return super::call_suspension::begin_lexical_call(
                         state,
@@ -521,10 +519,16 @@ fn builtin_inner(
     )
 }
 
-async fn with_output_count<T>(count: usize, future: impl Future<Output = T>) -> T {
+async fn with_output_count<T>(
+    count: usize,
+    future: impl Future<Output = Result<T, runmat_runtime::RuntimeError>>,
+) -> Result<T, runmat_runtime::RuntimeError> {
     let mut future = std::pin::pin!(future);
     std::future::poll_fn(|context| {
-        let _outputs = runmat_runtime::output_context::push_output_count(count);
+        let _outputs = match runmat_runtime::output_context::push_output_count(count) {
+            Ok(guard) => guard,
+            Err(error) => return std::task::Poll::Ready(Err(error)),
+        };
         future.as_mut().poll(context)
     })
     .await
@@ -532,13 +536,18 @@ async fn with_output_count<T>(count: usize, future: impl Future<Output = T>) -> 
 
 async fn with_class_access_context<T>(
     class_context: Option<runmat_types::ClassIdentity>,
-    future: impl std::future::Future<Output = T>,
-) -> T {
+    future: impl std::future::Future<Output = Result<T, runmat_runtime::RuntimeError>>,
+) -> Result<T, runmat_runtime::RuntimeError> {
     let mut future = std::pin::pin!(future);
     std::future::poll_fn(|context| {
-        let _access = class_context
+        let access = class_context
             .clone()
-            .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+            .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+            .transpose();
+        let _access = match access {
+            Ok(guard) => guard,
+            Err(error) => return std::task::Poll::Ready(Err(error)),
+        };
         future.as_mut().poll(context)
     })
     .await

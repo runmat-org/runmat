@@ -9,6 +9,24 @@ use std::cell::RefCell;
 
 struct Retired(&'static str, Rc<RefCell<Vec<&'static str>>>);
 
+struct ScopedFutureDrop {
+    scope_id: runmat_execution::ExecutionScopeId,
+    dropped: Rc<Cell<bool>>,
+}
+
+impl Drop for ScopedFutureDrop {
+    fn drop(&mut self) {
+        assert_eq!(
+            runmat_runtime::context::legacy::active()
+                .expect("failed scoped future drops under its selected runtime")
+                .execution()
+                .scope_id(),
+            self.scope_id
+        );
+        self.dropped.set(true);
+    }
+}
+
 struct ManagedParallel(ManagedHostEffectLedger);
 
 impl RuntimeParallelService for ManagedParallel {
@@ -262,9 +280,11 @@ fn queued_arguments_are_rooted_before_the_first_child_poll() {
 #[test]
 fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
     let ledger = ManagedHostEffectLedger::new(8 * 1024 * 1024);
-    let runtime = RuntimeContext::new(Rc::new(
-        runmat_runtime::execution::RuntimeExecutionService::new(),
-    ))
+    let cancellation = runmat_execution::cancellation::CancellationSource::new();
+    let runtime = RuntimeContext::with_cancellation(
+        Rc::new(runmat_runtime::execution::RuntimeExecutionService::new()),
+        cancellation.token(),
+    )
     .with_service_ports(
         RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
     );
@@ -272,6 +292,7 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
         .expect("admit managed process driver");
     let handle = owner.handle();
     let child_runtime = runtime.clone();
+    let child_cancellation = cancellation.clone();
     futures::executor::block_on(
         owner
             .drive_in_context(&runtime, move || async move {
@@ -287,6 +308,43 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
                         .await?;
                     assert_eq!(actual, expected);
                 }
+                let scope = child_runtime.prepare_poll_scope()?;
+                let scoped = handle
+                    .enqueue_owned_scoped_in_context(&child_runtime, scope, || async move {
+                        Ok::<_, RuntimeError>(64_usize)
+                    })?
+                    .await?;
+                assert_eq!(scoped, 64);
+                let constructed = Rc::new(Cell::new(false));
+                let constructed_in_factory = Rc::clone(&constructed);
+                let dropped = Rc::new(Cell::new(false));
+                let dropped_in_future = Rc::clone(&dropped);
+                let scope_id = child_runtime.execution().scope_id();
+                let scope = child_runtime.prepare_poll_scope()?;
+                let refused =
+                    handle.enqueue_owned_scoped_in_context(&child_runtime, scope, move || {
+                        constructed_in_factory.set(true);
+                        child_cancellation.cancel(runmat_execution::CancellationReason::User);
+                        let drop_probe = ScopedFutureDrop {
+                            scope_id,
+                            dropped: dropped_in_future,
+                        };
+                        async move {
+                            let _drop_probe = drop_probe;
+                            Ok::<_, RuntimeError>(65_usize)
+                        }
+                    });
+                let error = match refused {
+                    Ok(_) => panic!("canceled scoped child must not be published"),
+                    Err(error) => error,
+                };
+                assert!(constructed.get());
+                assert!(dropped.get());
+                assert_eq!(
+                    error.identifier(),
+                    Some("RunMat:Interpreter:ProcessContinuation:Cancelled")
+                );
+                assert_eq!(handle.owner()?.borrow().tasks.ids().count(), 1);
                 drop(pending);
                 Ok::<_, RuntimeError>(())
             })

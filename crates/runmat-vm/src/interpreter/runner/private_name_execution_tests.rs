@@ -76,7 +76,8 @@ fn retained_private_name_executes_old_body_after_same_id_republication() {
                     source_file: Some("old/entry.m".into()),
                     definition_owners: Some(owners),
                 }]),
-            ));
+            ))
+            .expect("call-port scope");
             runmat_runtime::user_functions::bound_function_authority_for(1)
         };
         let mut registry = FunctionRegistry::new(HashMap::from([

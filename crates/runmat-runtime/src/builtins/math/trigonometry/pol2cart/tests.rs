@@ -6,7 +6,7 @@ use runmat_value::IntegerStorage;
 
 #[test]
 fn single_xy_and_elevation_keep_independent_classes() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let outputs = output_list(
         call(
             Value::Tensor(Tensor::from_f32(vec![0.0], vec![1, 1]).unwrap()),
@@ -59,7 +59,7 @@ fn one_dimensional_storage_is_aligned_as_row_and_empty_nd_stays_empty() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn low_rank_coordinates_preserve_requested_outputs_and_row_broadcasting() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let scalar = output_list(
         call(
             Value::Tensor(Tensor::new(vec![0.0], Vec::new()).unwrap()),
@@ -170,7 +170,7 @@ fn polar_two_outputs_for_row_vectors() {
         vec![1, 4],
     );
     let rho = tensor(vec![5.0, 5.0, 10.0, 10.0], vec![1, 4]);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(Value::Tensor(theta), Value::Tensor(rho), Vec::new()).unwrap());
     assert_close(&data(&outputs[0]), &[5.0, 3.5355339059327378, 0.0, -10.0]);
     assert_close(&data(&outputs[1]), &[0.0, 3.5355339059327373, 10.0, 0.0]);
@@ -180,7 +180,7 @@ fn polar_two_outputs_for_row_vectors() {
 fn cylindrical_expands_all_three_inputs() {
     let theta = tensor(vec![0.0, std::f64::consts::FRAC_PI_2], vec![2, 1]);
     let rho = tensor(vec![1.0, 2.0, 3.0], vec![1, 3]);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let outputs = output_list(
         call(
             Value::Tensor(theta),
@@ -196,7 +196,7 @@ fn cylindrical_expands_all_three_inputs() {
 
 #[test]
 fn cylindrical_two_outputs_omits_z() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(
         call(Value::Num(0.0), Value::Num(3.0), vec![Value::Num(9.0)]).expect("pol2cart"),
     );
@@ -209,7 +209,7 @@ fn cylindrical_two_outputs_omits_z() {
 fn cylindrical_broadcasts_missing_trailing_dimension() {
     let theta = tensor(vec![0.0; 12], vec![3, 4]);
     let rho = tensor((1..=24).map(|value| value as f64).collect(), vec![3, 4, 2]);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(
         call(
             Value::Tensor(theta),
@@ -248,7 +248,7 @@ fn rejects_trailing_aligned_non_matlab_shapes() {
 
 #[test]
 fn polar_rejects_three_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = call(Value::Num(0.0), Value::Num(1.0), Vec::new()).expect_err("too many outputs");
     assert_eq!(err.identifier(), ERROR_OUTPUT_COUNT.identifier);
 }
@@ -279,7 +279,7 @@ fn rejects_incompatible_shapes() {
 fn empty_inputs_preserve_broadcast_shape() {
     let theta = tensor(Vec::new(), vec![0, 3]);
     let rho = tensor(vec![1.0, 2.0, 3.0], vec![1, 3]);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(Value::Tensor(theta), Value::Tensor(rho), Vec::new()).unwrap());
     match &outputs[0] {
         Value::Tensor(out) => assert_eq!(out.shape(), &[0, 3]),
@@ -298,7 +298,7 @@ fn typed_integer_host_inputs_read_exact_storage() {
     let rho = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
     let z = Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
 
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let outputs = output_list(
         call(
             Value::Tensor(theta),
@@ -315,7 +315,7 @@ fn typed_integer_host_inputs_read_exact_storage() {
 
 #[test]
 fn integer_roles_validate_exact_wide_values_and_compatibility_independently() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     let exact = runmat_value::IntValue::U64(1_u64 << 63);
     let values = output_list(
@@ -355,7 +355,7 @@ fn gpu_inputs_keep_resident_outputs() {
         };
         let theta = provider.upload(&theta_view).expect("upload theta");
         let rho = provider.upload(&rho_view).expect("upload rho");
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = output_list(
             call(Value::GpuTensor(theta), Value::GpuTensor(rho), Vec::new()).expect("pol2cart"),
         );
@@ -379,7 +379,7 @@ fn mixed_gpu_typed_integer_inputs_upload_exact_storage() {
         let rho = Tensor::new_integer(IntegerStorage::U16(vec![2, 3]), vec![1, 2]).expect("rho");
         let z = Tensor::new_integer(IntegerStorage::U16(vec![7, 8]), vec![1, 2]).expect("z");
 
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let outputs = output_list(
             call(
                 Value::GpuTensor(theta),
@@ -411,7 +411,7 @@ fn mixed_gpu_typed_integer_theta_upload_reads_exact_storage() {
         let theta =
             Tensor::new_integer(IntegerStorage::I16(vec![0, 0]), vec![1, 2]).expect("theta");
 
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = output_list(
             call(Value::Tensor(theta), Value::GpuTensor(rho), Vec::new()).expect("pol2cart"),
         );
@@ -432,7 +432,7 @@ fn gpu_mixed_cylindrical_broadcasts_z_output() {
         };
         let theta = provider.upload(&theta_view).expect("upload theta");
         let rho = tensor(vec![1.0, 2.0, 3.0], vec![1, 3]);
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let outputs = output_list(
             call(
                 Value::GpuTensor(theta),

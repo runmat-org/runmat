@@ -197,7 +197,7 @@ async fn invoke_semantic(
             requested_outputs,
         ),
     )
-    .await
+    .await?
     {
         Some(result) => result.map(Some),
         None => Ok(None),
@@ -269,7 +269,7 @@ async fn invoke_external(
             },
         ),
     )
-    .await
+    .await?
     {
         return result.map(Some);
     }
@@ -282,7 +282,7 @@ async fn invoke_external(
             requested_outputs,
         ),
     )
-    .await
+    .await?
     {
         Some(result) => result.map(Some),
         None => Ok(None),
@@ -395,6 +395,6 @@ async fn invoke_descriptor_optional(
     let result = match runtime {
         Some(runtime) => runtime.scope(invoke).await,
         None => invoke.await,
-    }?;
+    }??;
     Ok(result)
 }

@@ -1358,7 +1358,7 @@ mod tests {
 
     #[test]
     fn migrated_classifiers_reject_excess_outputs_before_execution() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let strncmpi_error = block(strncmpi_builtin(
             Value::String("ab".into()),
             Value::String("AB".into()),
@@ -1588,7 +1588,7 @@ mod tests {
             .unwrap(),
             Value::CharArray(CharArray::new_row("abc"))
         );
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert!(matches!(
             block(convert_strings_to_chars_builtin(
                 Value::String("a".into()),
@@ -1598,7 +1598,7 @@ mod tests {
             Value::OutputList(outputs) if outputs.len() == 2
         ));
         drop(_guard);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert!(matches!(
             block(convert_chars_to_strings_builtin(
                 Value::CharArray(CharArray::new_row("a")),
@@ -1657,7 +1657,8 @@ mod tests {
     #[test]
     fn conversion_output_selection_preserves_existing_padding_and_zero_output_behavior() {
         {
-            let _outputs = crate::output_count::push_output_count(Some(3));
+            let _outputs =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let result = block(convert_strings_to_chars_builtin(
                 Value::String("a".into()),
                 vec![Value::String("b".into())],
@@ -1673,7 +1674,8 @@ mod tests {
             );
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(0));
+            let _outputs =
+                crate::output_count::push_output_count(Some(0)).expect("output-count scope");
             let result = block(convert_chars_to_strings_builtin(
                 Value::CharArray(CharArray::new_row("a")),
                 vec![Value::CharArray(CharArray::new_row("b"))],
@@ -1935,7 +1937,8 @@ mod tests {
     #[test]
     fn migrated_text_output_bounds_precede_input_materialization() {
         {
-            let _outputs = crate::output_count::push_output_count(Some(3));
+            let _outputs =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let strtok = block(strtok_builtin(Value::Num(7.0), Vec::new()))
                 .expect_err("strtok must reject excess outputs first");
             assert_eq!(
@@ -1950,7 +1953,8 @@ mod tests {
             );
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(5));
+            let _outputs =
+                crate::output_count::push_output_count(Some(5)).expect("output-count scope");
             let sscanf = block(sscanf_builtin(Value::Num(7.0), Vec::new()))
                 .expect_err("sscanf must reject excess outputs first");
             assert_eq!(
@@ -1959,7 +1963,8 @@ mod tests {
             );
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let mat2str = block(mat2str_builtin(Value::Num(7.0), Vec::new()))
                 .expect_err("mat2str must reject excess outputs first");
             assert_eq!(
@@ -2029,7 +2034,7 @@ mod tests {
 
     #[test]
     fn pattern_constructors_reject_extra_outputs_before_reading_inputs() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         for (result, identifier) in [
             (
                 block(pattern_builtin(Value::Num(7.0))),

@@ -92,7 +92,7 @@ fn call(args: Vec<Value>) -> BuiltinResult<crate::execution::RootedValue> {
     let (context, _) = crate::context::document_test_support::recording_context();
     let selected = context.clone();
     block_on(context.scope(async move {
-        let _outputs = crate::output_count::push_output_count(outputs);
+        let _outputs = crate::output_count::push_output_count(outputs).expect("output-count scope");
         open_builtin(Some(selected), args).await
     }))
 }
@@ -250,7 +250,8 @@ fn zero_output_extension_handler_is_handled_without_viewer_fallthrough() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "openaudit").then_some(88)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_, _, requested| {
             assert_eq!(requested, 0);
@@ -259,9 +260,11 @@ fn zero_output_extension_handler_is_handled_without_viewer_fallthrough() {
                     .map_err(|error| error.into_runtime_error())
             })
         },
-    )));
-    let _outputs = crate::output_count::push_output_count(Some(0));
-    let _semantic_outputs = crate::output_context::push_output_count(0);
+    )))
+    .expect("call-port scope");
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
+    let _semantic_outputs =
+        crate::output_context::push_output_count(0).expect("output-count scope");
     assert_eq!(
         block_on(open_builtin(
             None,
@@ -300,7 +303,8 @@ fn open_calls_custom_extension_handler() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(move |name| {
             (name == "openlog").then_some(77)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |_function, args, requested_outputs| {
             assert_eq!(requested_outputs, 1);
@@ -314,7 +318,8 @@ fn open_calls_custom_extension_handler() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
 
     let result = call(vec![Value::String(path.to_string_lossy().to_string())]).expect("open");
 
@@ -334,7 +339,8 @@ fn open_resolves_custom_extension_file_on_current_path() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(move |name| {
             (name == "openlog").then_some(77)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |_function, args, _requested_outputs| {
             let Value::String(path) = &args[0] else {
@@ -347,7 +353,8 @@ fn open_resolves_custom_extension_file_on_current_path() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
 
     let result = call(vec![Value::from("events.log")]).expect("open");
 
@@ -407,8 +414,7 @@ fn open_rejects_more_than_one_output() {
     let _guard = workspace_guard();
     ensure_test_resolver();
     set_workspace(&[]);
-    let _outputs = crate::output_count::push_output_count(Some(2));
-
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let err = call(vec![Value::from("anything")]).expect_err("too many outputs");
 
     assert_eq!(err.identifier(), Some("RunMat:open:TooManyOutputs"));

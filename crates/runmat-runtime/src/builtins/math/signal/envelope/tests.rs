@@ -23,7 +23,9 @@ fn integer_matrix(values: Vec<i16>, shape: Vec<usize>) -> Value {
 }
 
 fn call(value: Value, rest: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
-    let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+    let _guard = outputs
+        .map(|count| crate::output_count::push_output_count(Some(count)))
+        .expect("output-count scope");
     block_on(envelope_builtin(None, value, rest))
 }
 

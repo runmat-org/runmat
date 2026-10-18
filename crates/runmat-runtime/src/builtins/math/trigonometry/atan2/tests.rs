@@ -345,7 +345,7 @@ fn atan2_integer_extension_covers_all_eight_classes_exactly() {
 
 #[test]
 fn atan2_rejects_excess_outputs() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = atan2_builtin(Value::Num(1.0), Value::Num(1.0))
         .expect_err("second output must be rejected");
     assert_eq!(error.identifier(), ATAN2_ERROR_TOO_MANY_OUTPUTS.identifier);

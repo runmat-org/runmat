@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 #[test]
 fn one_output_does_not_publish_unused_gradient_or_jacobian() {
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = LeastSquaresResult {
         x: vec![2.0],
         residual: vec![0.0],
@@ -107,7 +107,8 @@ fn lsqnonlin_vector_residual_recovers_parameters() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(runtime.scope(lsqnonlin_builtin(
         objective,
         vec![tensor(vec![0.0, 0.0], vec![2, 1])],
@@ -141,7 +142,8 @@ fn lsqnonlin_respects_bounds_and_empty_constraint_placeholders() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
     let result = block_on(runtime.scope(lsqnonlin_builtin(
         objective,
@@ -180,7 +182,8 @@ fn lsqnonlin_accepts_empty_options_placeholder() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
     let result = block_on(runtime.scope(lsqnonlin_builtin(
         objective,
@@ -211,7 +214,8 @@ fn lsqnonlin_partial_bounds_apply_to_leading_variables() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let empty = Value::Tensor(Tensor::zeros(vec![0, 0]));
     let result = block_on(runtime.scope(lsqnonlin_builtin(
         objective,
@@ -232,7 +236,7 @@ fn lsqnonlin_partial_bounds_apply_to_leading_variables() {
 fn lsqnonlin_multi_output_includes_diagnostics_lambda_and_jacobian() {
     let (runtime, objective, _bound) = selected_residual(3, "multi");
     let _entry = runtime.enter();
-    let _guard = crate::output_count::push_output_count(Some(7));
+    let _guard = crate::output_count::push_output_count(Some(7)).expect("output-count scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, _requested_outputs| {
             assert_eq!(function, 3);
@@ -247,7 +251,8 @@ fn lsqnonlin_multi_output_includes_diagnostics_lambda_and_jacobian() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut options = StructValue::new();
     options.insert("Algorithm", Value::from("levenberg-marquardt"));
     let result = block_on(runtime.scope(lsqnonlin_builtin(
@@ -291,7 +296,7 @@ fn lsqnonlin_multi_output_includes_diagnostics_lambda_and_jacobian() {
 fn lsqnonlin_accepts_problem_struct() {
     let (runtime, objective, _bound) = selected_residual(4, "problem");
     let _entry = runtime.enter();
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, _requested_outputs| {
             assert_eq!(function, 4);
@@ -306,7 +311,8 @@ fn lsqnonlin_accepts_problem_struct() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut problem = StructValue::new();
     problem.insert("solver", Value::from("lsqnonlin"));
     problem.insert("objective", objective);
@@ -369,7 +375,7 @@ fn lsqnonlin_rejects_real_constraints_until_interior_point_exists() {
 
 #[test]
 fn lsqnonlin_rejects_more_than_seven_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(8));
+    let _guard = crate::output_count::push_output_count(Some(8)).expect("output-count scope");
     let err = block_on(lsqnonlin_builtin(
         Value::FunctionHandle("sin".into()),
         vec![Value::Num(0.0)],

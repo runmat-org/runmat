@@ -28,7 +28,7 @@ fn resident_dense_values_are_not_sparse() {
 
 #[test]
 fn rejects_excess_outputs_with_catalog_error() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(issparse_builtin(Value::Num(1.0))).expect_err("two outputs");
     assert_eq!(error.identifier(), Some("RunMat:issparse:TooManyOutputs"));
 }

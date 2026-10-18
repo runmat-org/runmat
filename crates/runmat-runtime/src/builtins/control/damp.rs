@@ -250,7 +250,8 @@ mod tests {
     }
 
     fn damp_outputs(sys: Value, count: usize) -> Vec<Value> {
-        let _guard = crate::output_count::push_output_count(Some(count));
+        let _guard =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let Value::OutputList(outputs) = block_on(damp_builtin(sys)).expect("damp") else {
             panic!("expected output list");
         };
@@ -603,7 +604,7 @@ mod tests {
 
     #[test]
     fn damp_output_count_error_precedes_model_validation() {
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let error = block_on(damp_builtin(Value::Num(1.0)))
             .expect_err("too many outputs must reject before model analysis");
         assert_eq!(error.identifier(), Some("RunMat:damp:OutputCount"));
@@ -632,8 +633,8 @@ mod tests {
                     .properties
                     .insert("Denominator".into(), Value::GpuTensor(denominator));
                 provider.reset_telemetry();
-                let _guard = crate::output_count::push_output_count(Some(4));
-
+                let _guard =
+                    crate::output_count::push_output_count(Some(4)).expect("output-count scope");
                 let error = block_on(damp_builtin(Value::Object(object)))
                     .expect_err("output count must reject before nested gather");
                 assert_eq!(error.identifier(), Some("RunMat:damp:OutputCount"));
@@ -650,7 +651,7 @@ mod tests {
             &[],
         );
 
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let err = sys
             .with_owned(|sys| block_on(damp_builtin(sys)))
             .expect_err("too many outputs should fail");

@@ -99,7 +99,7 @@ mod tests {
 
     #[test]
     fn rejects_excess_outputs_before_gather() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = futures::executor::block_on(blanks_builtin(Value::Num(3.0)))
             .expect_err("fixed output bound");
         assert_eq!(error.identifier(), BLANKS_ERROR_TOO_MANY_OUTPUTS.identifier);

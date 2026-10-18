@@ -52,7 +52,10 @@ pub use multi_store::{
     ImageRegionStore, ImageStoreDestination, ImageStoreOrdinal, ProspectiveMultiStoreRegion,
     ProspectiveSemanticMultiStoreRegion, ProspectiveStore,
 };
-pub use parallel::{BytecodeParallelVariable, BytecodeParforRegion, BytecodeSpmdRegion};
+pub use parallel::{
+    validate_compiled_parallel_contracts, BytecodeParallelVariable, BytecodeParforRegion,
+    BytecodeSpmdRegion,
+};
 pub use program::{
     rebind_session_source, remap_closed_session_function, remap_decorated_session_definitions,
     remap_session_entrypoint, remap_session_function, SessionCallableBinding,

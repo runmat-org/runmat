@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn malformed_logical_signal_is_rejected_with_or_without_an_output() {
     for count in [0, 1] {
-        let _outputs = crate::output_count::push_output_count(Some(count));
+        let _outputs =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let logical = runmat_value::LogicalArray {
             data: runmat_value::HostLogicalBuffer::new(vec![0, 1, 0]),
             shape: vec![1, 4].into(),
@@ -39,7 +40,7 @@ fn discarded_logical_filter_uses_shape_admission_and_prepared_coefficients_stay_
         vec![0.0, 1.0, 0.0]
     );
 
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let signal = || tensor(vec![1.0, 2.0], vec![1, 2]);
     // The public one-optional-argument form classifies a nonscalar LogicalArray
     // as an invalid scalar N before the filter-vector branch. Preserve that
@@ -73,7 +74,7 @@ fn discarded_logical_filter_uses_shape_admission_and_prepared_coefficients_stay_
 
 #[test]
 fn discarded_resample_outputs_still_admit_inputs_rates_and_options() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let signal = || tensor(vec![1.0, 2.0], vec![1, 2]);
     let call = |x, p, q, rest| block_on(resample_builtin(x, p, q, rest));
 
@@ -140,7 +141,7 @@ fn discarded_resample_outputs_still_admit_inputs_rates_and_options() {
 fn discarded_resample_retains_count_and_extension_precedence() {
     let signal = || tensor(vec![1.0, 2.0], vec![1, 2]);
     {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = block_on(resample_builtin(
             signal(),
             Value::Num(0.0),
@@ -151,7 +152,7 @@ fn discarded_resample_retains_count_and_extension_precedence() {
         assert_eq!(error.identifier(), RESAMPLE_ERROR_OUTPUT_COUNT.identifier);
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(resample_builtin(
             signal(),
@@ -166,7 +167,7 @@ fn discarded_resample_retains_count_and_extension_precedence() {
         );
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let factor = 1usize << (usize::BITS - 3);
         let error = block_on(resample_builtin(
             signal(),
@@ -190,7 +191,7 @@ fn discarded_resample_does_not_allocate_provider_output_or_touch_borrowed_source
             shape: &[1, 2],
         })
         .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let result = block_on(resample_builtin(
         Value::GpuTensor(source.clone()),
         Value::Num(2.0),

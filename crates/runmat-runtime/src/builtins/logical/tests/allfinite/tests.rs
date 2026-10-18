@@ -133,7 +133,7 @@ fn errors_use_catalog_descriptors() {
     .expect_err("cell input");
     assert_eq!(error.identifier(), Some("RunMat:allfinite:InvalidInput"));
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = call(Value::Num(1.0)).expect_err("two outputs");
     assert_eq!(error.identifier(), Some("RunMat:allfinite:TooManyOutputs"));
 }

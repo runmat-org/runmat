@@ -46,9 +46,18 @@ impl ExactHostAllocationReservation for ScratchClaim {
     }
 }
 
-struct ScratchPermit {
+pub(super) struct ScratchPermit {
     stage: Arc<ManagedHostEffectStageReservation>,
     fence: AllocationFence,
+}
+
+impl ScratchPermit {
+    pub(super) fn new(
+        stage: Arc<ManagedHostEffectStageReservation>,
+        fence: AllocationFence,
+    ) -> Self {
+        Self { stage, fence }
+    }
 }
 
 impl fmt::Debug for ScratchPermit {
@@ -120,6 +129,7 @@ mod typed_element {
     impl Sealed for f32 {}
     impl Sealed for f64 {}
     impl Sealed for usize {}
+    impl Sealed for u64 {}
     impl Sealed for num_complex::Complex32 {}
     impl Sealed for num_complex::Complex64 {}
 }

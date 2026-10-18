@@ -174,8 +174,10 @@ mod tests {
                     ))
                 })
             },
-        )));
-        let _out_guard = crate::output_count::push_output_count(Some(2));
+        )))
+        .expect("call-port scope");
+        let _out_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         drop(entry);
 
         let out = block_on(runtime.scope(ode23_builtin(
@@ -213,7 +215,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let out = block_on(ode23_builtin(
             crate::user_functions::test_support::exact_local_value("ode_decay", binding),

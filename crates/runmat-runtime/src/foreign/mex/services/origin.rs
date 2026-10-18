@@ -207,7 +207,7 @@ impl OriginMexBoundaryAdapter {
                 stdout,
                 stderr,
             } => {
-                capture_async(stdout, stderr, async move {
+                capture_async(&host.runtime, stdout, stderr, async move {
                     host.eval_rooted(command)
                         .await
                         .map_err(runtime_diagnostic)
@@ -222,7 +222,7 @@ impl OriginMexBoundaryAdapter {
                 stdout,
                 stderr,
             } => {
-                capture_async(stdout, stderr, async move {
+                capture_async(&host.runtime, stdout, stderr, async move {
                     let sequence = arguments
                         .with_unbounded_values_async(|arguments| {
                             host.call_rooted(&function, arguments, requested_outputs)
@@ -309,6 +309,7 @@ impl OriginMexBoundaryAdapter {
 }
 
 async fn capture_async<T>(
+    runtime: &RuntimeContext,
     stdout: bool,
     stderr: bool,
     operation: impl Future<Output = Result<T, MexDiagnostic>>,
@@ -316,7 +317,13 @@ async fn capture_async<T>(
     if !stdout && !stderr {
         return MexEngineCompletion::from_result(operation.await);
     }
-    let capture = crate::console::begin_capture();
+    if let Err(error) = super::prepare_legacy_capture_materialization(runtime) {
+        return MexEngineCompletion::from_result(Err(runtime_diagnostic(error)));
+    }
+    let capture = match crate::console::begin_capture() {
+        Ok(capture) => capture,
+        Err(error) => return MexEngineCompletion::from_result(Err(runtime_diagnostic(error))),
+    };
     let result = operation.await;
     let entries = capture.finish_entries();
     let mut output = MexEngineCompletion::from_result(result);

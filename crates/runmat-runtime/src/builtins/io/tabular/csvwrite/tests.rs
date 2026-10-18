@@ -64,7 +64,7 @@ fn line_ending() -> &'static str {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn csvwrite_preserves_rank_zero_and_rank_one_column_layout() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let cases = [
         (vec![7.0], Vec::new(), "7\n"),
         (vec![7.0, 8.0], vec![2], "7\n8\n"),
@@ -396,7 +396,7 @@ fn csvwrite_output_and_resident_gates_run_before_side_effects_or_provider_access
     let path = temp_path("csv");
     let filename = Value::from(path.to_string_lossy().into_owned());
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let outputs = crate::output_count::push_output_count(Some(1));
+    let outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let error = csvwrite_builtin(
         filename.clone(),
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
@@ -428,7 +428,7 @@ fn csvwrite_output_and_resident_gates_run_before_side_effects_or_provider_access
     assert!(!path.exists(), "resident gate must precede file creation");
     drop(strict);
 
-    let no_outputs = crate::output_count::push_output_count(Some(0));
+    let no_outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let value = csvwrite_builtin(
         filename,
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
@@ -442,7 +442,8 @@ fn csvwrite_output_and_resident_gates_run_before_side_effects_or_provider_access
     let path = temp_path("csv");
     let filename = Value::from(path.to_string_lossy().into_owned());
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let too_many_outputs = crate::output_count::push_output_count(Some(2));
+    let too_many_outputs =
+        crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = csvwrite_builtin(
         filename,
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),

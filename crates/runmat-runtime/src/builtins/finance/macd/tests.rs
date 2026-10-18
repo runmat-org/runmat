@@ -226,7 +226,7 @@ fn rank_one_macd_input_keeps_its_full_shape() {
 
 #[test]
 fn two_outputs_return_macd_and_signal() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = call(matrix(
         5,
         [
@@ -255,14 +255,14 @@ fn two_outputs_return_macd_and_signal() {
 
 #[test]
 fn zero_outputs_return_empty_without_validating_input() {
-    let _guard = crate::output_count::push_output_count(Some(0));
+    let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let result = call(Value::String("not data".to_string())).unwrap();
     assert_eq!(result, Value::output_list(Vec::new()));
 }
 
 #[test]
 fn rejects_more_than_two_outputs_before_evaluation() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = call(matrix(
         1,
         [[2.0, 0.5, 1.0, 1.0], [0.0; 4], [0.0; 4], [0.0; 4], [0.0; 4]],
@@ -273,7 +273,7 @@ fn rejects_more_than_two_outputs_before_evaluation() {
 
 #[test]
 fn empty_matrix_returns_empty_series() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = call(Value::Tensor(Tensor::new(vec![], vec![0, 4]).unwrap())).unwrap();
     let Value::OutputList(values) = result else {
         panic!("expected outputs");

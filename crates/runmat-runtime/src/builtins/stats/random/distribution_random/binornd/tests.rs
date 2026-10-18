@@ -324,7 +324,7 @@ fn rejects_unsupported_representations_and_excess_outputs() {
         BINORND_ERROR_INVALID_ARGUMENT.identifier
     );
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(binornd_builtin(vec![Value::Num(2.0), Value::Num(0.5)]))
         .expect_err("second output");
     assert_eq!(

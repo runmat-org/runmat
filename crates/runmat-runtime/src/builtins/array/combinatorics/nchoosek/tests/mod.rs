@@ -6,10 +6,10 @@ use super::*;
 #[test]
 fn requested_outputs_admit_zero_or_one_and_reject_excess_before_provider_access() {
     for count in [None, Some(0), Some(1)] {
-        let _outputs = crate::output_count::push_output_count(count);
+        let _outputs = crate::output_count::push_output_count(count).expect("output-count scope");
         call(Value::Num(5.0), Value::Num(2.0)).expect("supported output request");
     }
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let allocation_owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
     let resident = Value::GpuTensor(
         allocation_owner

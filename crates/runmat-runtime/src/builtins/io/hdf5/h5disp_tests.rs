@@ -39,9 +39,8 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
     ))
     .expect("write floating attribute");
 
-    let _outputs = crate::output_count::push_output_count(Some(1));
-
-    let quiet_capture = crate::console::begin_capture();
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
+    let quiet_capture = crate::console::begin_capture().expect("console capture");
     let simple = block_on(h5disp_builtin(
         filename(),
         vec![Value::String("/café".into())],
@@ -56,7 +55,7 @@ fn h5disp_min_mode_and_utf8_option_use_typed_display_forms() {
     assert!(simple.contains("Value: 18446744073709551615"));
     assert!(simple.contains("Value: 2.5"));
     assert!(
-        quiet_capture.finish().is_empty(),
+        quiet_capture.finish().expect("captured text").is_empty(),
         "captured result must not print"
     );
 
@@ -104,19 +103,19 @@ fn dispatcher_statement_h5disp_prints_under_suppressed_expression_without_replay
     .expect("write display fixture");
 
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let printed = crate::console::begin_capture();
+    let printed = crate::console::begin_capture().expect("console capture");
     block_on(crate::call_builtin_async_with_outputs(
         "h5disp",
         std::slice::from_ref(&filename),
         0,
     ))
     .expect("statement display");
-    let printed = printed.finish();
+    let printed = printed.finish().expect("captured text");
     assert_eq!(printed.matches("Dataset: /A").count(), 1);
 
     drop(strict);
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let quiet = crate::console::begin_capture();
+    let quiet = crate::console::begin_capture().expect("console capture");
     let value = block_on(crate::call_builtin_async_with_outputs(
         "h5disp",
         &[filename],
@@ -124,5 +123,8 @@ fn dispatcher_statement_h5disp_prints_under_suppressed_expression_without_replay
     ))
     .expect("captured text");
     assert!(matches!(value.value(), Value::String(text) if text.contains("Dataset: /A")));
-    assert!(quiet.finish().is_empty(), "captured display must be silent");
+    assert!(
+        quiet.finish().expect("captured text").is_empty(),
+        "captured display must be silent"
+    );
 }

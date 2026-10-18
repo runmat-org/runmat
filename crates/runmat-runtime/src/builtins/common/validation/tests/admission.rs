@@ -90,7 +90,8 @@ fn zero_output_and_implicit_calls_execute_and_assigned_outputs_reject() {
     let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
     for (name, evaluate, args) in validators() {
         for count in [None, Some(0)] {
-            let _outputs = crate::output_count::push_output_count(count);
+            let _outputs =
+                crate::output_count::push_output_count(count).expect("output-count scope");
             assert!(evaluate(args.clone()).is_ok(), "{name} count {count:?}");
             assert!(
                 invoke_validator(name, args.clone()).is_ok(),
@@ -98,7 +99,8 @@ fn zero_output_and_implicit_calls_execute_and_assigned_outputs_reject() {
             );
         }
         for count in [1, 2, 4] {
-            let _outputs = crate::output_count::push_output_count(Some(count));
+            let _outputs =
+                crate::output_count::push_output_count(Some(count)).expect("output-count scope");
             let error = evaluate(args.clone()).unwrap_err();
             assert_eq!(
                 error.identifier(),
@@ -123,14 +125,14 @@ fn excess_outputs_and_invalid_controls_precede_provider_lookup() {
     let handle = allocation.handle;
     for (name, evaluate, mut args) in validators() {
         args[0] = Value::GpuTensor(handle.clone());
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let error = evaluate(args).unwrap_err();
         assert_eq!(
             error.identifier(),
             Some(format!("RunMat:{name}:TooManyOutputs").as_str())
         );
     }
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     for evaluate in [
         must_be_a::evaluate as Validator,
         must_be_underlying_type::evaluate,
@@ -161,7 +163,7 @@ fn vector_option_accepts_existing_single_text_cell_form() {
 
 #[test]
 fn json_payload_extension_is_gated_without_filesystem_access() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let _mode = crate::compatibility::push_runmat_extensions_enabled(false);
     let error =
         validate_function_signatures_json::evaluate(vec![Value::String("{}".into())]).unwrap_err();

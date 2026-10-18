@@ -156,7 +156,7 @@ fn assert_close(left: f64, right: f64) {
 
 #[test]
 fn lscov_solves_ordinary_least_squares_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0], 3, 1);
     let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
@@ -171,7 +171,7 @@ fn lscov_solves_ordinary_least_squares_outputs() {
 
 #[test]
 fn lscov_accepts_typed_integer_matrices_and_weights() {
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let a = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 0, 1, 2]), 3, 2, f64::NAN);
     let b = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5]), 3, 1, f64::NAN);
     let weights = poisoned_int_tensor(IntegerStorage::U16(vec![1, 1, 1]), 3, 1, f64::NAN);
@@ -184,7 +184,7 @@ fn lscov_accepts_typed_integer_matrices_and_weights() {
 
 #[test]
 fn lscov_reads_typed_integer_covariance_from_exact_storage() {
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let a = poisoned_int_tensor(IntegerStorage::I16(vec![1, 1, 1, 0, 1, 2]), 3, 2, f64::NAN);
     let b = poisoned_int_tensor(IntegerStorage::I16(vec![1, 2, 10]), 3, 1, f64::NAN);
     let v = poisoned_int_tensor(
@@ -219,7 +219,7 @@ fn lscov_weighting_length_uses_typed_integer_storage_not_mirror() {
 
 #[test]
 fn lscov_supports_weight_vector_weighting() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 2.0, 10.0], 3, 1);
     let v = tensor(vec![1.0, 1.0, 100.0], 3, 1);
@@ -235,7 +235,7 @@ fn lscov_supports_weight_vector_weighting() {
 
 #[test]
 fn lscov_supports_zero_weight_observations() {
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 100.0], 3, 1);
     let w = tensor(vec![1.0, 1.0, 0.0], 3, 1);
@@ -248,7 +248,7 @@ fn lscov_supports_zero_weight_observations() {
 
 #[test]
 fn lscov_supports_full_covariance_and_chol_algorithm() {
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 2.0, 10.0], 3, 1);
     let v = tensor(
@@ -269,7 +269,7 @@ fn lscov_supports_full_covariance_and_chol_algorithm() {
 
 #[test]
 fn lscov_orth_handles_singular_psd_covariance() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 100.0], 3, 1);
     let v = tensor(
@@ -291,7 +291,7 @@ fn lscov_orth_handles_singular_psd_covariance() {
 
 #[test]
 fn lscov_supports_matrix_rhs() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], 3, 2);
     let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());
@@ -306,7 +306,7 @@ fn lscov_supports_matrix_rhs() {
 
 #[test]
 fn lscov_supports_complex_design_and_response() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let a = complex_tensor(
         vec![
             (1.0, 0.0),
@@ -334,7 +334,7 @@ fn lscov_supports_complex_design_and_response() {
 
 #[test]
 fn lscov_rejects_fourth_output_for_matrix_rhs() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let a = tensor(vec![1.0, 1.0, 1.0, 0.0, 1.0, 2.0], 3, 2);
     let b = tensor(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], 3, 2);
     let err = block_on(lscov_builtin(a, b, Vec::new())).unwrap_err();
@@ -360,7 +360,7 @@ fn lscov_rejects_negative_weights() {
 
 #[test]
 fn lscov_underdetermined_mse_is_zero() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let a = tensor(vec![1.0, 0.0, 1.0, 0.0, 1.0, 1.0], 2, 3);
     let b = tensor(vec![1.0, 2.0], 2, 1);
     let out = outputs(block_on(lscov_builtin(a, b, Vec::new())).unwrap());

@@ -279,7 +279,8 @@ fn bayesopt_minimizes_quadratic_over_optimizable_variables() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let result = block_on(runtime.scope(bayesopt_builtin(
         crate::user_functions::test_support::exact_local_value("objective", objective),
@@ -346,7 +347,8 @@ fn bayesopt_honors_x_constraint_function() {
                 }
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let result = block_on(runtime.scope(bayesopt_builtin(
         crate::user_functions::test_support::exact_local_value("objective", objective),
@@ -390,7 +392,8 @@ fn bayesopt_supports_mixed_variables_and_objective_constraint_struct() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let result = block_on(runtime.scope(bayesopt_builtin(
         crate::user_functions::test_support::exact_local_value("objective", objective),
@@ -450,7 +453,8 @@ fn bayesopt_reads_typed_integer_storage_exactly() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let result = block_on(runtime.scope(bayesopt_builtin(
         crate::user_functions::test_support::exact_local_value("objective", objective),

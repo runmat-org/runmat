@@ -24,7 +24,7 @@ fn selected_local_mail_command_never_reports_browser_success() {
 
 #[test]
 fn websave_rejects_excess_outputs_before_input_or_http_service() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = run(websave_builtin(None, vec![Value::Num(1.0)])).expect_err("excess outputs");
     assert_eq!(error.identifier(), Some("RunMat:websave:TooManyOutputs"));
 }
@@ -131,7 +131,7 @@ fn url_text_typed_failures_and_output_precedence() {
             .identifier(),
         Some("RunMat:urldecode:InvalidText")
     );
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         run(urlencode_builtin(vec![])).unwrap_err().identifier(),
         Some("RunMat:urlencode:TooManyOutputs")

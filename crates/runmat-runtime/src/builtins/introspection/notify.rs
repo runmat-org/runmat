@@ -49,7 +49,8 @@ mod tests {
     fn strict_profile_rejects_status_and_multiple_callback_arguments_before_dispatch() {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         {
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             let error = block_on(notify_builtin(
                 Value::Num(1.0),
                 "Changed".into(),

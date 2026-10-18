@@ -33,6 +33,9 @@ mod root_retirement;
 pub use root_retirement::{RootRetirement, RootRetirementObserver};
 mod retirement;
 pub mod stats;
+#[cfg(not(target_arch = "wasm32"))]
+#[doc(hidden)]
+pub mod test_support;
 
 // Finalizer support
 use std::collections::HashMap;

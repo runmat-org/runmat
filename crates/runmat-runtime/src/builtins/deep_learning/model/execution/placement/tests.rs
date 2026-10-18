@@ -256,8 +256,8 @@ fn registered_predict_uses_explicit_context_and_output_count_for_placement() {
     ];
     let bindings = crate::builtin::runtime_builtin_bindings_by_name("predict");
     assert_eq!(bindings.len(), 1);
-    let _ambient_outputs = crate::output_count::push_output_count(Some(3));
-
+    let _ambient_outputs =
+        crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let output = block_on((bindings[0].implementation)(
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
     ))

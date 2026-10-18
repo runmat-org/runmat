@@ -145,10 +145,10 @@ mod tests {
     #[test]
     fn fixed_bounds_preserve_zero_and_implicit_outputs() {
         for count in [None, Some(0), Some(1)] {
-            let _guard = super::super::push_output_count(count);
+            let _guard = super::super::push_output_count(count).expect("output-count scope");
             assert!(validate_fixed_outputs(&FIXED, &ERROR, "output_test").is_ok());
         }
-        let _guard = super::super::push_output_count(Some(2));
+        let _guard = super::super::push_output_count(Some(2)).expect("output-count scope");
         let error = validate_fixed_outputs(&FIXED, &ERROR, "output_test").unwrap_err();
         assert_eq!(error.identifier(), ERROR.identifier);
         assert_eq!(error.message(), ERROR.message);
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn dynamic_and_variadic_policies_stay_with_the_caller() {
-        let _guard = super::super::push_output_count(Some(20));
+        let _guard = super::super::push_output_count(Some(20)).expect("output-count scope");
         for descriptor in [&DYNAMIC, &VARIADIC] {
             assert!(validate_fixed_outputs(descriptor, &ERROR, "output_test").is_ok());
         }
@@ -180,10 +180,10 @@ mod tests {
             ..FIXED
         };
         for count in [0, 1, 2] {
-            let _guard = super::super::push_output_count(Some(count));
+            let _guard = super::super::push_output_count(Some(count)).expect("output-count scope");
             assert!(validate_fixed_outputs(&OVERLOADED, &ERROR, "output_test").is_ok());
         }
-        let _guard = super::super::push_output_count(Some(3));
+        let _guard = super::super::push_output_count(Some(3)).expect("output-count scope");
         assert!(validate_fixed_outputs(&OVERLOADED, &ERROR, "output_test").is_err());
     }
 
@@ -234,10 +234,10 @@ mod tests {
             ..FIXED
         };
         for count in [None, Some(0)] {
-            let _guard = super::super::push_output_count(count);
+            let _guard = super::super::push_output_count(count).expect("output-count scope");
             assert!(validate_fixed_outputs(&ZERO, &ERROR, "output_test").is_ok());
         }
-        let _guard = super::super::push_output_count(Some(1));
+        let _guard = super::super::push_output_count(Some(1)).expect("output-count scope");
         assert!(validate_fixed_outputs(&UNDECLARED, &ERROR, "output_test").is_ok());
         assert!(validate_fixed_outputs(&ZERO, &ERROR, "output_test").is_err());
     }

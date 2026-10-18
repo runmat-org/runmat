@@ -14801,10 +14801,23 @@ fn portable_product_preserves_analyzed_parfor_contracts() {
         .manifest
         .validate()
         .expect("parallel contract remains valid in the executable manifest");
+    let mut altered = envelope.clone();
+    altered.manifest.parallel.parfor_regions[0].maximum_workers = Some(runmat_types::LabCount(3));
+    let altered = altered
+        .canonical_bytes()
+        .expect("structurally valid altered parallel manifest");
+    let error = runmat_vm::admit_executable_unit(&altered)
+        .expect_err("worker must reject a manifest that differs from compiled parfor bytecode");
+    assert!(
+        error
+            .to_string()
+            .contains("selected parfor manifest differs from its compiled region contracts"),
+        "unexpected parallel import error: {error}"
+    );
 }
 
 #[test]
-fn parfor_without_a_semantic_contract_is_rejected_before_execution() {
+fn parfor_break_is_rejected_before_execution() {
     let mut session = RunMatSession::with_options(false, false).expect("session init");
     let error = block_on(session.compile_executable_unit(
         ExecutableSource::new(
@@ -14817,7 +14830,7 @@ fn parfor_without_a_semantic_contract_is_rejected_before_execution() {
     .expect_err("an unclassified parfor must not produce executable bytecode");
     let rendered = error.to_string();
     assert!(
-        rendered.contains("did not pass semantic classification"),
+        rendered.contains("break cannot leave a parfor region"),
         "unexpected parfor compilation error: {rendered}"
     );
 }
@@ -16961,7 +16974,10 @@ fn invoke_executable_with_console(
     control: &InvocationControl,
 ) -> (
     runmat_runtime::execution::RootedValueSequence,
-    Vec<(runmat_runtime::console::ConsoleStream, String)>,
+    Vec<(
+        runmat_runtime::console::ConsoleStream,
+        runmat_runtime::console::ConsoleText,
+    )>,
 ) {
     {
         let _runtime = session.runtime_context().enter();

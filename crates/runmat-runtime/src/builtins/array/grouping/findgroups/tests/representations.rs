@@ -6,7 +6,7 @@ fn sorts_text_and_preserves_orientation() {
     let input = Value::StringArray(
         StringArray::new(vec!["b".into(), "a".into(), "b".into()], vec![1, 3]).unwrap(),
     );
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(input, Vec::new()).unwrap());
     let Value::Tensor(groups) = &outputs[0] else {
         panic!("expected group numbers");
@@ -26,7 +26,7 @@ fn preserves_exact_integer_identifiers() {
         )
         .unwrap(),
     );
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(input, Vec::new()).unwrap());
     assert!(
         matches!(&outputs[1], Value::Tensor(ids) if ids.integer_storage() == Some(&IntegerStorage::U64(vec![base, base + 1])))

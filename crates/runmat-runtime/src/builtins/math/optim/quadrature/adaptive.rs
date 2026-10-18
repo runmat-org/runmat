@@ -59,7 +59,8 @@ pub(crate) trait QuadratureEvaluator {
         _b: f64,
         _estimate: &<Self::Sample as OpenSample>::Result,
         _error: &<Self::Sample as OpenSample>::Error,
-    ) {
+    ) -> BuiltinResult<()> {
+        Ok(())
     }
 }
 
@@ -197,7 +198,7 @@ where
         .subtract(&state.whole, evaluator)
         .await
         .map_err(|error| evaluator.arithmetic_error(error))?;
-    evaluator.refined(*evaluations, state.a, state.b, &refined, &error);
+    evaluator.refined(*evaluations, state.a, state.b, &refined, &error)?;
     let accepted_error = state
         .tol
         .multiply_f64(15.0, evaluator)
@@ -336,8 +337,9 @@ mod tests {
             _b: f64,
             _estimate: &ScaledEstimate,
             _error: &ScaledEstimate,
-        ) {
+        ) -> BuiltinResult<()> {
             self.trace_rows += 1;
+            Ok(())
         }
     }
 

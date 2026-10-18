@@ -200,7 +200,11 @@ mod tests {
         }
     }
     impl RuntimeHostService for Host {
-        fn console(&self, _: runmat_runtime::console::ConsoleStream, _: String) {
+        fn console(
+            &self,
+            _: runmat_runtime::console::ConsoleStream,
+            _: runmat_runtime::console::ConsoleText,
+        ) {
             panic!("installation must not emit console output")
         }
         fn warning(&self, _: runmat_runtime::warning_store::RuntimeWarning) {

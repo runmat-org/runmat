@@ -137,7 +137,7 @@ fn wide_integer_class_identity_and_exact_score_boundary() {
 
 #[test]
 fn finite_large_priors_normalize_without_overflow() {
-    let _outputs = output_count::push_output_count(Some(4));
+    let _outputs = output_count::push_output_count(Some(4)).expect("output-count scope");
     let result = block_on(perfcurve_builtin(
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
@@ -165,7 +165,7 @@ fn finite_large_observation_weights_have_explicit_empirical_boundary_and_stable_
         .message()
         .contains("weight exceeds finite double range"));
 
-    let _outputs = output_count::push_output_count(Some(4));
+    let _outputs = output_count::push_output_count(Some(4)).expect("output-count scope");
     let (labels, scores, positive) = input();
     let mut controls = weights();
     controls.extend([Value::from("Prior"), Value::from("uniform")]);
@@ -176,7 +176,7 @@ fn finite_large_observation_weights_have_explicit_empirical_boundary_and_stable_
 
 #[test]
 fn finite_extreme_costs_keep_expected_cost_curve_finite() {
-    let _outputs = output_count::push_output_count(Some(2));
+    let _outputs = output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = block_on(perfcurve_builtin(
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
@@ -196,7 +196,7 @@ fn finite_extreme_costs_keep_expected_cost_curve_finite() {
 
 #[test]
 fn empirical_and_uniform_priors_select_different_roc_operating_points() {
-    let _outputs = output_count::push_output_count(Some(5));
+    let _outputs = output_count::push_output_count(Some(5)).expect("output-count scope");
     let run = |controls| {
         block_on(perfcurve_builtin(
             tensor(&[1.0, 0.0, 0.0, 0.0], &[4, 1]),
@@ -248,7 +248,7 @@ fn output_num(value: &Value, index: usize) -> f64 {
 
 #[tokio::test]
 async fn default_roc_returns_thresholds_auc_and_optimal_point() {
-    let _guard = output_count::push_output_count(Some(5));
+    let _guard = output_count::push_output_count(Some(5)).expect("output-count scope");
     let result = perfcurve_builtin(
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
@@ -279,7 +279,7 @@ async fn default_roc_returns_thresholds_auc_and_optimal_point() {
 #[tokio::test]
 async fn perfcurve_accepts_typed_integer_labels_scores_and_weights() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = output_count::push_output_count(Some(4));
+    let _guard = output_count::push_output_count(Some(4)).expect("output-count scope");
     let result = perfcurve_builtin(
         int_tensor(IntegerStorage::U8(vec![1, 0, 1, 0]), &[4, 1]),
         int_tensor(IntegerStorage::U16(vec![9, 8, 4, 1]), &[4, 1]),
@@ -302,7 +302,7 @@ async fn perfcurve_accepts_typed_integer_labels_scores_and_weights() {
 
 #[tokio::test]
 async fn supports_text_labels_negclass_weights_and_precision_recall() {
-    let _guard = output_count::push_output_count(Some(7));
+    let _guard = output_count::push_output_count(Some(7)).expect("output-count scope");
     let labels = Value::StringArray(
         StringArray::new(
             vec![
@@ -356,7 +356,7 @@ async fn supports_text_labels_negclass_weights_and_precision_recall() {
 
 #[tokio::test]
 async fn xvals_nearest_returns_actual_points_and_interpolation_sorts_targets() {
-    let _guard = output_count::push_output_count(Some(4));
+    let _guard = output_count::push_output_count(Some(4)).expect("output-count scope");
     let result = perfcurve_builtin(
         tensor(&[1.0, 0.0, 1.0, 0.0], &[4, 1]),
         tensor(&[0.9, 0.8, 0.4, 0.1], &[4, 1]),
@@ -426,7 +426,7 @@ async fn rejects_missing_classes_and_bad_option_shapes() {
 
 #[tokio::test]
 async fn handles_nan_addtofalse_logical_aliases_and_non_roc_optimal_point() {
-    let _guard = output_count::push_output_count(Some(5));
+    let _guard = output_count::push_output_count(Some(5)).expect("output-count scope");
     let result = perfcurve_builtin(
         Value::LogicalArray(runmat_value::LogicalArray::new(vec![1, 0, 1, 0], vec![4, 1]).unwrap()),
         tensor(&[0.9, f64::NAN, f64::NAN, 0.1], &[4, 1]),

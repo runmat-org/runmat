@@ -182,7 +182,7 @@ mod tests {
             block_on(syms_builtin(vec![Value::from("x"), Value::from("_bad")])).unwrap_err();
         assert_eq!(error.identifier(), SYMS_ERRORS[1].identifier);
         assert!(crate::workspace::lookup("x").is_none());
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(syms_builtin(vec![Value::from("x")])).unwrap_err();
         assert_eq!(error.identifier(), SYMS_ERROR_TOO_MANY_OUTPUTS.identifier);
         assert!(crate::workspace::lookup("x").is_none());
@@ -218,7 +218,7 @@ mod tests {
     #[test]
     fn zero_outputs_still_declares_and_placeholder_is_empty_double() {
         let _workspace = test_workspace_guard();
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let value = block_on(syms_builtin(vec![Value::from("x h")])).unwrap();
         assert_eq!(crate::workspace::lookup("x").unwrap().to_string(), "x");
         assert_eq!(crate::workspace::lookup("h").unwrap().to_string(), "h");

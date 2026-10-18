@@ -455,7 +455,7 @@ fn kmeans_clusters_numeric_matrix_with_outputs() {
     let _rng_guard = random::test_guard();
     random::reset_rng();
     let x = tensor(vec![0.0, 0.2, 9.8, 10.0, 0.0, 0.1, 9.9, 10.1], 4, 2);
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let out = block_on(kmeans_builtin(
         x,
         Value::Num(2.0),
@@ -512,7 +512,7 @@ fn kmeans_reads_typed_integer_inputs_start_and_options_exactly() {
         cleared_int_tensor(IntegerStorage::U8(vec![0]), 1, 1),
     );
 
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(kmeans_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 0, 10, 10]), 4, 1),
         poisoned_int_tensor(IntegerStorage::U8(vec![2]), 1, 1),
@@ -551,7 +551,7 @@ fn kmeans_treats_vector_as_column_and_nan_rows_as_missing() {
     let _rng_guard = random::test_guard();
     random::reset_rng();
     let x = tensor(vec![1.0, 2.0, f64::NAN, 20.0, 21.0], 1, 5);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(kmeans_builtin(
         x,
         Value::Num(2.0),
@@ -598,7 +598,7 @@ fn kmeans_supports_cityblock_and_replicates() {
 fn kmeans_infers_k_from_numeric_start_when_k_is_empty() {
     let x = tensor(vec![0.0, 0.5, 10.0, 10.5], 4, 1);
     let empty_k = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(kmeans_builtin(
         x,
         empty_k,
@@ -622,7 +622,7 @@ fn kmeans_accepts_3d_numeric_starts_as_replicates() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let x = tensor(vec![0.0, 0.2, 10.0, 10.2], 4, 1);
     let starts = poisoned_int_tensor_shape(IntegerStorage::I16(vec![0, 10, 0, 10]), vec![2, 1, 2]);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let out = block_on(kmeans_builtin(
         x,
         Value::Num(2.0),

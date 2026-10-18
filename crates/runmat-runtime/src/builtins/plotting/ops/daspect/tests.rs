@@ -13,7 +13,7 @@ fn daspect_query_output_count_rejects_before_default_state_creation() {
     use crate::builtins::plotting::state;
     let _guard = lock_plot_registry();
     state::reset_plot_state();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         daspect_builtin(vec![]).unwrap_err().identifier(),
         Some("RunMat:daspect:TooManyOutputs")
@@ -30,7 +30,7 @@ fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
 }
 
 fn set_daspect(args: Vec<Value>) -> BuiltinResult<Value> {
-    let _output = crate::output_count::push_output_count(Some(0));
+    let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     daspect_builtin(args)
 }
 

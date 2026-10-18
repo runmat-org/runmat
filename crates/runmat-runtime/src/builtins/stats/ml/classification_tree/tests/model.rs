@@ -159,7 +159,7 @@ fn fitctree_predict_rejects_too_many_outputs() {
         ],
     ))
     .unwrap();
-    let output_count = crate::output_count::push_output_count(Some(5));
+    let output_count = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let err = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
         model,
         tensor_value(vec![0.5, 2.5], 2, 1),

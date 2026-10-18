@@ -41,10 +41,11 @@ fn char_array(data: Vec<char>, rows: usize, columns: usize) -> BuiltinResult<Val
         .map_err(|error| super::error::operation(format!("ls: {error}")))
 }
 
-pub(super) fn emit(rows: &[String]) {
+pub(super) fn emit(rows: &[String]) -> BuiltinResult<()> {
     if !rows.is_empty() {
-        record_console_line(ConsoleStream::Stdout, rows.join("\n"));
+        record_console_line(ConsoleStream::Stdout, rows.join("\n"))?;
     }
+    Ok(())
 }
 
 pub(super) fn should_emit_stdout() -> bool {

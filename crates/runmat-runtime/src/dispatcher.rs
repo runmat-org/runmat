@@ -7,6 +7,10 @@ use runmat_types::ClassIdentity;
 use runmat_value::Value;
 use std::cell::RefCell;
 
+#[path = "dispatcher/class_access_identity.rs"]
+mod class_access_identity;
+pub use class_access_identity::ClassAccessIdentity;
+
 #[path = "dispatcher/constructor.rs"]
 mod constructor;
 pub(crate) mod direct_call_observation;
@@ -84,16 +88,18 @@ impl Drop for ClassAccessContextGuard {
     }
 }
 
-pub fn push_class_access_context(class_name: Option<ClassIdentity>) -> ClassAccessContextGuard {
+pub fn push_class_access_context(
+    class_name: Option<ClassIdentity>,
+) -> Result<ClassAccessContextGuard, RuntimeError> {
     if let Some(runtime) = crate::context::legacy::active() {
-        return ClassAccessContextGuard {
+        return Ok(ClassAccessContextGuard {
             previous: None,
             projection: Some(crate::context::call_projection::push_class_access(
                 runtime.call_projection(),
                 class_name,
-            )),
+            )?),
             context: None,
-        };
+        });
     }
     let context =
         crate::context::legacy::active().map(|context| std::rc::Rc::clone(context.state()));
@@ -102,25 +108,33 @@ pub fn push_class_access_context(class_name: Option<ClassIdentity>) -> ClassAcce
     } else {
         CLASS_ACCESS_CONTEXT.with(|slot| std::mem::replace(&mut *slot.borrow_mut(), class_name))
     };
-    ClassAccessContextGuard {
+    Ok(ClassAccessContextGuard {
         previous,
         projection: None,
         context,
-    }
+    })
 }
 
-fn current_class_access_context() -> Option<ClassIdentity> {
+fn current_class_access_context() -> Option<ClassAccessIdentity> {
     if let Some(context) = crate::context::legacy::active() {
         return context
             .call_projection()
             .borrow()
             .class_access()
-            .unwrap_or_else(|| context.state().call.borrow().class_access.clone());
+            .unwrap_or_else(|| {
+                context
+                    .state()
+                    .call
+                    .borrow()
+                    .class_access
+                    .clone()
+                    .map(ClassAccessIdentity::from)
+            });
     }
-    CLASS_ACCESS_CONTEXT.with(|slot| slot.borrow().clone())
+    CLASS_ACCESS_CONTEXT.with(|slot| slot.borrow().clone().map(ClassAccessIdentity::from))
 }
 
-pub fn class_access_context() -> Option<ClassIdentity> {
+pub fn class_access_context() -> Option<ClassAccessIdentity> {
     current_class_access_context()
 }
 
@@ -436,7 +450,7 @@ async fn try_call_builtin_sequence_async_impl(
     let resolved_name = ResolvedBuiltinName::resolve(name);
     let name = resolved_name.canonical;
 
-    let _output_guard = crate::output_count::push_output_count(output_count);
+    let _output_guard = crate::output_count::push_output_count(output_count)?;
     if let Some(result) =
         try_distributed_builtin(name, args, output_count, context.as_ref()).await?
     {
@@ -1218,9 +1232,9 @@ async fn call_class_constructor(
     let caller_class = current_class_access_context();
     let ctor_access_allowed = match ctor.access {
         runmat_types::MemberAccess::Public => true,
-        runmat_types::MemberAccess::Private => caller_class.as_ref() == Some(&owner),
+        runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(&owner),
         runmat_types::MemberAccess::Protected => caller_class
-            .as_ref()
+            .as_deref()
             .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
     };
     if !ctor_access_allowed {
@@ -1493,7 +1507,7 @@ pub(crate) async fn call_selected_builtin_async_with_outputs(
     let scoped_context = context.clone();
     let result = async move {
         let name = binding.identity.builtin.name;
-        let _output_guard = crate::output_count::push_output_count(Some(output_count));
+        let _output_guard = crate::output_count::push_output_count(Some(output_count))?;
         if let Some(result) =
             try_distributed_builtin(name, args, Some(output_count), context.as_ref()).await?
         {
@@ -2156,7 +2170,8 @@ mod tests {
         let ctor_fn_name_for_invoker = ctor_fn_name.clone();
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(Some(
             std::sync::Arc::new(move |name| (name == ctor_fn_name_for_resolver).then_some(10101)),
-        ));
+        ))
+        .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             std::sync::Arc::new(move |function, _args, requested_outputs| {
                 assert_eq!(function, 10101);
@@ -2169,7 +2184,8 @@ mod tests {
                     )
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let mut parent_methods = HashMap::new();
         parent_methods.insert(
@@ -2299,7 +2315,8 @@ mod tests {
         let fn_name_for_resolver = fn_name.clone();
         let _resolver_guard = crate::user_functions::install_semantic_function_resolver(Some(
             std::sync::Arc::new(move |name| (name == fn_name_for_resolver).then_some(20202)),
-        ));
+        ))
+        .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             std::sync::Arc::new(move |function, _args, requested_outputs| {
                 assert_eq!(function, 20202);
@@ -2322,7 +2339,8 @@ mod tests {
                     }
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let out = call_builtin(&format!("{class_name}.zero"), &[])
             .expect("dotted static class method call should dispatch");

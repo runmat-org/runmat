@@ -201,7 +201,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
 
         let out = block_on(runtime.scope(ode45_builtin(
@@ -275,7 +276,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
 
         let error = block_on(runtime.scope(ode45_builtin(
@@ -308,7 +310,8 @@ mod tests {
                         )
                     })
                 }),
-            ));
+            ))
+            .expect("call-port scope");
             let times = [0.0, 0.1];
             let shape = [1, 2];
             let automatic = provider
@@ -371,7 +374,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
 
         let err = block_on(runtime.scope(ode45_builtin(
@@ -407,7 +411,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
 
         let out = block_on(runtime.scope(ode45_builtin(

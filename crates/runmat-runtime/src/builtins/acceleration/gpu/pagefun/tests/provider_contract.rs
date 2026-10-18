@@ -176,7 +176,8 @@ fn exact_owner_is_used_instead_of_active_provider_and_discard_releases_result() 
         .expect("explicit immutable view");
     let input_lease = input.allocation_lease().downgrade();
     for count in [0, 1] {
-        let _outputs = crate::output_count::push_output_count(Some(count));
+        let _outputs =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let result = block_on(pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
             Value::GpuTensor(input.clone()),

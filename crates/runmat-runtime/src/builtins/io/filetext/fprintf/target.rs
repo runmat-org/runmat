@@ -35,14 +35,8 @@ impl OutputTarget {
         bytes: &[u8],
     ) -> BuiltinResult<()> {
         match self {
-            OutputTarget::Stdout => {
-                record_console_chunk(ConsoleStream::Stdout, bytes);
-                Ok(())
-            }
-            OutputTarget::Stderr => {
-                record_console_chunk(ConsoleStream::Stderr, bytes);
-                Ok(())
-            }
+            OutputTarget::Stdout => record_console_chunk(ConsoleStream::Stdout, bytes),
+            OutputTarget::Stderr => record_console_chunk(ConsoleStream::Stderr, bytes),
             OutputTarget::File { operation, .. } => {
                 operation.check_authority(runtime).map_err(|source| {
                     fprintf_error_with_source(
@@ -73,12 +67,12 @@ impl OutputTarget {
     }
 }
 
-fn record_console_chunk(stream: ConsoleStream, bytes: &[u8]) {
+fn record_console_chunk(stream: ConsoleStream, bytes: &[u8]) -> BuiltinResult<()> {
     if bytes.is_empty() {
-        return;
+        return Ok(());
     }
     let text = String::from_utf8_lossy(bytes).to_string();
-    record_console_output(stream, text);
+    record_console_output(stream, text)
 }
 
 pub(super) fn target_from_fid(

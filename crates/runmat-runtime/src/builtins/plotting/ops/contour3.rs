@@ -1,6 +1,5 @@
 //! MATLAB-compatible `contour3` builtin (3-D contour lines).
 
-#[cfg(not(target_arch = "wasm32"))]
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::ColorMap;
 #[cfg(test)]

@@ -42,7 +42,8 @@ fn topk_barrier_preserves_explicit_owner_and_requested_resident_outputs() {
         .unwrap();
         for kind in [TopKKind::Max, TopKKind::Min] {
             for requested in [0, 1, 2] {
-                let _outputs = crate::output_count::push_output_count(Some(requested));
+                let _outputs = crate::output_count::push_output_count(Some(requested))
+                    .expect("output-count scope");
                 for handle in [&input, &k] {
                     runmat_accelerate_api::mark_residency(handle);
                 }

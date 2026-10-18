@@ -8,6 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::{Bytecode, BytecodeRegionBoundary};
 
+#[path = "parallel/product.rs"]
+mod product;
+pub use product::validate_compiled_parallel_contracts;
+
 /// Required VM executable for one analyzed `parfor` region.
 ///
 /// The semantic contract remains authoritative for variable roles and facts.

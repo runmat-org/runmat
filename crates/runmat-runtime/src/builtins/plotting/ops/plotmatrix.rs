@@ -574,7 +574,8 @@ mod tests {
     #[test]
     fn plotmatrix_one_input_builds_square_grid_with_diagonal_histograms() {
         let _guard = setup();
-        let _out_guard = crate::output_count::push_output_count(Some(5));
+        let _out_guard =
+            crate::output_count::push_output_count(Some(5)).expect("output-count scope");
         let output = block_on(plotmatrix_builtin(vec![matrix(
             vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0],
             3,
@@ -613,7 +614,8 @@ mod tests {
     #[test]
     fn plotmatrix_two_input_returns_requested_handle_and_axes_matrices() {
         let _guard = setup();
-        let _out_guard = crate::output_count::push_output_count(Some(5));
+        let _out_guard =
+            crate::output_count::push_output_count(Some(5)).expect("output-count scope");
         let output = block_on(plotmatrix_builtin(vec![
             matrix(vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0], 3, 2),
             matrix(vec![4.0, 5.0, 6.0], 3, 1),
@@ -669,7 +671,8 @@ mod tests {
             crate::builtins::plotting::current_figure_handle(),
             axes_index,
         );
-        let _out_guard = crate::output_count::push_output_count(Some(3));
+        let _out_guard =
+            crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let output = block_on(plotmatrix_builtin(vec![
             Value::Num(target),
             matrix(vec![1.0, 2.0, 3.0], 3, 1),

@@ -45,7 +45,7 @@ fn rmmissing_rejects_more_than_two_outputs_before_resident_download() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let error = block_on(rmmissing_builtin(
         Value::GpuTensor(allocation.handle.clone()),
         Vec::new(),
@@ -105,7 +105,7 @@ fn rmmissing_resident_integer_restores_value_and_mask_through_exact_owner() {
         let source = source
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .unwrap();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(rmmissing_builtin(
             Value::GpuTensor(source.clone()),
             Vec::new(),

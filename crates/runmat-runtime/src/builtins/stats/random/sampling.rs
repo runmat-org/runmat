@@ -2638,7 +2638,7 @@ mod tests {
         random::reset_rng();
         let data =
             Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 10.0, 20.0, 30.0], vec![3, 2]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(datasample::datasample_builtin(
             data,
             vec![Value::Num(2.0), Value::from("Replace"), Value::Bool(false)],
@@ -3080,7 +3080,7 @@ mod tests {
     fn dividerand_partitions_indices_into_row_vectors() {
         let _lock = random::test_guard();
         random::reset_rng();
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let out = block_on(dividerand::dividerand_builtin(vec![
             Value::Num(10.0),
             Value::Num(0.6),
@@ -3113,7 +3113,8 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         {
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let out = block_on(dividerand::dividerand_builtin(vec![Value::Num(4.0)])).unwrap();
             match out {
                 Value::OutputList(values) => {
@@ -3132,7 +3133,8 @@ mod tests {
 
         random::reset_rng();
         {
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let out = block_on(dividerand::dividerand_builtin(vec![
                 Value::Num(3.0),
                 Value::Num(1.0),
@@ -3330,7 +3332,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let wide = 9_007_199_254_740_993_u64;
         let data = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U64(vec![wide, 7]), vec![2, 1])
@@ -3446,7 +3448,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![10.0, 20.0, 30.0], vec![3, 1]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(4.0),
             Value::FunctionHandle("mean".into()),
@@ -3483,7 +3485,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
             Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
@@ -3555,7 +3557,7 @@ mod tests {
         let _lock = random::test_guard();
         random::reset_rng();
         let row = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),
             Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap()),
@@ -3591,7 +3593,7 @@ mod tests {
         .unwrap_err();
         assert!(err.message().contains("same number of rows"));
 
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let data = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
         let err = block_on(bootstrp::bootstrp_builtin(vec![
             Value::Num(2.0),

@@ -66,7 +66,8 @@ fn dropping_a_pending_callback_abandons_the_solver_without_publication() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(0.0))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut call = Box::pin(fzero_builtin(
         crate::user_functions::test_support::exact_local_value("pending_callback", binding),
         Value::Num(0.0),
@@ -113,7 +114,7 @@ fn fzero_single_interval_returns_single_numerical_outputs() {
     let bracket =
         Tensor::new_with_dtype(vec![3.0, 4.0], vec![1, 2], runmat_value::NumericDType::F32)
             .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Tensor(bracket),
@@ -158,7 +159,8 @@ fn fzero_single_precision_is_explicitly_threaded_through_all_callback_calls() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let bracket =
         Tensor::new_with_dtype(vec![3.0, 4.0], vec![1, 2], runmat_value::NumericDType::F32)
             .unwrap();
@@ -198,7 +200,8 @@ fn fzero_single_callback_result_selects_single_default_tolerance() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let options = FzeroOptions::from_struct(None).unwrap();
     let mut cooperation = ScalarCooperation::new(OptimSolver::Fzero, None);
     let bracket = block_on(bracket_from_endpoints(
@@ -328,7 +331,8 @@ fn scalar_expansion_honors_eval_budget_and_stops_at_finite_domain_exhaustion() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(1.0))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let function =
         crate::user_functions::test_support::exact_local_value("constant_positive", binding);
     let mut options = FzeroOptions::from_struct(None).unwrap();
@@ -383,7 +387,8 @@ fn fzero_accepts_semantic_function_handle_callback() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
 
     let root = block_on(fzero_builtin(
         crate::user_functions::test_support::exact_local_value("root_function", binding),
@@ -399,7 +404,7 @@ fn fzero_accepts_semantic_function_handle_callback() {
 
 #[test]
 fn fzero_multi_output_two_returns_root_and_fval() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
@@ -424,7 +429,7 @@ fn fzero_multi_output_two_returns_root_and_fval() {
 
 #[test]
 fn fzero_multi_output_four_includes_output_struct() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
@@ -468,7 +473,7 @@ fn fzero_reports_zero_exitflag_when_iteration_budget_exhausted() {
     opts.insert("MaxIter", Value::Num(1.0));
     opts.insert("MaxFunEvals", Value::Num(2.0));
     opts.insert("Display", Value::from("off"));
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
@@ -490,7 +495,7 @@ fn fzero_reports_convergence_when_final_step_hits_root() {
     let mut opts = StructValue::new();
     opts.insert("MaxIter", Value::Num(1.0));
     opts.insert("Display", Value::from("off"));
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let bracket = Tensor::new(vec![-1.0, 1.0], vec![1, 2]).unwrap();
     let result = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
@@ -510,7 +515,7 @@ fn fzero_reports_convergence_when_final_step_hits_root() {
 
 #[test]
 fn fzero_rejects_more_than_four_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let bracket = Tensor::new(vec![3.0, 4.0], vec![1, 2]).unwrap();
     let err = block_on(fzero_builtin(
         Value::FunctionHandle("sin".into()),
@@ -536,10 +541,13 @@ fn fzero_iter_display_records_iteration_rows() {
     .expect("fzero");
     assert!(matches!(result, Value::Num(_)));
 
-    let joined = crate::console::take_thread_buffer()
-        .into_iter()
-        .map(|entry| entry.text)
-        .collect::<String>();
+    let joined =
+        crate::console::take_thread_buffer()
+            .into_iter()
+            .fold(String::new(), |mut text, entry| {
+                text.push_str(entry.text.as_str());
+                text
+            });
     assert!(joined.contains("Func-count"), "{joined}");
     assert!(joined.contains("initial"), "{joined}");
     assert!(

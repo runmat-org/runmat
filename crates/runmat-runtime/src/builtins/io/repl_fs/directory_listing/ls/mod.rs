@@ -20,7 +20,7 @@ async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input = input::Input::parse(&args)?;
     let rows = query::execute(input).await?;
     if output::should_emit_stdout() {
-        output::emit(&rows);
+        output::emit(&rows)?;
     }
     output::value(&rows)
 }

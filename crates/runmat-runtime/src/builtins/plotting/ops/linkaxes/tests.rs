@@ -17,7 +17,7 @@ fn linkaxes_output_admission_preserves_existing_link_and_empty_arrays_are_noop()
         Value::output_list(vec![])
     );
     {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         assert_eq!(
             linkaxes_builtin(vec![handles, Value::from("off")])
                 .unwrap_err()

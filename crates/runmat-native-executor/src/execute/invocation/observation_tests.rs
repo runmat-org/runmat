@@ -43,7 +43,7 @@ unsafe extern "C" fn one_result_entry(
 
 #[test]
 fn terminal_result_outlives_the_native_arena() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::terminal_result_outlives_the_native_arena"
     )) {

@@ -480,7 +480,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cosh_rejects_excess_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(super::cosh_builtin(None, Value::Num(0.0)))
             .map(|owned| owned.value().clone())
             .expect_err("excess outputs must reject");

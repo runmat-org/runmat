@@ -10,8 +10,8 @@ fn selected_sink_binding_projects_exact_requested_status_count() {
     runtime.set_language_mode(crate::context::RuntimeLanguageMode::RunMat);
     runtime.set_runmat_extensions_enabled(true);
     let _conflicting_compatibility = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _conflicting_ambient = crate::output_count::push_output_count(Some(2));
-
+    let _conflicting_ambient =
+        crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for name in [SAVEAS, SAVEFIG, HGSAVE] {
         let zero_path = temp_path(&format!("{name}_selected_zero"));
         let one_path = temp_path(&format!("{name}_selected_one"));

@@ -74,7 +74,7 @@ fn sequence_read_reenters_only_the_exact_typed_site_without_replaying() {
 
 #[test]
 fn unpolled_sequence_input_lease_retires_only_after_pending_future_drop() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::unpolled_sequence_input_lease_retires_only_after_pending_future_drop"
     )) {

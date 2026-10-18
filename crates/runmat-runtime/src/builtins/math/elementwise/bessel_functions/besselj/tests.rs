@@ -163,7 +163,7 @@ fn invalid_forms_report_typed_errors() {
         BESSELJ_ERROR_INVALID_INPUT.identifier
     );
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = call(Value::Num(0.0), Value::Num(1.0), vec![]).unwrap_err();
     assert_eq!(
         outputs.identifier(),

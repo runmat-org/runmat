@@ -2922,7 +2922,8 @@ pub(crate) mod tests {
                 .expect("integer row");
             let handle = gpu_helpers::upload_tensor(provider, &input).expect("typed upload");
             {
-                let _guard = crate::output_count::push_output_count(Some(3));
+                let _guard =
+                    crate::output_count::push_output_count(Some(3)).expect("output-count scope");
                 let Value::OutputList(outputs) = builtin_sync(Value::GpuTensor(handle), Vec::new())
                     .expect("resident integer unique")
                 else {
@@ -2993,7 +2994,7 @@ pub(crate) mod tests {
             );
         });
 
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let err = builtin_sync(Value::Num(1.0), Vec::new()).expect_err("excess outputs must fail");
         assert_eq!(err.identifier(), UNIQUE_ERROR_INVALID_ARGUMENT.identifier);
     }

@@ -2110,7 +2110,7 @@ fn grpstats_matrix_returns_multiple_statistics_and_group_names() {
         )
         .unwrap(),
     );
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = grpstats_impl(x, group, vec![whichstats]).unwrap();
     let Value::OutputList(outputs) = result else {
         panic!("expected output list");
@@ -2169,7 +2169,7 @@ fn grpstats_matrix_handles_empty_group_missing_groups_and_output_count_contract(
         other => panic!("expected means, got {other:?}"),
     }
 
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let err = grpstats_impl(
         x,
         Value::Tensor(Tensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]).unwrap()),
@@ -2191,7 +2191,7 @@ fn grpstats_matrix_preserves_text_group_first_seen_order_and_builtin_handles() {
         )
         .unwrap(),
     );
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = grpstats_impl(
         x,
         group,

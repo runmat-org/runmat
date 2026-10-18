@@ -13,7 +13,7 @@ fn resident_integer_input_is_gathered_without_losing_group_labels() {
         .unwrap();
         let handle = gpu_helpers::upload_tensor(provider, &source).unwrap();
         let _mode = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = output_list(call(Value::GpuTensor(handle), Vec::new()).unwrap());
         assert!(
             matches!(&outputs[1], Value::Tensor(labels) if labels.integer_storage() == Some(&IntegerStorage::U64(vec![base, base + 1])))

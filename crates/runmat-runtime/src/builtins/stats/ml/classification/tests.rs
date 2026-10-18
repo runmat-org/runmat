@@ -33,7 +33,7 @@ fn classify(sample: Value, training: Value, group: Value, rest: Vec<Value>) -> V
 }
 
 fn with_outputs<T>(count: usize, f: impl FnOnce() -> T) -> T {
-    let _guard = crate::output_count::push_output_count(Some(count));
+    let _guard = crate::output_count::push_output_count(Some(count)).expect("output-count scope");
     f()
 }
 

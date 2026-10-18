@@ -4,6 +4,7 @@
 //! This module supplies checked workload bounds and an allocation receipt; it
 //! neither estimates process RSS nor certifies host I/O effects or placement.
 
+mod aligned;
 mod collection_allocator;
 mod control_error;
 mod frame_collection;
@@ -12,8 +13,10 @@ mod provider_registration;
 mod receipt;
 mod session;
 mod temporary;
+mod text;
 mod trace_scratch;
 
+pub(crate) use aligned::AlignedHostWorkspace;
 pub use collection_allocator::{
     hashbrown_table_layout, AdmittedCollectionAllocator, OperationCollectionAllocator,
 };
@@ -34,6 +37,8 @@ pub(crate) use session::HostRetainedSessionAllocation;
 pub use temporary::{
     HostComplexWorkspace, HostNumericWorkspace, HostTypedElement, HostTypedWorkspace,
 };
+pub use text::HostTextError;
+pub(crate) use text::{HostText, HostTextAllocation};
 pub(crate) use trace_scratch::HostTraceScratchPermit;
 
 #[cfg(test)]

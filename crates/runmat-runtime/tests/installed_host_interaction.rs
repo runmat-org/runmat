@@ -16,7 +16,12 @@ use std::{
 
 struct Adapter(Arc<AtomicUsize>);
 impl RuntimeHostService for Adapter {
-    fn console(&self, _: runmat_runtime::console::ConsoleStream, _: String) {}
+    fn console(
+        &self,
+        _: runmat_runtime::console::ConsoleStream,
+        _: runmat_runtime::console::ConsoleText,
+    ) {
+    }
     fn warning(&self, _: runmat_runtime::warning_store::RuntimeWarning) {}
     fn interact(
         &self,

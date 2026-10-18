@@ -8,6 +8,23 @@ use super::{max_abs_matrix, symmetric_part, RiccatiApi, RiccatiIssue};
 use crate::BuiltinResult;
 use nalgebra::{DMatrix, SymmetricEigen};
 
+pub(super) const SCHUR_NEGATIVE_TOLERANCE: f64 = 1.0e-8;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum WeightContract {
+    SymmetricNonsingular,
+    PositiveCost,
+}
+
+impl WeightContract {
+    pub(super) fn for_api(api: RiccatiApi) -> Self {
+        match api {
+            RiccatiApi::Care => Self::SymmetricNonsingular,
+            RiccatiApi::Lqr | RiccatiApi::Dlqr => Self::PositiveCost,
+        }
+    }
+}
+
 pub(super) fn validate(
     q: &DMatrix<f64>,
     r: &DMatrix<f64>,
@@ -23,8 +40,8 @@ pub(super) fn validate(
             "Riccati weights are nonfinite after normalization",
         ));
     }
-    match api {
-        RiccatiApi::Care => {
+    match WeightContract::for_api(api) {
+        WeightContract::SymmetricNonsingular => {
             if !r.clone().lu().is_invertible() {
                 return Err(api.error(
                     RiccatiIssue::InvalidDimensions,
@@ -33,7 +50,7 @@ pub(super) fn validate(
             }
             Ok(())
         }
-        RiccatiApi::Lqr | RiccatiApi::Dlqr => validate_regulator(q, r, cross, api),
+        WeightContract::PositiveCost => validate_regulator(q, r, cross, api),
     }
 }
 
@@ -43,25 +60,20 @@ fn validate_regulator(
     cross: &DMatrix<f64>,
     api: RiccatiApi,
 ) -> BuiltinResult<()> {
-    if r.clone().cholesky().is_none() {
-        return Err(api.error(
-            RiccatiIssue::InvalidDimensions,
-            "R must be symmetric positive definite",
-        ));
-    }
-    let r_inv = r.clone().try_inverse().ok_or_else(|| {
+    let factor = r.clone().cholesky().ok_or_else(|| {
         api.error(
             RiccatiIssue::InvalidDimensions,
-            "R must be nonsingular for the Riccati problem",
+            "R must be symmetric positive definite",
         )
     })?;
-    let schur = symmetric_part(q - cross * r_inv * cross.transpose());
+    let solved = factor.solve(&cross.transpose());
+    let schur = symmetric_part(q - cross * solved);
     let scale = max_abs_matrix(&schur).max(1.0);
     if !scale.is_finite()
         || !SymmetricEigen::new(schur)
             .eigenvalues
             .iter()
-            .all(|value| *value >= -1.0e-8 * scale)
+            .all(|value| *value >= -SCHUR_NEGATIVE_TOLERANCE * scale)
     {
         return Err(api.error(
             RiccatiIssue::InvalidDimensions,

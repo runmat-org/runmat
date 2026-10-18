@@ -96,7 +96,7 @@ fn rem_duration_returns_duration_in_source_format() {
 
 #[test]
 fn rem_rejects_excess_outputs() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error =
         rem_builtin(Value::Num(5.0), Value::Num(3.0)).expect_err("rem must reject excess outputs");
     assert_eq!(error.identifier(), Some("RunMat:rem:TooManyOutputs"));

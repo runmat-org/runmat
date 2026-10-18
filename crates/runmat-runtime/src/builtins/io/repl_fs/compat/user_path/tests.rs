@@ -271,7 +271,7 @@ fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
     let runtime = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
         .with_search_path(search.clone());
     {
-        let _output = crate::output_count::push_output_count(Some(1));
+        let _output = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let rejected = restore(Some(runtime.clone()), vec![])
             .expect_err("MATLAB-compatible form has no requested result");
         assert_eq!(
@@ -281,7 +281,7 @@ fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
         assert_eq!(search.current_string(), "manual");
     }
     {
-        let _output = crate::output_count::push_output_count(Some(0));
+        let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let rejected = restore(Some(runtime.clone()), vec![])
             .expect_err("a statement cannot restore an uncaptured user-path factory");
         assert_eq!(
@@ -305,13 +305,13 @@ fn restore_return_is_extension_but_statement_is_admitted_before_mutation() {
         crate::builtins::common::path_state::PathOrigin::Manual,
     )]);
     {
-        let _output = crate::output_count::push_output_count(Some(0));
+        let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         restore(Some(runtime.clone()), vec![]).expect("statement restores the path");
         assert_eq!(search.current_string(), "factory");
     }
     drop(_strict);
     let _extension = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _output = crate::output_count::push_output_count(Some(1));
+    let _output = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let restored =
         restore(Some(runtime), vec![]).expect("RunMat mode may request the restored path");
     assert_eq!(text(&restored), "factory");

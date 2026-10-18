@@ -32,6 +32,13 @@ impl Drop for ObservedTaskMember {
 
 #[test]
 fn task_results_retain_managed_members_through_collecting_root_retirement() {
+    #[cfg(not(target_arch = "wasm32"))]
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
+        module_path!(),
+        "::task_results_retain_managed_members_through_collecting_root_retirement"
+    )) {
+        return;
+    }
     for mode in [
         ParforTaskMode::Sequential,
         ParforTaskMode::IndependentIterations,

@@ -4,7 +4,7 @@ use runmat_parser::CompatMode;
 use runmat_value::Value;
 use uuid::Uuid;
 
-use crate::execution::{ExecutionProfiling, ExecutionStreamEntry, StdinEvent};
+use crate::execution::{ExecutionProfiling, StdinEvent};
 use crate::fusion::FusionPlanSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -142,12 +142,12 @@ impl Trace for ExecutionOutcome {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ExecutionOutcome {
     pub flow: RuntimeFlow,
     pub workspace_delta: WorkspaceDelta,
     pub display_events: Vec<DisplayEvent>,
-    pub streams: Vec<ExecutionStreamEntry>,
+    pub streams: runmat_runtime::console::CapturedConsoleEntries,
     pub diagnostics: Vec<RuntimeDiagnostic>,
     pub effects: Vec<ObservedEffect>,
     pub suspension: Option<Suspension>,
@@ -176,7 +176,7 @@ impl Default for ExecutionOutcome {
             flow: RuntimeFlow::NoValue,
             workspace_delta: WorkspaceDelta::default(),
             display_events: Vec::new(),
-            streams: Vec::new(),
+            streams: Default::default(),
             diagnostics: Vec::new(),
             effects: Vec::new(),
             suspension: None,

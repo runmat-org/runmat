@@ -14,12 +14,12 @@ use runmat_runtime::{
 #[derive(Default)]
 struct Host {
     documents: RefCell<Vec<HostDocumentRequest>>,
-    console: RefCell<Vec<String>>,
+    console: RefCell<Vec<runmat_runtime::console::ConsoleText>>,
     warnings: RefCell<Vec<RuntimeWarning>>,
 }
 
 impl RuntimeHostService for Host {
-    fn console(&self, _: ConsoleStream, text: String) {
+    fn console(&self, _: ConsoleStream, text: runmat_runtime::console::ConsoleText) {
         self.console.borrow_mut().push(text);
     }
     fn warning(&self, warning: RuntimeWarning) {

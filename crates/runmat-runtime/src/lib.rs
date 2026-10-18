@@ -600,7 +600,7 @@ pub fn call_feval_sequence_async_with_outputs(
         .and_then(|_| crate::call::feval::admit_inputs(&func_value, args));
     async move {
         let _input_roots = input_roots?;
-        let _guard = crate::output_count::push_output_count(Some(requested_outputs));
+        let _guard = crate::output_count::push_output_count(Some(requested_outputs))?;
         Box::pin(crate::call::feval::invoke(
             None,
             Some(requested_outputs),
@@ -643,7 +643,7 @@ pub fn call_feval_sequence_async_with_outputs_and_callsite_in_context<'a>(
         let _input_roots = input_roots?;
         runtime
             .scope(async {
-                let _guard = crate::output_count::push_output_count(Some(requested_outputs));
+                let _guard = crate::output_count::push_output_count(Some(requested_outputs))?;
                 crate::call::feval::invoke(
                     Some(runtime),
                     Some(requested_outputs),
@@ -1059,10 +1059,14 @@ pub async fn call_super_constructor(
         let caller_class = crate::dispatcher::class_access_context();
         let accessible = match ctor.access {
             runmat_types::MemberAccess::Public => true,
-            runmat_types::MemberAccess::Private => caller_class.as_ref() == Some(&registered_owner),
-            runmat_types::MemberAccess::Protected => caller_class.as_ref().is_some_and(|caller| {
-                crate::class_registry::is_class_or_subclass(caller, &registered_owner)
-            }),
+            runmat_types::MemberAccess::Private => {
+                caller_class.as_deref() == Some(&registered_owner)
+            }
+            runmat_types::MemberAccess::Protected => {
+                caller_class.as_deref().is_some_and(|caller| {
+                    crate::class_registry::is_class_or_subclass(caller, &registered_owner)
+                })
+            }
         };
         if !accessible {
             return Err(build_runtime_error("super constructor is not accessible")
@@ -1806,7 +1810,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let closure = Value::Closure(runmat_value::Closure::from_data(
             runmat_value::ClosureData {
                 lexical_environment: None,
@@ -1840,7 +1845,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let handle =
             crate::user_functions::test_support::exact_local_value("function_target", binding);
 
@@ -1851,7 +1857,8 @@ mod tests {
 
     #[test]
     fn feval_semantic_function_handle_errors_when_semantic_invoker_unavailable() {
-        let _guard = crate::user_functions::clear_semantic_function_invoker();
+        let _guard =
+            crate::user_functions::clear_semantic_function_invoker().expect("call-port scope");
         let handle = Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
             runmat_value::BoundFunctionHandleData {
                 name: "function_target".into(),
@@ -1878,7 +1885,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -1890,7 +1898,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let result = block_on(feval_builtin(
             Value::FunctionHandle("resolved_target".into()),
@@ -1905,7 +1914,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_method").then_some(5045)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 5045);
@@ -1917,7 +1927,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let result = block_on(feval_builtin(
             Value::MethodFunctionHandle("resolved_method".into()),
@@ -1929,7 +1940,8 @@ mod tests {
 
     #[test]
     fn feval_method_function_handle_does_not_fallback_to_builtin_name() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let err = block_on(feval_builtin(
             Value::MethodFunctionHandle("sqrt".into()),
             vec![Value::Num(9.0)],
@@ -1943,7 +1955,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(145)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 145);
@@ -1955,7 +1968,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let closure = Value::Closure(runmat_value::Closure::from_data(
             runmat_value::ClosureData {
@@ -1978,8 +1992,10 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "sin").then_some(245)
-            })));
-        let _invoker_guard = crate::user_functions::clear_semantic_function_invoker();
+            })))
+            .expect("call-port scope");
+        let _invoker_guard =
+            crate::user_functions::clear_semantic_function_invoker().expect("call-port scope");
 
         let closure = Value::Closure(runmat_value::Closure::from_data(
             runmat_value::ClosureData {
@@ -1999,7 +2015,8 @@ mod tests {
 
     #[test]
     fn feval_external_function_handle_errors_when_unresolved() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let err = block_on(feval_builtin(
             Value::ExternalFunctionHandle("missing.external".into()),
             vec![Value::Num(1.0)],
@@ -2017,7 +2034,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(4501)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 4501);
@@ -2029,7 +2047,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let result = block_on(feval_builtin(
             Value::ExternalFunctionHandle("resolved_target".into()),
@@ -2064,7 +2083,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "integer_identity").then_some(654_321)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 654_321);
@@ -2075,7 +2095,8 @@ mod tests {
                     crate::user_functions::test_support::rooted_single_value_sequence(output)
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let storages = [
             IntegerStorage::I8(vec![i8::MIN, i8::MAX]),
@@ -2154,7 +2175,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(9876)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 9876);
@@ -2166,7 +2188,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let value = block_on(feval_builtin(
             Value::String("@ resolved_target ".to_string()),
@@ -2181,7 +2204,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(145)
-            })));
+            })))
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::String("resolved_target".to_string()),
         )
@@ -2202,7 +2226,8 @@ mod tests {
 
     #[test]
     fn str2func_returns_dynamic_handle_when_resolver_cannot_resolve() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::String("@missing_target".to_string()),
         )
@@ -2212,7 +2237,8 @@ mod tests {
 
     #[test]
     fn str2func_returns_external_handle_for_qualified_name() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::String("Point.origin".to_string()),
         )
@@ -2222,7 +2248,8 @@ mod tests {
 
     #[test]
     fn str2func_malformed_qualified_name_returns_dynamic_handle() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::String("Point..origin".to_string()),
         )
@@ -2270,7 +2297,8 @@ mod tests {
 
     #[test]
     fn str2func_accepts_scalar_string_array_name() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
                 runmat_value::StringArray::new(vec!["@missing_target".to_string()], vec![1, 1])
@@ -2283,7 +2311,8 @@ mod tests {
 
     #[test]
     fn str2func_rejects_nonscalar_string_array_name_with_identifier() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = Value::StringArray(
             runmat_value::StringArray::new(vec!["@a".to_string(), "@b".to_string()], vec![1, 2])
                 .expect("string array construction should succeed"),
@@ -2298,7 +2327,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(445)
-            })));
+            })))
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
                 runmat_value::StringArray::new(vec!["@resolved_target".to_string()], vec![1, 1])
@@ -2322,7 +2352,8 @@ mod tests {
 
     #[test]
     fn str2func_scalar_string_array_returns_external_handle_for_qualified_name() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
                 runmat_value::StringArray::new(vec!["Point.origin".to_string()], vec![1, 1])
@@ -2335,7 +2366,8 @@ mod tests {
 
     #[test]
     fn str2func_scalar_string_array_malformed_qualified_name_returns_dynamic_handle() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
                 runmat_value::StringArray::new(vec!["Point..origin".to_string()], vec![1, 1])
@@ -2348,7 +2380,8 @@ mod tests {
 
     #[test]
     fn str2func_scalar_string_array_rejects_empty_name_with_identifier() {
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let err = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
                 runmat_value::StringArray::new(vec!["   ".to_string()], vec![1, 1])
@@ -2364,7 +2397,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.resolved_target").then_some(446)
-            })));
+            })))
+            .expect("call-port scope");
         let value = crate::builtins::introspection::function_handle_text::dispatch_str2func(
             Value::StringArray(
                 runmat_value::StringArray::new(
@@ -2392,7 +2426,8 @@ mod tests {
     #[test]
     fn getmethod_classref_returns_typed_external_function_handle() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let value = crate::builtins::introspection::getmethod::dispatch_getmethod(
             Value::ClassRef("Point".into()),
             "origin".to_string(),
@@ -2582,7 +2617,8 @@ mod tests {
     #[test]
     fn feval_qualified_at_handle_errors_as_unresolved_external() {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+        let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+            .expect("call-port scope");
         let err = block_on(feval_builtin(
             Value::String("@missing.external".to_string()),
             vec![Value::Num(1.0)],
@@ -2649,7 +2685,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2661,7 +2698,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
@@ -2681,7 +2719,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2693,7 +2732,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
@@ -2715,7 +2755,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2727,7 +2768,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
@@ -2747,7 +2789,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2759,7 +2802,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
@@ -2779,7 +2823,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2791,7 +2836,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
@@ -2814,7 +2860,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg..resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2826,7 +2873,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::ExternalName(runmat_types::QualifiedName(vec![
@@ -2846,7 +2894,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2858,7 +2907,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::DynamicName(runmat_types::SymbolName(
@@ -2880,7 +2930,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "resolved_target").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2892,7 +2943,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::Method(runmat_types::MethodId(
@@ -2914,7 +2966,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "Point.origin").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2926,7 +2979,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::Imported(runmat_types::DefPath {
@@ -2959,7 +3013,8 @@ mod tests {
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(move |_| {
                 resolver_calls_for_closure.fetch_add(1, Ordering::Relaxed);
                 Some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker_guard = crate::user_functions::install_semantic_function_invoker(Some(
             Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 45);
@@ -2971,7 +3026,8 @@ mod tests {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
 
         let request = crate::user_functions::CallableRequest::resolved(
             runmat_types::CallableIdentity::Imported(runmat_types::DefPath {
@@ -3003,7 +3059,8 @@ mod tests {
 
     #[test]
     fn call_method_fallback_preserves_requested_outputs() {
-        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -3030,7 +3087,8 @@ mod tests {
 
     #[test]
     fn call_method_trims_method_name_for_resolution() {
-        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -3057,7 +3115,8 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_fast_path_preserves_requested_outputs() {
-        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -3094,7 +3153,8 @@ mod tests {
 
     #[test]
     fn feval_call_method_closure_fast_path_trims_method_name_for_resolution() {
-        let _output_guard = crate::output_count::push_output_count(Some(3));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let base = Value::Object(runmat_value::ObjectInstance::new(
             "NoSuchMethodClass".to_string(),
         ));
@@ -3552,7 +3612,8 @@ mod tests {
             let _resolver_guard =
                 crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                     (name == "event_callback").then_some(61)
-                })));
+                })))
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let listener = block_on(addlistener_builtin(
@@ -3579,7 +3640,8 @@ mod tests {
             let _resolver_guard =
                 crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                     (name == "pkg.event_callback").then_some(62)
-                })));
+                })))
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let listener = block_on(addlistener_builtin(
@@ -3606,7 +3668,8 @@ mod tests {
             let _resolver_guard =
                 crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                     (name == "event_callback").then_some(63)
-                })));
+                })))
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let listener = block_on(addlistener_builtin(
@@ -3633,7 +3696,8 @@ mod tests {
             let _resolver_guard =
                 crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                     (name == "event_callback").then_some(64)
-                })));
+                })))
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let listener = block_on(addlistener_builtin(
@@ -3660,7 +3724,8 @@ mod tests {
             let _resolver_guard =
                 crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                     (name == "event_callback").then_some(66)
-                })));
+                })))
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback =
@@ -3690,7 +3755,8 @@ mod tests {
             let _resolver_guard =
                 crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                     (name == "event_callback").then_some(65)
-                })));
+                })))
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback = Value::Closure(runmat_value::Closure::from_data(
@@ -3746,7 +3812,8 @@ mod tests {
                         )
                     })
                 },
-            )));
+            )))
+            .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback =
@@ -3795,7 +3862,8 @@ mod tests {
                         }
                     })
                 }),
-            ));
+            ))
+            .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".into())).expect("target");
             for _ in 0..2 {
                 block_on(addlistener_builtin(
@@ -3845,7 +3913,8 @@ mod tests {
                         )
                     })
                 }),
-            ));
+            ))
+            .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".into())).expect("target");
             let listener = block_on(addlistener_builtin(
                 target.clone(),
@@ -3905,7 +3974,8 @@ mod tests {
     #[test]
     fn notify_char_handle_callback_surfaces_unresolved_identifier() {
         listener_gc_test(|| {
-            let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+            let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             block_on(addlistener_builtin(
@@ -3925,7 +3995,8 @@ mod tests {
     #[test]
     fn notify_string_array_handle_callback_surfaces_unresolved_identifier() {
         listener_gc_test(|| {
-            let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None);
+            let _resolver_guard = crate::user_functions::install_semantic_function_resolver(None)
+                .expect("call-port scope");
             let target = block_on(new_handle_object_builtin("EventTarget".to_string()))
                 .expect("handle target");
             let callback = runmat_value::StringArray::new(
@@ -3963,8 +4034,10 @@ mod tests {
                     .map_err(|error| error.into_runtime_error())
                 })
             },
-        )));
-        let _output_guard = crate::output_count::push_output_count(Some(0));
+        )))
+        .expect("call-port scope");
+        let _output_guard =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let handle =
             crate::user_functions::test_support::exact_local_value("function_target", binding);
 
@@ -3996,8 +4069,10 @@ mod tests {
                     })
                 })
             },
-        )));
-        let _output_guard = crate::output_count::push_output_count(Some(2));
+        )))
+        .expect("call-port scope");
+        let _output_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let handle =
             crate::user_functions::test_support::exact_local_value("function_target", binding);
 
@@ -4011,7 +4086,8 @@ mod tests {
 
     #[test]
     fn feval_semantic_closure_errors_when_semantic_invoker_unavailable() {
-        let _guard = crate::user_functions::clear_semantic_function_invoker();
+        let _guard =
+            crate::user_functions::clear_semantic_function_invoker().expect("call-port scope");
         let closure = Value::Closure(runmat_value::Closure::from_data(
             runmat_value::ClosureData {
                 lexical_environment: None,

@@ -46,7 +46,7 @@ fn indexed_field(record: usize, field: &str, index: usize) -> Value {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn method_output_bounds_precede_path_parse_and_mapped_effects() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let invalid_path = Value::Num(42.0);
     let reference =
         futures::executor::block_on(subsref(None, Value::Num(0.0), invalid_path.clone()))

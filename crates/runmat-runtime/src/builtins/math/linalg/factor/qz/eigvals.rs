@@ -9,7 +9,7 @@ fn magnitude(value: c64) -> f64 {
     value.re.hypot(value.im)
 }
 
-fn ratio(alpha: c64, beta: c64) -> (f64, f64) {
+pub(super) fn ratio(alpha: c64, beta: c64) -> (f64, f64) {
     if beta.re == 0.0 && beta.im == 0.0 {
         return if alpha.re == 0.0 && alpha.im == 0.0 {
             (f64::NAN, f64::NAN)

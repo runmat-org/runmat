@@ -91,7 +91,7 @@ fn int_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
 }
 
 fn with_outputs<T>(count: usize, f: impl FnOnce() -> T) -> T {
-    let _guard = crate::output_count::push_output_count(Some(count));
+    let _guard = crate::output_count::push_output_count(Some(count)).expect("output-count scope");
     f()
 }
 

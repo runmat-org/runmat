@@ -1471,7 +1471,8 @@ pub(crate) mod tests {
             .expect("registered regexp")
         };
         {
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             match call(vec![
                 Value::String("warnings".into()),
                 Value::String("match".into()),
@@ -1484,7 +1485,8 @@ pub(crate) mod tests {
             }
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             match call(vec![Value::String("match".into())]) {
                 Value::OutputList(values) => match &values[0] {
                     Value::Cell(cell) => assert_eq!((cell.rows, cell.cols), (1, 2)),
@@ -1508,14 +1510,16 @@ pub(crate) mod tests {
             }
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(0));
+            let _outputs =
+                crate::output_count::push_output_count(Some(0)).expect("output-count scope");
             assert_eq!(
                 call(vec![Value::String("match".into())]),
                 Value::output_list(vec![])
             );
         }
         for count in [7, 8] {
-            let _outputs = crate::output_count::push_output_count(Some(count));
+            let _outputs =
+                crate::output_count::push_output_count(Some(count)).expect("output-count scope");
             match call(vec![]) {
                 Value::OutputList(values) => {
                     assert_eq!(values.len(), count);

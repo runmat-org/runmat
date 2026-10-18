@@ -143,7 +143,8 @@ fn coefficient_and_qr_basis_follows_requested_output_count() {
     let x = Value::Tensor(Tensor::new(vec![10.0, 11.0, 12.0, 13.0], vec![1, 4]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![21.0, 24.0, 24.0, 28.0], vec![1, 4]).unwrap());
     for outputs in [1, 2, 3] {
-        let _requested = crate::output_count::push_output_count(Some(outputs));
+        let _requested =
+            crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
         let fit = evaluate(
             x.clone(),
             y.clone(),
@@ -192,7 +193,7 @@ fn coefficient_and_qr_basis_follows_requested_output_count() {
 fn normalized_small_spread_retains_its_actual_basis() {
     let x = Value::Tensor(Tensor::new(vec![1.0e-14, 2.0e-14, 3.0e-14], vec![1, 3]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
-    let _requested = crate::output_count::push_output_count(Some(3));
+    let _requested = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let fit =
         evaluate(x, y, Value::Int(runmat_value::IntValue::I32(1)), &[]).expect("small-spread fit");
     let Value::Tensor(mu) = fit.mu() else {
@@ -217,7 +218,7 @@ fn normalized_small_spread_retains_its_actual_basis() {
 fn small_units_preserve_two_output_original_basis() {
     let x = Value::Tensor(Tensor::new(vec![1.0e-14, 2.0e-14, 3.0e-14], vec![1, 3]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 3]).unwrap());
-    let _requested = crate::output_count::push_output_count(Some(2));
+    let _requested = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let fit = evaluate(x, y, Value::Int(runmat_value::IntValue::I32(1)), &[])
         .expect("original-coordinate fit");
     let Value::Tensor(coefficients) = fit.coefficients() else {
@@ -316,7 +317,7 @@ fn finite_extreme_samples_keep_analytic_center_scale_and_coordinates() {
         assert!((*coordinate + 0.4 / 0.8_f64.sqrt()).abs() < 1.0e-14);
     }
 
-    let _requested = crate::output_count::push_output_count(Some(3));
+    let _requested = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let fit = evaluate(
         Value::Tensor(Tensor::new(samples.to_vec(), vec![1, 5]).unwrap()),
         Value::Tensor(Tensor::new(vec![4.0, 0.0, 0.0, 0.0, 0.0], vec![1, 5]).unwrap()),
@@ -632,7 +633,8 @@ fn polyfit_wgpu_matches_cpu() {
     let y_handle = trait_provider.upload(&y_view).expect("upload y");
 
     for output_count in [2, 3] {
-        let _requested = crate::output_count::push_output_count(Some(output_count));
+        let _requested =
+            crate::output_count::push_output_count(Some(output_count)).expect("output-count scope");
         let cpu_eval = evaluate(
             Value::Tensor(x.clone()),
             Value::Tensor(y.clone()),

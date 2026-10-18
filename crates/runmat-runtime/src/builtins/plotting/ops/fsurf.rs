@@ -1117,7 +1117,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
         (fixture, numeric)
     }
@@ -1329,7 +1330,8 @@ mod tests {
                     )
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = block_on(fixture.runtime.scope(call_surface_function(
             &fixture.value("surface", 1),
@@ -1509,7 +1511,8 @@ mod tests {
                     )
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let handle = block_on(fixture.runtime.scope(fsurf_builtin(vec![
             Value::Num(ax),

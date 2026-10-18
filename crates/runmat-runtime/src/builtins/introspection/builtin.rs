@@ -216,7 +216,7 @@ mod tests {
             NumericStorage::F32(vec![2.25, 3.5])
         );
 
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let source = Tensor::new_integer(IntegerStorage::I16(vec![0, 7, 0, -3]), vec![2, 2])
             .expect("source");
         let result = call("find", vec![Value::Tensor(source)]).expect("delegated find");

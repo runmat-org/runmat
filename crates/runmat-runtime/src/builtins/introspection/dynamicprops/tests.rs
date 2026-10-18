@@ -78,7 +78,7 @@ fn addprop_duplicate_and_excess_outputs_leave_existing_metadata_unchanged() {
     };
     assert_eq!(found_handle.target, first_handle.target);
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(addprop_builtin(target.clone(), "other".into())).unwrap_err();
         assert_eq!(
             error.identifier(),
@@ -96,7 +96,7 @@ fn qualified_delete_rejects_requested_output_before_removing_property() {
     let (target, _root) = dynamic_target_handle("DynDeleteOutputGuard");
     let prop = block_on(addprop_builtin(target.clone(), "gain".into())).expect("property");
     {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let error = block_on(dynamic_property_delete_builtin(prop.clone())).unwrap_err();
         assert_eq!(
             error.identifier(),

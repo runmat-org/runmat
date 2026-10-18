@@ -167,7 +167,7 @@ fn strict_matrix_numeric_provider_and_output_count_reject_before_work() {
             STRJOIN_ERROR_INVALID_INPUT.identifier
         );
     }
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         block_on(strjoin_builtin(Value::from("a"), vec![]))
             .unwrap_err()

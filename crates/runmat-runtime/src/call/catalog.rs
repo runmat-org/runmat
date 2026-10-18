@@ -113,7 +113,8 @@ mod tests {
         let _resolver =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "plus").then_some(7)
-            })));
+            })))
+            .expect("call-port scope");
         assert!(infer_builtin_callback(
             &Value::FunctionHandle("plus".into()),
             vec![single(), single()],

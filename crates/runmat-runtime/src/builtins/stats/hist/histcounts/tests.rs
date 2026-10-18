@@ -22,7 +22,7 @@ fn integer_tensor(storage: IntegerStorage, shape: Vec<usize>) -> Value {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn histcounts_three_outputs_preserve_low_rank_bin_indices() {
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     for (samples, shape, expected_counts, expected_bins) in [
         (vec![0.5], Vec::new(), vec![1.0, 0.0], vec![1.0]),
         (vec![0.5, 1.5], vec![2], vec![1.0, 1.0], vec![1.0, 2.0]),
@@ -71,7 +71,7 @@ fn wide_integer_edges_classify_without_rounding_and_keep_exact_widths() {
     let (counts, _) = eval.into_pair();
     assert_eq!(values_from_tensor(counts), vec![1.0, 2.0]);
 
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = block_on(histcounts_builtin(
         data,
         vec![
@@ -127,7 +127,7 @@ fn signed_minimum_unsigned_maximum_and_cross_class_edges_are_exact() {
 
 #[test]
 fn third_output_preserves_input_shape_and_marks_excluded_observations() {
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let input =
         Tensor::new(vec![-1.0, 0.0, 1.0, 2.0, 3.0, f64::NAN], vec![2, 3]).expect("nonsquare input");
     let edges = Tensor::new(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]).expect("edges");
@@ -161,7 +161,7 @@ fn third_output_preserves_input_shape_and_marks_excluded_observations() {
 
 #[test]
 fn excessive_outputs_are_rejected_before_invalid_bin_options() {
-    let _outputs = crate::output_count::push_output_count(Some(4));
+    let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let result = block_on(histcounts_builtin(Value::Num(1.0), vec![Value::Num(-1.0)]));
     let error = match result {
         Ok(_) => panic!("four outputs must fail before invalid bins"),

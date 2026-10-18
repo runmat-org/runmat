@@ -158,7 +158,7 @@ pub async fn execute_prepared_graph_request(
     };
     let nested_selected = std::rc::Rc::clone(&selected);
     let active_runtime = selected_runtime.enter();
-    let _selected_bound_invoker =
+    let selected_bound_invoker =
         runmat_runtime::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
             move |caller_runtime, binding, arguments, outputs, environment| {
                 let selected = std::rc::Rc::clone(&nested_selected);
@@ -175,6 +175,10 @@ pub async fn execute_prepared_graph_request(
                 })
             },
         ));
+    let _selected_bound_invoker = match selected_bound_invoker {
+        Ok(guard) => guard,
+        Err(error) => return graph_runtime_failure_response(error, &selected_runtime, &selected),
+    };
     drop(active_runtime);
     let result = match selected_runtime
         .scope(invoke_selected_root(

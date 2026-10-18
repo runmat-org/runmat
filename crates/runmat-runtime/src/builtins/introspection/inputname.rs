@@ -211,7 +211,8 @@ mod tests {
                 span_of(source, "alpha + 1"),
                 span_of(source, "7"),
             ]),
-        );
+        )
+        .expect("inputname callsite");
 
         let name = dispatch_inputname(vec![Value::Num(1.0)]).expect("inputname succeeds");
         assert_eq!(name, Value::CharArray(CharArray::new_row("alpha")));
@@ -229,7 +230,8 @@ mod tests {
         let _callsite_guard = crate::callsite::push_function_input_callsite(
             Some(SourceId(71)),
             Some(vec![span_of(source, "alpha"), span_of(source, "beta")]),
-        );
+        )
+        .expect("inputname callsite");
         let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
             crate::execution::RuntimeExecutionService::new(),
         ))
@@ -258,7 +260,8 @@ mod tests {
                 span_of(source, "alpha + 1"),
                 span_of(source, "7"),
             ]),
-        );
+        )
+        .expect("inputname callsite");
 
         let expr = dispatch_inputname(vec![Value::Num(2.0)]).expect("inputname succeeds");
         let literal = dispatch_inputname(vec![Value::Num(3.0)]).expect("inputname succeeds");
@@ -284,7 +287,8 @@ mod tests {
         let _callsite_guard = crate::callsite::push_function_input_callsite(
             Some(SourceId(9)),
             Some(vec![span_of(source, "alpha"), span_of(source, "beta")]),
-        );
+        )
+        .expect("inputname callsite");
         let tensor =
             Tensor::new_integer(IntegerStorage::U64(vec![2]), vec![1, 1]).expect("integer tensor");
 
@@ -320,7 +324,8 @@ mod tests {
                     span_of(source, indexed),
                     span_of(source, "beta"),
                 ]),
-            );
+            )
+            .expect("inputname callsite");
             assert_eq!(
                 dispatch_inputname(vec![Value::Num(1.0)]).unwrap(),
                 Value::CharArray(CharArray::new_row("alpha"))
@@ -363,7 +368,8 @@ mod tests {
         let _callsite_guard = crate::callsite::push_function_input_callsite(
             Some(SourceId(10)),
             Some(vec![span_of(source, "alpha")]),
-        );
+        )
+        .expect("inputname callsite");
         for index in [
             runmat_value::IntValue::I8(1),
             runmat_value::IntValue::I16(1),

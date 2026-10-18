@@ -769,7 +769,7 @@ mod write_extension_tests {
     #[test]
     fn table_writers_gate_bytes_outputs_before_file_access() {
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let outputs = crate::output_count::push_output_count(Some(1));
+        let outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let table_error = futures::executor::block_on(writetable_builtin(
             Value::Num(1.0),
             vec![Value::from("definitely/missing/table.csv")],

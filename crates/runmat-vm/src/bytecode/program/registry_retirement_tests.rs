@@ -472,7 +472,8 @@ fn selected_origin_binding_ignores_absent_or_foreign_ambient_resolver() {
         std::rc::Rc::new(|_| None),
     ));
     let _foreign_guard =
-        runmat_runtime::user_functions::install_execution_source_resolver(Some(foreign));
+        runmat_runtime::user_functions::install_execution_source_resolver(Some(foreign))
+            .expect("call-port scope");
     assert_eq!(resolve().function, 1);
 }
 

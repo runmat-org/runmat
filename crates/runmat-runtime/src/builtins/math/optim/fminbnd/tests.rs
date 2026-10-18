@@ -48,7 +48,7 @@ fn registered_fminbnd_preserves_invocation_cancellation_before_solver_effects() 
 
 #[test]
 fn excessive_requested_outputs_fail_before_callback_evaluation() {
-    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = calls.clone();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
@@ -58,7 +58,8 @@ fn excessive_requested_outputs_fail_before_callback_evaluation() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(0.0))
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let error = block_on(fminbnd_builtin(
         Value::BoundFunctionHandle(runmat_value::BoundFunctionHandle::from_data(
             runmat_value::BoundFunctionHandleData {
@@ -212,7 +213,7 @@ fn returns_lone_endpoint_when_bounds_collapse() {
 
 #[test]
 fn reports_inconsistent_reversed_bounds() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let result = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(5.0),
@@ -417,7 +418,7 @@ fn rejects_unknown_display_value() {
 
 #[test]
 fn multi_output_two_returns_x_and_fval() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
@@ -442,7 +443,7 @@ fn multi_output_two_returns_x_and_fval() {
 
 #[test]
 fn multi_output_three_includes_exitflag() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
@@ -464,7 +465,7 @@ fn multi_output_three_includes_exitflag() {
 
 #[test]
 fn multi_output_four_includes_output_struct() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let result = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),
@@ -498,7 +499,7 @@ fn reports_zero_exitflag_when_max_iter_exhausted() {
     opts.insert("MaxIter", Value::Num(1.0));
     opts.insert("MaxFunEvals", Value::Num(2.0));
     opts.insert("Display", Value::from("off"));
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = block_on(fminbnd_builtin(
         V::FunctionHandle("__fminbnd_quad_minus_two".into()),
         V::Num(0.0),

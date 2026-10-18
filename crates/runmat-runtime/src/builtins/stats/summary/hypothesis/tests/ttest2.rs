@@ -3,7 +3,7 @@ use super::*;
 fn ttest2_equal_variance_vector_outputs_match_reference_values() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(block_on(ttest2_builtin(x, y, Vec::new())).unwrap());
     assert_eq!(outputs[0], Value::Bool(false));
     assert_close(
@@ -50,7 +50,7 @@ fn ttest2_equal_variance_vector_outputs_match_reference_values() {
 fn ttest2_unequal_variance_tail_and_nan_omission() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, f64::NAN, 4.0], vec![5, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![10.0, 11.0, 12.0, 13.0], vec![4, 1]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(ttest2_builtin(
             x,
@@ -96,7 +96,7 @@ fn ttest2_matrix_dim_outputs_shape_and_invalid_samples() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 1.0, 1.0, 4.0, 5.0, 6.0], vec![3, 2]).unwrap());
     {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = output_list(block_on(ttest2_builtin(x, y, Vec::new())).unwrap());
         match &outputs[0] {
             Value::LogicalArray(h) => assert_eq!(h.shape, vec![1, 2]),
@@ -193,7 +193,7 @@ fn ttest2_sample_provider_failure_preserves_nested_cause() {
 fn ttest2_rejects_too_many_outputs_and_huge_dim() {
     let x = Value::Tensor(Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
     let y = Value::Tensor(Tensor::new(vec![1.0, 2.0, 4.0], vec![3, 1]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let err = block_on(ttest2_builtin(x, y, Vec::new())).unwrap_err();
     assert!(err.message.contains("too many output arguments"));
 
@@ -278,7 +278,7 @@ fn ttest2_gates_integer_roles_and_rejects_lossy_boundaries() {
 fn ttest2_empty_and_nd_outputs_preserve_shapes() {
     let empty_x = Value::Tensor(Tensor::new(Vec::new(), vec![3, 0]).unwrap());
     let empty_y = Value::Tensor(Tensor::new(Vec::new(), vec![3, 0]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(block_on(ttest2_builtin(empty_x, empty_y, Vec::new())).unwrap());
     match &outputs[0] {
         Value::LogicalArray(h) => assert_eq!(h.shape, vec![1, 0]),
@@ -303,7 +303,7 @@ fn ttest2_empty_and_nd_outputs_preserve_shapes() {
         )
         .unwrap(),
     );
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(block_on(ttest2_builtin(x, y, Vec::new())).unwrap());
     match &outputs[2] {
         Value::Tensor(ci) => assert_eq!(ci.shape(), &[2, 1, 4]),

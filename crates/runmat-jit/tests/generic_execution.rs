@@ -665,7 +665,8 @@ fn injected_failure_at_every_safepoint_does_not_replay_completed_calls() {
                     rooted_sequence(ValueSequence::single(result).unwrap()).map_err(|error| *error)
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
         drop(activation);
 
         let executor = compile_executor(assembly.clone()).unwrap();
@@ -739,7 +740,8 @@ fn gc_collection_during_deopt_resume_preserves_native_handle_values() {
                 rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let assembly = two_semantic_calls_returning_first_fixture();
@@ -850,7 +852,8 @@ fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
     let activation = runtime.enter();
     let resolver = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "suspending_prefix_subsref").then_some(9)),
-    ));
+    ))
+    .expect("call-port scope");
     runmat_runtime::class_registry::register_class(runmat_runtime::class_registry::RuntimeClass {
         events: Default::default(),
         name: "SuspendingPrefixObject".into(),
@@ -900,7 +903,8 @@ fn suspending_subscript_prefix_is_prepared_once_before_end_and_suffix() {
                 .map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let executor = compile_executor(suspending_subscript_prefix_fixture()).unwrap();
@@ -929,7 +933,8 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
             "staged_path_end" => Some(12),
             _ => None,
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let method = |name: &str, function_name: &str| runmat_runtime::class_registry::RuntimeMethod {
         name: name.into(),
         is_static: false,
@@ -1009,7 +1014,8 @@ fn suspending_object_end_and_final_path_do_not_replay_prior_stages() {
             };
             future
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let executor = compile_executor(staged_subscript_suspension_fixture()).unwrap();
@@ -1132,7 +1138,8 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
     });
     let resolver = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "native_parent_increment").then_some(9)),
-    ));
+    ))
+    .expect("call-port scope");
     let invoker = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, arguments, requested_outputs| {
             assert_eq!(function, 9);
@@ -1151,7 +1158,8 @@ fn generic_super_dispatch_uses_runtime_class_and_semantic_call_services() {
                     )
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let executor = compile_executor(super_method_fixture()).unwrap();
@@ -1463,7 +1471,8 @@ fn generic_native_sequence_destination_precedes_rhs_and_runs_once() {
                     }
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
         drop(activation);
 
         let executor = compile_executor(sequence_member_order_fixture(dynamic)).unwrap();
@@ -1692,7 +1701,8 @@ fn generic_context_dependent_end_selectors_execute_once_against_the_base_shape()
                 rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
     let called_assembly = end_call_fixture();
     let contextual_site = called_assembly.functions[0].blocks[0]
@@ -1747,7 +1757,8 @@ fn contextual_regions_at_one_site_resume_without_replaying_prior_regions() {
                 rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let executor = compile_executor(end_two_regions_fixture()).unwrap();
@@ -1793,7 +1804,8 @@ fn contextual_step_calls_have_distinct_resume_identities() {
                     .map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let executor = compile_executor(end_two_calls_one_step_fixture()).unwrap();
@@ -1851,7 +1863,8 @@ fn nested_contextual_call_restores_the_outer_operation_identity() {
                 .map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let executor = compile_executor(end_nested_context_then_call_fixture()).unwrap();
@@ -1901,7 +1914,8 @@ fn caught_contextual_selector_call_error_clears_native_site_state() {
                 ))
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let executor = compile_executor(caught_contextual_error_fixture()).unwrap();
@@ -1987,7 +2001,8 @@ fn suspended_contextual_site_roots_completed_calls_and_captured_sequences() {
                 }
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
 
     let assembly = contextual_gc_roots_fixture();
@@ -2101,7 +2116,8 @@ fn terminator_sites_clear_state_on_success_and_caught_call_failures() {
                     ))
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
         drop(activation);
         let executor = compile_executor(caught_terminator_call_fixture()).unwrap();
         assert_eq!(
@@ -3573,6 +3589,26 @@ fn lower_body_with_inputs(
     span: Span,
     fixed_inputs: Vec<BindingId>,
 ) -> runmat_native_codegen::NativeAssembly {
+    lower_body_with_inputs_and_capabilities(
+        name,
+        local_count,
+        statements,
+        returned,
+        span,
+        fixed_inputs,
+        CapabilitySet::default(),
+    )
+}
+
+fn lower_body_with_inputs_and_capabilities(
+    name: &str,
+    local_count: usize,
+    statements: Vec<MirStmt>,
+    returned: MirOperand,
+    span: Span,
+    fixed_inputs: Vec<BindingId>,
+    capabilities: CapabilitySet,
+) -> runmat_native_codegen::NativeAssembly {
     let function = FunctionId(0);
     let mir = MirAssembly {
         bodies: [(
@@ -3635,7 +3671,8 @@ fn lower_body_with_inputs(
         entrypoints: vec![function],
     };
     let analysis = runmat_mir::analysis::analyze_assembly(&mir);
-    let manifest = manifest(analysis.revision.schema_version);
+    let mut manifest = manifest(analysis.revision.schema_version);
+    manifest.capabilities = capabilities;
     lower_executable(NativeLoweringInput {
         mir: &mir,
         analysis: &analysis,

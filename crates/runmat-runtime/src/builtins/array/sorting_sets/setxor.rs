@@ -1931,7 +1931,8 @@ mod tests {
             let right = Value::GpuTensor(
                 gpu_helpers::upload_tensor(provider, &right).expect("upload right"),
             );
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let Value::OutputList(outputs) =
                 builtin_sync(left, right, Vec::new()).expect("resident setxor")
             else {
@@ -2559,7 +2560,7 @@ mod tests {
 
     #[test]
     fn setxor_rejects_more_than_three_outputs() {
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let err = builtin_sync(
             Value::Tensor(tensor.clone()),

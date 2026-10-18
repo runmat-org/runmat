@@ -82,7 +82,7 @@ fn trailing_singleton_character_folder_is_a_row() {
 
 #[test]
 fn discarded_output_still_validates_folder() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert_eq!(
         run(vec![Value::Num(1.0)]).unwrap_err().identifier(),
         Some("RunMat:tempname:InvalidFolder")

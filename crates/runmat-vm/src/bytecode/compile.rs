@@ -7478,7 +7478,8 @@ y = x^[1 2; 3 4];\n",
                     None
                 }
             })),
-        );
+        )
+        .expect("call-port scope");
         let _invoker_guard = runmat_runtime::user_functions::install_external_function_invoker(
             Some(Arc::new(|call| {
                 assert_eq!(call.function, 9001);

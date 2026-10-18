@@ -28,7 +28,8 @@ async fn browser_start_returns_before_callback_and_wait_joins_it() {
                     .map_err(|error| error.into_runtime_error())
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let binding = crate::user_functions::test_support::exact_local_binding(&runtime, 1);
     let callback = crate::user_functions::test_support::exact_local_value("tick", binding.clone());
     let _bound = crate::user_functions::test_support::install_bound_forwarder(binding);

@@ -85,7 +85,7 @@ fn validates_domains_representations_and_output_count() {
         assert_eq!(error.identifier(), WBLRND_ERROR_INVALID_ARGUMENT.identifier);
     }
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(wblrnd_builtin(vec![Value::Num(2.0), Value::Num(1.0)]))
         .expect_err("second output");
     assert_eq!(error.identifier(), WBLRND_ERROR_TOO_MANY_OUTPUTS.identifier);

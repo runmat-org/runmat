@@ -6,7 +6,7 @@ mod preflight;
 
 #[test]
 fn free_boundary_aliases_reject_excess_outputs_before_receiver_access() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for error in [
         block_on(free_boundary_builtin(Value::Num(0.0))).expect_err("fixed boundary output bound"),
         block_on(delaunay_tri_free_boundary_builtin(Value::Num(0.0)))
@@ -21,7 +21,7 @@ fn free_boundary_aliases_reject_excess_outputs_before_receiver_access() {
 
 #[test]
 fn constructor_and_nearest_aliases_reject_excess_outputs_before_geometry() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let constructor = block_on(delaunay_tri_builtin(vec![Value::Num(f64::NAN)]))
         .expect_err("constructor output bound precedes input inspection");
     assert_eq!(
@@ -47,7 +47,7 @@ fn constructor_and_nearest_aliases_reject_excess_outputs_before_geometry() {
 #[test]
 fn point_location_aliases_bound_outputs_before_receiver_and_return_barycentric_rows() {
     {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         for error in [
             block_on(point_location_builtin(Value::Num(0.0), vec![]))
                 .expect_err("function output bound"),
@@ -66,7 +66,7 @@ fn point_location_aliases_bound_outputs_before_receiver_and_return_barycentric_r
         2,
     )]))
     .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for result in [
         block_on(point_location_builtin(
             dt.clone(),

@@ -26,7 +26,7 @@ pub(super) fn install(
 ) -> Result<InstalledExternalSources, Box<runmat_runtime::RuntimeError>> {
     let Some(binding) = program.product.selected() else {
         return Ok(InstalledExternalSources {
-            guard: user_functions::install_execution_source_resolver(None),
+            guard: user_functions::install_execution_source_resolver(None)?,
             scoped_bindings: Rc::new(HashMap::new()),
         });
     };
@@ -144,7 +144,7 @@ pub(super) fn install(
         by_external_lookup.get(&origin).cloned()
     }));
     Ok(InstalledExternalSources {
-        guard: user_functions::install_execution_source_resolver(Some(Rc::new(facts))),
+        guard: user_functions::install_execution_source_resolver(Some(Rc::new(facts)))?,
         scoped_bindings: Rc::new(scoped_bindings),
     })
 }

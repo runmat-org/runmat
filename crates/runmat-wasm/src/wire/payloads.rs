@@ -1,3 +1,4 @@
+use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use uuid::Uuid;
@@ -11,11 +12,10 @@ use runmat_core::{
         RuntimeDiagnostic, RuntimeFlow,
     },
     approximate_size_bytes, matlab_class_name, numeric_dtype_label, preview_numeric_values,
-    value_shape, ExecutionProfiling, ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision,
-    FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot, MaterializedVariable,
-    NumericPreviewValue, StdinEvent, StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions,
-    WorkspaceMaterializeTarget, WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions,
-    WorkspaceSnapshot,
+    value_shape, ExecutionProfiling, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
+    FusionPlanShader, FusionPlanSnapshot, MaterializedVariable, NumericPreviewValue, StdinEvent,
+    StdinEventKind, WorkspaceEntry, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget,
+    WorkspacePreview, WorkspaceResidency, WorkspaceSliceOptions, WorkspaceSnapshot,
 };
 use runmat_value::Value;
 
@@ -52,7 +52,8 @@ pub(crate) struct ExecutionPayload {
     pub(crate) execution_time_ms: u64,
     pub(crate) used_jit: bool,
     pub(crate) error: Option<RunMatErrorPayload>,
-    pub(crate) stdout: Vec<ConsoleStreamPayload>,
+    #[serde(serialize_with = "serialize_console_entries")]
+    pub(crate) stdout: runmat_runtime::console::CapturedConsoleEntries,
     pub(crate) workspace: WorkspacePayload,
     pub(crate) figures_touched: Vec<u32>,
     pub(crate) warnings: Vec<WarningPayload>,
@@ -94,11 +95,7 @@ impl ExecutionPayload {
             execution_time_ms: outcome.execution_time_ms,
             used_jit: outcome.used_jit,
             error,
-            stdout: outcome
-                .streams
-                .into_iter()
-                .map(ConsoleStreamPayload::from)
-                .collect(),
+            stdout: outcome.streams,
             workspace,
             figures_touched: outcome.figures_touched,
             warnings: outcome
@@ -156,23 +153,39 @@ impl From<DisplayEvent> for DisplayEventPayload {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConsoleStreamPayload {
     pub(crate) stream: &'static str,
-    pub(crate) text: String,
+    pub(crate) text: runmat_runtime::console::ConsoleText,
     pub(crate) timestamp_ms: u64,
 }
 
-impl From<ExecutionStreamEntry> for ConsoleStreamPayload {
-    fn from(entry: ExecutionStreamEntry) -> Self {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BorrowedConsoleStreamPayload<'a> {
+    stream: &'static str,
+    text: &'a runmat_runtime::console::ConsoleText,
+    timestamp_ms: u64,
+}
+
+fn serialize_console_entries<S>(
+    entries: &runmat_runtime::console::CapturedConsoleEntries,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut sequence = serializer.serialize_seq(Some(entries.len()))?;
+    for entry in entries.iter() {
         let stream = match entry.stream {
-            ExecutionStreamKind::Stdout => "stdout",
-            ExecutionStreamKind::Stderr => "stderr",
-            ExecutionStreamKind::ClearScreen => "clear",
+            runmat_runtime::console::ConsoleStream::Stdout => "stdout",
+            runmat_runtime::console::ConsoleStream::Stderr => "stderr",
+            runmat_runtime::console::ConsoleStream::ClearScreen => "clear",
         };
-        Self {
+        sequence.serialize_element(&BorrowedConsoleStreamPayload {
             stream,
-            text: entry.text,
+            text: &entry.text,
             timestamp_ms: entry.timestamp_ms,
-        }
+        })?;
     }
+    sequence.end()
 }
 
 impl ConsoleStreamPayload {
@@ -839,6 +852,30 @@ mod tests {
             text: Some(String::new()),
             identity: None,
         }
+    }
+
+    #[wasm_bindgen_test::wasm_bindgen_test]
+    fn execution_streams_retain_canonical_entries_and_wire_shape() {
+        use runmat_runtime::console::{ConsoleEntry, ConsoleStream, ConsoleText};
+
+        let text = ConsoleText::from(String::from("hello"));
+        let text_pointer = text.as_ptr();
+        let outcome = ExecutionOutcome {
+            streams: vec![ConsoleEntry {
+                stream: ConsoleStream::Stdout,
+                text,
+                timestamp_ms: 17,
+            }]
+            .into(),
+            ..ExecutionOutcome::default()
+        };
+        let payload = ExecutionPayload::from_outcome(outcome, &test_source_context());
+        assert_eq!(payload.stdout[0].text.as_ptr(), text_pointer);
+        let wire = serde_json::to_value(&payload).expect("serialize execution payload");
+        assert_eq!(
+            wire["stdout"],
+            serde_json::json!([{"stream":"stdout","text":"hello","timestampMs":17}])
+        );
     }
 
     #[test]

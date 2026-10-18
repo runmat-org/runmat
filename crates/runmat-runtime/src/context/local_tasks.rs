@@ -37,7 +37,6 @@ pub struct CanonicalLocalTaskAdmission {
 }
 
 impl CanonicalLocalTaskAdmission {
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn is_active_driver(&self) -> bool {
         self.port.is_active_driver()
     }

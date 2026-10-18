@@ -234,6 +234,51 @@ pub async fn execute_deferred_program_in_context(
     }
 }
 
+/// Execute a locally scheduled task against the same selected V3 graph and
+/// result receipt used by an isolated worker. The issuing context, not the
+/// service's `requires_program_capture` hint, authenticates the product and
+/// decodes its result.
+pub async fn execute_deferred_graph_in_context(
+    call: DeferredCall,
+    runtime: runmat_runtime::context::RuntimeContext,
+) -> Result<runmat_runtime::execution::RootedValueSequence, ExecutionServiceError> {
+    let requested_outputs = u16::try_from(call.invocation.requested_outputs())
+        .map_err(|_| ExecutionServiceError::InvalidOutputContract)?;
+    let outputs = OutputContract {
+        requested_outputs,
+        owned_work: None,
+    };
+    let (_, request, receipt) = materialize_deferred_graph_call(
+        &call,
+        outputs,
+        runmat_execution_artifact::ProgramTarget::portable("vm-parallel-graph-v1"),
+        runmat_execution::value::ValueLimits::default(),
+    )?;
+    receipt.check_issuing_context(&runtime)?;
+    match execute_graph_request_with_context(request, runtime.clone()).await {
+        ProgramExecutionResponse::GraphSuccess { graph } => {
+            let result = receipt.decode_in_context(&runtime, &graph)?;
+            if result.as_slice().len() != usize::from(requested_outputs) {
+                return Err(ExecutionServiceError::InvalidOutputContract);
+            }
+            Ok(result)
+        }
+        ProgramExecutionResponse::RuntimeFailure { failure } => {
+            Err(ExecutionServiceError::LocalizedRuntimeFailure(
+                receipt
+                    .decode_failure_in_context(&runtime, &failure)?
+                    .into(),
+            ))
+        }
+        ProgramExecutionResponse::Failure { message } => {
+            Err(ExecutionServiceError::Failed(message))
+        }
+        _ => Err(ExecutionServiceError::Infrastructure(
+            "selected graph returned an incompatible parallel response".into(),
+        )),
+    }
+}
+
 fn captured_program_revision(program: &[u8]) -> ProgramRevision {
     let digest = Digest::sha256(program);
     ProgramRevision::new(

@@ -39,6 +39,7 @@ try {
     "cargo",
     [
       "check",
+      "--locked",
       "-p",
       "runmat-runtime",
       "--target",

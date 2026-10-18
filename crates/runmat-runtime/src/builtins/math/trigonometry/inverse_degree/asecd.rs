@@ -16,7 +16,7 @@ pub(super) const SPEC: Spec = Spec {
 #[runtime_builtin(
     name = "asecd",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::trigonometry::inverse_degree::asecd"
+    builtin_path = "crate::builtins::math::trigonometry::inverse_degree"
 )]
 async fn asecd_builtin(value: Value) -> crate::BuiltinResult<Value> {
     execute(&SPEC, value).await

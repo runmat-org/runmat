@@ -220,7 +220,8 @@ fn public_call(
     });
     let _restore = runmat_filesystem::replace_provider(provider);
     runmat_filesystem::set_current_dir(fixture_root()).expect("fixture cwd");
-    let _outputs = crate::output_count::push_output_count(Some(output_count));
+    let _outputs =
+        crate::output_count::push_output_count(Some(output_count)).expect("output-count scope");
     let result = block_on(xlswrite_call(
         Value::from("out.xlsx"),
         Value::Num(7.0),
@@ -245,7 +246,8 @@ pub(super) fn with_lifecycle(
     });
     let _restore = runmat_filesystem::replace_provider(provider);
     runmat_filesystem::set_current_dir(fixture_root()).expect("fixture cwd");
-    let _outputs = crate::output_count::push_output_count(Some(output_count));
+    let _outputs =
+        crate::output_count::push_output_count(Some(output_count)).expect("output-count scope");
     test(memory, evidence);
 }
 

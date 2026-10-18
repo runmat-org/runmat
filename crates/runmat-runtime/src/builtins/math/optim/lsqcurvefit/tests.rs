@@ -10,7 +10,7 @@ use std::sync::{
 
 #[test]
 fn one_output_does_not_publish_unused_gradient_or_jacobian() {
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = LeastSquaresResult {
         x: vec![2.0],
         residual: vec![0.0],
@@ -152,7 +152,8 @@ fn lsqcurvefit_passes_wide_integer_xdata_to_callback_exactly() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(0.0))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let xdata = Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
 
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
@@ -181,7 +182,8 @@ fn lsqcurvefit_automatic_resident_input_gathers_but_explicit_input_is_gated() {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let values = [0.0];
         let shape = [1, 1];
         let automatic = provider
@@ -256,7 +258,8 @@ fn lsqcurvefit_linear_model_recovers_parameters() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
         model,
         tensor(vec![0.0, 0.0], vec![2, 1]),
@@ -300,7 +303,8 @@ fn lsqcurvefit_exponential_model_recovers_parameters() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let xdata = (0..=10).map(|i| i as f64 * 0.2).collect::<Vec<_>>();
     let ydata = xdata
         .iter()
@@ -345,7 +349,8 @@ fn lsqcurvefit_respects_bounds() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
         model,
         tensor(vec![0.5], vec![1, 1]),
@@ -365,7 +370,7 @@ fn lsqcurvefit_respects_bounds() {
 fn lsqcurvefit_multi_output_includes_diagnostics_lambda_and_jacobian() {
     let (runtime, model, _bound) = selected_model(4, "line_multi");
     let _entry = runtime.enter();
-    let _guard = crate::output_count::push_output_count(Some(7));
+    let _guard = crate::output_count::push_output_count(Some(7)).expect("output-count scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, _requested_outputs| {
             assert_eq!(function, 4);
@@ -384,7 +389,8 @@ fn lsqcurvefit_multi_output_includes_diagnostics_lambda_and_jacobian() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
         model,
         tensor(vec![0.0, 0.0], vec![1, 2]),
@@ -442,7 +448,8 @@ fn optimoptions_long_evaluation_name_limits_lsqcurvefit_callbacks() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let option_arguments = vec![
         Value::from("lsqcurvefit"),
         Value::from("MaxFunctionEvaluations"),
@@ -461,7 +468,7 @@ fn optimoptions_long_evaluation_name_limits_lsqcurvefit_callbacks() {
     ));
     assert!(!fields.fields.contains_key("MaxFunctionEvaluations"));
 
-    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
         model,
         Value::Num(0.0),
@@ -492,7 +499,7 @@ fn optimoptions_long_evaluation_name_limits_lsqcurvefit_callbacks() {
 fn lsqcurvefit_output_reports_selected_algorithm() {
     let (runtime, model, _bound) = selected_model(45, "line_algorithm");
     let _entry = runtime.enter();
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, _requested_outputs| {
             assert_eq!(function, 45);
@@ -511,7 +518,8 @@ fn lsqcurvefit_output_reports_selected_algorithm() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut options = StructValue::new();
     options.insert("Algorithm", Value::from("trust-region-reflective"));
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
@@ -557,7 +565,8 @@ fn lsqcurvefit_underdetermined_case_runs() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(runtime.scope(lsqcurvefit_builtin(
         model,
         tensor(vec![0.0, 0.0], vec![2, 1]),
@@ -588,7 +597,8 @@ fn lsqcurvefit_rejects_model_ydata_shape_mismatch() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let err = block_on(runtime.scope(lsqcurvefit_builtin(
         model,
         Value::Num(0.0),
@@ -615,7 +625,7 @@ fn lsqcurvefit_rejects_inconsistent_bounds() {
 
 #[test]
 fn lsqcurvefit_rejects_more_than_seven_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(8));
+    let _guard = crate::output_count::push_output_count(Some(8)).expect("output-count scope");
     let err = block_on(lsqcurvefit_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Num(0.0),

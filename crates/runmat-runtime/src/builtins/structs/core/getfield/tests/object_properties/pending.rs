@@ -26,10 +26,11 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     selected.set_runmat_extensions_enabled(true);
     let expected_session = selected.session_lease();
     let _wrong_scope = wrong.enter();
-    let _wrong_outputs = crate::output_count::push_output_count(Some(2));
+    let _wrong_outputs =
+        crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let _selected_outputs = {
         let _selected_scope = selected.enter();
-        crate::output_count::push_output_count(Some(1))
+        crate::output_count::push_output_count(Some(1)).expect("selected output-count scope")
     };
     let selected_setup_scope = selected.enter();
     let class = runmat_types::ClassIdentity::from("PendingSelectedGetfieldSession");
@@ -66,7 +67,8 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "PendingSelectedGetfieldSession.get.p").then_some(943)
-        })));
+        })))
+        .expect("call-port scope");
     let dropped = Arc::new(AtomicUsize::new(0));
     let getter_dropped = dropped.clone();
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
@@ -90,7 +92,8 @@ fn pending_public_getfield_restores_enclosing_session_and_drops_getter() {
                 Err(error.into_runtime_error())
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(selected_setup_scope);
     let mut work = Box::pin(getfield_builtin(
         Some(selected.clone()),

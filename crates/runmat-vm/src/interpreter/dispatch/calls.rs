@@ -132,7 +132,7 @@ pub struct BuiltinCallContext<'a> {
     pub name: &'a str,
     pub arg_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
-    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub call_arg_spans: Option<runmat_runtime::callsite::CallsiteSpans>,
     pub imports: &'a [(Vec<String>, bool)],
     pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
@@ -150,7 +150,7 @@ pub struct UserCallContext<'a> {
     pub out_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
     pub source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
-    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub call_arg_spans: Option<runmat_runtime::callsite::CallsiteSpans>,
     pub current_function_name: &'a str,
     pub imports: &'a [(Vec<String>, bool)],
     pub exception: ExceptionRouteContext<'a>,
@@ -184,7 +184,7 @@ pub struct WorkspaceFirstCallContext<'a> {
     pub out_count: usize,
     pub source_id: Option<runmat_hir::SourceId>,
     pub source_ref: Option<runmat_runtime::source_context::RuntimeSourceRef>,
-    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub call_arg_spans: Option<runmat_runtime::callsite::CallsiteSpans>,
     pub current_function_name: &'a str,
     pub imports: &'a [(Vec<String>, bool)],
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
@@ -377,12 +377,13 @@ async fn handle_builtin_call_inner(
     let args = call_builtins::collect_call_args(stack, arg_count)?;
     let _roots = root_values(&args)?;
 
-    let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
+    let _callsite_guard = runmat_runtime::callsite::push_callsite_spans(source_id, call_arg_spans)?;
     let _output_guard = runmat_runtime::output_context::push_output_count(requested_outputs);
     let current_class_context =
         runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
-        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+        .transpose()?;
 
     let result =
         call_builtins::call_builtin_or_imported(runtime, name, imports, &args, requested_outputs)
@@ -425,8 +426,10 @@ pub async fn handle_prepared_user_function_call(
         pc,
     } = exception;
 
-    let preparation_callsite_guard =
-        runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans.clone());
+    let preparation_callsite_guard = runmat_runtime::callsite::push_function_input_callsite_spans(
+        source_id,
+        call_arg_spans.clone(),
+    )?;
     let mut prepared = user_preparation::prepare(
         identity,
         bound,
@@ -471,24 +474,33 @@ pub async fn handle_prepared_user_function_call(
                 callsite, call,
             ));
             std::future::poll_fn(move |context| {
-                let _access_guard = class_context
+                let access_guard = class_context
                     .clone()
-                    .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+                    .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+                    .transpose();
+                let _access_guard = match access_guard {
+                    Ok(guard) => guard,
+                    Err(error) => return std::task::Poll::Ready(Err(error)),
+                };
                 std::future::Future::poll(call.as_mut(), context)
             })
-            .await
+            .await?
         }) {
             Ok(ticket) => ticket.await.map(|(output, _captures)| output),
             Err(error) => Err(error),
         }
     } else {
         let _function_input_callsite_guard =
-            runmat_runtime::callsite::push_function_input_callsite(source_id, call_arg_spans);
+            runmat_runtime::callsite::push_function_input_callsite_spans(
+                source_id,
+                call_arg_spans,
+            )?;
         let _access_guard = if prepared.route == user_preparation::UserCallRoute::StaticMethod {
             None
         } else {
             current_class_context
                 .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+                .transpose()?
         };
         execute_callable_descriptor(runtime, prepared.descriptor).await
     };
@@ -544,7 +556,8 @@ pub async fn handle_workspace_first_prepared_call(
                     .map_err(runmat_runtime::sequence::sequence_error_to_runtime)?,
             )?));
         }
-        let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
+        let _callsite_guard =
+            runmat_runtime::callsite::push_callsite_spans(source_id, call_arg_spans)?;
         let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
         let result = super::indexing::paren_index_sequence(
             runtime,
@@ -674,7 +687,8 @@ async fn handle_method_or_member_index_call_inner(
     let current_class_context =
         runmat_runtime::class_registry::class_context_for_function(current_function_name);
     let _access_guard = current_class_context
-        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+        .transpose()?;
     let outputs = Box::pin(
         runmat_runtime::object::dispatch::call_method_or_member_index_with_outputs_in_context(
             runtime,
@@ -713,7 +727,8 @@ pub async fn handle_method_or_member_index_expand_multi_call(
     let current_class_context =
         runmat_runtime::class_registry::class_context_for_function(context.current_function_name);
     let _access_guard = current_class_context
-        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)));
+        .map(|class_name| runmat_runtime::push_class_access_context(Some(class_name)))
+        .transpose()?;
     let outputs = args
         .with_unbounded_values_async(|mut args| async move {
             let base = args.remove(0);

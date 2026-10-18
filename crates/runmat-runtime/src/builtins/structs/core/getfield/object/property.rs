@@ -24,7 +24,7 @@ pub(super) async fn get_object_field(
             if !projection.receiver_member_accessible(
                 owner,
                 prop.get_access,
-                crate::dispatcher::class_access_context().as_ref(),
+                crate::dispatcher::class_access_context().as_deref(),
             ) {
                 return Err(private_access(format!(
                     "You cannot get the '{}' property of '{}' class.",

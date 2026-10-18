@@ -99,7 +99,7 @@ fn invalid_numeric_input_rejects_without_gathering() {
 
 #[test]
 fn output_and_character_shape_admission_precede_enumeration() {
-    let outputs = crate::output_count::push_output_count(Some(2));
+    let outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         run(vec![Value::Num(1.0)]).unwrap_err().identifier(),
         runmat_builtins::LS_ERROR_TOO_MANY_OUTPUTS.identifier
@@ -121,11 +121,13 @@ fn console_listing_occurs_only_without_captured_outputs() {
         .unwrap();
     runmat_filesystem::with_provider_override(Arc::new(filesystem), || {
         for count in [0, 1] {
-            let _requested = crate::output_count::push_output_count(Some(count));
-            let _presentation = crate::output_context::push_output_count(count);
-            let capture = crate::console::begin_capture();
+            let _requested =
+                crate::output_count::push_output_count(Some(count)).expect("output-count scope");
+            let _presentation =
+                crate::output_context::push_output_count(count).expect("output-count scope");
+            let capture = crate::console::begin_capture().expect("console capture");
             run(vec![]).unwrap();
-            let text = capture.finish();
+            let text = capture.finish().expect("captured text");
             assert_eq!(text.contains("listed.m"), count == 0);
         }
     });

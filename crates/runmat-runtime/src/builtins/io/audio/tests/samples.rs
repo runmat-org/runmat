@@ -24,7 +24,7 @@ fn audioread_descriptor_covers_core_forms() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn audioread_invalid_output_count_and_controls_precede_file_read() {
-    let _count = crate::output_count::push_output_count(Some(3));
+    let _count = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = block_on(audioread_builtin(None, Value::from("missing.wav"), vec![]))
         .expect_err("invalid output count");
     assert_eq!(err.identifier(), Some("RunMat:audioread:InvalidArgument"));
@@ -113,8 +113,7 @@ fn audioread_stereo_output_is_column_major_by_channel() {
 fn audioread_sample_range_is_one_based_inclusive_and_returns_fs() {
     let file = audio_file("wav", &pcm16_wav(22_050, 1, &[-32768, -16384, 0, 16384]));
     let path = &file.path;
-    let _guard = crate::output_count::push_output_count(Some(2));
-
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(
         block_on(audioread_builtin(
             None,
@@ -395,7 +394,7 @@ fn audioread_reads_rf64_data_size_from_ds64() {
     let path = &file.path;
 
     let outputs = {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         output_list(
             block_on(audioread_builtin(
                 None,
@@ -427,7 +426,8 @@ fn audioread_reads_via_active_filesystem_provider() {
     .expect("provider write");
 
     let outputs = {
-        let _out_guard = crate::output_count::push_output_count(Some(2));
+        let _out_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         output_list(
             block_on(audioread_builtin(
                 None,

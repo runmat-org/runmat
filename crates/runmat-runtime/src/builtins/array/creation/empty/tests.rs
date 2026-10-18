@@ -60,7 +60,7 @@ fn resident_integer_size_controls_preserve_host_receiver_class() {
 
 #[test]
 fn requested_outputs_reject_before_size_or_provider_access() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let resident = Value::GpuTensor(
         runmat_accelerate_api::test_support::TestAllocationOwner::new()
             .allocate_zeroed(
@@ -77,7 +77,7 @@ fn requested_outputs_reject_before_size_or_provider_access() {
 
 #[test]
 fn discarded_output_still_validates_empty_shape() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert!(futures::executor::block_on(int8_empty_builtin(vec![])).is_ok());
     assert!(futures::executor::block_on(int8_empty_builtin(vec![Value::Num(3.0)])).is_err());
 }

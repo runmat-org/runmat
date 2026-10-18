@@ -1143,7 +1143,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
         TestFunction {
             runtime,

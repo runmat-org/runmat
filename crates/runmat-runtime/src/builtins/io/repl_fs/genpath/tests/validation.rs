@@ -78,7 +78,7 @@ fn rejects_numeric_columns_and_higher_dimensions() {
 
 #[test]
 fn rejects_multiple_outputs_before_root_resolution() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = call(vec![Value::from("missing")]).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:genpath:TooManyOutputs"));
 }

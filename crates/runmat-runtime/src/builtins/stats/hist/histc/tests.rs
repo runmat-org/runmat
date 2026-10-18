@@ -69,7 +69,7 @@ fn excess_outputs_and_zero_dimension_fail_before_provider_access() {
         )
         .unwrap();
     let resident = Value::GpuTensor(allocation.handle.clone());
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let error = block_on(histc_builtin(resident.clone(), Value::Num(0.0), vec![])).unwrap_err();
     assert!(error.message().contains("too many output"));
     drop(_outputs);
@@ -331,7 +331,7 @@ fn histc_empty_edges_return_empty_counts_and_indices() {
 fn histc_rejects_excess_outputs_and_huge_dimensions() {
     let x = tensor(vec![0.0, 1.0], vec![1, 2]);
     let edges = tensor(vec![0.0, 1.0], vec![1, 2]);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = block_on(histc_builtin(x, edges, Vec::new())).expect_err("too many outputs");
     assert_eq!(err.identifier(), ERROR_INVALID_ARGUMENT.identifier);
     drop(_guard);

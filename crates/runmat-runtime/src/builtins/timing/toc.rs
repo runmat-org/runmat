@@ -62,7 +62,7 @@ pub async fn toc_builtin(
         crate::console::record_console_line(
             crate::console::ConsoleStream::Stdout,
             format!("Elapsed time is {seconds:.6} seconds."),
-        );
+        )?;
     }
     Ok(seconds)
 }

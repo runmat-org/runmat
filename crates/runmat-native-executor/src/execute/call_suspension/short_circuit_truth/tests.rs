@@ -85,7 +85,7 @@ fn exact_region_step_rejects_other_site_without_consuming_truth() {
 
 #[test]
 fn unpolled_truth_input_keeps_managed_target_until_abandonment() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::unpolled_truth_input_keeps_managed_target_until_abandonment"
     )) {
@@ -174,7 +174,7 @@ fn invalid_truth_preserves_runtime_identifier_without_advancing_checkpoint() {
 
 #[test]
 fn retained_expression_input_survives_source_replacement_and_abandonment_releases_it() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::retained_expression_input_survives_source_replacement_and_abandonment_releases_it"
     )) {

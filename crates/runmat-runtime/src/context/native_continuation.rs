@@ -351,7 +351,8 @@ mod tests {
         let selected = Rc::clone(&expected);
         let result = host()
             .block_on(supervisor.drive_until(base.scope(async move {
-                let _guard = crate::user_functions::install_local_bound_function_invoker(selected);
+                let _guard = crate::user_functions::install_local_bound_function_invoker(selected)
+                    .expect("call-port scope");
                 let (parent, _) = parent.native_invocation_context();
                 let (child, placement) = parent.native_invocation_context();
                 run_native_continuation(&child, placement, roots(), async move {

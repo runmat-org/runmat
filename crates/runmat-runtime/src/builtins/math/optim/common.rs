@@ -1013,7 +1013,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(42)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical = canonicalize_callback_handle(&Value::FunctionHandle("decay".into()));
         assert_eq!(
             canonical,
@@ -1034,7 +1035,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.decay").then_some(43)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical =
             canonicalize_callback_handle(&Value::ExternalFunctionHandle("pkg.decay".into()));
         assert_eq!(
@@ -1056,7 +1058,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg..decay").then_some(44)
-            })));
+            })))
+            .expect("call-port scope");
         let raw = Value::ExternalFunctionHandle("pkg..decay".into());
         let canonical = canonicalize_callback_handle(&raw);
         assert_eq!(canonical, raw);
@@ -1067,7 +1070,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(45)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical = canonicalize_callback_handle(&Value::String("@decay".to_string()));
         assert_eq!(
             canonical,
@@ -1088,7 +1092,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(145)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical = canonicalize_callback_handle(&Value::String("  @decay  ".to_string()));
         assert_eq!(
             canonical,
@@ -1109,7 +1114,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.decay").then_some(46)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical = canonicalize_callback_handle(&Value::StringArray(
             StringArray::new(vec!["@pkg.decay".to_string()], vec![1, 1]).expect("string array"),
         ));
@@ -1132,7 +1138,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "pkg.decay").then_some(146)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical = canonicalize_callback_handle(&Value::StringArray(
             StringArray::new(vec!["  @pkg.decay  ".to_string()], vec![1, 1]).expect("string array"),
         ));
@@ -1155,7 +1162,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(47)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical =
             canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("@decay")));
         assert_eq!(
@@ -1177,7 +1185,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(147)
-            })));
+            })))
+            .expect("call-port scope");
         let canonical =
             canonicalize_callback_handle(&Value::CharArray(CharArray::new_row("  @decay  ")));
         assert_eq!(
@@ -1199,7 +1208,8 @@ mod tests {
         let _resolver_guard =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "decay").then_some(48)
-            })));
+            })))
+            .expect("call-port scope");
         let raw = Value::Closure(Closure::from_data(runmat_value::ClosureData {
             lexical_environment: None,
             function_name: "decay".into(),

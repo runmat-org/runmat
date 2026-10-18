@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn multiple_outputs_collapse_remaining_dimensions() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let tensor = Tensor::new(vec![0.0; 60], vec![3, 4, 5]).unwrap();
         assert_eq!(
             call(Value::Tensor(tensor), vec![]).unwrap(),
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn selected_multiple_outputs_must_match_query_count() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let tensor = Tensor::new(vec![0.0; 24], vec![2, 3, 4]).unwrap();
         let dims = Tensor::new(vec![1.0, 3.0], vec![1, 2]).unwrap();
         assert_eq!(

@@ -25,7 +25,7 @@ fn direct_requested_output_boundary_rejects_before_name_parsing() {
             crate::execution::RuntimeExecutionService::new(),
         ));
         let _context = scoped.then(|| context.enter());
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert_eq!(crate::output_count::current_output_count(), Some(2));
         let direct = run(vec![Value::Num(1.0)]).unwrap_err();
         assert_eq!(direct.identifier(), Some("RunMat:getenv:TooManyOutputs"));

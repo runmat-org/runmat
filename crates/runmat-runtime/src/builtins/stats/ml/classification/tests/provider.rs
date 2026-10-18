@@ -20,7 +20,7 @@ async fn discarded_classify_admits_before_provider_access() {
     }));
     let _selected = ThreadProviderGuard::set(Some(provider));
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let resident = provider
         .owner
         .allocate_zeroed(vec![2, 1], NumericElementType::F64, GpuTensorStorage::Real)

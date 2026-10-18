@@ -122,4 +122,5 @@ pub fn install_bound_forwarders(
             })
         },
     ))
+    .expect("test bound-forwarder projection")
 }

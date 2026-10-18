@@ -187,7 +187,8 @@ pub(in crate::builtins::timing::timer) fn install_timer_invoker(
     invoker: Option<Arc<crate::user_functions::UnscopedFunctionInvoker>>,
 ) -> TimerInvokerGuards {
     let _scope = test_runtime().enter();
-    let semantic = crate::user_functions::install_semantic_function_invoker(invoker);
+    let semantic =
+        crate::user_functions::install_semantic_function_invoker(invoker).expect("call-port scope");
     let bound = install_timer_bound_forwarders();
     TimerInvokerGuards {
         _semantic: semantic,

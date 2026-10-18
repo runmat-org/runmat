@@ -57,7 +57,8 @@ fn deopt_ownership(cancel: bool) {
                 rooted_sequence(ValueSequence::single(result).unwrap()).map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
     let assembly = two_semantic_calls_returning_first_fixture();
     let safepoint = assembly.functions[0].blocks[0]

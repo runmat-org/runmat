@@ -16,7 +16,7 @@ async fn clc_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if !args.is_empty() {
         return Err(argument_count_error());
     }
-    console::record_clear_screen();
+    console::record_clear_screen()?;
     Ok(empty_return_value())
 }
 

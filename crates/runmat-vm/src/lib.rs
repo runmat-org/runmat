@@ -28,7 +28,7 @@ pub use graph_schema::{
 
 pub use bytecode::{
     compile, compile_semantic_function_registry, compile_semantic_function_registry_with_analysis,
-    compile_with_analysis,
+    compile_with_analysis, validate_compiled_parallel_contracts,
 };
 
 /// Retain typed class declarations in a product without a callable or script

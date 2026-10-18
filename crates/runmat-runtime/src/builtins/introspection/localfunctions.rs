@@ -74,7 +74,8 @@ mod tests {
         )])
         .expect("localfunctions source catalog admission");
         let _current_guard = crate::source_context::replace_current_source_id(Some(SourceId(99)));
-        let _active = crate::user_functions::push_active_semantic_function(10);
+        let _active =
+            crate::user_functions::push_active_semantic_function(10).expect("call-port scope");
         let _catalog_guard =
             crate::user_functions::install_source_function_catalog(Some(Arc::new(vec![
                 crate::user_functions::SourceFunctionInfo {
@@ -113,7 +114,8 @@ mod tests {
                     source_file: None,
                     definition_owners: None,
                 },
-            ])));
+            ])))
+            .expect("call-port scope");
 
         let value = dispatch_localfunctions(Vec::new()).expect("localfunctions succeeds");
         let Value::Cell(cell) = value else {
@@ -173,7 +175,8 @@ mod tests {
                     source_file: Some("/new/file.m".into()),
                     definition_owners: None,
                 },
-            ])));
+            ])))
+            .expect("call-port scope");
         let selected_local = local.clone();
         let selected_group = vec![primary, local];
         let _selected = crate::user_functions::install_execution_source_resolver(Some(
@@ -189,7 +192,8 @@ mod tests {
                 std::rc::Rc::new(|_| None),
                 std::rc::Rc::new(|_| None),
             )),
-        ));
+        ))
+        .expect("call-port scope");
         let Value::Cell(cell) = dispatch_localfunctions(Vec::new()).expect("retained locals")
         else {
             panic!("cell result");

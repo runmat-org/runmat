@@ -103,7 +103,7 @@ fn no_output_failure_throws_and_success_still_moves() {
     let temp = tempdir().unwrap();
     let source = temp.path().join("source");
     let target = temp.path().join("target");
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let run = |args| futures::executor::block_on(super::super::movefile_builtin(None, args));
     assert_eq!(
         run(vec![text(&source), text(&target)])

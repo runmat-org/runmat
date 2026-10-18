@@ -28,7 +28,7 @@ fn public_savefig_retains_one_scene_snapshot_across_pending_write() {
     let _fs = fs::provider_override_lock();
     let fixture = StageFixture::new(PausePoint::Write);
     let _selected = fs::replace_provider(fixture.provider.clone());
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let mut call = Box::pin(savefig_builtin(vec![
         Value::Num(figure),
         Value::from("/snapshot.fig"),

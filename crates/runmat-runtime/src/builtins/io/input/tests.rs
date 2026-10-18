@@ -302,7 +302,7 @@ fn paged_prompt_and_flag_reject_before_interaction_but_trailing_singleton_works(
 
 #[test]
 fn excessive_outputs_reject_before_interaction() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let err = futures::executor::block_on(input_builtin(vec![Value::String("Prompt: ".into())]))
         .expect_err("too many outputs");
     assert_eq!(err.identifier(), INPUT_ERROR_TOO_MANY_OUTPUTS.identifier);

@@ -80,7 +80,7 @@ fn no_output_removal_executes_and_reports_missing_target() {
     let path = temp.path().join("removed");
     std::fs::create_dir(&path).unwrap();
     let args = vec![Value::from(path.to_string_lossy().to_string())];
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert_eq!(
         super::invoke(args.clone()).unwrap(),
         Value::output_list(vec![])

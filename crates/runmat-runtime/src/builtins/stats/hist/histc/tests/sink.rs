@@ -36,7 +36,8 @@ fn histogram_sink_keeps_borrowed_data_and_edges_reusable() {
             })
             .unwrap();
         for outputs in [0, 1, 2] {
-            let _outputs = crate::output_count::push_output_count(Some(outputs));
+            let _outputs =
+                crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
             for handle in [&input, &edges] {
                 runmat_accelerate_api::mark_residency(handle);
             }

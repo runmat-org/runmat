@@ -378,7 +378,7 @@ mod cases {
 
     #[test]
     fn factorial_rejects_more_than_one_output() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = factorial_builtin(Value::Num(5.0), Vec::new())
             .expect_err("factorial defines one output");
         assert_eq!(

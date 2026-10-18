@@ -70,7 +70,7 @@ pub async fn display_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinRe
             Some(label) => format_display_body(&label, &host_value, &lines),
             None => lines.join("\n"),
         };
-        record_console_line(ConsoleStream::Stdout, body);
+        record_console_line(ConsoleStream::Stdout, body)?;
     }
     Ok(empty_return_value())
 }
@@ -182,8 +182,10 @@ mod tests {
         take_thread_buffer()
             .into_iter()
             .filter(|entry| entry.stream == ConsoleStream::Stdout)
-            .map(|entry| entry.text)
-            .collect::<String>()
+            .fold(String::new(), |mut text, entry| {
+                text.push_str(entry.text.as_str());
+                text
+            })
     }
 
     #[test]
@@ -199,7 +201,7 @@ mod tests {
 
     #[test]
     fn display_rejects_requested_output() {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let err = block_on(display_builtin(Value::Num(1.0), Vec::new())).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:display:TooManyOutputs"));
     }
@@ -284,7 +286,8 @@ mod tests {
         let _callsite_guard = crate::callsite::push_callsite(
             Some(SourceId(81)),
             Some(vec![span_of(source, "alpha")]),
-        );
+        )
+        .expect("display callsite");
 
         reset_thread_buffer();
         let result = block_on(display_builtin(Value::Num(42.0), Vec::new())).expect("display");
@@ -305,7 +308,8 @@ mod tests {
         let _callsite_guard = crate::callsite::push_callsite(
             Some(SourceId(82)),
             Some(vec![span_of(source, "alpha + 1")]),
-        );
+        )
+        .expect("display callsite");
 
         reset_thread_buffer();
         block_on(display_builtin(Value::Num(43.0), Vec::new())).expect("display");
@@ -347,7 +351,8 @@ mod tests {
         let _resolver =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "DisplayHookObject.customDisplayImpl").then_some(771)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 let args = args.to_vec();
@@ -357,14 +362,14 @@ mod tests {
                     assert!(
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_OBJECT))
                     );
-                    record_console_line(ConsoleStream::Stdout, "custom display");
+                    record_console_line(ConsoleStream::Stdout, "custom display")?;
                     crate::execution::RootedValueSequence::new(
                         crate::sequence::ValueSequence::empty(),
                     )
                     .map_err(|error| error.into_runtime_error())
                 })
             },
-        )));
+        ))).expect("call-port scope");
 
         reset_thread_buffer();
         block_on(display_builtin(
@@ -401,7 +406,8 @@ mod tests {
         let _resolver =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "DispFallbackObject.renderDisp").then_some(773)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 let args = args.to_vec();
@@ -411,14 +417,14 @@ mod tests {
                     assert!(
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISP_FALLBACK_OBJECT))
                     );
-                    record_console_line(ConsoleStream::Stdout, "custom disp");
+                    record_console_line(ConsoleStream::Stdout, "custom disp")?;
                     crate::execution::RootedValueSequence::new(
                         crate::sequence::ValueSequence::empty(),
                     )
                     .map_err(|error| error.into_runtime_error())
                 })
             },
-        )));
+        ))).expect("call-port scope");
         reset_thread_buffer();
         block_on(display_builtin(
             Value::Object(ObjectInstance::new(class_name)),
@@ -461,7 +467,8 @@ mod tests {
         let _resolver =
             crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                 (name == "DisplayHookParent.renderDisplay").then_some(772)
-            })));
+            })))
+            .expect("call-port scope");
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
             |function, args, requested_outputs| {
                 let args = args.to_vec();
@@ -471,14 +478,14 @@ mod tests {
                     assert!(
                         matches!(args.first(), Some(Value::Object(object)) if object.class_name.is(DISPLAY_HOOK_CHILD))
                     );
-                    record_console_line(ConsoleStream::Stdout, "inherited display");
+                    record_console_line(ConsoleStream::Stdout, "inherited display")?;
                     crate::execution::RootedValueSequence::new(
                         crate::sequence::ValueSequence::empty(),
                     )
                     .map_err(|error| error.into_runtime_error())
                 })
             },
-        )));
+        ))).expect("call-port scope");
 
         reset_thread_buffer();
         block_on(display_builtin(

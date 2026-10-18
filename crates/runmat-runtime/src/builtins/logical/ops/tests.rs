@@ -97,11 +97,11 @@ fn logical_character_pages_preserve_shape_and_column_major_order() {
 #[test]
 fn logical_output_arity_precedes_input_conversion_and_discard_still_validates() {
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = logical_builtin(Value::Num(f64::NAN), vec![]).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:logical:TooManyOutputs"));
     }
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = logical_builtin(Value::Num(f64::NAN), vec![]).unwrap_err();
     assert_eq!(
         error.identifier(),

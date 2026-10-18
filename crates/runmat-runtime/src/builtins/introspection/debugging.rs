@@ -578,7 +578,7 @@ pub(crate) fn dispatch_dbstack(args: Vec<Value>) -> BuiltinResult<Value> {
     let stack = stack_value(skip, complete_names)?;
     match crate::output_count::current_output_count() {
         Some(0) => {
-            record_console_line(ConsoleStream::Stdout, format_stack_for_display(&stack));
+            record_console_line(ConsoleStream::Stdout, format_stack_for_display(&stack))?;
             Ok(empty_value())
         }
         Some(n) if n >= 2 => Ok(crate::output_count::output_list_with_padding(
@@ -779,7 +779,7 @@ pub(crate) async fn dispatch_dbtype(args: Vec<Value>) -> BuiltinResult<Value> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    record_console_line(ConsoleStream::Stdout, rendered);
+    record_console_line(ConsoleStream::Stdout, rendered)?;
     Ok(empty_value())
 }
 
@@ -1015,7 +1015,7 @@ mod tests {
 
     #[test]
     fn dbstack_rejects_more_than_two_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = dispatch_dbstack(Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), Some("RunMat:dbstack:TooManyOutputs"));
     }

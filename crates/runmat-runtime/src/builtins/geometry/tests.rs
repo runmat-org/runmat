@@ -40,7 +40,7 @@ fn geometry_file_read_error_retains_io_identifier() {
 fn geometry_output_count_is_rejected_before_file_read() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("missing.stl");
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(geometry_load_builtin(Value::String(
         path.to_string_lossy().to_string(),
     )))
@@ -52,7 +52,7 @@ fn geometry_output_count_is_rejected_before_file_read() {
 fn geometry_inspect_output_count_is_rejected_before_file_read() {
     let tmp = tempfile::TempDir::new().unwrap();
     let path = tmp.path().join("missing.stl");
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(geometry_inspect_builtin(Value::String(
         path.to_string_lossy().to_string(),
     )))

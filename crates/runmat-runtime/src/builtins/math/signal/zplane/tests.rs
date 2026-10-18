@@ -268,7 +268,7 @@ fn evaluate_accepts_leading_axes_for_coefficient_and_sos_forms() {
 #[test]
 fn evaluate_honors_zero_requested_outputs() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
-    let _out_guard = crate::output_count::push_output_count(Some(0));
+    let _out_guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let value = block_on(evaluate(vec![row(&[1.0]), row(&[1.0, -0.8])])).expect("zplane render");
     let Value::OutputList(values) = value else {
         panic!("expected output list");
@@ -279,7 +279,7 @@ fn evaluate_honors_zero_requested_outputs() {
 #[test]
 fn evaluate_preserves_first_handle_output_and_pads_later_requested_slots() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
-    let _out_guard = crate::output_count::push_output_count(Some(2));
+    let _out_guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(evaluate(vec![row(&[1.0]), row(&[1.0, -0.8])])).expect("zplane render");
     let Value::OutputList(values) = value else {
         panic!("expected two requested outputs");

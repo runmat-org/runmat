@@ -468,7 +468,7 @@ fn xlswrite_returns_status_and_message_outputs() {
     let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = temp_path("xlsx");
     let filename = path.to_string_lossy().into_owned();
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = block_on(xlswrite_call(
         Value::from(filename),
         Value::Complex(1.0, 2.0),
@@ -489,7 +489,7 @@ fn xlswrite_returns_status_and_message_outputs() {
 
 #[test]
 fn xlswrite_rejects_too_many_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = block_on(xlswrite_call(
         Value::from("out.xlsx"),
         Value::Num(1.0),

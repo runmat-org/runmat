@@ -1146,7 +1146,7 @@ mod integer_compatibility_tests {
             Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1])
                 .unwrap(),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = futures::executor::block_on(groupsummary_builtin(
             data,
             groups,
@@ -1189,7 +1189,7 @@ mod integer_compatibility_tests {
             )
             .unwrap(),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = futures::executor::block_on(groupsummary_builtin(
             data,
             groups,

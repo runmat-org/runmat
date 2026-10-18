@@ -57,7 +57,7 @@ fn mutation_updates_runtime_search_directories() {
 fn discarded_output_still_updates_path() {
     let _lock = runmat_filesystem::provider_override_lock();
     let _guard = super::support::PathGuard::new();
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     super::support::call(vec![runmat_value::Value::from("discarded-output-path")]).unwrap();
     assert_eq!(
         crate::builtins::common::path_state::current_path_string(),

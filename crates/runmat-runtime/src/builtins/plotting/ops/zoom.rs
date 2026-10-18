@@ -921,7 +921,7 @@ mod tests {
         let _guard = setup_plot_tests();
         crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
 
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         zoom_builtin(vec![Value::Num(2.0)]).unwrap();
 
         let fig = clone_figure(current_figure_handle()).unwrap();
@@ -971,7 +971,7 @@ mod tests {
         .unwrap();
         crate::builtins::plotting::state::select_axes_for_figure(figure, 1).unwrap();
 
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         zoom_builtin(vec![Value::Num(ax1), Value::Num(2.0)]).unwrap();
 
         assert_eq!(
@@ -1004,7 +1004,7 @@ mod tests {
     fn typed_integer_single_argument_is_a_zoom_factor() {
         let _guard = setup_plot_tests();
         crate::builtins::plotting::state::set_axis_limits(Some((0.0, 10.0)), Some((0.0, 20.0)));
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         zoom_builtin(vec![Value::Int(IntValue::U8(2))]).expect("integer factor");
         let fig = clone_figure(current_figure_handle()).unwrap();
         let meta = fig.axes_metadata(0).unwrap();

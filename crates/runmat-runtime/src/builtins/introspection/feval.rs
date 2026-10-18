@@ -14,11 +14,8 @@ pub async fn feval_builtin_registered(
     f: Value,
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<crate::execution::RootedValueSequence> {
-    let input_callsite = crate::callsite::current_callsite().and_then(|mut callsite| {
-        (!callsite.arg_spans.is_empty()).then(|| {
-            callsite.arg_spans.remove(0);
-            callsite
-        })
+    let input_callsite = crate::callsite::current_callsite().and_then(|callsite| {
+        (!callsite.arg_spans.is_empty()).then(|| callsite.without_first_argument())
     });
     crate::call::feval::invoke(runtime.as_ref(), requested_outputs, f, rest, input_callsite).await
 }

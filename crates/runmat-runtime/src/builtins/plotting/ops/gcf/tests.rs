@@ -63,14 +63,14 @@ fn gcf_output_count_precedes_creation_and_discard_still_creates() {
     let _lock = lock_plot_registry();
     state::reset_plot_state();
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert_eq!(
             gcf_builtin().unwrap_err().identifier(),
             Some("RunMat:gcf:TooManyOutputs")
         );
         assert!(state::current_figure_handle_if_exists().is_none());
     }
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     gcf_builtin().unwrap();
     assert!(state::current_figure_handle_if_exists().is_some());
 }

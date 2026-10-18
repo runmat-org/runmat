@@ -727,7 +727,7 @@ mod tests {
             .expect("integer X");
         let y =
             Tensor::new_integer(IntegerStorage::U64(vec![1, 2]), vec![1, 2]).expect("integer Y");
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let Value::OutputList(values) =
             peaks_builtin(vec![Value::Tensor(x), Value::Tensor(y)]).expect("peaks")
         else {
@@ -759,7 +759,7 @@ mod tests {
             Tensor::new_integer(IntegerStorage::I16(vec![0, 1, 2, 3]), vec![2, 2])
                 .expect("integer Y"),
         );
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let Value::OutputList(values) = peaks_builtin(vec![x, y]).expect("broadcast peaks") else {
             panic!("expected three outputs");
         };
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     fn peaks_too_many_outputs_errors() {
         // Simulate [a,b,c,d] = peaks() — out_count = 4 must be rejected.
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let err = peaks_builtin(vec![]).unwrap_err();
         assert!(
             err.to_string().contains("too many output arguments"),

@@ -19,8 +19,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::execution::{
-    ExecutionStats, ExecutionStreamEntry, ExecutionStreamKind, InputRequest, InputRequestKind,
-    InputResponse, SharedAsyncInputHandler, StdinEvent, StdinEventKind,
+    ExecutionStats, InputRequest, InputRequestKind, InputResponse, SharedAsyncInputHandler,
+    StdinEvent, StdinEventKind,
 };
 use crate::fusion::{build_fusion_snapshot, FusionPlanSnapshot};
 use crate::profiling::execution_profiling;

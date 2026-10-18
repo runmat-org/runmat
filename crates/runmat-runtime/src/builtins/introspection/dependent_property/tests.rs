@@ -41,7 +41,7 @@ fn backing_fields_preserve_wide_integer_and_nested_resident_payloads() {
 
 #[test]
 fn output_bounds_precede_receiver_validation() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         block_on(get_p_builtin(Value::Num(1.0)))
             .unwrap_err()

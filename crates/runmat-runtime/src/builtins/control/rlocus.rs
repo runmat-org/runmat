@@ -938,7 +938,7 @@ mod tests {
     fn explicit_gain_returns_closed_loop_roots_and_gains() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
         let gains = Value::Tensor(Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap());
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_rlocus(sys, vec![gains]).expect("rlocus");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -979,7 +979,7 @@ mod tests {
         let gains = Value::Tensor(
             Tensor::new_integer(IntegerStorage::U16(vec![0, 1, 3]), vec![1, 3]).unwrap(),
         );
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_rlocus(sys, vec![gains]).expect("rlocus");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -1089,7 +1089,7 @@ mod tests {
     #[test]
     fn statement_form_plots_without_error() {
         let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let result = run_rlocus(sys, Vec::new()).expect("rlocus");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
@@ -1104,8 +1104,8 @@ mod tests {
 
         let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
         let malformed_tf = Value::Object(ObjectInstance::new("tf".to_string()));
-        let _output_guard = crate::output_count::push_output_count(Some(0));
-
+        let _output_guard =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let err = run_rlocus(sys, vec![malformed_tf]).expect_err("second system should fail");
         assert!(err.message().contains("missing"));
         assert!(!crate::builtins::plotting::state::current_hold_enabled());
@@ -1122,8 +1122,8 @@ mod tests {
 
         let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
         let malformed_tf = Value::Object(ObjectInstance::new("tf".to_string()));
-        let _output_guard = crate::output_count::push_output_count(Some(0));
-
+        let _output_guard =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let err = run_rlocus(sys, vec![malformed_tf]).expect_err("second system should fail");
         assert!(err.message().contains("missing"));
         assert!(crate::builtins::plotting::state::current_hold_enabled());

@@ -7,6 +7,8 @@ use crate::builtins::math::linalg::factor::qz::riccati::RiccatiFactorization;
 use crate::BuiltinResult;
 use num_complex::Complex64;
 
+pub(super) const RESIDUAL_TOLERANCE: f64 = 1.0e-7;
+
 pub(super) fn validate_solution(
     factor: RiccatiFactorization,
     domain: LqrDomain,
@@ -23,22 +25,23 @@ pub(super) fn validate_solution(
     if !s.iter().all(|value| value.is_finite()) {
         return Err(failed(api, "Riccati solution is nonfinite"));
     }
-    let k = match domain {
-        LqrDomain::Continuous => {
-            let r_inv = r
-                .clone()
-                .try_inverse()
-                .ok_or_else(|| failed(api, "R is singular"))?;
-            r_inv * (b.transpose() * &s + n.transpose())
-        }
+    let (mut denominator, mut k) = match domain {
+        LqrDomain::Continuous => (r, b.transpose() * &s + n.transpose()),
         LqrDomain::Discrete => {
             let denominator = &r + b.transpose() * &s * &b;
-            let inverse = denominator
-                .try_inverse()
-                .ok_or_else(|| failed(api, "R + B' * S * B is singular at the Riccati solution"))?;
-            inverse * (b.transpose() * &s * &a + n.transpose())
+            (denominator, b.transpose() * &s * &a + n.transpose())
         }
     };
+    let m = k.nrows();
+    let states = k.ncols();
+    super::gain::solve_in_place(
+        denominator.as_mut_slice(),
+        k.as_mut_slice(),
+        m,
+        states,
+        api,
+        || Ok(()),
+    )?;
     if !k.iter().all(|value| value.is_finite()) {
         return Err(failed(api, "Riccati feedback gain is nonfinite"));
     }
@@ -72,7 +75,10 @@ pub(super) fn validate_solution(
         }
     };
     let residual_norm = max_abs_matrix(&residual);
-    if !scale.is_finite() || !residual_norm.is_finite() || residual_norm > 1.0e-7 * scale {
+    if !scale.is_finite()
+        || !residual_norm.is_finite()
+        || residual_norm > RESIDUAL_TOLERANCE * scale
+    {
         return Err(failed(api, "Riccati residual is nonfinite or too large"));
     }
     let closed_loop = &a - &b * &k;
@@ -94,7 +100,7 @@ pub(super) fn validate_solution(
     })
 }
 
-fn stable(pole: Complex64, domain: LqrDomain) -> bool {
+pub(super) fn stable(pole: Complex64, domain: LqrDomain) -> bool {
     if !pole.re.is_finite() || !pole.im.is_finite() {
         return false;
     }

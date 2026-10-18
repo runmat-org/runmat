@@ -36,7 +36,7 @@ fn cla_invalid_syntax_and_strict_output_reject_before_creation() {
     assert!(cla_builtin(vec![Value::String("bad".into())]).is_err());
     assert!(current_figure_handle_if_exists().is_none());
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _output = crate::output_count::push_output_count(Some(1));
+    let _output = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     assert!(cla_builtin(vec![]).is_err());
     assert!(current_figure_handle_if_exists().is_none());
 }

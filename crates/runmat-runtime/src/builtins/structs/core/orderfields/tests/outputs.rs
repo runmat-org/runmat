@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn returns_permutation_as_second_output() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let input = structure(&[("z", 1.0.into()), ("x", 2.0.into()), ("y", 3.0.into())]);
     let Value::OutputList(outputs) = call(Value::Struct(input), Vec::new()).unwrap() else {
         panic!("expected output list")
@@ -17,7 +17,7 @@ fn returns_permutation_as_second_output() {
 
 #[test]
 fn zero_outputs_returns_empty_output_list() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let input = structure(&[("a", 1.0.into())]);
     assert_eq!(
         call(Value::Struct(input), Vec::new()).unwrap(),
@@ -27,7 +27,7 @@ fn zero_outputs_returns_empty_output_list() {
 
 #[test]
 fn one_field_permutation_uses_the_double_scalar_carrier() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let input = structure(&[("only", 1.0.into())]);
     let Value::OutputList(outputs) = call(Value::Struct(input), Vec::new()).unwrap() else {
         panic!("expected output list")

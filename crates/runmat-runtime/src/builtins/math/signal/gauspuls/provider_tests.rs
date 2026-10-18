@@ -12,7 +12,7 @@ fn resident_samples_gather_to_host_for_each_requested_component() {
                 shape: &[1, 2],
             })
             .unwrap();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = block_on(gauspuls_builtin(Value::GpuTensor(handle.clone()), vec![])).unwrap();
         let Value::OutputList(outputs) = result else {
             panic!("components")

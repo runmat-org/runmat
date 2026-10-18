@@ -85,7 +85,7 @@ async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
 
     if !lines.is_empty() {
         let body = lines.join("\n");
-        record_console_line(ConsoleStream::Stdout, body);
+        record_console_line(ConsoleStream::Stdout, body)?;
     }
 
     Ok(empty_return_value())

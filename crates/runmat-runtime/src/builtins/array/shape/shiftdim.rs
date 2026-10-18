@@ -831,7 +831,7 @@ mod tests {
 
     #[test]
     fn two_output_form_reports_removed_leading_dimensions() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 1, 3]).unwrap();
         let output = call(Value::Tensor(input), None).unwrap();
         let Value::OutputList(values) = output else {
@@ -859,7 +859,7 @@ mod tests {
                 Some("RunMat:shiftdim:InvalidShift")
             );
         }
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = call(Value::Num(1.0), Some(Value::Num(1.0))).unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),

@@ -5,7 +5,7 @@ use runmat_value::{IntValue, Value};
 #[test]
 fn requested_output_admission_preserves_discard_and_single_output() {
     for count in [None, Some(0), Some(1)] {
-        let _outputs = crate::output_count::push_output_count(count);
+        let _outputs = crate::output_count::push_output_count(count).expect("output-count scope");
         assert_eq!(
             block_on(idivide_builtin(vec![
                 Value::Int(IntValue::I16(6)),
@@ -15,7 +15,7 @@ fn requested_output_admission_preserves_discard_and_single_output() {
             Value::Int(IntValue::I16(3)),
         );
     }
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(idivide_builtin(vec![
         Value::Int(IntValue::I16(6)),
         Value::Int(IntValue::I16(2)),

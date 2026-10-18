@@ -16,7 +16,7 @@ pub(super) const SPEC: Spec = Spec {
 #[runtime_builtin(
     name = "atand",
     binding_variant = "default",
-    builtin_path = "crate::builtins::math::trigonometry::inverse_degree::atand"
+    builtin_path = "crate::builtins::math::trigonometry::inverse_degree"
 )]
 async fn atand_builtin(value: Value) -> crate::BuiltinResult<Value> {
     execute(&SPEC, value).await

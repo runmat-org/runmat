@@ -153,7 +153,7 @@ fn resident_integer_x_and_start_each_download_once() {
     let provider = CountingProvider::new();
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let x = Tensor::new_integer(
         runmat_value::IntegerStorage::U64(vec![0, 1, 9, 10]),
         vec![4, 1],

@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use serde::{Deserialize, Serialize};
 
 use super::{
@@ -71,24 +69,9 @@ impl ExecutableUnitManifest {
                 format!("{}: {}", error.path, error.message),
             )
         })?;
-        let region_ids = self
-            .regions
-            .iter()
-            .map(|region| region.id)
-            .collect::<BTreeSet<_>>();
-        if self
-            .parallel
-            .parfor_regions
-            .iter()
-            .map(|region| region.id.0)
-            .chain(self.parallel.spmd_regions.iter().map(|region| region.id.0))
-            .any(|region| !region_ids.contains(&region))
-        {
-            return Err(ContractError::invalid(
-                "executable.parallel.regions",
-                "every parallel construct must name a declared region contract",
-            ));
-        }
+        // `regions` are independently discovered pure-operation runs. A
+        // structured parfor/SPMD body has its own contract in `parallel` and
+        // must not be identified by a coincident pure-run ordinal.
         if (!self.interop.foreign_types.is_empty() || !self.interop.adapters.is_empty())
             && !self
                 .capabilities

@@ -683,10 +683,11 @@ impl QuadratureEvaluator for QuadEvaluator<'_> {
         b: f64,
         estimate: &ScaledEstimate,
         error: &ScaledEstimate,
-    ) {
+    ) -> BuiltinResult<()> {
         if let Some(trace) = self.trace.as_mut() {
-            trace.record(evals, a, b, estimate.trace_f64(), error.trace_f64());
+            trace.record(evals, a, b, estimate.trace_f64(), error.trace_f64())?;
         }
+        Ok(())
     }
 }
 
@@ -717,14 +718,21 @@ async fn call_integrand(
 struct QuadTrace;
 
 impl QuadTrace {
-    fn record(&mut self, func_count: usize, a: f64, b: f64, q: f64, _err: f64) {
+    fn record(
+        &mut self,
+        func_count: usize,
+        a: f64,
+        b: f64,
+        q: f64,
+        _err: f64,
+    ) -> BuiltinResult<()> {
         crate::console::record_console_line(
             crate::console::ConsoleStream::Stdout,
             format!(
                 "    {func_count:>5}    {a:13.6e} {width:13.6e} {q:13.6e}",
                 width = b - a,
             ),
-        );
+        )
     }
 }
 
@@ -809,7 +817,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let result = block_on(runtime.scope(quad_builtin(
             integrand,
@@ -826,7 +835,7 @@ mod tests {
 
     #[test]
     fn quad_two_outputs_include_function_count() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(quad_builtin(
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),
@@ -856,10 +865,13 @@ mod tests {
         .expect("quad");
         assert!(matches!(result, Value::Num(_)));
 
-        let joined = crate::console::take_thread_buffer()
-            .into_iter()
-            .map(|entry| entry.text)
-            .collect::<String>();
+        let joined = crate::console::take_thread_buffer().into_iter().fold(
+            String::new(),
+            |mut text, entry| {
+                text.push_str(entry.text.as_str());
+                text
+            },
+        );
         let first_row: Vec<&str> = joined
             .lines()
             .next()
@@ -976,7 +988,8 @@ mod tests {
                     crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(x))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let parameter =
             Tensor::new_integer(IntegerStorage::U64(vec![expected]), vec![1, 1]).unwrap();
 
@@ -1065,7 +1078,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let result = block_on(runtime.scope(quad_builtin(
             integrand,
@@ -1116,7 +1130,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let result = block_on(runtime.scope(quad_builtin(
             integrand,
@@ -1148,7 +1163,7 @@ mod tests {
 
     #[test]
     fn quad_rejects_more_than_two_outputs() {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = block_on(quad_builtin(
             Value::FunctionHandle("sin".into()),
             Value::Num(0.0),

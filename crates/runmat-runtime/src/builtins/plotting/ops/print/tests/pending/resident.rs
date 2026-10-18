@@ -47,7 +47,8 @@ fn resident_handle_selects_scene_after_pending_gather_then_retains_it_through_ex
     });
     let _selected_filesystem = fs::replace_provider(provider.clone());
     let runtime = selected_runtime();
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [Value::GpuTensor(handle), Value::from("/resident.png")];
     let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(download_started_receiver, call.as_mut());
@@ -142,7 +143,8 @@ fn wide_resident_integer_handle_uses_one_authenticated_download() {
     });
     let _selected_filesystem = fs::replace_provider(provider.clone());
     let runtime = selected_runtime();
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [Value::GpuTensor(handle), Value::from("/integer.png")];
     let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(download_started_receiver, call.as_mut());
@@ -217,7 +219,8 @@ fn cancelled_pending_resident_gather_has_no_stage_or_download_replay() {
     );
     runtime.set_language_mode(crate::context::RuntimeLanguageMode::RunMat);
     runtime.set_runmat_extensions_enabled(true);
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [
         Value::GpuTensor(handle),
         Value::from("/cancelled-gather.png"),

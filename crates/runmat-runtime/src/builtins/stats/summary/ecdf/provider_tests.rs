@@ -255,7 +255,7 @@ fn unavailable_ecdf_statement_form_does_not_download_resident_inputs() {
         .owner
         .allocate_zeroed(vec![4, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let invalid = block_on(ecdf_builtin(vec![
         Value::GpuTensor(allocation.handle.clone()),
         Value::from("Alpha"),
@@ -422,7 +422,7 @@ fn resident_frequency_alias_on_second_output_preserves_borrowed_control_and_clea
         .allocate_zeroed(vec![3, 1], NumericElementType::F64, GpuTensorStorage::Real)
         .unwrap();
     *provider.borrowed_alias.lock().unwrap() = Some(frequency.handle.clone());
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(ecdf_builtin(vec![
         Value::GpuTensor(sample.handle.clone()),
         Value::from("Frequency"),

@@ -16,7 +16,7 @@ async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let input = input::Input::parse(&args)?;
     let records = query::execute(input).await?;
     if output::should_emit_stdout() {
-        output::emit(&records);
+        output::emit(&records)?;
     }
     output::value(records)
 }

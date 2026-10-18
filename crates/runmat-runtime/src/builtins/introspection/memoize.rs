@@ -1419,7 +1419,8 @@ mod tests {
                     future.await
                 })
             },
-        ));
+        ))
+        .expect("call-port scope");
         let value = block_on(memoize_builtin(Value::BoundFunctionHandle(
             runmat_value::BoundFunctionHandle::from_data(runmat_value::BoundFunctionHandleData {
                 name: "step".into(),
@@ -1689,7 +1690,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let (f, _bound) = memoized();
         let runtime = exact_memoized_runtime();
 
@@ -1712,7 +1714,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let (f, _bound) = memoized();
         let runtime = exact_memoized_runtime();
 
@@ -1732,11 +1735,11 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let (f, _bound) = memoized();
         let runtime = exact_memoized_runtime();
-        let _caller = crate::output_count::push_output_count(Some(7));
-
+        let _caller = crate::output_count::push_output_count(Some(7)).expect("output-count scope");
         for _ in 0..2 {
             for (count, expected) in [
                 (1, Value::Num(3.0)),
@@ -1763,9 +1766,10 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let (f, _bound) = memoized();
-        let _caller = crate::output_count::push_output_count(Some(7));
+        let _caller = crate::output_count::push_output_count(Some(7)).expect("output-count scope");
         let runtime = exact_memoized_runtime();
         let invalid = call_feval_fixture(
             &runtime,
@@ -1785,7 +1789,8 @@ mod tests {
             // runtime's inventory wrappers with independent invoker TLS.
             // Public dispatch is covered by memoize_feval_contract instead.
             let error = {
-                let _requested = crate::output_count::push_output_count(Some(3));
+                let _requested =
+                    crate::output_count::push_output_count(Some(3)).expect("output-count scope");
                 let Value::HandleObject(handle) = &f else {
                     panic!("memoized handle")
                 };
@@ -1840,12 +1845,13 @@ mod tests {
                     futures::future::pending().await
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let f = block_on(memoize_builtin(
             crate::user_functions::test_support::exact_local_value("step", binding),
         ))
         .expect("memoized function");
-        let _caller = crate::output_count::push_output_count(Some(7));
+        let _caller = crate::output_count::push_output_count(Some(7)).expect("output-count scope");
         let args = [Value::Num(2.0)];
         let mut future = Box::pin(
             runtime
@@ -1885,7 +1891,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let (f, _bound) = memoized();
         let runtime = exact_memoized_runtime();
         let Value::HandleObject(handle) = &f else {
@@ -1914,7 +1921,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let (f, _bound) = memoized();
         let runtime = exact_memoized_runtime();
         let Value::HandleObject(handle) = &f else {
@@ -1947,12 +1955,14 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             counting_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let (f, _bound) = memoized();
         let runtime = exact_memoized_runtime();
 
         {
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             let err = block_on(clear_cache_builtin(f.clone())).unwrap_err();
             assert_eq!(err.identifier(), Some("RunMat:clearCache:TooManyOutputs"));
         }
@@ -2085,7 +2095,8 @@ mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         reset_memoize_registry_for_test();
         let _guard =
-            crate::user_functions::install_semantic_function_invoker(Some(echo_first_invoker()));
+            crate::user_functions::install_semantic_function_invoker(Some(echo_first_invoker()))
+                .expect("call-port scope");
         let (f, _bound) = memoized();
         let runtime = exact_memoized_runtime();
         let payload_target = runmat_gc::gc_allocate(Value::Object(ObjectInstance::new(

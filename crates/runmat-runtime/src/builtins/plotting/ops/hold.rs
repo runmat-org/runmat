@@ -89,14 +89,15 @@ mod tests {
         let _lock = crate::builtins::plotting::tests::lock_plot_registry();
         state::reset_plot_state();
         {
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             assert_eq!(
                 hold_builtin(vec![]).unwrap_err().identifier(),
                 Some("RunMat:hold:TooManyOutputs")
             );
             assert!(state::current_figure_handle_if_exists().is_none());
         }
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         hold_builtin(vec![Value::from("on")]).unwrap();
         assert!(state::current_hold_enabled());
         for value in [

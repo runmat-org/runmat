@@ -23,7 +23,7 @@ fn requested_outputs_select_only_the_public_values() {
         (Some(3), 3),
         (Some(4), 4),
     ] {
-        let _guard = crate::output_count::push_output_count(requested);
+        let _guard = crate::output_count::push_output_count(requested).expect("output-count scope");
         let mut restorations = 0;
         let value = finish_selected(RequestedOutputs::current(), eval(), |value, _| {
             restorations += 1;

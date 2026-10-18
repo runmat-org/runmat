@@ -302,7 +302,7 @@ fn reset_rng() -> impl Drop {
 #[tokio::test]
 async fn tsne_embeds_rows_and_returns_loss() {
     let _guard = reset_rng();
-    let _out_guard = crate::output_count::push_output_count(Some(2));
+    let _out_guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = tsne_builtin(
         tensor(vec![0.0, 0.1, 5.0, 5.1, 0.0, 0.1, 5.0, 5.1], vec![4, 2]),
         vec![

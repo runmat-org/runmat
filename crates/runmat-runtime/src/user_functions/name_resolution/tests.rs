@@ -24,11 +24,13 @@ fn dynamic_observation_places_only_scoped_private_semantic_before_native() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             matches!(name, "private_name" | "public_name").then_some(17)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker =
         crate::user_functions::install_semantic_function_invoker(Some(Arc::new(|_, _, _| {
             panic!("observation must not invoke a candidate")
-        })));
+        })))
+        .expect("call-port scope");
     let _scoped =
         crate::user_functions::install_scoped_name_target_resolver(Some(Rc::new(|name| {
             (name == "private_name").then_some(
@@ -36,7 +38,8 @@ fn dynamic_observation_places_only_scoped_private_semantic_before_native() {
                     runmat_types::FunctionId(17),
                 ),
             )
-        })));
+        })))
+        .expect("call-port scope");
     let retired_owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let published_owner = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let _candidates =
@@ -64,7 +67,8 @@ fn dynamic_observation_places_only_scoped_private_semantic_before_native() {
                 "public_name" => vec![fact("/current/public_name.m", Arc::clone(&published_owner))],
                 _ => Vec::new(),
             }
-        })));
+        })))
+        .expect("call-port scope");
     let query = RuntimeNameQuery {
         route: RuntimeNameRoute::DynamicCall,
         filter: RuntimeNameFilter::Any,
@@ -236,11 +240,13 @@ fn registered_static_method_is_later_than_native_and_source_name_routes() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "__observed_static_body__").then_some(55)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker =
         crate::user_functions::install_semantic_function_invoker(Some(Arc::new(|_, _, _| {
             panic!("observation cannot invoke a static method")
-        })));
+        })))
+        .expect("call-port scope");
     let resolution = futures::executor::block_on(observe_runtime_name(
         "ObservedClass.zero",
         RuntimeNameQuery {
@@ -282,11 +288,13 @@ fn semantic_candidates_keep_selected_and_shadowed_order() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "sin").then_some(10)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker =
         crate::user_functions::install_semantic_function_invoker(Some(Arc::new(|_, _, _| {
             panic!("observation cannot invoke a semantic function")
-        })));
+        })))
+        .expect("call-port scope");
     let _observer =
         crate::user_functions::install_semantic_name_candidates(Some(Arc::new(|name| {
             if name == "sin" {
@@ -301,7 +309,8 @@ fn semantic_candidates_keep_selected_and_shadowed_order() {
             } else {
                 Vec::new()
             }
-        })));
+        })))
+        .expect("call-port scope");
     let result = futures::executor::block_on(observe_runtime_name(
         "sin",
         RuntimeNameQuery {
@@ -328,7 +337,8 @@ fn resolver_without_invoker_never_selects_semantic_candidate() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "sin").then_some(10)
-        })));
+        })))
+        .expect("call-port scope");
     let _observer =
         crate::user_functions::install_semantic_name_candidates(Some(Arc::new(|name| {
             if name == "sin" {
@@ -343,8 +353,10 @@ fn resolver_without_invoker_never_selects_semantic_candidate() {
             } else {
                 Vec::new()
             }
-        })));
-    let _invoker = crate::user_functions::install_semantic_function_invoker(None);
+        })))
+        .expect("call-port scope");
+    let _invoker =
+        crate::user_functions::install_semantic_function_invoker(None).expect("call-port scope");
     for route in [RuntimeNameRoute::NamedFeval, RuntimeNameRoute::DynamicCall] {
         let result = futures::executor::block_on(observe_runtime_name(
             "sin",

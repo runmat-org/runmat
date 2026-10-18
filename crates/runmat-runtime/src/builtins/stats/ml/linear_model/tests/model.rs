@@ -61,7 +61,7 @@ fn predict_confidence_intervals_are_column_major() {
     let x = tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1);
     let y = tensor_value(vec![1.0, 3.1, 4.9, 7.0], 4, 1);
     let model = block_on(fitlm_builtin(x, vec![y])).unwrap();
-    let output_count = crate::output_count::push_output_count(Some(2));
+    let output_count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let predicted = block_on(predict_builtin(
         model,
         tensor_value(vec![4.0, 5.0], 2, 1),

@@ -311,7 +311,7 @@ fn resample_dimension_name_value_operates_on_requested_axis() {
 
 #[test]
 fn resample_two_outputs_return_signal_and_filter() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = block_on(resample_builtin(
         tensor(vec![1.0, 2.0, 3.0], vec![3, 1]),
         Value::Num(3.0),
@@ -337,7 +337,7 @@ fn resample_two_outputs_return_signal_and_filter() {
 
 #[test]
 fn resample_default_filter_has_matlab_compatible_length() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = block_on(resample_builtin(
         tensor(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4]),
         Value::Num(4.0),
@@ -388,7 +388,7 @@ fn resample_rejects_invalid_options_and_output_count() {
     .unwrap_err();
     assert_eq!(err.identifier(), SAMPLE_ERROR_INVALID_OPTION.identifier);
 
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = block_on(resample_builtin(
         tensor(vec![1.0, 2.0], vec![1, 2]),
         Value::Num(2.0),

@@ -1368,7 +1368,8 @@ pub(crate) mod tests {
                     shape: &[1, 2],
                 })
                 .expect("upload denominator");
-            let guard = crate::output_count::push_output_count(Some(1));
+            let guard =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             let output = deconv_builtin(Value::GpuTensor(numerator), Value::GpuTensor(denominator))
                 .expect("deconv");
             drop(guard);

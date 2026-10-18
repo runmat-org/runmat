@@ -617,6 +617,13 @@ pub fn admit_executable_unit(
         ))?;
     let registry = serde_json::from_slice(&registry_payload.bytes)
         .map_err(ExecutableUnitAdmissionError::InvalidRegistry)?;
+    crate::validate_compiled_parallel_contracts(
+        &bytecode,
+        &registry,
+        &envelope.manifest.parallel,
+        None,
+    )
+    .map_err(ExecutableUnitAdmissionError::SourceBinding)?;
     validate_class_method_roles(&bytecode, &registry)?;
     let layout_payload = envelope
         .component(ExecutableComponentKind::VmLayout)

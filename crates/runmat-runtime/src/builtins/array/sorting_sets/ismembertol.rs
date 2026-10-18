@@ -1179,8 +1179,7 @@ mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn public_invocation_preserves_rank_zero_rows_and_rank_one_element_geometry() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
-
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero input");
         let Value::OutputList(outputs) = builtin(
             Value::Tensor(rank_zero.clone()),
@@ -1617,7 +1616,8 @@ mod tests {
             let a = Value::GpuTensor(gpu_helpers::upload_tensor(provider, &a).unwrap());
             let b = Value::GpuTensor(gpu_helpers::upload_tensor(provider, &b).unwrap());
             let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let Value::OutputList(outputs) = builtin(a, b, Vec::new()).unwrap() else {
                 panic!("expected output list");
             };
@@ -1641,7 +1641,7 @@ mod tests {
             );
         });
 
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = builtin(Value::Num(1.0), Value::Num(1.0), Vec::new())
             .expect_err("excess outputs must reject");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
@@ -1710,7 +1710,8 @@ mod tests {
                     vec![1, 1]
                 );
 
-                let _outputs = crate::output_count::push_output_count(Some(2));
+                let _outputs =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 let Value::OutputList(outputs) = builtin(
                     Value::GpuTensor(data_handle.clone()),
                     Value::GpuTensor(data_handle),

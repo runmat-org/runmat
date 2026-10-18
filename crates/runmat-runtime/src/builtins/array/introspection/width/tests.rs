@@ -67,7 +67,7 @@ fn resident_shape_requires_no_provider_or_payload_access() {
 
 #[test]
 fn rejects_excess_outputs_with_catalog_error() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = run(Value::Num(1.0)).expect_err("two outputs");
     assert_eq!(error.identifier(), Some("RunMat:width:TooManyOutputs"));
 }

@@ -121,7 +121,7 @@ fn relative_import_reads_from_installed_memory_provider() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn excessive_outputs_reject_before_missing_file_read() {
-    let _requested = crate::output_count::push_output_count(Some(4));
+    let _requested = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let err = block_on(importdata_builtin(
         None,
         Value::from("missing.txt"),
@@ -206,7 +206,7 @@ fn importdata_headerlines_typed_integer_tensors_ignore_poisoned_f64_mirrors() {
 #[test]
 fn importdata_returns_documented_delimiter_and_header_count_outputs() {
     let path = write_fixture("csv", "name,value\na,1\nb,2\n");
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = block_on(importdata_builtin(
         None,
         Value::from(path.to_string_lossy().into_owned()),

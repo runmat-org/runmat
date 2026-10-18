@@ -351,7 +351,7 @@ fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
     let value = query_command(&[])?;
     match &value {
         Value::Cell(cell) => {
-            emit_status_line("Warning status:".to_string());
+            emit_status_line("Warning status:".to_string())?;
             for idx in 0..cell.data.len() {
                 let entry = cell.data[idx].clone();
                 if let Value::Struct(st) = entry {
@@ -365,7 +365,7 @@ fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
                         .get("state")
                         .and_then(|v| value_to_string("warning", v).ok())
                         .unwrap_or_default();
-                    emit_status_line(format!("  {identifier}: {state}"));
+                    emit_status_line(format!("  {identifier}: {state}"))?;
                 }
             }
         }
@@ -380,7 +380,7 @@ fn status_command(rest: &[Value]) -> crate::BuiltinResult<Value> {
                 .get("state")
                 .and_then(|v| value_to_string("warning", v).ok())
                 .unwrap_or_default();
-            emit_status_line(format!("Warning status -> {identifier}: {state}"));
+            emit_status_line(format!("Warning status -> {identifier}: {state}"))?;
         }
         _ => {}
     }
@@ -609,9 +609,9 @@ fn structs_to_cell(states: Vec<WarningState>) -> crate::BuiltinResult<Value> {
         .map_err(|e| warning_default_error(format!("warning: failed to assemble state cell: {e}")))
 }
 
-fn emit_status_line(line: String) {
+fn emit_status_line(line: String) -> crate::BuiltinResult<()> {
     tracing::warn!("{line}");
-    crate::console::record_console_line(crate::console::ConsoleStream::Stderr, line);
+    crate::console::record_console_line(crate::console::ConsoleStream::Stderr, line)
 }
 
 #[cfg(test)]

@@ -231,7 +231,7 @@ async fn system_builtin(
     };
     let result = system::run(runtime.as_ref(), &command).await?;
     if (echo || requested == Some(0)) && !result.1.is_empty() {
-        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, &result.1);
+        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, &result.1)?;
     }
     let outputs = vec![Value::Num(result.0 as f64), char_value(&result.1)];
     if let Some(count) = requested {
@@ -986,7 +986,7 @@ mod tests {
 
     #[test]
     fn memmapfile_rejects_excess_requested_outputs_before_file_access() {
-        let _requested = output_count::push_output_count(Some(2));
+        let _requested = output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = run(memmapfile_builtin(
             None,
             vec![Value::String("definitely-missing-output-count.bin".into())],
@@ -1434,7 +1434,7 @@ mod tests {
         let command = "echo hello";
         #[cfg(not(windows))]
         let command = "printf hello";
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let value = system_builtin(Some(runtime), vec![Value::String(command.to_string())])
             .await
             .unwrap();
@@ -1474,7 +1474,7 @@ mod tests {
 
     #[test]
     fn system_rejects_excess_outputs_before_process_access() {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = run(system_builtin(
             None,
             vec![Value::String("printf should-not-run".to_string())],
@@ -1554,7 +1554,8 @@ mod tests {
         vfs::set_current_dir(&root).unwrap();
 
         for count in 0..=2 {
-            let _outputs = output_count::push_output_count(Some(count));
+            let _outputs =
+                output_count::push_output_count(Some(count)).expect("output-count scope");
             let Value::OutputList(outputs) = run(fileattrib_builtin(vec![
                 Value::String("input.bin".into()),
                 char_value("+w"),
@@ -1571,7 +1572,7 @@ mod tests {
             }
         }
 
-        let _outputs = output_count::push_output_count(Some(3));
+        let _outputs = output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = run(fileattrib_builtin(vec![
             Value::String("input.bin".into()),
             char_value("-w"),
@@ -1665,7 +1666,7 @@ mod tests {
             .unwrap();
         let _installed = vfs::replace_provider(provider);
         vfs::set_current_dir(&root).unwrap();
-        let _outputs = output_count::push_output_count(Some(2));
+        let _outputs = output_count::push_output_count(Some(2)).expect("output-count scope");
         let Value::OutputList(outputs) =
             run(fileattrib_builtin(vec![Value::String("sample.bin".into())])).unwrap()
         else {
@@ -1787,7 +1788,7 @@ mod tests {
         .expect_err("extra mode must fail before cache callback");
         assert_eq!(error.identifier(), Some("RunMat:rehash:InvalidCall"));
         assert_eq!(observed.borrow().len(), 4);
-        let _outputs = output_count::push_output_count(Some(2));
+        let _outputs = output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = run(rehash_builtin(Vec::new()))
             .expect_err("unsupported output count must fail before cache callback");
         assert_eq!(error.identifier(), Some("RunMat:rehash:TooManyOutputs"));

@@ -148,7 +148,7 @@ fn invalid_host_option_precedes_unregistered_predictor_download() {
 
 #[test]
 fn alpha_weights_and_fitinfo_output_are_supported() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let x = tensor(
         vec![
             0.0, 1.0, 2.0, 3.0, //
@@ -284,7 +284,7 @@ fn lasso_positive_usize_parses_integer_bounds_exactly() {
 
 #[test]
 fn cross_validation_adds_minimum_error_fields() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let x = tensor(
         vec![
             0.0, 1.0, 2.0, 3.0, 4.0, 5.0, //
@@ -317,7 +317,7 @@ fn cross_validation_adds_minimum_error_fields() {
 
 #[test]
 fn dfmax_filters_cv_fields_consistently() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let x = tensor(
         vec![
             0.0, 1.0, 2.0, 3.0, 4.0, 5.0, //
@@ -364,7 +364,7 @@ fn dfmax_filters_cv_fields_consistently() {
 
 #[test]
 fn omitted_predictor_names_and_use_covariance_report_actual_state() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let x = tensor(
         vec![
             0.0, 1.0, 2.0, 3.0, //

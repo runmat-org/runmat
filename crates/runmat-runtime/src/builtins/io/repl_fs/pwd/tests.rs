@@ -75,7 +75,7 @@ fn rejects_arguments_with_stable_error() {
 
 #[test]
 fn rejects_multiple_outputs_before_query() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         call(Vec::new()).unwrap_err().identifier(),
         Some("RunMat:pwd:TooManyOutputs")

@@ -297,7 +297,7 @@ pub(in crate::builtins::deep_learning::supervised) async fn train(
         }
         let epoch_loss = epoch_loss / seen as f64;
         losses.push(epoch_loss);
-        progress::epoch(epoch + 1, config.max_epochs, epoch_loss, config.verbose);
+        progress::epoch(epoch + 1, config.max_epochs, epoch_loss, config.verbose)?;
     }
     admit_training_cancellation(runtime, function)?;
     attach_training_result(

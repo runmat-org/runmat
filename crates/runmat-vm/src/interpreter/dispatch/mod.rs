@@ -61,7 +61,7 @@ pub struct DispatchMeta<'a> {
     pub var_names: &'a HashMap<usize, String>,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
-    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub call_arg_spans: Option<runmat_runtime::callsite::CallsiteSpans>,
     pub invocation_arity: runmat_runtime::context::RuntimeInvocationArity,
     pub current_function_name: &'a str,
 }

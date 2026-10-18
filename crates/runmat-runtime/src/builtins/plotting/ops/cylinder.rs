@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn output_count_and_empty_profile_preserve_shapes() {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = block_on(cylinder_builtin(vec![Value::Num(2.0), Value::Num(4.0)])).unwrap();
         let Value::OutputList(outputs) = result else {
             panic!("expected XYZ")
@@ -329,7 +329,7 @@ mod tests {
     fn statement_form_publishes_surface_without_outputs() {
         let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
         crate::builtins::plotting::reset_plot_state();
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let result = block_on(cylinder_builtin(vec![Value::Num(2.0), Value::Num(8.0)]))
             .expect("cylinder plot");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));

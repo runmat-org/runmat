@@ -512,7 +512,7 @@ mod tests {
 
     #[test]
     fn requested_outputs_reject_before_invalid_input_or_provider_access() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         for (name, result) in [
             ("gzip", run(gzip_builtin(None, vec![Value::Num(1.0)]))),
             ("gunzip", run(gunzip_builtin(None, vec![Value::Num(1.0)]))),

@@ -149,7 +149,7 @@ fn fillmissing_rejects_more_than_two_outputs_before_resident_download() {
             runmat_accelerate_api::GpuTensorStorage::Real,
         )
         .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let error = block_on(fillmissing_builtin(
         Value::GpuTensor(allocation.handle.clone()),
         vec![Value::from("constant"), Value::Num(0.0)],
@@ -206,7 +206,7 @@ fn fillmissing_integer_data_is_gated_and_all_classes_are_exact_noops() {
             );
         }
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let output = block_on(fillmissing_builtin(
             input,
             vec![Value::from("constant"), Value::Num(0.0)],
@@ -514,7 +514,7 @@ fn fillmissing_nearest_uses_original_neighbors() {
 
 #[test]
 fn fillmissing_mask_marks_only_entries_actually_filled() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = tensor(vec![f64::NAN, 2.0, 3.0], vec![3, 1]);
     let output = block_on(fillmissing_builtin(value, vec![Value::from("previous")])).unwrap();
     let Value::OutputList(values) = output else {

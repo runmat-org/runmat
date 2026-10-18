@@ -386,7 +386,8 @@ mod tests {
                 crate::user_functions::test_support::install_bound_forwarder(binding.clone());
             let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
                 cleanup_invoker(Arc::clone(&counter)),
-            ));
+            ))
+            .expect("call-port scope");
             let cleanup = crate::builtins::introspection::on_cleanup::on_cleanup_builtin(
                 crate::user_functions::test_support::exact_local_value("cleanup", binding),
             )
@@ -451,7 +452,8 @@ mod tests {
                             .map_err(|error| error.into_runtime_error())
                     })
                 }),
-            ));
+            ))
+            .expect("call-port scope");
             let cleanup = crate::builtins::introspection::on_cleanup::on_cleanup_builtin(
                 crate::user_functions::test_support::exact_local_value("cleanup", binding),
             )

@@ -32,7 +32,8 @@ fn retained_generated_invocation_releases_suspended_work_on_cancel_or_resume_aba
                         .map_err(|error| *error)
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
         drop(activation);
         let executor = compile_executor(fixtures::caught_capture_fixture()).unwrap();
         let mut invocation = executor

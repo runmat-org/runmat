@@ -31,7 +31,7 @@ fn exact_origin_resolves_relocated_id_not_reused_numeric_id() {
             definition_owners: None,
         },
     ]);
-    let _catalog = install_source_function_catalog(Some(catalog));
+    let _catalog = install_source_function_catalog(Some(catalog)).expect("call-port scope");
     assert_eq!(resolve_binding_origin(original), Some(77));
     assert_eq!(resolve_binding_origin(unrelated), Some(3));
     assert_eq!(
@@ -67,7 +67,8 @@ fn exact_origin_binding_owns_the_selected_definition_graph() {
             (41, Arc::clone(&root)),
             (42, Arc::clone(&helper)),
         ])),
-    }])));
+    }])))
+    .expect("call-port scope");
 
     let binding = resolve_binding_origin_binding(origin).expect("exact binding");
     let copied = binding.clone();
@@ -100,7 +101,8 @@ fn exact_origin_binding_owns_the_selected_definition_graph() {
                 crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
                     .map_err(|error| error.into_runtime_error())
             })
-        }));
+        }))
+        .expect("call-port scope");
     let result = futures::executor::block_on(try_call_bound_function(copied.clone(), &[], 0))
         .expect("bound route is installed");
     assert!(
@@ -146,7 +148,8 @@ fn selected_execution_facts_resolve_only_their_exact_origins() {
         source_file: Some("/old/same_id.m".into()),
         definition_owners: Some(Arc::new(vec![(9, Arc::clone(&old_owner))])),
     };
-    let _catalog = install_source_function_catalog(Some(Arc::new(vec![published])));
+    let _catalog =
+        install_source_function_catalog(Some(Arc::new(vec![published]))).expect("call-port scope");
     let selected_old = old.clone();
     let old_group = old.clone();
     let old_by_origin = old.clone();
@@ -160,7 +163,8 @@ fn selected_execution_facts_resolve_only_their_exact_origins() {
         }),
         Rc::new(|_| None),
         Rc::new(move |origin| (origin == old_origin).then(|| old_by_origin.clone())),
-    ))));
+    ))))
+    .expect("call-port scope");
     assert_eq!(
         source_function_for(9).unwrap().role,
         runmat_types::FunctionSourceRole::Local
@@ -198,7 +202,8 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
         definition_owners: Some(Arc::new(vec![(9, new_owner)])),
     };
     let entry = runtime.enter();
-    let catalog = install_source_function_catalog(Some(Arc::new(vec![published])));
+    let catalog =
+        install_source_function_catalog(Some(Arc::new(vec![published]))).expect("call-port scope");
     let old_group = old.clone();
     let execution = install_execution_source_resolver(Some(Rc::new(ExecutionSourceFacts::new(
         Rc::new(move |function| (function == 9).then(|| old.clone())),
@@ -210,7 +215,8 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
         }),
         Rc::new(|_| None),
         Rc::new(|_| None),
-    ))));
+    ))))
+    .expect("call-port scope");
     let Value::BoundFunctionHandle(handle) = bound_function_handle("reused".into(), 9) else {
         panic!("bound handle");
     };
@@ -237,7 +243,8 @@ fn selected_old_definition_issues_old_owner_under_one_runtime() {
                 crate::execution::RootedValueSequence::new(runmat_value::ValueSequence::empty())
                     .map_err(|error| error.into_runtime_error())
             })
-        }));
+        }))
+        .expect("call-port scope");
     let result = futures::executor::block_on(try_call_bound_function(
         runmat_value::BoundFunctionBinding {
             function: 9,
@@ -269,7 +276,7 @@ fn legacy_entry_context_inherits_exact_bound_invoker() {
             })
         },
     );
-    let _guard = install_local_bound_function_invoker(exact);
+    let _guard = install_local_bound_function_invoker(exact).expect("call-port scope");
     let context = crate::context::RuntimeContext::new(Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
@@ -310,7 +317,8 @@ fn selected_bound_future_roots_arguments_until_drop() {
                         .map_err(|error| error.into_runtime_error())
                 })
             },
-        ));
+        ))
+        .expect("call-port scope");
         drop(entry);
 
         let initial = runmat_gc::gc_allocate_rooted(Value::String("argument".into()))

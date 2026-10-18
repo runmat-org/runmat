@@ -426,7 +426,7 @@ mod tests {
     #[test]
     fn plotyy_returns_three_outputs_when_requested() {
         let _guard = setup();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let out = block_on(plotyy_builtin(vec![
             tensor(&[1.0, 2.0]),
             tensor(&[3.0, 4.0]),

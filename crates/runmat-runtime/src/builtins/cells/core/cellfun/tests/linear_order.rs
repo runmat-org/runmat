@@ -22,12 +22,14 @@ fn asymmetric_uniform_and_cell_multioutputs_keep_linear_positions() {
                 .and_then(rooted_sequence)
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     for shape in [vec![2, 2], vec![2, 2, 2]] {
         let len = shape.iter().product::<usize>();
         let linear = (1..=len).map(|n| Value::Num(n as f64)).collect::<Vec<_>>();
         for uniform in [true, false] {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let result = call(
                 crate::user_functions::test_support::exact_local_value("position", binding.clone()),
                 vec![
@@ -98,7 +100,8 @@ fn handler_context_refers_to_the_original_column_major_element() {
                         .and_then(rooted_sequence)
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let linear = (1..=shape.iter().product::<usize>())
             .map(|n| Value::Num(n as f64))
             .collect::<Vec<_>>();

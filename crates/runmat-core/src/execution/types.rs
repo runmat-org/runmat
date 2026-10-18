@@ -49,19 +49,8 @@ pub enum InputResponse {
     KeyPress,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ExecutionStreamKind {
-    Stdout,
-    Stderr,
-    ClearScreen,
-}
-
-#[derive(Debug, Clone)]
-pub struct ExecutionStreamEntry {
-    pub stream: ExecutionStreamKind,
-    pub text: String,
-    pub timestamp_ms: u64,
-}
+pub type ExecutionStreamKind = runmat_runtime::console::ConsoleStream;
+pub type ExecutionStreamEntry = runmat_runtime::console::ConsoleEntry;
 
 #[derive(Debug, Clone, Default)]
 pub struct ExecutionProfiling {
@@ -88,7 +77,7 @@ pub struct SessionExecutionResult {
     /// Type information displayed when output is suppressed by semicolon
     pub type_info: Option<String>,
     /// Ordered console output (stdout/stderr) captured during execution.
-    pub streams: Vec<ExecutionStreamEntry>,
+    pub streams: runmat_runtime::console::CapturedConsoleEntries,
     /// Workspace metadata for variables touched during this execution.
     pub workspace: WorkspaceSnapshot,
     /// Figure handles that were mutated during this execution.

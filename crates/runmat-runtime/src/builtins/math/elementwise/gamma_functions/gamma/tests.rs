@@ -21,7 +21,7 @@ fn approx_eq(actual: f64, expected: f64, tolerance: f64) {
 
 #[test]
 fn rejects_excess_outputs() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = call(Value::Num(0.5), Vec::new()).expect_err("second output must reject");
     assert_eq!(error.identifier(), GAMMA_ERROR_TOO_MANY_OUTPUTS.identifier);
 }

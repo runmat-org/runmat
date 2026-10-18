@@ -337,7 +337,7 @@ pub fn dynamic_property_read(obj: &ObjectInstance, name: &str) -> BuiltinResult<
         if !projection.receiver_member_accessible(
             &def.defining_class,
             def.get_access,
-            crate::dispatcher::class_access_context().as_ref(),
+            crate::dispatcher::class_access_context().as_deref(),
         ) {
             return Err(dynamic_error(
                 "getfield",

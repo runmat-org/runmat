@@ -32,14 +32,16 @@ fn bsxfun_does_not_logicalize_shadowed_callback_names() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "gt").then_some(17)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |_function, _args, _requested_outputs| {
             Box::pin(async move {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(2.0))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = call(
         Value::FunctionHandle("gt".into()),
         Value::Num(10.0),
@@ -77,7 +79,8 @@ fn bsxfun_invokes_bound_function_for_each_broadcasted_pair() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let column = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
     let row = Tensor::new(vec![10.0, 20.0, 30.0], vec![1, 3]).unwrap();
     let result = call(
@@ -112,7 +115,8 @@ fn bsxfun_rejects_non_scalar_callback_output() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let err = call(
         crate::user_functions::test_support::exact_local_value("bad", binding),
         Value::Num(1.0),

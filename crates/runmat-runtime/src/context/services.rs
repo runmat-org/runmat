@@ -469,7 +469,7 @@ pub enum HostInteraction {
 }
 
 pub trait RuntimeHostService {
-    fn console(&self, stream: crate::console::ConsoleStream, text: String);
+    fn console(&self, stream: crate::console::ConsoleStream, text: crate::console::ConsoleText);
 
     fn interact(
         &self,

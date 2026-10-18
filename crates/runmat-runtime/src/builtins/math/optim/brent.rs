@@ -56,7 +56,7 @@ pub(crate) trait BrentMinObserver {
         x: f64,
         fx: f64,
         step_kind: BrentStepKind,
-    );
+    ) -> crate::BuiltinResult<()>;
 }
 
 /// Per-iteration hook used for scalar root-finding `Display = 'iter'` output.
@@ -68,7 +68,7 @@ pub(crate) trait BrentZeroObserver {
         x: f64,
         fx: f64,
         step_kind: BrentZeroStepKind,
-    );
+    ) -> crate::BuiltinResult<()>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -136,7 +136,7 @@ pub(crate) async fn brent_zero(
     let mut evals = bracket.evals;
 
     if let Some(observer) = observer.as_deref_mut() {
-        observer.on_iteration(0, evals, b, fb, BrentZeroStepKind::Initial);
+        observer.on_iteration(0, evals, b, fb, BrentZeroStepKind::Initial)?;
     }
 
     for iter in 1..=params.max_iter {
@@ -224,7 +224,7 @@ pub(crate) async fn brent_zero(
         evals += 1;
 
         if let Some(observer) = observer.as_deref_mut() {
-            observer.on_iteration(iter, evals, b, fb, step_kind);
+            observer.on_iteration(iter, evals, b, fb, step_kind)?;
         }
         if fb == 0.0 {
             return Ok(BrentZeroResult {
@@ -313,7 +313,7 @@ pub(crate) async fn brent_min(
         let fx = call_scalar_function(name, OptimSolver::Fminbnd, function, x).await?;
         cooperation.completed(0).await?;
         if let Some(observer) = observer.as_deref_mut() {
-            observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial);
+            observer.on_iteration(0, 1, x, fx, BrentStepKind::Initial)?;
         }
         return Ok(BrentMinResult {
             x,
@@ -336,7 +336,7 @@ pub(crate) async fn brent_min(
     let mut e = 0.0_f64;
 
     if let Some(observer) = observer.as_deref_mut() {
-        observer.on_iteration(0, func_count, x, fx, BrentStepKind::Initial);
+        observer.on_iteration(0, func_count, x, fx, BrentStepKind::Initial)?;
     }
 
     for iter in 1..=params.max_iter {
@@ -437,7 +437,7 @@ pub(crate) async fn brent_min(
         }
 
         if let Some(observer) = observer.as_deref_mut() {
-            observer.on_iteration(iter, func_count, x, fx, step_kind);
+            observer.on_iteration(iter, func_count, x, fx, step_kind)?;
         }
     }
 

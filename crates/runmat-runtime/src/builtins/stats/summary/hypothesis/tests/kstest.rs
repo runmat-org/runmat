@@ -2,7 +2,7 @@ use super::*;
 #[test]
 fn kstest_default_normal_accepts_centered_sample() {
     let sample = Value::Tensor(Tensor::new(vec![-1.0, -0.25, 0.0, 0.25, 1.0], vec![5, 1]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(block_on(kstest_builtin(sample, Vec::new())).unwrap());
     assert_eq!(outputs[0], Value::Bool(false));
     match outputs[1] {
@@ -22,7 +22,7 @@ fn kstest_default_normal_accepts_centered_sample() {
 #[test]
 fn kstest_rejects_shifted_sample_and_supports_tail() {
     let sample = Value::Tensor(Tensor::new(vec![2.0, 2.5, 3.0, 3.5, 4.0], vec![5, 1]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(
         block_on(kstest_builtin(
             sample,
@@ -42,7 +42,7 @@ fn kstest_rejects_shifted_sample_and_supports_tail() {
     }
 
     let sample = Value::Tensor(Tensor::new(vec![-4.0, -3.5, -3.0, -2.5], vec![4, 1]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(
         block_on(kstest_builtin(
             sample,
@@ -61,7 +61,7 @@ fn kstest_rejects_shifted_sample_and_supports_tail() {
 fn kstest_accepts_two_column_cdf_table() {
     let sample = Value::Tensor(Tensor::new(vec![0.2, 0.4, 0.6, 0.8], vec![4, 1]).unwrap());
     let cdf = Value::Tensor(Tensor::new(vec![0.0, 0.5, 1.0, 0.0, 0.5, 1.0], vec![3, 2]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs =
         output_list(block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap());
     assert_eq!(outputs[0], Value::Bool(false));
@@ -74,7 +74,7 @@ fn kstest_accepts_two_column_cdf_table() {
     let unsorted_cdf = Value::Tensor(
         Tensor::new(vec![1.0, 0.0, 0.5, 0.5, 1.0, 0.0, 0.4, 0.5], vec![4, 2]).unwrap(),
     );
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(kstest_builtin(
             sample,
@@ -118,7 +118,7 @@ fn kstest_accepts_rank_zero_and_rank_one_sample_vectors() {
         Tensor::new(vec![0.0], Vec::new()).unwrap(),
         Tensor::new(vec![-0.5, 0.5], vec![2]).unwrap(),
     ] {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let outputs = output_list(
             block_on(kstest_builtin(Value::Tensor(sample), Vec::new()))
                 .expect("low-rank sample remains a vector"),
@@ -134,7 +134,7 @@ fn kstest_reads_typed_integer_sample_and_cdf_table_exactly() {
     let cdf = poisoned_integer_tensor(IntegerStorage::U8(vec![0, 1, 0, 1]), vec![2, 2]);
     let cdf =
         Value::Cell(runmat_value::CellArray::new(vec![cdf], 1, 1).expect("singleton CDF cell"));
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs =
         output_list(block_on(kstest_builtin(sample, vec![Value::from("CDF"), cdf])).unwrap());
     assert_eq!(outputs[0], Value::Bool(false));
@@ -309,7 +309,7 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     let err = block_on(kstest_builtin(all_nan, Vec::new())).unwrap_err();
     assert!(err.message.contains("non-NaN"));
 
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(kstest_builtin(
             sample.clone(),
@@ -323,7 +323,7 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     }
     drop(_guard);
 
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(kstest_builtin(
             sample.clone(),
@@ -342,7 +342,7 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     }
     drop(_guard);
 
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let outputs = output_list(
         block_on(kstest_builtin(
             sample.clone(),
@@ -361,7 +361,7 @@ fn kstest_rejects_bad_options_cdf_and_outputs() {
     }
     drop(_guard);
 
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let err = block_on(kstest_builtin(sample, Vec::new())).unwrap_err();
     assert!(err.message.contains("too many output arguments"));
 }

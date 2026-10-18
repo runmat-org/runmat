@@ -61,10 +61,11 @@ pub(super) async fn dispatch(
         }
     };
     let func_val = crate::interpreter::stack::pop_value(stack)?;
-    let _function_input_callsite_guard = runmat_runtime::callsite::push_function_input_callsite(
-        source_id,
-        call_arg_spans.as_ref().cloned(),
-    );
+    let _function_input_callsite_guard =
+        runmat_runtime::callsite::push_function_input_callsite_spans(
+            source_id,
+            call_arg_spans.as_ref().cloned(),
+        )?;
     let crate::call::feval::FevalDispatch::Completed(sequence) = args
         .with_unbounded_values_async(|args| {
             crate::call::feval::execute_feval(

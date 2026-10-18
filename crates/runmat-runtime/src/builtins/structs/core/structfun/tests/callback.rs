@@ -19,8 +19,9 @@ fn discarded_outputs_still_invoke_each_callback_once() {
                     .and_then(rooted_sequence)
             })
         },
-    )));
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    )))
+    .expect("call-port scope");
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let result = call(
         crate::user_functions::test_support::exact_local_value("effect_only", binding),
         numbers(),
@@ -52,8 +53,9 @@ fn passes_requested_output_count_to_bound_callbacks() {
                 .and_then(rooted_sequence)
             })
         },
-    )));
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    )))
+    .expect("call-port scope");
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = call(
         crate::user_functions::test_support::exact_local_value("two_outputs", binding),
         numbers(),
@@ -128,7 +130,8 @@ fn error_handler_receives_the_original_callback_identity() {
                 .and_then(rooted_sequence)
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut structure = StructValue::new();
     structure.insert("a", Value::Num(1.0));
     let result = call(

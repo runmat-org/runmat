@@ -331,7 +331,8 @@ mod tests {
         };
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             assert_eq!(
                 run(writelines_builtin(args())).unwrap_err().identifier(),
                 WRITELINES_ERROR_OUTPUTS.identifier
@@ -342,7 +343,8 @@ mod tests {
             );
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             assert_eq!(
                 run(writelines_builtin(args())).unwrap_err().identifier(),
                 WRITELINES_BYTE_COUNT_EXTENSION.error_identifier
@@ -350,12 +352,13 @@ mod tests {
             assert!(!path.exists());
         }
         for count in [None, Some(0)] {
-            let _outputs = crate::output_count::push_output_count(count);
+            let _outputs =
+                crate::output_count::push_output_count(count).expect("output-count scope");
             assert_eq!(run(writelines_builtin(args())).unwrap(), Value::Num(6.0));
             assert_eq!(std::fs::read(&path).unwrap(), b"alpha\n");
         }
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         assert_eq!(run(writelines_builtin(args())).unwrap(), Value::Num(6.0));
     }
 }

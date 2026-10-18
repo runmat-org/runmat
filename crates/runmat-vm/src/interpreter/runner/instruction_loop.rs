@@ -690,6 +690,25 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 }
             }
         }
+        let call_arg_spans = bytecode
+            .call_arg_spans
+            .get(*pc)
+            .and_then(Option::as_deref)
+            .map(|spans| {
+                runmat_runtime::callsite::CallsiteSpans::from_borrowed_in_context(
+                    spans,
+                    &context.runtime,
+                )
+                .map_err(|source| {
+                    runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+                        Some(&context.runtime),
+                        "RunMat:VM:CallsiteProjection",
+                        "VM callsite metadata admission failed",
+                        source,
+                    )
+                })
+            })
+            .transpose()?;
         let dispatch_future = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[*pc],
@@ -699,7 +718,7 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
                 source_id: bytecode
                     .source_id
                     .and_then(|source| source.resolve_in(&context.runtime)),
-                call_arg_spans: bytecode.call_arg_spans.get(*pc).cloned().flatten(),
+                call_arg_spans,
                 invocation_arity,
                 current_function_name,
             },

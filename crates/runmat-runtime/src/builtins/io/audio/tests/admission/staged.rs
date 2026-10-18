@@ -362,7 +362,7 @@ fn native_source_scans_then_selects_once_and_retains_exact_output_reservation() 
     assert_eq!(resources.live_total.load(Ordering::SeqCst), 0);
 
     let discarded = {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         block_on(audioread_builtin(
             Some(runtime.clone()),
             Value::from(path.to_string_lossy().as_ref()),

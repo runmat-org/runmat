@@ -66,7 +66,7 @@ fn require_unbounded_host_work(context: Option<&RuntimeContext>) -> BuiltinResul
     name = "poly",
     binding_variant = "default",
     context = true,
-    builtin_path = "crate::builtins::math::poly::characteristic"
+    builtin_path = "crate::builtins::math::poly"
 )]
 async fn poly_builtin(context: Option<RuntimeContext>, input: Value) -> BuiltinResult<Value> {
     if crate::output_count::current_output_count().is_some_and(|count| count > 1) {

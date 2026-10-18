@@ -33,11 +33,13 @@ pub async fn call_bound_method_builtin(
             ))
         }
     };
-    let _scope_guard = scope_class.and_then(|class_name| {
-        runmat_types::ClassIdentity::new(class_name)
-            .ok()
-            .map(|identity| crate::push_class_access_context(Some(identity)))
-    });
+    let _scope_guard = scope_class
+        .and_then(|class_name| {
+            runmat_types::ClassIdentity::new(class_name)
+                .ok()
+                .map(|identity| crate::push_class_access_context(Some(identity)))
+        })
+        .transpose()?;
     let class_name = crate::object_receiver_class_name(&base).ok_or_else(|| {
         crate::runtime_descriptor_error(
             "__runmat_call_bound_method__",
@@ -64,7 +66,9 @@ pub async fn call_bound_method_builtin(
         let caller = crate::class_access_context();
         let accessible = match bound.declaration.access {
             runmat_types::MemberAccess::Public => true,
-            runmat_types::MemberAccess::Private => caller.as_ref() == Some(&bound.declaring_class),
+            runmat_types::MemberAccess::Private => {
+                caller.as_deref() == Some(&bound.declaring_class)
+            }
             runmat_types::MemberAccess::Protected => caller.as_ref().is_some_and(|caller| {
                 crate::class_registry::is_class_or_subclass(caller, &bound.declaring_class)
             }),

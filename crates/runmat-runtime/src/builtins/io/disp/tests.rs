@@ -6,7 +6,7 @@ use runmat_value::{ComplexTensor, IntValue, StringArray, SymbolicExpr, Tensor};
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn disp_preserves_rank_zero_scalar_and_rank_one_row_display() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let cases = [
         (
             Value::Tensor(Tensor::new(vec![7.0], Vec::new()).unwrap()),
@@ -50,7 +50,7 @@ fn disp_descriptor_signatures_cover_core_forms() {
 
 #[test]
 fn disp_rejects_outputs_and_prints_nothing_for_empty_builtin_values() {
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let err = futures::executor::block_on(disp_builtin(Value::Num(1.0), Vec::new())).unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:disp:TooManyOutputs"));
     drop(_outputs);
@@ -409,10 +409,13 @@ fn disp_gathers_wgpu_integer_tensor_exactly() {
         .expect("upload integer");
     crate::console::reset_thread_buffer();
     futures::executor::block_on(disp_builtin(Value::GpuTensor(handle), Vec::new())).expect("disp");
-    let text = crate::console::take_thread_buffer()
-        .into_iter()
-        .map(|entry| entry.text)
-        .collect::<String>();
+    let text =
+        crate::console::take_thread_buffer()
+            .into_iter()
+            .fold(String::new(), |mut text, entry| {
+                text.push_str(entry.text.as_str());
+                text
+            });
     assert!(text.contains("9007199254740993"));
     assert!(text.contains("18446744073709551615"));
 }

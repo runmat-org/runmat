@@ -52,7 +52,8 @@ impl Write for ReentrantHandle {
         if !self.fired.swap(true, Ordering::SeqCst) {
             match self.callback {
                 Callback::ConsoleLine => {
-                    crate::console::record_console_line(ConsoleStream::Stdout, "from provider");
+                    crate::console::record_console_line(ConsoleStream::Stdout, "from provider")
+                        .expect("reentrant console output");
                 }
                 Callback::ReplaceOwnerAndFail => {
                     set_diary_filename_checked("/replacement.log").expect("nested replacement");

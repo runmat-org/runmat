@@ -350,7 +350,7 @@ async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
     let result = imp::disp(H5DISP_NAME, &path, controls)?;
     path::check(&path, H5DISP_NAME)?;
     if crate::output_count::current_output_count() == Some(0) {
-        record_console_line(ConsoleStream::Stdout, result);
+        record_console_line(ConsoleStream::Stdout, result)?;
         Ok(Value::output_list(Vec::new()))
     } else {
         Ok(Value::String(result))

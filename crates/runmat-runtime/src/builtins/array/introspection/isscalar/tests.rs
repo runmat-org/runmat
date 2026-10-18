@@ -34,7 +34,7 @@ fn classifies_scalars_vectors_empty_and_text_shapes() {
 
 #[test]
 fn rejects_excess_outputs_with_catalog_error() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(isscalar_builtin(Value::Num(1.0))).expect_err("two outputs");
     assert_eq!(error.identifier(), Some("RunMat:isscalar:TooManyOutputs"));
 }

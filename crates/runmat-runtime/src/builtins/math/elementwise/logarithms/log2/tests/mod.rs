@@ -13,7 +13,7 @@ fn call(value: Value) -> BuiltinResult<Value> {
 }
 
 fn call_with_outputs(value: Value, count: usize) -> BuiltinResult<Value> {
-    let _outputs = crate::output_count::push_output_count(Some(count));
+    let _outputs = crate::output_count::push_output_count(Some(count)).expect("output-count scope");
     call(value)
 }
 

@@ -501,7 +501,8 @@ mod tests {
                         definition_owners: None,
                     })
                     .collect(),
-            )));
+            )))
+            .expect("call-port scope");
         let closure = Value::Closure(runmat_value::Closure::from_data(
             runmat_value::ClosureData {
                 lexical_environment: None,

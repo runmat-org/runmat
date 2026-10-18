@@ -103,9 +103,9 @@ pub(crate) fn dispatch_getmethod(obj: Value, name: String) -> crate::BuiltinResu
         let caller_class = crate::class_access_context();
         let access_allowed = match method.access {
             runmat_types::MemberAccess::Public => true,
-            runmat_types::MemberAccess::Private => caller_class.as_ref() == Some(&owner),
+            runmat_types::MemberAccess::Private => caller_class.as_deref() == Some(&owner),
             runmat_types::MemberAccess::Protected => caller_class
-                .as_ref()
+                .as_deref()
                 .is_some_and(|caller| crate::class_registry::is_class_or_subclass(caller, &owner)),
         };
         if access_allowed {

@@ -7,7 +7,7 @@ fn run(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
 #[test]
 fn direct_requested_output_boundary_rejects_before_name_parsing() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         run(vec![Value::Num(1.0)]).unwrap_err().identifier(),
         Some("RunMat:isenv:TooManyOutputs")

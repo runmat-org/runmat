@@ -167,7 +167,7 @@ fn adamupdate_gpu_inputs_return_resident_outputs() {
         let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty");
 
         provider.reset_telemetry();
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let out = block_on(adamupdate_builtin(vec![
             Value::GpuTensor(parameters),
             Value::GpuTensor(gradient),
@@ -228,7 +228,7 @@ fn adamupdate_resident_results_inherit_explicit_input_intent() {
             .unwrap();
         let empty = Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).unwrap());
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = block_on(adamupdate_builtin(vec![
             Value::GpuTensor(parameters.clone()),
             Value::GpuTensor(gradient.clone()),
@@ -312,7 +312,7 @@ fn adamupdate_single_resident_inputs_fall_back_without_widening_class() {
         let empty = Tensor::new(Vec::new(), vec![0, 0]).expect("empty state");
 
         provider.reset_telemetry();
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = block_on(adamupdate_builtin(vec![
             Value::GpuTensor(parameters),
             Value::GpuTensor(gradient),
@@ -365,7 +365,7 @@ fn adamupdate_gpu_single_output_frees_state_outputs() {
             })
             .expect("upload averageSqGrad");
 
-        let _guard = crate::output_count::push_output_count(Some(1));
+        let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let out = block_on(adamupdate_builtin(vec![
             Value::GpuTensor(parameters),
             Value::GpuTensor(gradient),

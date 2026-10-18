@@ -32,7 +32,7 @@ fn active_diary_keeps_original_provider_and_directory_across_ambient_swap() {
     fs::set_current_dir("/second").expect("second fixture directory");
     write_diary_entry(&ConsoleEntry {
         stream: ConsoleStream::Stdout,
-        text: "second output\n".to_string(),
+        text: "second output\n".into(),
         timestamp_ms: 0,
     });
     assert_eq!(diary_filename(), PathBuf::from("session.log"));

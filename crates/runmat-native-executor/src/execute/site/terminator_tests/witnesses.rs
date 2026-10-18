@@ -83,7 +83,7 @@ fn genuinely_pending_branch_completion_restores_origin_scope_and_resumes_once() 
 
 #[test]
 fn unpolled_managed_branch_input_survives_allocation_retirement_then_reclaims() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::unpolled_managed_branch_input_survives_allocation_retirement_then_reclaims"
     )) {

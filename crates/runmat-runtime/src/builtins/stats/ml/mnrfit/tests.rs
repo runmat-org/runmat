@@ -111,7 +111,7 @@ fn mnrfit_rejects_sparse_predictors_and_responses_at_admission() {
 #[test]
 fn mnrfit_binary_logistic_returns_coefficients_stats() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let out = block_on(mnrfit_builtin(
         tensor_value(vec![0.0, 1.0, 2.0, 3.0, 4.0], 5, 1),
         tensor_value(vec![1.0, 1.0, 2.0, 2.0, 2.0], 5, 1),
@@ -140,7 +140,7 @@ fn mnrfit_binary_logistic_returns_coefficients_stats() {
 #[test]
 fn mnrfit_requested_fourth_output_is_runtime_zero_padding() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let values = output_list(
         block_on(mnrfit_builtin(
             tensor_value(vec![0.0, 1.0, 2.0, 3.0, 4.0], 5, 1),
@@ -250,7 +250,7 @@ fn mnrfit_binomial_counts_and_weights() {
 
 #[test]
 fn mnrfit_grouped_multinomial_counts() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let out = block_on(mnrfit_builtin(
         tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
         tensor_value(
@@ -283,7 +283,7 @@ fn mnrfit_grouped_multinomial_counts() {
 
 #[test]
 fn constant_grouped_odds_have_known_intercept_zero_slope_and_zero_deviance() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let values = output_list(
         block_on(mnrfit_builtin(
             tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
@@ -307,7 +307,7 @@ fn constant_grouped_odds_have_known_intercept_zero_slope_and_zero_deviance() {
 #[test]
 fn mnrfit_accepts_text_labels_and_omits_missing_rows() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let out = block_on(mnrfit_builtin(
         tensor_value(vec![0.0, 1.0, f64::NAN, 2.0, 3.0, 4.0], 6, 1),
         Value::StringArray(
@@ -365,7 +365,7 @@ fn mnrfit_rejects_unsupported_model() {
 #[test]
 fn mnrfit_reads_typed_integer_class_vectors_exactly() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let out = block_on(mnrfit_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4]), 5, 1),
         poisoned_int_tensor(IntegerStorage::U8(vec![1, 1, 2, 2, 2]), 5, 1),

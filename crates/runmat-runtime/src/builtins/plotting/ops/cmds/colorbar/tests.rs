@@ -24,11 +24,11 @@ fn strict_colorbar_reuses_live_handle_and_off_deletes_without_selection_drift() 
         0,
     ));
     {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         assert!(colorbar_builtin(vec![target.clone(), Value::String("off".into())]).is_err());
         assert!(crate::builtins::plotting::state::plot_child_handle_snapshot(bar).is_ok());
     }
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert_eq!(
         colorbar_builtin(vec![target, Value::String("off".into())]).unwrap(),
         Value::output_list(vec![])

@@ -257,8 +257,10 @@ fn take_console_output(runtime: &runmat_runtime::context::RuntimeContext) -> Str
     runmat_runtime::console::take_thread_buffer()
         .into_iter()
         .filter(|entry| entry.stream != runmat_runtime::console::ConsoleStream::ClearScreen)
-        .map(|entry| entry.text)
-        .collect()
+        .fold(String::new(), |mut output, entry| {
+            output.push_str(entry.text.as_str());
+            output
+        })
 }
 
 fn qualification_already_recorded(commands: &[TestCommand], error: &RunError) -> bool {

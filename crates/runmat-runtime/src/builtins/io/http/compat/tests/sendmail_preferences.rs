@@ -248,7 +248,7 @@ fn all_known_invalid_mail_forms_have_stable_identifiers_before_preferences() {
 #[test]
 fn excessive_output_request_rejects_before_mail_parsing_or_service_effects() {
     let (runtime, calls) = context(Reply::Values(None));
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = run(sendmail_builtin(
         Some(runtime),
         vec![

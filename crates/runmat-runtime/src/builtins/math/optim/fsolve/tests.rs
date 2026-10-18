@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 #[test]
 fn one_output_does_not_publish_unused_jacobian() {
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = LeastSquaresResult {
         x: vec![2.0],
         residual: vec![0.0],
@@ -71,7 +71,7 @@ fn fsolve_scalar_builtin_handle() {
 
 #[test]
 fn fsolve_five_output_form_returns_residual_status_diagnostics_and_jacobian() {
-    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let result = block_on(fsolve_builtin(
         Value::FunctionHandle("sin".into()),
         Value::Num(3.0),
@@ -108,8 +108,9 @@ fn fsolve_returns_stationary_non_root_with_solver_status() {
                 ))
             })
         },
-    )));
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    )))
+    .expect("call-port scope");
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     drop(entry);
     let result = block_on(runtime.scope(fsolve_builtin(
         crate::user_functions::test_support::exact_local_value("no_real_root", binding),
@@ -149,7 +150,8 @@ fn fsolve_vector_system_via_semantic_resolver() {
                 ))
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(entry);
     let x0 = Tensor::new(vec![1.0, 1.0], vec![2, 1]).unwrap();
     let root = block_on(runtime.scope(fsolve_builtin(
@@ -199,7 +201,8 @@ fn fsolve_preserves_row_vector_shape_for_callback() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let x0 = Tensor::new(vec![0.0, 0.0], vec![1, 2]).unwrap();
     let root = block_on(runtime.scope(fsolve_builtin(
@@ -246,7 +249,8 @@ fn fsolve_preserves_matrix_shape_for_callback() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let x0 = Tensor::new(vec![0.0, 0.0, 0.0, 0.0], vec![2, 2]).unwrap();
     let root = block_on(runtime.scope(fsolve_builtin(
@@ -288,7 +292,8 @@ fn fsolve_accepts_semantic_function_handle_callback() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let root = block_on(runtime.scope(fsolve_builtin(
         crate::user_functions::test_support::exact_local_value("system_function", binding),

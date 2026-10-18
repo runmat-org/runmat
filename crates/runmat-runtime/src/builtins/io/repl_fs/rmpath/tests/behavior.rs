@@ -57,7 +57,7 @@ fn discarded_output_still_removes_path() {
     let directory = tempfile::tempdir().unwrap();
     let path = super::super::super::path_mutation::test_support::canonical(directory.path());
     crate::builtins::common::path_state::set_path_string(&path);
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     super::run(vec![runmat_value::Value::String(path)]).unwrap();
     assert!(crate::builtins::common::path_state::current_path_string().is_empty());
 }

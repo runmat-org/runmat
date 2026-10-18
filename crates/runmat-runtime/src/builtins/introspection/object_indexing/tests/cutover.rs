@@ -37,7 +37,8 @@ fn requested_cell_outputs_preserve_nested_resident_values_without_provider_acces
     let source = cell(vec![Value::Int(IntValue::U64(u64::MAX)), payload.clone()]);
     let path = substruct("{}", cell(vec![Value::String(":".into())]));
     for count in [0, 1, 2] {
-        let _guard = crate::output_count::push_output_count(Some(count));
+        let _guard =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let result = block_on(subsref_builtin(source.clone(), path.clone())).unwrap();
         let Value::OutputList(values) = result.value() else {
             panic!("explicit output carrier");
@@ -50,14 +51,14 @@ fn requested_cell_outputs_preserve_nested_resident_values_without_provider_acces
             assert_eq!(values[1], payload);
         }
     }
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     assert!(block_on(subsref_builtin(source, path)).is_err());
 }
 
 #[test]
 fn discard_still_validates_paths_and_overload_admission() {
     block_on(crate::register_test_classes_builtin()).unwrap();
-    let _guard = crate::output_count::push_output_count(Some(0));
+    let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let object = Value::Object(ObjectInstance::new("OverIdx"));
     // Invalid selectors must fail even when the read targets an overloaded class
     // and the caller retains no outputs.
@@ -68,7 +69,7 @@ fn discard_still_validates_paths_and_overload_admission() {
 
 #[test]
 fn fixed_output_rejection_precedes_indexing_dispatch() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(subsasgn_builtin(
         Value::Num(0.0),
         Value::Num(0.0),

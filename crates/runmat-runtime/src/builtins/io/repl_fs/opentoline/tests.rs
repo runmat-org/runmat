@@ -11,7 +11,7 @@ fn call(args: Vec<Value>) -> BuiltinResult<Value> {
     let (context, _) = crate::context::document_test_support::recording_context();
     let selected = context.clone();
     block_on(context.scope(async move {
-        let _outputs = crate::output_count::push_output_count(outputs);
+        let _outputs = crate::output_count::push_output_count(outputs).expect("output-count scope");
         opentoline_builtin(Some(selected), args).await
     }))
 }
@@ -297,8 +297,7 @@ fn opentoline_rejects_too_many_outputs() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("target.m");
     std::fs::write(&path, "abcdef\n").expect("write file");
-    let _outputs = crate::output_count::push_output_count(Some(2));
-
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let err = call(vec![
         Value::String(path.to_string_lossy().to_string()),
         Value::Num(1.0),

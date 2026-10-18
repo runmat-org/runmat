@@ -3,7 +3,7 @@ use runmat_builtins::WEBREAD_DESCRIPTOR;
 
 #[test]
 fn webread_rejects_excess_outputs_before_input_or_http_service() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = futures::executor::block_on(webread_builtin(None, Value::Num(1.0), vec![]))
         .expect_err("excess outputs");
     assert_eq!(error.identifier(), Some("RunMat:webread:TooManyOutputs"));

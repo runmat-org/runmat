@@ -27,7 +27,7 @@ mod tests {
     #[test]
     fn returns_string_scalar_and_rejects_excess_outputs() {
         assert_eq!(newline_builtin().unwrap(), Value::String("\n".into()));
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = newline_builtin().expect_err("fixed output bound");
         assert_eq!(
             error.identifier(),

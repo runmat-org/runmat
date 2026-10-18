@@ -174,7 +174,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
 
         let out = block_on(runtime.scope(ode15s_builtin(
@@ -219,7 +220,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
         let mut options = StructValue::new();
         options.insert("RelTol", Value::Num(1.0e6));
@@ -267,7 +269,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
 
         let out = block_on(ode15s_builtin(
             crate::user_functions::test_support::exact_local_value("ode_stiff_decay", binding),

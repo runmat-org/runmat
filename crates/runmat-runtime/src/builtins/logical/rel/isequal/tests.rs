@@ -418,7 +418,7 @@ fn errors_are_identity_specific_and_validate_before_materialization() {
             error.identifier(),
             Some(format!("RunMat:{name}:NotEnoughInputs").as_str())
         );
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(equality_builtin(
             vec![resident.clone(), resident],
             nan,
@@ -434,7 +434,7 @@ fn errors_are_identity_specific_and_validate_before_materialization() {
 
 #[test]
 fn discarded_outputs_still_validate_and_compare() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert_eq!(
         run_isequal(vec![Value::Num(2.0), Value::Num(2.0)]).unwrap(),
         Value::Bool(true)

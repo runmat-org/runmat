@@ -258,7 +258,7 @@ pub(crate) async fn invoke(
                 }
             })
         },
-    ));
+    ))?;
 
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
     let bound_registry = Rc::clone(&registry);
@@ -462,7 +462,7 @@ pub(crate) async fn invoke(
                 ))
             })
         },
-    ));
+    ))?;
 
     let previous_external_invoker = user_functions::current_external_function_invoker();
     let external_registry = Rc::clone(&registry);
@@ -621,10 +621,10 @@ pub(crate) async fn invoke(
                         .as_ref()
                         .and_then(|resolver| resolver(name))
                 })
-        })));
+        })))?;
     let execution_sources = registry.execution_source_resolver_in(&runtime);
     let execution_source =
-        user_functions::install_execution_source_resolver(Some(Rc::clone(&execution_sources)));
+        user_functions::install_execution_source_resolver(Some(Rc::clone(&execution_sources)))?;
     let mut source_functions = registry
         .functions
         .values()
@@ -644,8 +644,9 @@ pub(crate) async fn invoke(
         })
         .collect::<Vec<_>>();
     source_functions.sort_by_key(|function| function.function);
-    let catalog = user_functions::install_source_function_catalog(Some(Arc::new(source_functions)));
-    let active = user_functions::push_active_semantic_function(function.0 as usize);
+    let catalog =
+        user_functions::install_source_function_catalog(Some(Arc::new(source_functions)))?;
+    let active = user_functions::push_active_semantic_function(function.0 as usize)?;
     // The compiler deliberately omits the synthetic script entrypoint from
     // the semantic FunctionRegistry. It cannot own a superclass constructor;
     // every real function still has to pass the exact retained-owner check.

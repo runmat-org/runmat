@@ -8,7 +8,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::lqr::RiccatiApi;
-use super::lqr::{LqrDomain, LqrRequest};
+use super::lqr::{LqrDomain, LqrRequest, ManagedRiccatiRequest};
 use crate::builtins::control::tf_model::control_error;
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPolicy, HostAllocationReceipt,
@@ -58,17 +58,28 @@ async fn care_builtin(
     }
     let policy = HostAllocationReceipt::policy(runtime.as_ref())
         .map_err(|error| admission(runtime.as_ref(), error))?;
-    if policy == HostAllocationPolicy::Managed {
-        return Err(admission(
-            runtime.as_ref(),
-            HostAllocationError::MissingManagedOwner,
-        ));
-    }
     let mut values = rest.into_iter();
     let b = values.next().expect("shape checked B");
     let q = values.next().expect("shape checked Q");
     let r = values.next();
     let s = values.next();
+    if policy == HostAllocationPolicy::Managed {
+        let runtime = runtime
+            .as_ref()
+            .ok_or_else(|| admission(None, HostAllocationError::MissingManagedOwner))?;
+        return ManagedRiccatiRequest::new(
+            a,
+            b,
+            q,
+            r,
+            s,
+            LqrDomain::Continuous,
+            RiccatiApi::Care,
+            runtime,
+        )?
+        .execute(out_count, runtime)
+        .await;
+    }
     // This is the same validated matrix request and ordered-QZ CARE owner
     // used by lqr. Matrix arguments are moved into that request once.
     let request = LqrRequest::prepare_standard_matrix(
@@ -106,7 +117,7 @@ mod tests {
     fn one_state_standard_solution_satisfies_riccati_residual_and_stability() {
         // A=-1, B=1, Q=1, R=1. The stabilizing CARE root is sqrt(2)-1,
         // gain equals that root, and the closed-loop pole is -sqrt(2).
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let outputs = block_on(care_builtin(
             None,
             Value::Num(-1.0),

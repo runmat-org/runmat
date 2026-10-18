@@ -115,7 +115,8 @@ fn controlled_call(
     let selected = runtime.clone();
     let call_context = runtime.clone();
     let future = selected.scope(async move {
-        let _presentation = crate::output_context::push_output_count(presentation_outputs);
+        let _presentation = crate::output_context::push_output_count(presentation_outputs)
+            .expect("output-count scope");
         match requested_outputs {
             Some(count) => {
                 call_builtin_async_with_outputs_in_context(&call_context, NAME, &[], count).await

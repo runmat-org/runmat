@@ -1103,7 +1103,7 @@ fn legacy_date_conversion_and_query_helpers_work() {
 
 #[test]
 fn legacy_datevec_single_output_is_a_six_column_matrix() {
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let serial = serial_for_date(2024, 3, 14);
     let value =
         futures::executor::block_on(datevec_builtin(Value::Num(serial))).expect("date vector");
@@ -1149,7 +1149,7 @@ fn datevec_tensor_preserves_dense_rank_one_row_and_rank_zero_empty_columns() {
 
 #[test]
 fn legacy_weekday_names_use_short_char_rows_by_default_and_long_on_request() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let serial = serial_for_date(2024, 3, 14);
     for (options, expected) in [
         (Vec::new(), "Thurs"),
@@ -1288,13 +1288,13 @@ fn legacy_date_extensions_reject_before_provider_access_in_matlab_mode() {
 fn legacy_date_output_counts_reject_unsupported_requests() {
     let serial = serial_for_date(2024, 3, 14);
     {
-        let _outputs = crate::output_count::push_output_count(Some(7));
+        let _outputs = crate::output_count::push_output_count(Some(7)).expect("output-count scope");
         let err = futures::executor::block_on(datevec_builtin(Value::Num(serial)))
             .expect_err("datevec has six components");
         assert!(err.message().contains("at most six outputs"));
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = futures::executor::block_on(weekday_builtin(Value::Num(serial), Vec::new()))
             .expect_err("weekday has two outputs");
         assert!(err.message().contains("at most two outputs"));

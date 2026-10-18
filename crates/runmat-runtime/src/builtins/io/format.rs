@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn captured_output_rejects_before_mode_change() {
         set_display_format(FormatMode::Long);
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let err = block_on(format_builtin(vec![Value::from("hex")])).expect_err("sink output");
         assert_eq!(err.identifier(), Some("RunMat:format:TooManyOutputs"));
         assert_eq!(get_display_format(), FormatMode::Long);

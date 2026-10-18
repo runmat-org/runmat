@@ -15,7 +15,7 @@ fn fitctree_matrix_predicts_numeric_labels_and_scores() {
         ],
     ))
     .unwrap();
-    let output_count = crate::output_count::push_output_count(Some(4));
+    let output_count = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let predicted = crate::builtins::stats::ml::linear_model::predict_builtin(
         model,
         tensor_value(vec![0.5, 2.5], 2, 1),

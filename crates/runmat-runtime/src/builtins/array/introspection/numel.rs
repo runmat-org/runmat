@@ -193,7 +193,7 @@ mod tests {
         let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
         let empty = Tensor::new(vec![], vec![1, 0]).unwrap();
         assert!(call(Value::Num(1.0), vec![Value::Tensor(empty)]).is_err());
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert!(call(Value::Num(1.0), vec![]).is_err());
     }
 }

@@ -1505,7 +1505,7 @@ fn finish_invocation(
         console,
     } = invocation;
     if !console.is_empty() {
-        crate::console::record_console_output(crate::console::ConsoleStream::Stdout, console);
+        crate::console::record_console_output(crate::console::ConsoleStream::Stdout, console)?;
     }
     for warning in warnings {
         crate::warning_store::push(

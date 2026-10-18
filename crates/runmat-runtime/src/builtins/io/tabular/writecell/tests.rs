@@ -317,7 +317,7 @@ fn writecell_explicit_gpu_input_is_gated_before_filesystem_access() {
 #[test]
 fn writecell_bytes_output_is_gated_before_filesystem_access() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let data = cell(vec![Value::Num(1.0)], 1, 1);
 
     let error = block_on(writecell_builtin(

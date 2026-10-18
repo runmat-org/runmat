@@ -48,6 +48,12 @@ impl RuntimeLocalTaskService for BrowserPort {
 }
 
 impl BrowserPort {
+    pub(super) fn is_active_driver(&self) -> bool {
+        self.supervisor
+            .upgrade()
+            .is_some_and(|owner| !owner.closed.get())
+    }
+
     pub(super) fn submit(
         &self,
         owner_id: RuntimeContextLocalId,

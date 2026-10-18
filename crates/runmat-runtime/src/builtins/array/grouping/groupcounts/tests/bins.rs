@@ -8,7 +8,7 @@ fn numeric_edges_include_empty_bins() {
     let edges = Value::Tensor(
         Tensor::new_integer(IntegerStorage::I64(vec![0, 1, 2, 3]), vec![4, 1]).unwrap(),
     );
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(
         call(
             input,
@@ -36,7 +36,7 @@ fn included_edge_uses_exact_wide_integer_boundaries() {
         .unwrap(),
     );
     for (edge, expected_label) in [("left", 1_usize), ("right", 0_usize)] {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = output_list(
             call(
                 input.clone(),

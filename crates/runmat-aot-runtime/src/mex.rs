@@ -39,9 +39,8 @@ impl Drop for MexRuntimeGuard {
         let abandoned = self.mex_runtime.has_unretired_work();
         self.force_abandon_if_needed();
         if abandoned {
-            runmat_runtime::console::record_console_line(
-                runmat_runtime::console::ConsoleStream::Stderr,
-                "abandoned MEX lifecycle during forced standalone disposal; mexAtExit completion is not guaranteed",
+            tracing::warn!(
+                "abandoned MEX lifecycle during forced standalone disposal; mexAtExit completion is not guaranteed"
             );
         }
     }

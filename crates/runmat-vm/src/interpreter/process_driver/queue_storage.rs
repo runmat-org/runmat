@@ -404,6 +404,14 @@ impl PreparedQueueGrowth {
         self.receipt.with_output_allocation(context, construct)
     }
 
+    pub(super) fn with_output_construction<T, E>(
+        &self,
+        context: &RuntimeContext,
+        construct: impl FnOnce(&dyn ExactHostAllocationPermit) -> Result<T, E>,
+    ) -> Result<Result<T, E>, HostAllocationError> {
+        self.receipt.with_output_construction(context, construct)
+    }
+
     pub(super) fn checkpoint(&self, context: &RuntimeContext) -> Result<(), HostAllocationError> {
         self.receipt.checkpoint(context)?;
         Ok(())

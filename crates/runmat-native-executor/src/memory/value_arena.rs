@@ -509,7 +509,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn live_arena_values_are_traced_as_gc_roots() {
-        if crate::test_support::run_isolated_gc_test(concat!(
+        if runmat_gc::test_support::run_isolated_gc_test(concat!(
             module_path!(),
             "::live_arena_values_are_traced_as_gc_roots"
         )) {

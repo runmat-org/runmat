@@ -79,7 +79,7 @@ mod tests {
 
     #[test]
     fn every_binding_rejects_excess_outputs_before_context_read() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         struct Case {
             read: fn() -> crate::BuiltinResult<Value>,
             expected: Option<&'static str>,

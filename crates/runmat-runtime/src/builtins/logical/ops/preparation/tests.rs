@@ -58,7 +58,7 @@ fn invalid_nan_arity_and_outputs_never_reach_preparation() {
         vec![Value::Num(1.0)]
     ))
     .is_err());
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert!(block_on(super::super::logical_builtin(
         Some(context),
         tensor(),
@@ -72,7 +72,7 @@ fn invalid_nan_arity_and_outputs_never_reach_preparation() {
 fn admitted_dense_shape_and_zero_output_effect_are_preserved() {
     let calls = Rc::new(Cell::new(0));
     let (_selected, context) = install(calls.clone());
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let result = block_on(super::super::logical_builtin(
         Some(context),
         Value::Tensor(Tensor::new(vec![0.0, 2.0, -1.0, 0.0], vec![2, 2]).unwrap()),

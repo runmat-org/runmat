@@ -44,7 +44,7 @@ fn resident_metadata_distinguishes_numeric_and_logical_classes() {
 
 #[test]
 fn rejects_excess_outputs_with_catalog_error() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(isnumeric_builtin(Value::Num(1.0))).expect_err("two outputs");
     assert_eq!(error.identifier(), Some("RunMat:isnumeric:TooManyOutputs"));
 }

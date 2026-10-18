@@ -44,7 +44,7 @@ fn tf(num: Vec<f64>, den: Vec<f64>, ts: f64) -> Value {
     )
 }
 fn run(model: Value, frequency: Option<Value>, outputs: usize) -> BuiltinResult<Value> {
-    let _count = crate::output_count::push_output_count(Some(outputs));
+    let _count = crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
     block_on(nyquist_builtin(model, frequency.into_iter().collect()))
 }
 fn values(value: &Value) -> Vec<f64> {

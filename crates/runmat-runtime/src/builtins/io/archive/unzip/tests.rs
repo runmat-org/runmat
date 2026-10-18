@@ -125,7 +125,9 @@ fn write_test_zip_with_dirs(path: &Path, dirs: &[&str], entries: &[(&str, &[u8])
 
 fn run_unzip(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
     let _provider_lock = runmat_filesystem::provider_override_lock();
-    let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+    let _guard = outputs
+        .map(|count| crate::output_count::push_output_count(Some(count)))
+        .expect("output-count scope");
     block_on(unzip_builtin(None, args))
 }
 

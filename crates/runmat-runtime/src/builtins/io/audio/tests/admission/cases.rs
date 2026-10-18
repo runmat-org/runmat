@@ -117,11 +117,11 @@ fn insufficient_known_budget_and_invalid_controls_have_zero_file_effects() {
         .expect_err("invalid metadata filename");
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
     {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         assert!(block_on(audioread_builtin(Some(runtime.clone()), value(), vec![])).is_err());
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert!(block_on(audioinfo_builtin(Some(runtime), value())).is_err());
     }
     assert_eq!(resources.calls.get(), calls);
@@ -140,7 +140,7 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
         .expect("implicit samples");
     assert_eq!(tensor(direct).materialize_f64(), vec![0.0, 0.5]);
     {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         assert!(output_list(
             block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
                 .expect("discarded output")
@@ -148,7 +148,7 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
         .is_empty());
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let result = output_list(
             block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
                 .expect("one output"),
@@ -157,7 +157,7 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
         assert_eq!(tensor(result[0].clone()).materialize_f64(), vec![0.0, 0.5]);
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = output_list(
             block_on(audioread_builtin(Some(runtime.clone()), value(), vec![]))
                 .expect("two outputs"),
@@ -167,7 +167,7 @@ fn admitted_output_forms_and_metadata_finish_one_complete_call_each() {
     let info = block_on(audioinfo_builtin(Some(runtime.clone()), value())).expect("metadata");
     assert_eq!(field(&info, "TotalSamples"), &Value::Num(2.0));
     {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let info =
             block_on(audioinfo_builtin(Some(runtime), value())).expect("zero-output metadata");
         assert!(output_list(info).is_empty());

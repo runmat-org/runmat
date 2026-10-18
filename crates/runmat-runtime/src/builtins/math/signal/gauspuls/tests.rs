@@ -23,7 +23,7 @@ fn extreme_finite_db_levels_do_not_underflow_before_logarithm() {
 #[test]
 fn discarded_samples_still_validate_representation_and_exactness() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     for value in [
         Value::Complex(1.0, 2.0),
         Value::String("unknown-mode".into()),
@@ -180,7 +180,7 @@ fn gauspuls_preserves_native_single_time_shape_and_output_class() {
     assert_eq!(output.shape(), &[1, 3]);
     assert_eq!(output.numeric_dtype(), NumericDType::F32);
 
-    let _count = crate::output_count::push_output_count(Some(3));
+    let _count = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let input =
         Tensor::from_numeric_storage(NumericStorage::F32(vec![0.0, 0.00025]), vec![2, 1]).unwrap();
     let Value::OutputList(outputs) = call(Value::Tensor(input), Vec::new()).expect("outputs")
@@ -284,7 +284,7 @@ fn gauspuls_integer_capabilities_cover_time_and_scalar_controls() {
 
 #[test]
 fn gauspuls_multi_output_returns_quadrature_and_envelope() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let input = Tensor::new(vec![0.0, 0.00025], vec![1, 2]).unwrap();
     let out = call(
         Value::Tensor(input),
@@ -311,7 +311,7 @@ fn gauspuls_multi_output_returns_quadrature_and_envelope() {
 #[test]
 fn gauspuls_multi_output_reads_typed_integer_storage_exactly() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let input = integer_tensor(vec![0, 1], vec![1, 2]);
     let out = call(Value::Tensor(input), Vec::new()).expect("gauspuls");
     let Value::OutputList(outputs) = out else {
@@ -362,7 +362,7 @@ fn gauspuls_cutoff_accepts_documented_empty_default_placeholder() {
 
 #[test]
 fn gauspuls_cutoff_mode_honors_requested_output_count() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = call(
         Value::CharArray(CharArray::new_row("cutoff")),
         vec![

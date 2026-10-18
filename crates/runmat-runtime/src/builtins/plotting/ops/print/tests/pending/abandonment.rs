@@ -77,7 +77,8 @@ fn dropping_public_print_at_pending_stage_retires_stage_without_publication_or_r
     });
     let _selected = fs::replace_provider(provider.clone());
     let runtime = selected_runtime();
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [Value::from("/dropped.png")];
     let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(start_receiver, call.as_mut());
@@ -138,7 +139,8 @@ fn dropping_public_print_at_pending_gather_retires_input_without_stage_or_replay
     });
     let _selected_filesystem = fs::replace_provider(provider.clone());
     let runtime = selected_runtime();
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [Value::GpuTensor(handle), Value::from("/dropped-gather.png")];
     let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(download_started_receiver, call.as_mut());

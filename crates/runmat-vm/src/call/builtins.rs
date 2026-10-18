@@ -334,6 +334,24 @@ async fn execute_dynamic_workspace_builtin(
         }
         DynamicWorkspaceBuiltin::Evalc => {
             validate_intrinsic_arg_count(builtin.name(), args.len(), 1)?;
+            let policy = runmat_runtime::context::host_allocation::HostAllocationReceipt::policy(
+                Some(runtime),
+            )
+            .map_err(|source| {
+                runmat_runtime::context::host_allocation::host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:evalc:HostAllocation",
+                    "evalc capture admission failed",
+                    source,
+                )
+            })?;
+            if policy == runmat_runtime::context::host_allocation::HostAllocationPolicy::Managed {
+                return Err(runmat_runtime::build_runtime_error(
+                    "evalc cannot yet publish captured text under finite managed admission",
+                )
+                .with_identifier("RunMat:evalc:ManagedTextUnavailable")
+                .build());
+            }
             let source = workspace_text_arg(builtin.name(), &args[0])?;
             let source_lease = dynamic_source_context(runtime, "<evalc>", &source, source_id)?;
             let eval_requested_outputs = if requested_outputs == 1 {
@@ -341,7 +359,7 @@ async fn execute_dynamic_workspace_builtin(
             } else {
                 requested_outputs.saturating_sub(1)
             };
-            let capture = runmat_runtime::console::begin_capture();
+            let capture = runmat_runtime::console::begin_capture()?;
             let eval_result = eval_workspace_source(
                 WorkspaceEvalRequest {
                     builtin: builtin.name(),
@@ -366,7 +384,7 @@ async fn execute_dynamic_workspace_builtin(
                 function_registry,
             )
             .await;
-            let captured = capture.finish();
+            let captured = capture.finish()?;
             eval_result?.try_map_owned(
                 |result| evalc_output_value(captured, result, requested_outputs),
                 |error| error.into_runtime_error(),
@@ -1401,12 +1419,12 @@ async fn eval_workspace_source(
                         .map_err(|err| dynamic_workspace_commit_error(builtin, err))?;
                 }
             }
-            effects.replay();
+            let replay = effects.replay();
             drop(publication);
-            return Err(err);
+            return runmat_runtime::runtime_error::complete_with_cleanup(Err(err), replay);
         }
     };
-    effects.replay();
+    effects.replay()?;
     // The source's earlier effects precede its captured final expression.
     // Use the same provider-aware emitter as ordinary statement output while
     // the rooted result and workspace publication remain live.
@@ -1543,10 +1561,11 @@ impl RootedDynamicWorkspaceSnapshot {
 }
 
 impl DynamicThreadEffects {
-    fn replay(self) {
-        runmat_runtime::console::append_thread_buffer(self.console);
+    fn replay(self) -> Result<(), RuntimeError> {
+        runmat_runtime::console::append_thread_buffer(self.console)?;
         runmat_runtime::warning_store::extend(self.warnings);
         runmat_runtime::plotting_hooks::record_recent_figures(self.recent_figures);
+        Ok(())
     }
 }
 

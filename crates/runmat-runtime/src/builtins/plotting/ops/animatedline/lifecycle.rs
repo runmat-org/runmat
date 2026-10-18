@@ -17,7 +17,7 @@ fn animatedline_output_error_precedes_state_and_discard_still_constructs() {
     ensure_plot_test_env();
     state::reset_plot_state();
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(animatedline_builtin(vec![])).unwrap_err();
         assert_eq!(
             error.identifier(),
@@ -25,7 +25,7 @@ fn animatedline_output_error_precedes_state_and_discard_still_constructs() {
         );
         assert!(state::figure_handles().is_empty());
     }
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let handle = block_on(animatedline_builtin(vec![])).unwrap();
     assert_eq!(
         get_builtin(vec![handle, Value::from("Type")]).unwrap(),

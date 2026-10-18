@@ -33,7 +33,7 @@ fn regexp_followed_by_another_option_has_no_pattern() {
 #[test]
 fn nested_implicit_save_does_not_inherit_outer_captured_status() {
     let _state = crate::builtins::io::mat::tests::state_guard();
-    let _presentation = crate::output_context::push_output_count(1);
+    let _presentation = crate::output_context::push_output_count(1).expect("output-count scope");
     let error = block_on(crate::dispatcher::call_builtin_async(
         "save",
         &[Value::from("-unsupported")],
@@ -448,7 +448,7 @@ fn captured_status_is_a_pre_effect_runmat_extension() {
     let path = folder.path().join("status.mat");
     let previous = crate::compatibility::runmat_extensions_enabled();
     crate::compatibility::set_runmat_extensions_enabled(false);
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let result = block_on(save_builtin(vec![Value::String(
         path.to_string_lossy().into_owned(),
     )]));
@@ -460,7 +460,7 @@ fn captured_status_is_a_pre_effect_runmat_extension() {
     );
     assert!(!exists(&path), "rejection precedes MAT file publication");
     drop(_outputs);
-    let _statement = crate::output_count::push_output_count(Some(0));
+    let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let status = block_on(save_builtin(vec![Value::String(
         path.to_string_lossy().into_owned(),
     )]))

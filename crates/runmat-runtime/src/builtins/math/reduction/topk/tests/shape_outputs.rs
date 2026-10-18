@@ -36,7 +36,8 @@ async fn topk_output_and_argument_preflight_precedes_provider_lookup() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
     for kind in [TopKKind::Max, TopKKind::Min] {
         {
-            let _outputs = crate::output_count::push_output_count(Some(3));
+            let _outputs =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let error = evaluate_topk(kind, providerless.clone(), &[Value::Num(1.)])
                 .await
                 .unwrap_err();
@@ -47,7 +48,8 @@ async fn topk_output_and_argument_preflight_precedes_provider_lookup() {
             .await
             .unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:topk:InvalidArgument"));
-        let _discarded = crate::output_count::push_output_count(Some(0));
+        let _discarded =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         assert!(
             evaluate_topk(kind, providerless.clone(), &[Value::Num(-1.)])
                 .await
@@ -154,7 +156,7 @@ async fn topk_allows_zero_k() {
 #[tokio::test]
 async fn builtin_wraps_multiple_outputs() {
     let input = tensor(vec![1.0, 3.0, 2.0], vec![1, 3]);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = maxk_builtin(input, vec![Value::Num(2.0)]).await.unwrap();
     let values = outputs(result);
     assert_eq!(values.len(), 2);
@@ -170,7 +172,7 @@ async fn builtin_wraps_multiple_outputs() {
 
 #[tokio::test]
 async fn topk_rejects_more_than_two_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = maxk_builtin(
         tensor(vec![1.0, 3.0, 2.0], vec![1, 3]),
         vec![Value::Num(2.0)],

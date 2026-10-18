@@ -557,6 +557,11 @@ impl NativeExecutor {
         request: NativeRequestParts,
         lexical_environment: Option<runmat_value::LexicalEnvironment>,
     ) -> NativeExecutorResult<NativeInvocation> {
+        // A pre-cancelled invocation must not begin constructing a frame or
+        // report an admission failure before the execution cancellation exit.
+        if request.runtime.is_cancelled() {
+            return Err(NativeExecutorError::Cancelled);
+        }
         let _admission_roots = lexical_environment
             .as_ref()
             .map(runmat_runtime::call::lexical::root_environment)

@@ -248,7 +248,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strncmp_rejects_excess_outputs_before_gathering() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = strncmp_builtin(
             Value::String("text".into()),
             Value::String("text".into()),

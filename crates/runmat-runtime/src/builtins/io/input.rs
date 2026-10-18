@@ -133,7 +133,7 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<RootedValue> {
                 crate::console::record_console_line(
                     crate::console::ConsoleStream::Stderr,
                     error.format_diagnostic(),
-                );
+                )?;
             }
             Err(error) => return Err(error),
         }

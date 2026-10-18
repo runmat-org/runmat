@@ -1570,7 +1570,7 @@ mod tests {
         );
         assert_unchanged();
 
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error =
             errorbar_builtin(vec![Value::Num(1.0), Value::Num(0.2)]).expect_err("excess outputs");
         assert_eq!(

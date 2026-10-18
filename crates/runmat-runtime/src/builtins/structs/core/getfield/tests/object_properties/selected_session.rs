@@ -10,10 +10,11 @@ fn public_getfield_output_admission_uses_selected_session_not_enclosing_session(
         crate::execution::RuntimeExecutionService::new(),
     ));
     let _wrong_scope = wrong.enter();
-    let _wrong_outputs = crate::output_count::push_output_count(Some(2));
+    let _wrong_outputs =
+        crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let selected_outputs = {
         let _selected_scope = selected.enter();
-        crate::output_count::push_output_count(Some(1))
+        crate::output_count::push_output_count(Some(1)).expect("selected output-count scope")
     };
     let mut value = StructValue::new();
     value.fields.insert("p".to_string(), Value::Num(7.0));
@@ -27,10 +28,11 @@ fn public_getfield_output_admission_uses_selected_session_not_enclosing_session(
     assert_eq!(crate::output_count::current_output_count(), Some(2));
 
     drop(selected_outputs);
-    let _wrong_one_output = crate::output_count::push_output_count(Some(1));
+    let _wrong_one_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let _selected_two_outputs = {
         let _selected_scope = selected.enter();
-        crate::output_count::push_output_count(Some(2))
+        crate::output_count::push_output_count(Some(2)).expect("selected output-count scope")
     };
     let error = futures::executor::block_on(getfield_builtin(
         Some(selected),
@@ -91,7 +93,8 @@ fn public_getfield_dependent_getter_uses_selected_session() {
     });
     let _resolver = crate::user_functions::install_semantic_function_resolver(Some(
         std::sync::Arc::new(|name| (name == "SelectedGetfieldSession.get.p").then_some(942)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
         std::sync::Arc::new(move |function, args, requested_outputs| {
             assert_eq!(function, 942);
@@ -106,7 +109,8 @@ fn public_getfield_dependent_getter_uses_selected_session() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(29.0))
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(selected_scope);
     let _wrong_scope = wrong.enter();
     let result = futures::executor::block_on(getfield_builtin(

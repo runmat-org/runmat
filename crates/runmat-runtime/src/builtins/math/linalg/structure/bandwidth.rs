@@ -532,7 +532,7 @@ pub(crate) mod tests {
     fn bandwidth_sparse_public_outputs_and_extension_gate() {
         let sparse =
             SparseTensor::new(3, 3, vec![0, 1, 2, 3], vec![2, 1, 0], vec![1.0; 3]).unwrap();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert_eq!(
             bandwidth_builtin(Value::SparseTensor(sparse), Vec::new()).unwrap(),
             Value::output_list(vec![Value::Num(2.0), Value::Num(2.0)])
@@ -564,7 +564,7 @@ pub(crate) mod tests {
     #[test]
     fn bandwidth_returns_public_two_output_contract() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 0.0], vec![2, 2]).unwrap();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert_eq!(
             bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth"),
             Value::output_list(vec![Value::Num(1.0), Value::Num(1.0)])
@@ -727,7 +727,8 @@ pub(crate) mod tests {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
         for storage in cases {
             let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("integer matrix");
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             assert_eq!(
                 bandwidth_builtin(Value::Tensor(tensor), Vec::new()).expect("bandwidth"),
                 Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])
@@ -776,7 +777,7 @@ pub(crate) mod tests {
         .expect("complex integer storage");
         let tensor = ComplexTensor::new_integer(storage, vec![2, 2]).expect("complex matrix");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert_eq!(
             bandwidth_builtin(Value::ComplexTensor(tensor), Vec::new()).expect("bandwidth"),
             Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])
@@ -858,7 +859,8 @@ pub(crate) mod tests {
                 let tensor =
                     Tensor::new_integer(storage, vec![2, 2]).expect("resident integer matrix");
                 let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-                let _outputs = crate::output_count::push_output_count(Some(2));
+                let _outputs =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 assert_eq!(
                     bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth"),
                     Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])
@@ -929,7 +931,8 @@ pub(crate) mod tests {
         for storage in all_integer_bandwidth_storages() {
             let tensor = Tensor::new_integer(storage, vec![2, 2]).expect("resident integer matrix");
             let handle = gpu_helpers::upload_tensor(provider, &tensor).expect("integer upload");
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             assert_eq!(
                 bandwidth_builtin(Value::GpuTensor(handle), Vec::new()).expect("bandwidth"),
                 Value::output_list(vec![Value::Num(0.0), Value::Num(1.0)])

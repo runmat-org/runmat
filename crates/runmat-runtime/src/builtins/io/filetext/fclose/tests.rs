@@ -491,7 +491,7 @@ fn fclose_strict_extension_rejection_precedes_close_side_effects() {
     );
     assert!(registry::info_for(fid as i32).is_some());
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let message =
         futures::executor::block_on(fclose_builtin(None, vec![Value::Num(fid)])).unwrap_err();
     assert_eq!(

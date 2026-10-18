@@ -830,7 +830,7 @@ mod tests {
             LINPROG_ERROR_INVALID_ARGUMENT.identifier
         );
         assert!(error.message().contains("Aeq requires a matching beq"));
-        let _outputs = crate::output_count::push_output_count(Some(5));
+        let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
         let error = block_on(linprog_builtin_registered(None, Vec::new()))
             .expect_err("output preflight before argument parsing");
         assert_eq!(
@@ -893,7 +893,8 @@ mod tests {
     }
 
     fn run(f: V, a: V, b: V, rest: Vec<V>, outputs: usize) -> Vec<V> {
-        let _guard = crate::output_count::push_output_count(Some(outputs));
+        let _guard =
+            crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
         let value = block_on(linprog_builtin(f, a, b, rest)).expect("linprog");
         match value {
             V::OutputList(values) => values

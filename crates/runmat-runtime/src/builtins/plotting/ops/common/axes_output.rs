@@ -29,13 +29,13 @@ mod tests {
         let _ = clear_figure(None);
 
         let baseline = limits([0.0, 2.0]);
-        let _zero = crate::output_count::push_output_count(Some(0));
+        let _zero = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         crate::builtins::plotting::xlim::xlim_builtin(vec![baseline])
             .expect("unassigned setter is MATLAB-compatible");
         drop(_zero);
 
-        let _one = crate::output_count::push_output_count(Some(1));
+        let _one = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let error = crate::builtins::plotting::xlim::xlim_builtin(vec![limits([3.0, 5.0])])
             .expect_err("assigned setter is a RunMat-only extension");
         assert_eq!(
@@ -48,7 +48,7 @@ mod tests {
         assert_eq!(tensor.materialize_f64(), vec![0.0, 2.0]);
         drop(_one);
 
-        let _two = crate::output_count::push_output_count(Some(2));
+        let _two = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = crate::builtins::plotting::xlim::xlim_builtin(vec![limits([8.0, 9.0])])
             .expect_err("two outputs reject before setting limits");
         assert_eq!(error.identifier(), Some("RunMat:xlim:TooManyOutputs"));
@@ -64,7 +64,7 @@ mod tests {
         reset_hold_state_for_run();
         let _ = clear_figure(None);
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _one = crate::output_count::push_output_count(Some(1));
+        let _one = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let result = crate::builtins::plotting::xlim::xlim_builtin(vec![limits([4.0, 7.0])])
             .expect("one-output RunMat setter");
         let tensor = Tensor::try_from(&result).expect("legacy result");
@@ -79,13 +79,14 @@ mod tests {
         let _ = clear_figure(None);
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         {
-            let _zero = crate::output_count::push_output_count(Some(0));
+            let _zero =
+                crate::output_count::push_output_count(Some(0)).expect("output-count scope");
             crate::builtins::plotting::xscale::xscale_builtin(vec![Value::String("linear".into())])
                 .expect("unassigned scale setter");
             crate::builtins::plotting::xticks::xticks_builtin(vec![limits([1.0, 2.0])])
                 .expect("unassigned ticks setter");
         }
-        let _one = crate::output_count::push_output_count(Some(1));
+        let _one = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         for error in [
             crate::builtins::plotting::xscale::xscale_builtin(vec![Value::String("log".into())])
                 .expect_err("assigned scale setter"),

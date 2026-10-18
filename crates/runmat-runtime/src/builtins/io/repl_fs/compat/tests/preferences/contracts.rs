@@ -67,7 +67,7 @@ fn ispref_rejects_integer_and_resident_controls_without_gather() {
 fn preference_output_admission_precedes_storage_and_provider_access() {
     let runtime = preference_context();
     let group = Value::String("runmatPreferenceOutputAdmission".into());
-    let _count = crate::output_count::push_output_count(Some(2));
+    let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for call in [
         run(getpref_builtin(
             Some(runtime.clone()),
@@ -96,7 +96,7 @@ fn preference_output_admission_precedes_storage_and_provider_access() {
 #[test]
 fn setpref_status_result_is_a_separately_gated_extension() {
     let runtime = preference_context();
-    let _count = crate::output_count::push_output_count(Some(1));
+    let _count = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
     let group = Value::String("runmatSetprefStatusAdmission".into());
     let error = run(setpref_builtin(

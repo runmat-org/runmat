@@ -188,7 +188,7 @@ fn excess_outputs_reject_before_provider_download() {
             })
             .expect("resident input");
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let err = block_on(crossentropy_builtin(
             Value::GpuTensor(input.clone()),
             Value::GpuTensor(input),

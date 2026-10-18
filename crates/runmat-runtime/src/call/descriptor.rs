@@ -591,14 +591,14 @@ async fn call_builtin_with_requested_outputs(
                         requested_outputs,
                     ),
                 ))
-                .await
+                .await?
         }
         None => {
             crate::callsite::with_callsite(
                 callsite,
                 crate::call_builtin_sequence_async_with_outputs(name, args, requested_outputs),
             )
-            .await
+            .await?
         }
     }
 }
@@ -622,8 +622,8 @@ async fn forward_named_fallback(
         ),
     );
     match runtime {
-        Some(runtime) => runtime.scope(invoke).await?,
-        None => invoke.await?,
+        Some(runtime) => runtime.scope(invoke).await??,
+        None => invoke.await??,
     }
     .ok_or_else(|| {
         let builder = crate::build_runtime_error(format!("Undefined function: {name}"))

@@ -308,7 +308,7 @@ pub(super) async fn minimize(
         options,
         iterations,
         evaluator.func_count,
-    );
+    )?;
 
     Ok(MinimizeOutcome {
         x: state.x,
@@ -548,14 +548,14 @@ fn emit_summary(
     options: &FminuncOptions,
     iterations: usize,
     func_count: usize,
-) {
+) -> crate::BuiltinResult<()> {
     let should_emit = match options.display {
         DisplayMode::Off | DisplayMode::None => false,
         DisplayMode::Final | DisplayMode::Iter => true,
         DisplayMode::Notify => exitflag <= 0,
     };
     if !should_emit {
-        return;
+        return Ok(());
     }
     crate::console::record_console_line(
         crate::console::ConsoleStream::Stdout,
@@ -564,13 +564,14 @@ fn emit_summary(
             fval = state.f,
             opt = norm_inf(&state.grad),
         ),
-    );
+    )?;
     if matches!(options.display, DisplayMode::Iter) {
         crate::console::record_console_line(
             crate::console::ConsoleStream::Stdout,
             format!("fminunc: iterations = {iterations}, funcCount = {func_count}"),
-        );
+        )?;
     }
+    Ok(())
 }
 
 pub(super) fn dense_len(n: usize) -> BuiltinResult<usize> {
@@ -687,7 +688,7 @@ mod publication_tests {
 
     #[test]
     fn one_output_does_not_invert_unused_hessian() {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let outcome = MinimizeOutcome {
             x: vec![2.0],
             fval: 0.0,

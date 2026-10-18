@@ -919,7 +919,8 @@ fn gpu_input_extension_rejects_before_gather_and_admits_host_rendering() {
         }
         {
             let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-            let _outputs = crate::output_count::push_output_count(Some(0));
+            let _outputs =
+                crate::output_count::push_output_count(Some(0)).expect("output-count scope");
             assert_eq!(
                 block_on(boxplot_builtin(vec![Value::GpuTensor(handle)]))
                     .expect("RunMat resident input"),

@@ -71,7 +71,7 @@ fn excess_predict_outputs_fail_before_resident_access() {
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
             network.value().clone(),
             Value::GpuTensor(handle),
@@ -101,7 +101,7 @@ fn direct_network_predict_rejects_excess_outputs_before_provider_access() {
             .with_provenance(GpuHandleProvenance::Explicit)
             .unwrap();
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = block_on(predict_deep_learning_object(
             network.clone(),
             Value::GpuTensor(handle),
@@ -118,7 +118,7 @@ fn direct_network_predict_rejects_excess_outputs_before_provider_access() {
 #[test]
 fn two_output_network_predict_returns_state() {
     let network = network();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(crate::builtins::stats::ml::linear_model::predict_builtin(
         network.value().clone(),
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),

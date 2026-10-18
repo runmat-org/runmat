@@ -100,7 +100,7 @@ mod output_contract_tests {
     }
     #[test]
     fn excessive_outputs_reject_before_argument_or_graphics_effects() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = super::yline_builtin(vec![]).expect_err("excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:yline:TooManyOutputs"));
     }

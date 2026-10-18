@@ -111,7 +111,7 @@ fn rejects_excess_arguments_with_the_catalog_error() {
 
 #[test]
 fn output_and_character_shape_admission_precede_enumeration() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = run(vec![Value::Num(1.0)]).unwrap_err();
     assert_eq!(
         error.identifier(),
@@ -132,7 +132,7 @@ fn empty_folder_has_empty_column_groups_even_without_outputs() {
     filesystem
         .create_dir_project_path("/workspace/empty", true)
         .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let result = runmat_filesystem::with_provider_override(Arc::new(filesystem), || {
         run(vec![Value::from("/workspace/empty")]).unwrap()
     });

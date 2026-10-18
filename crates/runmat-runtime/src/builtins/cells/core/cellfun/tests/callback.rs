@@ -28,7 +28,8 @@ fn bound_callback_uses_semantic_identity() {
                 crate::sequence::single_value_sequence(Value::Num(result)).and_then(rooted_sequence)
             })
         },
-    ));
+    ))
+    .expect("call-port scope");
     drop(entry);
     let callback = Value::Closure(Closure::from_data(runmat_value::ClosureData {
         lexical_environment: None,
@@ -66,7 +67,8 @@ fn name_callback_resolves_to_semantic_function() {
                 crate::sequence::single_value_sequence(Value::Num(result)).and_then(rooted_sequence)
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let result = futures::executor::block_on(runtime.scope(super::cellfun_builtin(
         Value::String("project_callback".into()),
@@ -103,8 +105,10 @@ fn requested_output_count_is_forwarded_and_collected_independently() {
                     .and_then(rooted_sequence)
                 })
             },
-        )));
-        let _outputs = crate::output_count::push_output_count(Some(requested));
+        )))
+        .expect("call-port scope");
+        let _outputs =
+            crate::output_count::push_output_count(Some(requested)).expect("output-count scope");
         let result = call(
             crate::user_functions::test_support::exact_local_value("multiple", binding),
             vec![cell(vec![Value::Num(1.), Value::Num(2.)], &[1, 2])],

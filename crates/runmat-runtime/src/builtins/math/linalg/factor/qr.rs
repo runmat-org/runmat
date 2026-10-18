@@ -1299,7 +1299,7 @@ pub(crate) mod tests {
             panic!("complex single R retains its complex domain");
         };
         assert_eq!(complex_r.numeric_dtype(), NumericDType::F32);
-        let _outputs = crate::output_count::push_output_count(Some(4));
+        let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let error = qr_builtin(Value::from("invalid input"), Vec::new())
             .expect_err("output arity must reject before input inspection");
         assert_eq!(error.identifier(), QR_ERROR_INVALID_ARGUMENT.identifier);

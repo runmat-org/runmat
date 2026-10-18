@@ -72,7 +72,8 @@ fn rejects_nontext_without_provider_access() {
 #[test]
 fn requested_outputs_zero_through_three_project_without_padding() {
     for count in 0..=3 {
-        let _scope = crate::output_count::push_output_count(Some(count));
+        let _scope =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let Value::OutputList(outputs) = run(Value::String("folder/name.ext".into())).unwrap()
         else {
             panic!("expected output list");
@@ -86,7 +87,7 @@ fn requested_outputs_zero_through_three_project_without_padding() {
 
 #[test]
 fn fourth_output_rejects_before_input_decoding() {
-    let _scope = crate::output_count::push_output_count(Some(4));
+    let _scope = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let error = run(Value::Num(42.0)).expect_err("unsupported fourth output");
     assert_eq!(error.identifier(), Some("RunMat:fileparts:TooManyOutputs"));
 }

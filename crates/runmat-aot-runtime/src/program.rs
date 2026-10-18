@@ -39,7 +39,7 @@ pub async fn invoke(
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
             executor
                 .invoke_async(function, arguments, requested_outputs, selected)
                 .await
@@ -71,7 +71,7 @@ pub async fn invoke_workspace(
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
             executor
                 .invoke_workspace_async(function, workspace, requested_outputs, selected)
                 .await
@@ -231,7 +231,7 @@ impl ProgramInvocationGuards {
                     .await
                 })
             }),
-        );
+        )?;
 
         let previous_bound = runmat_runtime::user_functions::current_bound_function_invoker();
         let bound_executor = Rc::clone(&executor);
@@ -284,7 +284,7 @@ impl ProgramInvocationGuards {
                     .await
                 })
             },
-        ));
+        ))?;
 
         let previous_lexical = runmat_runtime::user_functions::current_lexical_function_invoker();
         let lexical_executor = Rc::clone(&executor);
@@ -361,7 +361,7 @@ impl ProgramInvocationGuards {
                         async move {
                             let _active = runmat_runtime::user_functions::push_active_semantic_function(
                                 function.0 as usize,
-                            );
+                            )?;
                             let _environment_roots = environment_roots;
                             executor
                                 .invoke_request_async_in_environment(
@@ -485,9 +485,9 @@ impl ProgramInvocationGuards {
                     .next()
                     .map(|candidate| candidate.function)
             }),
-        ));
+        ))?;
         let name_candidates =
-            runmat_runtime::user_functions::install_semantic_name_candidates(Some(candidates));
+            runmat_runtime::user_functions::install_semantic_name_candidates(Some(candidates))?;
         let installed_external =
             external_sources::install(Rc::clone(&executor), program, runtime, &functions)?;
         let execution_source = installed_external.guard;
@@ -515,10 +515,10 @@ impl ProgramInvocationGuards {
                     )
                 }
             }),
-        ));
+        ))?;
         let catalog = runmat_runtime::user_functions::install_source_function_catalog(Some(
             Arc::new(functions),
-        ));
+        ))?;
         Ok(Self {
             _semantic: semantic,
             _bound: bound,
@@ -573,7 +573,7 @@ async fn invoke_native_values(
         arguments,
         move |arguments| async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
             let _environment_roots = environment_roots;
             executor
                 .invoke_rooted_function_arguments_async(
@@ -621,7 +621,7 @@ async fn invoke_native_values_legacy(
     let execution =
         runmat_runtime::context::run_native_continuation(&runtime, placement, roots, async move {
             let _active =
-                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize);
+                runmat_runtime::user_functions::push_active_semantic_function(function.0 as usize)?;
             let _environment_roots = environment_roots;
             executor
                 .invoke_request_async_in_environment(

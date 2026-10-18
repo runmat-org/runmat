@@ -49,7 +49,8 @@ fn topk_gpu_extension_gates_before_gather_and_preserves_residency() {
         }
         {
             let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let Value::OutputList(outputs) = futures::executor::block_on(maxk_builtin(
                 Value::GpuTensor(handle),
                 vec![Value::Num(2.0)],

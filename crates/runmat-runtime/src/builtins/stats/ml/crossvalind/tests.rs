@@ -3,7 +3,7 @@ use futures::executor::block_on;
 use runmat_value::IntegerStorage;
 
 fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
-    let _guard = crate::output_count::push_output_count(outputs);
+    let _guard = crate::output_count::push_output_count(outputs).expect("output-count scope");
     block_on(crossvalind_builtin(args))
 }
 

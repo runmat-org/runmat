@@ -303,7 +303,7 @@ pub(crate) mod tests {
 
     #[test]
     fn floor_rejects_excess_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = floor_builtin(Value::Num(1.25), Vec::new())
             .expect_err("floor must reject excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:floor:TooManyOutputs"));

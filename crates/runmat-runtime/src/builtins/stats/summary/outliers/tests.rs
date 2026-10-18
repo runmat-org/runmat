@@ -11,7 +11,7 @@ fn tensor(data: Vec<f64>, shape: Vec<usize>) -> Value {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn filloutliers_preserves_low_rank_numeric_mask_geometry() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for (shape, data, mask, expected) in [
         (Vec::new(), vec![9.0], vec![1.0], Value::Num(0.0)),
         (
@@ -283,7 +283,7 @@ fn filloutliers_integer_roles_are_independently_gated() {
 #[test]
 fn filloutliers_wide_integer_detection_precedes_double_output_boundary() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let base = 9_007_199_254_740_992_u64;
     let value = int_tensor(
         IntegerStorage::U64(vec![base, base + 1, base + 2, base + 3, base + 100]),
@@ -478,7 +478,7 @@ fn isoutlier_detects_columnwise_median_outliers() {
 
 #[test]
 fn isoutlier_returns_threshold_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
     let out = block_on(isoutlier_builtin(value, vec![Value::from("quartiles")])).unwrap();
     let Value::OutputList(values) = out else {
@@ -491,7 +491,7 @@ fn isoutlier_returns_threshold_outputs() {
 
 #[test]
 fn filloutliers_supports_center_and_mask_output() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
     let out = block_on(filloutliers_builtin(value, vec![Value::from("center")])).unwrap();
     let Value::OutputList(values) = out else {
@@ -609,7 +609,7 @@ fn previous_and_next_do_not_cross_fill_endpoints() {
 
 #[test]
 fn filloutliers_mask_excludes_detected_endpoint_that_cannot_be_filled() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = tensor(vec![100.0, 2.0, 3.0], vec![3, 1]);
     let locations = Value::LogicalArray(LogicalArray::new(vec![1, 0, 0], vec![3, 1]).unwrap());
     let output = block_on(filloutliers_builtin(
@@ -646,7 +646,7 @@ fn outlier_locations_drive_filloutliers_mask() {
 
 #[test]
 fn too_many_outputs_error() {
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let value = tensor(vec![1.0, 2.0, 100.0, 4.0, 5.0], vec![5, 1]);
     let err = block_on(isoutlier_builtin(value, Vec::new())).unwrap_err();
     assert_eq!(err.identifier(), Some("RunMat:outliers:TooManyOutputs"));

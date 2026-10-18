@@ -34,10 +34,10 @@ pub(super) async fn dispatch(
             call_args.extend(args);
             let _output_guard = runmat_runtime::output_context::push_output_count(*out_count);
             let _function_input_callsite_guard =
-                runmat_runtime::callsite::push_function_input_callsite(
+                runmat_runtime::callsite::push_function_input_callsite_spans(
                     source_id,
                     call_arg_spans.as_ref().cloned(),
-                );
+                )?;
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
                     function.0,
@@ -87,10 +87,10 @@ pub(super) async fn dispatch(
             call_args.extend(args);
             let _output_guard = runmat_runtime::output_context::push_output_count(out_count);
             let _function_input_callsite_guard =
-                runmat_runtime::callsite::push_function_input_callsite(
+                runmat_runtime::callsite::push_function_input_callsite_spans(
                     source_id,
                     call_arg_spans.as_ref().cloned(),
-                );
+                )?;
             let (result, updated_captures) =
                 crate::interpreter::runner::invoke_semantic_function_value_with_capture_updates(
                     function.0,

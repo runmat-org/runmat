@@ -1322,7 +1322,8 @@ pub(crate) mod tests {
     }
 
     fn mode_outputs(value: Value, rest: Vec<Value>, out_count: usize) -> BuiltinResult<Vec<Value>> {
-        let _guard = crate::output_count::push_output_count(Some(out_count));
+        let _guard =
+            crate::output_count::push_output_count(Some(out_count)).expect("output-count scope");
         let result = mode_call(value, rest)?;
         match result {
             Value::OutputList(list) => list

@@ -522,34 +522,40 @@ pub async fn try_call_semantic_descriptor(
     if let CallableIdentity::BoundFunction(function) = identity {
         if let Some(binding) = bound {
             if let Some(context) = selected_runtime.as_ref() {
-                return crate::callsite::with_function_input_callsite(
-                    function_input_callsite,
-                    try_call_bound_function_with_environment_in_context(
-                        context,
-                        binding,
-                        &args,
-                        requested_outputs,
-                        None,
-                    ),
-                )
-                .await;
+                return flatten_callsite_result(
+                    crate::callsite::with_function_input_callsite(
+                        function_input_callsite,
+                        try_call_bound_function_with_environment_in_context(
+                            context,
+                            binding,
+                            &args,
+                            requested_outputs,
+                            None,
+                        ),
+                    )
+                    .await,
+                );
             }
-            return crate::callsite::with_function_input_callsite(
-                function_input_callsite,
-                try_call_bound_function(binding, &args, requested_outputs),
-            )
-            .await;
+            return flatten_callsite_result(
+                crate::callsite::with_function_input_callsite(
+                    function_input_callsite,
+                    try_call_bound_function(binding, &args, requested_outputs),
+                )
+                .await,
+            );
         }
-        return crate::callsite::with_function_input_callsite(
-            function_input_callsite,
-            try_call_semantic_function_in_context(
-                selected_runtime.as_ref(),
-                function.0,
-                &args,
-                requested_outputs,
-            ),
-        )
-        .await;
+        return flatten_callsite_result(
+            crate::callsite::with_function_input_callsite(
+                function_input_callsite,
+                try_call_semantic_function_in_context(
+                    selected_runtime.as_ref(),
+                    function.0,
+                    &args,
+                    requested_outputs,
+                ),
+            )
+            .await,
+        );
     }
     if !fallback_policy.allows_semantic_name_resolution_for(&identity) {
         return None;
@@ -687,12 +693,13 @@ pub async fn try_call_semantic_descriptor(
                     }
                 }
             };
-            if let Some(result) = crate::callsite::with_function_input_callsite(
-                function_input_callsite.clone(),
-                selected,
-            )
-            .await
-            {
+            if let Some(result) = flatten_callsite_result(
+                crate::callsite::with_function_input_callsite(
+                    function_input_callsite.clone(),
+                    selected,
+                )
+                .await,
+            ) {
                 return Some(result);
             }
         }
@@ -709,18 +716,19 @@ pub async fn try_call_semantic_descriptor(
         }
     }
     if let Some(function) = resolve_semantic_function_by_name(&name) {
-        if let Some(result) = crate::callsite::with_function_input_callsite(
-            function_input_callsite.clone(),
-            try_call_selected_semantic_name_in_context(
-                selected_runtime.as_ref(),
-                &name,
-                function,
-                &args,
-                requested_outputs,
-            ),
-        )
-        .await
-        {
+        if let Some(result) = flatten_callsite_result(
+            crate::callsite::with_function_input_callsite(
+                function_input_callsite.clone(),
+                try_call_selected_semantic_name_in_context(
+                    selected_runtime.as_ref(),
+                    &name,
+                    function,
+                    &args,
+                    requested_outputs,
+                ),
+            )
+            .await,
+        ) {
             return Some(result);
         }
     }
@@ -755,4 +763,13 @@ pub async fn try_call_semantic_descriptor(
         }
     }
     None
+}
+
+fn flatten_callsite_result<T>(
+    result: Result<Option<Result<T, RuntimeError>>, RuntimeError>,
+) -> Option<Result<T, RuntimeError>> {
+    match result {
+        Ok(result) => result,
+        Err(error) => Some(Err(error)),
+    }
 }

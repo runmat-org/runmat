@@ -1623,7 +1623,7 @@ mod tests {
 
     #[test]
     fn eigs_supports_two_and_three_output_forms() {
-        let guard = crate::output_count::push_output_count(Some(3));
+        let guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let a = real_matrix(vec![2.0, 0.0, 0.0, 5.0], 2, 2);
         let out = outputs(call(a, vec![Value::Num(1.0)]).unwrap());
         drop(guard);

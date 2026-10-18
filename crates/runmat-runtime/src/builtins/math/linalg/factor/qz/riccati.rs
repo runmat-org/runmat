@@ -5,19 +5,21 @@
 //! columns before QZ; factoring the singular full pencil directly does not
 //! provide the required two-block Riccati subspace.
 
-use faer::col::ColMut;
-use faer::dyn_stack::{MemBuffer, MemStack, StackReq};
-use faer::linalg::{householder, qr::no_pivoting::factor as qr};
-use faer::mat::MatMut;
-use faer::{c64, Conj, Par, Spec};
+use faer::c64;
+use faer::dyn_stack::MemBuffer;
 use nalgebra::DMatrix;
-use runmat_value::{exact_capacity_vec, exact_capacity_vec_with};
+use runmat_value::exact_capacity_vec_with;
 
-use super::algorithm::{complex_qz_in_place, complex_qz_scratch, ComplexQzView};
-use super::reorder::{reorder_clusters_in_place, ClusterOrder};
 use super::work::QzWork;
+use crate::context::host_allocation::{HostAllocationReceipt, HostTypedWorkspace};
 use crate::context::RuntimeContext;
 use crate::RuntimeError;
+
+mod kernel;
+mod managed_workspace;
+
+use managed_workspace::RiccatiScratch;
+pub(crate) use managed_workspace::{ManagedRiccatiWorkspace, RiccatiWorkspacePlan};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RiccatiTimeDomain {
@@ -66,10 +68,6 @@ fn solve_owned(
 ) -> Result<RiccatiFactorization, &'static str> {
     let n = a.nrows();
     let m = b.ncols();
-    let doubled = n.checked_mul(2).ok_or("Riccati pencil order overflow")?;
-    let order = doubled
-        .checked_add(m)
-        .ok_or("Riccati pencil order overflow")?;
     if n == 0
         || m == 0
         || a.ncols() != n
@@ -80,132 +78,136 @@ fn solve_owned(
     {
         return Err("Riccati pencil dimensions are invalid");
     }
-    let zero = c64::new(0.0, 0.0);
-    let one = c64::new(1.0, 0.0);
-    let pencil_len = order
-        .checked_mul(order)
-        .ok_or("Riccati pencil extent overflow")?;
-    let mut h_data = complex_buffer(pencil_len)?;
-    let mut j_data = complex_buffer(pencil_len)?;
-    let mut h = MatMut::from_column_major_slice_mut(&mut h_data, order, order);
-    let mut j = MatMut::from_column_major_slice_mut(&mut j_data, order, order);
-    for col in 0..n {
-        for row in 0..n {
-            h[(row, col)] = c64::new(a[(row, col)], 0.0);
-            h[(n + row, col)] = c64::new(-q[(row, col)], 0.0);
-            h[(n + row, n + col)] = match domain {
-                RiccatiTimeDomain::Continuous => c64::new(-a[(col, row)], 0.0),
-                RiccatiTimeDomain::Discrete => {
-                    if row == col {
-                        one
-                    } else {
-                        zero
-                    }
-                }
-            };
-            j[(row, col)] = if row == col { one } else { zero };
-            j[(n + row, n + col)] = match domain {
-                RiccatiTimeDomain::Continuous => {
-                    if row == col {
-                        one
-                    } else {
-                        zero
-                    }
-                }
-                RiccatiTimeDomain::Discrete => c64::new(a[(col, row)], 0.0),
-            };
-        }
-    }
-    for col in 0..m {
-        for row in 0..n {
-            h[(row, doubled + col)] = c64::new(b[(row, col)], 0.0);
-            h[(n + row, doubled + col)] = c64::new(-cross[(row, col)], 0.0);
-            h[(doubled + col, row)] = c64::new(cross[(row, col)], 0.0);
-            match domain {
-                RiccatiTimeDomain::Continuous => {
-                    h[(doubled + col, n + row)] = c64::new(b[(row, col)], 0.0);
-                }
-                RiccatiTimeDomain::Discrete => {
-                    j[(doubled + col, n + row)] = c64::new(-b[(row, col)], 0.0);
-                }
-            }
-        }
-        for row in 0..m {
-            h[(doubled + row, doubled + col)] = c64::new(r[(row, col)], 0.0);
-        }
-    }
-    let (mut aa_data, mut bb_data) = deflate_input_columns(h, j, n, m)?;
-    let reduced_len = doubled
-        .checked_mul(doubled)
-        .ok_or("Riccati reduced extent overflow")?;
-    let mut left_data = complex_buffer(reduced_len)?;
-    let mut right_data = complex_buffer(reduced_len)?;
-    let mut alpha = complex_buffer(doubled)?;
-    let mut beta = complex_buffer(doubled)?;
-    let mut qz_memory = MemBuffer::try_new(complex_qz_scratch(doubled))
+    let plan = RiccatiWorkspacePlan::new(n, m).map_err(|_| "Riccati pencil extent overflow")?;
+    let mut h = complex_buffer(plan.pencil_len)?;
+    let mut j = complex_buffer(plan.pencil_len)?;
+    let mut columns = complex_buffer(plan.column_len)?;
+    let mut householder = complex_buffer(plan.householder_len)?;
+    let mut aa = complex_buffer(plan.reduced_len)?;
+    let mut bb = complex_buffer(plan.reduced_len)?;
+    let mut alpha = complex_buffer(plan.doubled)?;
+    let mut beta = complex_buffer(plan.doubled)?;
+    let mut lu = complex_buffer(plan.subspace_len)?;
+    let mut rhs = complex_buffer(plan.subspace_len)?;
+    let mut labels = exact_capacity_vec_with(plan.doubled, |_| 0_u64)
+        .map_err(|_| "Riccati cluster metadata allocation failed")?;
+    let mut solution = exact_capacity_vec_with(plan.subspace_len, |_| 0.0_f64)
+        .map_err(|_| "Riccati solution allocation failed")?;
+    let mut qr_memory = MemBuffer::try_new(plan.qr_scratch)
+        .map_err(|_| "Riccati QR workspace allocation failed")?;
+    let mut qz_memory = MemBuffer::try_new(plan.qz_scratch)
         .map_err(|_| "Riccati QZ workspace allocation failed")?;
-    let mut form = ComplexQzView {
-        aa: MatMut::from_column_major_slice_mut(&mut aa_data, doubled, doubled),
-        bb: MatMut::from_column_major_slice_mut(&mut bb_data, doubled, doubled),
-        left: MatMut::from_column_major_slice_mut(&mut left_data, doubled, doubled),
-        right: MatMut::from_column_major_slice_mut(&mut right_data, doubled, doubled),
-        alpha: ColMut::from_slice_mut(&mut alpha),
-        beta: ColMut::from_slice_mut(&mut beta),
-    };
-    complex_qz_in_place(&mut form, &mut qz_memory)?;
-    let mut labels =
-        exact_capacity_vec(doubled).map_err(|_| "Riccati cluster metadata allocation failed")?;
-    let boundary = 128.0 * f64::EPSILON * (doubled as f64).max(1.0);
-    for index in 0..doubled {
-        let alpha = form.alpha[index];
-        let beta = form.beta[index];
-        let a_norm = alpha.re.hypot(alpha.im);
-        let b_norm = beta.re.hypot(beta.im);
-        if !a_norm.is_finite() || !b_norm.is_finite() || b_norm == 0.0 {
-            return Err("Riccati pencil has a nonfinite or infinite eigenvalue");
-        }
-        let stable = match domain {
-            RiccatiTimeDomain::Continuous => {
-                let a_scale = alpha.re.abs().max(alpha.im.abs());
-                let b_scale = beta.re.abs().max(beta.im.abs());
-                if a_scale == 0.0 {
-                    return Err("Hamiltonian spectrum touches the imaginary axis");
-                }
-                let real = (alpha.re / a_scale) * (beta.re / b_scale)
-                    + (alpha.im / a_scale) * (beta.im / b_scale);
-                if real.abs() <= boundary {
-                    return Err("Hamiltonian spectrum is too near the imaginary axis");
-                }
-                real < 0.0
-            }
-            RiccatiTimeDomain::Discrete => {
-                let scale = a_norm.max(b_norm);
-                if ((a_norm / scale) - (b_norm / scale)).abs() <= boundary {
-                    return Err("symplectic spectrum is too near the unit circle");
-                }
-                a_norm < b_norm
-            }
-        };
-        labels.push(if stable { 0 } else { 1 });
-    }
-    if labels.iter().filter(|label| **label == 0).count() != n {
-        return Err("Riccati pencil has no n-dimensional stable subspace");
-    }
-    reorder_clusters_in_place(&mut form, &mut labels, ClusterOrder::SelectedFirst)?;
-    let solution = real_symmetric_subspace_solution(form.right.as_ref(), n)?;
+    kernel::solve(
+        a.as_slice(),
+        b.as_slice(),
+        q.as_slice(),
+        r.as_slice(),
+        cross.as_slice(),
+        &plan,
+        domain,
+        RiccatiScratch {
+            h: &mut h,
+            j: &mut j,
+            columns: &mut columns,
+            householder: &mut householder,
+            aa: &mut aa,
+            bb: &mut bb,
+            alpha: &mut alpha,
+            beta: &mut beta,
+            lu: &mut lu,
+            rhs: &mut rhs,
+            labels: &mut labels,
+            solution: &mut solution,
+            qr_scratch: &mut qr_memory,
+            qz_scratch: &mut qz_memory,
+        },
+    )?;
     Ok(RiccatiFactorization {
         a,
         b,
         q,
         r,
         cross,
-        solution,
+        solution: DMatrix::from_vec(n, n, solution),
     })
 }
 
-/// Solve `U0^T X^T = U1^T` using one pivoted complex LU. This avoids an
-/// opaque matrix inverse and duplicate SVD backing; the subsequent original-
-/// equation residual and closed-loop test remain the publication authority.
+/// Exactly claimed source matrices moved into the same selected QZ worker as
+/// its scratch. The worker returns these owners for the independent original-
+/// equation residual and closed-loop publication checks.
+pub(crate) struct ManagedRiccatiInputs {
+    pub(crate) a: HostTypedWorkspace<f64>,
+    pub(crate) b: HostTypedWorkspace<f64>,
+    pub(crate) q: HostTypedWorkspace<f64>,
+    pub(crate) r: HostTypedWorkspace<f64>,
+    pub(crate) cross: HostTypedWorkspace<f64>,
+}
+
+pub(crate) struct ManagedRiccatiFactorization {
+    pub(crate) inputs: ManagedRiccatiInputs,
+    pub(crate) plan: RiccatiWorkspacePlan,
+    pub(crate) workspace: ManagedRiccatiWorkspace,
+}
+
+pub(crate) async fn stabilizing_subspace_managed(
+    inputs: ManagedRiccatiInputs,
+    plan: RiccatiWorkspacePlan,
+    mut workspace: ManagedRiccatiWorkspace,
+    domain: RiccatiTimeDomain,
+    runtime: &RuntimeContext,
+    receipt: &HostAllocationReceipt,
+    name: &'static str,
+    numerical_error: impl FnOnce(&'static str) -> RuntimeError,
+) -> Result<ManagedRiccatiFactorization, RuntimeError> {
+    let mut work = QzWork::new(Some(runtime), Some(receipt), name);
+    work.checkpoint(0).await?;
+    let result = work
+        .blocking(move || {
+            kernel::solve(
+                inputs.a.as_slice(),
+                inputs.b.as_slice(),
+                inputs.q.as_slice(),
+                inputs.r.as_slice(),
+                inputs.cross.as_slice(),
+                &plan,
+                domain,
+                workspace.numerical_scratch(),
+            )?;
+            Ok(ManagedRiccatiFactorization {
+                inputs,
+                plan,
+                workspace,
+            })
+        })
+        .await?;
+    result.map_err(numerical_error)
+}
+
+/// The independent closed-loop QZ also runs under the installed blocking
+/// worker. A cancelled awaiting caller cannot retire either the selected
+/// factorization or its claimed A-BK input while the kernel still reads it.
+pub(crate) async fn closed_loop_poles_managed(
+    mut factor: ManagedRiccatiFactorization,
+    closed_loop: HostTypedWorkspace<f64>,
+    runtime: &RuntimeContext,
+    receipt: &HostAllocationReceipt,
+    name: &'static str,
+    numerical_error: impl FnOnce(&'static str) -> RuntimeError,
+) -> Result<(ManagedRiccatiFactorization, HostTypedWorkspace<f64>), RuntimeError> {
+    let mut work = QzWork::new(Some(runtime), Some(receipt), name);
+    work.checkpoint(0).await?;
+    let result = work
+        .blocking(move || {
+            factor
+                .workspace
+                .closed_loop_poles_into(&factor.plan, closed_loop.as_slice())?;
+            Ok((factor, closed_loop))
+        })
+        .await?;
+    result.map_err(numerical_error)
+}
+
+#[cfg(test)]
 fn real_symmetric_subspace_solution(
     right: faer::mat::MatRef<'_, c64>,
     n: usize,
@@ -213,151 +215,10 @@ fn real_symmetric_subspace_solution(
     let extent = n.checked_mul(n).ok_or("Riccati subspace extent overflow")?;
     let mut lu = complex_buffer(extent)?;
     let mut rhs = complex_buffer(extent)?;
-    for col in 0..n {
-        for row in 0..n {
-            lu[col * n + row] = right[(col, row)];
-            rhs[col * n + row] = right[(n + col, row)];
-        }
-    }
-    let scale = lu
-        .iter()
-        .fold(0.0_f64, |maximum, value| maximum.max(value.norm()));
-    if !scale.is_finite() || scale == 0.0 {
-        return Err("stable Riccati invariant subspace is singular");
-    }
-    let pivot_floor = f64::EPSILON * (n as f64).max(1.0) * scale;
-    for k in 0..n {
-        let pivot = (k..n)
-            .max_by(|&a, &b| lu[k * n + a].norm().total_cmp(&lu[k * n + b].norm()))
-            .ok_or("stable Riccati invariant subspace is empty")?;
-        if !lu[k * n + pivot].norm().is_finite() || lu[k * n + pivot].norm() <= pivot_floor {
-            return Err("stable Riccati invariant subspace is ill-conditioned");
-        }
-        if pivot != k {
-            for col in 0..n {
-                lu.swap(col * n + k, col * n + pivot);
-                rhs.swap(col * n + k, col * n + pivot);
-            }
-        }
-        let diagonal = lu[k * n + k];
-        for row in (k + 1)..n {
-            let multiplier = lu[k * n + row] / diagonal;
-            lu[k * n + row] = multiplier;
-            for col in (k + 1)..n {
-                let prior = lu[col * n + k];
-                lu[col * n + row] -= multiplier * prior;
-            }
-        }
-    }
-    for col in 0..n {
-        for row in 0..n {
-            let mut value = rhs[col * n + row];
-            for k in 0..row {
-                value -= lu[k * n + row] * rhs[col * n + k];
-            }
-            rhs[col * n + row] = value;
-        }
-        for row in (0..n).rev() {
-            let mut value = rhs[col * n + row];
-            for k in (row + 1)..n {
-                value -= lu[k * n + row] * rhs[col * n + k];
-            }
-            rhs[col * n + row] = value / lu[row * n + row];
-        }
-    }
-    let value_scale = rhs
-        .iter()
-        .fold(1.0_f64, |maximum, value| maximum.max(value.norm()));
-    let tolerance = 1024.0 * f64::EPSILON * (n as f64).max(1.0) * value_scale;
     let mut solution = exact_capacity_vec_with(extent, |_| 0.0_f64)
         .map_err(|_| "Riccati solution allocation failed")?;
-    for col in 0..n {
-        for row in 0..n {
-            let value = rhs[row * n + col];
-            let transpose = rhs[col * n + row];
-            if !value.re.is_finite()
-                || !value.im.is_finite()
-                || value.im.abs() > tolerance
-                || (value.re - transpose.re).abs() > tolerance
-            {
-                return Err("stable Riccati subspace does not yield a real symmetric solution");
-            }
-            solution[col * n + row] = (value.re + transpose.re) * 0.5;
-        }
-    }
+    kernel::subspace_into(right, n, &mut lu, &mut rhs, &mut solution)?;
     Ok(DMatrix::<f64>::from_vec(n, n, solution))
-}
-
-fn deflate_input_columns(
-    mut h: MatMut<'_, c64>,
-    mut j: MatMut<'_, c64>,
-    n: usize,
-    m: usize,
-) -> Result<(Vec<c64>, Vec<c64>), &'static str> {
-    let doubled = n.checked_mul(2).ok_or("Riccati deflation order overflow")?;
-    let order = doubled
-        .checked_add(m)
-        .ok_or("Riccati deflation order overflow")?;
-    let column_len = order.checked_mul(m).ok_or("Riccati QR extent overflow")?;
-    let mut column_data = complex_buffer(column_len)?;
-    for col in 0..m {
-        for row in 0..order {
-            column_data[col * order + row] = h[(row, doubled + col)];
-        }
-    }
-    let mut columns = MatMut::from_column_major_slice_mut(&mut column_data, order, m);
-    let block = qr::recommended_block_size::<c64>(order, m);
-    let householder_len = block.checked_mul(m).ok_or("Riccati QR extent overflow")?;
-    let mut householder_data = complex_buffer(householder_len)?;
-    let mut householder = MatMut::from_column_major_slice_mut(&mut householder_data, block, m);
-    let params: Spec<qr::QrParams, c64> = Default::default();
-    let scratch = StackReq::any_of(&[
-        qr::qr_in_place_scratch::<c64>(order, m, block, Par::Seq, params),
-        householder::apply_block_householder_sequence_transpose_on_the_left_in_place_scratch::<c64>(
-            order, block, order,
-        ),
-    ]);
-    let mut memory =
-        MemBuffer::try_new(scratch).map_err(|_| "Riccati QR workspace allocation failed")?;
-    let stack = MemStack::new(&mut memory);
-    let info = qr::qr_in_place(
-        columns.as_mut(),
-        householder.as_mut(),
-        Par::Seq,
-        stack,
-        params,
-    );
-    if info.rank < m {
-        return Err("Riccati pencil input column is rank deficient");
-    }
-    householder::apply_block_householder_sequence_transpose_on_the_left_in_place_with_conj(
-        columns.as_ref(),
-        householder.as_ref(),
-        Conj::Yes,
-        h.as_mut(),
-        Par::Seq,
-        stack,
-    );
-    householder::apply_block_householder_sequence_transpose_on_the_left_in_place_with_conj(
-        columns.as_ref(),
-        householder.as_ref(),
-        Conj::Yes,
-        j.as_mut(),
-        Par::Seq,
-        stack,
-    );
-    let reduced_len = doubled
-        .checked_mul(doubled)
-        .ok_or("Riccati reduced extent overflow")?;
-    let mut aa = complex_buffer(reduced_len)?;
-    let mut bb = complex_buffer(reduced_len)?;
-    for col in 0..doubled {
-        for row in 0..doubled {
-            aa[col * doubled + row] = h[(m + row, col)];
-            bb[col * doubled + row] = j[(m + row, col)];
-        }
-    }
-    Ok((aa, bb))
 }
 
 fn complex_buffer(len: usize) -> Result<Vec<c64>, &'static str> {

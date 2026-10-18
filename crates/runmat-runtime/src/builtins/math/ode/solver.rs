@@ -233,7 +233,8 @@ mod tests {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         drop(entry);
         let input = OdeInput {
             tspan: vec![0.0, 0.1],

@@ -165,11 +165,13 @@ fn which_observes_workspace_and_semantic_shadow_without_invocation() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "sin").then_some(771)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker =
         crate::user_functions::install_semantic_function_invoker(Some(Arc::new(|_, _, _| {
             panic!("which must not invoke a function")
-        })));
+        })))
+        .expect("call-port scope");
     let resolution = block_on(observe_runtime_name(
         "sin",
         RuntimeNameQuery {
@@ -265,11 +267,13 @@ fn which_all_keeps_distinct_definitions_at_the_same_display_path() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "reused_definition").then_some(17)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker =
         crate::user_functions::install_semantic_function_invoker(Some(Arc::new(|_, _, _| {
             panic!("which must not invoke either definition")
-        })));
+        })))
+        .expect("call-port scope");
     let first = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let second = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let _candidates =
@@ -293,7 +297,8 @@ fn which_all_keeps_distinct_definitions_at_the_same_display_path() {
                     definition_owner: Some(owner),
                 })
                 .collect()
-        })));
+        })))
+        .expect("call-port scope");
     let results = block_on(search_matches(
         "reused_definition",
         &WhichOptions {

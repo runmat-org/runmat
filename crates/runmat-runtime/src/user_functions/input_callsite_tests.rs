@@ -9,7 +9,8 @@ use std::rc::Rc;
 fn runtime_named_resolution_installs_caller_only_for_selected_user_function() {
     let _resolver = install_semantic_function_resolver(Some(Arc::new(|name| {
         (name == "late_user").then_some(17)
-    })));
+    })))
+    .expect("call-port scope");
     let _invoker = install_semantic_function_invoker(Some(Arc::new(|function, _, _| {
         assert_eq!(function, 17);
         Box::pin(async {
@@ -18,7 +19,8 @@ fn runtime_named_resolution_installs_caller_only_for_selected_user_function() {
             assert_eq!(callsite.arg_spans, vec![Span { start: 4, end: 9 }]);
             crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(17.0))
         })
-    })));
+    })))
+    .expect("call-port scope");
     let request = CallableRequest::resolved(
         CallableIdentity::DynamicName(SymbolName("late_user".into())),
         CallableFallbackPolicy::RuntimeNameResolution,
@@ -27,7 +29,7 @@ fn runtime_named_resolution_installs_caller_only_for_selected_user_function() {
     )
     .with_function_input_callsite(Some(CallsiteInfo {
         source_id: Some(SourceId(13)),
-        arg_spans: vec![Span { start: 4, end: 9 }],
+        arg_spans: vec![Span { start: 4, end: 9 }].into(),
     }));
     let result = futures::executor::block_on(try_call_semantic_descriptor(request))
         .expect("user function selected")
@@ -45,7 +47,8 @@ fn scoped_name_binding_does_not_redirect_same_numbered_numeric_call() {
     let _entry = runtime.enter();
     let _resolver = install_semantic_function_resolver(Some(Arc::new(|name| {
         (name == "private_helper").then_some(17)
-    })));
+    })))
+    .expect("call-port scope");
     let leased = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let republished = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let binding = runmat_value::BoundFunctionBinding {
@@ -59,14 +62,16 @@ fn scoped_name_binding_does_not_redirect_same_numbered_numeric_call() {
     };
     let _scoped = install_scoped_name_target_resolver(Some(Rc::new(move |name| {
         (name == "private_helper").then(|| ScopedSemanticNameTarget::Retained(binding.clone()))
-    })));
+    })))
+    .expect("call-port scope");
     let _numeric =
         install_local_semantic_function_invoker(std::rc::Rc::new(|_runtime, function, _, _| {
             assert_eq!(function, 17);
             Box::pin(async {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(22.0))
             })
-        }));
+        }))
+        .expect("call-port scope");
     let _bound = install_local_bound_function_invoker(std::rc::Rc::new(
         move |_, binding, _, _, _lexical_environment| {
             assert_eq!(binding.function, 17);
@@ -77,7 +82,8 @@ fn scoped_name_binding_does_not_redirect_same_numbered_numeric_call() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(33.0))
             })
         },
-    ));
+    ))
+    .expect("call-port scope");
     let named =
         futures::executor::block_on(try_call_semantic_function_by_name("private_helper", &[], 1))
             .expect("name route")
@@ -137,7 +143,8 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
     })));
     let _resolver = install_semantic_function_resolver(Some(Arc::new(|name| {
         matches!(name, "private_current" | "private_leased" | "public_name").then_some(17)
-    })));
+    })))
+    .expect("call-port scope");
     let leased = Arc::new(runmat_value::FunctionDefinitionOwner::default());
     let binding = runmat_value::BoundFunctionBinding {
         function: 17,
@@ -154,12 +161,14 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
         )),
         "private_leased" => Some(ScopedSemanticNameTarget::Retained(binding.clone())),
         _ => None,
-    })));
+    })))
+    .expect("call-port scope");
     let _numeric = install_local_semantic_function_invoker(Rc::new(|_runtime, _, _, _| {
         Box::pin(async {
             crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(33.0))
         })
-    }));
+    }))
+    .expect("call-port scope");
     let _bound = install_local_bound_function_invoker(Rc::new(
         move |_, binding, _, _, _lexical_environment| {
             assert!(binding
@@ -171,7 +180,8 @@ fn only_caller_private_targets_preempt_before_semantic_loader() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(55.0))
             })
         },
-    ));
+    ))
+    .expect("call-port scope");
     for (name, expected, loader_count) in [
         ("private_current", 33.0, 0),
         ("private_leased", 55.0, 0),
@@ -291,7 +301,8 @@ fn registered_constructor_loads_only_an_unresolved_declared_source() {
 
     let semantic = install_semantic_function_resolver(Some(Arc::new(|name| {
         (name == "SourceCtor.SourceCtor").then_some(13)
-    })));
+    })))
+    .expect("call-port scope");
     let request = CallableRequest::resolved(
         CallableIdentity::DynamicName(SymbolName("SourceCtor".into())),
         CallableFallbackPolicy::RuntimeNameResolution,

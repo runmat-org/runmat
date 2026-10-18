@@ -19,7 +19,8 @@ fn install_pending_loadobj(
     let resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "pending_mat_loadobj").then_some(METHOD_ID)
-        })));
+        })))
+        .expect("call-port scope");
     let gate = Arc::new(Mutex::new(Some(gate)));
     let invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |function, arguments, outputs| {
@@ -43,7 +44,8 @@ fn install_pending_loadobj(
                 crate::user_functions::test_support::rooted_single_value_sequence(payload)
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     (resolver, invoker)
 }
 

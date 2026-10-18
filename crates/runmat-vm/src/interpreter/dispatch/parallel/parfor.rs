@@ -344,25 +344,18 @@ async fn execute_parfor_tasks(
         workers = graph.worker_limit,
         "scheduled compiler-bound parfor task graph"
     );
-    let program = if context.runtime.execution().requires_program_capture() {
-        let selected = context.graph_program.as_ref().ok_or_else(|| {
-            crate::interpreter::errors::mex(
-                "ExecutionProgram",
-                "parallel worker execution has no selected V3 executable authority",
-            )
-        })?;
-        runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone())
-    } else {
-        runmat_runtime::execution::DeferredProgram::Local
-    };
-    let program_revision = if matches!(
-        &program,
-        runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
-    ) {
-        None
-    } else {
-        context.runtime.program_revision().cloned()
-    };
+    // Every scheduled region, including one driven by an in-process pool,
+    // needs its exact selected executable. `Local` is not an isolated region
+    // program and cannot be reconstructed from a service's pool hint. Share
+    // the already-issued graph owner across all chunks without copying the
+    // compiler's Bytecode or its Value constants.
+    let selected = context.graph_program.as_ref().ok_or_else(|| {
+        crate::interpreter::errors::mex(
+            "ExecutionProgram",
+            "parallel worker execution has no selected V3 executable authority",
+        )
+    })?;
+    let program = runmat_runtime::execution::DeferredProgram::SelectedGraph(selected.clone());
     let mut tasks = SubmittedTaskGroup::with_capacity(&context.runtime, graph.chunks.len());
     for chunk in &graph.chunks {
         let values = iterations[chunk.start..chunk.start + chunk.len].to_vec();
@@ -394,7 +387,7 @@ async fn execute_parfor_tasks(
                     requested_outputs: 1,
                 },
                 retry: runmat_execution::RetryPolicy::IdempotentInfrastructure,
-                program_revision: program_revision.clone(),
+                program_revision: None,
                 capabilities: executable.contract.capabilities.clone(),
                 program: program.clone(),
             })

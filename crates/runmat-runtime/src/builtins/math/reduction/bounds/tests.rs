@@ -34,7 +34,7 @@ async fn extra_outputs_require_extensions_before_provider_access() {
     let providerless = Value::GpuTensor(allocation.handle.clone());
     {
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = bounds_builtin(providerless.clone(), vec![])
             .await
             .unwrap_err();
@@ -178,7 +178,7 @@ async fn bounds_invalid_reduction_arguments_use_bounds_identifier() {
 async fn bounds_builtin_pads_requested_outputs() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let input = tensor(vec![1.0, 4.0], vec![2, 1]);
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = bounds_builtin(input, Vec::new()).await.unwrap();
     let Value::OutputList(values) = result else {
         panic!("expected output list");

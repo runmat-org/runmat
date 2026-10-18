@@ -70,7 +70,7 @@ fn nanmax_reduction_accepts_empty_placeholder_and_dim() {
 #[test]
 fn nanmax_output_count_returns_indices_and_zero_output_list() {
     let tensor = Tensor::new(vec![f64::NAN, 4.0, 2.0], vec![3, 1]).unwrap();
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = nanmax_builtin(Value::Tensor(tensor), Vec::new()).expect("nanmax outputs");
     match result {
         Value::OutputList(values) => {
@@ -82,7 +82,7 @@ fn nanmax_output_count_returns_indices_and_zero_output_list() {
     }
     drop(_guard);
 
-    let _guard = crate::output_count::push_output_count(Some(0));
+    let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let result = nanmax_builtin(Value::Num(1.0), Vec::new()).expect("nanmax zero outputs");
     assert_eq!(result, Value::output_list(Vec::new()));
 }

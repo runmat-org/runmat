@@ -99,7 +99,7 @@ fn hgsave_rejects_typed_integer_handle_spellings() {
 fn sink_status_output_is_runmat_only_and_admitted_before_file_effects() {
     let _guard = setup();
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _one = crate::output_count::push_output_count(Some(1));
+    let _one = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     for call in [SAVEAS, SAVEFIG, HGSAVE] {
         let error = match call {
             SAVEAS => block_on(saveas_builtin(vec![

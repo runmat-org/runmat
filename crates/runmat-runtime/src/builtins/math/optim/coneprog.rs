@@ -1216,7 +1216,7 @@ mod tests {
                 .expect_err("known non-real/non-numeric option metadata");
             }
         }
-        let _outputs = crate::output_count::push_output_count(Some(6));
+        let _outputs = crate::output_count::push_output_count(Some(6)).expect("output-count scope");
         let error = block_on(coneprog_builtin_registered(None, Vec::new()))
             .expect_err("output preflight before argument parsing");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);
@@ -1275,7 +1275,8 @@ mod tests {
     }
 
     fn run(args: Vec<Value>, outputs: usize) -> Vec<Value> {
-        let _guard = crate::output_count::push_output_count(Some(outputs));
+        let _guard =
+            crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
         let value = block_on(coneprog_builtin(args)).expect("coneprog");
         match value {
             Value::OutputList(values) => values

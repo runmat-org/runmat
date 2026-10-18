@@ -72,7 +72,8 @@ fn unary_object_overloads_preserve_errors_and_missing_method_fallback() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "unary_fixture_minus").then_some(91)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |function, _, requested| {
             assert_eq!(function, 91);
@@ -85,7 +86,8 @@ fn unary_object_overloads_preserve_errors_and_missing_method_fallback() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         events: Default::default(),
         name: "UnaryFixture".into(),

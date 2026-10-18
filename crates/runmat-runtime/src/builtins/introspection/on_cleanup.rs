@@ -615,7 +615,8 @@ mod tests {
         let observed = Arc::new(Mutex::new(Vec::new()));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             profiled_callback_invoker(Arc::clone(&observed)),
-        ));
+        ))
+        .expect("call-port scope");
         drop(registration);
         let create = CommandProfilingRoot::new();
         let created_context = runtime.clone().with_command_profiling(create.receipt());
@@ -653,7 +654,8 @@ mod tests {
         let observed = Arc::new(Mutex::new(Vec::new()));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             profiled_callback_invoker(Arc::clone(&observed)),
-        ));
+        ))
+        .expect("call-port scope");
         drop(registration);
         let cleanup = {
             let _selected = runtime.enter();
@@ -762,7 +764,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         drop(registration);
         let cleanup = {
             let _selected = runtime.enter();
@@ -835,7 +838,8 @@ mod tests {
                     ))
                 })
             }
-        }));
+        }))
+        .expect("call-port scope");
         drop(registration);
         let command = CommandProfilingRoot::new();
         let selected = runtime.clone().with_command_profiling(command.receipt());
@@ -863,7 +867,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let cleanup = block_on(on_cleanup_builtin(
             crate::user_functions::test_support::exact_local_value("cleanup", binding),
         ))
@@ -886,7 +891,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let cleanup = block_on(on_cleanup_builtin(
             crate::user_functions::test_support::exact_local_value("cleanup", binding),
         ))
@@ -919,7 +925,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let cleanup = block_on(on_cleanup_builtin(
             crate::user_functions::test_support::exact_local_value("cleanup", binding),
         ))
@@ -973,7 +980,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let cleanup = block_on(on_cleanup_builtin(
             crate::user_functions::test_support::exact_local_value("cleanup", binding),
         ))
@@ -1021,7 +1029,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _guard = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         let cleanup_a = block_on(on_cleanup_builtin(
             crate::user_functions::test_support::exact_local_value("cleanupA", a),
         ))
@@ -1080,7 +1089,8 @@ mod tests {
         let callback_origins = Arc::new(Mutex::new(Vec::new()));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             profiled_callback_invoker(Arc::clone(&callback_origins)),
-        ));
+        ))
+        .expect("call-port scope");
         let retired_roots = Arc::new(Mutex::new(Vec::new()));
         let retirement_observer_roots = Arc::clone(&retired_roots);
         let _observer = runmat_gc::RootRetirementObserver::register(Arc::new(move |event| {
@@ -1170,7 +1180,8 @@ mod tests {
         let counter = Arc::new(Mutex::new(0usize));
         let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
             callback_invoker(Arc::clone(&counter)),
-        ));
+        ))
+        .expect("call-port scope");
         drop(registration);
         runtime
             .clone()

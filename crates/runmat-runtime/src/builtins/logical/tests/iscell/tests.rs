@@ -81,7 +81,7 @@ fn recognizes_distributed_cell_identity_without_materialization() {
 
 #[test]
 fn rejects_excess_outputs_with_catalog_error() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(iscell_builtin(Value::Bool(true))).expect_err("two outputs");
     assert_eq!(error.identifier(), Some("RunMat:iscell:TooManyOutputs"));
 }

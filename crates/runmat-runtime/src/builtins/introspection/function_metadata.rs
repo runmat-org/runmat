@@ -167,7 +167,8 @@ mod tests {
                 source_file: None,
                 definition_owners: None,
             }]),
-        ));
+        ))
+        .expect("call-port scope");
         let value = dispatch_functions(Value::Closure(runmat_value::Closure::from_data(
             runmat_value::ClosureData {
                 lexical_environment: None,
@@ -229,7 +230,8 @@ mod tests {
                     definition_owners: None,
                 },
             ]),
-        ));
+        ))
+        .expect("call-port scope");
         for (name, function, kind) in [
             ("metadata_file", 1, "simple"),
             ("child_local", 2, "scopedfunction"),
@@ -335,7 +337,8 @@ mod tests {
                     source_file: Some("/origin/origin.m".into()),
                     definition_owners: None,
                 }]),
-            ));
+            ))
+            .expect("call-port scope");
             crate::user_functions::bound_function_handle("origin".into(), 9)
         };
         let source_id = runmat_types::SourceId(42);
@@ -356,7 +359,8 @@ mod tests {
                 source_file: Some("/destination/unrelated.m".into()),
                 definition_owners: None,
             }]),
-        ));
+        ))
+        .expect("call-port scope");
         let info = dispatch_functions(handle).expect("metadata reads original binding");
         assert_eq!(field(&info, "type"), &Value::String("simple".into()));
         assert_eq!(

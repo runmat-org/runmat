@@ -597,7 +597,7 @@ async fn invoke_semantic_function_with_owned_inputs(
     }
 
     let _active_semantic_function_guard =
-        user_functions::push_active_semantic_function(function_id.0);
+        user_functions::push_active_semantic_function(function_id.0)?;
     let mut bytecode = func.execution_bytecode(function_registry);
     let mut initially_unassigned_slots = func.initially_unassigned_slots.clone();
     for slot in &func.capture_slots {
@@ -1779,7 +1779,7 @@ async fn run_interpreter_inner(
                     .map(|(value, _)| value)
                 })
             },
-        ));
+        ))?;
     let previous_bound_invoker = user_functions::current_bound_function_invoker();
     let registry_for_bound_invoker = std::rc::Rc::clone(&function_registry);
     let bound_driver = context.process_driver.clone();
@@ -1856,7 +1856,7 @@ async fn run_interpreter_inner(
                     ))
                 })
             },
-        ));
+        ))?;
     let previous_semantic_resolver = user_functions::current_semantic_function_resolver();
     let previous_semantic_candidates = user_functions::current_semantic_name_candidates();
     let registry_for_function_resolver = function_registry.current_view();
@@ -1870,7 +1870,7 @@ async fn run_interpreter_inner(
                     .scoped_private_name_target_for_caller(runmat_hir::FunctionId(caller), name)
             })
         }),
-    ));
+    ))?;
     let current_name_facts = Arc::new(
         registry_for_function_resolver.semantic_name_candidate_facts_in(
             &context.runtime,
@@ -1948,13 +1948,13 @@ async fn run_interpreter_inner(
                 .into_iter()
                 .next()
                 .map(|candidate| candidate.function)
-        })));
+        })))?;
     let _semantic_candidates_guard =
-        user_functions::install_semantic_name_candidates(Some(semantic_candidates));
+        user_functions::install_semantic_name_candidates(Some(semantic_candidates))?;
     let execution_sources = function_registry.execution_source_resolver_in(&context.runtime);
     let _execution_source_guard = user_functions::install_execution_source_resolver(Some(
         std::rc::Rc::clone(&execution_sources),
-    ));
+    ))?;
     let mut source_function_catalog = function_registry
         .functions
         .values()
@@ -1977,7 +1977,7 @@ async fn run_interpreter_inner(
         .collect::<Vec<_>>();
     source_function_catalog.sort_by_key(|info| info.function);
     let _source_function_catalog_guard =
-        user_functions::install_source_function_catalog(Some(Arc::new(source_function_catalog)));
+        user_functions::install_source_function_catalog(Some(Arc::new(source_function_catalog)))?;
     super_constructor::bind_selected(
         &mut context,
         &bytecode,

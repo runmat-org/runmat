@@ -189,7 +189,8 @@ fn registered_predict_preserves_statistical_output_overloads_without_ambient_ari
     let runtime = crate::context::RuntimeContext::new(std::rc::Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
-    let _ambient_outputs = crate::output_count::push_output_count(Some(3));
+    let _ambient_outputs =
+        crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let predicted = block_on((bindings[0].implementation)(
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
     ))

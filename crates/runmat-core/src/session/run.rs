@@ -1236,20 +1236,7 @@ impl RunMatSession {
         // Generate type info if we have a suppressed value
         let type_info = suppressed_value.as_ref().map(format_type_info);
 
-        let streams = runmat_runtime::console::take_thread_buffer()
-            .into_iter()
-            .map(|entry| ExecutionStreamEntry {
-                stream: match entry.stream {
-                    runmat_runtime::console::ConsoleStream::Stdout => ExecutionStreamKind::Stdout,
-                    runmat_runtime::console::ConsoleStream::Stderr => ExecutionStreamKind::Stderr,
-                    runmat_runtime::console::ConsoleStream::ClearScreen => {
-                        ExecutionStreamKind::ClearScreen
-                    }
-                },
-                text: entry.text,
-                timestamp_ms: entry.timestamp_ms,
-            })
-            .collect();
+        let streams = runmat_runtime::console::take_thread_buffer();
         let canonical_workspace = self.logical_workspace_values().map_err(RunError::Runtime)?;
         let (workspace_entries, snapshot_full) = if workspace_snapshot_force_full {
             let mut entries = canonical_workspace

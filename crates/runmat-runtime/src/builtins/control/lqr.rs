@@ -27,12 +27,19 @@ use crate::{build_runtime_error, dispatcher, BuiltinResult};
 const BUILTIN_NAME: &str = "lqr";
 
 mod error;
+mod gain;
+mod managed_input;
+mod managed_output;
+mod managed_request;
+mod managed_validation;
+mod managed_weights;
 mod standard_matrix;
 mod validation;
 mod weights;
 
 pub(in crate::builtins::control) use error::RiccatiApi;
 use error::RiccatiIssue;
+pub(in crate::builtins::control) use managed_request::ManagedRiccatiRequest;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::control::lqr")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -100,16 +107,16 @@ async fn lqr_builtin(
             BUILTIN_NAME,
         )?;
     }
-    // The current matrix parser and ordered-pencil work still use opaque
-    // nalgebra/faer allocations. A managed invocation must not execute them
-    // without a complete retained scratch/output owner.
     if HostAllocationReceipt::policy(runtime.as_ref())
         .map_err(|error| RiccatiApi::Lqr.admission(runtime.as_ref(), error))?
         == HostAllocationPolicy::Managed
     {
-        return Err(
-            RiccatiApi::Lqr.admission(runtime.as_ref(), HostAllocationError::MissingManagedOwner)
-        );
+        let runtime = runtime.as_ref().ok_or_else(|| {
+            RiccatiApi::Lqr.admission(None, HostAllocationError::MissingManagedOwner)
+        })?;
+        return ManagedRiccatiRequest::from_lqr(first, rest, runtime)?
+            .execute(out_count, runtime)
+            .await;
     }
     let eval = LqrRequest::parse(first, rest, runtime.as_ref())
         .await?
@@ -714,7 +721,7 @@ mod tests {
 
     #[test]
     fn lqr_double_integrator_matches_known_solution() {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = block_on(lqr_builtin(
             None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
@@ -751,7 +758,7 @@ mod tests {
     #[test]
     fn lqr_accepts_typed_integer_matrices_at_double_boundary() {
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(lqr_builtin(
             None,
             integer_tensor(IntegerStorage::I16(vec![0, 0, 1, 0]), 2, 2),
@@ -816,7 +823,7 @@ mod tests {
 
     #[test]
     fn zero_output_request_still_validates_the_riccati_problem() {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let error = block_on(lqr_builtin(
             None,
             Value::Num(-1.0),
@@ -934,7 +941,7 @@ mod tests {
 
     #[test]
     fn lqr_cross_weight_changes_gain_and_satisfies_care() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(lqr_builtin(
             None,
             tensor(vec![0.0, 0.0, 1.0, 0.0], 2, 2),
@@ -994,7 +1001,7 @@ mod tests {
             vec![Value::Num(0.1)],
         ))
         .expect("discrete ss");
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = block_on(lqr_builtin(
             None,
             sys,
@@ -1033,7 +1040,7 @@ mod tests {
             vec![Value::Tensor(sample_time)],
         ))
         .expect("discrete ss");
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on(lqr_builtin(
             None,
             sys,
@@ -1096,7 +1103,7 @@ mod tests {
 
     #[test]
     fn lqr_zero_requested_outputs_still_reject_invalid_call_shape() {
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let error = block_on(lqr_builtin(
             None,
             Value::String("not matrices".to_string()),

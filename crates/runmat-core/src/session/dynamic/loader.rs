@@ -540,7 +540,8 @@ pub(in crate::session) async fn load_dynamic_function(
                         })
                         .await
                 })
-                .await;
+                .await
+                .and_then(std::convert::identity);
             #[cfg(test)]
             if constructor_trace {
                 let names = selected_runtime.session_global_names();

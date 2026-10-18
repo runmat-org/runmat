@@ -14,7 +14,8 @@ fn arrayfun_error_handler_recovers() {
             let seed = arguments.first().cloned().expect("captured seed");
             Box::pin(async move { rooted_single(seed) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
     let handler = Value::Closure(Closure::from_data(runmat_value::ClosureData {
         lexical_environment: None,

@@ -1091,7 +1091,7 @@ mod tests {
             builtin(Value::Tensor(values), vec![Value::from("strictascend")]).unwrap(),
             Value::Bool(false)
         );
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = builtin(Value::Int(IntValue::I8(1)), Vec::new())
             .expect_err("excess output must reject");
         assert_eq!(error.identifier(), ERROR_INVALID_ARGUMENT.identifier);

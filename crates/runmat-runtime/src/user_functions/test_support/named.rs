@@ -77,11 +77,13 @@ pub fn install_exact_named_forwarders(
     );
 
     let entry = runtime.enter();
-    let catalog_guard = super::super::install_source_function_catalog(Some(catalog));
+    let catalog_guard = super::super::install_source_function_catalog(Some(catalog))
+        .expect("exact named fixture catalog projection");
     let resolver_guard =
         super::super::install_semantic_function_resolver(Some(Arc::new(move |name| {
             resolved.get(name).copied()
-        })));
+        })))
+        .expect("exact named fixture resolver projection");
     let bindings = fixtures
         .iter()
         .map(|(name, function)| {

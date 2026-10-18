@@ -336,7 +336,7 @@ pub(crate) mod tests {
         .map(|owned| owned.value().clone())
         .expect_err("like form must be gated");
         assert_eq!(like.identifier(), ATAN_LIKE_EXTENSION.error_identifier);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let arity = block_on(super::atan_builtin(None, Value::Num(0.0), Vec::new()))
             .map(|owned| owned.value().clone())
             .expect_err("excess outputs must reject");

@@ -103,7 +103,7 @@ fn text_unicode_numeric_and_empty_shapes_remain_distinct() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn output_count_errors_precede_classifier_input_errors() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = evaluate(isletter_builtin(Value::Int(IntValue::U8(65))))
         .expect_err("excess outputs precede nontext scalar-false route");
     assert_eq!(

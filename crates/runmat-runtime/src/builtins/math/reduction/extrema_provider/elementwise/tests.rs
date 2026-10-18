@@ -150,7 +150,7 @@ fn builtin_values_only_skips_origin_work_but_public_evaluate_preserves_exact_ori
             "zero-output form still executes and validates values"
         );
         // An ambient zero-output count must not weaken the public Rust API.
-        let _zero = crate::output_count::push_output_count(Some(0));
+        let _zero = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let (values, indices) =
             futures::executor::block_on(full(name, args[0].clone(), args[1].clone())).unwrap();
         assert!(matches!(values, Value::GpuTensor(_)));

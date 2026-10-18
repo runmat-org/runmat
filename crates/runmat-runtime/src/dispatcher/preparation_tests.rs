@@ -140,7 +140,8 @@ fn registered_instance_method_sees_original_operand_and_skips_legacy_service() {
     });
     let _resolver = crate::user_functions::install_semantic_function_resolver(Some(
         std::sync::Arc::new(|name| (name == "preparation_fixture_mean").then_some(29021)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(
         std::sync::Arc::new(|_, args, _| {
             assert!(matches!(&args[0], Value::Object(_)));
@@ -149,7 +150,8 @@ fn registered_instance_method_sees_original_operand_and_skips_legacy_service() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(9.))
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let args = [
         Value::Object(runmat_value::ObjectInstance::new(class)),
         Value::Tensor(runmat_value::Tensor::new(vec![1.; 4], vec![1, 4]).unwrap()),

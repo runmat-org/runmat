@@ -1116,7 +1116,8 @@ fn canonical_forward_uses_invocation_outputs_and_cancellation() {
     let runtime = crate::context::RuntimeContext::new(Rc::new(
         crate::execution::RuntimeExecutionService::new(),
     ));
-    let _ambient_outputs = crate::output_count::push_output_count(Some(3));
+    let _ambient_outputs =
+        crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let output = block_on((bindings[0].implementation)(
         crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(2)),
     ))
@@ -1689,7 +1690,7 @@ fn export_onnx_network_rejects_unexportable_forms_deterministically() {
 
     let net_owner = block_on(dlnetwork_builtin(vec![feature_network_layers()])).unwrap();
     let net = net_owner.value().clone();
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let err = block_on(export_onnx_network_builtin(vec![
         net,
         Value::String(tmp.path().join("out.onnx").to_string_lossy().into_owned()),
@@ -1711,7 +1712,7 @@ fn dlfeval_dlgradient_differentiates_dlarray_elementwise_loss() {
         vec![Value::String("CB".into())],
     ))
     .expect("dlarray");
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(dlfeval_builtin(vec![
         Value::FunctionHandle("__deep_learning_square_grad".into()),
         x,
@@ -1747,7 +1748,7 @@ fn dlfeval_dlgradient_preserves_native_single_storage() {
         vec![Value::String("CB".into())],
     ))
     .expect("dlarray");
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(dlfeval_builtin(vec![
         Value::FunctionHandle("__deep_learning_square_grad".into()),
         x,
@@ -2252,7 +2253,7 @@ fn supervised_host_admission_precedes_resident_predictor_download() {
             regression_training_layers(),
             adam_training_options(),
         ];
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = block_on(train_network_builtin(args)).unwrap_err();
         assert!(error.message.contains("at most 2"));
         assert_eq!(provider.telemetry_snapshot().download_bytes, 0);
@@ -2419,7 +2420,7 @@ fn supervised_two_outputs_include_typed_loss_history() {
         regression_training_layers(),
         options,
     ];
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = block_on(train_network_builtin(args)).unwrap();
     let Value::OutputList(outputs) = result.value() else {
         panic!("expected two requested outputs")
@@ -2753,7 +2754,7 @@ fn supervised_verbose_controls_epoch_console_reporting() {
             ],
         ))
         .unwrap();
-        let capture = crate::console::begin_capture();
+        let capture = crate::console::begin_capture().expect("console capture");
         block_on(train_network_builtin(vec![
             Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap()),
             Value::Tensor(Tensor::new(vec![1.0, 3.0], vec![2, 1]).unwrap()),
@@ -2761,7 +2762,7 @@ fn supervised_verbose_controls_epoch_console_reporting() {
             options,
         ]))
         .unwrap();
-        let console = capture.finish();
+        let console = capture.finish().expect("captured text");
         if verbose {
             assert!(console.contains("Epoch 1/1: training loss "), "{console}");
         } else {
@@ -3352,7 +3353,7 @@ fn padsequences_reads_typed_integer_storage_exactly() {
 
 #[test]
 fn padsequences_uniform_mixed_storage_applies_padding_in_result_class() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let sequences = Value::Cell(
         CellArray::new(
             vec![
@@ -3446,7 +3447,7 @@ fn padsequences_preserves_wide_integer_class_and_returns_logical_mask() {
         )
         .unwrap(),
     );
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let output = block_on(padsequences_builtin(
         sequences.clone(),
         vec![Value::Int(IntValue::U8(2))],
@@ -3480,7 +3481,7 @@ fn padsequences_preserves_wide_integer_class_and_returns_logical_mask() {
     assert_eq!(mask.data.as_slice(), &[1, 1, 1, 0]);
     drop(_guard);
 
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let output = block_on(padsequences_builtin(
         sequences,
         vec![
@@ -4267,7 +4268,7 @@ fn crossentropy_preserves_dlarray_output_for_dlarray_inputs() {
 
 #[test]
 fn adamupdate_computes_bias_corrected_tensor_step() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let out = block_on(adamupdate_builtin(vec![
         Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap()),
         Value::Tensor(Tensor::new(vec![0.1, -0.2], vec![1, 2]).unwrap()),
@@ -4320,7 +4321,7 @@ fn adamupdate_preserves_dlarray_wrapper_for_state_outputs() {
         vec![Value::String("CB".into())],
     ))
     .unwrap();
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let out = block_on(adamupdate_builtin(vec![
         params,
         Value::Tensor(Tensor::new(vec![0.5], vec![1, 1]).unwrap()),
@@ -4375,7 +4376,7 @@ fn adamupdate_rejects_invalid_shapes_outputs_and_hyperparameters() {
     .unwrap_err();
     assert!(err.to_string().contains("learnRate must be positive"));
 
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let err = block_on(adamupdate_builtin(vec![
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),
         Value::Tensor(Tensor::new(vec![0.1], vec![1, 1]).unwrap()),
@@ -4507,7 +4508,7 @@ fn dlfeval_dispatches_function_handles() {
 
 #[test]
 fn dlfeval_preserves_requested_output_count() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(dlfeval_builtin(vec![
         Value::FunctionHandle("deal".into()),
         Value::String("a".into()),
@@ -4727,7 +4728,7 @@ fn dlupdate_preserves_typed_struct_array_shape_and_schema() {
 
 #[test]
 fn dlupdate_reconstructs_multiple_output_trees() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let first = Value::Cell(CellArray::new(vec![Value::Num(1.0), Value::Num(2.0)], 1, 2).unwrap());
     let second =
         Value::Cell(CellArray::new(vec![Value::Num(10.0), Value::Num(20.0)], 1, 2).unwrap());
@@ -4886,7 +4887,7 @@ fn dlupdate_rejects_non_callable_and_mismatched_trees() {
 fn dlupdate_discarded_result_still_invokes_callback_and_retains_failure_source() {
     use std::error::Error;
 
-    let _guard = crate::output_count::push_output_count(Some(0));
+    let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let err = block_on(dlupdate_builtin(vec![
         Value::FunctionHandle("__missing_dlupdate_callback".into()),
         Value::Num(1.0),

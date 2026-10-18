@@ -18,7 +18,7 @@ pub(crate) struct DocumentRecorder {
     pub requests: Rc<RefCell<Vec<HostDocumentRequest>>>,
 }
 impl RuntimeHostService for DocumentRecorder {
-    fn console(&self, _: crate::console::ConsoleStream, _: String) {}
+    fn console(&self, _: crate::console::ConsoleStream, _: crate::console::ConsoleText) {}
     fn warning(&self, _: crate::warning_store::RuntimeWarning) {}
     fn interact(
         &self,
@@ -68,7 +68,7 @@ impl Drop for PendingTurn {
 }
 
 impl RuntimeHostService for PendingDocumentHost {
-    fn console(&self, _: crate::console::ConsoleStream, _: String) {}
+    fn console(&self, _: crate::console::ConsoleStream, _: crate::console::ConsoleText) {}
 
     fn warning(&self, _: crate::warning_store::RuntimeWarning) {}
 

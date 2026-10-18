@@ -467,7 +467,7 @@ fn statset_stores_callback_handles_without_running_them() {
 
 #[test]
 fn statset_and_statget_reject_extra_outputs_before_value_access() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let set_error = block_on(statset_builtin(vec![])).expect_err("one output maximum");
     assert_eq!(
         set_error.identifier(),

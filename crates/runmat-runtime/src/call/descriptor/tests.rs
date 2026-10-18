@@ -159,7 +159,8 @@ fn resolved_family_selection_is_cold_until_the_selected_future_is_polled() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(41.0))
             })
         },
-    ));
+    ))
+    .expect("call-port scope");
     let descriptor = || {
         CallableDescriptor::resolved(
             CallableIdentity::BoundFunction(runmat_types::FunctionId(41)),

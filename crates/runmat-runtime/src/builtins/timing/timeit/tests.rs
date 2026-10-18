@@ -154,7 +154,8 @@ fn timeit_uses_injected_monotonic_service_for_every_batch() {
                 rooted_sequence(runmat_value::ValueSequence::single(Value::Num(1.0)).unwrap())
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(timeit_builtin(
         Some(runtime),
         crate::user_functions::test_support::exact_local_value("test.monotonic.callback", binding),
@@ -212,7 +213,8 @@ fn cancelled_pending_callback_is_dropped_without_replay() {
             callback_calls.fetch_add(1, Ordering::SeqCst);
             Box::pin(PendingCallback(callback_drops.clone()))
         },
-    )));
+    )))
+    .expect("call-port scope");
     let unpolled = timeit_builtin(
         Some(runtime.clone()),
         crate::user_functions::test_support::exact_local_value(
@@ -279,7 +281,8 @@ fn install_test_callbacks(
                 },
             )
             .collect(),
-    )));
+    )))
+    .expect("call-port scope");
     let bound = crate::user_functions::install_local_bound_function_invoker(std::rc::Rc::new(
         move |runtime, binding, arguments, outputs, _lexical_environment| {
             let lease = binding
@@ -303,7 +306,8 @@ fn install_test_callbacks(
                 future.await
             })
         },
-    ));
+    ))
+    .expect("call-port scope");
     let resolver = crate::user_functions::install_semantic_function_resolver(Some(Arc::new(
         |name| match name {
             "__timeit_helper_counter_default" => Some(1001),
@@ -312,7 +316,8 @@ fn install_test_callbacks(
             "__timeit_helper_zero_outputs" => Some(1004),
             _ => None,
         },
-    )));
+    )))
+    .expect("call-port scope");
     let invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         |function, args, requested_outputs| {
             assert!(args.is_empty());
@@ -345,7 +350,8 @@ fn install_test_callbacks(
             .map_err(crate::sequence::sequence_error_to_runtime);
             Box::pin(async move { result.and_then(rooted_sequence) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     (resolver, invoker, catalog, bound)
 }
 
@@ -433,7 +439,8 @@ fn timeit_trims_function_handle_name_for_semantic_resolution() {
     let _resolver_guard =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "__timeit_helper_counter_default").then_some(188)
-        })));
+        })))
+        .expect("call-port scope");
     let callable = prepare_callable(
         Value::FunctionHandle("  __timeit_helper_counter_default  ".into()),
         None,
@@ -466,7 +473,8 @@ fn timeit_callable_invoke_honors_multi_requested_outputs() {
                 .and_then(rooted_sequence)
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
 
     let callable = prepare_callable(
         crate::user_functions::test_support::exact_local_value("function_target", binding),
@@ -484,7 +492,8 @@ fn timeit_string_handle_prefers_semantic_resolver_identity() {
     let _resolver_guard =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "__timeit_helper_counter_default").then_some(87)
-        })));
+        })))
+        .expect("call-port scope");
     let callable = prepare_callable(
         Value::String("@__timeit_helper_counter_default".to_string()),
         None,
@@ -501,7 +510,8 @@ fn timeit_char_handle_prefers_semantic_resolver_identity() {
     let _resolver_guard =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "__timeit_helper_counter_default").then_some(88)
-        })));
+        })))
+        .expect("call-port scope");
     let callable = prepare_callable(
         Value::CharArray(runmat_value::CharArray::new_row(
             "@__timeit_helper_counter_default",
@@ -520,7 +530,8 @@ fn timeit_external_function_handle_prefers_semantic_resolver_identity() {
     let _resolver_guard =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "pkg.callback").then_some(86)
-        })));
+        })))
+        .expect("call-port scope");
     let callable = prepare_callable(
         Value::ExternalFunctionHandle("pkg.callback".into()),
         Some(2),
@@ -543,7 +554,8 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
     let _resolver_guard =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "__timeit_helper_counter_default").then_some(89)
-        })));
+        })))
+        .expect("call-port scope");
     let callable = prepare_callable(
         Value::Closure(Closure::from_data(runmat_value::ClosureData {
             lexical_environment: None,

@@ -2285,7 +2285,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn min_pairwise_public_form_rejects_second_output() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = min_builtin(Value::Num(1.0), vec![Value::Num(2.0)])
             .expect_err("pairwise min has one output");
         assert_eq!(error.identifier(), MIN_ERROR_INVALID_ARGUMENT.identifier);

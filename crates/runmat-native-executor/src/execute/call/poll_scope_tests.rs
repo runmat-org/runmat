@@ -37,7 +37,7 @@ fn resumed_call_presents_output_and_class_context_only_during_its_poll() {
                         );
                         assert_eq!(
                             runmat_runtime::class_access_context(),
-                            Some(class_in_future.clone())
+                            Some(class_in_future.clone().into())
                         );
                         polls_in_future.set(polls_in_future.get() + 1);
                         if polls_in_future.get() == 1 {
@@ -61,8 +61,10 @@ fn resumed_call_presents_output_and_class_context_only_during_its_poll() {
         let identity = (pending.continuation, pending.generation);
         let outer_class = runmat_types::ClassIdentity::new("OuterPollClass").unwrap();
         futures::executor::block_on(runtime.scope(async {
-            let _outer_output = runmat_runtime::output_context::push_output_count(2);
-            let _outer_class = runmat_runtime::push_class_access_context(Some(outer_class.clone()));
+            let _outer_output = runmat_runtime::output_context::push_output_count(2)
+                .expect("outer output-count scope");
+            let _outer_class =
+                runmat_runtime::push_class_access_context(Some(outer_class.clone())).unwrap();
             let pending = state.pending_call.as_mut().unwrap();
             let mut context = Context::from_waker(futures::task::noop_waker_ref());
             assert!(pending.future.as_mut().poll(&mut context).is_pending());
@@ -70,7 +72,10 @@ fn resumed_call_presents_output_and_class_context_only_during_its_poll() {
                 runmat_runtime::output_context::requested_output_count(),
                 Some(2)
             );
-            assert_eq!(runmat_runtime::class_access_context(), Some(outer_class));
+            assert_eq!(
+                runmat_runtime::class_access_context(),
+                Some(outer_class.into())
+            );
         }));
         assert_eq!(polls.get(), 1);
         futures::executor::block_on(runtime.scope(async {

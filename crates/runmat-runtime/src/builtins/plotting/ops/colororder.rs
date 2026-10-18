@@ -573,7 +573,8 @@ mod tests {
         assert_close(&tensor_data(queried), &[0.2, 0.4, 0.6]);
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             let error =
                 colororder_builtin(vec![Value::Num(ax2), rgb_matrix(vec![1.0, 0.0, 0.0], 1)])
                     .expect_err("assigned targeted setter rejects before recoloring");

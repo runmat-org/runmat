@@ -129,7 +129,8 @@ mod tests {
             );
             builtin(vec![target.clone(), limits]).expect("target setter");
             {
-                let _outputs = crate::output_count::push_output_count(Some(2));
+                let _outputs =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 let rejected = builtin(vec![
                     target.clone(),
                     Value::Tensor(runmat_value::Tensor::new(vec![91.0, 92.0], vec![1, 2]).unwrap()),
@@ -175,7 +176,8 @@ mod tests {
             };
             {
                 let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-                let _outputs = crate::output_count::push_output_count(Some(0));
+                let _outputs =
+                    crate::output_count::push_output_count(Some(0)).expect("output-count scope");
                 let error = builtin(vec![target.clone(), integer_limits()])
                     .expect_err("explicit target does not hide the integer control extension");
                 assert_eq!(
@@ -192,7 +194,8 @@ mod tests {
             );
             {
                 let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-                let _outputs = crate::output_count::push_output_count(Some(0));
+                let _outputs =
+                    crate::output_count::push_output_count(Some(0)).expect("output-count scope");
                 builtin(vec![target.clone(), integer_limits()])
                     .expect("RunMat integer target setter");
             }

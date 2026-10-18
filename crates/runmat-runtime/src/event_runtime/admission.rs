@@ -111,7 +111,7 @@ pub(super) struct EventAdmission {
     name: MemberName,
     declaration: EventDeclaration,
     owner: ClassIdentity,
-    caller_class: Option<ClassIdentity>,
+    caller_class: Option<crate::dispatcher::ClassAccessIdentity>,
     generation: crate::class_registry::ClassRegistryRevision,
     operation: EventOperation,
     selected: Option<(
@@ -158,7 +158,7 @@ impl EventAdmission {
         if !selected_event_accessible(
             &declaration,
             &owner,
-            caller_class.as_ref(),
+            caller_class.as_deref(),
             operation,
             &projection,
         ) {
@@ -202,7 +202,7 @@ impl EventAdmission {
         if !crate::class_registry::event_accessible_from(
             &declaration,
             &owner,
-            caller_class.as_ref(),
+            caller_class.as_deref(),
             operation.access_kind(),
         ) {
             return Err(event_descriptor_error(
@@ -254,7 +254,7 @@ impl EventAdmission {
                 || !selected_event_accessible(
                     &self.declaration,
                     &self.owner,
-                    self.caller_class.as_ref(),
+                    self.caller_class.as_deref(),
                     self.operation,
                     projection,
                 )
@@ -286,7 +286,7 @@ impl EventAdmission {
         if !crate::class_registry::event_accessible_from(
             &current,
             &owner,
-            self.caller_class.as_ref(),
+            self.caller_class.as_deref(),
             self.operation.access_kind(),
         ) {
             return Err(event_descriptor_error(
@@ -391,7 +391,7 @@ mod admission_tests {
             events,
         });
         assert!(EventAdmission::new(&owner, "Secret", EventOperation::Listen).is_err());
-        let _scope = crate::dispatcher::push_class_access_context(Some(owner.clone()));
+        let _scope = crate::dispatcher::push_class_access_context(Some(owner.clone())).unwrap();
         EventAdmission::new(&owner, "Secret", EventOperation::Listen)
             .expect("declaring class has listen access");
     }

@@ -8,7 +8,9 @@ use runmat_value::IntegerStorage;
 use runmat_value::NumericDType;
 
 fn call(x: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
-    let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+    let _guard = outputs
+        .map(|count| crate::output_count::push_output_count(Some(count)))
+        .expect("output-count scope");
     block_on(evaluate(x, rest))
 }
 
@@ -284,7 +286,7 @@ fn presentation_context_alone_publishes_and_discards_numeric_outputs() {
         axes.active_index,
     )
     .len();
-    let _presentation = crate::output_context::push_output_count(0);
+    let _presentation = crate::output_context::push_output_count(0).expect("output-count scope");
     assert_eq!(crate::output_count::current_output_count(), None);
     let signal = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
     let output = call(
@@ -330,7 +332,7 @@ fn no_plot_core_rejects_invalid_parent_before_missing_presentation() {
 #[test]
 #[cfg(not(feature = "plot-core"))]
 fn presentation_context_alone_requires_plotting_capability() {
-    let _presentation = crate::output_context::push_output_count(0);
+    let _presentation = crate::output_context::push_output_count(0).expect("output-count scope");
     assert_eq!(crate::output_count::current_output_count(), None);
     let x = Value::Tensor(Tensor::new(vec![1.0; 8], vec![8, 1]).unwrap());
     let error = call(

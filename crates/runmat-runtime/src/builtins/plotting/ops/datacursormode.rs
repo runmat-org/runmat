@@ -819,7 +819,7 @@ mod tests {
         let figure = current_figure_handle().as_u32();
         let strict = crate::compatibility::push_runmat_extensions_enabled(false);
 
-        let _output = crate::output_count::push_output_count(Some(1));
+        let _output = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let error = datacursormode_builtin(vec![Value::String("on".into())])
             .expect_err("status output gate");
         assert_eq!(

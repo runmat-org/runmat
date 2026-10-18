@@ -1235,7 +1235,7 @@ mod tests {
     #[test]
     fn gradient_matrix_outputs_follow_matlab_order() {
         let tensor = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
         match result {
             Value::OutputList(outputs) => {
@@ -1294,8 +1294,7 @@ mod tests {
     fn gradient_multi_output_uses_typed_integer_storage_length_without_mirror() {
         let tensor =
             Tensor::new_integer(IntegerStorage::I16(vec![1, 3, 2, 4]), vec![2, 2]).expect("input");
-        let _guard = crate::output_count::push_output_count(Some(2));
-
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(Value::Tensor(tensor), Vec::new()).expect("gradient");
         match result {
             Value::OutputList(outputs) => {
@@ -1380,7 +1379,7 @@ mod tests {
     fn gradient_mixed_scalar_and_coordinate_vector_spacing_for_matrix() {
         let tensor = Tensor::new(vec![0.0, 20.0, 1.0, 21.0, 9.0, 29.0], vec![2, 3]).unwrap();
         let x = Tensor::new(vec![0.0, 1.0, 3.0], vec![1, 3]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(
             Value::Tensor(tensor),
             vec![Value::Tensor(x), Value::Num(2.0)],
@@ -1456,7 +1455,7 @@ mod tests {
     #[test]
     fn gradient_rejects_too_many_outputs() {
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let err = gradient_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err();
         assert_eq!(err.identifier(), GRADIENT_ERROR_INVALID_ARGUMENT.identifier);
         assert!(err.message().contains("requested 2 outputs"));
@@ -1566,7 +1565,8 @@ mod tests {
             shape: host.shape(),
         };
         let handle = provider.upload(&view).expect("upload");
-        let _out_guard = crate::output_count::push_output_count(Some(2));
+        let _out_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = gradient_builtin(Value::GpuTensor(handle), Vec::new()).expect("gradient");
         match result {
             Value::OutputList(outputs) => {
@@ -1610,7 +1610,8 @@ mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let spacing = Tensor::new(vec![0.0, 2.0], vec![2, 1]).unwrap();
-            let _out_guard = crate::output_count::push_output_count(Some(2));
+            let _out_guard =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let result = gradient_builtin(
                 Value::GpuTensor(handle),
                 vec![Value::Tensor(spacing), Value::Num(2.0)],

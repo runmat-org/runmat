@@ -71,7 +71,8 @@ fn cached_receiver_preserves_ordinal_before_later_and_deeper_suspensions() {
             "receiver_replay_end" => Some(14),
             _ => None,
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let method = |name: &str, function_name: &str| runmat_runtime::class_registry::RuntimeMethod {
         name: name.into(),
         is_static: false,
@@ -126,7 +127,8 @@ fn cached_receiver_preserves_ordinal_before_later_and_deeper_suspensions() {
                 rooted_sequence(ValueSequence::single(value).unwrap()).map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
     let executor = compile_executor(fixture()).unwrap();
     let result = futures::executor::block_on(executor.invoke_async(

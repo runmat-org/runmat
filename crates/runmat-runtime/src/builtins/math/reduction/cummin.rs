@@ -850,7 +850,7 @@ pub(crate) mod tests {
 
     #[test]
     fn cummin_rejects_a_second_public_output() {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(super::cummin_builtin(Value::Num(7.0), Vec::new())).unwrap_err();
         assert_eq!(
             error.identifier.as_deref(),

@@ -300,7 +300,8 @@ mod tests {
     }
 
     fn call(inputs: Vec<Value>, outputs: usize) -> crate::BuiltinResult<Value> {
-        let _outputs = crate::output_count::push_output_count(Some(outputs));
+        let _outputs =
+            crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
         block_on(deal_builtin_registered(inputs))
     }
 

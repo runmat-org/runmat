@@ -252,7 +252,7 @@ fn exprnd_rejects_logical_complex_and_excess_outputs_before_rng() {
         assert_eq!(before.state, random::snapshot().unwrap().state);
     }
     let before = random::snapshot().unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(exprnd_builtin(vec![Value::Num(1.0)])).expect_err("excess outputs");
     assert_eq!(error.identifier(), EXPRND_ERROR_INVALID_ARGUMENT.identifier);
     assert_eq!(before.state, random::snapshot().unwrap().state);
@@ -263,7 +263,7 @@ fn exprnd_zero_output_evaluation_still_advances_rng_once() {
     let _guard = random::test_guard();
     reset();
     let before = random::snapshot().unwrap().state;
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let _ = block_on(exprnd_builtin(vec![Value::Num(1.0)])).expect("zero-output call");
     assert_ne!(before, random::snapshot().unwrap().state);
 }

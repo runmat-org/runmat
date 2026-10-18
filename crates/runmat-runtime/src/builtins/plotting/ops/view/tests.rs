@@ -12,7 +12,7 @@ fn view_rejects_nonfinite_and_overflowed_angles_before_axes_creation() {
     use crate::builtins::plotting::state;
     let _guard = lock_plot_registry();
     state::reset_plot_state();
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, f64::MAX] {
         for args in [
             vec![Value::Num(invalid), Value::Num(0.)],
@@ -61,7 +61,7 @@ fn view_two_outputs_share_query_and_set_state_in_matlab_mode() {
     let _guard = lock_plot_registry();
     ensure_plot_test_env();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         view_builtin(vec![Value::Num(45.), Value::Num(20.)]).unwrap(),
         Value::output_list(vec![Value::Num(45.), Value::Num(20.)])
@@ -78,7 +78,7 @@ fn view_output_and_numeric_admission_precedes_default_axes_creation() {
     let _guard = lock_plot_registry();
     state::reset_plot_state();
     {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         assert_eq!(
             view_builtin(vec![]).unwrap_err().identifier(),
             Some("RunMat:view:TooManyOutputs")
@@ -86,7 +86,7 @@ fn view_output_and_numeric_admission_precedes_default_axes_creation() {
         assert!(state::current_figure_handle_if_exists().is_none());
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
         assert_eq!(
             view_builtin(vec![]).unwrap_err().identifier(),
@@ -95,7 +95,7 @@ fn view_output_and_numeric_admission_precedes_default_axes_creation() {
         assert!(state::current_figure_handle_if_exists().is_none());
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         assert!(view_builtin(vec![Value::Num(4.)]).is_err());
         assert!(state::current_figure_handle_if_exists().is_none());
         assert_eq!(

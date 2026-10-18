@@ -218,7 +218,7 @@ fn structural_dimension_is_not_forced_through_the_floating_boundary() {
 #[test]
 fn normalize_single_input_preserves_single_outputs() {
     let input = Value::Tensor(Tensor::from_f32(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap());
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let Value::OutputList(values) = call(input, Vec::new()).unwrap() else {
         panic!("expected three outputs");
     };
@@ -239,7 +239,8 @@ fn normalize_restores_only_requested_resident_output_forms() {
             let source = handle
                 .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
                 .unwrap();
-            let _outputs = crate::output_count::push_output_count(Some(requested));
+            let _outputs = crate::output_count::push_output_count(Some(requested))
+                .expect("output-count scope");
             let Value::OutputList(outputs) =
                 call(Value::GpuTensor(source.clone()), Vec::new()).unwrap()
             else {
@@ -368,7 +369,7 @@ fn norm_method_accepts_p_norm() {
 #[test]
 fn center_scale_outputs_can_be_reused() {
     let values = {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = call(
             tensor(vec![1., 2., 3., 5.], vec![2, 2]),
             vec![
@@ -446,7 +447,7 @@ fn normalize_explicit_param_shape_uses_typed_integer_storage_not_mirror() {
 #[test]
 fn zero_scale_output_can_be_reused() {
     let values = {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = call(tensor(vec![4., 4.], vec![2, 1]), vec![]).unwrap();
         let Value::OutputList(values) = result else {
             panic!("expected outputs");
@@ -486,7 +487,7 @@ fn explicit_nan_scale_is_accepted_and_propagates() {
 #[test]
 fn empty_inputs_preserve_empty_shapes() {
     let values = {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = call(tensor(vec![], vec![0, 3]), vec![]).unwrap();
         let Value::OutputList(values) = result else {
             panic!("expected outputs");

@@ -15,8 +15,8 @@ use runmat_value::{
 };
 
 use super::{
-    HostAllocationPlan, HostComplexWorkspace, HostNumericWorkspace, HostTypedElement,
-    HostTypedWorkspace,
+    AlignedHostWorkspace, HostAllocationPlan, HostComplexWorkspace, HostNumericWorkspace,
+    HostTypedElement, HostTypedWorkspace,
 };
 use crate::context::host_effect::{
     HostEffectAllocationError, HostEffectOutputHeadroom, ManagedHostEffectLedger,
@@ -505,10 +505,36 @@ impl HostAllocationReceipt {
         result
     }
 
+    /// Own one aligned, possibly uninitialized numerical scratch block with
+    /// its exact physical claim. Its bytes are never reinterpreted through an
+    /// initialized typed Vec, and zero-sized layouts require no allocation.
+    pub(crate) fn temporary_aligned(
+        &self,
+        runtime: &RuntimeContext,
+        layout: std::alloc::Layout,
+    ) -> Result<AlignedHostWorkspace, HostAllocationError> {
+        self.checkpoint(runtime)?;
+        let result =
+            AlignedHostWorkspace::new_claimed(layout, self.stage.clone(), self.fence.clone());
+        self.checkpoint(runtime)?;
+        result
+    }
+
     /// Construct and publish one exact retained output using only this
     /// receipt's precharged headroom. The constructed result is dropped if a
     /// concurrent cancellation or rebind wins the post-allocation checkpoint;
     /// a returned Tensor retains its exact claim after the receipt retires.
+    pub fn with_output_construction<T, E>(
+        &self,
+        runtime: &RuntimeContext,
+        construct: impl FnOnce(&dyn ExactHostAllocationPermit) -> Result<T, E>,
+    ) -> Result<Result<T, E>, HostAllocationError> {
+        self.checkpoint(runtime)?;
+        let result = construct(&self.output);
+        self.checkpoint(runtime)?;
+        Ok(result)
+    }
+
     pub fn with_output_allocation<T>(
         &self,
         runtime: &RuntimeContext,
@@ -516,10 +542,8 @@ impl HostAllocationReceipt {
             &dyn ExactHostAllocationPermit,
         ) -> Result<T, ExactHostNumericAllocationError>,
     ) -> Result<T, HostAllocationError> {
-        self.checkpoint(runtime)?;
-        let result = construct(&self.output);
-        self.checkpoint(runtime)?;
-        result.map_err(HostAllocationError::Numeric)
+        self.with_output_construction(runtime, construct)?
+            .map_err(HostAllocationError::Numeric)
     }
 
     /// Retain the existing invocation fence and headroom without allocating

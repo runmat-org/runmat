@@ -1160,8 +1160,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[cfg_attr(not(target_arch = "wasm32"), test)]
     fn public_invocation_preserves_rank_zero_rows_and_rank_one_element_geometry() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
-
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let rank_zero = Tensor::new(vec![7.0], vec![]).expect("rank-zero input");
         let Value::OutputList(outputs) = builtin_sync(
             Value::Tensor(rank_zero.clone()),
@@ -1205,7 +1204,8 @@ pub(crate) mod tests {
             );
 
             {
-                let _guard = crate::output_count::push_output_count(Some(2));
+                let _guard =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 let Value::OutputList(outputs) =
                     builtin_sync(left, right, Vec::new()).expect("resident ismember")
                 else {
@@ -1231,7 +1231,8 @@ pub(crate) mod tests {
                 );
             }
 
-            let _guard = crate::output_count::push_output_count(Some(3));
+            let _guard =
+                crate::output_count::push_output_count(Some(3)).expect("output-count scope");
             let err = builtin_sync(Value::Num(1.0), Value::Num(1.0), Vec::new())
                 .expect_err("excess outputs must fail");
             assert_eq!(err.identifier(), ISMEMBER_ERROR_INVALID_ARGUMENT.identifier);

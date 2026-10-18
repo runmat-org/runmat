@@ -23,7 +23,7 @@ fn empty_and_nd_vectors_preserve_geometry() {
 
 #[test]
 fn output_count_and_arity_fail_before_provider_lookup() {
-    let _count = crate::output_count::push_output_count(Some(2));
+    let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(toeplitz_builtin(vec![])).unwrap_err();
     assert_eq!(
         error.identifier(),
@@ -34,7 +34,7 @@ fn output_count_and_arity_fail_before_provider_lookup() {
         block_on(toeplitz_builtin(vec![])).unwrap_err().identifier(),
         ERROR_INVALID_INPUT.identifier
     );
-    let _discard = crate::output_count::push_output_count(Some(0));
+    let _discard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert!(block_on(toeplitz_builtin(vec![row(&[1., 2.])])).is_ok());
 }
 

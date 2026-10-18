@@ -154,7 +154,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn strcmp_rejects_excess_outputs_before_comparing() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = strcmp_builtin(Value::String("a".into()), Value::String("a".into()))
             .expect_err("fixed output bound");
         assert_eq!(error.identifier(), STRCMP_ERROR_TOO_MANY_OUTPUTS.identifier);

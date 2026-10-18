@@ -136,7 +136,8 @@ fn resident_reverse_traverses_two_networks_and_accumulates_reused_parameters() {
         ))
         .unwrap();
         let second = block_on(model::forward_builtin(network.clone(), first, vec![])).unwrap();
-        let _requested = crate::output_count::push_output_count(Some(2));
+        let _requested =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         provider.reset_telemetry();
         let gradients = block_on(super::super::dlgradient_direct(
             second,
@@ -317,7 +318,8 @@ fn public_scalar_resident_network_gradient_stays_on_provider() {
             vec![],
         ))
         .unwrap();
-        let _requested = crate::output_count::push_output_count(Some(2));
+        let _requested =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let gradients =
             block_on(super::super::dlgradient_direct(loss, vec![input, network])).unwrap();
         let Value::OutputList(gradients) = gradients else {
@@ -422,7 +424,8 @@ fn canonical_dlgradient_uses_explicit_output_count_and_cancellation() {
             crate::execution::RuntimeExecutionService::new(),
         ));
         runtime.set_error_namespace("Invocation");
-        let _ambient_outputs = crate::output_count::push_output_count(Some(2));
+        let _ambient_outputs =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = block_on((bindings[0].implementation)(
             crate::builtin::RuntimeBuiltinInvocation::new(&args, Some(runtime.clone()), Some(1)),
         ))

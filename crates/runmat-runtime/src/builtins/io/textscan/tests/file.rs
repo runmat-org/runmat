@@ -314,7 +314,7 @@ fn textscan_rejects_standard_stream_identifiers() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn excessive_output_request_rejects_before_text_or_file_scan() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let err = block_on(textscan_builtin(
         None,
         Value::from("not a file and not parsed"),

@@ -74,6 +74,94 @@ fn runtime(ports: RuntimeServicePorts) -> RuntimeContext {
 }
 
 #[test]
+fn console_text_retains_one_backing_through_clones_and_rejects_partial_formatting() {
+    use crate::console::ConsoleText;
+
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = runtime(
+        RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+    );
+    let charged = ConsoleText::retained_bytes(5).unwrap();
+    let receipt =
+        HostAllocationReceipt::admit(Some(&context), HostAllocationPlan::new(0, charged).unwrap())
+            .unwrap()
+            .unwrap();
+    let text =
+        ConsoleText::try_initialize(5, &receipt.output_permit(&context).unwrap(), |writer| {
+            writer.write_str("hello")
+        })
+        .unwrap();
+    let shared = text.clone();
+    assert_eq!(text.as_str().as_ptr(), shared.as_str().as_ptr());
+    assert_eq!(text, "hello");
+    assert!(shared.has_managed_backing());
+    assert!(text.try_into_unbounded().is_err());
+    drop(receipt);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+    drop(shared);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+
+    let receipt =
+        HostAllocationReceipt::admit(Some(&context), HostAllocationPlan::new(0, charged).unwrap())
+            .unwrap()
+            .unwrap();
+    let failure =
+        ConsoleText::try_initialize(5, &receipt.output_permit(&context).unwrap(), |writer| {
+            writer.write_str("hello")?;
+            // Ignoring a failed write cannot publish the earlier prefix.
+            let _ = writer.write_str("!");
+            Ok(())
+        });
+    assert!(matches!(failure, Err(HostTextError::CapacityExceeded)));
+    let formatter_failure =
+        ConsoleText::try_initialize(0, &receipt.output_permit(&context).unwrap(), |_| {
+            Err(std::fmt::Error)
+        });
+    assert!(matches!(
+        formatter_failure,
+        Err(HostTextError::FormattingFailed)
+    ));
+    assert_eq!(ConsoleText::retained_bytes(0).unwrap(), 0);
+    drop(receipt);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+
+    for (contents, capacity) in [("short", 8192), ("", 64)] {
+        let mut original = String::with_capacity(capacity);
+        original.push_str(contents);
+        let pointer = original.as_ptr();
+        let source = ConsoleText::from(original);
+        let charged = source.adoption_retained_bytes().unwrap();
+        assert!(charged >= capacity as u64);
+        let receipt = HostAllocationReceipt::admit(
+            Some(&context),
+            HostAllocationPlan::new(0, charged).unwrap(),
+        )
+        .unwrap()
+        .unwrap();
+        let adopted = source
+            .try_adopt(&receipt.output_permit(&context).unwrap())
+            .unwrap();
+        assert_eq!(adopted.as_str(), contents);
+        assert_eq!(adopted.as_str().as_ptr(), pointer);
+        assert!(adopted.has_managed_backing());
+        drop(receipt);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, charged);
+        drop(adopted);
+        assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+        assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
+    }
+
+    let original = String::from("ordinary");
+    let pointer = original.as_ptr();
+    let ordinary = ConsoleText::from(original);
+    assert_eq!(ordinary.as_str().as_ptr(), pointer);
+    let ordinary = ordinary.try_into_unbounded().unwrap();
+    assert_eq!(ordinary.as_ptr(), pointer);
+}
+
+#[test]
 fn trace_scratch_growth_claims_exact_live_bytes_and_revokes_new_growth() {
     let ledger = ManagedHostEffectLedger::new_with_epoch(4_096, 7);
     let cancellation = CancellationSource::new();

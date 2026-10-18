@@ -421,7 +421,7 @@ fn resample_gpu_two_outputs_return_resident_signal_and_host_filter() {
             })
             .expect("upload input");
 
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(resample_builtin(
             Value::GpuTensor(handle.clone()),
             Value::Num(1.0),

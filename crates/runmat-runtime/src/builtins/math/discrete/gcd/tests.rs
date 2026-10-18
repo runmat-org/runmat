@@ -82,7 +82,7 @@ fn preserves_all_native_integer_classes_with_double_scalar() {
 
 #[test]
 fn extended_outputs_preserve_signed_class_and_bezout_identity() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let left = Tensor::new_integer(IntegerStorage::I16(vec![30, -81]), vec![1, 2]).unwrap();
     let right = Tensor::new_integer(IntegerStorage::I16(vec![56, 57]), vec![1, 2]).unwrap();
     let Value::OutputList(outputs) =
@@ -135,7 +135,7 @@ fn preserves_single_and_rejects_invalid_inputs() {
 #[test]
 fn extended_outputs_reject_unsigned_classes_and_excess_count() {
     {
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(gcd_builtin(
             Value::Int(IntValue::U16(30)),
             Value::Int(IntValue::U16(56)),
@@ -143,6 +143,6 @@ fn extended_outputs_reject_unsigned_classes_and_excess_count() {
         .unwrap_err();
         assert_eq!(error.identifier(), GCD_ERROR_INVALID_INPUT.identifier);
     }
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     assert!(block_on(gcd_builtin(Value::Num(30.0), Value::Num(56.0))).is_err());
 }

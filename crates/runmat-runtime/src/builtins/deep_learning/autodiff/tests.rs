@@ -535,7 +535,7 @@ fn method_output_arity_preflights_before_resident_operand_access() {
             })
             .expect("resident operand");
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         for result in [
             dlarray_plus_builtin(wrapped(Value::GpuTensor(resident.clone())), Value::Num(1.0)),
             dlarray_mtimes_builtin(wrapped(Value::GpuTensor(resident.clone())), Value::Num(1.0)),
@@ -680,7 +680,7 @@ fn gradient_output_arity_rejects_before_nested_provider_access() {
             .expect("resident target");
         let nested = Value::Cell(CellArray::new(vec![Value::GpuTensor(resident)], 1, 1).unwrap());
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = futures::executor::block_on(dlgradient_direct(dlarray(1.0), vec![nested]))
             .expect_err("one target cannot provide two outputs");
         assert_eq!(error.identifier(), Some("RunMat:deepLearning:InvalidInput"));

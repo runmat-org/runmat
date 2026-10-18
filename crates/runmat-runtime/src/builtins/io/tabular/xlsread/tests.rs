@@ -268,7 +268,9 @@ fn fill_named_xlsx<W: Write + std::io::Seek>(zip: &mut zip::ZipWriter<W>, sheet_
 }
 
 fn direct_xlsread(path: &Path, args: Vec<Value>, outputs: Option<usize>) -> Value {
-    let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+    let _guard = outputs
+        .map(|count| crate::output_count::push_output_count(Some(count)))
+        .expect("output-count scope");
     block_on(xlsread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
@@ -601,7 +603,7 @@ fn xlsread_rejects_too_many_outputs() {
     let _fs_lock = runmat_filesystem::provider_override_lock();
     let path = unique_path("xlsread_too_many_outputs");
     write_minimal_xlsx(&path);
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let err = block_on(xlsread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),

@@ -382,7 +382,7 @@ fn nanmin_all_option_routes_to_reduction() {
 #[test]
 fn nanmin_reduction_returns_indices_but_pairwise_has_one_output() {
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let input = tensor(vec![f64::NAN, 2.0, 3.0, 4.0], vec![2, 2]);
         let placeholder = Value::Tensor(
             Tensor::new(Vec::<f64>::new(), vec![0, 0]).expect("empty reduction placeholder"),
@@ -401,7 +401,7 @@ fn nanmin_reduction_returns_indices_but_pairwise_has_one_output() {
         );
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(nanmin_builtin(
             tensor(vec![1.0, 2.0], vec![1, 2]),
             vec![tensor(vec![2.0, 1.0], vec![1, 2])],

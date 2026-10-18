@@ -6,7 +6,9 @@ use runmat_value::{IntegerStorage, NumericDType};
 use std::rc::Rc;
 
 fn call(image: Value, rest: Vec<Value>, outputs: Option<usize>) -> Value {
-    let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+    let _guard = outputs
+        .map(|count| crate::output_count::push_output_count(Some(count)))
+        .expect("output-count scope");
     block_on(imhist_builtin(None, image, rest)).expect("imhist")
 }
 
@@ -282,7 +284,7 @@ fn rejects_colormap_values_outside_unit_range() {
 fn rejects_more_than_two_outputs() {
     let image = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
     let err = {
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap_err()
     };
     assert_eq!(err.identifier(), Some("RunMat:imhist:TooManyOutputs"));
@@ -292,7 +294,7 @@ fn rejects_more_than_two_outputs() {
 fn output_and_arity_rejection_precede_image_materialization() {
     let wide = Value::Int(IntValue::U64(u64::MAX));
     let excess = {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         block_on(imhist_builtin(None, wide.clone(), vec![])).unwrap_err()
     };
     assert_eq!(excess.identifier(), Some("RunMat:imhist:TooManyOutputs"));
@@ -327,7 +329,8 @@ fn resident_programmatic_outputs_are_deferred_unique_and_owner_preserving() {
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("publish provenance view");
         let result = {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             block_on(imhist_builtin(
                 None,
                 Value::GpuTensor(source.clone()),
@@ -385,7 +388,8 @@ fn selected_host_histogram_reports_completed_owner_upload_once() {
         let input = tensor(vec![0.0, 1.0, 1.0, 0.0], vec![2, 2], NumericDType::F64);
         let source = gpu_helpers::upload_tensor(provider, &input).expect("resident image");
         let result = {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             block_on(imhist_builtin(
                 Some(runtime),
                 Value::GpuTensor(source.clone()),
@@ -420,7 +424,7 @@ fn selected_histogram_unpolled_and_statement_forms_do_not_probe() {
             vec![],
         ));
         assert_eq!(witness.selections(), 0);
-        let _requested = crate::output_context::push_output_count(0);
+        let _requested = crate::output_context::push_output_count(0).expect("output-count scope");
         let counts = block_on(imhist_builtin(
             Some(runtime),
             Value::GpuTensor(source.clone()),
@@ -486,7 +490,8 @@ fn resident_statement_form_returns_host_counts_without_plotting_or_publication()
             .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
             .expect("publish provenance view");
         let result = {
-            let _requested = crate::output_context::push_output_count(0);
+            let _requested =
+                crate::output_context::push_output_count(0).expect("output-count scope");
             block_on(imhist_builtin(
                 None,
                 Value::GpuTensor(source.clone()),
@@ -537,7 +542,8 @@ fn automatic_f32_resident_outputs_fall_back_to_host_without_publication() {
             .expect("publish provenance view");
         runmat_accelerate_api::mark_residency(&source);
         let result = {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             block_on(imhist_builtin(
                 None,
                 Value::GpuTensor(source.clone()),
@@ -607,7 +613,7 @@ fn statement_form_renders_bar_chart_without_value() {
     ensure_plot_test_env();
     reset_hold_state_for_run();
     let _ = clear_figure(None);
-    let _requested = crate::output_context::push_output_count(0);
+    let _requested = crate::output_context::push_output_count(0).expect("output-count scope");
     let image = tensor(vec![0.0, 1.0, 1.0, 2.0], vec![2, 2], NumericDType::U8);
     let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
     assert_eq!(out, Value::output_list(Vec::new()));
@@ -621,7 +627,7 @@ fn statement_form_renders_bar_chart_without_value() {
 #[cfg(not(feature = "plot-core"))]
 #[test]
 fn statement_form_noops_without_plot_core() {
-    let _requested = crate::output_context::push_output_count(0);
+    let _requested = crate::output_context::push_output_count(0).expect("output-count scope");
     let image = tensor(vec![0.0, 1.0], vec![1, 2], NumericDType::U8);
     let out = block_on(imhist_builtin(None, Value::Tensor(image), vec![])).unwrap();
     assert_eq!(out, Value::output_list(Vec::new()));

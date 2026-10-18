@@ -526,7 +526,7 @@ pub(crate) mod tests {
 
     #[test]
     fn round_rejects_excess_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = round_builtin(Value::Num(1.25), Vec::new())
             .expect_err("round must reject excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:round:TooManyOutputs"));

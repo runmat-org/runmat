@@ -93,7 +93,7 @@ fn fixed_output_arity_rejects_all_eight_before_file_access() {
     let file = || Value::String("never-created-output-count.h5".into());
     let object = || Value::String("/data".into());
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         for result in [
             block_on(h5read_builtin(file(), object(), Vec::new())),
             block_on(hdf5read_builtin(file(), object(), Vec::new())),
@@ -108,7 +108,7 @@ fn fixed_output_arity_rejects_all_eight_before_file_access() {
         }
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         for result in [
             block_on(h5write_builtin(
                 file(),
@@ -140,8 +140,8 @@ fn fixed_output_arity_rejects_all_eight_before_file_access() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn nested_implicit_output_does_not_inherit_enclosing_presentation_count() {
-    let _presentation = crate::output_context::push_output_count(3);
-    let _invocation = crate::output_count::push_output_count(None);
+    let _presentation = crate::output_context::push_output_count(3).expect("output-count scope");
+    let _invocation = crate::output_count::push_output_count(None).expect("output-count scope");
     let error = block_on(h5write_builtin(
         Value::Bool(true),
         Value::String("/A".into()),
@@ -157,7 +157,7 @@ fn nested_implicit_output_does_not_inherit_enclosing_presentation_count() {
 #[test]
 fn captured_h5disp_text_is_gated_before_native_file_access() {
     let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _captured = crate::output_count::push_output_count(Some(1));
+    let _captured = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let denied = block_on(h5disp_builtin(
         Value::String("never-opened.h5".into()),
         Vec::new(),
@@ -169,14 +169,14 @@ fn captured_h5disp_text_is_gated_before_native_file_access() {
     );
     drop(_captured);
 
-    let _statement = crate::output_count::push_output_count(Some(0));
+    let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let invalid = block_on(h5disp_builtin(Value::Bool(true), Vec::new()))
         .expect_err("statement form must continue into ordinary argument validation");
     assert_eq!(invalid.identifier(), ERR_ARGUMENT.identifier);
     drop(_statement);
 
     let _enabled = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _captured = crate::output_count::push_output_count(Some(1));
+    let _captured = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let invalid = block_on(h5disp_builtin(Value::Bool(true), Vec::new()))
         .expect_err("enabled captured form must continue into argument validation");
     assert_eq!(invalid.identifier(), ERR_ARGUMENT.identifier);
@@ -186,7 +186,7 @@ fn captured_h5disp_text_is_gated_before_native_file_access() {
 #[test]
 fn h5disp_invalid_mode_and_encoding_precede_native_path_capture() {
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _captured = crate::output_count::push_output_count(Some(1));
+    let _captured = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     for rest in [
         vec![Value::String("/data".into()), Value::String("full".into())],
         vec![

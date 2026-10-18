@@ -436,13 +436,28 @@ async fn await_sequence(
                         .await
                     }
                     runmat_runtime::execution::DeferredInvocation::Program { .. } => {
-                        crate::execute_deferred_program_in_context(*call, context.runtime.clone())
+                        if matches!(
+                            &call.program,
+                            runmat_runtime::execution::DeferredProgram::SelectedGraph(_)
+                        ) {
+                            crate::program_execution::execute_deferred_graph_in_context(
+                                *call,
+                                context.runtime.clone(),
+                            )
+                            .await
+                            .map_err(execution_error)
+                        } else {
+                            crate::execute_deferred_program_in_context(
+                                *call,
+                                context.runtime.clone(),
+                            )
                             .await
                             .map_err(execution_error)
                             .and_then(|sequence| {
                                 runmat_runtime::execution::RootedValueSequence::new(sequence)
                                     .map_err(execution_error)
                             })
+                        }
                     }
                 };
                 let stored = result.as_ref().map(Clone::clone).map_err(|error| {

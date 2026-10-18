@@ -2048,7 +2048,7 @@ pub(crate) mod tests {
 
     #[test]
     fn sort_rejects_more_than_two_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = sort_builtin(
             Value::Tensor(Tensor::new(vec![2.0, 1.0], vec![2, 1]).expect("input")),
             Vec::new(),

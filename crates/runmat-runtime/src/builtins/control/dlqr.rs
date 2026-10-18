@@ -7,7 +7,7 @@ use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
 use super::lqr::RiccatiApi;
-use super::lqr::{LqrDomain, LqrRequest};
+use super::lqr::{LqrDomain, LqrRequest, ManagedRiccatiRequest};
 use crate::builtins::control::tf_model::control_error;
 use crate::context::host_allocation::{
     HostAllocationError, HostAllocationPolicy, HostAllocationReceipt,
@@ -47,17 +47,28 @@ async fn dlqr_builtin(
     }
     let policy = HostAllocationReceipt::policy(runtime.as_ref())
         .map_err(|error| admission(runtime.as_ref(), error))?;
-    if policy == HostAllocationPolicy::Managed {
-        return Err(admission(
-            runtime.as_ref(),
-            HostAllocationError::MissingManagedOwner,
-        ));
-    }
     let mut values = rest.into_iter();
     let b = values.next().expect("shape checked B");
     let q = values.next().expect("shape checked Q");
     let r = values.next().expect("shape checked R");
     let n = values.next();
+    if policy == HostAllocationPolicy::Managed {
+        let runtime = runtime
+            .as_ref()
+            .ok_or_else(|| admission(None, HostAllocationError::MissingManagedOwner))?;
+        return ManagedRiccatiRequest::new(
+            a,
+            b,
+            q,
+            Some(r),
+            n,
+            LqrDomain::Discrete,
+            RiccatiApi::Dlqr,
+            runtime,
+        )?
+        .execute(out_count, runtime)
+        .await;
+    }
     let request = LqrRequest::prepare_standard_matrix(
         a,
         b,
@@ -93,7 +104,7 @@ mod tests {
     fn scalar_dare_solution_has_small_residual_and_stable_closed_loop() {
         // A=B=Q=R=1. Positive stabilizing root solves S²-S-1=0;
         // K=S/(1+S), and |A-BK|<1.
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let outputs = block_on(dlqr_builtin(
             None,
             Value::Num(1.0),

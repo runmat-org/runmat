@@ -274,7 +274,7 @@ fn resident_hold_trace_uses_typed_extrema_and_keeps_borrowed_source_live() {
             scale: SpectrumScale::Psd,
             trace,
         };
-        let _count = crate::output_count::push_output_count(Some(1));
+        let _count = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let value = futures::executor::block_on(output_gpu(
             &source_input.handle,
             8,

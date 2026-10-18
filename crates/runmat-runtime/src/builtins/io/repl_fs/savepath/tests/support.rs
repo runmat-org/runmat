@@ -12,7 +12,8 @@ pub(super) fn run(
     outputs: usize,
     extensions: bool,
 ) -> crate::BuiltinResult<Value> {
-    let _outputs = crate::output_count::push_output_count(Some(outputs));
+    let _outputs =
+        crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(extensions);
     futures::executor::block_on(super::super::savepath_builtin(args))
 }

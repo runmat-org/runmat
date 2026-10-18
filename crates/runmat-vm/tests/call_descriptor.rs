@@ -101,7 +101,8 @@ fn external_name_descriptor_does_not_fallback_to_builtin_name_resolution() {
 fn external_name_descriptor_external_boundary_can_use_semantic_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.remote_inc").then_some(7777)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 7777);
@@ -109,7 +110,8 @@ fn external_name_descriptor_external_boundary_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let descriptor = CallableDescriptor::resolved(
         CallableIdentity::ExternalName(QualifiedName(vec![
             SymbolName("pkg".to_string()),
@@ -187,7 +189,8 @@ fn imported_identity_never_falls_back_to_builtin_name_resolution() {
 fn imported_identity_runtime_name_resolution_can_use_semantic_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.import_only").then_some(6262)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 6262);
@@ -195,7 +198,8 @@ fn imported_identity_runtime_name_resolution_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(5.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(6.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let descriptor = CallableDescriptor::resolved(
         imported_identity("import_only"),
         vec![Value::Num(5.0)],
@@ -212,7 +216,8 @@ fn imported_identity_runtime_name_resolution_can_use_semantic_resolver() {
 fn method_identity_runtime_name_resolution_can_use_semantic_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "method_only").then_some(9191)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 9191);
@@ -220,7 +225,8 @@ fn method_identity_runtime_name_resolution_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(5.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(6.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let descriptor = CallableDescriptor::resolved(
         method_identity("method_only"),
         vec![Value::Num(5.0)],
@@ -331,7 +337,8 @@ fn try_execute_external_boundary_single_segment_name_returns_none_without_semant
 fn try_execute_external_boundary_qualified_name_can_use_semantic_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.remote_inc").then_some(9393)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 9393);
@@ -339,7 +346,8 @@ fn try_execute_external_boundary_qualified_name_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let descriptor = CallableDescriptor::resolved(
         CallableIdentity::ExternalName(QualifiedName(vec![
             SymbolName("pkg".to_string()),
@@ -360,13 +368,15 @@ fn try_execute_external_boundary_qualified_name_can_use_semantic_resolver() {
 fn feval_function_handle_builtin_prefers_builtin_identity_over_runtime_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "sqrt").then_some(4242)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, _args, _requested_outputs| {
             assert_eq!(function, 4242);
             Box::pin(async { Ok(single_sequence(Value::Num(123.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let descriptor = CallableDescriptor::from_feval_value(
         Value::function_handle("sqrt".to_string()),
         vec![Value::Num(9.0)],
@@ -423,7 +433,8 @@ fn feval_method_function_handle_classifies_as_method_identity() {
 fn feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "resolved_method").then_some(5252)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 5252);
@@ -431,7 +442,8 @@ fn feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolve
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::method_function_handle("resolved_method".to_string()),
@@ -448,7 +460,8 @@ fn feval_method_function_handle_runtime_name_resolution_can_use_semantic_resolve
 fn feval_function_handle_external_boundary_can_use_semantic_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.remote_inc").then_some(5151)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 5151);
@@ -456,7 +469,8 @@ fn feval_function_handle_external_boundary_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::function_handle("pkg.remote_inc".to_string()),
@@ -481,7 +495,8 @@ fn feval_closure_without_embedded_semantic_uses_registry_name_resolution() {
             assert_eq!(args, &[Value::Num(10.0), Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(12.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::Closure(Closure::new(
@@ -541,7 +556,8 @@ fn feval_closure_with_embedded_semantic_prefers_embedded_identity() {
     let runtime = descriptor_runtime();
     let value = block_on(runtime.scope(async {
         let _invoker_guard =
-            runmat_runtime::user_functions::install_local_bound_function_invoker(invoker);
+            runmat_runtime::user_functions::install_local_bound_function_invoker(invoker)
+                .expect("call-port scope");
         execute_callable_descriptor_in_context(&runtime, descriptor).await
     }))
     .expect("embedded semantic identity should take precedence");
@@ -642,7 +658,8 @@ fn feval_at_handle_external_boundary_can_use_semantic_resolver() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.remote_inc").then_some(7171)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 7171);
@@ -650,7 +667,8 @@ fn feval_at_handle_external_boundary_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::String("@pkg.remote_inc".to_string()),
@@ -685,7 +703,8 @@ fn feval_string_array_at_handle_can_use_semantic_resolver() {
     let _compat = runmat_runtime::compatibility::push_runmat_extensions_enabled(true);
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.remote_inc").then_some(7272)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 7272);
@@ -693,7 +712,8 @@ fn feval_string_array_at_handle_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::StringArray(
@@ -713,7 +733,8 @@ fn feval_string_array_at_handle_can_use_semantic_resolver() {
 fn feval_external_function_handle_can_use_semantic_resolver() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.remote_inc").then_some(8181)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 8181);
@@ -721,7 +742,8 @@ fn feval_external_function_handle_can_use_semantic_resolver() {
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
 
     let descriptor = CallableDescriptor::from_feval_value(
         Value::external_function_handle("pkg.remote_inc".to_string()),
@@ -738,7 +760,8 @@ fn feval_external_function_handle_can_use_semantic_resolver() {
 fn feval_external_function_handle_prefers_registry_semantic_identity() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "pkg.remote_inc").then_some(9999)),
-    ));
+    ))
+    .expect("call-port scope");
     let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(Some(
         Arc::new(|function, args, requested_outputs| {
             assert_eq!(function, 8181);
@@ -746,7 +769,8 @@ fn feval_external_function_handle_prefers_registry_semantic_identity() {
             assert_eq!(args, &[Value::Num(2.0)]);
             Box::pin(async { Ok(single_sequence(Value::Num(3.0))) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     let mut registry = FunctionRegistry::default();
     publish_named_fixture(&mut registry, "pkg.remote_inc", 8181);
 
@@ -765,7 +789,8 @@ fn feval_external_function_handle_prefers_registry_semantic_identity() {
 fn feval_semantic_function_handle_prefers_embedded_function_id() {
     let _resolver_guard = runmat_runtime::user_functions::install_semantic_function_resolver(Some(
         Arc::new(|name| (name == "inc").then_some(9999)),
-    ));
+    ))
+    .expect("call-port scope");
     let origin = runmat_execution::FunctionBindingOrigin {
         program: runmat_execution::Digest::sha256("call descriptor exact fixture"),
         function: runmat_types::ProgramFunctionId(4242),
@@ -798,7 +823,8 @@ fn feval_semantic_function_handle_prefers_embedded_function_id() {
     let runtime = descriptor_runtime();
     let value = block_on(runtime.scope(async {
         let _invoker_guard =
-            runmat_runtime::user_functions::install_local_bound_function_invoker(invoker);
+            runmat_runtime::user_functions::install_local_bound_function_invoker(invoker)
+                .expect("call-port scope");
         execute_callable_descriptor_in_context(&runtime, descriptor).await
     }))
     .expect("semantic function handle should use embedded semantic function id");

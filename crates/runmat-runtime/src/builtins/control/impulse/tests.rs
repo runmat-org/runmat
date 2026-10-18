@@ -114,7 +114,7 @@ fn impulse_second_order_continuous() {
 
 #[test]
 fn impulse_multi_output_returns_y_and_t_columns() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let sys = tf_object(vec![20.0], vec![1.0, 5.0], 0.0);
     let t_arg = Value::Tensor(Tensor::new(vec![0.0, 0.1], vec![1, 2]).unwrap());
     let result = run_impulse(sys, vec![t_arg]).expect("impulse");
@@ -138,7 +138,7 @@ fn impulse_multi_output_returns_y_and_t_columns() {
 #[cfg(feature = "plot-core")]
 #[test]
 fn impulse_zero_output_count_emits_no_values() {
-    let _guard = crate::output_count::push_output_count(Some(0));
+    let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
     let result = run_impulse(sys, Vec::new()).expect("impulse");
     let Value::OutputList(outputs) = result else {
@@ -150,7 +150,7 @@ fn impulse_zero_output_count_emits_no_values() {
 #[cfg(feature = "plot-core")]
 #[test]
 fn impulse_requested_zero_outputs_emits_no_values() {
-    let _guard = crate::output_context::push_output_count(0);
+    let _guard = crate::output_context::push_output_count(0).expect("output-count scope");
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
     let result = run_impulse(sys, Vec::new()).expect("impulse");
     let Value::OutputList(outputs) = result else {
@@ -165,14 +165,14 @@ fn impulse_numeric_output_survives_without_plotting_but_statement_fails_typed() 
     use std::error::Error;
 
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-    let _numeric = crate::output_count::push_output_count(Some(1));
+    let _numeric = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     assert!(matches!(
         run_impulse(sys.clone(), Vec::new()).expect("numeric response"),
         Value::OutputList(_)
     ));
     drop(_numeric);
 
-    let _statement = crate::output_count::push_output_count(Some(0));
+    let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = run_impulse(sys, Vec::new()).expect_err("presentation capability absent");
     assert_eq!(error.identifier(), IMPULSE_ERROR_PLOT_FAILED.identifier);
     assert!(error
@@ -219,7 +219,7 @@ fn impulse_typed_integer_coefficients_and_time_cross_double_boundary_exactly() {
         .insert("OutputDelay".to_string(), Value::Num(0.0));
 
     let t = integer_tensor(IntegerStorage::U64(vec![0, 1]), vec![1, 2]);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = run_impulse(Value::Object(object), vec![t]).expect("impulse");
     let Value::OutputList(outputs) = result else {
         panic!("expected output list");
@@ -275,7 +275,7 @@ fn impulse_scalar_final_time_reads_typed_integer_storage_length_exactly() {
 
     let final_time =
         Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result =
         run_impulse(Value::Object(object), vec![Value::Tensor(final_time)]).expect("impulse");
     let Value::OutputList(outputs) = result else {
@@ -555,7 +555,7 @@ fn wide_exact_integer_time_is_accepted_but_inexact_time_is_rejected() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let exact = 1_u64 << 63;
     let model = tf_object(vec![1.0], vec![1.0, -0.5], exact as f64);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let Value::OutputList(values) =
         run_impulse(model.clone(), vec![Value::Int(IntValue::U64(exact))])
             .expect("exact wide final time")

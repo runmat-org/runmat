@@ -72,7 +72,7 @@ fn unknown_and_inaccessible_events_reject_before_listener_publication() {
             unknown_notify.identifier(),
             Some("RunMat:NotifyEventUnknown")
         );
-        let _scope = crate::dispatcher::push_class_access_context(Some(owner));
+        let _scope = crate::dispatcher::push_class_access_context(Some(owner)).unwrap();
         block_on(addlistener_builtin(target, "Changed".into(), callback)).unwrap();
         assert_eq!(
             with_event_registry(|registry| registry.listener_roots.len()),
@@ -123,7 +123,8 @@ fn default_and_subclass_event_data_reach_callbacks_as_second_argument() {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let source = register_source("EventAdmissionPayloadSource", EventAccess::Public);
         let target = block_on(crate::new_handle_object_builtin(source.to_string())).unwrap();
         block_on(addlistener_builtin(
@@ -186,7 +187,8 @@ fn callback_republication_stops_later_delivery_without_replay() {
                     ))
                 })
             },
-        )));
+        )))
+        .expect("call-port scope");
         let target = block_on(crate::new_handle_object_builtin(source.to_string())).unwrap();
         let callback =
             crate::user_functions::test_support::exact_local_value("event_callback", binding);

@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::{BuiltinEffects, BuiltinSemantics};
 
-pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 9;
+pub const BUILTIN_CATALOG_SCHEMA_VERSION: u32 = 10;
 
 /// Whether a callable is part of public builtin discovery or is an executable
 /// runtime fixture. Both audiences share one catalog and one binding registry.

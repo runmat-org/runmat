@@ -123,7 +123,7 @@ mod tests {
             futures::executor::block_on(sym_builtin(Value::from("x"), vec![Value::from("real")]))
                 .unwrap_err();
         assert_eq!(error.identifier(), SYM_ERRORS[0].identifier);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = futures::executor::block_on(sym_builtin(Value::from("x"), vec![])).unwrap_err();
         assert_eq!(error.identifier(), SYM_ERROR_TOO_MANY_OUTPUTS.identifier);
     }

@@ -84,7 +84,7 @@ fn illegal_outputs_and_nested_inputs_fail_before_provider_ownership_access() {
     assert!(gpu_helpers::exact_provider_for_handle(&allocation.handle).is_none());
     let resident = Value::GpuTensor(allocation.handle.clone());
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = block_on(pagefun_builtin(
             Value::FunctionHandle("mtimes".into()),
             resident.clone(),

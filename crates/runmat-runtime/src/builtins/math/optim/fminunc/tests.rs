@@ -74,7 +74,8 @@ fn fminunc_quadratic_reaches_vector_minimum() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(f))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(runtime.scope(fminunc_builtin(
         objective,
         tensor(vec![0.0, 0.0, 0.0]),
@@ -102,7 +103,8 @@ fn fminunc_rosenbrock_converges_from_standard_start() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let x0 = Value::Tensor(Tensor::new(vec![-1.2, 1.0], vec![2, 1]).unwrap());
     let result =
         block_on(runtime.scope(fminunc_builtin(objective, x0, Vec::new()))).expect("fminunc");
@@ -131,7 +133,8 @@ fn fminunc_handles_high_dimensional_smooth_objective() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(f))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let x0 = Value::Tensor(Tensor::new(vec![0.0; 8], vec![8, 1]).unwrap());
     let result =
         block_on(runtime.scope(fminunc_builtin(objective, x0, Vec::new()))).expect("fminunc");
@@ -173,12 +176,13 @@ fn fminunc_uses_objective_gradient_and_returns_six_outputs() {
                     .map_err(|error| error.into_runtime_error())
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut opts = StructValue::new();
     opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
     opts.insert("TolX", Value::Num(1.0e-10));
     opts.insert("TolFun", Value::Num(1.0e-10));
-    let _outputs = crate::output_count::push_output_count(Some(6));
+    let _outputs = crate::output_count::push_output_count(Some(6)).expect("output-count scope");
     let result = block_on(runtime.scope(fminunc_builtin(
         objective,
         tensor(vec![0.0, 0.0, 0.0]),
@@ -246,7 +250,8 @@ fn fminunc_rejects_invalid_gradient_length() {
                     .map_err(|error| error.into_runtime_error())
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut opts = StructValue::new();
     opts.insert("SpecifyObjectiveGradient", Value::Bool(true));
     let err = block_on(runtime.scope(fminunc_builtin(
@@ -277,7 +282,8 @@ fn fminunc_scalar_input_returns_scalar() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let result = block_on(runtime.scope(fminunc_builtin(objective, Value::Num(0.0), Vec::new())))
         .expect("fminunc");
     assert!(matches!(result, Value::Num(x) if (x - 4.0).abs() < 1.0e-4));
@@ -303,7 +309,8 @@ fn fminunc_rejects_budget_too_small_for_finite_difference_gradient() {
         |_function, _args, _requested_outputs| {
             Box::pin(async { panic!("budget check should happen before invoking objective") })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let mut opts = StructValue::new();
     opts.insert("MaxFunEvals", Value::Num(3.0));
     let err = block_on(fminunc_builtin(

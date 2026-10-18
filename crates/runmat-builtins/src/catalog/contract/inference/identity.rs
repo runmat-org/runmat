@@ -10,14 +10,14 @@ pub(crate) type BuiltinFusionFactHandler = fn(&CallRequest) -> Option<ValueFact>
 ///
 /// The executable pointer is omitted from serialized catalog data because a
 /// process address is not a stable contract. The surrounding entry supplies
-/// the stable builtin identity, while generated products fingerprint source.
+/// the stable builtin identity; the serialized capability flag below changes
+/// the catalog fingerprint when compiler admission semantics change.
 #[derive(Clone, Copy, Serialize)]
 pub struct IdentityInferenceRule {
     #[serde(skip)]
     handler: BuiltinInferenceHandler,
     #[serde(skip)]
     fusion_fact: Option<BuiltinFusionFactHandler>,
-    #[serde(skip)]
     structural_dimension_constructor: bool,
 }
 
@@ -88,3 +88,25 @@ impl PartialEq for IdentityInferenceRule {
 }
 
 impl Eq for IdentityInferenceRule {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unused_handler(_: &CallRequest, _: &BuiltinCatalogEntry) -> CallInference {
+        unreachable!("serialization must not execute inference")
+    }
+
+    #[test]
+    fn structural_dimension_capability_changes_stable_contract() {
+        let ordinary = serde_json::to_vec(&IdentityInferenceRule::new(unused_handler)).unwrap();
+        let structural = serde_json::to_vec(&IdentityInferenceRule::with_structural_dimensions(
+            unused_handler,
+        ))
+        .unwrap();
+        assert_ne!(ordinary, structural);
+        assert!(String::from_utf8(structural)
+            .unwrap()
+            .contains("\"structural_dimension_constructor\":true"));
+    }
+}

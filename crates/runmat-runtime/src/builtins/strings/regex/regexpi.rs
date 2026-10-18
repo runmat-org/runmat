@@ -192,7 +192,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn regexpi_default_third_output_is_token_extents() {
-        let _output_count = crate::output_count::push_output_count(Some(3));
+        let _output_count =
+            crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let result = run_regexpi_builtin(
             Value::String("AB12".into()),
             Value::String("([a-z]+)(\\d+)".into()),

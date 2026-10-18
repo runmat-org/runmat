@@ -337,7 +337,7 @@ fn weboptions_preflights_all_literal_names_and_host_values_before_gather() {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn weboptions_rejects_excess_outputs_before_constructing_options() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = run_weboptions(vec![]).expect_err("fixed one-output contract");
     assert_eq!(error.identifier(), Some("RunMat:weboptions:TooManyOutputs"));
 }

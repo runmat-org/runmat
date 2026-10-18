@@ -10,8 +10,6 @@ pub mod memory;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod osr;
 mod profile;
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod test_support;
 #[cfg(not(target_arch = "wasm32"))]
 mod region;
 pub mod specialization;

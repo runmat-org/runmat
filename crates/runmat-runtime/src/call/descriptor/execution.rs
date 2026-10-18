@@ -62,7 +62,7 @@ pub(crate) async fn try_execute_retained_bound_closure_in_context(
                 lexical_environment,
             ),
         )
-        .await
+        .await?
         .transpose(),
         None if lexical_environment.is_some() => Err(crate::runtime_error::semantic_error(
             "LexicalEnvironment",
@@ -76,7 +76,7 @@ pub(crate) async fn try_execute_retained_bound_closure_in_context(
                 requested_outputs,
             ),
         )
-        .await
+        .await?
         .transpose(),
     }
 }
@@ -365,7 +365,7 @@ async fn invoke_bound(
             }
         }
     })
-    .await
+    .await?
     .unwrap_or_else(|| Err(function_unavailable_error(function, &metadata)))
 }
 

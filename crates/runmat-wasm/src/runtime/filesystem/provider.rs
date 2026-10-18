@@ -125,7 +125,11 @@ struct JsDialogHost {
 }
 
 impl RuntimeHostService for JsDialogHost {
-    fn console(&self, stream: runmat_runtime::console::ConsoleStream, text: String) {
+    fn console(
+        &self,
+        stream: runmat_runtime::console::ConsoleStream,
+        text: runmat_runtime::console::ConsoleText,
+    ) {
         runmat_runtime::console::forward_recorded_console_output(stream, text);
     }
 

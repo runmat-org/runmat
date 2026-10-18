@@ -19,7 +19,8 @@ fn overloaded_reads_execute_once_for_zero_and_multiple_outputs_and_failures() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "cutover_sequence_subsref").then_some(937)
-        })));
+        })))
+        .expect("call-port scope");
     let _invoker = crate::user_functions::install_semantic_function_invoker(Some(Arc::new(
         move |function, _, requested| {
             assert_eq!(function, 937);
@@ -41,7 +42,8 @@ fn overloaded_reads_execute_once_for_zero_and_multiple_outputs_and_failures() {
                     .map_err(|error| error.into_runtime_error())
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         events: Default::default(),
         name: "CutoverSequenceRead".into(),
@@ -67,7 +69,8 @@ fn overloaded_reads_execute_once_for_zero_and_multiple_outputs_and_failures() {
         fail.store(failure, Ordering::SeqCst);
         for count in [0, 3] {
             expected.store(count, Ordering::SeqCst);
-            let _outputs = crate::output_count::push_output_count(Some(count));
+            let _outputs =
+                crate::output_count::push_output_count(Some(count)).expect("output-count scope");
             let result = block_on(subsref_builtin(
                 Value::Object(ObjectInstance::new("CutoverSequenceRead")),
                 substruct("()", cell(vec![Value::Num(1.0)])),

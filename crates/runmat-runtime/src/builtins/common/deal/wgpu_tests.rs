@@ -37,7 +37,8 @@ fn check_wgpu_resident_aliases(require_device: bool) {
         );
         {
             let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let error = futures::executor::block_on(deal_builtin_registered(vec![nested.clone()]))
                 .expect_err("resident extension must be explicit");
             assert_eq!(
@@ -46,7 +47,7 @@ fn check_wgpu_resident_aliases(require_device: bool) {
             );
         }
         let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let transfers_before = provider.telemetry_snapshot();
         let result = futures::executor::block_on(deal_builtin_registered(vec![nested.clone()]))
             .expect("resident aliases");

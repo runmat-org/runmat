@@ -158,7 +158,7 @@ fn invalid_host_range_and_output_count_reject_without_open() {
         vec![Value::from("Data"), Value::from("A0:B2")],
     ));
     assert!(bad_range.is_err());
-    let _outputs = crate::output_count::push_output_count(Some(4));
+    let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let bad_outputs = block_on(xlsread_builtin(None, Value::from("input.xlsx"), Vec::new()));
     assert_eq!(
         bad_outputs.expect_err("four outputs").identifier(),

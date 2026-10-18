@@ -219,7 +219,7 @@ fn writematrix_gates_integer_quote_alias_before_file_access() {
 #[test]
 fn writematrix_gates_bytes_output_before_file_access() {
     let strict = crate::compatibility::push_runmat_extensions_enabled(false);
-    let outputs = crate::output_count::push_output_count(Some(1));
+    let outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let error = block_on(writematrix_builtin(
         Value::Num(1.0),
         vec![Value::from("definitely/missing/out.csv")],

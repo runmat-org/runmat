@@ -2,6 +2,9 @@ use serde::Serialize;
 
 use super::ExecutableUnit;
 
+#[path = "portable/parallel.rs"]
+mod parallel;
+
 const SOURCE_MAP_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Serialize)]
@@ -315,6 +318,7 @@ impl ExecutableUnit {
                 .collectives
                 .retain(|collective| functions.contains(&collective.id.region.0.function));
         }
+        parallel::validate(self, &parallel, selected_functions)?;
         let mut optional_sections = Vec::new();
         if let Some((_, imports)) = automatic_selection {
             if !imports.is_empty() {

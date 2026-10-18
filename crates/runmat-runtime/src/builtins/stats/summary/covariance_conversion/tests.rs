@@ -58,7 +58,8 @@ fn resident_output_arity_keeps_only_returned_allocation_leases() {
                 // resource is the physical allocation, not that old view.
                 let correlation_weak = correlation.allocation_lease().downgrade();
                 let sigma_weak = sigma.allocation_lease().downgrade();
-                let _outputs = crate::output_count::push_output_count(count);
+                let _outputs =
+                    crate::output_count::push_output_count(count).expect("output-count scope");
                 let result = CovarianceGpuEval {
                     provider,
                     correlation,
@@ -129,7 +130,7 @@ fn covariance_matrix_extents_preserve_rank_zero_and_vector_projection() {
 #[test]
 fn corrcov_converts_covariance_and_returns_sigma() {
     let c = Value::Tensor(Tensor::new(vec![4.0, 2.0, 2.0, 9.0], vec![2, 2]).expect("tensor"));
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(corrcov::corrcov_builtin(c, Vec::new())).expect("corrcov");
     match out {
         Value::OutputList(values) => {
@@ -158,7 +159,7 @@ fn corrcov_preserves_native_single_outputs() {
     let covariance = Value::Tensor(
         Tensor::from_f32(vec![4.0, 2.0, 2.0, 9.0], vec![2, 2]).expect("single covariance"),
     );
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let Value::OutputList(outputs) =
         block_on(corrcov::corrcov_builtin(covariance, Vec::new())).expect("corrcov")
     else {
@@ -185,7 +186,7 @@ fn corrcov_gpu_input_returns_resident_outputs() {
             .expect("upload covariance");
         provider.reset_telemetry();
 
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(corrcov::corrcov_builtin(
             Value::GpuTensor(covariance),
             Vec::new(),
@@ -242,7 +243,7 @@ fn cov2corr_gpu_extension_returns_finance_output_order() {
                 shape: &[2, 2],
             })
             .expect("upload covariance");
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let Value::OutputList(outputs) = block_on(cov2corr::cov2corr_builtin(
             Value::GpuTensor(covariance),
             Vec::new(),
@@ -262,7 +263,7 @@ fn cov2corr_gpu_extension_returns_finance_output_order() {
 #[test]
 fn cov2corr_returns_finance_output_order_and_shapes() {
     let c = Value::Tensor(Tensor::new(vec![16.0, 4.0, 4.0, 25.0], vec![2, 2]).expect("tensor"));
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let Value::OutputList(outputs) =
         block_on(cov2corr::cov2corr_builtin(c, Vec::new())).expect("cov2corr")
     else {
@@ -281,7 +282,7 @@ fn cov2corr_returns_finance_output_order_and_shapes() {
 fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
     let empty = || Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty tensor"));
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let Value::OutputList(outputs) =
             block_on(corrcov::corrcov_builtin(empty(), Vec::new())).expect("corrcov empty")
         else {
@@ -294,7 +295,7 @@ fn covariance_conversion_preserves_empty_shapes_and_cov2corr_default_output() {
         assert_eq!(sigma.shape(), [0, 1]);
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let Value::OutputList(outputs) =
             block_on(cov2corr::cov2corr_builtin(empty(), Vec::new())).expect("cov2corr empty")
         else {
@@ -382,7 +383,7 @@ fn corrcov_accepts_typed_integer_tensors_and_scalar_logical_extensions() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     {
         let integer = int_tensor(IntegerStorage::U16(vec![4, 2, 2, 9]), vec![2, 2]);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(corrcov::corrcov_builtin(integer, Vec::new())).unwrap();
         match out {
             Value::OutputList(values) => {
@@ -583,7 +584,7 @@ fn covariance_conversion_resident_extension_gates_precede_dispatch() {
 #[test]
 fn corrcov_rejects_too_many_outputs() {
     let c = Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).expect("tensor"));
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let err = block_on(corrcov::corrcov_builtin(c, Vec::new())).unwrap_err();
     assert!(err.message().contains("too many output"));
 }

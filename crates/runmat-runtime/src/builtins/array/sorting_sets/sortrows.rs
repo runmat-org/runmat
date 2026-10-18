@@ -1789,7 +1789,8 @@ pub(crate) mod tests {
             .expect("integer input");
             let handle = gpu_helpers::upload_tensor(provider, &integer).expect("typed upload");
             {
-                let _guard = crate::output_count::push_output_count(Some(2));
+                let _guard =
+                    crate::output_count::push_output_count(Some(2)).expect("output-count scope");
                 let Value::OutputList(outputs) =
                     builtin(Value::GpuTensor(handle), Vec::new()).expect("resident sortrows")
                 else {
@@ -1840,7 +1841,7 @@ pub(crate) mod tests {
             assert!(output_lease.acquire().is_none());
         });
 
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = builtin(Value::Num(1.0), Vec::new()).expect_err("excess outputs must reject");
         assert_eq!(err.identifier(), SORTROWS_ERROR_INVALID_ARGUMENT.identifier);
     }

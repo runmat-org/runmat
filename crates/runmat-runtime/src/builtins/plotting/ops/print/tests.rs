@@ -89,7 +89,7 @@ fn nested_container_is_not_materialized_as_a_print_control() {
 fn output_admission_precedes_render_and_file_effects() {
     let _guard = setup();
     let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
-    let one = crate::output_count::push_output_count(Some(1));
+    let one = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let error = block_on(print_builtin_direct(
         None,
         vec![Value::from("never-created.png")],
@@ -100,7 +100,7 @@ fn output_admission_precedes_render_and_file_effects() {
         PRINT_STATUS_OUTPUT_EXTENSION.error_identifier
     );
     drop(one);
-    let _two = crate::output_count::push_output_count(Some(2));
+    let _two = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(print_builtin_direct(
         None,
         vec![Value::from("never-created.png")],
@@ -122,7 +122,7 @@ fn print_adds_png_extension_and_writes_png() {
     let stem = unique_temp_path("basic");
     let output = stem.with_extension("png");
     let _ = std::fs::remove_file(&output);
-    let _statement = crate::output_count::push_output_count(Some(0));
+    let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     block_on(print_builtin_direct(
         None,
         vec![
@@ -266,7 +266,7 @@ fn pre_cancelled_public_print_preserves_existing_target() {
         std::rc::Rc::new(crate::execution::RuntimeExecutionService::new()),
         source.token(),
     );
-    let _statement = crate::output_count::push_output_count(Some(0));
+    let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(print_builtin_direct(
         Some(runtime),
         vec![Value::from("/plot.png")],

@@ -70,7 +70,7 @@ fn requested_outputs_preserve_filesystem_effects_and_failure_policy() {
     let path = temp.path().join("created");
     let args = vec![Value::from(path.to_string_lossy().to_string())];
     {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         assert_eq!(
             super::invoke(args.clone()).unwrap(),
             Value::output_list(vec![])
@@ -78,7 +78,7 @@ fn requested_outputs_preserve_filesystem_effects_and_failure_policy() {
         assert!(path.is_dir());
     }
     {
-        let _outputs = crate::output_count::push_output_count(Some(4));
+        let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let Value::OutputList(values) = super::invoke(args).unwrap() else {
             panic!("output list")
         };
@@ -88,7 +88,7 @@ fn requested_outputs_preserve_filesystem_effects_and_failure_policy() {
     }
     let file = temp.path().join("file");
     File::create(&file).unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert!(super::invoke(vec![Value::from(file.to_string_lossy().to_string())]).is_err());
     assert!(file.is_file());
 }

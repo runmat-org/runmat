@@ -10,7 +10,7 @@ fn call(value: Value) -> BuiltinResult<Value> {
 
 #[test]
 fn gammaln_rejects_excess_outputs() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = call(Value::Num(1.0)).expect_err("second output must reject");
     assert_eq!(
         error.identifier(),

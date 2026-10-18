@@ -31,7 +31,7 @@ fn discarded_audioinfo_has_no_retained_value_but_still_needs_scratch() {
     );
     let (runtime, resources, placement) = context(provider.clone(), Some(bounds), Some(256 * 1024));
     let value = {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         block_on(audioinfo_builtin(Some(runtime.clone()), source())).expect("discarded metadata")
     };
     assert!(output_list(value.clone()).is_empty());
@@ -78,7 +78,8 @@ fn discarded_audioinfo_has_no_retained_value_but_still_needs_scratch() {
     assert_ne!(returned.identity_bytes(), discarded.identity_bytes());
     assert_eq!(resources.workloads.borrow()[0], discarded.identity_bytes());
     for requested in [Some(1), None] {
-        let _outputs = crate::output_count::push_output_count(requested);
+        let _outputs =
+            crate::output_count::push_output_count(requested).expect("output-count scope");
         let error = block_on(audioinfo_builtin(Some(runtime.clone()), source()))
             .expect_err("returned metadata requires its own retained bound");
         assert_eq!(
@@ -101,7 +102,7 @@ fn discarded_audioinfo_has_no_retained_value_but_still_needs_scratch() {
         ResourceByteBound::Unavailable(ResourceBoundUnavailable::NoPeakMemoryBound),
     );
     let (runtime, _, placement) = context(provider, Some(scratch_unknown), Some(256 * 1024));
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(audioinfo_builtin(Some(runtime), source()))
         .expect_err("discarded metadata still requires scratch evidence");
     assert_eq!(
@@ -126,7 +127,7 @@ fn discarded_audioinfo_validates_format_and_preserves_missing_file_errors() {
         ResourceByteBound::Known(256 * 1024),
     );
     let (runtime, _, placement) = context(provider, Some(bounds), Some(256 * 1024));
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(audioinfo_builtin(Some(runtime), source()))
         .expect_err("discard must still validate audio format");
     assert_eq!(
@@ -166,7 +167,7 @@ fn discarded_audioinfo_cancellation_during_synchronous_read_never_publishes() {
         .expect("cancel-on-read lock")
         .replace(cancellation.clone());
     let runtime = runtime.with_cancellation_token(cancellation.token());
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(audioinfo_builtin(Some(runtime), source()))
         .expect_err("synchronous read cancellation precedes publication");
     assert_eq!(error.identifier(), Some("RunMat:Cancelled"));

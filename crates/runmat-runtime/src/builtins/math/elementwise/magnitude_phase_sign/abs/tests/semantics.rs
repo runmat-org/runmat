@@ -193,7 +193,7 @@ fn abs_extensions_and_output_arity_are_enforced_before_execution() {
         crate::compatibility::SPARSE_INTEGER_EXTENSION.error_identifier
     );
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let output_error =
         abs_builtin(Value::Int(IntValue::I8(-1))).expect_err("excess outputs reject");
     assert_eq!(
@@ -204,7 +204,7 @@ fn abs_extensions_and_output_arity_are_enforced_before_execution() {
 
 #[test]
 fn abs_zero_output_still_validates_input() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = abs_builtin(Value::from("not numeric")).expect_err("input must validate");
     assert_eq!(error.identifier(), ABS_ERROR_INVALID_INPUT.identifier);
 }

@@ -41,7 +41,7 @@ fn invalid_expression_emits_one_diagnostic_then_requests_a_new_response() {
             ))
         })
     })));
-    let capture = crate::console::begin_capture();
+    let capture = crate::console::begin_capture().expect("console capture");
     let value = input_with_empty_prompt().expect("second response succeeds");
     let entries = capture.finish_entries();
     assert_eq!(value, Value::Num(41.0));

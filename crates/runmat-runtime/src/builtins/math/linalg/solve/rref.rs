@@ -575,7 +575,7 @@ pub(crate) mod tests {
             vec![3, 3],
         )
         .unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
@@ -636,7 +636,7 @@ pub(crate) mod tests {
     #[test]
     fn rref_row_vector_pivots_after_leading_zero() {
         let tensor = Tensor::new(vec![0.0, 2.0, 4.0], vec![1, 3]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
@@ -693,7 +693,7 @@ pub(crate) mod tests {
     #[test]
     fn rref_custom_tolerance_suppresses_small_pivot() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1e-12], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values =
             output_list(rref_builtin(Value::Tensor(tensor), vec![Value::Num(1e-6)]).expect("rref"));
         match &values[0] {
@@ -713,7 +713,7 @@ pub(crate) mod tests {
     #[test]
     fn rref_zero_matrix_has_no_pivots() {
         let tensor = Tensor::new(vec![0.0; 6], vec![2, 3]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
@@ -779,13 +779,15 @@ pub(crate) mod tests {
     #[test]
     fn rref_output_count_zero_and_one() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let zero_output_guard = crate::output_count::push_output_count(Some(0));
+        let zero_output_guard =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let values =
             output_list(rref_builtin(Value::Tensor(tensor.clone()), Vec::new()).expect("rref"));
         assert!(values.is_empty());
         drop(zero_output_guard);
 
-        let _one_output_guard = crate::output_count::push_output_count(Some(1));
+        let _one_output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         assert_eq!(values.len(), 1);
         match &values[0] {
@@ -801,7 +803,7 @@ pub(crate) mod tests {
     #[test]
     fn rref_infinite_default_tolerance_zeros_columns() {
         let tensor = Tensor::new(vec![f64::INFINITY, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
@@ -820,7 +822,7 @@ pub(crate) mod tests {
     #[test]
     fn rref_nan_default_tolerance_propagates_nan_arithmetic() {
         let tensor = Tensor::new(vec![f64::NAN, 0.0, 1.0, 0.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let values = output_list(rref_builtin(Value::Tensor(tensor), Vec::new()).expect("rref"));
         match &values[0] {
             Value::Tensor(out) => {
@@ -883,7 +885,7 @@ pub(crate) mod tests {
     #[test]
     fn rref_too_many_outputs_errors() {
         let tensor = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = unwrap_error(rref_builtin(Value::Tensor(tensor), Vec::new()).unwrap_err());
         assert_eq!(err.identifier(), RREF_ERROR_TOO_MANY_OUTPUTS.identifier);
     }
@@ -915,7 +917,8 @@ pub(crate) mod tests {
                 shape: tensor.shape(),
             };
             let handle = provider.upload(&view).expect("upload");
-            let _guard = crate::output_count::push_output_count(Some(2));
+            let _guard =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let values =
                 output_list(rref_builtin(Value::GpuTensor(handle), Vec::new()).expect("rref"));
             match &values[0] {

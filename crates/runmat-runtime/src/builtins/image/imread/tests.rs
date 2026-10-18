@@ -71,7 +71,7 @@ fn imread_returns_alpha_as_third_output_for_rgba_png() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("alpha.png");
     std::fs::write(&path, rgba_png()).expect("write image");
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let result = futures::executor::block_on(imread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),
@@ -178,7 +178,7 @@ fn imread_rejects_unknown_format_hint() {
 
 #[test]
 fn output_and_input_arity_reject_before_missing_file_or_provider_work() {
-    let _outputs = crate::output_count::push_output_count(Some(4));
+    let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let err =
         futures::executor::block_on(imread_builtin(None, Value::from("missing.png"), Vec::new()))
             .expect_err("excess outputs must fail before reading");
@@ -281,7 +281,7 @@ fn imread_materializes_multi_outputs_with_empty_colormap() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("rgb.png");
     std::fs::write(&path, rgb_png()).expect("write image");
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = futures::executor::block_on(imread_builtin(
         None,
         Value::from(path.to_string_lossy().to_string()),

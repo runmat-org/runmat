@@ -86,7 +86,7 @@ impl PendingDialogHost {
 }
 
 impl RuntimeHostService for PendingDialogHost {
-    fn console(&self, _: crate::console::ConsoleStream, _: String) {}
+    fn console(&self, _: crate::console::ConsoleStream, _: crate::console::ConsoleText) {}
     fn warning(&self, _: crate::warning_store::RuntimeWarning) {}
     fn interact(
         &self,

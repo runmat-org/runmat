@@ -19,7 +19,8 @@ fn arrayfun_single_segment_external_handle_uses_runtime_name_resolution() {
             let value = *value;
             Box::pin(async move { rooted_single(Value::Num(value + 40.0)) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
 
@@ -53,7 +54,8 @@ fn arrayfun_external_handle_prefers_semantic_handle_binding_when_resolved() {
             assert_eq!(arguments, &[Value::Num(4.0)]);
             Box::pin(async { rooted_single(Value::Num(8.0)) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let callable = Callable::from_function(Value::ExternalFunctionHandle("pkg.callback".into()))
         .expect("external handle should parse");
     drop(entry);
@@ -78,7 +80,8 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
             assert_eq!(arguments, &[Value::Num(5.0), Value::Num(4.0)]);
             Box::pin(async { rooted_single(Value::Num(9.0)) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let callable = Callable::from_function(Value::Closure(Closure::from_data(
         runmat_value::ClosureData {
             lexical_environment: None,
@@ -113,7 +116,8 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
             assert_eq!(args, &[Value::Num(5.0), Value::Num(4.0)]);
             Box::pin(async { rooted_single(Value::Num(9.0)) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let callable = Callable::from_function(Value::Closure(Closure::from_data(
         runmat_value::ClosureData {
             lexical_environment: None,
@@ -134,7 +138,8 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
 #[test]
 fn arrayfun_external_handle_errors_as_undefined_when_unresolved() {
     let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)))
+            .expect("call-port scope");
     let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
 
     let err = call(
@@ -161,7 +166,8 @@ fn arrayfun_external_handle_errors_as_undefined_when_unresolved() {
 #[test]
 fn arrayfun_malformed_external_handle_errors_as_undefined_when_unresolved() {
     let _resolver_guard =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)))
+            .expect("call-port scope");
     let tensor = Tensor::new(vec![1.0], vec![1, 1]).expect("tensor");
 
     let err = call(

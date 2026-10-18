@@ -250,7 +250,7 @@ pub(crate) async fn invoke(
                     requested_outputs,
                 ),
             )
-            .await
+            .await?
             {
                 return result;
             }

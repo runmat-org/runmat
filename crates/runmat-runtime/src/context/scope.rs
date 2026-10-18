@@ -10,6 +10,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+#[path = "scope/future_owner.rs"]
+mod future_owner;
+
 runmat_thread_local! {
     static ACTIVE_CONTEXTS: RefCell<Vec<RuntimeContext>> = const { RefCell::new(Vec::new()) };
 }
@@ -192,9 +195,8 @@ impl<F> ContextFuture<F> {
 }
 
 /// A complete poll-local context snapshot prepared before a queued future is
-/// constructed. Managed snapshots retain exact owners, but conversion into a
-/// future remains unavailable until overlay growth has its own admitted
-/// control; no managed future factory runs through this interim boundary.
+/// constructed. Managed snapshots retain their exact projection owners and
+/// admit the concrete future owner before its factory is invoked.
 pub struct PreparedRuntimeScope {
     context: RuntimeContext,
 }
@@ -202,20 +204,6 @@ pub struct PreparedRuntimeScope {
 impl PreparedRuntimeScope {
     /// Admit the concrete future owner before its factory is invoked.
     pub fn prepare_future<F: Future>(self) -> Result<PreparedRuntimeFutureScope<F>, RuntimeError> {
-        if HostAllocationReceipt::policy(Some(&self.context)).map_err(|source| {
-            scope_allocation_error(
-                &self.context,
-                "poll future authority is unavailable",
-                source,
-            )
-        })? == HostAllocationPolicy::Managed
-        {
-            return Err(crate::execution::ExecutionServiceError::Infrastructure(
-                "managed poll-local overlay growth requires an admitted continuation control owner"
-                    .to_owned(),
-            )
-            .into_runtime_error());
-        }
         let bytes = u64::try_from(std::mem::size_of::<F>()).map_err(|_| {
             scope_allocation_error(
                 &self.context,
@@ -246,6 +234,7 @@ impl PreparedRuntimeScope {
         }
         Ok(PreparedRuntimeFutureScope {
             context: self.context,
+            receipt,
             scratch,
             _future: std::marker::PhantomData,
         })
@@ -255,13 +244,48 @@ impl PreparedRuntimeScope {
 /// Exact preparation for one concrete scoped future allocation.
 pub struct PreparedRuntimeFutureScope<F> {
     context: RuntimeContext,
+    receipt: Option<HostAllocationReceipt>,
     scratch: Option<std::sync::Arc<super::host_effect::ManagedHostEffectStageReservation>>,
     _future: std::marker::PhantomData<fn() -> F>,
 }
 
 impl<F: Future> PreparedRuntimeFutureScope<F> {
-    pub fn scope(self, future: F) -> ContextFuture<F> {
-        ContextFuture::from_prepared(self.context, Box::pin(future), self.scratch)
+    pub fn try_scope_with(
+        self,
+        make_future: impl FnOnce() -> F,
+    ) -> Result<ContextFuture<F>, RuntimeError> {
+        let Self {
+            context,
+            receipt,
+            scratch,
+            _future: _,
+        } = self;
+        let future = if let Some(receipt) = &receipt {
+            receipt.checkpoint(&context).map_err(|source| {
+                scope_allocation_error(&context, "poll future authority changed", source)
+            })?;
+            let allocated = future_owner::try_pin_in_context(&context, make_future);
+            if let Err(source) = receipt.checkpoint(&context) {
+                if let Ok(future) = allocated {
+                    future_owner::drop_in_context(&context, future);
+                }
+                return Err(scope_allocation_error(
+                    &context,
+                    "poll future authority changed",
+                    source,
+                ));
+            }
+            allocated.map_err(|source| {
+                scope_allocation_error(
+                    &context,
+                    "poll future allocation failed",
+                    HostAllocationError::Numeric(source),
+                )
+            })?
+        } else {
+            future_owner::pin_in_context(&context, make_future)
+        };
+        Ok(ContextFuture::from_prepared(context, future, scratch))
     }
 }
 
@@ -325,16 +349,13 @@ impl RuntimeContext {
             .clone()
             .with_admitted_poll_source_catalog(&permit, scratch.clone())
             .and_then(|context| context.with_admitted_poll_debug_frames(&permit, scratch.clone()))
-            .and_then(|context| context.with_admitted_poll_local_projections(&permit, scratch))
-            .map_err(|source| {
-                scope_allocation_error(
-                    self,
-                    "poll scope projection allocation failed",
-                    HostAllocationError::Numeric(source),
-                )
-            })?;
+            .map_err(HostAllocationError::Numeric)
+            .and_then(|context| context.with_admitted_poll_local_projections(&permit, scratch));
         receipt.checkpoint(self).map_err(|source| {
             scope_allocation_error(self, "poll scope authority changed", source)
+        })?;
+        let context = context.map_err(|source| {
+            scope_allocation_error(self, "poll scope projection allocation failed", source)
         })?;
         Ok(PreparedRuntimeScope { context })
     }
@@ -655,7 +676,8 @@ mod tests {
             )])
             .expect("session source catalog admission");
             let _source = crate::source_context::replace_current_source_id(Some(source_id));
-            let _outputs = crate::output_count::push_output_count(Some(outputs));
+            let _outputs = crate::output_count::push_output_count(Some(outputs))
+                .expect("session output-count projection");
             let mut yielded = false;
             std::future::poll_fn(move |_| {
                 if yielded {
@@ -680,7 +702,6 @@ mod tests {
             cancellation.token(),
         );
         let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
-        cancellation.cancel(runmat_execution::CancellationReason::User);
         let mut first_future = Box::pin(first.scope(session_future(SourceId(1), "first", 1, true)));
         let mut second_future =
             Box::pin(second.scope(session_future(SourceId(2), "second", 2, false)));
@@ -689,6 +710,7 @@ mod tests {
 
         assert!(first_future.as_mut().poll(&mut cx).is_pending());
         assert!(second_future.as_mut().poll(&mut cx).is_pending());
+        cancellation.cancel(runmat_execution::CancellationReason::User);
         assert!(first_future.as_mut().poll(&mut cx).is_ready());
         assert!(second_future.as_mut().poll(&mut cx).is_ready());
         assert!(crate::source_context::current_source().is_none());

@@ -126,7 +126,8 @@ mod tests {
         let _resolver_guard =
             runmat_runtime::user_functions::install_semantic_function_resolver(Some(Arc::new(
                 move |name| (name == resolved_name).then_some(7331),
-            )));
+            )))
+            .expect("call-port scope");
         let _invoker_guard = runmat_runtime::user_functions::install_semantic_function_invoker(
             Some(Arc::new(|function, args, requested_outputs| {
                 assert_eq!(function, 7331);
@@ -140,7 +141,8 @@ mod tests {
                     .map_err(|error| error.into_runtime_error())
                 })
             })),
-        );
+        )
+        .expect("call-port scope");
         let value = block_on(call_method_or_member_index_with_outputs(
             Value::ClassRef(class_name),
             CallableIdentity::Method(MethodId("remote_inc".to_string())),

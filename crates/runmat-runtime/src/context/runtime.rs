@@ -1289,27 +1289,35 @@ impl RuntimeContext {
     }
 
     pub(super) fn with_poll_output_projection(mut self) -> Self {
-        let owner = super::scope::active_runtime_context()
-            .filter(|active| Rc::ptr_eq(active.state(), self.state()))
-            .map(|active| active.output_projection().clone())
-            .unwrap_or_else(|| self.output_projection.clone());
+        let owner = self.selected_output_projection();
         let snapshot = owner.borrow().snapshot();
         self.output_projection = super::poll_projection::PollProjection::legacy(snapshot);
         self
     }
 
+    pub(crate) fn selected_output_projection(
+        &self,
+    ) -> super::poll_projection::PollProjection<super::output_projection::InvocationOutputProjection>
+    {
+        super::scope::active_runtime_context()
+            .filter(|active| Rc::ptr_eq(active.state(), self.state()))
+            .map(|active| active.output_projection().clone())
+            .unwrap_or_else(|| self.output_projection.clone())
+    }
+
     pub(super) fn poll_local_projection_quote(
         &self,
     ) -> Option<super::poll_projection::PollProjectionQuote> {
-        let call_scratch = self
-            .selected_call_projection()
+        let call_owner = self.selected_call_projection();
+        let call_state = self.state.call.borrow();
+        let (call_retained, call_claims) = call_owner
             .borrow()
-            .poll_snapshot_scratch_bytes()?;
+            .poll_snapshot_retained_quote(&call_state)?;
+        drop(call_state);
         let console_scratch = self
             .selected_console_capture_projection()
             .borrow()
             .poll_snapshot_scratch_bytes()?;
-        let scratch = call_scratch.checked_add(console_scratch)?;
         let output = super::poll_projection::PollProjection::<
             super::output_projection::InvocationOutputProjection,
         >::quote(0)
@@ -1324,8 +1332,9 @@ impl RuntimeContext {
         .ok()?;
         output.checked_add(call)?.checked_add(console)?.checked_add(
             super::poll_projection::PollProjectionQuote {
-                scratch_bytes: scratch,
-                ..Default::default()
+                scratch_bytes: console_scratch,
+                retained_bytes: call_retained,
+                retained_claims: call_claims,
             },
         )
     }
@@ -1334,19 +1343,32 @@ impl RuntimeContext {
         mut self,
         permit: &super::host_allocation::HostOutputPermit,
         scratch: std::sync::Arc<super::host_effect::ManagedHostEffectStageReservation>,
-    ) -> Result<Self, runmat_value::ExactHostNumericAllocationError> {
-        let output = self.output_projection.borrow().poll_snapshot();
-        let call = self.selected_call_projection().borrow().poll_snapshot()?;
+    ) -> Result<Self, super::host_allocation::HostAllocationError> {
+        let output = self
+            .output_projection
+            .borrow()
+            .admitted_poll_snapshot(&self, permit.clone())?;
+        let call_owner = self.selected_call_projection();
+        let call = {
+            let call_state = self.state.call.borrow();
+            let snapshot = call_owner
+                .borrow()
+                .poll_snapshot(&call_state, &self, permit.clone());
+            snapshot?
+        };
         let console = self
             .selected_console_capture_projection()
             .borrow()
-            .poll_snapshot()?;
+            .poll_snapshot(&self, permit.clone())?;
         self.output_projection =
-            super::poll_projection::PollProjection::prepare(output, permit, scratch.clone())?;
+            super::poll_projection::PollProjection::prepare(output, permit, scratch.clone())
+                .map_err(super::host_allocation::HostAllocationError::Numeric)?;
         self.call_projection =
-            super::poll_projection::PollProjection::prepare(call, permit, scratch.clone())?;
+            super::poll_projection::PollProjection::prepare(call, permit, scratch.clone())
+                .map_err(super::host_allocation::HostAllocationError::Numeric)?;
         self.console_capture_projection =
-            super::poll_projection::PollProjection::prepare(console, permit, scratch)?;
+            super::poll_projection::PollProjection::prepare(console, permit, scratch)
+                .map_err(super::host_allocation::HostAllocationError::Numeric)?;
         Ok(self)
     }
 
@@ -1873,6 +1895,7 @@ impl RuntimeContext {
         // own selection. This shares the active owner; it does not snapshot it.
         context.call_projection = self.selected_call_projection();
         context.console_capture_projection = self.selected_console_capture_projection();
+        context.output_projection = self.selected_output_projection();
         RuntimeContextGuard::enter(context)
     }
 }

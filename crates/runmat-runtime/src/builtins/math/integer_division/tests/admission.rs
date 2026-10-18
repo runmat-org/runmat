@@ -66,7 +66,7 @@ fn invalid_options_operands_shapes_and_outputs_never_download() {
         assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
         assert_eq!(allocation.probe.retirements(), 0);
     }
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert!(block_on(idivide_builtin(vec![source(), Value::Int(IntValue::U8(1))])).is_err());
     assert_eq!(provider.downloads.load(Ordering::Relaxed), 0);
     assert_eq!(allocation.probe.retirements(), 0);

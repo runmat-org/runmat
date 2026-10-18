@@ -37,14 +37,14 @@ fn explicit_device_control_rejects_without_provider_access() {
 
 #[test]
 fn requested_outputs_reject_before_order_evaluation() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = magic_builtin(vec![Value::Num(f64::INFINITY)]).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:magic:TooManyOutputs"));
 }
 
 #[test]
 fn discarded_output_preserves_validation() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert!(magic_builtin(vec![Value::Num(3.0)]).is_ok());
     assert!(magic_builtin(vec![Value::Num(f64::INFINITY)]).is_err());
 }

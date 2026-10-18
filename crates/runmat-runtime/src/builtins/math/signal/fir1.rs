@@ -545,7 +545,7 @@ mod tests {
             call(Value::Num(0.0), Value::Num(0.25), &[]),
             Ok(Value::Num(_))
         ));
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = call(Value::Num(4.0), Value::Num(0.25), &[]).expect_err("fir1 has one output");
         assert_eq!(error.identifier(), FIR1_ERROR_TOO_MANY_OUTPUTS.identifier);
     }

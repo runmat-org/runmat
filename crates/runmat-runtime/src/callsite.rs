@@ -4,21 +4,90 @@ use runmat_types::{SourceId, Span};
 use std::cell::RefCell;
 use std::future::Future;
 
+#[path = "callsite/spans.rs"]
+mod spans;
+pub use spans::CallsiteSpans;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CallsiteInfo {
     pub source_id: Option<SourceId>,
-    pub arg_spans: Vec<Span>,
+    pub arg_spans: CallsiteSpans,
+}
+
+impl CallsiteInfo {
+    pub fn from_borrowed_in_context(
+        source_id: Option<SourceId>,
+        arg_spans: &[Span],
+        context: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        Ok(Self {
+            source_id,
+            arg_spans: CallsiteSpans::from_borrowed_in_context(arg_spans, context).map_err(
+                |source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(context),
+                        "RunMat:Runtime:CallsiteProjection",
+                        "callsite metadata admission failed",
+                        source,
+                    )
+                },
+            )?,
+        })
+    }
+
+    pub(crate) fn retained_quote(
+        &self,
+    ) -> Result<(u64, usize), crate::context::host_allocation::HostAllocationError> {
+        self.arg_spans.retained_quote()
+    }
+
+    pub(crate) fn admit(
+        self,
+        context: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::context::host_allocation::HostAllocationError> {
+        Ok(Self {
+            source_id: self.source_id,
+            arg_spans: self.arg_spans.admit(context)?,
+        })
+    }
+
+    pub(crate) fn admitted_clone_with_permit(
+        &self,
+        permit: crate::context::host_allocation::HostOutputPermit,
+    ) -> Result<Self, crate::context::host_allocation::HostAllocationError> {
+        Ok(Self {
+            source_id: self.source_id,
+            arg_spans: self.arg_spans.admitted_clone_with_permit(permit)?,
+        })
+    }
+
+    pub fn without_first_argument(mut self) -> Self {
+        self.arg_spans = self.arg_spans.without_first();
+        self
+    }
 }
 
 /// Keep the ordinary source callsite active only while this future is polled.
 /// This is presentation/source metadata, not permission to select a callee.
-pub async fn with_callsite<F: Future>(info: Option<CallsiteInfo>, future: F) -> F::Output {
+pub async fn with_callsite<F: Future>(
+    info: Option<CallsiteInfo>,
+    future: F,
+) -> Result<F::Output, crate::RuntimeError> {
+    let info = admit_callsite(info)?;
     let mut future = Box::pin(future);
     std::future::poll_fn(move |cx| {
-        let _guard = info
+        let guard = info
             .as_ref()
-            .map(|info| push_callsite(info.source_id, Some(info.arg_spans.clone())));
-        future.as_mut().poll(cx)
+            .map(|info| push_callsite_info(info.clone()))
+            .transpose();
+        let _guard = match guard {
+            Ok(guard) => guard,
+            Err(error) => return std::task::Poll::Ready(Err(error)),
+        };
+        match future.as_mut().poll(cx) {
+            std::task::Poll::Ready(output) => std::task::Poll::Ready(Ok(output)),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
     })
     .await
 }
@@ -28,15 +97,41 @@ pub async fn with_callsite<F: Future>(info: Option<CallsiteInfo>, future: F) -> 
 pub async fn with_function_input_callsite<F: Future>(
     info: Option<CallsiteInfo>,
     future: F,
-) -> F::Output {
+) -> Result<F::Output, crate::RuntimeError> {
+    let info = admit_callsite(info)?;
     let mut future = Box::pin(future);
     std::future::poll_fn(move |cx| {
-        let _guard = info
+        let guard = info
             .as_ref()
-            .map(|info| push_function_input_callsite(info.source_id, Some(info.arg_spans.clone())));
-        future.as_mut().poll(cx)
+            .map(|info| push_function_input_callsite_info(info.clone()))
+            .transpose();
+        let _guard = match guard {
+            Ok(guard) => guard,
+            Err(error) => return std::task::Poll::Ready(Err(error)),
+        };
+        match future.as_mut().poll(cx) {
+            std::task::Poll::Ready(output) => std::task::Poll::Ready(Ok(output)),
+            std::task::Poll::Pending => std::task::Poll::Pending,
+        }
     })
     .await
+}
+
+fn admit_callsite(info: Option<CallsiteInfo>) -> Result<Option<CallsiteInfo>, crate::RuntimeError> {
+    let Some(runtime) = crate::context::legacy::active() else {
+        return Ok(info);
+    };
+    info.map(|info| {
+        info.admit(&runtime).map_err(|source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                Some(&runtime),
+                "RunMat:Runtime:CallsiteProjection",
+                "callsite metadata admission failed",
+                source,
+            )
+        })
+    })
+    .transpose()
 }
 
 runmat_thread_local! {
@@ -94,86 +189,115 @@ impl Drop for FunctionInputCallsiteGuard {
     }
 }
 
-pub fn push_callsite(source_id: Option<SourceId>, arg_spans: Option<Vec<Span>>) -> CallsiteGuard {
+pub fn push_callsite(
+    source_id: Option<SourceId>,
+    arg_spans: Option<Vec<Span>>,
+) -> Result<CallsiteGuard, crate::RuntimeError> {
+    push_callsite_spans(source_id, arg_spans.map(CallsiteSpans::from))
+}
+
+pub fn push_callsite_spans(
+    source_id: Option<SourceId>,
+    arg_spans: Option<CallsiteSpans>,
+) -> Result<CallsiteGuard, crate::RuntimeError> {
     let Some(arg_spans) = arg_spans else {
-        return CallsiteGuard {
+        return Ok(CallsiteGuard {
             did_push: false,
             projection: None,
             state: None,
-        };
+        });
     };
     let info = CallsiteInfo {
         source_id,
         arg_spans,
     };
+    let info = admit_callsite(Some(info))?.expect("callsite is present");
+    push_callsite_info(info)
+}
+
+fn push_callsite_info(info: CallsiteInfo) -> Result<CallsiteGuard, crate::RuntimeError> {
     if let Some(runtime) = crate::context::legacy::active() {
-        return CallsiteGuard {
+        return Ok(CallsiteGuard {
             did_push: true,
             projection: Some(crate::context::call_projection::push_callsite(
                 runtime.call_projection(),
                 info,
-            )),
+            )?),
             state: None,
-        };
+        });
     }
     if let Some(state) = active_state() {
         state.call.borrow_mut().callsites.push(info);
-        CallsiteGuard {
+        Ok(CallsiteGuard {
             did_push: true,
             projection: None,
             state: Some(state),
-        }
+        })
     } else {
         CALLSITE_STACK.with(|stack| stack.borrow_mut().push(info));
-        CallsiteGuard {
+        Ok(CallsiteGuard {
             did_push: true,
             projection: None,
             state: None,
-        }
+        })
     }
 }
 
 pub fn push_function_input_callsite(
     source_id: Option<SourceId>,
     arg_spans: Option<Vec<Span>>,
-) -> FunctionInputCallsiteGuard {
+) -> Result<FunctionInputCallsiteGuard, crate::RuntimeError> {
+    push_function_input_callsite_spans(source_id, arg_spans.map(CallsiteSpans::from))
+}
+
+pub fn push_function_input_callsite_spans(
+    source_id: Option<SourceId>,
+    arg_spans: Option<CallsiteSpans>,
+) -> Result<FunctionInputCallsiteGuard, crate::RuntimeError> {
     let Some(arg_spans) = arg_spans else {
-        return FunctionInputCallsiteGuard {
+        return Ok(FunctionInputCallsiteGuard {
             did_push: false,
             projection: None,
             state: None,
-        };
+        });
     };
     let info = CallsiteInfo {
         source_id,
         arg_spans,
     };
+    let info = admit_callsite(Some(info))?.expect("callsite is present");
+    push_function_input_callsite_info(info)
+}
+
+fn push_function_input_callsite_info(
+    info: CallsiteInfo,
+) -> Result<FunctionInputCallsiteGuard, crate::RuntimeError> {
     if let Some(runtime) = crate::context::legacy::active() {
-        return FunctionInputCallsiteGuard {
+        return Ok(FunctionInputCallsiteGuard {
             did_push: true,
             projection: Some(
                 crate::context::call_projection::push_function_input_callsite(
                     runtime.call_projection(),
                     info,
-                ),
+                )?,
             ),
             state: None,
-        };
+        });
     }
     if let Some(state) = active_state() {
         state.call.borrow_mut().function_input_callsites.push(info);
-        FunctionInputCallsiteGuard {
+        Ok(FunctionInputCallsiteGuard {
             did_push: true,
             projection: None,
             state: Some(state),
-        }
+        })
     } else {
         FUNCTION_INPUT_CALLSITE_STACK.with(|stack| stack.borrow_mut().push(info));
-        FunctionInputCallsiteGuard {
+        Ok(FunctionInputCallsiteGuard {
             did_push: true,
             projection: None,
             state: None,
-        }
+        })
     }
 }
 
@@ -292,7 +416,8 @@ mod tests {
                     arg_spans: vec![Span {
                         start: source,
                         end: source + 1,
-                    }],
+                    }]
+                    .into(),
                 }),
                 std::future::poll_fn(move |_| {
                     let current = current_function_input_callsite()
@@ -322,7 +447,7 @@ mod tests {
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let info = CallsiteInfo {
             source_id: Some(SourceId(9)),
-            arg_spans: vec![Span { start: 1, end: 2 }],
+            arg_spans: vec![Span { start: 1, end: 2 }].into(),
         };
         let mut pending = Box::pin(runtime.scope(with_callsite(
             Some(info.clone()),

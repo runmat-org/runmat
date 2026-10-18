@@ -64,7 +64,7 @@ fn handle_value(handle: runmat_gc::GcHandle) -> Value {
 
 #[test]
 fn assigned_unmapped_value_survives_suspension_and_state_drop_releases_roots() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::assigned_unmapped_value_survives_suspension_and_state_drop_releases_roots"
     )) {
@@ -116,7 +116,7 @@ fn assigned_unmapped_value_survives_suspension_and_state_drop_releases_roots() {
 
 #[test]
 fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::stale_service_does_not_retain_the_canonical_projection_after_state_drop"
     )) {
@@ -205,7 +205,7 @@ fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
 
 #[test]
 fn input_snapshot_aliases_remove_clear_and_replacement_have_exact_root_lifetimes() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::input_snapshot_aliases_remove_clear_and_replacement_have_exact_root_lifetimes"
     )) {
@@ -277,7 +277,7 @@ fn input_snapshot_aliases_remove_clear_and_replacement_have_exact_root_lifetimes
 
 #[test]
 fn reentrant_mutation_is_structured_and_gc_never_borrows_workspace_storage() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::reentrant_mutation_is_structured_and_gc_never_borrows_workspace_storage"
     )) {

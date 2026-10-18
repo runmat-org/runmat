@@ -179,7 +179,7 @@ fn unsupported_input_and_excess_output_have_stable_identifiers() {
     let error = block_on(nextpow2_builtin(Value::from("bad"))).expect_err("invalid input");
     assert_eq!(error.identifier(), NEXTPOW2_ERROR_INVALID_INPUT.identifier);
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(nextpow2_builtin(Value::Num(2.0))).expect_err("too many outputs");
     assert_eq!(
         error.identifier(),

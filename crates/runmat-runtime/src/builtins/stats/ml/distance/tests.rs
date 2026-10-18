@@ -51,7 +51,8 @@ fn knnsearch_documented_floating_gpu_fallback_preserves_explicit_residency() {
 #[test]
 fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocations() {
     {
-        let _requested = crate::output_count::push_output_count(Some(0));
+        let _requested =
+            crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let output = block_on(knnsearch_builtin(
             tensor(vec![0.0, 2.0], 2, 1),
             tensor(vec![1.0], 1, 1),
@@ -61,7 +62,8 @@ fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocation
         assert!(matches!(output, Value::OutputList(values) if values.is_empty()));
     }
     {
-        let _requested = crate::output_count::push_output_count(Some(3));
+        let _requested =
+            crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let output = block_on(knnsearch_builtin(
             tensor(vec![0.0, 2.0], 2, 1),
             tensor(vec![1.0], 1, 1),
@@ -82,7 +84,8 @@ fn knnsearch_requested_outputs_preserve_padding_and_distinct_resident_allocation
         .expect("upload observations")
         .with_provenance(runmat_accelerate_api::GpuHandleProvenance::Explicit)
         .expect("explicit provenance");
-        let _requested = crate::output_count::push_output_count(Some(2));
+        let _requested =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let output = block_on(knnsearch_builtin(
             Value::GpuTensor(source.clone()),
             tensor(vec![1.0], 1, 1),
@@ -354,7 +357,7 @@ fn pdist2_selection_extension_uses_typed_case_insensitive_keyword() {
 fn knnsearch_returns_indices_then_distances() {
     let x = tensor(vec![0.0, 2.0, 5.0, 0.0, 0.0, 0.0], 3, 2);
     let y = tensor(vec![1.0, 4.0, 0.0, 0.0], 2, 2);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(knnsearch_builtin(
         x,
         y,
@@ -515,7 +518,7 @@ fn knnsearch_runmat_floating_integer_controls_require_exact_double_values() {
 
 #[test]
 fn knnsearch_handles_nan_rows_empty_queries_and_option_validation() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(knnsearch_builtin(
         tensor(vec![0.0, f64::NAN, 2.0], 3, 1),
         tensor(vec![1.0], 1, 1),

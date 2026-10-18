@@ -1858,7 +1858,7 @@ pub(crate) mod tests {
     fn linsolve_output_count_limit_identifier() {
         let a = Tensor::new(vec![1.0], vec![1, 1]).unwrap();
         let b = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = unwrap_error(
             linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
                 .expect_err("three outputs should fail"),
@@ -2170,7 +2170,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
@@ -2296,7 +2297,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
@@ -2370,7 +2372,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts
             .fields
@@ -2442,7 +2445,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
@@ -2521,7 +2525,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(2));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts
             .fields
@@ -2615,7 +2620,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts
             .fields
@@ -2694,7 +2700,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts.fields.insert("SYM".to_string(), Value::Bool(true));
         let gpu_value = linsolve_builtin(
@@ -2768,7 +2775,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
@@ -2845,7 +2853,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
@@ -2926,7 +2935,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
@@ -3002,7 +3012,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut opts = StructValue::new();
         opts.fields.insert("LT".to_string(), Value::Bool(true));
         let gpu_value = linsolve_builtin(
@@ -3078,7 +3089,8 @@ pub(crate) mod tests {
             })
             .expect("upload B");
 
-        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let _output_guard =
+            crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let mut gpu_opts = StructValue::new();
         gpu_opts.fields.insert("LT".to_string(), Value::Bool(true));
         gpu_opts.fields.insert(

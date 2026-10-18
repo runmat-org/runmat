@@ -459,7 +459,9 @@ mod tests {
         rest: &[Value],
         outputs: Option<usize>,
     ) -> BuiltinResult<Value> {
-        let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+        let _guard = outputs
+            .map(|count| crate::output_count::push_output_count(Some(count)))
+            .expect("output-count scope");
         block_on(evaluate(wp, ws, rp, rs, rest))
     }
 

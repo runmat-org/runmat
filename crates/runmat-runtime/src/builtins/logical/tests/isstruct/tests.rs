@@ -79,7 +79,7 @@ fn resident_and_distributed_classification_needs_no_payload() {
 
 #[test]
 fn rejects_more_than_one_output() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(isstruct_builtin(Value::Struct(StructValue::new()))).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:isstruct:TooManyOutputs"));
 }

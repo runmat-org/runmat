@@ -96,7 +96,7 @@ fn trailing_singleton_character_components_are_rows() {
 
 #[test]
 fn invalid_output_count_precedes_provider_access() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let resident = Value::GpuTensor(
         crate::builtins::io::repl_fs::test_support::unregistered_numeric_allocation(vec![1, 2])
             .handle,

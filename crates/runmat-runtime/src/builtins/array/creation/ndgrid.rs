@@ -861,7 +861,7 @@ mod tests {
     }
 
     fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
-        let _guard = crate::output_count::push_output_count(outputs);
+        let _guard = crate::output_count::push_output_count(outputs).expect("output-count scope");
         block_on(ndgrid_builtin(args))
     }
 

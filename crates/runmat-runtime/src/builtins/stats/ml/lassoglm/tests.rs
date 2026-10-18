@@ -32,7 +32,7 @@ fn row_field<'a>(info: &'a StructValue, name: &str) -> &'a Tensor {
 
 #[test]
 fn normal_explicit_lambda_matches_linear_trend() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0, 4.0], vec![5, 1]),
         tensor(vec![1.0, 3.0, 5.0, 7.0, 9.0], vec![5, 1]),
@@ -114,7 +114,7 @@ fn lassoglm_numeric_options_retain_vector_shape_admission() {
 
 #[test]
 fn binomial_and_poisson_paths_return_fitinfo() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0], vec![6, 1]),
         tensor(vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![6, 1]),
@@ -167,7 +167,7 @@ fn binomial_and_poisson_paths_return_fitinfo() {
 
 #[test]
 fn binomial_size_and_single_row_count_response_are_supported() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(lassoglm_builtin(
         tensor(vec![0.0, 1.0, 2.0], vec![3, 1]),
         tensor(vec![0.2, 0.5, 0.8], vec![3, 1]),
@@ -316,7 +316,7 @@ fn validates_binomial_counts_and_predictor_names() {
 #[test]
 fn lassoglm_reads_typed_integer_storage_exactly() {
     let _runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(lassoglm_builtin(
         poisoned_int_tensor(IntegerStorage::I16(vec![0, 1, 2, 3, 4]), 5, 1),
         poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7, 9]), 5, 1),

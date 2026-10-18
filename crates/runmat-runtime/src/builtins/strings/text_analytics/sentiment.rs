@@ -964,7 +964,7 @@ mod tests {
 
     #[test]
     fn vader_returns_four_requested_score_vectors() {
-        let _guard = crate::output_count::push_output_count(Some(4));
+        let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let values = outputs(run(vec![documents(vec![vec!["good"], vec!["bad"]])]).unwrap());
         assert_eq!(values.len(), 4);
         let compound_scores = compound(values[0].clone());

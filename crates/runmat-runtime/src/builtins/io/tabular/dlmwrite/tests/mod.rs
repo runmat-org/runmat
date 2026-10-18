@@ -163,7 +163,7 @@ fn dlmwrite_strict_resident_input_rejects_before_provider_or_file_access() {
 #[test]
 fn dlmwrite_byte_count_output_is_a_gated_extension() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let error = dlmwrite_builtin(
         Value::from("unused.csv"),
         Value::Tensor(Tensor::new(vec![1.0], vec![1, 1]).unwrap()),

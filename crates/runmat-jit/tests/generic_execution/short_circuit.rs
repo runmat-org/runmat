@@ -39,7 +39,8 @@ fn suspended_descendant_argument_defers_to_exact_child_without_replay() {
                 }
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
     let executor = compile_executor(fixtures::nested_argument_fixture()).unwrap();
     let result = futures::executor::block_on(executor.invoke_async(
@@ -180,7 +181,8 @@ fn captured_empty_and_multi_cells_resume_without_effect_or_branch_replay() {
                         .map_err(|error| *error)
                 })
             }),
-        ));
+        ))
+        .expect("call-port scope");
         drop(activation);
         let executor = compile_executor(capture_fixture(true, count)).unwrap();
         let result = futures::executor::block_on(executor.invoke_async(
@@ -207,7 +209,8 @@ fn skipped_rhs_never_captures_or_invokes_calls() {
             observed.fetch_add(1, Ordering::SeqCst);
             Box::pin(async { Err(runmat_runtime::RuntimeError::new("skipped RHS executed")) })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
     let executor = compile_executor(capture_fixture(false, 3)).unwrap();
     assert_eq!(
@@ -260,7 +263,8 @@ fn caught_failure_clears_unconsumed_capture_before_next_short_circuit() {
                 }
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
     let executor = compile_executor(fixtures::caught_capture_fixture()).unwrap();
     let result = futures::executor::block_on(executor.invoke_async(
@@ -300,7 +304,8 @@ fn abandoning_suspended_rhs_drops_owned_future_without_replaying_effects() {
                     .map_err(|error| *error)
             })
         }),
-    ));
+    ))
+    .expect("call-port scope");
     drop(activation);
     let executor = compile_executor(fixtures::caught_capture_fixture()).unwrap();
     let mut invocation = executor

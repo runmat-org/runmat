@@ -103,7 +103,7 @@ fn known_bad_controls_and_output_count_precede_registered_owner_download() {
     assert!(error.message().contains("unsupported Tail"), "{error}");
     assert_eq!(provider.downloads.load(Ordering::SeqCst), 0);
 
-    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let error = block_on(ttest2_builtin(resident(), host_sample(), Vec::new())).unwrap_err();
     assert!(
         error.message().contains("too many output arguments"),

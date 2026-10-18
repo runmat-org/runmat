@@ -3860,7 +3860,8 @@ pub(crate) mod tests {
             assert_eq!(error.identifier(), SPARSE_ERROR_INVALID_INPUT.identifier);
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let error =
                 sparse_builtin(vec![resident.clone()]).expect_err("output count before readback");
             assert_eq!(error.identifier(), SPARSE_ERROR_INVALID_INPUT.identifier);
@@ -4303,7 +4304,7 @@ pub(crate) mod tests {
             ]
         );
 
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let outputs = spdiags_builtin(vec![Value::Tensor(matrix)]).expect("spdiags");
         match outputs {
             Value::OutputList(values) => {

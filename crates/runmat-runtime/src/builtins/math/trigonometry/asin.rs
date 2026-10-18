@@ -303,7 +303,7 @@ pub(crate) mod tests {
             character.identifier(),
             ASIN_CHARACTER_INPUT_EXTENSION.error_identifier
         );
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let arity = block_on(super::asin_builtin(None, Value::Num(0.0)))
             .expect_err("excess outputs must reject");
         assert_eq!(arity.identifier(), ASIN_ERROR_TOO_MANY_OUTPUTS.identifier);

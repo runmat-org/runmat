@@ -25,7 +25,8 @@ fn reentrant_stop_and_restart_cannot_let_stale_generation_turn_running_off() {
             })
         });
     let scope = runtime.enter();
-    let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker);
+    let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker)
+        .expect("call-port scope");
     let _bound = install_timer_bound_forwarders();
     drop(scope);
     let timer = block_on(timer_builtin(vec![
@@ -96,7 +97,8 @@ fn stale_failure_after_restart_does_not_enter_new_generations_error_handler() {
             })
         });
     let scope = runtime.enter();
-    let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker);
+    let _guard = crate::user_functions::install_local_semantic_function_invoker(invoker)
+        .expect("call-port scope");
     let _bound = install_timer_bound_forwarders();
     drop(scope);
     let timer = block_on(timer_builtin(vec![

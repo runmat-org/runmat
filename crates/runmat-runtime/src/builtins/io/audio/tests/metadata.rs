@@ -14,7 +14,7 @@ fn audioinfo_descriptor_covers_core_form() {
 fn audioinfo_invalid_control_rejects_before_filesystem_read() {
     let err = block_on(audioinfo_builtin(None, Value::Num(42.0))).expect_err("numeric filename");
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));
-    let _count = crate::output_count::push_output_count(Some(2));
+    let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let err =
         block_on(audioinfo_builtin(None, Value::from("missing.wav"))).expect_err("output count");
     assert_eq!(err.identifier(), Some("RunMat:audioinfo:InvalidArgument"));

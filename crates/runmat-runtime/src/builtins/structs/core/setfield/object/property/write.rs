@@ -33,7 +33,7 @@ pub(in super::super) async fn write_property(
                 || !projection.receiver_member_accessible(
                     &owner,
                     prop.set_access,
-                    crate::dispatcher::class_access_context().as_ref(),
+                    crate::dispatcher::class_access_context().as_deref(),
                 )
             {
                 return Err(errors::private_access(format!(

@@ -93,7 +93,7 @@ fn black_scholes_broadcast_indexing_appends_trailing_singletons() {
 
 #[test]
 fn blsprice_matches_documented_stock_option_example() {
-    let guard = crate::output_count::push_output_count(Some(2));
+    let guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = output_list(
         block_on(blsprice_builtin(
             Value::Num(100.0),
@@ -112,7 +112,7 @@ fn blsprice_matches_documented_stock_option_example() {
 
 #[test]
 fn blsprice_vectorizes_scalar_inputs() {
-    let guard = crate::output_count::push_output_count(Some(2));
+    let guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = output_list(
         block_on(blsprice_builtin(
             tensor(vec![100.0, 90.0], 2, 1),
@@ -136,7 +136,7 @@ fn blsprice_vectorizes_scalar_inputs() {
 #[test]
 fn blsprice_broadcast_inputs_read_typed_integer_storage_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let guard = crate::output_count::push_output_count(Some(2));
+    let guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = output_list(
         block_on(blsprice_builtin(
             poisoned_integer_tensor(IntegerStorage::U16(vec![100, 90]), vec![2, 1]),
@@ -253,7 +253,7 @@ fn invalid_host_pricing_operand_precedes_any_resident_download_or_upload() {
 
 #[test]
 fn blsprice_implicitly_expands_nonscalar_inputs() {
-    let guard = crate::output_count::push_output_count(Some(2));
+    let guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = output_list(
         block_on(blsprice_builtin(
             tensor(vec![100.0, 110.0], 2, 1),
@@ -312,7 +312,7 @@ fn blsprice_gpu_resident_inputs_preserve_residency() {
         let yield_gpu = upload(&yield_rate);
 
         provider.reset_telemetry();
-        let guard = crate::output_count::push_output_count(Some(2));
+        let guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = output_list(
             block_on(blsprice_builtin(
                 Value::GpuTensor(price_gpu.clone()),
@@ -417,7 +417,7 @@ fn single_boundary_rejects_finite_double_scalar_overflow_and_underflow() {
 
 #[test]
 fn black_scholes_nan_inputs_propagate_elementwise() {
-    let guard = crate::output_count::push_output_count(Some(2));
+    let guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let prices = output_list(
         block_on(blsprice_builtin(
             tensor(vec![100.0, f64::NAN], 2, 1),
@@ -533,7 +533,7 @@ fn blsimpv_inverts_call_price() {
 
 #[test]
 fn blsimpv_supports_put_class_and_yield() {
-    let guard = crate::output_count::push_output_count(Some(2));
+    let guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let prices = output_list(
         block_on(blsprice_builtin(
             Value::Num(910.0),

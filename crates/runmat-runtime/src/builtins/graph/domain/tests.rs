@@ -491,7 +491,7 @@ fn treelayout_returns_single_or_pair_by_output_count() {
         block_on(treelayout_builtin(numeric(vec![0.0, 1.0, 1.0, 2.0], 1, 4))).expect("treelayout");
     assert_eq!(tensor_data(result).len(), 4);
 
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result =
         block_on(treelayout_builtin(numeric(vec![0.0, 1.0, 1.0, 2.0], 1, 4))).expect("treelayout");
     let Value::OutputList(values) = result else {
@@ -515,7 +515,8 @@ fn empty_treelayout_obeys_requested_output_count() {
 
     assert_empty_row(&block_on(treelayout_builtin(empty.clone())).expect("default output"));
     for (count, expected) in [(0, 0), (1, 1), (2, 2)] {
-        let _outputs = crate::output_count::push_output_count(Some(count));
+        let _outputs =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let Value::OutputList(values) =
             block_on(treelayout_builtin(empty.clone())).expect("empty tree outputs")
         else {
@@ -526,7 +527,7 @@ fn empty_treelayout_obeys_requested_output_count() {
             assert_empty_row(value);
         }
     }
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let error = block_on(treelayout_builtin(empty)).expect_err("too many outputs");
     assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));
 }
@@ -543,7 +544,7 @@ fn impossible_graph_output_counts_precede_resident_downloads() {
         ]))
         .expect("graph");
         provider.reset_telemetry();
-        let _outputs = crate::output_count::push_output_count(Some(3));
+        let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let error = block_on(treelayout_builtin(Value::GpuTensor(resident.clone())))
             .expect_err("invalid tree output request");
         assert_eq!(error.identifier(), Some("RunMat:graph:InvalidArgument"));

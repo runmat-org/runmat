@@ -31,7 +31,7 @@ fn character_row(text: &str) -> Value {
     Value::CharArray(CharArray::new_row(text))
 }
 
-pub(super) fn emit(records: &[Record]) {
+pub(super) fn emit(records: &[Record]) -> BuiltinResult<()> {
     let lines = records.iter().map(|record| {
         let size = if record.is_dir {
             "<DIR>".into()
@@ -46,8 +46,9 @@ pub(super) fn emit(records: &[Record]) {
     });
     let text = lines.collect::<Vec<_>>().join("\n");
     if !text.is_empty() {
-        record_console_line(ConsoleStream::Stdout, text);
+        record_console_line(ConsoleStream::Stdout, text)?;
     }
+    Ok(())
 }
 
 pub(super) fn should_emit_stdout() -> bool {

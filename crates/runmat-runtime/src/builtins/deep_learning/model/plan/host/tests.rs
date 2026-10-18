@@ -583,7 +583,7 @@ fn single_input_projects_double_parameters_only_at_execution_boundary() {
 #[test]
 fn stateless_two_output_forward_publishes_canonical_empty_state() {
     let network = network();
-    let _count = crate::output_count::push_output_count(Some(2));
+    let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let input = Value::Tensor(Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap());
     let Value::OutputList(outputs) =
         block_on(forward_builtin(network.value().clone(), input, vec![])).unwrap()

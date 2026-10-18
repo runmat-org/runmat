@@ -390,7 +390,8 @@ fn exact_resolvers_remain_invocation_owned_across_sibling_pending_and_drop() {
 
     let ambient = runtime.enter();
     let ambient_resolver =
-        crate::user_functions::install_execution_source_resolver(Some(Rc::clone(&resolver_a)));
+        crate::user_functions::install_execution_source_resolver(Some(Rc::clone(&resolver_a)))
+            .expect("call-port scope");
     drop(ambient);
 
     let pending_payload = bound_callable(origin_a, &"a".repeat(DECODE_WORK_QUANTUM.get() * 2));

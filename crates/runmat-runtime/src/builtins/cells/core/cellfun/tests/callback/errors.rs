@@ -19,7 +19,8 @@ fn error_handler_receives_callback_failure() {
                 crate::sequence::single_value_sequence(seed).and_then(rooted_sequence)
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let handler = Value::Closure(Closure::from_data(runmat_value::ClosureData {
         lexical_environment: None,
         function_name: "cellfun_handler_fixture".into(),
@@ -43,7 +44,8 @@ fn error_handler_receives_callback_failure() {
 #[test]
 fn unresolved_qualified_callback_reports_typed_external_identity() {
     let _resolver =
-        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)));
+        crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|_| None)))
+            .expect("call-port scope");
     let error = call(
         Value::ExternalFunctionHandle("pkg.callback".into()),
         vec![cell(vec![Value::Num(1.0)], &[1, 1])],

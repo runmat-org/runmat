@@ -19,6 +19,19 @@ mod asecd;
 mod asind;
 mod atand;
 
+#[cfg(target_arch = "wasm32")]
+pub(crate) use acosd::__runmat_wasm_register_builtin_acosd_builtin;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use acotd::__runmat_wasm_register_builtin_acotd_builtin;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use acscd::__runmat_wasm_register_builtin_acscd_builtin;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use asecd::__runmat_wasm_register_builtin_asecd_builtin;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use asind::__runmat_wasm_register_builtin_asind_builtin;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use atand::__runmat_wasm_register_builtin_atand_builtin;
+
 const RAD_TO_DEG: f64 = 180.0 / std::f64::consts::PI;
 
 #[derive(Clone, Copy)]

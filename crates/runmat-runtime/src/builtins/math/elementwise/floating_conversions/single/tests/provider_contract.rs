@@ -127,14 +127,13 @@ fn unsupported_complex_like_input_rejects_without_gathering() {
 #[test]
 fn fixed_outputs_admit_discard_and_reject_multiple_before_provider_work() {
     for count in [None, Some(0), Some(1)] {
-        let _outputs = crate::output_count::push_output_count(count);
+        let _outputs = crate::output_count::push_output_count(count).expect("output-count scope");
         single_builtin(Value::Num(1.25), vec![]).expect("valid output count");
     }
     with_conversion_hook_provider(HookBehavior::PendingDirectHook, |provider| {
         let input = upload_input(provider);
         let before = input.wire_descriptor();
-        let _outputs = crate::output_count::push_output_count(Some(2));
-        // This would never complete if output admission reached the hook.
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope"); // This would never complete if output admission reached the hook.
         let error = single_builtin(Value::GpuTensor(input.clone()), vec![]).unwrap_err();
         assert_eq!(
             error.identifier(),

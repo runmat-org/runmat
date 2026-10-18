@@ -14,7 +14,8 @@ fn rhs_operator_callee_failures_are_not_retried_or_reordered() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "RhsFailureFixture.plus").then_some(939)
-        })));
+        })))
+        .expect("call-port scope");
     let class = ClassIdentity::from("RhsFailureFixture");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         events: Default::default(),
@@ -54,7 +55,8 @@ fn rhs_operator_callee_failures_are_not_retried_or_reordered() {
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
 
     for code in ["UndefinedFunction", "ProbeReceiverInvalid"] {
         *diagnostic.lock().expect("diagnostic fixture lock") = code;
@@ -97,7 +99,8 @@ fn rhs_operator_uses_selected_session_not_unrelated_ambient_session() {
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "SelectedSessionRhs.plus").then_some(940)
-        })));
+        })))
+        .expect("call-port scope");
     let class = ClassIdentity::from("SelectedSessionRhs");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         events: Default::default(),
@@ -135,7 +138,8 @@ fn rhs_operator_uses_selected_session_not_unrelated_ambient_session() {
                 crate::user_functions::test_support::rooted_single_value_sequence(Value::Num(12.0))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(selected_setup);
     let rhs = Value::Object(runmat_value::ObjectInstance::new(class));
     let value = block_on(call_rhs_object_operator_method_ordered_in_context(
@@ -169,7 +173,8 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
     let _resolver =
         crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
             (name == "SelectedSessionProperty.set.p").then_some(941)
-        })));
+        })))
+        .expect("call-port scope");
     let class = ClassIdentity::from("SelectedSessionProperty");
     crate::class_registry::register_class(crate::class_registry::RuntimeClass {
         events: Default::default(),
@@ -226,7 +231,8 @@ fn dependent_property_setter_uses_selected_session_not_unrelated_ambient_session
                 ))
             })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(selected_setup);
     let original = Value::Object(runmat_value::ObjectInstance::new(class));
     let updated = block_on(crate::object::resolve::store_member_traced_in_context(

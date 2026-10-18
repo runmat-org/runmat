@@ -4,7 +4,7 @@ use runmat_value::{CellArray, IntegerStorage, LogicalArray, StringArray, Tensor}
 #[test]
 fn returns_counts_labels_and_percentages() {
     let input = Value::Tensor(Tensor::new(vec![2.0, 1.0, 2.0, 2.0], vec![4, 1]).unwrap());
-    let _outputs = crate::output_count::push_output_count(Some(3));
+    let _outputs = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let outputs = output_list(call(input, Vec::new()).unwrap());
     assert!(matches!(&outputs[0], Value::Tensor(value) if value.materialize_f64() == [1.0, 3.0]));
     assert!(matches!(&outputs[1], Value::Tensor(value) if value.materialize_f64() == [1.0, 2.0]));
@@ -14,7 +14,7 @@ fn returns_counts_labels_and_percentages() {
 #[test]
 fn includes_missing_group_by_default() {
     let input = Value::Tensor(Tensor::new(vec![2.0, f64::NAN, 2.0], vec![3, 1]).unwrap());
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(input, Vec::new()).unwrap());
     assert!(matches!(&outputs[0], Value::Tensor(value) if value.materialize_f64() == [2.0, 1.0]));
     let Value::Tensor(labels) = &outputs[1] else {
@@ -30,7 +30,7 @@ fn preserves_exact_wide_integer_labels() {
     let input = Value::Tensor(
         Tensor::new_integer(IntegerStorage::U64(vec![base, base + 1, base]), vec![3, 1]).unwrap(),
     );
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(input, Vec::new()).unwrap());
     assert!(
         matches!(&outputs[1], Value::Tensor(value) if value.integer_storage() == Some(&IntegerStorage::U64(vec![base, base + 1])))
@@ -52,7 +52,7 @@ fn multiple_grouping_vectors_return_one_label_column_each() {
         )
         .unwrap(),
     );
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(groups, Vec::new()).unwrap());
     let Value::Cell(labels) = &outputs[1] else {
         panic!("expected one label vector per grouping role");
@@ -67,7 +67,7 @@ fn multiple_grouping_vectors_return_one_label_column_each() {
 #[test]
 fn logical_empty_groups_use_closed_value_domain() {
     let input = Value::LogicalArray(LogicalArray::new(vec![1, 1], vec![2, 1]).unwrap());
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(
         call(
             input,

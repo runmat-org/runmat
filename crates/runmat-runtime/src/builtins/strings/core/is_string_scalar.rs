@@ -44,7 +44,7 @@ mod tests {
             is_string_scalar_builtin(Value::Num(1.0)).unwrap(),
             Value::Bool(false)
         );
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error =
             is_string_scalar_builtin(Value::String("x".into())).expect_err("fixed output bound");
         assert_eq!(

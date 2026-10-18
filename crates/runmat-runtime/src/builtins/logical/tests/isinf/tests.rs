@@ -35,7 +35,7 @@ fn classifies_scalars_dense_complex_and_integer_storage() {
 
 #[test]
 fn rejects_excess_outputs_with_catalog_error() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error =
         block_on(isinf_builtin(Value::Num(f64::INFINITY))).expect_err("two outputs must fail");
     assert_eq!(error.identifier(), Some("RunMat:isinf:TooManyOutputs"));

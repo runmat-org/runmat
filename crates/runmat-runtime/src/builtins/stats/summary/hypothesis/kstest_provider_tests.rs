@@ -221,7 +221,7 @@ fn registered_owner_observes_no_download_for_known_invalid_calls() {
         matrix.handle.allocation_lease().validate_live().unwrap();
         assert_eq!(matrix.probe.retirements(), 0);
 
-        let _outputs = crate::output_count::push_output_count(Some(5));
+        let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
         let error = block_on(kstest_builtin(resident(), vec![])).unwrap_err();
         assert!(
             error.message().contains("too many output arguments"),

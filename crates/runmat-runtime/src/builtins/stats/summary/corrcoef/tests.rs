@@ -16,7 +16,7 @@ fn single_observations_keep_all_four_output_classes() {
         runmat_value::NumericDType::F32,
     )
     .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(4));
+    let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let Value::OutputList(outputs) = block_on(corrcoef_builtin(
         Value::Tensor(observations),
         vec![Value::from("Alpha"), Value::Num(0.1)],
@@ -391,7 +391,7 @@ fn corrcoef_public_scalar_vector_and_paired_empty_geometry() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn corrcoef_low_rank_inputs_keep_statistics_outputs_canonical() {
     for (values, shape) in [(vec![7.0], Vec::new()), (vec![1.0, 2.0, 4.0], vec![3])] {
-        let _outputs = crate::output_count::push_output_count(Some(4));
+        let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
         let Value::OutputList(outputs) = block_on(corrcoef_builtin(
             Value::Tensor(Tensor::new(values, shape).unwrap()),
             Vec::new(),
@@ -580,7 +580,7 @@ fn corrcoef_requested_outputs_include_p_values_and_alpha_bounds() {
         vec![6, 2],
     )
     .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(4));
+    let _outputs = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let Value::OutputList(outputs) = block_on(corrcoef_builtin(
         Value::Tensor(tensor),
         vec![Value::from("Alpha"), Value::Num(0.1)],
@@ -612,7 +612,7 @@ fn corrcoef_requested_outputs_include_p_values_and_alpha_bounds() {
 #[test]
 fn corrcoef_complex_multi_output_is_rejected() {
     let tensor = ComplexTensor::new(vec![(1.0, 1.0), (2.0, 0.0), (3.0, -1.0)], vec![3, 1]).unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(corrcoef_builtin(Value::ComplexTensor(tensor), Vec::new())).unwrap_err();
     assert_eq!(
         error.identifier(),

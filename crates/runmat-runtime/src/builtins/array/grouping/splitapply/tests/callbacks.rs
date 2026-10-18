@@ -36,7 +36,7 @@ fn table_variables_become_callback_arguments_in_table_order() {
 
 #[test]
 fn concatenates_each_requested_callback_output_independently() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = call(
         "min",
         tensor(vec![4.0, 1.0, 3.0, 2.0], vec![4, 1]),

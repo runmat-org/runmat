@@ -245,7 +245,7 @@ mod tests {
     fn invalid_output_and_format_precede_missing_file_read() {
         let root = tempfile::TempDir::new().unwrap();
         let missing = Value::String(path_to_string(&root.path().join("missing.png")));
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = run(imfinfo_builtin(vec![missing.clone()])).unwrap_err();
         assert_eq!(error.identifier(), IMFINFO_ERROR_OUTPUTS.identifier);
         drop(_outputs);

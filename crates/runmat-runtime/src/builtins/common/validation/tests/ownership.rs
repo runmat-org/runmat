@@ -16,7 +16,8 @@ fn namedargs_preserves_nested_resident_payloads_and_source_reuse() {
             let mut structure = StructValue::new();
             structure.insert("payload", nested.clone());
             for count in [0, 1] {
-                let _outputs = crate::output_count::push_output_count(Some(count));
+                let _outputs = crate::output_count::push_output_count(Some(count))
+                    .expect("output-count scope");
                 let output =
                     namedargs2cell::evaluate(vec![Value::Struct(structure.clone())]).unwrap();
                 let Value::Cell(cell) = output else {
@@ -51,12 +52,13 @@ fn scalar_predicate_and_name_value_conversion_enforce_one_output_before_input_wo
         isvarname::evaluate as fn(Vec<Value>) -> BuiltinResult<Value>,
         namedargs2cell::evaluate,
     ] {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = evaluate(vec![]).unwrap_err();
         assert!(error.identifier().unwrap().ends_with(":TooManyOutputs"));
     }
     for count in [0, 1] {
-        let _outputs = crate::output_count::push_output_count(Some(count));
+        let _outputs =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         assert_eq!(
             isvarname::evaluate(vec![Value::String("valid_name".into())]).unwrap(),
             Value::Bool(true)

@@ -32,7 +32,8 @@ fn public_feval_future_roots_unpolled_and_pending_nested_inputs_until_drop() {
                     unreachable!("pending test invocation cannot complete")
                 })
             },
-        ));
+        ))
+        .expect("call-port scope");
         drop(entry);
 
         let activation = runmat_gc::gc_allocate_rooted(Value::Cell(
@@ -107,7 +108,8 @@ fn mapped_nested_closure_uses_explicit_runtime_without_ambient_or_foreign_ambien
                     ))
                 })
             }),
-        );
+        )
+        .expect("call-port scope");
         drop(selected_entry);
 
         let foreign_calls = Rc::new(Cell::new(0));
@@ -122,7 +124,8 @@ fn mapped_nested_closure_uses_explicit_runtime_without_ambient_or_foreign_ambien
                     ))
                 })
             }),
-        );
+        )
+        .expect("call-port scope");
         drop(foreign_entry);
 
         let activation = runmat_gc::gc_allocate_rooted(Value::Cell(

@@ -117,7 +117,7 @@ fn expansion_lifecycle(completion: Completion) {
             let _resolver =
                 crate::user_functions::install_semantic_function_resolver(Some(Arc::new(|name| {
                     (name == "expansion_root_subsref").then_some(91)
-                })));
+                }))).expect("call-port scope");
             let _invoker = crate::user_functions::install_local_semantic_function_invoker(Rc::new(
                 move |_runtime, function, _, _| {
                     assert_eq!(function, 91);
@@ -147,7 +147,7 @@ fn expansion_lifecycle(completion: Completion) {
                         }
                     })
                 },
-            ));
+            )).expect("call-port scope");
             let method = RuntimeMethod {
                 name: "subsref".into(),
                 is_static: false,

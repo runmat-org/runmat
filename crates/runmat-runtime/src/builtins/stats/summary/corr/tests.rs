@@ -162,7 +162,7 @@ fn corr_pairwise_omits_nan_pair() {
 fn corr_returns_pvalues_when_requested() {
     let x = tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]);
     let y = tensor(vec![2.0, 4.0, 6.0, 8.0], vec![4, 1]);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(corr_builtin(x, vec![y])).unwrap();
     match out {
         Value::OutputList(values) => {
@@ -178,7 +178,7 @@ fn corr_returns_pvalues_when_requested() {
 fn corr_supports_kendall_and_tail_option() {
     let x = tensor(vec![1.0, 2.0, 3.0, 4.0], vec![4, 1]);
     let y = tensor(vec![1.0, 3.0, 2.0, 4.0], vec![4, 1]);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(corr_builtin(
         x,
         vec![
@@ -313,7 +313,7 @@ fn corr_weights_affect_all_types_and_force_nan_pvalues() {
     let y = tensor(vec![1.0, 4.0, 2.0], vec![3, 1]);
     let weights = tensor(vec![1.0, 0.0, 1.0], vec![3, 1]);
     for method in ["Pearson", "Spearman", "Kendall"] {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let out = block_on(corr_builtin(
             x.clone(),
             vec![

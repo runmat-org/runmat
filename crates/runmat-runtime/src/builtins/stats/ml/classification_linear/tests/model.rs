@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn fitclinear_logistic_returns_fitinfo_and_probability_scores() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = fitclinear_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![4, 1]),
         vec![

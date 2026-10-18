@@ -27,7 +27,7 @@ fn double_values(tensor: &Tensor) -> &[f64] {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn five_outputs_preserve_rank_zero_and_rank_one_observation_shapes() {
-    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     for shape in [Vec::new(), vec![1]] {
         let observation = || Value::Tensor(Tensor::new(vec![0.5], shape.clone()).unwrap());
         let edges = || Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
@@ -61,7 +61,7 @@ fn five_outputs_preserve_rank_zero_and_rank_one_observation_shapes() {
 
 #[test]
 fn excessive_outputs_are_rejected_before_option_parsing_or_evaluation() {
-    let _outputs = crate::output_count::push_output_count(Some(6));
+    let _outputs = crate::output_count::push_output_count(Some(6)).expect("output-count scope");
     let error = match block_on(histcounts2_builtin(
         Value::Num(1.0),
         Value::Num(2.0),
@@ -75,7 +75,7 @@ fn excessive_outputs_are_rejected_before_option_parsing_or_evaluation() {
 
 #[test]
 fn five_outputs_preserve_bin_shapes_and_zero_excluded_positions() {
-    let _outputs = crate::output_count::push_output_count(Some(5));
+    let _outputs = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let x = Tensor::new(vec![0.5, 1.5, 2.5, f64::NAN], vec![2, 2]).expect("X");
     let y = Tensor::new(vec![0.5, 1.5, 0.5, 1.5], vec![2, 2]).expect("Y");

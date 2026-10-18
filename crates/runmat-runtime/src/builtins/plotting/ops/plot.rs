@@ -669,7 +669,8 @@ pub(crate) mod tests {
             runmat_types::Span { start: 5, end: 6 }, // "a"
             runmat_types::Span { start: 8, end: 9 }, // "b"
         ];
-        let _callsite_guard = crate::callsite::push_callsite(None, Some(spans));
+        let _callsite_guard =
+            crate::callsite::push_callsite(None, Some(spans)).expect("plot callsite");
 
         let _ = block_on(plot_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),

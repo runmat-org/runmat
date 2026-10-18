@@ -28,7 +28,8 @@ fn public_print_keeps_selected_snapshot_across_pending_stage_and_scene_clear() {
     });
     let _selected = fs::replace_provider(provider.clone());
     let runtime = selected_runtime();
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [Value::from("/selected.png")];
     let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(start_receiver, call.as_mut());
@@ -81,7 +82,8 @@ fn cancelled_public_print_drops_pending_stage_without_publication_or_replay() {
     );
     runtime.set_language_mode(crate::context::RuntimeLanguageMode::RunMat);
     runtime.set_runmat_extensions_enabled(true);
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [Value::from("/cancelled.png")];
     let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(start_receiver, call.as_mut());
@@ -131,7 +133,8 @@ fn revoked_selected_print_lease_after_pending_write_prevents_publication() {
     });
     let _selected = fs::replace_provider(provider.clone());
     let runtime = selected_runtime();
-    let _ambient_output = crate::output_count::push_output_count(Some(1));
+    let _ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let arguments = [Value::from("/revoked.png")];
     let mut call = Box::pin(dispatch_print(&runtime, &arguments));
     await_operation_start(start_receiver, call.as_mut());

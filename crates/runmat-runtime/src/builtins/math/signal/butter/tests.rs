@@ -7,7 +7,7 @@ use runmat_builtins::{
 use runmat_value::{IntValue, IntegerStorage};
 
 fn output_values(order: usize, cutoff: Value, rest: Vec<Value>, outputs: usize) -> Vec<Value> {
-    let _guard = crate::output_count::push_output_count(Some(outputs));
+    let _guard = crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
     match block_on(butter_builtin(None, Value::Num(order as f64), cutoff, rest)).expect("butter") {
         Value::OutputList(values) => values
             .try_into_owned()
@@ -38,7 +38,7 @@ fn call_values(
     rest: Vec<Value>,
     outputs: usize,
 ) -> BuiltinResult<Value> {
-    let _guard = crate::output_count::push_output_count(Some(outputs));
+    let _guard = crate::output_count::push_output_count(Some(outputs)).expect("output-count scope");
     block_on(butter_builtin(None, order, cutoff, rest))
 }
 
@@ -88,7 +88,7 @@ fn numerical_design_observes_invocation_cancellation() {
         },
     );
     let mut cooperation = SignalCooperation::with_budget(budget, BUILTIN_NAME);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(evaluate_with_cooperation(
         Value::Num(100.0),
         Value::Num(0.25),
@@ -287,8 +287,7 @@ fn butter_first_order_lowpass_matches_closed_form() {
 fn butter_order_reads_typed_integer_storage_exactly() {
     let order = Tensor::new_integer(IntegerStorage::U16(vec![1]), vec![1, 1]).expect("order");
     let _extensions = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(2));
-
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let values = match block_on(butter_builtin(
         None,
         Value::Tensor(order),
@@ -616,7 +615,7 @@ fn butter_rejects_invalid_frequency_and_outputs() {
         Some("RunMat:butter:InvalidFrequency")
     );
 
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let err = block_on(butter_builtin(
         None,
         Value::Num(2.0),

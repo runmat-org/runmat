@@ -188,7 +188,7 @@ fn all_constructors_reject_extra_outputs_before_provider_calls() {
     let _lock = test_support::accel_test_lock();
     let provider = GuardProvider::new(true, false);
     let _thread = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for name in ["true", "false", "inf", "nan"] {
         let allocation = provider
             .owner
@@ -208,7 +208,7 @@ fn all_constructors_reject_extra_outputs_before_provider_calls() {
 
 #[test]
 fn all_constructors_accept_discarded_scalar_output() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     for name in ["true", "false", "inf", "nan"] {
         call(name, vec![]).expect("discarded output");
     }

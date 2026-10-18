@@ -149,7 +149,7 @@ fn shared_step_simulation_matches_builtin_and_keeps_stepinfo_error_ownership() {
 #[test]
 fn multi_output_returns_y_then_time() {
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![2, 1]).unwrap());
     let result = run_step(sys, vec![time]).expect("step");
     let Value::OutputList(outputs) = result else {
@@ -164,7 +164,7 @@ fn multi_output_returns_y_then_time() {
 #[test]
 fn single_requested_output_returns_only_response() {
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let time = Value::Tensor(Tensor::new(vec![0.0, 1.0], vec![1, 2]).unwrap());
     let result = run_step(sys, vec![time]).expect("step");
     let Value::OutputList(outputs) = result else {
@@ -179,7 +179,7 @@ fn single_requested_output_returns_only_response() {
 #[test]
 fn scalar_final_time_generates_column_time_vector_ending_at_final_time() {
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = run_step(sys, vec![Value::Num(5.0)]).expect("step");
     let Value::OutputList(outputs) = result else {
         panic!("expected output list");
@@ -202,7 +202,7 @@ fn discrete_response_uses_sample_time_grid() {
 fn step_typed_integer_time_inputs_cross_double_boundary_exactly() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = run_step(
         sys,
         vec![integer_tensor(
@@ -223,7 +223,7 @@ fn step_scalar_final_time_reads_typed_integer_storage_length_exactly() {
     let sys = tf_object(vec![1.0], vec![1.0, 1.0], 0.0);
     let final_time =
         Tensor::new_integer(IntegerStorage::U16(vec![2]), vec![1, 1]).expect("final time");
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result = run_step(sys, vec![Value::Tensor(final_time)]).expect("step");
     let Value::OutputList(outputs) = result else {
         panic!("expected output list");
@@ -462,7 +462,7 @@ fn invalid_statement_style_is_rejected_before_model_download() {
         model
             .properties
             .insert("Denominator".into(), Value::GpuTensor(resident));
-        let _output = crate::output_count::push_output_count(Some(0));
+        let _output = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         provider.reset_telemetry();
         let error = run_step(
             Value::Object(model),

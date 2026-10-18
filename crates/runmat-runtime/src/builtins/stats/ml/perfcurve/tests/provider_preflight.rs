@@ -187,7 +187,7 @@ fn unsupported_output_count_precedes_download() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = CountingProvider::new();
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let _outputs = output_count::push_output_count(Some(8));
+    let _outputs = output_count::push_output_count(Some(8)).expect("output-count scope");
     let scores = provider.resident_scores();
     let error = block_on(perfcurve_builtin(
         labels(),
@@ -205,7 +205,7 @@ fn discarded_call_admits_host_structure_without_download_or_curve_execution() {
     let _serial = crate::builtins::common::test_support::accel_test_lock();
     let provider = CountingProvider::new();
     let _selected = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
-    let _outputs = output_count::push_output_count(Some(0));
+    let _outputs = output_count::push_output_count(Some(0)).expect("output-count scope");
     let scores = provider.resident_scores();
 
     let error = block_on(perfcurve_builtin(

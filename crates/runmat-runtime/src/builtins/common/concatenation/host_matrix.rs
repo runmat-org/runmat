@@ -19,41 +19,47 @@ pub fn host_matrix_can_run_inline(
     if policy != HostAllocationPolicy::Unbounded || context.service_ports().builtin().is_some() {
         return Ok(false);
     }
-    // Browser registration can change between a read and an allocating host
-    // assembly, so it retains the ordinary selected async route.
-    #[cfg(target_arch = "wasm32")]
-    return Ok(false);
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        use crate::builtins::array::shape::{cat, horzcat, vertcat};
-        static CANONICAL_NATIVE_BINDINGS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-        let canonical = *CANONICAL_NATIVE_BINDINGS.get_or_init(|| {
-            for (name, matches) in [
-                (
-                    "horzcat",
-                    horzcat::is_canonical_host_binding
-                        as fn(crate::builtin::RuntimeBuiltinBinding) -> bool,
-                ),
-                ("vertcat", vertcat::is_canonical_host_binding),
-            ] {
-                let selected =
-                    crate::builtin::registration::registered_runtime_builtin_bindings_by_name(name);
-                if selected.len() != 1
-                    || !selected[0].registration().is_current()
-                    || !matches(selected[0].binding())
-                {
-                    return false;
-                }
-            }
-            cat::has_selected_host_legacy_implementation()
-        });
-        if !canonical {
-            return Ok(false);
-        }
-        Ok(rows.iter().flatten().all(host_literal_value))
-    }
+    Ok(platform_can_run_inline(rows))
 }
 
+// Browser registration can change between a read and an allocating host
+// assembly, so it retains the ordinary selected async route.
+#[cfg(target_arch = "wasm32")]
+fn platform_can_run_inline(_rows: &[Vec<Value>]) -> bool {
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn platform_can_run_inline(rows: &[Vec<Value>]) -> bool {
+    use crate::builtins::array::shape::{cat, horzcat, vertcat};
+    static CANONICAL_NATIVE_BINDINGS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let canonical = *CANONICAL_NATIVE_BINDINGS.get_or_init(|| {
+        for (name, matches) in [
+            (
+                "horzcat",
+                horzcat::is_canonical_host_binding
+                    as fn(crate::builtin::RuntimeBuiltinBinding) -> bool,
+            ),
+            ("vertcat", vertcat::is_canonical_host_binding),
+        ] {
+            let selected =
+                crate::builtin::registration::registered_runtime_builtin_bindings_by_name(name);
+            if selected.len() != 1
+                || !selected[0].registration().is_current()
+                || !matches(selected[0].binding())
+            {
+                return false;
+            }
+        }
+        cat::has_selected_host_legacy_implementation()
+    });
+    if !canonical {
+        return false;
+    }
+    rows.iter().flatten().all(host_literal_value)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn host_literal_value(value: &Value) -> bool {
     // cat's trailing name-value parser treats a textual `like` token as a
     // control in some argument positions. Keep those literals on dispatch.

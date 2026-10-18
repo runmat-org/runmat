@@ -184,7 +184,7 @@ fn invalid_forms_report_stable_identifiers() {
         call(Value::Tensor(left), vec![Value::Tensor(right)]).expect_err("shape must reject");
     assert_eq!(error.identifier(), POW2_ERROR_SIZE_MISMATCH.identifier);
 
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = call(Value::Num(1.0), vec![]).expect_err("outputs must reject");
     assert_eq!(error.identifier(), POW2_ERROR_TOO_MANY_OUTPUTS.identifier);
 }

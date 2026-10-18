@@ -11,7 +11,7 @@ fn axes_output_and_pair_syntax_admission_preserve_current_selection() {
     ensure_plot_test_env();
     reset_plot_state();
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert_eq!(
             axes_builtin(vec![]).unwrap_err().identifier(),
             Some("RunMat:axes:TooManyOutputs")
@@ -26,7 +26,7 @@ fn axes_output_and_pair_syntax_admission_preserve_current_selection() {
         state::current_axes_state().active_index,
         before.active_index
     );
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     axes_builtin(vec![Value::Num(first)]).unwrap();
     assert_ne!(
         state::current_axes_state().active_index,

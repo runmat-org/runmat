@@ -977,7 +977,7 @@ pub(crate) mod tests {
 
     #[test]
     fn assert_rejects_requested_public_output() {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let err = assert_builtin(vec![Value::Bool(true)]).expect_err("assert has no output");
         assert_eq!(err.identifier(), ASSERT_ERROR_TOO_MANY_OUTPUTS.identifier);
     }

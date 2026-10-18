@@ -16,11 +16,11 @@ use tempfile::tempdir;
 fn output_count_rejects_before_lookup_and_zero_still_queries() {
     let (_guard, _lock) = test_guard();
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = exist_builtin(Value::from("sin"), vec![Value::from("builtin")]).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:exist:TooManyOutputs"));
     }
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert_eq!(
         exist_builtin(Value::from("sin"), vec![Value::from("builtin")]).unwrap(),
         Value::Num(5.0)

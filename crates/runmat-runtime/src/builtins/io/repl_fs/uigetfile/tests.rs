@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 fn call(args: Vec<Value>, outputs: Option<usize>) -> BuiltinResult<Value> {
-    let _guard = crate::output_count::push_output_count(outputs);
+    let _guard = crate::output_count::push_output_count(outputs).expect("output-count scope");
     futures::executor::block_on(uigetfile_builtin(crate::context::legacy::active(), args))
 }
 
@@ -33,7 +33,7 @@ struct DialogProvider {
 }
 
 impl crate::context::RuntimeHostService for DialogProvider {
-    fn console(&self, _: crate::console::ConsoleStream, _: String) {}
+    fn console(&self, _: crate::console::ConsoleStream, _: crate::console::ConsoleText) {}
 
     fn warning(&self, _: crate::warning_store::RuntimeWarning) {}
 

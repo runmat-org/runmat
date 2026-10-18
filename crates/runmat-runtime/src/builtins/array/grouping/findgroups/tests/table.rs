@@ -21,7 +21,7 @@ fn table_form_returns_exact_identifier_columns() {
         ],
     )
     .unwrap();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let outputs = output_list(call(table, Vec::new()).unwrap());
     let Value::Object(ids) = &outputs[1] else {
         panic!("expected identifier table");

@@ -95,7 +95,7 @@ fn quantile_scalar_count_and_vecdim_have_distinct_shapes() {
 fn tiedrank_kendall_and_ansari_modes_match_documented_vectors() {
     let sample = || Value::Tensor(Tensor::new(vec![-2.0, 1.0, 3.0, 1.0, 4.0], vec![5, 1]).unwrap());
     {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let kendall =
             block_on(tiedrank::tiedrank_builtin(sample(), vec![Value::Num(1.0)])).unwrap();
         let Value::OutputList(kendall) = kendall else {
@@ -311,7 +311,7 @@ fn quantile_omits_nan_by_default_and_rejects_approximate_method() {
 #[test]
 fn tiedrank_ranks_matrix_columns_and_returns_tieadj() {
     let x = Value::Tensor(Tensor::new(vec![3.0, 1.0, 1.0, 2.0, 2.0, 5.0], vec![3, 2]).unwrap());
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(tiedrank::tiedrank_builtin(x, vec![])).unwrap();
     match out {
         Value::OutputList(values) => {
@@ -387,7 +387,7 @@ fn tiedrank_typed_integer_matrix_reads_exact_storage() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
     let x = Tensor::new_integer(IntegerStorage::I16(vec![3, 1, 1, 2, 2, 5]), vec![3, 2]).unwrap();
 
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let out = block_on(tiedrank::tiedrank_builtin(Value::Tensor(x), vec![])).unwrap();
     match out {
         Value::OutputList(values) => {

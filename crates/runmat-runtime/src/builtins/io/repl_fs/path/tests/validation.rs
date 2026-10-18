@@ -78,7 +78,7 @@ fn rejects_malformed_numeric_character_code_rows() {
 #[test]
 fn rejects_multiple_outputs_before_mutation() {
     let (_lock, guard) = locked();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     assert_eq!(
         call(vec![Value::from("new")]).unwrap_err().identifier(),
         Some("RunMat:path:TooManyOutputs")

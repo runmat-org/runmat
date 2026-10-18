@@ -104,7 +104,7 @@ fn assert_close_tol(left: f64, right: f64, tol: f64) {
 
 #[test]
 fn regress_fits_coefficients_and_requested_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let y = tensor(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
     let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
@@ -124,7 +124,7 @@ fn regress_fits_coefficients_and_requested_outputs() {
 #[test]
 fn regress_accepts_typed_integer_design_and_response() {
     let _compatibility = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(1));
+    let _guard = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let y = poisoned_int_tensor(IntegerStorage::I16(vec![1, 3, 5, 7]), 4, 1, f64::NAN);
     let x = poisoned_int_tensor(
         IntegerStorage::I16(vec![1, 1, 1, 1, 0, 1, 2, 3]),
@@ -151,7 +151,7 @@ fn regress_rejects_typed_integer_alpha_boundaries() {
 
 #[test]
 fn regress_omits_nan_rows_and_uses_alpha() {
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let y = tensor(vec![1.0, f64::NAN, 5.0, 7.0], 4, 1);
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
     let out = outputs(block_on(regress_builtin(y, x, vec![Value::Num(0.1)])).unwrap());
@@ -164,7 +164,7 @@ fn regress_omits_nan_rows_and_uses_alpha() {
 
 #[test]
 fn regress_supports_partial_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(3));
+    let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
     let y = tensor(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
     let x = tensor(vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 2.0, 3.0], 4, 2);
     let out = outputs(block_on(regress_builtin(y, x, Vec::new())).unwrap());
@@ -176,7 +176,7 @@ fn regress_supports_partial_outputs() {
 
 #[test]
 fn regress_reports_nonzero_intervals_and_stats() {
-    let _guard = crate::output_count::push_output_count(Some(5));
+    let _guard = crate::output_count::push_output_count(Some(5)).expect("output-count scope");
     let y = tensor(vec![1.0, 2.1, 2.9, 4.2, 4.8, 6.1], 6, 1);
     let x = tensor(
         vec![
@@ -236,7 +236,7 @@ fn regress_reports_nonzero_intervals_and_stats() {
 
 #[test]
 fn regress_zeroes_dependent_columns_and_intervals() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let y = tensor(vec![1.0, 3.0, 5.0, 7.0], 4, 1);
     let x = tensor(
         vec![
@@ -308,7 +308,7 @@ fn regress_rejects_bad_dimensions_and_alpha() {
 
 #[test]
 fn discarded_calls_admit_without_fitting_but_still_validate_alpha() {
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     for (response, design) in [
         (tensor(Vec::new(), 0, 1), tensor(Vec::new(), 0, 2)),
         (

@@ -26,33 +26,39 @@ fn dispatcher_uses_selected_compatibility_and_requested_output_count() {
     let runmat = runtime(crate::context::RuntimeLanguageMode::RunMat);
 
     let ambient_runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let ambient_output = crate::output_count::push_output_count(Some(1));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     assert_no_outputs(block_on(dispatch(&matlab, "/print/matlab-statement.png", 0)).unwrap());
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(dispatch(&matlab, "/print/matlab-status.png", 1)).unwrap_err();
     assert_eq!(
         error.identifier(),
         PRINT_STATUS_OUTPUT_EXTENSION.error_identifier
     );
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(dispatch(&matlab, "/print/matlab-two.png", 2)).unwrap_err();
     assert_eq!(error.identifier(), PRINT_ERROR_TOO_MANY_OUTPUTS.identifier);
     drop(ambient_output);
     drop(ambient_runmat);
 
     let ambient_matlab = crate::compatibility::push_runmat_extensions_enabled(false);
-    let ambient_output = crate::output_count::push_output_count(Some(1));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     assert_no_outputs(block_on(dispatch(&runmat, "/print/runmat-statement.png", 0)).unwrap());
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert_eq!(
         block_on(dispatch(&runmat, "/print/runmat-status.png", 1)).unwrap(),
         Value::Bool(true)
     );
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(dispatch(&runmat, "/print/runmat-two.png", 2)).unwrap_err();
     assert_eq!(error.identifier(), PRINT_ERROR_TOO_MANY_OUTPUTS.identifier);
     drop(ambient_output);
@@ -105,36 +111,42 @@ fn feature_disabled_dispatch_fails_before_filesystem_capture() {
     let runmat = runtime(crate::context::RuntimeLanguageMode::RunMat);
 
     let ambient_runmat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let ambient_output = crate::output_count::push_output_count(Some(1));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     assert_renderer_unavailable(
         &block_on(dispatch(&matlab, "/print/matlab-statement.png", 0)).unwrap_err(),
     );
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(dispatch(&matlab, "/print/matlab-status.png", 1)).unwrap_err();
     assert_eq!(
         error.identifier(),
         PRINT_STATUS_OUTPUT_EXTENSION.error_identifier
     );
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(dispatch(&matlab, "/print/matlab-two.png", 2)).unwrap_err();
     assert_eq!(error.identifier(), PRINT_ERROR_TOO_MANY_OUTPUTS.identifier);
     drop(ambient_output);
     drop(ambient_runmat);
 
     let ambient_matlab = crate::compatibility::push_runmat_extensions_enabled(false);
-    let ambient_output = crate::output_count::push_output_count(Some(1));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     assert_renderer_unavailable(
         &block_on(dispatch(&runmat, "/print/runmat-statement.png", 0)).unwrap_err(),
     );
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     assert_renderer_unavailable(
         &block_on(dispatch(&runmat, "/print/runmat-status.png", 1)).unwrap_err(),
     );
     drop(ambient_output);
-    let ambient_output = crate::output_count::push_output_count(Some(0));
+    let ambient_output =
+        crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(dispatch(&runmat, "/print/runmat-two.png", 2)).unwrap_err();
     assert_eq!(error.identifier(), PRINT_ERROR_TOO_MANY_OUTPUTS.identifier);
     drop(ambient_output);

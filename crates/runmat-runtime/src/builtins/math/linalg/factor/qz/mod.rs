@@ -5,6 +5,8 @@ mod allocation;
 mod eigvals;
 mod eigvectors;
 mod ordqz;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use ordqz::__runmat_wasm_register_builtin_ordqz_builtin;
 mod real_eigenvectors;
 mod real_reorder;
 mod reorder;

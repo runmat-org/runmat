@@ -4,10 +4,11 @@ use super::*;
 fn fixed_outputs_preserve_statement_and_scalar_result_contract() {
     for builtin in [flintmax, intmax, intmin, realmax, realmin] {
         for count in [None, Some(0), Some(1)] {
-            let _outputs = crate::output_count::push_output_count(count);
+            let _outputs =
+                crate::output_count::push_output_count(count).expect("output-count scope");
             assert!(builtin(vec![]).is_ok());
         }
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = builtin(vec![]).unwrap_err();
         assert_eq!(
             error.identifier(),

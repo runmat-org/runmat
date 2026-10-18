@@ -236,7 +236,7 @@ impl MexHostServices for RuntimeMexHostServices {
     }
 
     fn eval_captured(&self, command: &str) -> MexEngineCompletion<()> {
-        captured_completion(|| self.eval(command))
+        captured_completion(&self.runtime, || self.eval(command))
     }
 
     fn call(
@@ -259,7 +259,9 @@ impl MexHostServices for RuntimeMexHostServices {
         arguments: Vec<Value>,
         requested_outputs: usize,
     ) -> MexEngineCompletion<Box<dyn MexCallOutput>> {
-        captured_completion(|| self.call(function, arguments, requested_outputs))
+        captured_completion(&self.runtime, || {
+            self.call(function, arguments, requested_outputs)
+        })
     }
 
     fn get_variable(
@@ -382,9 +384,16 @@ impl MexHostServices for RuntimeMexHostServices {
 }
 
 fn captured_completion<T>(
+    runtime: &RuntimeContext,
     operation: impl FnOnce() -> Result<T, MexDiagnostic>,
 ) -> MexEngineCompletion<T> {
-    let capture = crate::console::begin_capture();
+    if let Err(error) = prepare_legacy_capture_materialization(runtime) {
+        return MexEngineCompletion::from_result(Err(runtime_diagnostic(error)));
+    }
+    let capture = match crate::console::begin_capture() {
+        Ok(capture) => capture,
+        Err(error) => return MexEngineCompletion::from_result(Err(runtime_diagnostic(error))),
+    };
     let result = operation();
     let entries = capture.finish_entries();
     let mut stdout = String::new();
@@ -401,6 +410,29 @@ fn captured_completion<T>(
         stdout,
         stderr,
     }
+}
+
+fn prepare_legacy_capture_materialization(
+    runtime: &RuntimeContext,
+) -> Result<(), crate::RuntimeError> {
+    use crate::context::host_allocation::{
+        host_allocation_runtime_error, HostAllocationPolicy, HostAllocationReceipt,
+    };
+    let policy = HostAllocationReceipt::policy(Some(runtime)).map_err(|error| {
+        host_allocation_runtime_error(
+            Some(runtime),
+            "RunMat:mex:CaptureUnavailable",
+            "MEX captured text policy could not be established",
+            error,
+        )
+    })?;
+    if policy == HostAllocationPolicy::Managed {
+        return Err(crate::runtime_error::semantic_error(
+            "RunMat:mex:ManagedCaptureUnavailable",
+            "MEX captured text requires an admitted language-string owner",
+        ));
+    }
+    Ok(())
 }
 
 struct RuntimeMexCancellationScope {

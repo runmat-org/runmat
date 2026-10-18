@@ -46,7 +46,7 @@ fn graphics_commands_reject_excess_outputs_before_creation() {
     let _guard = test_support::setup();
     for (command, arguments) in command_cases() {
         crate::builtins::plotting::state::reset_plot_state();
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         assert!(command(arguments).is_err());
         assert!(crate::builtins::plotting::state::current_figure_handle_if_exists().is_none());
     }
@@ -56,7 +56,7 @@ fn graphics_commands_reject_excess_outputs_before_creation() {
 fn graphics_commands_accept_zero_outputs_in_strict_mode() {
     let _guard = test_support::setup();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(false);
-    let _outputs = crate::output_count::push_output_count(Some(0));
+    let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     for (command, arguments) in command_cases() {
         crate::builtins::plotting::state::reset_plot_state();
         command(arguments).unwrap();

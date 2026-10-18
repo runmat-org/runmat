@@ -35,7 +35,8 @@ fn arrayfun_semantic_function_handle_uses_semantic_invoker() {
             let value = *value;
             Box::pin(async move { rooted_single(Value::Num(value + 10.0)) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
     let handle = crate::user_functions::test_support::exact_local_value("arrayfun_target", binding);
 
@@ -69,7 +70,8 @@ fn arrayfun_name_only_callback_uses_semantic_resolver() {
             let value = *value;
             Box::pin(async move { rooted_single(Value::Num(value + 20.0)) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
 
@@ -114,7 +116,8 @@ fn arrayfun_external_handle_uses_semantic_resolver() {
             let value = *value;
             Box::pin(async move { rooted_single(Value::Num(value + 30.0)) })
         },
-    )));
+    )))
+    .expect("call-port scope");
     drop(entry);
     let tensor = Tensor::new(vec![1.0, 2.0], vec![1, 2]).expect("tensor");
 

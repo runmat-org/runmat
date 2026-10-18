@@ -213,7 +213,8 @@ fn zero_requested_outputs_preserve_input_and_numerical_errors() {
     ];
     for (beta, residual, method, source, identifier) in cases {
         for requested in [0, 1] {
-            let _outputs = crate::output_count::push_output_count(Some(requested));
+            let _outputs = crate::output_count::push_output_count(Some(requested))
+                .expect("output-count scope");
             let error = block_on(nlparci_in_runtime(
                 None,
                 beta.clone(),
@@ -349,7 +350,7 @@ fn finite_host_precharge_and_retained_interval_claim_share_one_owner() {
     let zero_ledger = ManagedHostEffectLedger::new_with_epoch(zero_plan.scratch_peak_bytes(), 3);
     let zero_runtime = finite_runtime(zero_ledger.clone());
     {
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let zero_output = block_on(nlparci_in_runtime(
             Some(&zero_runtime),
             Value::Num(1.0),

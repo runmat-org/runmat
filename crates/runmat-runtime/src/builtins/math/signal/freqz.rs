@@ -408,7 +408,9 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage};
 
     fn call(b: Value, a: Value, rest: &[Value], outputs: Option<usize>) -> BuiltinResult<Value> {
-        let _guard = outputs.map(|count| crate::output_count::push_output_count(Some(count)));
+        let _guard = outputs
+            .map(|count| crate::output_count::push_output_count(Some(count)))
+            .expect("output-count scope");
         block_on(evaluate(b, a, rest))
     }
 
@@ -598,7 +600,7 @@ mod tests {
             },
         );
         let mut cooperation = SignalCooperation::with_budget(budget, BUILTIN_NAME);
-        let _outputs = crate::output_count::push_output_count(Some(0));
+        let _outputs = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let error = block_on(evaluate_with_cooperation(
             Value::Num(1.0),
             Value::Num(1.0),

@@ -243,7 +243,7 @@ fn typed_terminator_pending_cancel_and_abandoned_resume_drop_do_not_replay() {
 
 #[test]
 fn observed_cancellation_releases_captured_arena_roots_before_invocation_drop() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::observed_cancellation_releases_captured_arena_roots_before_invocation_drop"
     )) {
@@ -297,7 +297,7 @@ fn observed_cancellation_releases_captured_arena_roots_before_invocation_drop() 
 
 #[test]
 fn polled_resume_drop_and_cancellation_keep_roots_and_context_during_work_destruction() {
-    if crate::test_support::run_isolated_gc_test(concat!(
+    if runmat_gc::test_support::run_isolated_gc_test(concat!(
         module_path!(),
         "::polled_resume_drop_and_cancellation_keep_roots_and_context_during_work_destruction"
     )) {

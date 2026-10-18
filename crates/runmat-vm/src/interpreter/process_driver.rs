@@ -475,7 +475,7 @@ impl ProcessDriverHandle {
         M: FnOnce() -> F,
     {
         let scope = scope.prepare_future::<F>()?;
-        self.enqueue_typed_in_context(context, 0, move || scope.scope(make_future()))
+        self.enqueue_typed_in_context(context, 0, move || scope.try_scope_with(make_future))
     }
 
     fn enqueue_typed_unbounded<T: 'static>(
@@ -525,7 +525,7 @@ impl ProcessDriverHandle {
         F: Future<Output = Result<T, RuntimeError>> + 'static,
         M: FnOnce() -> F,
     {
-        self.enqueue_typed_in_context(context, 0, make_future)
+        self.enqueue_typed_in_context(context, 0, move || Ok(make_future()))
     }
 
     pub(crate) fn enqueue_owned_scoped_in_context<T, F, M>(
@@ -540,7 +540,7 @@ impl ProcessDriverHandle {
         M: FnOnce() -> F,
     {
         let scope = scope.prepare_future::<F>()?;
-        self.enqueue_typed_in_context(context, 0, move || scope.scope(make_future()))
+        self.enqueue_typed_in_context(context, 0, move || scope.try_scope_with(make_future))
     }
 
     fn enqueue_typed_in_context<T, F, M>(
@@ -552,7 +552,7 @@ impl ProcessDriverHandle {
     where
         T: 'static,
         F: Future<Output = Result<T, RuntimeError>> + 'static,
-        M: FnOnce() -> F,
+        M: FnOnce() -> Result<F, RuntimeError>,
     {
         let owner = self.owner()?;
         {
@@ -563,7 +563,7 @@ impl ProcessDriverHandle {
             }
             if !state.tasks.is_managed() {
                 drop(state);
-                return self.enqueue_typed_unbounded(make_future());
+                return self.enqueue_typed_unbounded(make_future()?);
             }
         }
         let (geometry, expected_id, parent, depth, wake_hub) = {
@@ -613,11 +613,16 @@ impl ProcessDriverHandle {
 
         // Only after the complete request and queue capacity are admitted may
         // caller-owned child state enter the queued future.
-        let (completion, control, wake, queued) = prepared
-            .with_output_allocation(context, |permit| {
-                prepare_managed_request(permit, wake_hub.clone(), expected_id, depth, make_future())
+        let request = prepared
+            .with_output_construction(context, |permit| {
+                make_future().map(|future| {
+                    prepare_managed_request(permit, wake_hub.clone(), expected_id, depth, future)
+                })
             })
             .map_err(|error| queue_allocation_error(context, error))?;
+        let (completion, control, wake, queued) = request?.map_err(|error| {
+            queue_allocation_error(context, HostAllocationError::Numeric(error))
+        })?;
         prepared
             .checkpoint(context)
             .map_err(|error| queue_allocation_error(context, error))?;

@@ -27,7 +27,7 @@ pub(crate) fn emit(request: WarningRequest<'_>) -> Result<(), RuntimeError> {
     match action {
         WarningAction::Suppress => Ok(()),
         WarningAction::Display => {
-            display(&warning, request.show_identifier);
+            display(&warning, request.show_identifier)?;
             warning_store::push(&warning.identifier, &warning.message);
             notify_host(warning);
             Ok(())
@@ -43,22 +43,23 @@ pub(crate) fn emit(request: WarningRequest<'_>) -> Result<(), RuntimeError> {
     }
 }
 
-fn display(warning: &RuntimeWarning, show_identifier: bool) {
+fn display(warning: &RuntimeWarning, show_identifier: bool) -> Result<(), RuntimeError> {
     let (backtrace, verbose) =
         with_policy(|policy| (policy.backtrace_enabled(), policy.verbose_enabled()));
-    emit_stderr_line(format!("Warning: {}", warning.message));
+    emit_stderr_line(format!("Warning: {}", warning.message))?;
     if show_identifier {
-        emit_stderr_line(format!("identifier: {}", warning.identifier));
+        emit_stderr_line(format!("identifier: {}", warning.identifier))?;
     }
     if verbose {
         emit_stderr_line(format!(
             "(Type \"warning('off','{}')\" to suppress this warning.)",
             warning.identifier
-        ));
+        ))?;
     }
     if backtrace {
-        emit_stderr_line(format!("{}", std::backtrace::Backtrace::force_capture()));
+        emit_stderr_line(format!("{}", std::backtrace::Backtrace::force_capture()))?;
     }
+    Ok(())
 }
 
 fn notify_host(warning: RuntimeWarning) {
@@ -69,7 +70,7 @@ fn notify_host(warning: RuntimeWarning) {
     }
 }
 
-fn emit_stderr_line(line: String) {
+fn emit_stderr_line(line: String) -> Result<(), RuntimeError> {
     tracing::warn!("{line}");
-    record_console_line(ConsoleStream::Stderr, line);
+    record_console_line(ConsoleStream::Stderr, line)
 }

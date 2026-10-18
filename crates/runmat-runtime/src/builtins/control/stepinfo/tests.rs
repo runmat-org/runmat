@@ -134,7 +134,7 @@ fn host_options_and_length_fail_before_provider_download() {
 
 #[test]
 fn requested_output_count_is_checked_before_admission() {
-    let _count = crate::output_count::push_output_count(Some(2));
+    let _count = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = run(samples(vec![0.0, 1.0]), vec![]).expect_err("one output only");
     assert_eq!(error.identifier(), Some("RunMat:stepinfo:InvalidArgument"));
 }

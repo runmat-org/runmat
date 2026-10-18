@@ -63,7 +63,8 @@ fn controls_admit_only_needed_readback_after_host_validation() {
             .unwrap();
         let resident = Value::GpuTensor(allocation.handle.clone());
         {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let errors = [
                 block_on(crate::builtins::table::builtins::parquetinfo_builtin(
                     Value::from("not-read.parquet"),

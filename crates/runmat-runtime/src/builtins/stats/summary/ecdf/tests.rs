@@ -23,13 +23,13 @@ fn canonical_entry(name: &str) -> &'static runmat_builtins::BuiltinCatalogEntry 
 #[cfg(not(feature = "plot-core"))]
 #[test]
 fn numeric_ecdf_remains_available_without_presentation() {
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let result =
         block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])])).expect("numeric ECDF output");
     assert!(matches!(result, Value::OutputList(values) if values.len() == 2));
     drop(_outputs);
 
-    let _statement = crate::output_count::push_output_count(Some(0));
+    let _statement = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
     let error = block_on(ecdf_builtin(vec![tensor(vec![1.0, 2.0, 3.0])]))
         .expect_err("presentation unavailable");
     assert!(error
@@ -123,7 +123,7 @@ fn ecdf_numeric_parsers_read_admitted_typed_integer_storage() {
 #[test]
 fn ecdf_accepts_typed_integer_data_frequency_and_censoring() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(ecdf_builtin(vec![
         int_tensor(IntegerStorage::I16(vec![1, 2, 3, 4]), 4),
         Value::from("Frequency"),
@@ -277,7 +277,7 @@ fn ecdf_admits_all_integer_y_classes_and_rejects_wide_boundary() {
 #[test]
 fn ecdf_accepts_aligned_wide_integer_at_the_exact_binary64_boundary() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let aligned = 1_u64 << 54;
     let result = block_on(ecdf_builtin(vec![int_tensor(
         IntegerStorage::U64(vec![aligned, aligned + 4]),
@@ -312,7 +312,7 @@ fn ecdf_descriptor_exposes_role_specific_integer_policy() {
 #[test]
 fn ecdf_resident_input_restores_numeric_outputs_to_its_owner() {
     crate::builtins::common::test_support::with_test_provider(|provider| {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1]).unwrap();
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &input)
             .expect("resident input");
@@ -329,7 +329,7 @@ fn ecdf_resident_input_restores_numeric_outputs_to_its_owner() {
 
 #[test]
 fn ecdf_returns_unique_sorted_points_with_initial_zero() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(ecdf_builtin(vec![tensor(vec![3.0, 1.0, 2.0, 2.0])])).unwrap();
     let outputs = output_tensors(value);
     assert_eq!(outputs[0].materialize_f64(), vec![0.0, 0.25, 0.75, 1.0]);
@@ -339,7 +339,7 @@ fn ecdf_returns_unique_sorted_points_with_initial_zero() {
 #[test]
 fn ecdf_logical_vector_preserves_shape_and_numeric_steps() {
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let sample = Value::LogicalArray(
         LogicalArray::new(vec![0, 1, 1, 0], vec![4, 1]).expect("logical vector"),
     );
@@ -362,7 +362,7 @@ fn ecdf_logical_sample_geometry_matches_numeric_sample_admission() {
 
 #[test]
 fn ecdf_supports_frequency_survivor_and_bounds_outputs() {
-    let _guard = crate::output_count::push_output_count(Some(4));
+    let _guard = crate::output_count::push_output_count(Some(4)).expect("output-count scope");
     let value = block_on(ecdf_builtin(vec![
         tensor(vec![1.0, 2.0, 3.0]),
         Value::from("Frequency"),
@@ -382,7 +382,7 @@ fn ecdf_supports_frequency_survivor_and_bounds_outputs() {
 
 #[test]
 fn ecdf_supports_right_censoring_with_kaplan_meier_steps() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(ecdf_builtin(vec![
         tensor(vec![1.0, 2.0, 3.0, 4.0]),
         Value::from("Censoring"),
@@ -398,7 +398,7 @@ fn ecdf_supports_right_censoring_with_kaplan_meier_steps() {
 
 #[test]
 fn ecdf_right_censoring_starts_at_first_event_time() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(ecdf_builtin(vec![
         tensor(vec![1.0, 2.0, 3.0, 4.0]),
         Value::from("Censoring"),
@@ -412,7 +412,7 @@ fn ecdf_right_censoring_starts_at_first_event_time() {
 
 #[test]
 fn ecdf_cumulative_hazard_uses_nelson_aalen_steps() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(ecdf_builtin(vec![
         tensor(vec![1.0, 2.0, 3.0]),
         Value::from("Function"),
@@ -438,7 +438,7 @@ fn ecdf_cumulative_hazard_uses_nelson_aalen_steps() {
 
 #[test]
 fn ecdf_rejects_non_vector_non_interval_matrix() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let err = block_on(ecdf_builtin(vec![matrix(
         vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
         2,
@@ -450,7 +450,7 @@ fn ecdf_rejects_non_vector_non_interval_matrix() {
 
 #[test]
 fn ecdf_supports_left_censoring_without_right_censoring() {
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(ecdf_builtin(vec![
         tensor(vec![1.0, 2.0, 3.0, 4.0]),
         Value::from("Censoring"),
@@ -470,7 +470,7 @@ fn ecdf_supports_left_censoring_without_right_censoring() {
 fn cdfplot_returns_handle_and_stats() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     let _ = crate::builtins::plotting::clear_figure(None);
-    let _guard = crate::output_count::push_output_count(Some(2));
+    let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let value = block_on(cdfplot_builtin(vec![tensor(vec![1.0, 2.0, 3.0])])).unwrap();
     let Value::OutputList(values) = value else {
         panic!("expected output list");
@@ -523,7 +523,7 @@ fn cdfplot_descriptor_classifies_integer_and_runtime_extensions() {
 fn cdfplot_admits_all_integer_classes_at_explicit_double_boundary() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for storage in all_integer_storages((-3, 3)) {
         crate::builtins::plotting::reset_plot_state();
         let value =
@@ -623,7 +623,7 @@ fn cdfplot_resident_integer_fallback_returns_host_outputs() {
     let _plot_guard = crate::builtins::plotting::lock_plot_test_context();
     crate::builtins::common::test_support::with_test_provider(|provider| {
         let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let value = Tensor::new_integer(IntegerStorage::U32(vec![1, 3]), vec![2, 1])
             .expect("integer input");
         let handle = crate::builtins::common::gpu_helpers::upload_tensor(provider, &value)
@@ -653,7 +653,7 @@ fn cdfplot_wgpu_integer_fallback_returns_host_outputs_for_all_classes() {
         return;
     };
     let _compat = crate::compatibility::push_runmat_extensions_enabled(true);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     for storage in all_integer_storages((2, 2)) {
         crate::builtins::plotting::reset_plot_state();
         let value = Tensor::new_integer(storage, vec![1, 1]).expect("integer input");

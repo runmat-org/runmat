@@ -3,7 +3,8 @@ use super::*;
 #[test]
 fn cholesky_validation_is_independent_of_requested_outputs() {
     for count in [0, 1] {
-        let _outputs = crate::output_count::push_output_count(Some(count));
+        let _outputs =
+            crate::output_count::push_output_count(Some(count)).expect("output-count scope");
         let error = call_constructor(vec![
             tensor(&[1.0, 2.0, 2.0, 1.0], 2, 2),
             Value::from("chol"),
@@ -20,7 +21,7 @@ fn cholesky_validation_is_independent_of_requested_outputs() {
         ])
         .expect("valid positive definite matrix");
     }
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = call_constructor(vec![
         tensor(&[1.0, 2.0, 2.0, 1.0], 2, 2),
         Value::from("chol"),
@@ -42,7 +43,7 @@ fn every_method_checks_output_count_before_inputs_or_provider_access() {
             .unwrap()
             .handle,
     );
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let errors = [
         call_constructor(vec![providerless.clone()]).unwrap_err(),
         block_on(super::super::decomposition_subsref(

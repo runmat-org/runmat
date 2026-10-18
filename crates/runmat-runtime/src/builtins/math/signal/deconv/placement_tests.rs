@@ -151,7 +151,8 @@ fn requested_zero_one_two_outputs_select_only_real_published_work() {
         let service = PlacementWitnessService::new(false);
         let (numerator, denominator) = inputs(provider);
         let uploads_before = provider.uploads.load(Ordering::SeqCst);
-        let _outputs = crate::output_count::push_output_count(Some(requested));
+        let _outputs =
+            crate::output_count::push_output_count(Some(requested)).expect("output-count scope");
         let result = block_on(deconv_builtin(
             Some(service.context()),
             Value::GpuTensor(numerator.clone()),
@@ -204,7 +205,7 @@ fn host_route_retained_budget_uses_provider_physical_estimate_not_copy_volume() 
     let _selected = ThreadProviderGuard::set(Some(provider));
     let (numerator, denominator) = inputs(provider);
     let service = PlacementWitnessService::new(false);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let _result = block_on(deconv_builtin(
         Some(service.context()),
         Value::GpuTensor(numerator.clone()),
@@ -235,7 +236,7 @@ fn second_restore_failure_drops_first_result_without_retiring_callers() {
     let _selected = ThreadProviderGuard::set(Some(provider));
     let (numerator, denominator) = inputs(provider);
     let service = PlacementWitnessService::new(false);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(deconv_builtin(
         Some(service.context()),
         Value::GpuTensor(numerator.clone()),
@@ -268,7 +269,7 @@ fn exact_late_upload_rejection_precedes_any_result_upload() {
     let _selected = ThreadProviderGuard::set(Some(provider));
     let (numerator, denominator) = inputs(provider);
     let service = PlacementWitnessService::new(false);
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = block_on(deconv_builtin(
         Some(service.context()),
         Value::GpuTensor(numerator.clone()),

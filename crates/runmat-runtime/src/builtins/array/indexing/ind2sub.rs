@@ -524,7 +524,8 @@ pub(crate) mod tests {
         let dims = Value::Tensor(Tensor::new(vec![2.0, 3.0, 4.0], vec![1, 3]).unwrap());
         let indices = Value::Tensor(Tensor::new(vec![3.0, 11.0], vec![1, 2]).unwrap());
         {
-            let _outputs = crate::output_count::push_output_count(Some(1));
+            let _outputs =
+                crate::output_count::push_output_count(Some(1)).expect("output-count scope");
             let result =
                 ind2sub_builtin(dims.clone(), indices.clone()).expect("one requested output");
             let Value::OutputList(outputs) = result else {
@@ -537,7 +538,8 @@ pub(crate) mod tests {
             );
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             let result = ind2sub_builtin(dims.clone(), indices.clone()).expect("two outputs");
             let Value::OutputList(outputs) = result else {
                 panic!("expected output list");
@@ -553,7 +555,8 @@ pub(crate) mod tests {
             );
         }
         {
-            let _outputs = crate::output_count::push_output_count(Some(4));
+            let _outputs =
+                crate::output_count::push_output_count(Some(4)).expect("output-count scope");
             let result = ind2sub_builtin(dims, indices).expect("four outputs");
             let Value::OutputList(outputs) = result else {
                 panic!("expected output list");

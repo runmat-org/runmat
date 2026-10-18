@@ -97,7 +97,7 @@ fn build_mex(arguments: Vec<Value>, builtin: &'static str, cuda: bool) -> Builti
             .map_err(|error| map_mex_build_error(builtin, error))?
             .command()
             .join(" ");
-        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, command);
+        crate::console::record_console_line(crate::console::ConsoleStream::Stdout, command)?;
     }
     let output = invocation
         .compile()
@@ -105,7 +105,7 @@ fn build_mex(arguments: Vec<Value>, builtin: &'static str, cuda: bool) -> Builti
     crate::console::record_console_line(
         crate::console::ConsoleStream::Stdout,
         format!("Built {}", output.module.display()),
-    );
+    )?;
     Ok(Value::output_list(Vec::new()))
 }
 
@@ -187,14 +187,14 @@ mod tests {
 
     #[test]
     fn requested_build_output_is_rejected_before_argument_or_filesystem_work() {
-        let _outputs = crate::output_count::push_output_count(Some(1));
+        let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
         let error = mex_builtin(Vec::new()).unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:TooManyOutputs"));
     }
 
     #[test]
     fn mexext_rejects_excess_outputs_before_target_lookup() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = mexext_builtin().unwrap_err();
         assert_eq!(error.identifier(), Some("RunMat:MEX:TooManyOutputs"));
     }

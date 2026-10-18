@@ -74,7 +74,7 @@ fn cancellation_during_numeric_output_conversion_drops_pending_turn_without_outp
     let budget = pending_budget(&source, &turns, &dropped, 16);
     let mut cooperation = TabularCooperation::with_test_budget(&runtime, BUILTIN_NAME, budget);
     let rows = vec![vec![SpreadsheetData::Float(1.0); 64]; 128];
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let requested = XlsReadOutputs::requested().expect("one output");
     let mut call = Box::pin(XlsReadResult::from_cells(
         rows,
@@ -121,7 +121,7 @@ fn numeric_scan_yields_inside_one_wide_row() {
     let budget = pending_budget(&source, &turns, &dropped, 0);
     let mut cooperation = TabularCooperation::with_test_budget(&runtime, BUILTIN_NAME, budget);
     let rows = vec![vec![SpreadsheetData::Float(1.0); 4096]];
-    let _outputs = crate::output_count::push_output_count(Some(1));
+    let _outputs = crate::output_count::push_output_count(Some(1)).expect("output-count scope");
     let requested = XlsReadOutputs::requested().expect("one output");
     let mut scan = Box::pin(XlsReadResult::from_cells(
         rows,

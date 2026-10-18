@@ -85,7 +85,7 @@ fn distinguishes_files_from_missing_folders() {
 fn rejects_multiple_outputs_before_path_mutation() {
     let _guard = PathGuard::new();
     let previous = crate::builtins::common::path_state::current_path_string();
-    let _outputs = crate::output_count::push_output_count(Some(2));
+    let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
     let error = super::run(vec![Value::from("missing")]).unwrap_err();
     assert_eq!(error.identifier(), Some("RunMat:rmpath:TooManyOutputs"));
     assert_eq!(

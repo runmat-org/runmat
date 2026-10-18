@@ -2,6 +2,8 @@
 
 mod form;
 mod ordschur;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use ordschur::__runmat_wasm_register_builtin_ordschur_builtin;
 mod reorder;
 #[cfg(test)]
 mod tests;

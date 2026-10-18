@@ -305,7 +305,7 @@ pub(crate) mod tests {
 
     #[test]
     fn fix_rejects_excess_outputs() {
-        let _outputs = crate::output_count::push_output_count(Some(2));
+        let _outputs = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let error = fix_builtin(Value::Num(1.25)).expect_err("fix must reject excess outputs");
         assert_eq!(error.identifier(), Some("RunMat:fix:TooManyOutputs"));
     }

@@ -1052,7 +1052,7 @@ impl RunMatWasm {
                     Some(exec_response.source_context.source_name()),
                     exec_response.source_context.source_text(),
                 )),
-                stdout: Vec::new(),
+                stdout: Default::default(),
                 display_events: Vec::new(),
                 workspace: WorkspacePayload {
                     full: false,

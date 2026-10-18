@@ -412,7 +412,8 @@ mod tests {
             model
                 .properties
                 .insert("Unrelated".into(), Value::GpuTensor(resident));
-            let _outputs = crate::output_count::push_output_count(Some(2));
+            let _outputs =
+                crate::output_count::push_output_count(Some(2)).expect("output-count scope");
             provider.reset_telemetry();
             let Value::OutputList(values) =
                 block_on(pzmap_builtin(Value::Object(model), vec![])).expect("static gain")
@@ -470,7 +471,7 @@ mod tests {
     #[test]
     fn two_output_call_returns_poles_and_zeros() {
         let sys = tf(vec![1.0, 3.0, 2.0], vec![1.0, 4.0]);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -496,7 +497,7 @@ mod tests {
     #[test]
     fn complex_poles_are_returned_as_complex_column() {
         let sys = tf(vec![1.0], vec![1.0, 0.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -524,7 +525,7 @@ mod tests {
     #[test]
     fn statement_form_plots_without_error() {
         let sys = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
@@ -534,7 +535,7 @@ mod tests {
     fn statement_form_accepts_multiple_systems() {
         let first = tf(vec![1.0], vec![1.0, 1.0]);
         let second = tf(vec![1.0, 2.0], vec![1.0, 3.0, 4.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let result = run_pzmap(first, vec![second.value().clone()]).expect("pzmap");
         assert!(matches!(result, Value::OutputList(outputs) if outputs.is_empty()));
     }
@@ -545,7 +546,7 @@ mod tests {
         let _ = crate::builtins::plotting::clear_figure(None);
         let first = tf(vec![1.0, 2.0], vec![1.0, 3.0]);
         let second = tf(vec![1.0, 4.0], vec![1.0, 5.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let result = run_pzmap(
             first,
             vec![Value::from("r"), second.value().clone(), Value::from("b--")],
@@ -581,7 +582,7 @@ mod tests {
     #[test]
     fn statement_form_rejects_invalid_style_tokens() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(0));
+        let _guard = crate::output_count::push_output_count(Some(0)).expect("output-count scope");
         let err = run_pzmap(sys, vec![Value::from("foo")]).expect_err("invalid style");
         assert!(err.message().contains("unrecognised style token"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_ARGUMENT.identifier);
@@ -595,7 +596,7 @@ mod tests {
             Value::Num(1.0),
             Value::Num(0.0),
         );
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let result = run_pzmap(sys, Vec::new()).expect("pzmap");
         let Value::OutputList(outputs) = result else {
             panic!("expected output list");
@@ -619,7 +620,7 @@ mod tests {
     #[test]
     fn output_form_rejects_extra_arguments() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(2));
+        let _guard = crate::output_count::push_output_count(Some(2)).expect("output-count scope");
         let err = run_pzmap(sys, vec![Value::Num(1.0)]).expect_err("should fail");
         assert!(err.message().contains("exactly one system"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_ARGUMENT.identifier);
@@ -628,7 +629,7 @@ mod tests {
     #[test]
     fn too_many_outputs_are_rejected() {
         let sys = tf(vec![1.0], vec![1.0, 1.0]);
-        let _guard = crate::output_count::push_output_count(Some(3));
+        let _guard = crate::output_count::push_output_count(Some(3)).expect("output-count scope");
         let err = run_pzmap(sys, Vec::new()).expect_err("should fail");
         assert!(err.message().contains("too many output arguments"));
         assert_eq!(err.identifier(), PZMAP_ERROR_INVALID_ARGUMENT.identifier);
