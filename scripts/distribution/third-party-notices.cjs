@@ -3,11 +3,19 @@ const { lstatSync, readFileSync, writeFileSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 
 const NOTICE_FILE_NAME = "THIRD_PARTY_NOTICES.txt";
-const NOTICE_SOURCE = resolve(__dirname, "../../crates/runmat-runtime/src/builtins/math/linalg/ops/linear_operator/LAPACK-LICENSE.txt");
+const NOTICE_SOURCES = [
+  resolve(__dirname, "../../crates/runmat-runtime/src/builtins/math/linalg/ops/linear_operator/LAPACK-LICENSE.txt"),
+  resolve(__dirname, "../../crates/runmat-runtime/licenses/UNICODE-LICENSE.txt"),
+];
 
 function thirdPartyNoticeBytes() {
-  regularFile(NOTICE_SOURCE);
-  return readFileSync(NOTICE_SOURCE);
+  const parts = [];
+  for (const source of NOTICE_SOURCES) {
+    regularFile(source);
+    if (parts.length) parts.push(Buffer.from("\n"));
+    parts.push(readFileSync(source));
+  }
+  return Buffer.concat(parts);
 }
 
 function regularFile(path) {

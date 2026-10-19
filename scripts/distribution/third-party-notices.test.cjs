@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
-const { join } = require("node:path");
+const { join, resolve } = require("node:path");
 const test = require("node:test");
 const { execFileSync } = require("node:child_process");
 const { NOTICE_FILE_NAME, thirdPartyNoticeBytes, stageThirdPartyNotices, stageWasmPackageNotices, verifyThirdPartyNotices } = require("./third-party-notices.cjs");
@@ -9,6 +9,13 @@ const { NOTICE_FILE_NAME, thirdPartyNoticeBytes, stageThirdPartyNotices, stageWa
 test("distribution notices survive native and npm archives without changing package metadata", () => {
   const root = mkdtempSync(join(tmpdir(), "runmat-notices-"));
   try {
+    const runtime = resolve(__dirname, "../../crates/runmat-runtime");
+    const expected = Buffer.concat([
+      readFileSync(join(runtime, "src/builtins/math/linalg/ops/linear_operator/LAPACK-LICENSE.txt")),
+      Buffer.from("\n"),
+      readFileSync(join(runtime, "licenses/UNICODE-LICENSE.txt")),
+    ]);
+    assert.deepEqual(thirdPartyNoticeBytes(), expected);
     const product = join(root, "native");
     mkdirSync(product);
     stageThirdPartyNotices(product);
