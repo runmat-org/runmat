@@ -12,7 +12,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     summary: "Form the state-space controllability matrix.",
     description: "`ctrb(A,B)` and `ctrb(sys)` assemble `[B, A*B, ..., A^(n-1)*B]` for one n-state model. The result has n rows and n*m columns when B has m inputs.",
     keywords: &["ctrb", "controllability", "reachability", "state space", "control system"],
-    related: &["ss", "obsv", "rank"],
+    related: &["ss", "rank"],
     sections: &[
         BuiltinDocumentationSection { heading: "Input and output contract", paragraphs: &[
             "A must be a nonempty square host matrix and B must have the same row count and at least one column. One `ss` model supplies its stored A and B fields; model arrays, uncertain/generalized models, and sparse coefficient matrices are not yet supported.",
