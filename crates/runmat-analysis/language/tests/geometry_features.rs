@@ -87,3 +87,35 @@ geometry rounded_block {
         runmat_geometry_core::GeometryRegionCardinality::OneOrMore
     );
 }
+
+#[test]
+fn imported_geometry_without_units_names_the_missing_units() {
+    let source = r#"
+geometry bracket {
+    file = "./part.brep"
+}
+"#;
+    let program = FeaCompiler::new(&TestHost::default().with_geometry("project/part.brep", 2))
+        .check(CheckRequest {
+            modules: ModuleGraphRequest {
+                source_root: LogicalSourcePath::new("project").unwrap(),
+                root: source_module("project/main.fea", source, 1),
+            },
+        });
+    assert!(!program.is_valid());
+    let messages = program
+        .diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        messages
+            .iter()
+            .any(|message| message.contains("`bracket` needs `units = mm`, `m`, or `in`")),
+        "{messages:#?}"
+    );
+    assert!(
+        !messages.iter().any(|message| message.contains("no inspection facts")),
+        "{messages:#?}"
+    );
+}

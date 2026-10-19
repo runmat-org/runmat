@@ -99,12 +99,22 @@ fn definition(
             );
         }
         let Some(inspection) = inspection else {
-            error(
-                declaration,
-                declaration.span,
-                "imported geometry has no inspection facts",
-                diagnostics,
-            );
+            // Inspection is skipped without units (CAD import needs an explicit
+            // length unit) and reported separately when the host import fails.
+            let file_span = imported_file(&declaration.statements)
+                .map_or(declaration.span, |file| file.span);
+            let message = if assignment(&declaration.statements, "units").is_none() {
+                format!(
+                    "imported geometry `{}` needs `units = mm`, `m`, or `in` so its CAD file can be inspected",
+                    declaration.key.name
+                )
+            } else {
+                format!(
+                    "imported geometry `{}` could not be inspected; check `units` (mm, m, or in) and the inspection diagnostic for its file",
+                    declaration.key.name
+                )
+            };
+            error(declaration, file_span, message, diagnostics);
             return None;
         };
         imported_source(declaration, inspection, diagnostics)
