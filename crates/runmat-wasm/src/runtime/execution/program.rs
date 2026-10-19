@@ -42,7 +42,8 @@ async fn invoke(
             .program
             .environment()
             .compatibility_mode
-            .clone(),
+            .as_ref()
+            .to_string(),
     ))
     .map_err(|error| format!("unsupported portable language mode: {error}"))?;
     let mut session = runmat_core::RunMatSession::with_frozen_environment(

@@ -708,10 +708,7 @@ impl RunMatSession {
                 .and_then(|source| source.resolve_in(&product.runtime)),
         );
         let preparation::workspace::PreparedInteractiveWorkspace {
-            #[cfg(not(target_arch = "wasm32"))]
-                unit: interactive_unit,
-            #[cfg(target_arch = "wasm32")]
-                unit: _interactive_unit,
+            unit: interactive_unit,
             runtime: execution_runtime,
             bytecode,
             publication: source_registry_publication,
@@ -1242,7 +1239,6 @@ impl RunMatSession {
             self.generic_native_cache
                 .publish_session_registry(&self.function_registry, &function_registry_after_success)
                 .map_err(RunError::Runtime)?;
-            #[cfg(not(target_arch = "wasm32"))]
             self.program_service
                 .publish(&interactive_unit, &function_registry_after_success);
             self.function_registry = function_registry_after_success;
