@@ -37,7 +37,10 @@ pub enum NativeDeploymentServiceKind {
 impl NativeDeploymentServiceKind {
     pub fn for_effect(effect: EffectKind) -> Option<Self> {
         match effect {
-            EffectKind::MayThrow => None,
+            // Execution control is implemented by the runtime driver, not an
+            // optional external service. Keep these effects in the program's
+            // effect set without inventing a service grant for them.
+            EffectKind::MayThrow | EffectKind::MaySuspend => None,
             EffectKind::Unknown => Some(Self::HostedDynamicDispatch),
             effect => Some(Self::Effect(effect)),
         }
@@ -45,7 +48,7 @@ impl NativeDeploymentServiceKind {
     pub fn validate(self) -> Result<(), ContractError> {
         if matches!(
             self,
-            Self::Effect(EffectKind::Unknown | EffectKind::MayThrow)
+            Self::Effect(EffectKind::Unknown | EffectKind::MayThrow | EffectKind::MaySuspend)
         ) {
             return Err(ContractError::invalid(
                 "native deployment service",

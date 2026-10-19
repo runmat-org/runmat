@@ -329,6 +329,22 @@ fn canonical_pack_identity_reachability_cycles_link_order_and_exact_bytes() {
 
 #[test]
 fn profiles_require_explicit_reached_services_and_reject_ambient_or_unknown_inputs() {
+    // Suspension/throwing are driver control, not external service factories.
+    // Neither can stand in for an independently reached clock service.
+    let (mut control_manifest, mut control_required, _) = fixture();
+    control_required
+        .effects
+        .0
+        .extend([EffectKind::MaySuspend, EffectKind::MayThrow]);
+    control_required.service_abis.clear();
+    control_manifest.services.clear();
+    control_manifest.select(&control_required, None).unwrap();
+    for effect in [EffectKind::MaySuspend, EffectKind::MayThrow] {
+        assert!(TargetPackServiceKind::Effect(effect).validate().is_err());
+    }
+    control_required.effects.0.insert(EffectKind::Clock);
+    assert!(control_manifest.select(&control_required, None).is_err());
+
     let (mut manifest, mut required, contents) = fixture();
     required.effects.0.insert(EffectKind::Clock);
     let selected = manifest.select(&required, None).unwrap();
