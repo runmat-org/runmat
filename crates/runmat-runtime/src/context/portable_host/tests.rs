@@ -20,9 +20,9 @@ fn retaining_host_has_no_duplicate_buffer_and_evalc_remains_hidden() {
     let runtime = context(host.clone());
     let _scope = runtime.enter();
     crate::console::record_console_output(ConsoleStream::Stdout, "first");
-    let guard = crate::console::begin_capture();
+    let guard = crate::console::begin_capture().expect("capture admitted");
     crate::console::record_console_output(ConsoleStream::Stderr, "hidden");
-    assert_eq!(guard.finish(), "hidden");
+    assert_eq!(guard.finish().expect("capture finished"), "hidden");
     crate::console::record_clear_screen();
     crate::console::record_console_output(ConsoleStream::Stderr, "last");
     assert!(crate::console::take_thread_buffer().is_empty());
@@ -100,9 +100,7 @@ fn builtin_capture_failure_is_sticky_without_marking_user_cancellation() {
         result.unwrap_err().identifier(),
         Some("RunMat:console:CaptureRejected")
     );
-    assert!(!runtime
-        .cancellation()
-        .load(std::sync::atomic::Ordering::Acquire));
+    assert!(!runtime.cancellation().is_cancelled());
     assert!(
         futures::executor::block_on(crate::dispatcher::call_builtin_async(
             "cos",

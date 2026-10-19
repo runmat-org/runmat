@@ -186,9 +186,9 @@ fn complete_receipts_publish_once_with_audited_engineering_failure() {
 fn cancellation_after_function_admission_publishes_no_children() {
     let _guard = super::super::tests::analysis_test_guard();
     let (publication, store) = fixture();
-    let _interrupt = crate::interrupt::replace_interrupt(Some(Arc::new(
+    let _interrupt = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(Arc::new(
         std::sync::atomic::AtomicBool::new(true),
-    )));
+    ))));
     assert!(publication
         .complete(vec![Receipt {
             id: "deflection".into(),

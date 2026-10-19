@@ -2393,7 +2393,7 @@ impl WgpuPipelines {
     }
 }
 
-fn create_pipeline(
+pub(crate) fn create_pipeline(
     access: &runmat_accelerate_api::WgpuDeviceAccess,
     layout_label: &'static str,
     shader_label: &'static str,

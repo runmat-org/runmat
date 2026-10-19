@@ -86,7 +86,7 @@ use interfaces::*;
 use material_assignments::*;
 use modeling::*;
 use steps::*;
-#[cfg(test)]
+#[cfg(all(test, feature = "plot-core"))]
 use visualization::{mesh_request_from_args, plot_request_from_args};
 
 const STUDY_NAME: &str = "fea.study";
@@ -781,19 +781,6 @@ fn study_context_value(value: &Value) -> Option<Value> {
     object.properties.get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
 }
 
-fn study_context_from_value(
-    builtin: &'static str,
-    value: &Value,
-) -> BuiltinResult<AnalysisStudySpec> {
-    let Some(study) = study_context_value(value) else {
-        return Err(builtin_error(
-            builtin,
-            &ERROR_INPUT,
-            format!("{builtin}: FEA visualization requires study geometry context; pass a fea.RunResult from fea.run(study), a derived fea.Results/fea.Field, or call {builtin}(study, run ID)"),
-        ));
-    };
-    object_payload(builtin, &study, FEA_STUDY_CLASS)
-}
 
 fn run_id_context_from_value(value: &Value) -> Option<String> {
     let Value::Object(object) = value else {
@@ -1411,9 +1398,6 @@ fn exact_bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
     }
 }
 
-fn bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<bool> {
-    bool::try_from(value).map_err(|err| builtin_error(builtin, &ERROR_INPUT, err))
-}
 
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
     if let Some(int) = tensor_utils::scalar_integer_value(value) {

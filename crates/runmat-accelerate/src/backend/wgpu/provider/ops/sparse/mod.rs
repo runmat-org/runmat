@@ -1,7 +1,8 @@
-use std::sync::Arc;
-
 use anyhow::{anyhow, ensure};
-use runmat_accelerate_api::NumericElementType;
+use runmat_accelerate_api::{NumericElementType, WgpuBufferOwner, WgpuEmission};
+
+use crate::backend::wgpu::dispatch::observation::ProfiledEncoder;
+use crate::backend::wgpu::pipelines::PipelineBundle;
 
 mod cg;
 mod contract;
@@ -33,22 +34,66 @@ fn storage_binding_limit(provider: &super::WgpuProvider) -> u64 {
     ))
 }
 
-fn upload_u32(
-    provider: &super::WgpuProvider,
-    label: &str,
-    values: &[u32],
-) -> anyhow::Result<Arc<wgpu::Buffer>> {
-    upload_bytes(provider, label, bytemuck::cast_slice(values), 4)
+/// One workgroup per `workgroup_config.scalar` rows, within the adapter limit.
+fn dispatch_groups(provider: &super::WgpuProvider, count: usize) -> anyhow::Result<u32> {
+    let workgroup_size = provider.workgroup_config.scalar.max(1);
+    let groups = u32::try_from(count)
+        .ok()
+        .and_then(|count| count.checked_add(workgroup_size - 1))
+        .map(|count| count / workgroup_size)
+        .ok_or_else(|| anyhow!("sparse dispatch count exceeds WGPU limits"))?;
+    ensure!(
+        groups <= provider.adapter_limits.max_compute_workgroups_per_dimension,
+        "sparse dispatch exceeds the adapter workgroup limit"
+    );
+    Ok(groups)
 }
 
-fn upload_bytes(
+/// Bind `buffers` in binding order and record one compute pass.
+fn dispatch(
+    emission: &WgpuEmission<'_>,
+    encoder: &mut ProfiledEncoder<'_>,
+    pipeline: &PipelineBundle,
+    label: &'static str,
+    buffers: &[&wgpu::Buffer],
+    groups: u32,
+) -> anyhow::Result<()> {
+    let compiled = pipeline.get(emission)?;
+    let entries = buffers
+        .iter()
+        .enumerate()
+        .map(|(binding, buffer)| wgpu::BindGroupEntry {
+            binding: binding as u32,
+            resource: buffer.as_entire_binding(),
+        })
+        .collect::<Vec<_>>();
+    let bind_group = emission
+        .device()
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &compiled.layout,
+            entries: &entries,
+        });
+    let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+        label: Some(label),
+        timestamp_writes: None,
+    });
+    pass.set_pipeline(&compiled.pipeline);
+    pass.set_bind_group(0, &bind_group, &[]);
+    pass.dispatch_workgroups(groups, 1, 1);
+    Ok(())
+}
+
+/// A host-written buffer with `usage`; empty contents occupy `minimum_size`
+/// zero bytes so the buffer remains bindable.
+fn initialized_buffer(
     provider: &super::WgpuProvider,
+    emission: &WgpuEmission<'_>,
     label: &str,
     bytes: &[u8],
     minimum_size: u64,
-) -> anyhow::Result<Arc<wgpu::Buffer>> {
-    use wgpu::util::DeviceExt;
-
+    usage: wgpu::BufferUsages,
+) -> anyhow::Result<WgpuBufferOwner> {
     let zeroes = [0_u8; 8];
     let minimum_size = usize::try_from(minimum_size)
         .map_err(|_| anyhow!("{label} minimum allocation exceeds the host address space"))?;
@@ -61,20 +106,73 @@ fn upload_bytes(
     } else {
         bytes
     };
-    let binding_limit = storage_binding_limit(provider);
     ensure!(
-        contents.len() as u64 <= binding_limit,
+        contents.len() as u64 <= storage_binding_limit(provider),
         "{label} exceeds the WGPU storage-buffer binding limit"
     );
-    let buffer = Arc::new(provider.device_ref().create_buffer_init(
+    emission.ensure_device(&provider.access)?;
+    let buffer = WgpuBufferOwner::new(emission.create_initialized_buffer(
         &wgpu::util::BufferInitDescriptor {
             label: Some(label),
             contents,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            usage,
         },
     ));
     provider
         .telemetry
         .record_upload_bytes(contents.len() as u64);
     Ok(buffer)
+}
+
+/// Read-only operand storage uploaded once and retained by sparse handles.
+fn upload_operand(
+    provider: &super::WgpuProvider,
+    emission: &WgpuEmission<'_>,
+    label: &str,
+    bytes: &[u8],
+    minimum_size: u64,
+) -> anyhow::Result<WgpuBufferOwner> {
+    initialized_buffer(
+        provider,
+        emission,
+        label,
+        bytes,
+        minimum_size,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+    )
+}
+
+/// Device-written status or state copied back to the host at checkpoints.
+fn readback_source(
+    provider: &super::WgpuProvider,
+    emission: &WgpuEmission<'_>,
+    label: &str,
+    bytes: &[u8],
+) -> anyhow::Result<WgpuBufferOwner> {
+    initialized_buffer(
+        provider,
+        emission,
+        label,
+        bytes,
+        4,
+        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+    )
+}
+
+/// Copy `size` bytes of `source` into a fresh mappable staging buffer.
+fn stage_readback(
+    emission: &WgpuEmission<'_>,
+    encoder: &mut ProfiledEncoder<'_>,
+    source: &wgpu::Buffer,
+    size: u64,
+    label: &str,
+) -> wgpu::Buffer {
+    let staging = emission.device().create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    encoder.copy_buffer_to_buffer(source, 0, &staging, 0, size);
+    staging
 }

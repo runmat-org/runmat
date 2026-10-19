@@ -463,6 +463,9 @@ impl WgpuProvider {
         let ordered_real_mean = (precision == NumericPrecision::F64)
             .then(|| crate::backend::wgpu::pipelines::OrderedRealMeanPipelines::new(&access));
 
+        let sparse_pipelines =
+            super::sparse::SparsePipelines::new(&access, precision, workgroup_config.scalar);
+
         let buffer_pool_limit = Self::buffer_residency_pool_limit();
         let max_poolable_bytes =
             Self::buffer_residency_max_poolable_bytes(satisfied_limits.max_buffer_size);
@@ -509,7 +512,7 @@ impl WgpuProvider {
             global_reduce_launch,
             allocations,
             sparse: super::sparse::SparseState::default(),
-            sparse_pipelines: super::sparse::SparsePipelines::default(),
+            sparse_pipelines,
             pipelines,
             f32_real_floating,
             ordered_real_mean,

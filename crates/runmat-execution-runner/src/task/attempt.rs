@@ -279,6 +279,20 @@ impl AttemptSuccess {
         }
     }
 
+    /// Append a result object to a value result (e.g. stage evidence published
+    /// beside the root). Graph and SPMD results own no object inventory.
+    pub fn push_result_object(&mut self, object: ValueRef) -> Result<(), String> {
+        match self {
+            Self::Values { result_objects, .. } => {
+                result_objects.push(object);
+                Ok(())
+            }
+            Self::Graph { .. } | Self::Spmd { .. } => {
+                Err("only value results carry result objects".into())
+            }
+        }
+    }
+
     pub fn result_objects(&self) -> &[ValueRef] {
         match self {
             Self::Values { result_objects, .. } => result_objects,

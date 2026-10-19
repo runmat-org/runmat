@@ -162,7 +162,13 @@ pub(super) fn admit_stage_success<E: ExactMeshingDagExecutor>(
     success: AttemptSuccess,
     limits: ObjectInventoryLimits,
 ) -> Result<ExecutedStage, ExactMeshingDagRunError> {
-    let [ValuePayload::Object(root)] = success.outputs.as_slice() else {
+    let Some((outputs, result_objects)) = success.into_values() else {
+        return Err(crate::MeshingExecutionError::Invalid(
+            "meshing stage executor must return a value result".into(),
+        )
+        .into());
+    };
+    let [ValuePayload::Object(root)] = outputs.as_slice() else {
         return Err(crate::MeshingExecutionError::Invalid(
             "meshing stage executor must return one externalized root".into(),
         )
@@ -175,11 +181,11 @@ pub(super) fn admit_stage_success<E: ExactMeshingDagExecutor>(
         stage.host().artifact_access.clone(),
         limits,
     )?;
-    if success.result_objects.len() != publication.result_objects().len() + 1
+    if result_objects.len() != publication.result_objects().len() + 1
         || !publication
             .result_objects()
             .iter()
-            .all(|reference| success.result_objects.contains(reference))
+            .all(|reference| result_objects.contains(reference))
     {
         return Err(crate::MeshingExecutionError::Identity(
             "meshing stage result inventory contains missing or unrelated objects",
@@ -187,10 +193,10 @@ pub(super) fn admit_stage_success<E: ExactMeshingDagExecutor>(
         .into());
     }
     let evidence =
-        import_stage_evidence_observation(executor, stage.host(), &success.result_objects, limits)?;
+        import_stage_evidence_observation(executor, stage.host(), &result_objects, limits)?;
     Ok(ExecutedStage {
         root,
-        result_objects: success.result_objects,
+        result_objects,
         evidence,
     })
 }

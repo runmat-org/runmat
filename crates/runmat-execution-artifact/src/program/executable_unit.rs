@@ -18,7 +18,13 @@ impl ProgramArtifact {
         let recipe = ProgramBuildRecipe {
             schema_version: PROGRAM_BUILD_RECIPE_SCHEMA_VERSION,
             program_revision: envelope.manifest.identity.program.clone(),
-            entrypoint: envelope.manifest.identity.entrypoint_function.0.to_string(),
+            entrypoint: envelope
+                .manifest
+                .identity
+                .entrypoint_function
+                .ok_or_else(|| ArtifactError::Invalid("executable unit has no entrypoint".into()))?
+                .0
+                .to_string(),
             outputs,
             execution_mode: "portable-v4".into(),
             target,

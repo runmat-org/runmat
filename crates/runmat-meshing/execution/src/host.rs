@@ -63,12 +63,16 @@ pub fn prepare_meshing_host_program(
         entrypoint: HOST_ENTRYPOINT.into(),
         outputs: OutputContract {
             requested_outputs: 1,
+            owned_work: None,
         },
         execution_mode: MESHING_HOST_EXECUTION_MODE.into(),
         target: ProgramTarget::portable(MESHING_HOST_TARGET_PROFILE),
+        interop: runmat_types::InteropManifest::empty(),
+        accelerators: Vec::new(),
         features: Default::default(),
         compile_options: Default::default(),
         source_objects: Vec::new(),
+        foreign_policy: None,
         expected_artifact_id: None,
     };
     let artifact = ProgramArtifact::materialize(
@@ -421,7 +425,7 @@ impl MeshingHostWorkload {
             .iter()
             .map(|value| match value {
                 ValuePayload::Object(root) => Ok((**root).clone()),
-                ValuePayload::Inline(_) => Err(MeshingExecutionError::Invalid(
+                _ => Err(MeshingExecutionError::Invalid(
                     "meshing host inputs must be externalized root manifests".into(),
                 )),
             })

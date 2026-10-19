@@ -1,3 +1,4 @@
+use super::AnalysisFigureMeshSource;
 use glam::{Vec3, Vec4};
 use runmat_analysis_core::{
     AnalysisField, AnalysisFieldValues, AnalysisModel, AnalysisProcedure, CoupledPhysicsFamily,
@@ -46,14 +47,6 @@ pub struct AnalysisGeneratedFigure {
     pub topology_ids: Vec<String>,
     pub warnings: Vec<String>,
     pub figure: Figure,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnalysisFigureMeshSource {
-    Auto,
-    Solver,
-    Cad,
-    CadReference,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

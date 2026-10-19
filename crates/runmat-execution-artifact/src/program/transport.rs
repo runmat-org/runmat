@@ -459,9 +459,11 @@ fn collect_references(values: &[ValuePayload]) -> Vec<&ValueRef> {
     fn visit<'a>(value: &'a ValuePayload, references: &mut Vec<&'a ValueRef>) {
         match value {
             ValuePayload::Object(reference) => references.push(reference),
+            // Pool-resident partitions are addressed by their pool handle, not
+            // by transported objects.
+            ValuePayload::Distributed(_) | ValuePayload::Composite(_) => {}
             ValuePayload::Inline(value) => match value.as_ref() {
-                runmat_execution::value::InlineValue::Cell { values, .. }
-                | runmat_execution::value::InlineValue::OutputList(values) => {
+                runmat_execution::value::InlineValue::Cell { values, .. } => {
                     values.iter().for_each(|value| visit(value, references));
                 }
                 runmat_execution::value::InlineValue::Struct(fields) => fields

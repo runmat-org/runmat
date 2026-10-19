@@ -372,8 +372,18 @@ pub use contracts::{
 pub use figures::{
     analysis_generate_study_field_figures, analysis_generate_study_run_figures,
     analysis_generate_study_run_mesh_figure, AnalysisFigureGenerationOptions,
-    AnalysisFigureMeshSource, AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
+    AnalysisGeneratedFigure, AnalysisGeneratedFigureKind,
 };
+
+/// Which mesh a result figure is drawn on; request data, independent of plotting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnalysisFigureMeshSource {
+    Auto,
+    Solver,
+    Cad,
+    CadReference,
+}
+
 pub use operations::{
     analysis_field_page_by_run_id_op, analysis_observation_history_sample_by_run_id_op,
     analysis_results_by_run_id_op, analysis_results_compare_op, analysis_results_op,

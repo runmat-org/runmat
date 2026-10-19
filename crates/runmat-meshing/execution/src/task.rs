@@ -85,7 +85,7 @@ pub fn build_task_submission(
         MESHING_HOST_INVOCATION_MEDIA_TYPE,
         MESHING_HOST_INVOCATION_VALUE_SCHEMA,
     )?;
-    if invocation_root.logical_digest != Digest::sha256(host.canonical_bytes()?) {
+    if invocation_root.logical_digest != runmat_execution::Digest::sha256(host.canonical_bytes()?) {
         return Err(MeshingExecutionError::Identity(
             "meshing invocation descriptor differs from its task workload",
         ));
@@ -131,6 +131,7 @@ pub fn build_task_submission(
         required_capabilities: capabilities,
     };
     resources.validate()?;
+    let qualified_name = stage_callable(workload.stage).to_string();
     Ok(TaskSubmission {
         request: TaskRequest {
             console: None,
@@ -446,5 +447,24 @@ const fn order_name(order: ElementOrder) -> &'static str {
     match order {
         ElementOrder::Tet4 => "tet4",
         ElementOrder::Tet10 => "tet10",
+    }
+}
+
+const fn stage_callable(stage: MeshingStageKind) -> &'static str {
+    match stage {
+        MeshingStageKind::GeometryAdmission => "geometry-admission",
+        MeshingStageKind::Healing => "healing",
+        MeshingStageKind::Sizing => "sizing",
+        MeshingStageKind::CurveMesh => "curve-mesh",
+        MeshingStageKind::SurfaceMesh => "surface-mesh",
+        MeshingStageKind::ProtectedBoundaryComplex => "protected-boundary-complex",
+        MeshingStageKind::Tetrahedralization => "tetrahedralization",
+        MeshingStageKind::ConstraintRecovery => "constraint-recovery",
+        MeshingStageKind::Refinement => "refinement",
+        MeshingStageKind::Optimization => "optimization",
+        MeshingStageKind::OrderElevation => "order-elevation",
+        MeshingStageKind::Validation => "validation",
+        MeshingStageKind::Serialization => "serialization",
+        MeshingStageKind::Publication => "publication",
     }
 }

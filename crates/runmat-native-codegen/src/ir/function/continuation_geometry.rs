@@ -115,7 +115,8 @@ fn rvalue_cursor_regions(value: &runmat_mir::MirRvalue) -> Option<usize> {
         runmat_mir::MirRvalue::Index { indexing, .. } => indexing_cursor_regions(indexing),
         runmat_mir::MirRvalue::SubscriptChain(chain) => chain_cursor_regions(chain),
         runmat_mir::MirRvalue::Call(call) => call_arguments_cursor_regions(&call.args),
-        runmat_mir::MirRvalue::Future { args, .. } => call_arguments_cursor_regions(args),
+        runmat_mir::MirRvalue::Future { args, .. }
+        | runmat_mir::MirRvalue::ExternalFuture { args, .. } => call_arguments_cursor_regions(args),
         runmat_mir::MirRvalue::Use(_)
         | runmat_mir::MirRvalue::Unary(_, _)
         | runmat_mir::MirRvalue::Binary(_, _, _)

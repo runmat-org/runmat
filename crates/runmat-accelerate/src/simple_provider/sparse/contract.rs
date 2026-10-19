@@ -70,6 +70,8 @@ pub(in crate::simple_provider) fn cost(query: &SparseCostQuery) -> Option<Provid
         | runmat_execution::CandidatePreparationState::Preparing => work / 4,
         runmat_execution::CandidatePreparationState::Ready
         | runmat_execution::CandidatePreparationState::Warm => 0,
+        // An uncertified cache phase yields no cost evidence rather than a guess.
+        runmat_execution::CandidatePreparationState::Unknown => return None,
     };
     Some(ProviderCostEstimate::static_prior(
         ExecutionCostComponents {

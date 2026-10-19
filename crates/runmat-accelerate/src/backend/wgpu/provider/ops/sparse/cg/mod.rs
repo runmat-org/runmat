@@ -9,13 +9,14 @@ use runmat_accelerate_api::{
     AccelProvider, AccelProviderFuture, GpuTensorStorage, SparseExecutionBinding,
     SparseFeasibilityQuery, SparseKrylovMethod, SparseKrylovRequest, SparseKrylovResult,
     SparseKrylovTermination, SparseOperation, SparseOperationEvidence, SparseOperationTimings,
-    SparsePreconditionerKind, SPARSE_EVIDENCE_SCHEMA_VERSION,
+    SparsePreconditionerKind, WgpuEmission, SPARSE_EVIDENCE_SCHEMA_VERSION,
 };
 use runmat_time::Instant;
 
 use self::encoding::CgInputs;
 use self::workspace::{decode_state, CgTerminalState, CgWorkspace};
 use super::super::{BufferUsageClass, NumericBufferRegistration, WgpuProvider};
+use crate::backend::wgpu::dispatch::observation::ProfiledEncoder;
 
 pub(super) const ITERATIONS_PER_CHECKPOINT: u32 = 32;
 pub(super) const MAXIMUM_ITERATIONS: u32 = 8_192;
@@ -101,15 +102,18 @@ pub(crate) fn execute<'a>(
         let dimension = usize::try_from(matrix.pattern.descriptor.rows)
             .map_err(|_| anyhow!("sparse CG dimension exceeds host address space"))?;
         let vector_groups = vector_groups(provider, dimension)?;
-        let pipelines = pipelines::get(provider);
-        let workspace = CgWorkspace::allocate(
-            provider,
-            dimension,
-            vector_groups,
-            request.relative_tolerance,
-            request.absolute_tolerance,
-            request.max_iterations,
-        )?;
+        let pipelines = &provider.sparse_pipelines.cg;
+        let workspace = provider.with_emission(|emission, _| {
+            CgWorkspace::allocate(
+                provider,
+                emission,
+                dimension,
+                vector_groups,
+                request.relative_tolerance,
+                request.absolute_tolerance,
+                request.max_iterations,
+            )
+        })??;
         let transient_reservation = provider
             .sparse
             .reserve_transient(workspace.allocated_bytes())?;
@@ -121,21 +125,29 @@ pub(crate) fn execute<'a>(
         let mut submitted_iterations = 0_u32;
         let mut synchronization_ns = 0_u64;
         let mut provider_loss = None;
-        let mut initial_encoder = encoder(provider, "runmat-sparse-cg-initialization");
-        encoding::encode_initialization(
+        let initialization = submit_checkpoint(
             provider,
-            &mut initial_encoder,
-            &pipelines,
-            CgInputs {
-                matrix: &matrix,
-                preconditioner: &preconditioner,
-                rhs: &rhs,
-                initial_guess: initial_guess.as_ref(),
-            },
             &workspace,
-            vector_groups,
-        );
-        let mut state = match submit_checkpoint(provider, initial_encoder, &workspace).await {
+            "runmat-sparse-cg-initialization",
+            |emission, encoder| {
+                encoding::encode_initialization(
+                    provider,
+                    emission,
+                    encoder,
+                    pipelines,
+                    CgInputs {
+                        matrix: &matrix,
+                        preconditioner: &preconditioner,
+                        rhs: &rhs,
+                        initial_guess: initial_guess.as_ref(),
+                    },
+                    &workspace,
+                    vector_groups,
+                )
+            },
+        )
+        .await;
+        let mut state = match initialization {
             Ok((snapshot, elapsed)) => {
                 checkpoints += 1;
                 cancellation_checks += 1;
@@ -171,20 +183,28 @@ pub(crate) fn execute<'a>(
                 batch > 0,
                 "sparse CG exhausted iterations without terminal state"
             );
-            let mut encoder = encoder(provider, "runmat-sparse-cg-iteration-batch");
-            for _ in 0..batch {
-                encoding::encode_iteration(
-                    provider,
-                    &mut encoder,
-                    &pipelines,
-                    &matrix,
-                    &preconditioner,
-                    &workspace,
-                    vector_groups,
-                );
-            }
+            let checkpoint = submit_checkpoint(
+                provider,
+                &workspace,
+                "runmat-sparse-cg-iteration-batch",
+                |emission, encoder| {
+                    (0..batch).try_for_each(|_| {
+                        encoding::encode_iteration(
+                            provider,
+                            emission,
+                            encoder,
+                            pipelines,
+                            &matrix,
+                            &preconditioner,
+                            &workspace,
+                            vector_groups,
+                        )
+                    })
+                },
+            )
+            .await;
             submitted_iterations = submitted_iterations.saturating_add(batch);
-            match submit_checkpoint(provider, encoder, &workspace).await {
+            match checkpoint {
                 Ok((snapshot, elapsed)) => {
                     checkpoints += 1;
                     cancellation_checks += 1;
@@ -250,7 +270,7 @@ pub(crate) fn execute<'a>(
                     allocated_bytes: workspace.solution.size(),
                     usage: BufferUsageClass::Generic,
                 },
-            ))
+            )?)
         };
         let result = SparseKrylovResult {
             solution,
@@ -301,40 +321,48 @@ pub(crate) fn execute<'a>(
     })
 }
 
+/// Encode one command batch, copy the solver state behind it and wait for the
+/// host-visible checkpoint.
 async fn submit_checkpoint(
     provider: &WgpuProvider,
-    mut encoder: wgpu::CommandEncoder,
     workspace: &CgWorkspace,
+    label: &'static str,
+    encode: impl FnOnce(&WgpuEmission<'_>, &mut ProfiledEncoder<'_>) -> anyhow::Result<()>,
 ) -> Result<(CgTerminalState, u64), CheckpointFailure> {
     let started = Instant::now();
+    let failure = |error| CheckpointFailure {
+        error,
+        elapsed_ns: elapsed_ns(started),
+    };
     let _readback_reservation = provider
         .sparse
         .reserve_transient(workspace.state_size)
-        .map_err(|error| CheckpointFailure {
-            error,
-            elapsed_ns: elapsed_ns(started),
-        })?;
-    let staging =
-        provider.create_readback_buffer(workspace.state_size, "runmat-sparse-cg-checkpoint");
-    encoder.copy_buffer_to_buffer(
-        workspace.state.as_ref(),
-        0,
-        staging.as_ref(),
-        0,
-        workspace.state_size,
-    );
-    provider.submit(encoder);
-    let bytes = provider
-        .map_readback_bytes(staging, workspace.state_size, "sparse CG checkpoint")
+        .map_err(failure)?;
+    let staging = provider
+        .with_emission(|emission, pending| {
+            let mut encoder = pending.profiled_encoder(
+                emission,
+                &wgpu::CommandEncoderDescriptor { label: Some(label) },
+            );
+            encode(emission, &mut encoder)?;
+            let staging = super::stage_readback(
+                emission,
+                &mut encoder,
+                workspace.state.as_ref(),
+                workspace.state_size,
+                "runmat-sparse-cg-checkpoint",
+            );
+            provider.submit(emission, pending, encoder)?;
+            anyhow::Ok(staging)
+        })
+        .and_then(|staging| staging)
+        .map_err(failure)?;
+    let state = provider
+        .map_readback_with(staging, "sparse CG checkpoint", |bytes| {
+            decode_state(provider.precision, bytes)
+        })
         .await
-        .map_err(|error| CheckpointFailure {
-            error,
-            elapsed_ns: elapsed_ns(started),
-        })?;
-    let state = decode_state(provider.precision, &bytes).map_err(|error| CheckpointFailure {
-        error,
-        elapsed_ns: elapsed_ns(started),
-    })?;
+        .map_err(failure)?;
     Ok((state, elapsed_ns(started)))
 }
 
@@ -353,23 +381,9 @@ fn provider_lost_state() -> CgTerminalState {
 }
 
 fn vector_groups(provider: &WgpuProvider, dimension: usize) -> anyhow::Result<u32> {
-    let workgroup_size = provider.workgroup_config.scalar.max(1);
-    let groups = u32::try_from(dimension)
-        .ok()
-        .and_then(|value| value.checked_add(workgroup_size - 1))
-        .map(|value| value / workgroup_size)
-        .ok_or_else(|| anyhow!("sparse CG dispatch count exceeds WGPU limits"))?;
-    ensure!(
-        groups > 0 && groups <= provider.adapter_limits.max_compute_workgroups_per_dimension,
-        "sparse CG dispatch exceeds the WGPU workgroup limit"
-    );
+    let groups = super::dispatch_groups(provider, dimension)?;
+    ensure!(groups > 0, "sparse CG requires a nonempty system");
     Ok(groups)
-}
-
-fn encoder(provider: &WgpuProvider, label: &'static str) -> wgpu::CommandEncoder {
-    provider
-        .device_ref()
-        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(label) })
 }
 
 fn elapsed_ns(started: Instant) -> u64 {

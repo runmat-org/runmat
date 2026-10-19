@@ -135,14 +135,17 @@ pub(crate) fn cost(
         return None;
     }
     let nnz_work = query.operation.pattern.nnz.checked_mul(2)?;
+    let compile_or_prepare_ns = match query.preparation {
+        runmat_execution::CandidatePreparationState::Ready
+        | runmat_execution::CandidatePreparationState::Warm => 0,
+        runmat_execution::CandidatePreparationState::Cold
+        | runmat_execution::CandidatePreparationState::Preparing => nnz_work / 4,
+        // Like dense WGPU costing, an uncertified cache phase yields no evidence.
+        runmat_execution::CandidatePreparationState::Unknown => return None,
+    };
     Some(ProviderCostEstimate::static_prior(
         ExecutionCostComponents {
-            compile_or_prepare_ns: match query.preparation {
-                runmat_execution::CandidatePreparationState::Ready
-                | runmat_execution::CandidatePreparationState::Warm => 0,
-                runmat_execution::CandidatePreparationState::Cold
-                | runmat_execution::CandidatePreparationState::Preparing => nnz_work / 4,
-            },
+            compile_or_prepare_ns,
             upload_ns: query.required_upload_bytes,
             allocation_ns: query.operation.pattern.rows,
             queue_ns: 1,

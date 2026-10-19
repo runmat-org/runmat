@@ -52,6 +52,7 @@ impl MeshingHostResponse {
         let runmat_execution_runner::AttemptSuccess::Values {
             outputs,
             result_objects,
+            ..
         } = attempt
         else {
             return Err(MeshingExecutionError::Invalid(

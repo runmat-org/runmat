@@ -2736,10 +2736,10 @@ fn analysis_run_gpu_without_provider_rejects_before_execution() {
     assert_static_gpu_admission_rejected("trace-contract-8");
 }
 
+/// Counts device transfers; admission must reject GPU studies before any.
 struct AdmissionProbeProvider {
     uploads: AtomicU64,
     downloads: AtomicU64,
-    fail_upload: bool,
 }
 
 impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
@@ -2747,16 +2747,9 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
         &self,
         host: &runmat_accelerate_api::HostTensorView,
     ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+        let _ = host;
         self.uploads.fetch_add(1, Ordering::Relaxed);
-        if self.fail_upload {
-            return Err(anyhow::anyhow!("forced-upload-failure"));
-        }
-        Ok(runmat_accelerate_api::GpuTensorHandle {
-            shape: host.shape.to_vec(),
-            device_id: 11,
-            buffer_id: 2000,
-            descriptor: Default::default(),
-        })
+        Err(anyhow::anyhow!("admission probe never allocates device memory"))
     }
 
     fn download<'a>(
@@ -2765,10 +2758,6 @@ impl runmat_accelerate_api::AccelProvider for AdmissionProbeProvider {
     ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
         self.downloads.fetch_add(1, Ordering::Relaxed);
         Box::pin(async { Err(anyhow::anyhow!("unadmitted download")) })
-    }
-
-    fn free(&self, _handle: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
-        Ok(())
     }
 
     fn device_info(&self) -> String {
@@ -2781,7 +2770,6 @@ fn analysis_run_gpu_with_provider_rejects_without_device_transfers() {
     static PROVIDER: AdmissionProbeProvider = AdmissionProbeProvider {
         uploads: AtomicU64::new(0),
         downloads: AtomicU64::new(0),
-        fail_upload: false,
     };
     let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
     PROVIDER.uploads.store(0, Ordering::Relaxed);
@@ -2796,7 +2784,6 @@ fn analysis_run_gpu_upload_failure_provider_is_not_reached() {
     static PROVIDER: AdmissionProbeProvider = AdmissionProbeProvider {
         uploads: AtomicU64::new(0),
         downloads: AtomicU64::new(0),
-        fail_upload: true,
     };
     let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
     PROVIDER.uploads.store(0, Ordering::Relaxed);

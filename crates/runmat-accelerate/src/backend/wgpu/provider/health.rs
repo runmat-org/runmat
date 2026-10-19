@@ -5,8 +5,6 @@ use runmat_accelerate_api::SparseProviderLossReason;
 const HEALTHY: u8 = 0;
 const UNKNOWN: u8 = 1;
 const DESTROYED: u8 = 2;
-const DROPPED: u8 = 3;
-const CALLBACK_REPLACED: u8 = 4;
 
 #[derive(Default)]
 pub(in crate::backend::wgpu::provider) struct WgpuDeviceHealth {
@@ -29,8 +27,6 @@ impl WgpuDeviceHealth {
             HEALTHY => None,
             UNKNOWN => Some(SparseProviderLossReason::Unknown),
             DESTROYED => Some(SparseProviderLossReason::Destroyed),
-            DROPPED => Some(SparseProviderLossReason::Dropped),
-            CALLBACK_REPLACED => Some(SparseProviderLossReason::CallbackReplaced),
             _ => Some(SparseProviderLossReason::Unknown),
         }
     }
@@ -50,8 +46,6 @@ fn encode(reason: SparseProviderLossReason) -> u8 {
     match reason {
         SparseProviderLossReason::Unknown => UNKNOWN,
         SparseProviderLossReason::Destroyed => DESTROYED,
-        SparseProviderLossReason::Dropped => DROPPED,
-        SparseProviderLossReason::CallbackReplaced => CALLBACK_REPLACED,
     }
 }
 
@@ -75,8 +69,6 @@ pub(super) fn loss_reason(reason: wgpu::DeviceLostReason) -> SparseProviderLossR
     match reason {
         wgpu::DeviceLostReason::Unknown => SparseProviderLossReason::Unknown,
         wgpu::DeviceLostReason::Destroyed => SparseProviderLossReason::Destroyed,
-        wgpu::DeviceLostReason::Dropped => SparseProviderLossReason::Dropped,
-        wgpu::DeviceLostReason::ReplacedCallback => SparseProviderLossReason::CallbackReplaced,
     }
 }
 
