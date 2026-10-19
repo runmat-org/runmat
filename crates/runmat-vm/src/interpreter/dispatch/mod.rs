@@ -58,6 +58,8 @@ pub enum DispatchHandled {
 pub struct DispatchMeta<'a> {
     pub instr: &'a Instr,
     pub bytecode: &'a crate::bytecode::Bytecode,
+    #[cfg(feature = "native-accel")]
+    pub private_temp_load: Option<crate::bytecode::fusion_private_temp::FusionPrivateTempBridge>,
     pub var_names: &'a HashMap<usize, String>,
     pub function_registry: &'a crate::bytecode::FunctionRegistry,
     pub source_id: Option<runmat_hir::SourceId>,
@@ -736,6 +738,8 @@ fn dispatch_immediate(
         var_names,
         function_registry,
         current_function_name,
+        #[cfg(feature = "native-accel")]
+        private_temp_load,
         ..
     } = meta;
     let DispatchState {
@@ -886,12 +890,36 @@ fn dispatch_immediate(
                     return Err(error);
                 }
             }
-            let value = vars
-                .get(*index)
-                .expect("loaded variable slot lies within frame extent")
-                .clone();
-            debug::trace_load_var(*pc, *index, &value);
-            load_var(stack, vars, *index)?;
+            #[cfg(feature = "native-accel")]
+            let move_private = private_temp_load.is_some_and(|bridge| {
+                bridge.slot == *index && bridge.load_pc == *pc && bridge.consumer_pc > *pc
+            });
+            #[cfg(not(feature = "native-accel"))]
+            let move_private = false;
+            if move_private {
+                debug::trace_load_var(
+                    *pc,
+                    *index,
+                    &vars.get(*index)
+                        .expect("loaded private variable slot lies within frame extent"),
+                );
+                stack.try_push_with(|| {
+                    vars.take_private_owned(*index).ok_or_else(|| {
+                        runmat_runtime::build_runtime_error(
+                            "compiler-private fusion temporary is not an owned frame value",
+                        )
+                        .with_identifier("RunMat:Placement:InvalidDecision")
+                        .with_gpu_gather_retry(runmat_runtime::GpuGatherRetry::Never)
+                        .build()
+                    })
+                })?;
+            } else {
+                let value = vars
+                    .get(*index)
+                    .expect("loaded variable slot lies within frame extent");
+                debug::trace_load_var(*pc, *index, &value);
+                load_var(stack, vars, *index)?;
+            }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
             )))

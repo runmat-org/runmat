@@ -162,7 +162,13 @@ fn managed_intrinsics_consume_source_ordered_owners_and_refund_exact_outputs() {
                 runtime.clone(),
                 None,
             ))
-            .expect("authentic intrinsic trial");
+            .unwrap_or_else(|error| {
+                panic!(
+                    "authentic intrinsic trial: {error:?}; instructions: {:?}; private bridges: {:?}",
+                    bytecode.instructions,
+                    crate::bytecode::fusion_private_temp::bridges(&bytecode),
+                )
+            });
             block_on(runtime.scope(async {}));
             let selected = runmat_accelerate::placement_report()
                 .traces

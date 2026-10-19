@@ -29,6 +29,8 @@ fn immediate_instructions_run_only_when_polled_without_boxing() {
                 DispatchMeta {
                     instr: $instruction,
                     bytecode: &bytecode,
+                    #[cfg(feature = "native-accel")]
+                    private_temp_load: None,
                     var_names: &bytecode.var_names,
                     function_registry: &registry,
                     source_id: None,

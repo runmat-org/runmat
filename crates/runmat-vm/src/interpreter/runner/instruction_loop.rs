@@ -719,6 +719,14 @@ async fn run(loop_context: InstructionLoopContext<'_>) -> InstructionLoopResult 
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[*pc],
                 bytecode,
+                #[cfg(feature = "native-accel")]
+                private_temp_load: private_temp_bridges.iter().copied().find(|bridge| {
+                    bridge.load_pc == *pc
+                        && matches!(
+                            &bytecode.instructions[*pc],
+                            Instr::LoadVar(slot) if *slot == bridge.slot
+                        )
+                }),
                 var_names: &bytecode.var_names,
                 function_registry,
                 source_id: bytecode

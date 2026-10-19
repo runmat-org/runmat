@@ -165,6 +165,19 @@ impl InterpreterStack {
         Ok(())
     }
 
+    /// Admit one stack slot before asking another owner to relinquish a
+    /// value. The factory runs only after the verified stack extent accepts
+    /// the push, and `Vec::push` cannot grow an exact managed backing here.
+    pub(crate) fn try_push_with(
+        &mut self,
+        make_value: impl FnOnce() -> Result<Value, RuntimeError>,
+    ) -> Result<(), RuntimeError> {
+        self.ensure_additional(1)?;
+        let value = make_value()?;
+        self.values.push(value);
+        Ok(())
+    }
+
     pub fn try_extend(
         &mut self,
         values: impl IntoIterator<Item = Value>,
@@ -462,6 +475,14 @@ mod tests {
 
         stack.try_push(Value::Num(1.0)).expect("first operand");
         stack.try_push(Value::Num(2.0)).expect("second operand");
+        let moved = Cell::new(false);
+        assert!(stack
+            .try_push_with(|| {
+                moved.set(true);
+                Ok(Value::Num(3.0))
+            })
+            .is_err());
+        assert!(!moved.get());
         assert!(stack.try_push(Value::Num(3.0)).is_err());
         assert_eq!(stack.as_slice(), &[Value::Num(1.0), Value::Num(2.0)]);
 

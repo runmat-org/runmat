@@ -474,6 +474,25 @@ impl InterpreterVars {
         })
     }
 
+    /// Move one compiler-private, uniquely consumed temporary out of its
+    /// frame slot without publishing a workspace mutation. The bytecode proof
+    /// authorizing this operation is checked by the dispatch caller. A
+    /// retained workspace or captured binding is never converted into an
+    /// owned value by cloning.
+    pub(crate) fn take_private_owned(&mut self, slot: usize) -> Option<Value> {
+        self.with_storage_mut(|storage| match storage {
+            InterpreterVarsStorage::Owned(values) => values
+                .get_mut(slot)
+                .map(|value| std::mem::replace(value, Value::Num(0.0))),
+            InterpreterVarsStorage::Retained(values) => {
+                let Some(InterpreterSlot::Owned(value)) = values.get_mut(slot) else {
+                    return None;
+                };
+                Some(std::mem::replace(value, Value::Num(0.0)))
+            }
+        })
+    }
+
     pub(crate) fn replace_retained(
         &mut self,
         slot: usize,
