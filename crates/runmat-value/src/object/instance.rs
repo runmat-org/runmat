@@ -120,14 +120,20 @@ impl ObjectInstance {
     /// handle-object GC targets. This is storage, not issuance authority:
     /// method invocation must still validate its exact typed binding/owner.
     pub fn with_selected_class(mut self, selected: Rc<SelectedObjectClassFacts>) -> Option<Self> {
+        self.try_attach_selected_class(selected).then_some(self)
+    }
+
+    /// Attach already-issued exact facts to an existing object, including a
+    /// GC-owned handle target. Rejection leaves the receiver untouched.
+    pub fn try_attach_selected_class(&mut self, selected: Rc<SelectedObjectClassFacts>) -> bool {
         if self.class_name != *selected.class()
             || self.selected_class.is_some()
             || self.native_payload.is_some()
         {
-            return None;
+            return false;
         }
         self.selected_class = Some(selected);
-        Some(self)
+        true
     }
 
     pub fn selected_class(&self) -> Option<&Rc<SelectedObjectClassFacts>> {
