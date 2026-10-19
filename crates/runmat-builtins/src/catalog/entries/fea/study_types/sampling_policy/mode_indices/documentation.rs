@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when an index is zero, negative, fractional, nonfinite, or the input is not a vector.",
         "`RunMat:fea:Internal` if the policy cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 
@@ -26,7 +27,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(policy), 'fea.SamplingPolicy'));\nassert(numel(policy.value.mode_indices) == 3);" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(policy), 'fea.SamplingPolicy'));\nassert(isequal(double(policy.value.mode_indices), [1 2 3]));" },
     },
 ];
 
@@ -47,6 +48,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation =
         implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/observations/sampling.rs") }],
         verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Catalog inference contract", location: "crates/runmat-builtins/src/catalog/entries/fea/study_types/sampling_policy/tests.rs::sampling_policy_constructors_follow_their_positional_contract" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "One-based mode selection", location: "crates/runmat-runtime/src/builtins/fea/observations/tests.rs::mode_indices_keep_the_public_one_based_selection" },
         ],
-        notes: &["Known gap: the runtime converts the one-based input to zero-based indices before storing them, while model validation expects one-based indices (it rejects 0 and compares the last index with the requested mode count). Until the runtime stores the one-based values, mode 1 cannot be selected through this constructor."],
+        notes: &[],
     });

@@ -226,6 +226,10 @@ pub(super) const VERIFICATION: &[BuiltinEvidenceReference] = &[
         "crates/runmat-runtime/src/builtins/fea/signals.rs::tests::time_samples_preserve_vector_samples_and_closed_policies",
     ),
     unit_test(
+        "Current-density time samples are vectors",
+        "crates/runmat-runtime/src/builtins/fea/signals/tests/current_density.rs::current_density_time_samples_are_three_component_vectors",
+    ),
+    unit_test(
         "Time samples reject unordered axes",
         "crates/runmat-runtime/src/builtins/fea/signals.rs::tests::time_samples_reject_unsorted_axes_and_mismatched_values",
     ),

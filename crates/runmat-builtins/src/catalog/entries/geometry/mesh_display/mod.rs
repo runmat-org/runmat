@@ -39,13 +39,18 @@ const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor 
     inputs: &INPUTS,
     outputs: &OUTPUTS,
 }];
-// The display path shares the asset-query identifiers: malformed assets and
-// options report Internal, and figure construction failures report
-// OperationFailed (including hosts built without plotting support).
-pub const GEOMETRY_MESH_METHOD_ERROR_INPUT: BuiltinErrorDescriptor =
-    super::inspect::GEOMETRY_INSPECT_ERROR_INTERNAL;
-pub const GEOMETRY_MESH_METHOD_ERROR_OPERATION: BuiltinErrorDescriptor =
-    super::inspect::GEOMETRY_INSPECT_ERROR_OPERATION;
+pub const GEOMETRY_MESH_METHOD_ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GEOMETRY.MESH.INVALID_INPUT",
+    identifier: Some("RunMat:geometry:mesh:InvalidInput"),
+    when: "The first argument is not a geometry.Asset, or the options are not Edges/XRay Name, Value pairs with logical values.",
+    message: "mesh: invalid input",
+};
+pub const GEOMETRY_MESH_METHOD_ERROR_OPERATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GEOMETRY.MESH.OPERATION_FAILED",
+    identifier: Some("RunMat:geometry:mesh:OperationFailed"),
+    when: "The asset has no renderable surface data or the host has no plotting support.",
+    message: "mesh: operation failed",
+};
 const ERRORS: [BuiltinErrorDescriptor; 2] = [
     GEOMETRY_MESH_METHOD_ERROR_INPUT,
     GEOMETRY_MESH_METHOD_ERROR_OPERATION,
@@ -69,14 +74,17 @@ const PLOT_CORE: BuiltinExampleRequirements = BuiltinExampleRequirements {
 };
 const NATIVE_CAD_PLOT_CORE: BuiltinExampleRequirements = BuiltinExampleRequirements {
     host: BuiltinExampleHostRequirement::NativeOnly,
-    runtime: &[BuiltinRuntimeCapability::PlotCore],
+    runtime: &[
+        BuiltinRuntimeCapability::PlotCore,
+        BuiltinRuntimeCapability::NativeCad,
+    ],
     ..BuiltinExampleRequirements::NONE
 };
 
 const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog,
-    title: Some("__runmat_geometry_mesh"),
-    slug: Some("__runmat_geometry_mesh"),
+    title: None,
+    slug: None,
     summary: "Display a loaded geometry asset with `mesh(asset)`.",
     description: "`mesh(asset)` and `mesh(asset, Name, Value, ...)` draw the render tessellation of a `geometry.Asset` in a CAD-style figure and return the figure handle. RunMat's object dispatch routes `mesh` on a `geometry.Asset` to this method-only binding; numeric `mesh(X, Y, Z)` is unchanged.",
     keywords: &["geometry", "mesh", "display", "cad", "preview", "plot"],
@@ -87,7 +95,7 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             paragraphs: &[
                 "The figure shows every surface mesh in the asset with equal axis scaling and a fixed three-quarter view. It is a view of the imported geometry only: it does not generate solver elements and does not change the asset. Use `meshing.generate` to discretize the geometry for analysis.",
                 "Options are Name, Value pairs with case-insensitive names. `Edges` (logical, default `true`) draws the feature-edge overlay. `XRay` (logical, default `false`) renders faces translucent so internal faces and hidden edges are visible. Option values must be logical; numeric `1` or `0` is rejected.",
-                "Display requires a host built with plotting support. On a host without it, the call fails with `RunMat:geometry:inspect:OperationFailed` instead of returning a handle.",
+                "Display requires a host built with plotting support. On a host without it, the call fails with `RunMat:geometry:mesh:OperationFailed` instead of returning a handle.",
             ],
         },
         BuiltinDocumentationSection {
@@ -99,8 +107,8 @@ const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinDocumentationSection {
             heading: "Errors",
             paragraphs: &[
-                "`RunMat:geometry:inspect:Internal` reports a first argument that is not a `geometry.Asset`, options that are not Name, Value pairs, an unknown option name, or a non-logical option value.",
-                "`RunMat:geometry:inspect:OperationFailed` reports an asset without renderable surface data or a host without plotting support.",
+                "`RunMat:geometry:mesh:InvalidInput` reports a first argument that is not a `geometry.Asset`, options that are not Name, Value pairs, an unknown option name, or a non-logical option value.",
+                "`RunMat:geometry:mesh:OperationFailed` reports an asset without renderable surface data or a host without plotting support.",
             ],
         },
     ],

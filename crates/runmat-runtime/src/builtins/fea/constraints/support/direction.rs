@@ -7,58 +7,19 @@ use crate::class_registry::declaration::{
 };
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
-const DIRECTION_CLASS: &str = "fea.Direction";
+const DIRECTION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_DIRECTION_CLASS.display_name();
 const DIRECTION_FIELDS: &[&str] = &["components"];
-const DIRECTION_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "components",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Finite, nonzero 1-by-3 or 3-by-1 direction vector.",
-}];
-const DIRECTION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "direction = fea.Direction.vector(components)",
-    inputs: &DIRECTION_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const DIRECTION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DIRECTION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const DIRECTION_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "components",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The exact three-component integer vector is validated before explicit conversion to canonical normalized binary64 components.",
-    }];
-pub(super) const DIRECTION_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "three-component direction",
-        inputs: &DIRECTION_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Direction normalization uses binary64 arithmetic; resident values are rejected without provider execution.",
-    }];
-
 #[runtime_builtin(
     name = "fea.Direction.vector",
-    category = "fea",
-    summary = "Create a normalized typed direction from three components.",
-    keywords = "fea,direction,axis,frame,typed",
-    descriptor(crate::builtins::fea::constraints::support::direction::DIRECTION_DESCRIPTOR),
-    integer_capabilities(
-        crate::builtins::fea::constraints::support::direction::DIRECTION_INTEGER_CAPABILITIES
-    ),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::direction"
 )]
 pub async fn direction_vector_builtin(components: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_DIRECTION_VECTOR_DESCRIPTOR,
+        "fea.Direction.vector",
+    )?;
     let components = finite_numeric_vector3("fea.Direction.vector", &components, "components")?;
     let norm = components
         .iter()
@@ -86,7 +47,10 @@ pub(crate) fn direction_from_value(
             format!("expected {DIRECTION_CLASS}"),
         ));
     };
-    if object.class_name.display_name() != DIRECTION_CLASS {
+    if !object
+        .class_name
+        .is(runmat_builtins::fea_contract::model_types::classes::FEA_DIRECTION_CLASS)
+    {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

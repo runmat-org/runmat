@@ -12,7 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "The region is recorded as a boundary-face target (`entity_dimension` `face`, cardinality one or more faces). Whether the selected region really is a set of faces is checked when the model is meshed and validated, not by the constructor.",
             "`values` is one `fea.StructuralDofValue` or a cell array of them, built with `fea.StructuralDofValue.translation(fea.StructuralDof.uz(), fea.Displacement.millimeters(-0.5))` or `fea.StructuralDofValue.rotation(fea.StructuralDof.rx(), fea.Rotation.degrees(0))`. At least one value is required and a DOF may appear only once.",
             "`frame` is a `fea.CoordinateFrame`; the DOF axes (ux, uy, uz, rx, ry, rz) are the axes of that frame. Use `fea.CoordinateFrame.globalFrame()` for global axes or `fea.CoordinateFrame.cylindrical(...)` for radial, tangential, and axial components.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },

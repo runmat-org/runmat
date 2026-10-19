@@ -6,15 +6,14 @@ use crate::*;
 
 mod documentation;
 
-pub(super) const ENTRY: BuiltinCatalogEntry =
-    catalog_entry::entry(ConstructorEntryDefinition {
-        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-        name: "fea.IndependentDomain.frequencyHertz",
-        documentation: documentation::DOCUMENTATION,
-        descriptor: &super::FEA_INDEPENDENT_DOMAIN_FREQUENCY_HERTZ_DESCRIPTOR,
-        inference: super::inference::frequency_hertz,
-        integer_capabilities: &FEA_INDEPENDENT_DOMAIN_INTEGER_CAPABILITIES,
-        integer_audit: None,
-        filesystem_read: false,
-        distributed: BuiltinDistributedPolicy::Unsupported,
-    });
+pub(super) const ENTRY: BuiltinCatalogEntry = catalog_entry::entry(ConstructorEntryDefinition {
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    name: "fea.IndependentDomain.frequencyHertz",
+    documentation: documentation::DOCUMENTATION,
+    descriptor: &super::FEA_INDEPENDENT_DOMAIN_FREQUENCY_HERTZ_DESCRIPTOR,
+    inference: super::inference::frequency_hertz,
+    integer_capabilities: &FEA_INDEPENDENT_DOMAIN_INTEGER_CAPABILITIES,
+    integer_audit: None,
+    filesystem_read: false,
+    distributed: BuiltinDistributedPolicy::Unsupported,
+});

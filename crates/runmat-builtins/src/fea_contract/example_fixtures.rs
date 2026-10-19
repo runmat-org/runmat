@@ -370,7 +370,7 @@ macro_rules! fea_box_model_setup {
         concat!(
             "part = geometry.load(\"box.brep\", \"Units\", \"m\");\n",
             "steel = fea.material(\"steel\", \"YoungsModulusPa\", 200e9, \"PoissonRatio\", 0.3, \"MassDensityKgPerM3\", 7850);\n",
-            "body = fea.materialAssignment(fea.PropertyRegionTarget.solid(geometry.region(part, \"solid_000001\")), steel);\n",
+            "body = fea.materialAssignment(fea.PropertyRegionTarget.allSolids(part), steel);\n",
             "support = fea.StructuralConstraint.fixed(\"support\", geometry.region(part, \"face_000001\"));\n",
             "tipForce = fea.ForceSignal.constantNewtons(\"tip_force\", [1000 0 0]);\n",
             "tipLoad = fea.StructuralExcitation.force(\"tip_load\", geometry.region(part, \"face_000002\"), tipForce);\n",
@@ -397,3 +397,24 @@ macro_rules! fea_box_run_setup {
     };
 }
 pub(crate) use fea_box_run_setup;
+
+/// Examples that import `box.brep` need the native exact-CAD importer.
+pub const NATIVE_CAD: BuiltinExampleRequirements = BuiltinExampleRequirements {
+    host: BuiltinExampleHostRequirement::NativeOnly,
+    engine: BuiltinExampleEngine::Default,
+    compiler: &[],
+    runtime: &[BuiltinRuntimeCapability::NativeCad],
+    toolchain: &[],
+};
+
+/// Examples that also mesh or solve need the native meshing service.
+pub const NATIVE_CAD_MESHING: BuiltinExampleRequirements = BuiltinExampleRequirements {
+    host: BuiltinExampleHostRequirement::NativeOnly,
+    engine: BuiltinExampleEngine::Default,
+    compiler: &[],
+    runtime: &[
+        BuiltinRuntimeCapability::NativeCad,
+        BuiltinRuntimeCapability::NativeMeshing,
+    ],
+    toolchain: &[],
+};

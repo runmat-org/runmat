@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.StructuralStep` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
 pub(super) const STATIC_STEP: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralStep"),
+    result: classes::FEA_STRUCTURAL_STEP_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -14,7 +15,7 @@ pub(super) fn static_step(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
 }
 
 pub(super) const MODAL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralStep"),
+    result: classes::FEA_STRUCTURAL_STEP_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -23,7 +24,7 @@ pub(super) fn modal(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 pub(super) const HARMONIC: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralStep"),
+    result: classes::FEA_STRUCTURAL_STEP_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -32,7 +33,7 @@ pub(super) fn harmonic(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const TRANSIENT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralStep"),
+    result: classes::FEA_STRUCTURAL_STEP_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -41,7 +42,7 @@ pub(super) fn transient(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 }
 
 pub(super) const NONLINEAR: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralStep"),
+    result: classes::FEA_STRUCTURAL_STEP_CLASS,
     arguments: &[ModelArg::Text],
 };
 

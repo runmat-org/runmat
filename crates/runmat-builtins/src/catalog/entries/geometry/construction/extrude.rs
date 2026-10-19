@@ -37,9 +37,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:extrude:InvalidInput` reports a `profile` that is not a `geometry.Feature`, a distance that cannot be converted, or a `direction` that is not a finite three-element real vector.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:extrude:InvalidInput` reports every failure of the call: the wrong number of arguments, a `profile` that is not a `geometry.Feature`, a distance that cannot be converted, or a `direction` that is not a finite three-element real vector, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -55,7 +53,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         "zero-direction",
         "An all-zero direction is rejected",
         "profile = geometry.box(20e-3, 10e-3, 1e-3);\nbar = geometry.extrude(profile, 50e-3, [0 0 0]);",
-        "RunMat:geometry:feature:InvalidInput",
+        "RunMat:geometry:extrude:InvalidInput",
     ),
 ];
 

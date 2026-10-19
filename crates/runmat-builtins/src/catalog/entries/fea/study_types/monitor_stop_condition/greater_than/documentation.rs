@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when `quantity` is not a `fea.ObservationQuantity` or `canonicalValue` is not a finite real scalar.",
         "`RunMat:fea:Internal` if the condition cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 

@@ -4,7 +4,7 @@ use crate::*;
 const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
         "`positions` must be a host numeric matrix with exactly three columns (x, y, z in meters) and at least two rows. Each row becomes one ordered `fea.Position`; the order is retained with the result.",
-        "Integer-class matrices are accepted and converted once to binary64 meters. The constructor does not check that the coordinates are finite or inside the model; resolution against the admitted solid happens during evaluation, and a point outside the solid fails.",
+        "Integer-class matrices are accepted and converted once to binary64 meters. Every coordinate must be finite. Whether a position lies inside the model is checked during evaluation, where a point outside the admitted solid fails.",
         "Path observations require a nodal source location, `fea.FieldLocation.point()` output, and `fea.RecoveryPolicy.shapeFunctionInterpolation()`. RunMat interpolates each position in its owning Tet4 or Tet10 element and retains the owning element with the result.",
     ] },
     BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
@@ -12,8 +12,9 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         "Use a path for through-thickness stress profiles, temperature along a centerline, or deflection along a beam.",
     ] },
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
-        "`RunMat:fea:InvalidInput` when `positions` is not a host numeric matrix, or is not N-by-3 with N at least two.",
+        "`RunMat:fea:InvalidInput` when `positions` is not a host numeric matrix, is not N-by-3 with N at least two, or contains NaN or Inf.",
         "`RunMat:fea:Internal` if the target cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 
@@ -27,7 +28,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(target), 'fea.ObservationTarget'));\nassert(numel(target.value.path.positions) == 3);\nassert(isequal(reshape(target.value.path.positions{3}.meters, 1, []), [0.02 0 0]));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(target), 'fea.ObservationTarget'));\nassert(numel(target.value.path.positions) == 3);\nassert(isequal(target.value.path.positions{3}.meters, [0.02 0 0]));" },
     },
 ];
 
@@ -48,6 +49,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation =
         implementation: &[BuiltinDocumentationLink { label: "Implementation", target: BuiltinDocumentationLinkTarget::Source("https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/fea/observations/targets.rs") }],
         verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Catalog inference contract", location: "crates/runmat-builtins/src/catalog/entries/fea/study_types/observation_target/tests.rs::observation_target_constructors_follow_their_positional_contract" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Finite path positions", location: "crates/runmat-runtime/src/builtins/fea/observations/tests.rs::path_targets_reject_nonfinite_coordinates" },
         ],
-        notes: &["Coordinates are not checked for finiteness at construction; nonfinite rows fail later during target resolution."],
+        notes: &[],
     });

@@ -7,7 +7,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "Rayleigh damping is proportional to the mass and stiffness matrices. The modal damping ratio at angular frequency omega is zeta = alpha / (2 omega) + beta omega / 2, so alpha controls low-frequency damping and beta high-frequency damping. To hit a ratio zeta at two frequencies omega1 and omega2, alpha = 2 zeta omega1 omega2 / (omega1 + omega2) and beta = 2 zeta / (omega1 + omega2).",
             "`massCoefficient` must be a `fea.RayleighMassCoefficient` in 1/s and `stiffnessCoefficient` a `fea.RayleighStiffnessCoefficient` in s. At least one must be positive: a pair of zeros is rejected (use `fea.MechanicalDamping.undamped()` instead). The coefficient objects are stored as `mass_coefficient` and `stiffness_coefficient`.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },

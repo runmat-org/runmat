@@ -19,12 +19,18 @@ pub(super) fn fresh(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 
 pub(super) const CONTINUE_FROM_COMPLETED_STATE: StudyConstructorSignature =
     StudyConstructorSignature::new(&[Text, Text], FEA_RESTART_POLICY_CLASS);
-pub(super) fn continue_from_completed_state(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn continue_from_completed_state(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &CONTINUE_FROM_COMPLETED_STATE)
 }
 
 pub(super) const RESUME_CHECKPOINT: StudyConstructorSignature =
     StudyConstructorSignature::new(&[Text, Text], FEA_RESTART_POLICY_CLASS);
-pub(super) fn resume_checkpoint(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn resume_checkpoint(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &RESUME_CHECKPOINT)
 }

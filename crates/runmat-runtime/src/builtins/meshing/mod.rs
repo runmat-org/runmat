@@ -10,13 +10,12 @@ use runmat_value::Value;
 
 use crate::{build_runtime_error, BuiltinResult};
 
+mod aliases;
 mod inspection;
-mod metadata;
 mod object;
 mod options;
 #[cfg(test)]
 use inspection::quality_value;
-pub use metadata::*;
 pub(crate) use object::execution_output_from_value;
 use object::{evidence_object, mesh_object, payload_from_value, MeshPayload};
 pub use object::{EVIDENCE_CLASS, MESH_CLASS};
@@ -37,20 +36,17 @@ const MESH_METHOD_NAME: &str = "__runmat_meshing_mesh";
 
 #[runtime_builtin(
     name = "meshing.generate",
-    category = "meshing",
-    summary = "Generate a validated solver mesh from a geometry asset.",
-    keywords = "meshing,generate,solver,tetrahedron,cad",
-    descriptor(crate::builtins::meshing::GENERATE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::meshing::GENERATE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
 pub async fn generate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let (asset_value, options) = args
         .split_first()
         .ok_or_else(|| error(GENERATE_NAME, "expected a geometry.Asset"))?;
-    let asset = crate::builtins::geometry::geometry_asset_from_value_with_builtin(
+    let asset = crate::builtins::geometry::geometry_asset_from_value_with_error(
         asset_value,
         GENERATE_NAME,
+        &runmat_builtins::MESHING_ERROR_INVALID,
     )?;
     let settings = parse_settings(options)?;
     let output = crate::meshing::execute_meshing(&crate::meshing::MeshingExecutionRequest {
@@ -71,13 +67,24 @@ pub async fn generate_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "meshing.load",
-    category = "meshing",
-    summary = "Load and jointly validate solver-mesh and evidence artifacts.",
-    keywords = "meshing,load,artifact,evidence",
-    descriptor(crate::builtins::meshing::LOAD_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
+pub async fn load_binding(args: Vec<Value>) -> BuiltinResult<Value> {
+    let [mesh_path, evidence_path] = args.as_slice() else {
+        return Err(error(
+            LOAD_NAME,
+            format!(
+                "expected a mesh path and an evidence path, got {} arguments",
+                args.len()
+            ),
+        ));
+    };
+    load_builtin(text(LOAD_NAME, mesh_path)?, text(LOAD_NAME, evidence_path)?).await
+}
+
+/// Load a canonical mesh/evidence pair and any region-alias sidecar written by
+/// `meshing.save`. Shared by the binding and FEA unit tests.
 pub async fn load_builtin(mesh_path: String, evidence_path: String) -> BuiltinResult<Value> {
     let mesh_bytes = runmat_filesystem::read(&mesh_path)
         .map_err(|cause| error(LOAD_NAME, format!("failed to read {mesh_path}: {cause}")))?;
@@ -94,20 +101,17 @@ pub async fn load_builtin(mesh_path: String, evidence_path: String) -> BuiltinRe
     evidence
         .validate(&artifact)
         .map_err(|cause| error(LOAD_NAME, cause.to_string()))?;
+    let region_aliases = aliases::read_sidecar(LOAD_NAME, &mesh_path, &artifact)?;
     mesh_object(MeshPayload {
         artifact,
         evidence,
-        region_aliases: Default::default(),
+        region_aliases,
     })
 }
 
 #[runtime_builtin(
     name = "meshing.save",
-    category = "meshing",
-    summary = "Save a meshing object as canonical mesh and evidence artifacts.",
-    keywords = "meshing,save,artifact,evidence",
-    descriptor(crate::builtins::meshing::SAVE_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
 pub async fn save_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
@@ -132,102 +136,98 @@ pub async fn save_builtin(args: Vec<Value>) -> BuiltinResult<bool> {
         .evidence
         .canonical_encode()
         .map_err(|cause| error(SAVE_NAME, cause.to_string()))?;
-    crate::meshing::write_canonical_artifact_pair(
-        std::path::Path::new(&mesh_path),
-        &mesh_bytes,
-        std::path::Path::new(&evidence_path),
-        &evidence_bytes,
+    let sidecar_path = aliases::sidecar_path(&mesh_path);
+    if sidecar_path == evidence_path {
+        return Err(error(
+            SAVE_NAME,
+            "the evidence path must not be the mesh region-alias sidecar path",
+        ));
+    }
+    let sidecar_bytes =
+        aliases::encode_sidecar(SAVE_NAME, &payload.artifact, &payload.region_aliases)?;
+    crate::meshing::write_canonical_artifacts(
+        &[
+            (std::path::Path::new(&mesh_path), &mesh_bytes),
+            (std::path::Path::new(&evidence_path), &evidence_bytes),
+            (std::path::Path::new(&sidecar_path), &sidecar_bytes),
+        ],
         force,
     )
     .map_err(|cause| error(SAVE_NAME, cause))?;
     Ok(true)
 }
 
+fn single_mesh(builtin: &'static str, args: Vec<Value>) -> BuiltinResult<Value> {
+    let mut args = args.into_iter();
+    match (args.next(), args.next()) {
+        (Some(mesh), None) => Ok(mesh),
+        _ => Err(error(builtin, "expected exactly one meshing.Mesh")),
+    }
+}
+
 #[runtime_builtin(
     name = "meshing.nodes",
-    category = "meshing",
-    summary = "Return solver-mesh node ids and coordinates.",
-    keywords = "meshing,nodes,coordinates",
-    descriptor(crate::builtins::meshing::NODES_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn nodes_builtin(mesh: Value) -> BuiltinResult<Value> {
+pub async fn nodes_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let mesh = single_mesh(NODES_NAME, args)?;
     inspection::nodes(mesh)
 }
 
 #[runtime_builtin(
     name = "meshing.elements",
-    category = "meshing",
-    summary = "Return solver-mesh volume element connectivity.",
-    keywords = "meshing,elements,tetrahedra,connectivity",
-    descriptor(crate::builtins::meshing::ELEMENTS_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn elements_builtin(mesh: Value) -> BuiltinResult<Value> {
+pub async fn elements_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let mesh = single_mesh(ELEMENTS_NAME, args)?;
     inspection::elements(mesh)
 }
 
 #[runtime_builtin(
     name = "meshing.boundaryFaces",
-    category = "meshing",
-    summary = "Return solver-mesh boundary face connectivity and provenance ids.",
-    keywords = "meshing,boundary,faces,triangles",
-    descriptor(crate::builtins::meshing::BOUNDARY_FACES_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn boundary_faces_builtin(mesh: Value) -> BuiltinResult<Value> {
+pub async fn boundary_faces_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let mesh = single_mesh(BOUNDARY_FACES_NAME, args)?;
     inspection::boundary_faces(mesh)
 }
 
 #[runtime_builtin(
     name = "meshing.regions",
-    category = "meshing",
-    summary = "Return persistent physical-region inventories.",
-    keywords = "meshing,regions,physical",
-    descriptor(crate::builtins::meshing::REGIONS_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn regions_builtin(mesh: Value) -> BuiltinResult<Value> {
+pub async fn regions_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let mesh = single_mesh(REGIONS_NAME, args)?;
     inspection::regions(mesh)
 }
 
 #[runtime_builtin(
     name = "meshing.quality",
-    category = "meshing",
-    summary = "Compute per-element solver-mesh quality statistics.",
-    keywords = "meshing,quality,jacobian,aspect,volume",
-    descriptor(crate::builtins::meshing::QUALITY_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn quality_builtin(mesh: Value) -> BuiltinResult<Value> {
+pub async fn quality_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let mesh = single_mesh(QUALITY_NAME, args)?;
     inspection::quality(mesh)
 }
 
 #[runtime_builtin(
     name = "meshing.evidence",
-    category = "meshing",
-    summary = "Return typed validation and resource evidence for a solver mesh.",
-    keywords = "meshing,evidence,stages,resources",
-    descriptor(crate::builtins::meshing::EVIDENCE_DESCRIPTOR),
-    integer_audit(crate::builtins::meshing::INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
-pub async fn evidence_builtin(mesh: Value) -> BuiltinResult<Value> {
+pub async fn evidence_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let mesh = single_mesh(EVIDENCE_NAME, args)?;
     evidence_object(payload_from_value(EVIDENCE_NAME, &mesh)?.evidence)
 }
 
 #[runtime_builtin(
     name = "__runmat_meshing_mesh",
-    category = "meshing",
-    summary = "Implement mesh display for meshing.Mesh objects.",
-    keywords = "meshing,mesh,display",
-    descriptor(crate::builtins::meshing::METHOD_DESCRIPTOR),
-    integer_capabilities(crate::builtins::meshing::METHOD_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::meshing"
 )]
 pub async fn mesh_method_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -277,6 +277,118 @@ mod tests {
         .expect("fixture mesh object")
     }
 
+    fn aliased_mesh_value() -> (
+        Value,
+        std::collections::BTreeMap<String, runmat_geometry_core::PersistentEntityId>,
+    ) {
+        let artifact =
+            runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+        let evidence =
+            runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&artifact);
+        let aliases = std::collections::BTreeMap::from([(
+            "solid_000001".to_string(),
+            artifact.topology.regions[0].region_id.clone(),
+        )]);
+        let value = mesh_object(MeshPayload {
+            artifact,
+            evidence,
+            region_aliases: aliases.clone(),
+        })
+        .expect("fixture mesh object");
+        (value, aliases)
+    }
+
+    fn text_value(path: &std::path::Path) -> Value {
+        Value::String(path.to_string_lossy().to_string())
+    }
+
+    #[test]
+    fn save_and_load_retain_region_aliases_through_the_sidecar() {
+        let directory = tempfile::TempDir::new().expect("temporary directory");
+        let mesh_path = directory.path().join("part.solver-mesh.cbor");
+        let evidence_path = directory.path().join("part.meshing-evidence.cbor");
+        let (mesh, aliases) = aliased_mesh_value();
+        assert!(futures::executor::block_on(save_builtin(vec![
+            mesh,
+            text_value(&mesh_path),
+            text_value(&evidence_path),
+        ]))
+        .expect("save"));
+        let sidecar = directory.path().join("part.solver-mesh.cbor.regions.json");
+        assert!(sidecar.exists());
+        let loaded = futures::executor::block_on(load_builtin(
+            mesh_path.to_string_lossy().to_string(),
+            evidence_path.to_string_lossy().to_string(),
+        ))
+        .expect("load");
+        let payload = payload_from_value(LOAD_NAME, &loaded).expect("payload");
+        assert_eq!(payload.region_aliases, aliases);
+
+        // A mesh written without a sidecar (for example by `runmat mesh`) loads without aliases.
+        std::fs::remove_file(&sidecar).unwrap();
+        let loaded = futures::executor::block_on(load_builtin(
+            mesh_path.to_string_lossy().to_string(),
+            evidence_path.to_string_lossy().to_string(),
+        ))
+        .expect("load without sidecar");
+        assert!(payload_from_value(LOAD_NAME, &loaded)
+            .unwrap()
+            .region_aliases
+            .is_empty());
+    }
+
+    #[test]
+    fn load_rejects_a_sidecar_from_another_mesh_and_save_protects_it() {
+        let directory = tempfile::TempDir::new().expect("temporary directory");
+        let mesh_path = directory.path().join("part.solver-mesh.cbor");
+        let evidence_path = directory.path().join("part.meshing-evidence.cbor");
+        let (mesh, _) = aliased_mesh_value();
+        futures::executor::block_on(save_builtin(vec![
+            mesh.clone(),
+            text_value(&mesh_path),
+            text_value(&evidence_path),
+        ]))
+        .expect("save");
+        // Existing destinations, including the sidecar, are protected without Force.
+        let error = futures::executor::block_on(save_builtin(vec![
+            mesh.clone(),
+            text_value(&mesh_path),
+            text_value(&evidence_path),
+        ]))
+        .expect_err("protected");
+        assert_eq!(error.identifier(), Some("RunMat:meshing:InvalidInput"));
+        let sidecar = directory.path().join("part.solver-mesh.cbor.regions.json");
+        let text = std::fs::read_to_string(&sidecar).unwrap();
+        let tampered = text.replacen("\"artifact_digest\": \"", "\"artifact_digest\": \"00", 1);
+        std::fs::write(&sidecar, tampered).unwrap();
+        let error = futures::executor::block_on(load_builtin(
+            mesh_path.to_string_lossy().to_string(),
+            evidence_path.to_string_lossy().to_string(),
+        ))
+        .expect_err("foreign sidecar");
+        assert!(error
+            .message()
+            .contains("belongs to a different solver mesh"));
+    }
+
+    #[test]
+    fn bindings_report_arity_with_the_meshing_identifier() {
+        for result in [
+            futures::executor::block_on(nodes_builtin(Vec::new())),
+            futures::executor::block_on(quality_builtin(vec![
+                tetrahedron_mesh_value(),
+                tetrahedron_mesh_value(),
+            ])),
+            futures::executor::block_on(load_binding(vec![Value::String("a".into())])),
+            futures::executor::block_on(generate_builtin(vec![Value::Num(1.0)])),
+        ] {
+            assert_eq!(
+                result.expect_err("arity").identifier(),
+                Some("RunMat:meshing:InvalidInput")
+            );
+        }
+    }
+
     #[test]
     fn quality_returns_aligned_exact_ids_and_summary_statistics() {
         let mesh =
@@ -302,7 +414,7 @@ mod tests {
     #[test]
     fn boundary_faces_preserve_topology_roles_adjacency_and_full_identity() {
         let Value::Struct(faces) =
-            futures::executor::block_on(boundary_faces_builtin(tetrahedron_mesh_value()))
+            futures::executor::block_on(boundary_faces_builtin(vec![tetrahedron_mesh_value()]))
                 .expect("boundary faces")
         else {
             panic!("expected boundary face struct");
@@ -357,7 +469,7 @@ mod tests {
     #[test]
     fn regions_preserve_persistent_identity_components() {
         let Value::Cell(regions) =
-            futures::executor::block_on(regions_builtin(tetrahedron_mesh_value()))
+            futures::executor::block_on(regions_builtin(vec![tetrahedron_mesh_value()]))
                 .expect("regions")
         else {
             panic!("expected region cell");

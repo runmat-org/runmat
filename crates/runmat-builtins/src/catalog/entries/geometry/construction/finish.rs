@@ -36,7 +36,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:finish:InvalidInput` reports an argument that is not a `geometry.Feature`.",
+            "`RunMat:geometry:finish:InvalidInput` reports a call that does not pass exactly one `geometry.Feature`.",
         ],
     },
 ];

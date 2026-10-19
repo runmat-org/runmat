@@ -34,5 +34,6 @@ pub(super) const BOX_BREP: BuiltinExampleFixture =
 /// Native host boundary for examples that import exact CAD through OCCT.
 pub(super) const NATIVE_CAD: BuiltinExampleRequirements = BuiltinExampleRequirements {
     host: BuiltinExampleHostRequirement::NativeOnly,
+    runtime: &[BuiltinRuntimeCapability::NativeCad],
     ..BuiltinExampleRequirements::NONE
 };

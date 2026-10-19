@@ -12,23 +12,28 @@ use runmat_analysis_core::{
     ExcitationId, ExcitationKinematics, ProjectionRequirement,
 };
 
-pub(super) const STRUCTURAL_EXCITATION_CLASS: &str = "fea.StructuralExcitation";
-pub(super) const THERMAL_EXCITATION_CLASS: &str = "fea.ThermalExcitation";
-pub(super) const ELECTRICAL_EXCITATION_CLASS: &str = "fea.ElectricalExcitation";
-pub(super) const MAGNETIC_EXCITATION_CLASS: &str = "fea.MagneticExcitation";
-pub(super) const ACOUSTIC_EXCITATION_CLASS: &str = "fea.AcousticExcitation";
-pub(super) const FLUID_EXCITATION_CLASS: &str = "fea.FluidExcitation";
-pub(super) const EXCITATION_CASE_CLASS: &str = "fea.ExcitationCase";
+pub(super) const STRUCTURAL_EXCITATION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_EXCITATION_CLASS
+        .display_name();
+pub(super) const THERMAL_EXCITATION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_THERMAL_EXCITATION_CLASS
+        .display_name();
+pub(super) const ELECTRICAL_EXCITATION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_ELECTRICAL_EXCITATION_CLASS
+        .display_name();
+pub(super) const MAGNETIC_EXCITATION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_MAGNETIC_EXCITATION_CLASS
+        .display_name();
+pub(super) const ACOUSTIC_EXCITATION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_ACOUSTIC_EXCITATION_CLASS
+        .display_name();
+pub(super) const FLUID_EXCITATION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_FLUID_EXCITATION_CLASS.display_name();
+pub(super) const EXCITATION_CASE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_EXCITATION_CASE_CLASS.display_name();
 
 const EXCITATION_FIELDS: &[&str] = &["geometry_id", "geometry_revision", "action"];
 const CASE_FIELDS: &[&str] = &["case_id", "action_ids", "activation"];
-const TYPED_EXCITATION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "Typed excitation constructors accept identifiers, geometry.Region values, and typed signal objects; physical numeric conversion belongs to the signal constructor.",
-    };
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct GeometryBoundExcitation {
@@ -62,84 +67,6 @@ impl GeometryBoundExcitation {
             ));
         }
         Ok(())
-    }
-}
-
-const ACTION_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable excitation identifier.",
-    ),
-    required(
-        "region",
-        BuiltinParamType::Any,
-        "Typed geometry.Region target.",
-    ),
-    required(
-        "signal",
-        BuiltinParamType::Any,
-        "Typed physical signal with the quantity required by this action.",
-    ),
-];
-const CASE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable excitation-case identifier.",
-    ),
-    required(
-        "actions",
-        BuiltinParamType::Any,
-        "Typed excitation object or cell array of typed excitations.",
-    ),
-];
-const STEP_CASE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable excitation-case identifier.",
-    ),
-    required(
-        "actions",
-        BuiltinParamType::Any,
-        "Typed excitation object or cell array of typed excitations.",
-    ),
-    required(
-        "stepIds",
-        BuiltinParamType::Any,
-        "Nonempty string or cell array of procedure-step identifiers.",
-    ),
-];
-const GROUP_CASE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable excitation-case identifier.",
-    ),
-    required(
-        "actions",
-        BuiltinParamType::Any,
-        "Typed excitation object or cell array of typed excitations.",
-    ),
-    required(
-        "groupId",
-        BuiltinParamType::StringScalar,
-        "Mutually-exclusive combination-group identifier.",
-    ),
-];
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
     }
 }
 
@@ -228,35 +155,19 @@ fn create_action(
 
 macro_rules! action_builtin {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin:literal, $method:literal, $summary:literal, $class:expr,
+        $function:ident, $descriptor:ident, $builtin:literal, $class:expr,
         $quantity:path, $region:expr, $distribution:path, $preserve_moment:expr, $variant:path
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: concat!("action = ", $builtin, "(id, region, signal)"),
-            inputs: &ACTION_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
-                                            name = $builtin,
-                                            category = "fea",
-                                            summary = $summary,
-                                            keywords = "fea,excitation,signal,region,typed",
-                                            descriptor($descriptor),
-                                            integer_audit(TYPED_EXCITATION_INTEGER_AUDIT),
-                                            builtin_path = "crate::builtins::fea::excitations"
-                                        )]
-        pub async fn $function(
-            id: String,
-            region: Value,
-            signal: Value,
-        ) -> BuiltinResult<Value> {
+                    name = $builtin,
+                    binding_variant = "default",
+                    builtin_path = "crate::builtins::fea::excitations"
+                )]
+        pub async fn $function(id: String, region: Value, signal: Value) -> BuiltinResult<Value> {
+            crate::builtins::fea::constraints::fixed_outputs(
+                &runmat_builtins::$descriptor,
+                $builtin,
+            )?;
             create_action(
                 $builtin,
                 $class,
@@ -277,11 +188,8 @@ use runmat_analysis_core::PhysicalQuantityKind as Quantity;
 
 action_builtin!(
     structural_force,
-    STRUCTURAL_FORCE_DESCRIPTOR,
-    STRUCTURAL_FORCE_SIGNATURES,
+    FEA_STRUCTURAL_EXCITATION_FORCE_DESCRIPTOR,
     "fea.StructuralExcitation.force",
-    "force",
-    "Bind a force signal to a structural boundary region.",
     STRUCTURAL_EXCITATION_CLASS,
     Quantity::Force,
     RegionExpectation::Boundary,
@@ -291,11 +199,8 @@ action_builtin!(
 );
 action_builtin!(
     structural_moment,
-    STRUCTURAL_MOMENT_DESCRIPTOR,
-    STRUCTURAL_MOMENT_SIGNATURES,
+    FEA_STRUCTURAL_EXCITATION_MOMENT_DESCRIPTOR,
     "fea.StructuralExcitation.moment",
-    "moment",
-    "Bind a moment signal to a structural boundary region.",
     STRUCTURAL_EXCITATION_CLASS,
     Quantity::Moment,
     RegionExpectation::Boundary,
@@ -305,11 +210,8 @@ action_builtin!(
 );
 action_builtin!(
     structural_traction,
-    STRUCTURAL_TRACTION_DESCRIPTOR,
-    STRUCTURAL_TRACTION_SIGNATURES,
+    FEA_STRUCTURAL_EXCITATION_TRACTION_DESCRIPTOR,
     "fea.StructuralExcitation.traction",
-    "traction",
-    "Bind a traction signal to a structural boundary region.",
     STRUCTURAL_EXCITATION_CLASS,
     Quantity::Traction,
     RegionExpectation::Boundary,
@@ -319,11 +221,8 @@ action_builtin!(
 );
 action_builtin!(
     structural_pressure,
-    STRUCTURAL_PRESSURE_DESCRIPTOR,
-    STRUCTURAL_PRESSURE_SIGNATURES,
+    FEA_STRUCTURAL_EXCITATION_PRESSURE_DESCRIPTOR,
     "fea.StructuralExcitation.pressure",
-    "pressure",
-    "Bind a pressure signal to a structural boundary region.",
     STRUCTURAL_EXCITATION_CLASS,
     Quantity::Pressure,
     RegionExpectation::Boundary,
@@ -333,11 +232,8 @@ action_builtin!(
 );
 action_builtin!(
     structural_body_force,
-    STRUCTURAL_BODY_FORCE_DESCRIPTOR,
-    STRUCTURAL_BODY_FORCE_SIGNATURES,
+    FEA_STRUCTURAL_EXCITATION_BODY_FORCE_DESCRIPTOR,
     "fea.StructuralExcitation.bodyForce",
-    "bodyForce",
-    "Bind a body-force-density signal to a structural volume region.",
     STRUCTURAL_EXCITATION_CLASS,
     Quantity::BodyForceDensity,
     RegionExpectation::Volume,
@@ -347,11 +243,8 @@ action_builtin!(
 );
 action_builtin!(
     thermal_heat_generation,
-    THERMAL_HEAT_GENERATION_DESCRIPTOR,
-    THERMAL_HEAT_GENERATION_SIGNATURES,
+    FEA_THERMAL_EXCITATION_HEAT_GENERATION_DESCRIPTOR,
     "fea.ThermalExcitation.heatGeneration",
-    "heatGeneration",
-    "Bind a volumetric heat-generation signal to a thermal volume region.",
     THERMAL_EXCITATION_CLASS,
     Quantity::HeatGenerationDensity,
     RegionExpectation::Volume,
@@ -361,11 +254,8 @@ action_builtin!(
 );
 action_builtin!(
     thermal_heat_flux,
-    THERMAL_HEAT_FLUX_DESCRIPTOR,
-    THERMAL_HEAT_FLUX_SIGNATURES,
+    FEA_THERMAL_EXCITATION_HEAT_FLUX_DESCRIPTOR,
     "fea.ThermalExcitation.heatFlux",
-    "heatFlux",
-    "Bind a heat-flux signal to a thermal boundary region.",
     THERMAL_EXCITATION_CLASS,
     Quantity::HeatFlux,
     RegionExpectation::Boundary,
@@ -375,11 +265,8 @@ action_builtin!(
 );
 action_builtin!(
     thermal_temperature_field,
-    THERMAL_TEMPERATURE_FIELD_DESCRIPTOR,
-    THERMAL_TEMPERATURE_FIELD_SIGNATURES,
+    FEA_THERMAL_EXCITATION_TEMPERATURE_FIELD_DESCRIPTOR,
     "fea.ThermalExcitation.temperatureField",
-    "temperatureField",
-    "Bind an absolute-temperature signal to a volume region for coupling.",
     THERMAL_EXCITATION_CLASS,
     Quantity::Temperature,
     RegionExpectation::Volume,
@@ -389,11 +276,8 @@ action_builtin!(
 );
 action_builtin!(
     thermal_ambient_temperature,
-    THERMAL_AMBIENT_TEMPERATURE_DESCRIPTOR,
-    THERMAL_AMBIENT_TEMPERATURE_SIGNATURES,
+    FEA_THERMAL_EXCITATION_AMBIENT_TEMPERATURE_DESCRIPTOR,
     "fea.ThermalExcitation.ambientTemperature",
-    "ambientTemperature",
-    "Bind an ambient-temperature signal to a thermal boundary region.",
     THERMAL_EXCITATION_CLASS,
     Quantity::Temperature,
     RegionExpectation::Boundary,
@@ -403,11 +287,8 @@ action_builtin!(
 );
 action_builtin!(
     electrical_terminal_voltage,
-    ELECTRICAL_TERMINAL_VOLTAGE_DESCRIPTOR,
-    ELECTRICAL_TERMINAL_VOLTAGE_SIGNATURES,
+    FEA_ELECTRICAL_EXCITATION_TERMINAL_VOLTAGE_DESCRIPTOR,
     "fea.ElectricalExcitation.terminalVoltage",
-    "terminalVoltage",
-    "Bind an electric-potential signal to a terminal region.",
     ELECTRICAL_EXCITATION_CLASS,
     Quantity::ElectricPotential,
     RegionExpectation::Boundary,
@@ -417,11 +298,8 @@ action_builtin!(
 );
 action_builtin!(
     electrical_current,
-    ELECTRICAL_CURRENT_DESCRIPTOR,
-    ELECTRICAL_CURRENT_SIGNATURES,
+    FEA_ELECTRICAL_EXCITATION_CURRENT_DESCRIPTOR,
     "fea.ElectricalExcitation.current",
-    "current",
-    "Bind an electric-current signal to a conducting volume region.",
     ELECTRICAL_EXCITATION_CLASS,
     Quantity::ElectricCurrent,
     RegionExpectation::Volume,
@@ -431,11 +309,8 @@ action_builtin!(
 );
 action_builtin!(
     electrical_charge,
-    ELECTRICAL_CHARGE_DESCRIPTOR,
-    ELECTRICAL_CHARGE_SIGNATURES,
+    FEA_ELECTRICAL_EXCITATION_CHARGE_DESCRIPTOR,
     "fea.ElectricalExcitation.charge",
-    "charge",
-    "Bind an electric-charge signal to a volume region.",
     ELECTRICAL_EXCITATION_CLASS,
     Quantity::ElectricCharge,
     RegionExpectation::Volume,
@@ -445,11 +320,8 @@ action_builtin!(
 );
 action_builtin!(
     electrical_current_density,
-    ELECTRICAL_CURRENT_DENSITY_DESCRIPTOR,
-    ELECTRICAL_CURRENT_DENSITY_SIGNATURES,
+    FEA_ELECTRICAL_EXCITATION_CURRENT_DENSITY_DESCRIPTOR,
     "fea.ElectricalExcitation.currentDensity",
-    "currentDensity",
-    "Bind a current-density signal to a conducting volume region.",
     ELECTRICAL_EXCITATION_CLASS,
     Quantity::ElectricCurrentDensity,
     RegionExpectation::Volume,
@@ -459,11 +331,8 @@ action_builtin!(
 );
 action_builtin!(
     magnetic_vector_potential,
-    MAGNETIC_VECTOR_POTENTIAL_DESCRIPTOR,
-    MAGNETIC_VECTOR_POTENTIAL_SIGNATURES,
+    FEA_MAGNETIC_EXCITATION_VECTOR_POTENTIAL_DESCRIPTOR,
     "fea.MagneticExcitation.vectorPotential",
-    "vectorPotential",
-    "Bind a magnetic-vector-potential signal to a magnetic volume region.",
     MAGNETIC_EXCITATION_CLASS,
     Quantity::MagneticVectorPotential,
     RegionExpectation::Volume,
@@ -473,11 +342,8 @@ action_builtin!(
 );
 action_builtin!(
     acoustic_pressure,
-    ACOUSTIC_PRESSURE_DESCRIPTOR,
-    ACOUSTIC_PRESSURE_SIGNATURES,
+    FEA_ACOUSTIC_EXCITATION_PRESSURE_DESCRIPTOR,
     "fea.AcousticExcitation.pressure",
-    "pressure",
-    "Bind an acoustic-pressure signal to an acoustic boundary region.",
     ACOUSTIC_EXCITATION_CLASS,
     Quantity::Pressure,
     RegionExpectation::Boundary,
@@ -487,11 +353,8 @@ action_builtin!(
 );
 action_builtin!(
     acoustic_normal_velocity,
-    ACOUSTIC_NORMAL_VELOCITY_DESCRIPTOR,
-    ACOUSTIC_NORMAL_VELOCITY_SIGNATURES,
+    FEA_ACOUSTIC_EXCITATION_NORMAL_VELOCITY_DESCRIPTOR,
     "fea.AcousticExcitation.normalVelocity",
-    "normalVelocity",
-    "Bind a velocity signal to an acoustic boundary normal.",
     ACOUSTIC_EXCITATION_CLASS,
     Quantity::Velocity,
     RegionExpectation::Boundary,
@@ -501,11 +364,8 @@ action_builtin!(
 );
 action_builtin!(
     acoustic_volume_velocity,
-    ACOUSTIC_VOLUME_VELOCITY_DESCRIPTOR,
-    ACOUSTIC_VOLUME_VELOCITY_SIGNATURES,
+    FEA_ACOUSTIC_EXCITATION_VOLUME_VELOCITY_DESCRIPTOR,
     "fea.AcousticExcitation.volumeVelocity",
-    "volumeVelocity",
-    "Bind total outward volume flow to a finite acoustic boundary patch.",
     ACOUSTIC_EXCITATION_CLASS,
     Quantity::VolumeFlowRate,
     RegionExpectation::Boundary,
@@ -515,11 +375,8 @@ action_builtin!(
 );
 action_builtin!(
     fluid_inlet_velocity,
-    FLUID_INLET_VELOCITY_DESCRIPTOR,
-    FLUID_INLET_VELOCITY_SIGNATURES,
+    FEA_FLUID_EXCITATION_INLET_VELOCITY_DESCRIPTOR,
     "fea.FluidExcitation.inletVelocity",
-    "inletVelocity",
-    "Bind a velocity signal to a fluid inlet region.",
     FLUID_EXCITATION_CLASS,
     Quantity::Velocity,
     RegionExpectation::Boundary,
@@ -529,11 +386,8 @@ action_builtin!(
 );
 action_builtin!(
     fluid_mass_flow,
-    FLUID_MASS_FLOW_DESCRIPTOR,
-    FLUID_MASS_FLOW_SIGNATURES,
+    FEA_FLUID_EXCITATION_MASS_FLOW_DESCRIPTOR,
     "fea.FluidExcitation.massFlow",
-    "massFlow",
-    "Bind a mass-flow signal to a fluid boundary region.",
     FLUID_EXCITATION_CLASS,
     Quantity::MassFlowRate,
     RegionExpectation::Boundary,
@@ -543,11 +397,8 @@ action_builtin!(
 );
 action_builtin!(
     fluid_wall_motion,
-    FLUID_WALL_MOTION_DESCRIPTOR,
-    FLUID_WALL_MOTION_SIGNATURES,
+    FEA_FLUID_EXCITATION_WALL_MOTION_DESCRIPTOR,
     "fea.FluidExcitation.wallMotion",
-    "wallMotion",
-    "Bind a wall-velocity signal to a fluid boundary region.",
     FLUID_EXCITATION_CLASS,
     Quantity::Velocity,
     RegionExpectation::Boundary,
@@ -556,60 +407,27 @@ action_builtin!(
     ExcitationAction::WallMotion
 );
 
-const ALWAYS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "case = fea.ExcitationCase.always(id, actions)",
-    inputs: &CASE_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const ALWAYS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ALWAYS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const DURING_STEPS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "case = fea.ExcitationCase.duringSteps(id, actions, stepIds)",
-    inputs: &STEP_CASE_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const DURING_STEPS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DURING_STEPS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const EXCLUSIVE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "case = fea.ExcitationCase.mutuallyExclusive(id, actions, groupId)",
-    inputs: &GROUP_CASE_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const EXCLUSIVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &EXCLUSIVE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.ExcitationCase.always",
-    category = "fea",
-    summary = "Create an always-active excitation case.",
-    keywords = "fea,excitation,case,activation,typed",
-    descriptor(crate::builtins::fea::excitations::ALWAYS_DESCRIPTOR),
-    integer_audit(TYPED_EXCITATION_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::excitations"
 )]
 pub async fn excitation_case_always(id: String, actions: Value) -> BuiltinResult<Value> {
-    create_case(id, &actions, ExcitationCaseActivation::Always)
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_EXCITATION_CASE_ALWAYS_DESCRIPTOR,
+        "fea.ExcitationCase.always",
+    )?;
+    create_case(
+        "fea.ExcitationCase.always",
+        id,
+        &actions,
+        ExcitationCaseActivation::Always,
+    )
 }
 
 #[runtime_builtin(
     name = "fea.ExcitationCase.duringSteps",
-    category = "fea",
-    summary = "Create an excitation case active during named procedure steps.",
-    keywords = "fea,excitation,case,steps,activation,typed",
-    descriptor(crate::builtins::fea::excitations::DURING_STEPS_DESCRIPTOR),
-    integer_audit(TYPED_EXCITATION_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::excitations"
 )]
 pub async fn excitation_case_during_steps(
@@ -617,17 +435,22 @@ pub async fn excitation_case_during_steps(
     actions: Value,
     step_ids: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_EXCITATION_CASE_DURING_STEPS_DESCRIPTOR,
+        "fea.ExcitationCase.duringSteps",
+    )?;
     let step_ids = string_vec_from_value("fea.ExcitationCase.duringSteps", &step_ids)?;
-    create_case(id, &actions, ExcitationCaseActivation::Steps(step_ids))
+    create_case(
+        "fea.ExcitationCase.duringSteps",
+        id,
+        &actions,
+        ExcitationCaseActivation::Steps(step_ids),
+    )
 }
 
 #[runtime_builtin(
     name = "fea.ExcitationCase.mutuallyExclusive",
-    category = "fea",
-    summary = "Create an excitation case in a mutually-exclusive group.",
-    keywords = "fea,excitation,case,group,activation,typed",
-    descriptor(crate::builtins::fea::excitations::EXCLUSIVE_DESCRIPTOR),
-    integer_audit(TYPED_EXCITATION_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::excitations"
 )]
 pub async fn excitation_case_mutually_exclusive(
@@ -635,6 +458,10 @@ pub async fn excitation_case_mutually_exclusive(
     actions: Value,
     group_id: String,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_EXCITATION_CASE_MUTUALLY_EXCLUSIVE_DESCRIPTOR,
+        "fea.ExcitationCase.mutuallyExclusive",
+    )?;
     if group_id.trim().is_empty() {
         return Err(builtin_error(
             "fea.ExcitationCase.mutuallyExclusive",
@@ -643,6 +470,7 @@ pub async fn excitation_case_mutually_exclusive(
         ));
     }
     create_case(
+        "fea.ExcitationCase.mutuallyExclusive",
         id,
         &actions,
         ExcitationCaseActivation::MutuallyExclusiveGroup { group_id },
@@ -650,11 +478,11 @@ pub async fn excitation_case_mutually_exclusive(
 }
 
 fn create_case(
+    builtin: &'static str,
     id: String,
     actions: &Value,
     activation: ExcitationCaseActivation,
 ) -> BuiltinResult<Value> {
-    let builtin = "fea.ExcitationCase";
     if id.trim().is_empty() {
         return Err(builtin_error(
             builtin,

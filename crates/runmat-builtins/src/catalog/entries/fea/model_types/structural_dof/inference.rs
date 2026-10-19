@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.StructuralDof` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
 pub(super) const UX: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralTranslationDof"),
+    result: classes::FEA_STRUCTURAL_TRANSLATION_DOF_CLASS,
     arguments: &[],
 };
 
@@ -14,7 +15,7 @@ pub(super) fn ux(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfe
 }
 
 pub(super) const UY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralTranslationDof"),
+    result: classes::FEA_STRUCTURAL_TRANSLATION_DOF_CLASS,
     arguments: &[],
 };
 
@@ -23,7 +24,7 @@ pub(super) fn uy(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfe
 }
 
 pub(super) const UZ: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralTranslationDof"),
+    result: classes::FEA_STRUCTURAL_TRANSLATION_DOF_CLASS,
     arguments: &[],
 };
 
@@ -32,7 +33,7 @@ pub(super) fn uz(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfe
 }
 
 pub(super) const RX: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralRotationDof"),
+    result: classes::FEA_STRUCTURAL_ROTATION_DOF_CLASS,
     arguments: &[],
 };
 
@@ -41,7 +42,7 @@ pub(super) fn rx(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfe
 }
 
 pub(super) const RY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralRotationDof"),
+    result: classes::FEA_STRUCTURAL_ROTATION_DOF_CLASS,
     arguments: &[],
 };
 
@@ -50,7 +51,7 @@ pub(super) fn ry(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInfe
 }
 
 pub(super) const RZ: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralRotationDof"),
+    result: classes::FEA_STRUCTURAL_ROTATION_DOF_CLASS,
     arguments: &[],
 };
 

@@ -12,119 +12,52 @@ use crate::class_registry::declaration::{
 };
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
-const PERIODIC_TRANSFORM_CLASS: &str = "fea.PeriodicTransform";
-const IDENTITY_TRANSFORM_CLASS: &str = "fea.IdentityPeriodicTransform";
-const TRANSLATION_TRANSFORM_CLASS: &str = "fea.TranslationPeriodicTransform";
-const ROTATION_TRANSFORM_CLASS: &str = "fea.RotationPeriodicTransform";
+const PERIODIC_TRANSFORM_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_PERIODIC_TRANSFORM_CLASS
+        .display_name();
+const IDENTITY_TRANSFORM_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_IDENTITY_PERIODIC_TRANSFORM_CLASS
+        .display_name();
+const TRANSLATION_TRANSFORM_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS
+        .display_name();
+const ROTATION_TRANSFORM_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_ROTATION_PERIODIC_TRANSFORM_CLASS
+        .display_name();
 const EMPTY_FIELDS: &[&str] = &[];
 const TRANSLATION_FIELDS: &[&str] = &["translation"];
 const ROTATION_FIELDS: &[&str] = &["origin", "axis", "angle"];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const TRANSLATION_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "translation",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Typed fea.Translation vector from primary to secondary geometry.",
-}];
-const ROTATION_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "origin",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Position on the rotation axis.",
-    },
-    BuiltinParamDescriptor {
-        name: "axis",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Direction rotation axis.",
-    },
-    BuiltinParamDescriptor {
-        name: "angle",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Rotation angle from primary to secondary geometry.",
-    },
-];
-const IDENTITY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "transform = fea.PeriodicTransform.identity()",
-    inputs: &NO_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const TRANSLATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "transform = fea.PeriodicTransform.translation(translation)",
-    inputs: &TRANSLATION_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const ROTATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "transform = fea.PeriodicTransform.rotation(origin, axis, angle)",
-    inputs: &ROTATION_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const IDENTITY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &IDENTITY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const TRANSLATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRANSLATION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const ROTATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ROTATION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.PeriodicTransform.identity",
-    category = "fea",
-    summary = "Create an identity periodic transform.",
-    keywords = "fea,periodic,transform,identity,typed",
-    descriptor(
-        crate::builtins::fea::constraints::support::periodic_transform::IDENTITY_DESCRIPTOR
-    ),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
 pub async fn periodic_transform_identity_builtin() -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_PERIODIC_TRANSFORM_IDENTITY_DESCRIPTOR,
+        "fea.PeriodicTransform.identity",
+    )?;
     ensure_periodic_transform_classes_registered();
     Ok(Value::Object(ObjectInstance::new(IDENTITY_TRANSFORM_CLASS)))
 }
 
 #[runtime_builtin(
     name = "fea.PeriodicTransform.translation",
-    category = "fea",
-    summary = "Create a translational periodic transform.",
-    keywords = "fea,periodic,transform,translation,typed",
-    descriptor(
-        crate::builtins::fea::constraints::support::periodic_transform::TRANSLATION_DESCRIPTOR
-    ),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
 pub async fn periodic_transform_translation_builtin(translation: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_PERIODIC_TRANSFORM_TRANSLATION_DESCRIPTOR,
+        "fea.PeriodicTransform.translation",
+    )?;
     translation_meters("fea.PeriodicTransform.translation", &translation)?;
     transform_object(TRANSLATION_TRANSFORM_CLASS, [("translation", translation)])
 }
 
 #[runtime_builtin(
     name = "fea.PeriodicTransform.rotation",
-    category = "fea",
-    summary = "Create a rotational periodic transform.",
-    keywords = "fea,periodic,transform,rotation,axis,typed",
-    descriptor(
-        crate::builtins::fea::constraints::support::periodic_transform::ROTATION_DESCRIPTOR
-    ),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::periodic_transform"
 )]
 pub async fn periodic_transform_rotation_builtin(
@@ -132,6 +65,10 @@ pub async fn periodic_transform_rotation_builtin(
     axis: Value,
     angle: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_PERIODIC_TRANSFORM_ROTATION_DESCRIPTOR,
+        "fea.PeriodicTransform.rotation",
+    )?;
     position_meters("fea.PeriodicTransform.rotation", &origin)?;
     direction_from_value("fea.PeriodicTransform.rotation", &axis)?;
     quantity_scalar(

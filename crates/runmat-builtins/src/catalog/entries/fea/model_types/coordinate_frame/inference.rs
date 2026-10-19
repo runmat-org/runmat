@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.CoordinateFrame` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const GLOBAL_FRAME: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.GlobalCoordinateFrame"),
+    result: classes::FEA_GLOBAL_COORDINATE_FRAME_CLASS,
     arguments: &[],
 };
 
@@ -14,7 +15,7 @@ pub(super) fn global_frame(request: &CallRequest, entry: &BuiltinCatalogEntry) -
 }
 
 pub(super) const MATERIAL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.MaterialCoordinateFrame"),
+    result: classes::FEA_MATERIAL_COORDINATE_FRAME_CLASS,
     arguments: &[],
 };
 
@@ -23,7 +24,7 @@ pub(super) fn material(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const ELEMENT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ElementCoordinateFrame"),
+    result: classes::FEA_ELEMENT_COORDINATE_FRAME_CLASS,
     arguments: &[],
 };
 
@@ -32,7 +33,7 @@ pub(super) fn element(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
 }
 
 pub(super) const BOUNDARY_NORMAL_TANGENT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.BoundaryNormalTangentFrame"),
+    result: classes::FEA_BOUNDARY_NORMAL_TANGENT_FRAME_CLASS,
     arguments: &[],
 };
 
@@ -44,12 +45,12 @@ pub(super) fn boundary_normal_tangent(
 }
 
 pub(super) const CARTESIAN: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.CartesianCoordinateFrame"),
+    result: classes::FEA_CARTESIAN_COORDINATE_FRAME_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("fea.Position")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.Direction")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.Direction")]),
+        ModelArg::Typed(&[classes::FEA_DIRECTION_CLASS]),
+        ModelArg::Typed(&[classes::FEA_DIRECTION_CLASS]),
     ],
 };
 
@@ -58,12 +59,12 @@ pub(super) fn cartesian(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 }
 
 pub(super) const CYLINDRICAL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.CylindricalCoordinateFrame"),
+    result: classes::FEA_CYLINDRICAL_COORDINATE_FRAME_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("fea.Position")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.Direction")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.Direction")]),
+        ModelArg::Typed(&[classes::FEA_DIRECTION_CLASS]),
+        ModelArg::Typed(&[classes::FEA_DIRECTION_CLASS]),
     ],
 };
 
@@ -72,12 +73,12 @@ pub(super) fn cylindrical(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
 }
 
 pub(super) const SPHERICAL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.SphericalCoordinateFrame"),
+    result: classes::FEA_SPHERICAL_COORDINATE_FRAME_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("fea.Position")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.Direction")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.Direction")]),
+        ModelArg::Typed(&[classes::FEA_DIRECTION_CLASS]),
+        ModelArg::Typed(&[classes::FEA_DIRECTION_CLASS]),
     ],
 };
 

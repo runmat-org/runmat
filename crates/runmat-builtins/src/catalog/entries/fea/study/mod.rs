@@ -3,7 +3,7 @@ use crate::fea_contract::{
     constructor_inference::{infer_constructor, FeaConstructorKind},
     descriptors::FEA_STUDY_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_model_setup, BOX_STUDY},
+    example_fixtures::{fea_box_model_setup, BOX_STUDY, NATIVE_CAD, NATIVE_CAD_MESHING},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
 };
 use crate::*;
@@ -25,7 +25,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(study, 'fea.Study'));\nassert(strcmp(study.study_id, \"box_static\"));",
         },
@@ -42,7 +42,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD_MESHING,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(study, 'fea.Study'));\nassert(~isempty(study.solver_mesh_artifact_path));",
         },

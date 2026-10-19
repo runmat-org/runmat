@@ -1594,6 +1594,51 @@ fn analysis_run_study_executes_linear_static_path() {
     let _ = fs::remove_dir_all(&solver_mesh_root);
 }
 
+#[test]
+fn fea_step_result_selects_one_procedure_step_by_authored_id() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("step-result-selection");
+    let _ = fs::remove_dir_all(&root);
+    let env_guard = EnvVarRestoreGuard {
+        key: "RUNMAT_FEA_STUDY_ARTIFACT_ROOT",
+        previous: std::env::var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT").ok(),
+    };
+    std::env::set_var("RUNMAT_FEA_STUDY_ARTIFACT_ROOT", root.display().to_string());
+    let mut spec = sample_linear_static_study_spec();
+    let (solver_mesh_root, solver_mesh_path) =
+        write_ready_minimal_analysis_mesh_artifact("step-result-solver-mesh");
+    spec.solver_mesh_artifact_path = Some(solver_mesh_path.display().to_string());
+    let envelope = analysis_run_study_op(&spec, OperationContext::new(None, None))
+        .expect("study run should succeed");
+    let step = &envelope.data.steps[0];
+    let run = crate::builtins::fea::run_results::run_result_object_for_tests(&envelope.data);
+
+    let selected = futures::executor::block_on(crate::builtins::fea::run_results::step_result(
+        run.clone(),
+        step.procedure_step.step_id.0.clone(),
+    ))
+    .expect("the authored step id should select its result");
+    let runmat_value::Value::Object(object) = &selected else {
+        panic!("expected a fea.StepRunResult object");
+    };
+    assert_eq!(object.class_name, "fea.StepRunResult");
+    assert_eq!(
+        object.properties.get("run_id"),
+        Some(&runmat_value::Value::String(step.run_id.clone()))
+    );
+
+    let missing = futures::executor::block_on(crate::builtins::fea::run_results::step_result(
+        run,
+        "not_a_step".to_string(),
+    ))
+    .expect_err("an unknown step id must be rejected");
+    assert_eq!(missing.identifier(), Some("RunMat:fea:InvalidInput"));
+    drop(env_guard);
+    let _ = fs::remove_dir_all(&root);
+    let _ = fs::remove_dir_all(&solver_mesh_root);
+}
+
 struct CanonicalStructuralExecutor {
     calls: AtomicU64,
 }

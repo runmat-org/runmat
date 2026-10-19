@@ -21,8 +21,14 @@ pub(super) fn none(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
     infer_study_constructor(request, entry, &NONE)
 }
 
-pub(super) const NEW: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Object(SPATIAL_CLASSES), Object(SERIES_CLASSES), Object(TIES_CLASSES)], FEA_REDUCTION_POLICY_CLASS);
+pub(super) const NEW: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[
+        Object(SPATIAL_CLASSES),
+        Object(SERIES_CLASSES),
+        Object(TIES_CLASSES),
+    ],
+    FEA_REDUCTION_POLICY_CLASS,
+);
 pub(super) fn new(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &NEW)
 }

@@ -7,7 +7,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "The components are divided by their Euclidean length, so `[0 0 2]` and `[0 0 1]` give the same direction. The result stores a 1-by-3 `components` row of unit length in the global frame. A vector whose length is zero (to within machine epsilon) is rejected.",
             "`components` must be a real numeric 1-by-3 or 3-by-1 vector. Any built-in integer class is accepted; the values are validated exactly and then converted once to binary64 before normalization.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },

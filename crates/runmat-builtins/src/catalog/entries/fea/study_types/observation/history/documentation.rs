@@ -14,6 +14,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when the argument count is not 15, `id` is empty or not text, or any argument is not the expected typed value.",
         "`RunMat:fea:Internal` if the request cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 
@@ -40,7 +41,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(tipHistory), 'fea.Observation'));\nassert(strcmp(tipHistory.value.history.observation_id, 'tip_deflection'));\nassert(isequal(reshape(tipHistory.value.history.sampling.time_seconds, 1, []), [0 0.1 0.4 1]));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(tipHistory), 'fea.Observation'));\nassert(strcmp(tipHistory.value.history.observation_id, 'tip_deflection'));\nassert(isequal(tipHistory.value.history.sampling.time_seconds, [0 0.1 0.4 1]));" },
     },
 ];
 

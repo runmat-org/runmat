@@ -418,7 +418,10 @@ impl MeshingEvidence {
                 || stage.search_work > self.resources.search_work
                 || stage.maximum_recursion_depth > self.resources.maximum_recursion_depth
                 || stage.iterations > self.resources.iterations
-                || stage.elapsed_time_ms > self.resources.wall_time_ms
+                // A reused observation retains the timing of the run that produced it,
+                // which may exceed the wall time of the run that restored it.
+                || (stage.reused_from.is_none()
+                    && stage.elapsed_time_ms > self.resources.wall_time_ms)
             {
                 return Err(MeshingContractError::invalid(
                     "stage evidence",

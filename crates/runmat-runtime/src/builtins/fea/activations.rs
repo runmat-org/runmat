@@ -10,95 +10,28 @@ use crate::builtins::fea::study_values::{
     VALUE_FIELD,
 };
 
-pub(super) const OBJECT_REF_CLASS: &str = "fea.StepObjectRef";
-pub(super) const LIFECYCLE_CLASS: &str = "fea.ActivationLifecycle";
-pub(super) const ACTIVATION_CLASS: &str = "fea.StepObjectActivation";
+pub(super) const OBJECT_REF_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STEP_OBJECT_REF_CLASS.display_name();
+pub(super) const LIFECYCLE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_ACTIVATION_LIFECYCLE_CLASS
+        .display_name();
+pub(super) const ACTIVATION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STEP_OBJECT_ACTIVATION_CLASS
+        .display_name();
 
 const ACTIVATION_FIELDS: &[&str] = &["object", "lifecycle"];
-const STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Typed activation constructors accept identifiers and typed FEA objects only.",
-};
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
-const ID_INPUT: [BuiltinParamDescriptor; 1] = [required(
-    "id",
-    BuiltinParamType::StringScalar,
-    "Authored object identifier.",
-)];
-const STEP_INPUT: [BuiltinParamDescriptor; 1] = [required(
-    "fromStep",
-    BuiltinParamType::StringScalar,
-    "Upstream procedure-step identifier.",
-)];
-const MODIFY_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "priorStep",
-        BuiltinParamType::StringScalar,
-        "Upstream procedure-step identifier.",
-    ),
-    required(
-        "priorObject",
-        BuiltinParamType::Any,
-        "Typed reference to the object being replaced.",
-    ),
-];
-const ACTIVATION_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "object",
-        BuiltinParamType::Any,
-        "Typed reference to the object active in this step.",
-    ),
-    required(
-        "lifecycle",
-        BuiltinParamType::Any,
-        "Typed lifecycle for the object in this step.",
-    ),
-];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-
-macro_rules! descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: $inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
 macro_rules! object_ref_builtin {
     ($function:ident, $builtin:literal, $variant:ident, $descriptor:ident) => {
         #[runtime_builtin(
-                                    name = $builtin,
-                                    category = "fea",
-                                    summary = "Create a typed procedure-step object reference.",
-                                    keywords = "fea,procedure,step,activation,object,typed",
-                                    descriptor($descriptor),
-                                    integer_audit(STRUCTURAL_INTEGER_AUDIT),
-                                    builtin_path = "crate::builtins::fea::activations"
-                                )]
+                    name = $builtin,
+                    binding_variant = "default",
+                    builtin_path = "crate::builtins::fea::activations"
+                )]
         pub async fn $function(id: String) -> BuiltinResult<Value> {
+            crate::builtins::fea::constraints::fixed_outputs(
+                &runmat_builtins::$descriptor,
+                $builtin,
+            )?;
             to_typed_value(
                 $builtin,
                 OBJECT_REF_CLASS,
@@ -108,107 +41,59 @@ macro_rules! object_ref_builtin {
     };
 }
 
-descriptor!(
-    CONSTRAINT_REF_DESCRIPTOR,
-    CONSTRAINT_REF_SIGNATURES,
-    "object = fea.StepObjectRef.constraint(id)",
-    &ID_INPUT
-);
-descriptor!(
-    BOUNDARY_REF_DESCRIPTOR,
-    BOUNDARY_REF_SIGNATURES,
-    "object = fea.StepObjectRef.boundary(id)",
-    &ID_INPUT
-);
-descriptor!(
-    CONNECTOR_REF_DESCRIPTOR,
-    CONNECTOR_REF_SIGNATURES,
-    "object = fea.StepObjectRef.connector(id)",
-    &ID_INPUT
-);
-descriptor!(
-    INTERFACE_REF_DESCRIPTOR,
-    INTERFACE_REF_SIGNATURES,
-    "object = fea.StepObjectRef.interface(id)",
-    &ID_INPUT
-);
-descriptor!(
-    EXCITATION_REF_DESCRIPTOR,
-    EXCITATION_REF_SIGNATURES,
-    "object = fea.StepObjectRef.excitation(id)",
-    &ID_INPUT
-);
-descriptor!(
-    INITIAL_CONDITION_REF_DESCRIPTOR,
-    INITIAL_CONDITION_REF_SIGNATURES,
-    "object = fea.StepObjectRef.initialCondition(id)",
-    &ID_INPUT
-);
-descriptor!(
-    MATERIAL_PARAMETER_REF_DESCRIPTOR,
-    MATERIAL_PARAMETER_REF_SIGNATURES,
-    "object = fea.StepObjectRef.materialParameter(id)",
-    &ID_INPUT
-);
 object_ref_builtin!(
     constraint,
     "fea.StepObjectRef.constraint",
     Constraint,
-    CONSTRAINT_REF_DESCRIPTOR
+    FEA_STEP_OBJECT_REF_CONSTRAINT_DESCRIPTOR
 );
 object_ref_builtin!(
     boundary,
     "fea.StepObjectRef.boundary",
     Boundary,
-    BOUNDARY_REF_DESCRIPTOR
+    FEA_STEP_OBJECT_REF_BOUNDARY_DESCRIPTOR
 );
 object_ref_builtin!(
     connector,
     "fea.StepObjectRef.connector",
     Connector,
-    CONNECTOR_REF_DESCRIPTOR
+    FEA_STEP_OBJECT_REF_CONNECTOR_DESCRIPTOR
 );
 object_ref_builtin!(
     interface,
     "fea.StepObjectRef.interface",
     Interface,
-    INTERFACE_REF_DESCRIPTOR
+    FEA_STEP_OBJECT_REF_INTERFACE_DESCRIPTOR
 );
 object_ref_builtin!(
     excitation,
     "fea.StepObjectRef.excitation",
     Excitation,
-    EXCITATION_REF_DESCRIPTOR
+    FEA_STEP_OBJECT_REF_EXCITATION_DESCRIPTOR
 );
 object_ref_builtin!(
     initial_condition,
     "fea.StepObjectRef.initialCondition",
     InitialCondition,
-    INITIAL_CONDITION_REF_DESCRIPTOR
+    FEA_STEP_OBJECT_REF_INITIAL_CONDITION_DESCRIPTOR
 );
 object_ref_builtin!(
     material_parameter,
     "fea.StepObjectRef.materialParameter",
     MaterialParameter,
-    MATERIAL_PARAMETER_REF_DESCRIPTOR
+    FEA_STEP_OBJECT_REF_MATERIAL_PARAMETER_DESCRIPTOR
 );
 
-descriptor!(
-    ACTIVATE_DESCRIPTOR,
-    ACTIVATE_SIGNATURES,
-    "lifecycle = fea.ActivationLifecycle.activate()",
-    &NO_INPUTS
-);
 #[runtime_builtin(
     name = "fea.ActivationLifecycle.activate",
-    category = "fea",
-    summary = "Activate an authored object in a procedure step.",
-    keywords = "fea,procedure,step,activation,lifecycle,typed",
-    descriptor(ACTIVATE_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::activations"
 )]
 pub async fn activate() -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_ACTIVATION_LIFECYCLE_ACTIVATE_DESCRIPTOR,
+        "fea.ActivationLifecycle.activate",
+    )?;
     to_typed_value(
         "fea.ActivationLifecycle.activate",
         LIFECYCLE_CLASS,
@@ -216,22 +101,16 @@ pub async fn activate() -> BuiltinResult<Value> {
     )
 }
 
-descriptor!(
-    CONTINUE_DESCRIPTOR,
-    CONTINUE_SIGNATURES,
-    "lifecycle = fea.ActivationLifecycle.continueFrom(fromStep)",
-    &STEP_INPUT
-);
 #[runtime_builtin(
     name = "fea.ActivationLifecycle.continueFrom",
-    category = "fea",
-    summary = "Continue an object that remains active from an upstream step.",
-    keywords = "fea,procedure,step,activation,continue,typed",
-    descriptor(CONTINUE_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::activations"
 )]
 pub async fn continue_from(from_step: String) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_ACTIVATION_LIFECYCLE_CONTINUE_FROM_DESCRIPTOR,
+        "fea.ActivationLifecycle.continueFrom",
+    )?;
     const NAME: &str = "fea.ActivationLifecycle.continueFrom";
     to_typed_value(
         NAME,
@@ -242,22 +121,16 @@ pub async fn continue_from(from_step: String) -> BuiltinResult<Value> {
     )
 }
 
-descriptor!(
-    DEACTIVATE_DESCRIPTOR,
-    DEACTIVATE_SIGNATURES,
-    "lifecycle = fea.ActivationLifecycle.deactivate(fromStep)",
-    &STEP_INPUT
-);
 #[runtime_builtin(
     name = "fea.ActivationLifecycle.deactivate",
-    category = "fea",
-    summary = "Deactivate an object inherited from an upstream step.",
-    keywords = "fea,procedure,step,activation,deactivate,typed",
-    descriptor(DEACTIVATE_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::activations"
 )]
 pub async fn deactivate(from_step: String) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_ACTIVATION_LIFECYCLE_DEACTIVATE_DESCRIPTOR,
+        "fea.ActivationLifecycle.deactivate",
+    )?;
     const NAME: &str = "fea.ActivationLifecycle.deactivate";
     to_typed_value(
         NAME,
@@ -268,22 +141,16 @@ pub async fn deactivate(from_step: String) -> BuiltinResult<Value> {
     )
 }
 
-descriptor!(
-    MODIFY_DESCRIPTOR,
-    MODIFY_SIGNATURES,
-    "lifecycle = fea.ActivationLifecycle.modify(priorStep, priorObject)",
-    &MODIFY_INPUTS
-);
 #[runtime_builtin(
     name = "fea.ActivationLifecycle.modify",
-    category = "fea",
-    summary = "Replace an upstream object with a newly authored object identity.",
-    keywords = "fea,procedure,step,activation,modify,typed",
-    descriptor(MODIFY_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::activations"
 )]
 pub async fn modify(prior_step: String, prior_object: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_ACTIVATION_LIFECYCLE_MODIFY_DESCRIPTOR,
+        "fea.ActivationLifecycle.modify",
+    )?;
     const NAME: &str = "fea.ActivationLifecycle.modify";
     to_typed_value(
         NAME,
@@ -295,22 +162,16 @@ pub async fn modify(prior_step: String, prior_object: Value) -> BuiltinResult<Va
     )
 }
 
-descriptor!(
-    ACTIVATION_DESCRIPTOR,
-    ACTIVATION_SIGNATURES,
-    "activation = fea.StepObjectActivation.new(object, lifecycle)",
-    &ACTIVATION_INPUTS
-);
 #[runtime_builtin(
     name = "fea.StepObjectActivation.new",
-    category = "fea",
-    summary = "Bind an authored object and its lifecycle to a procedure step.",
-    keywords = "fea,procedure,step,activation,lifecycle,typed",
-    descriptor(ACTIVATION_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::activations"
 )]
 pub async fn activation(object: Value, lifecycle: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_STEP_OBJECT_ACTIVATION_NEW_ACTIVATION_DESCRIPTOR,
+        "fea.StepObjectActivation.new",
+    )?;
     const NAME: &str = "fea.StepObjectActivation.new";
     serializable_to_object(
         NAME,

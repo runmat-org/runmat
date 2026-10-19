@@ -9,46 +9,32 @@ use super::super::*;
 use crate::builtins::fea::study_values::{
     from_typed_value, register_immutable_class, to_typed_value, VALUE_FIELD,
 };
+use runmat_builtins::fea_contract::study_types::classes;
 
-pub(super) const STATE_KIND_CLASS: &str = "fea.StateKind";
-pub(super) const STATE_COMPLETENESS_CLASS: &str = "fea.StateCompleteness";
-pub(super) const STATE_PERSISTENCE_CLASS: &str = "fea.StatePersistence";
-pub(super) const STATE_USE_CLASS: &str = "fea.StateUse";
-pub(super) const INITIAL_CONFLICT_CLASS: &str = "fea.InitialStateConflictPolicy";
-pub(super) const DEPENDENCY_REASON_CLASS: &str = "fea.SequenceDependencyReason";
-pub(super) const TRANSITION_METHOD_CLASS: &str = "fea.StateTransitionMethod";
-pub(super) const TOPOLOGY_TRANSITION_CLASS: &str = "fea.TopologyTransitionPolicy";
-pub(super) const REFERENCE_STATE_CLASS: &str = "fea.ReferenceStatePolicy";
-
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const CHOICE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Closed FEA study-policy choices have no numeric inputs.",
-};
+pub(super) const STATE_KIND_CLASS: &str = classes::FEA_STATE_KIND_CLASS.display_name();
+pub(super) const STATE_COMPLETENESS_CLASS: &str =
+    classes::FEA_STATE_COMPLETENESS_CLASS.display_name();
+pub(super) const STATE_PERSISTENCE_CLASS: &str =
+    classes::FEA_STATE_PERSISTENCE_CLASS.display_name();
+pub(super) const STATE_USE_CLASS: &str = classes::FEA_STATE_USE_CLASS.display_name();
+pub(super) const INITIAL_CONFLICT_CLASS: &str =
+    classes::FEA_INITIAL_STATE_CONFLICT_POLICY_CLASS.display_name();
+pub(super) const DEPENDENCY_REASON_CLASS: &str =
+    classes::FEA_SEQUENCE_DEPENDENCY_REASON_CLASS.display_name();
+pub(super) const TRANSITION_METHOD_CLASS: &str =
+    classes::FEA_STATE_TRANSITION_METHOD_CLASS.display_name();
+pub(super) const TOPOLOGY_TRANSITION_CLASS: &str =
+    classes::FEA_TOPOLOGY_TRANSITION_POLICY_CLASS.display_name();
+pub(super) const REFERENCE_STATE_CLASS: &str =
+    classes::FEA_REFERENCE_STATE_POLICY_CLASS.display_name();
 
 macro_rules! choice {
-    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $label:literal, $summary:literal, $class:expr, $value:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &NO_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
+    ($function:ident, $builtin:literal, $class:expr, $value:expr $(,)?) => {
         #[runtime_builtin(
-                                    name = $builtin,
-                                    category = "fea",
-                                    summary = $summary,
-                                    keywords = "fea,study,sequence,state,policy,typed",
-                                    descriptor($descriptor),
-                                    integer_audit(CHOICE_INTEGER_AUDIT),
-                                    builtin_path = "crate::builtins::fea::study_policies::sequence"
-                                )]
+                    name = $builtin,
+                    binding_variant = "default",
+                    builtin_path = "crate::builtins::fea::study_policies::sequence"
+                )]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value($builtin, $class, $value)
         }
@@ -57,481 +43,293 @@ macro_rules! choice {
 
 choice!(
     state_structural_primary,
-    STATE_STRUCTURAL_PRIMARY_DESCRIPTOR,
-    STATE_STRUCTURAL_PRIMARY_SIGNATURES,
     "fea.StateKind.structuralPrimary",
-    "kind = fea.StateKind.structuralPrimary()",
-    "Select a complete structural primary state.",
     STATE_KIND_CLASS,
-    StateKind::StructuralPrimary
+    StateKind::StructuralPrimary,
 );
 choice!(
     state_structural_kinematics,
-    STATE_STRUCTURAL_KINEMATICS_DESCRIPTOR,
-    STATE_STRUCTURAL_KINEMATICS_SIGNATURES,
     "fea.StateKind.structuralKinematics",
-    "kind = fea.StateKind.structuralKinematics()",
-    "Select a structural kinematics state.",
     STATE_KIND_CLASS,
-    StateKind::StructuralKinematics
+    StateKind::StructuralKinematics,
 );
 choice!(
     state_structural_stress_strain,
-    STATE_STRUCTURAL_STRESS_STRAIN_DESCRIPTOR,
-    STATE_STRUCTURAL_STRESS_STRAIN_SIGNATURES,
     "fea.StateKind.structuralStressStrain",
-    "kind = fea.StateKind.structuralStressStrain()",
-    "Select a structural stress-strain state.",
     STATE_KIND_CLASS,
-    StateKind::StructuralStressStrain
+    StateKind::StructuralStressStrain,
 );
 choice!(
     state_geometric_stiffness,
-    STATE_GEOMETRIC_STIFFNESS_DESCRIPTOR,
-    STATE_GEOMETRIC_STIFFNESS_SIGNATURES,
     "fea.StateKind.geometricStiffness",
-    "kind = fea.StateKind.geometricStiffness()",
-    "Select a geometric-stiffness state.",
     STATE_KIND_CLASS,
-    StateKind::GeometricStiffness
+    StateKind::GeometricStiffness,
 );
 choice!(
     state_material_history,
-    STATE_MATERIAL_HISTORY_DESCRIPTOR,
-    STATE_MATERIAL_HISTORY_SIGNATURES,
     "fea.StateKind.materialHistory",
-    "kind = fea.StateKind.materialHistory()",
-    "Select a material-history state.",
     STATE_KIND_CLASS,
-    StateKind::MaterialHistory
+    StateKind::MaterialHistory,
 );
 choice!(
     state_contact_history,
-    STATE_CONTACT_HISTORY_DESCRIPTOR,
-    STATE_CONTACT_HISTORY_SIGNATURES,
     "fea.StateKind.contactHistory",
-    "kind = fea.StateKind.contactHistory()",
-    "Select a contact-history state.",
     STATE_KIND_CLASS,
-    StateKind::ContactHistory
+    StateKind::ContactHistory,
 );
 choice!(
     state_thermal,
-    STATE_THERMAL_DESCRIPTOR,
-    STATE_THERMAL_SIGNATURES,
     "fea.StateKind.thermal",
-    "kind = fea.StateKind.thermal()",
-    "Select a thermal state.",
     STATE_KIND_CLASS,
-    StateKind::Thermal
+    StateKind::Thermal,
 );
 choice!(
     state_electromagnetic_static,
-    STATE_ELECTROMAGNETIC_STATIC_DESCRIPTOR,
-    STATE_ELECTROMAGNETIC_STATIC_SIGNATURES,
     "fea.StateKind.electromagneticStatic",
-    "kind = fea.StateKind.electromagneticStatic()",
-    "Select a static electromagnetic state.",
     STATE_KIND_CLASS,
-    StateKind::ElectromagneticStatic
+    StateKind::ElectromagneticStatic,
 );
 choice!(
     state_electromagnetic_complex,
-    STATE_ELECTROMAGNETIC_COMPLEX_DESCRIPTOR,
-    STATE_ELECTROMAGNETIC_COMPLEX_SIGNATURES,
     "fea.StateKind.electromagneticComplex",
-    "kind = fea.StateKind.electromagneticComplex()",
-    "Select a complex electromagnetic state.",
     STATE_KIND_CLASS,
-    StateKind::ElectromagneticComplex
+    StateKind::ElectromagneticComplex,
 );
 choice!(
     state_acoustic_complex,
-    STATE_ACOUSTIC_COMPLEX_DESCRIPTOR,
-    STATE_ACOUSTIC_COMPLEX_SIGNATURES,
     "fea.StateKind.acousticComplex",
-    "kind = fea.StateKind.acousticComplex()",
-    "Select a complex acoustic state.",
     STATE_KIND_CLASS,
-    StateKind::AcousticComplex
+    StateKind::AcousticComplex,
 );
 choice!(
     state_fluid,
-    STATE_FLUID_DESCRIPTOR,
-    STATE_FLUID_SIGNATURES,
     "fea.StateKind.fluid",
-    "kind = fea.StateKind.fluid()",
-    "Select a fluid state.",
     STATE_KIND_CLASS,
-    StateKind::Fluid
+    StateKind::Fluid,
 );
 choice!(
     state_moving_mesh,
-    STATE_MOVING_MESH_DESCRIPTOR,
-    STATE_MOVING_MESH_SIGNATURES,
     "fea.StateKind.movingMesh",
-    "kind = fea.StateKind.movingMesh()",
-    "Select a moving-mesh state.",
     STATE_KIND_CLASS,
-    StateKind::MovingMesh
+    StateKind::MovingMesh,
 );
 choice!(
     state_modal_basis,
-    STATE_MODAL_BASIS_DESCRIPTOR,
-    STATE_MODAL_BASIS_SIGNATURES,
     "fea.StateKind.modalBasis",
-    "kind = fea.StateKind.modalBasis()",
-    "Select a modal-basis state.",
     STATE_KIND_CLASS,
-    StateKind::ModalBasis
+    StateKind::ModalBasis,
 );
 choice!(
     state_coupled_interface,
-    STATE_COUPLED_INTERFACE_DESCRIPTOR,
-    STATE_COUPLED_INTERFACE_SIGNATURES,
     "fea.StateKind.coupledInterface",
-    "kind = fea.StateKind.coupledInterface()",
-    "Select a coupled-interface state.",
     STATE_KIND_CLASS,
-    StateKind::CoupledInterface
+    StateKind::CoupledInterface,
 );
 choice!(
     state_integrator,
-    STATE_INTEGRATOR_DESCRIPTOR,
-    STATE_INTEGRATOR_SIGNATURES,
     "fea.StateKind.integrator",
-    "kind = fea.StateKind.integrator()",
-    "Select a time-integrator state.",
     STATE_KIND_CLASS,
-    StateKind::Integrator
+    StateKind::Integrator,
 );
 
 choice!(
     completeness_complete,
-    COMPLETENESS_COMPLETE_DESCRIPTOR,
-    COMPLETENESS_COMPLETE_SIGNATURES,
     "fea.StateCompleteness.complete",
-    "value = fea.StateCompleteness.complete()",
-    "Require a complete state.",
     STATE_COMPLETENESS_CLASS,
-    StateCompleteness::Complete
+    StateCompleteness::Complete,
 );
 choice!(
     completeness_checkpoint,
-    COMPLETENESS_CHECKPOINT_DESCRIPTOR,
-    COMPLETENESS_CHECKPOINT_SIGNATURES,
     "fea.StateCompleteness.checkpoint",
-    "value = fea.StateCompleteness.checkpoint()",
-    "Select checkpoint completeness.",
     STATE_COMPLETENESS_CLASS,
-    StateCompleteness::Checkpoint
+    StateCompleteness::Checkpoint,
 );
 choice!(
     completeness_partial,
-    COMPLETENESS_PARTIAL_DESCRIPTOR,
-    COMPLETENESS_PARTIAL_SIGNATURES,
     "fea.StateCompleteness.partial",
-    "value = fea.StateCompleteness.partial()",
-    "Select a partial state.",
     STATE_COMPLETENESS_CLASS,
-    StateCompleteness::Partial
+    StateCompleteness::Partial,
 );
 
 choice!(
     persistence_canonical,
-    PERSISTENCE_CANONICAL_DESCRIPTOR,
-    PERSISTENCE_CANONICAL_SIGNATURES,
     "fea.StatePersistence.canonical",
-    "value = fea.StatePersistence.canonical()",
-    "Retain state canonically.",
     STATE_PERSISTENCE_CLASS,
-    StatePersistence::Canonical
+    StatePersistence::Canonical,
 );
 choice!(
     persistence_until_dependents,
-    PERSISTENCE_UNTIL_DEPENDENTS_DESCRIPTOR,
-    PERSISTENCE_UNTIL_DEPENDENTS_SIGNATURES,
     "fea.StatePersistence.untilDependentsComplete",
-    "value = fea.StatePersistence.untilDependentsComplete()",
-    "Retain state until dependents complete.",
     STATE_PERSISTENCE_CLASS,
-    StatePersistence::UntilDependentsComplete
+    StatePersistence::UntilDependentsComplete,
 );
 choice!(
     persistence_checkpoint_only,
-    PERSISTENCE_CHECKPOINT_ONLY_DESCRIPTOR,
-    PERSISTENCE_CHECKPOINT_ONLY_SIGNATURES,
     "fea.StatePersistence.checkpointOnly",
-    "value = fea.StatePersistence.checkpointOnly()",
-    "Retain state only as a checkpoint.",
     STATE_PERSISTENCE_CLASS,
-    StatePersistence::CheckpointOnly
+    StatePersistence::CheckpointOnly,
 );
 
 choice!(
     use_physical_initial,
-    USE_PHYSICAL_INITIAL_DESCRIPTOR,
-    USE_PHYSICAL_INITIAL_SIGNATURES,
     "fea.StateUse.physicalInitialState",
-    "value = fea.StateUse.physicalInitialState()",
-    "Consume state as the physical initial state.",
     STATE_USE_CLASS,
-    StateUse::PhysicalInitialState
+    StateUse::PhysicalInitialState,
 );
 choice!(
     use_linearization,
-    USE_LINEARIZATION_DESCRIPTOR,
-    USE_LINEARIZATION_SIGNATURES,
     "fea.StateUse.linearizationPoint",
-    "value = fea.StateUse.linearizationPoint()",
-    "Consume state as a linearization point.",
     STATE_USE_CLASS,
-    StateUse::LinearizationPoint
+    StateUse::LinearizationPoint,
 );
 choice!(
     use_prestress,
-    USE_PRESTRESS_DESCRIPTOR,
-    USE_PRESTRESS_SIGNATURES,
     "fea.StateUse.prestress",
-    "value = fea.StateUse.prestress()",
-    "Consume state as prestress.",
     STATE_USE_CLASS,
-    StateUse::Prestress
+    StateUse::Prestress,
 );
 choice!(
     use_initial_guess,
-    USE_INITIAL_GUESS_DESCRIPTOR,
-    USE_INITIAL_GUESS_SIGNATURES,
     "fea.StateUse.initialGuess",
-    "value = fea.StateUse.initialGuess()",
-    "Consume state only as an initial guess.",
     STATE_USE_CLASS,
-    StateUse::InitialGuess
+    StateUse::InitialGuess,
 );
 choice!(
     use_modal_basis,
-    USE_MODAL_BASIS_DESCRIPTOR,
-    USE_MODAL_BASIS_SIGNATURES,
     "fea.StateUse.modalBasis",
-    "value = fea.StateUse.modalBasis()",
-    "Consume state as a modal basis.",
     STATE_USE_CLASS,
-    StateUse::ModalBasis
+    StateUse::ModalBasis,
 );
 choice!(
     use_coupled_interface,
-    USE_COUPLED_INTERFACE_DESCRIPTOR,
-    USE_COUPLED_INTERFACE_SIGNATURES,
     "fea.StateUse.coupledInterface",
-    "value = fea.StateUse.coupledInterface()",
-    "Consume state at a coupled interface.",
     STATE_USE_CLASS,
-    StateUse::CoupledInterface
+    StateUse::CoupledInterface,
 );
 choice!(
     use_restart,
-    USE_RESTART_DESCRIPTOR,
-    USE_RESTART_SIGNATURES,
     "fea.StateUse.restart",
-    "value = fea.StateUse.restart()",
-    "Consume state for restart.",
     STATE_USE_CLASS,
-    StateUse::Restart
+    StateUse::Restart,
 );
 
 choice!(
     conflict_reject,
-    CONFLICT_REJECT_DESCRIPTOR,
-    CONFLICT_REJECT_SIGNATURES,
     "fea.InitialStateConflictPolicy.reject",
-    "value = fea.InitialStateConflictPolicy.reject()",
-    "Reject an initial-state conflict.",
     INITIAL_CONFLICT_CLASS,
-    InitialStateConflictPolicy::Reject
+    InitialStateConflictPolicy::Reject,
 );
 choice!(
     conflict_replace,
-    CONFLICT_REPLACE_DESCRIPTOR,
-    CONFLICT_REPLACE_SIGNATURES,
     "fea.InitialStateConflictPolicy.replaceInitialCondition",
-    "value = fea.InitialStateConflictPolicy.replaceInitialCondition()",
-    "Replace a conflicting initial condition.",
     INITIAL_CONFLICT_CLASS,
-    InitialStateConflictPolicy::ReplaceInitialCondition
+    InitialStateConflictPolicy::ReplaceInitialCondition,
 );
 choice!(
     conflict_augment,
-    CONFLICT_AUGMENT_DESCRIPTOR,
-    CONFLICT_AUGMENT_SIGNATURES,
     "fea.InitialStateConflictPolicy.augmentDisjointQuantities",
-    "value = fea.InitialStateConflictPolicy.augmentDisjointQuantities()",
-    "Augment only disjoint initial-state quantities.",
     INITIAL_CONFLICT_CLASS,
-    InitialStateConflictPolicy::AugmentDisjointQuantities
+    InitialStateConflictPolicy::AugmentDisjointQuantities,
 );
 
 choice!(
     dependency_state_transfer,
-    DEPENDENCY_STATE_TRANSFER_DESCRIPTOR,
-    DEPENDENCY_STATE_TRANSFER_SIGNATURES,
     "fea.SequenceDependencyReason.stateTransfer",
-    "value = fea.SequenceDependencyReason.stateTransfer()",
-    "Order steps for state transfer.",
     DEPENDENCY_REASON_CLASS,
-    SequenceDependencyReason::StateTransfer
+    SequenceDependencyReason::StateTransfer,
 );
 choice!(
     dependency_authored,
-    DEPENDENCY_AUTHORED_DESCRIPTOR,
-    DEPENDENCY_AUTHORED_SIGNATURES,
     "fea.SequenceDependencyReason.authoredOrdering",
-    "value = fea.SequenceDependencyReason.authoredOrdering()",
-    "Apply explicit authored ordering.",
     DEPENDENCY_REASON_CLASS,
-    SequenceDependencyReason::AuthoredOrdering
+    SequenceDependencyReason::AuthoredOrdering,
 );
 choice!(
     dependency_interface,
-    DEPENDENCY_INTERFACE_DESCRIPTOR,
-    DEPENDENCY_INTERFACE_SIGNATURES,
     "fea.SequenceDependencyReason.sharedInterface",
-    "value = fea.SequenceDependencyReason.sharedInterface()",
-    "Order steps sharing an interface.",
     DEPENDENCY_REASON_CLASS,
-    SequenceDependencyReason::SharedInterface
+    SequenceDependencyReason::SharedInterface,
 );
 choice!(
     dependency_adaptation,
-    DEPENDENCY_ADAPTATION_DESCRIPTOR,
-    DEPENDENCY_ADAPTATION_SIGNATURES,
     "fea.SequenceDependencyReason.adaptation",
-    "value = fea.SequenceDependencyReason.adaptation()",
-    "Order steps across adaptation.",
     DEPENDENCY_REASON_CLASS,
-    SequenceDependencyReason::Adaptation
+    SequenceDependencyReason::Adaptation,
 );
 
 choice!(
     transition_reuse,
-    TRANSITION_REUSE_DESCRIPTOR,
-    TRANSITION_REUSE_SIGNATURES,
     "fea.StateTransitionMethod.reuse",
-    "value = fea.StateTransitionMethod.reuse()",
-    "Reuse an unchanged state.",
     TRANSITION_METHOD_CLASS,
-    StateTransitionMethod::Reuse
+    StateTransitionMethod::Reuse,
 );
 choice!(
     transition_conservative,
-    TRANSITION_CONSERVATIVE_DESCRIPTOR,
-    TRANSITION_CONSERVATIVE_SIGNATURES,
     "fea.StateTransitionMethod.conservativeProjection",
-    "value = fea.StateTransitionMethod.conservativeProjection()",
-    "Project state conservatively.",
     TRANSITION_METHOD_CLASS,
-    StateTransitionMethod::ConservativeProjection
+    StateTransitionMethod::ConservativeProjection,
 );
 choice!(
     transition_interpolation,
-    TRANSITION_INTERPOLATION_DESCRIPTOR,
-    TRANSITION_INTERPOLATION_SIGNATURES,
     "fea.StateTransitionMethod.interpolation",
-    "value = fea.StateTransitionMethod.interpolation()",
-    "Interpolate state with evidence.",
     TRANSITION_METHOD_CLASS,
-    StateTransitionMethod::Interpolation
+    StateTransitionMethod::Interpolation,
 );
 choice!(
     transition_linearize,
-    TRANSITION_LINEARIZE_DESCRIPTOR,
-    TRANSITION_LINEARIZE_SIGNATURES,
     "fea.StateTransitionMethod.linearize",
-    "value = fea.StateTransitionMethod.linearize()",
-    "Linearize about an upstream state.",
     TRANSITION_METHOD_CLASS,
-    StateTransitionMethod::Linearize
+    StateTransitionMethod::Linearize,
 );
 choice!(
     transition_operator,
-    TRANSITION_OPERATOR_DESCRIPTOR,
-    TRANSITION_OPERATOR_SIGNATURES,
     "fea.StateTransitionMethod.deriveOperatorContribution",
-    "value = fea.StateTransitionMethod.deriveOperatorContribution()",
-    "Derive an operator contribution from state.",
     TRANSITION_METHOD_CLASS,
-    StateTransitionMethod::DeriveOperatorContribution
+    StateTransitionMethod::DeriveOperatorContribution,
 );
 choice!(
     transition_guess,
-    TRANSITION_GUESS_DESCRIPTOR,
-    TRANSITION_GUESS_SIGNATURES,
     "fea.StateTransitionMethod.initialGuessOnly",
-    "value = fea.StateTransitionMethod.initialGuessOnly()",
-    "Use state only as an initial guess.",
     TRANSITION_METHOD_CLASS,
-    StateTransitionMethod::InitialGuessOnly
+    StateTransitionMethod::InitialGuessOnly,
 );
 
 choice!(
     topology_identical,
-    TOPOLOGY_IDENTICAL_DESCRIPTOR,
-    TOPOLOGY_IDENTICAL_SIGNATURES,
     "fea.TopologyTransitionPolicy.requireIdentical",
-    "value = fea.TopologyTransitionPolicy.requireIdentical()",
-    "Require identical topology.",
     TOPOLOGY_TRANSITION_CLASS,
-    TopologyTransitionPolicy::RequireIdentical
+    TopologyTransitionPolicy::RequireIdentical,
 );
 choice!(
     topology_project,
-    TOPOLOGY_PROJECT_DESCRIPTOR,
-    TOPOLOGY_PROJECT_SIGNATURES,
     "fea.TopologyTransitionPolicy.projectWithEvidence",
-    "value = fea.TopologyTransitionPolicy.projectWithEvidence()",
-    "Permit evidenced topology projection.",
     TOPOLOGY_TRANSITION_CLASS,
-    TopologyTransitionPolicy::ProjectWithEvidence
+    TopologyTransitionPolicy::ProjectWithEvidence,
 );
 choice!(
     topology_adapted,
-    TOPOLOGY_ADAPTED_DESCRIPTOR,
-    TOPOLOGY_ADAPTED_SIGNATURES,
     "fea.TopologyTransitionPolicy.adaptedMeshLineage",
-    "value = fea.TopologyTransitionPolicy.adaptedMeshLineage()",
-    "Require an adapted-mesh lineage.",
     TOPOLOGY_TRANSITION_CLASS,
-    TopologyTransitionPolicy::AdaptedMeshLineage
+    TopologyTransitionPolicy::AdaptedMeshLineage,
 );
 
 choice!(
     reference_preserve,
-    REFERENCE_PRESERVE_DESCRIPTOR,
-    REFERENCE_PRESERVE_SIGNATURES,
     "fea.ReferenceStatePolicy.preserve",
-    "value = fea.ReferenceStatePolicy.preserve()",
-    "Preserve the producer reference state.",
     REFERENCE_STATE_CLASS,
-    ReferenceStatePolicy::Preserve
+    ReferenceStatePolicy::Preserve,
 );
 choice!(
     reference_receiving,
-    REFERENCE_RECEIVING_DESCRIPTOR,
-    REFERENCE_RECEIVING_SIGNATURES,
     "fea.ReferenceStatePolicy.receivingStepOrigin",
-    "value = fea.ReferenceStatePolicy.receivingStepOrigin()",
-    "Use the receiving step origin.",
     REFERENCE_STATE_CLASS,
-    ReferenceStatePolicy::ReceivingStepOrigin
+    ReferenceStatePolicy::ReceivingStepOrigin,
 );
 choice!(
     reference_linearization,
-    REFERENCE_LINEARIZATION_DESCRIPTOR,
-    REFERENCE_LINEARIZATION_SIGNATURES,
     "fea.ReferenceStatePolicy.explicitLinearizationPoint",
-    "value = fea.ReferenceStatePolicy.explicitLinearizationPoint()",
-    "Use an explicit linearization point.",
     REFERENCE_STATE_CLASS,
-    ReferenceStatePolicy::ExplicitLinearizationPoint
+    ReferenceStatePolicy::ExplicitLinearizationPoint,
 );
 
 pub(crate) fn state_kind(builtin: &'static str, value: &Value) -> BuiltinResult<StateKind> {
@@ -749,3 +547,6 @@ pub(super) fn ensure_classes_registered() {
         );
     });
 }
+
+#[cfg(test)]
+mod tests;

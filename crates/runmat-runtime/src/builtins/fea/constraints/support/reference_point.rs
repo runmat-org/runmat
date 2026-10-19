@@ -8,51 +8,22 @@ use crate::class_registry::declaration::{
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_analysis_core::{Position, ReferencePoint};
 
-const REFERENCE_POINT_CLASS: &str = "fea.ReferencePoint";
+const REFERENCE_POINT_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_REFERENCE_POINT_CLASS.display_name();
 const REFERENCE_POINT_FIELDS: &[&str] = &["reference_point_id", "position"];
-const REFERENCE_POINT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Reference-point identifier.",
-    },
-    BuiltinParamDescriptor {
-        name: "position",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed fea.Position coordinates.",
-    },
-];
-const REFERENCE_POINT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "point = fea.ReferencePoint.fromCoordinates(id, position)",
-    inputs: &REFERENCE_POINT_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const REFERENCE_POINT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REFERENCE_POINT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.ReferencePoint.fromCoordinates",
-    category = "fea",
-    summary = "Create a typed reference point from a position.",
-    keywords = "fea,reference,point,position,coupling,typed",
-    descriptor(
-        crate::builtins::fea::constraints::support::reference_point::REFERENCE_POINT_DESCRIPTOR
-    ),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::reference_point"
 )]
 pub async fn reference_point_from_coordinates_builtin(
     id: String,
     position: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_REFERENCE_POINT_FROM_COORDINATES_DESCRIPTOR,
+        "fea.ReferencePoint.fromCoordinates",
+    )?;
     validate_id("fea.ReferencePoint.fromCoordinates", &id)?;
     position_meters("fea.ReferencePoint.fromCoordinates", &position)?;
     ensure_reference_point_class_registered();
@@ -75,7 +46,10 @@ pub(crate) fn reference_point_from_value(
             format!("expected {REFERENCE_POINT_CLASS}"),
         ));
     };
-    if object.class_name.display_name() != REFERENCE_POINT_CLASS {
+    if !object
+        .class_name
+        .is(runmat_builtins::fea_contract::model_types::classes::FEA_REFERENCE_POINT_CLASS)
+    {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,

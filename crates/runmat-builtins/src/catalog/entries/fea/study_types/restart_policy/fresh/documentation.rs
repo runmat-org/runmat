@@ -2,15 +2,25 @@ use crate::fea_contract::catalog_entry::{self, ConstructorDocumentationDefinitio
 use crate::*;
 
 const SECTIONS: &[BuiltinDocumentationSection] = &[
-    BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
-        "Takes no arguments. This is the usual policy; it imposes no extra validation.",
-    ] },
-    BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
-        "Pass the policy as the `restart` argument (8th) of `fea.ProcedureStep.configure`.",
-    ] },
-    BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
-        "`RunMat:fea:Internal` if the value cannot be converted into a RunMat object.",
-    ] },
+    BuiltinDocumentationSection {
+        heading: "Behavior",
+        paragraphs: &[
+            "Takes no arguments. This is the usual policy; it imposes no extra validation.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Use in a study",
+        paragraphs: &[
+            "Pass the policy as the `restart` argument (8th) of `fea.ProcedureStep.configure`.",
+        ],
+    },
+    BuiltinDocumentationSection {
+        heading: "Errors",
+        paragraphs: &[
+            "`RunMat:fea:Internal` if the value cannot be converted into a RunMat object.",
+            "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
+        ],
+    },
 ];
 
 const EXAMPLES: &[BuiltinExample] = &[

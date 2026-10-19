@@ -2,7 +2,7 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_FIELD_PAGE_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_run_setup, BOX_STUDY},
+    example_fixtures::{fea_box_run_setup, BOX_STUDY, NATIVE_CAD_MESHING},
     integer::FEA_FIELD_PAGE_INTEGER_CAPABILITIES,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     result_inference::{infer_result, FeaResultKind},
@@ -26,7 +26,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: BOX_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
+    requirements: NATIVE_CAD_MESHING,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isa(page, 'fea.FieldPage'));\nassert(page.start == 1);\nassert(page.count <= 4);\nassert(page.total_count >= page.count);\nassert(strcmp(page.numeric_representation, \"real\"));",
     },

@@ -2,7 +2,7 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_COMPARE_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_run_setup, BOX_STUDY},
+    example_fixtures::{fea_box_run_setup, BOX_STUDY, NATIVE_CAD_MESHING},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     result_inference::{infer_result, FeaResultKind},
@@ -26,7 +26,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: BOX_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
+    requirements: NATIVE_CAD_MESHING,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isa(comparison, 'fea.Compare'));\nassert(~comparison.run_status_changed);\nassert(~comparison.numerically_acceptable_changed);\nassert(comparison.quality_reason_count_delta == 0);",
     },

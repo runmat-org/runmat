@@ -37,9 +37,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:fillet:InvalidInput` reports a `target` that is not a `geometry.Feature`, an `edges` value that is not a `geometry.RegionOutput` with edge topology, or a radius that cannot be converted.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:fillet:InvalidInput` reports every failure of the call: the wrong number of arguments, a `target` that is not a `geometry.Feature`, an `edges` value that is not a `geometry.RegionOutput` with edge topology, or a radius that cannot be converted, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -77,7 +75,7 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructionDocumentat
     examples: EXAMPLES,
     faqs: FAQS,
     implementation: &[FEATURES_SOURCE, GRAPH_VALIDATION_SOURCE],
-    verification: &[FULL_SURFACE_TEST],
+    verification: &[FULL_SURFACE_TEST, ERROR_OWNER_TEST],
     notes: &[],
     status: BuiltinDocumentationStatus::Stable,
 });

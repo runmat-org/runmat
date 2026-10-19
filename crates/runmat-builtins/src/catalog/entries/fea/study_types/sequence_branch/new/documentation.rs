@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when an id is empty or a list contains a non-text element.",
         "`RunMat:fea:Internal` if the value cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 

@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.StructuralExcitation` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const FORCE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralExcitation"),
+    result: classes::FEA_STRUCTURAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -18,7 +19,7 @@ pub(super) fn force(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 pub(super) const MOMENT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralExcitation"),
+    result: classes::FEA_STRUCTURAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -31,7 +32,7 @@ pub(super) fn moment(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Call
 }
 
 pub(super) const TRACTION: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralExcitation"),
+    result: classes::FEA_STRUCTURAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -44,7 +45,7 @@ pub(super) fn traction(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const PRESSURE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralExcitation"),
+    result: classes::FEA_STRUCTURAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -57,7 +58,7 @@ pub(super) fn pressure(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const BODY_FORCE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralExcitation"),
+    result: classes::FEA_STRUCTURAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),

@@ -36,8 +36,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:withRegion:InvalidInput` reports a part that is not `geometry.Generated`, an output that is not `geometry.RegionOutput`, an invalid name, or a name that is already published.",
-            "`RunMat:geometry:finish:InvalidInput` reports an output that names a feature outside the part's graph, because the product is revalidated as a finished part.",
+            "`RunMat:geometry:withRegion:InvalidInput` reports the wrong number of arguments, a part that is not `geometry.Generated`, an output that is not `geometry.RegionOutput` or that names a feature outside the part's graph, a name that is not scalar text or is invalid, or a name that is already published.",
         ],
     },
 ];
@@ -75,7 +74,7 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructionDocumentat
     examples: EXAMPLES,
     faqs: FAQS,
     implementation: &[REGIONS_SOURCE, GRAPH_VALIDATION_SOURCE],
-    verification: &[COMPOSITION_TEST, FAIL_CLOSED_TEST],
+    verification: &[COMPOSITION_TEST, FAIL_CLOSED_TEST, ERROR_OWNER_TEST],
     notes: &[],
     status: BuiltinDocumentationStatus::Stable,
 });

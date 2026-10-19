@@ -29,38 +29,119 @@ const RETENTION_CLASSES: &[StaticClassIdentity] = &[FEA_RETENTION_POLICY_CLASS];
 const CADENCE_CLASSES: &[StaticClassIdentity] = &[FEA_MONITOR_CADENCE_CLASS];
 const STOP_CLASSES: &[StaticClassIdentity] = &[FEA_MONITOR_STOP_CONDITION_CLASS];
 
-pub(super) const FIELD: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Text, Object(QUANTITY_CLASSES), Object(TARGET_CLASSES), Object(LOCATION_CLASSES), Object(LOCATION_CLASSES), Object(RECOVERY_CLASSES), Object(COMPONENT_CLASSES), Object(ANY_OBJECT_CLASSES), Object(SIGN_CLASSES), Object(COMPLEX_CLASSES), Object(SAMPLING_CLASSES), Object(REDUCTION_CLASSES), Object(STORAGE_CLASSES), Object(PURPOSE_CLASSES), Object(COST_CLASSES)], FEA_OBSERVATION_CLASS);
+pub(super) const FIELD: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[
+        Text,
+        Object(QUANTITY_CLASSES),
+        Object(TARGET_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(RECOVERY_CLASSES),
+        Object(COMPONENT_CLASSES),
+        Object(ANY_OBJECT_CLASSES),
+        Object(SIGN_CLASSES),
+        Object(COMPLEX_CLASSES),
+        Object(SAMPLING_CLASSES),
+        Object(REDUCTION_CLASSES),
+        Object(STORAGE_CLASSES),
+        Object(PURPOSE_CLASSES),
+        Object(COST_CLASSES),
+    ],
+    FEA_OBSERVATION_CLASS,
+);
 pub(super) fn field(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &FIELD)
 }
 
-pub(super) const HISTORY: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Text, Object(QUANTITY_CLASSES), Object(TARGET_CLASSES), Object(LOCATION_CLASSES), Object(LOCATION_CLASSES), Object(RECOVERY_CLASSES), Object(COMPONENT_CLASSES), Object(ANY_OBJECT_CLASSES), Object(SIGN_CLASSES), Object(COMPLEX_CLASSES), Object(SAMPLING_CLASSES), Object(REDUCTION_CLASSES), Object(STORAGE_CLASSES), Object(PURPOSE_CLASSES), Object(COST_CLASSES)], FEA_OBSERVATION_CLASS);
+pub(super) const HISTORY: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[
+        Text,
+        Object(QUANTITY_CLASSES),
+        Object(TARGET_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(RECOVERY_CLASSES),
+        Object(COMPONENT_CLASSES),
+        Object(ANY_OBJECT_CLASSES),
+        Object(SIGN_CLASSES),
+        Object(COMPLEX_CLASSES),
+        Object(SAMPLING_CLASSES),
+        Object(REDUCTION_CLASSES),
+        Object(STORAGE_CLASSES),
+        Object(PURPOSE_CLASSES),
+        Object(COST_CLASSES),
+    ],
+    FEA_OBSERVATION_CLASS,
+);
 pub(super) fn history(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &HISTORY)
 }
 
-pub(super) const PROBE: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Text, Object(QUANTITY_CLASSES), Object(TARGET_CLASSES), Object(LOCATION_CLASSES), Object(LOCATION_CLASSES), Object(RECOVERY_CLASSES), Object(COMPONENT_CLASSES), Object(ANY_OBJECT_CLASSES), Object(SIGN_CLASSES), Object(COMPLEX_CLASSES), Object(SAMPLING_CLASSES), Object(REDUCTION_CLASSES), Object(STORAGE_CLASSES), Object(PURPOSE_CLASSES), Object(COST_CLASSES)], FEA_OBSERVATION_CLASS);
+pub(super) const PROBE: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[
+        Text,
+        Object(QUANTITY_CLASSES),
+        Object(TARGET_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(RECOVERY_CLASSES),
+        Object(COMPONENT_CLASSES),
+        Object(ANY_OBJECT_CLASSES),
+        Object(SIGN_CLASSES),
+        Object(COMPLEX_CLASSES),
+        Object(SAMPLING_CLASSES),
+        Object(REDUCTION_CLASSES),
+        Object(STORAGE_CLASSES),
+        Object(PURPOSE_CLASSES),
+        Object(COST_CLASSES),
+    ],
+    FEA_OBSERVATION_CLASS,
+);
 pub(super) fn probe(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &PROBE)
 }
 
-pub(super) const REDUCTION: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Text, Object(QUANTITY_CLASSES), Object(TARGET_CLASSES), Object(LOCATION_CLASSES), Object(LOCATION_CLASSES), Object(RECOVERY_CLASSES), Object(COMPONENT_CLASSES), Object(ANY_OBJECT_CLASSES), Object(SIGN_CLASSES), Object(COMPLEX_CLASSES), Object(SAMPLING_CLASSES), Object(REDUCTION_CLASSES), Object(STORAGE_CLASSES), Object(PURPOSE_CLASSES), Object(COST_CLASSES)], FEA_OBSERVATION_CLASS);
+pub(super) const REDUCTION: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[
+        Text,
+        Object(QUANTITY_CLASSES),
+        Object(TARGET_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(LOCATION_CLASSES),
+        Object(RECOVERY_CLASSES),
+        Object(COMPONENT_CLASSES),
+        Object(ANY_OBJECT_CLASSES),
+        Object(SIGN_CLASSES),
+        Object(COMPLEX_CLASSES),
+        Object(SAMPLING_CLASSES),
+        Object(REDUCTION_CLASSES),
+        Object(STORAGE_CLASSES),
+        Object(PURPOSE_CLASSES),
+        Object(COST_CLASSES),
+    ],
+    FEA_OBSERVATION_CLASS,
+);
 pub(super) fn reduction(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &REDUCTION)
 }
 
-pub(super) const DIAGNOSTIC: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Text, Object(DIAGNOSTIC_CLASSES), Object(SAMPLING_CLASSES), Object(RETENTION_CLASSES)], FEA_OBSERVATION_CLASS);
+pub(super) const DIAGNOSTIC: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[
+        Text,
+        Object(DIAGNOSTIC_CLASSES),
+        Object(SAMPLING_CLASSES),
+        Object(RETENTION_CLASSES),
+    ],
+    FEA_OBSERVATION_CLASS,
+);
 pub(super) fn diagnostic(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &DIAGNOSTIC)
 }
 
-pub(super) const MONITOR: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Text, Text, Object(CADENCE_CLASSES), Object(STOP_CLASSES)], FEA_OBSERVATION_CLASS);
+pub(super) const MONITOR: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[Text, Text, Object(CADENCE_CLASSES), Object(STOP_CLASSES)],
+    FEA_OBSERVATION_CLASS,
+);
 pub(super) fn monitor(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &MONITOR)
 }

@@ -11,8 +11,9 @@ pub(super) fn load_stl_fixture(path: &std::path::Path, x: f64) -> Value {
         ),
     )
     .expect("STL fixture should write");
-    block_on(geometry_load_builtin(vec![Value::String(
-        path.to_string_lossy().to_string(),
-    )]))
+    block_on(geometry_load_builtin(
+        Value::String(path.to_string_lossy().to_string()),
+        Vec::new(),
+    ))
     .expect("geometry should load")
 }

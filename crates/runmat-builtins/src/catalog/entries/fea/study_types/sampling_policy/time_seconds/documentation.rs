@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when `values` is not numeric, is empty, or contains NaN or Inf.",
         "`RunMat:fea:Internal` if the policy cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 
@@ -26,7 +27,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(policy), 'fea.SamplingPolicy'));\nassert(isequal(reshape(policy.value.time_seconds, 1, []), [0 0.01 0.02 0.05]));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(policy), 'fea.SamplingPolicy'));\nassert(isequal(policy.value.time_seconds, [0 0.01 0.02 0.05]));" },
     },
 ];
 
@@ -49,6 +50,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation =
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Catalog inference contract", location: "crates/runmat-builtins/src/catalog/entries/fea/study_types/sampling_policy/tests.rs::sampling_policy_constructors_follow_their_positional_contract" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Explicit samples inside the domain", location: "crates/runmat-analysis/core/src/validate_outputs/sampling.rs::tests::explicit_samples_must_remain_inside_the_independent_domain" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Bounded histories end to end", location: "crates/runmat-analysis/language/tests/output_histories.rs::bounded_sampling_interpolation_and_series_reductions_are_typed_end_to_end" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed vectors are rows", location: "crates/runmat-runtime/src/builtins/fea/observations/tests.rs::typed_vectors_are_rows_and_still_decode" },
         ],
         notes: &[],
     });

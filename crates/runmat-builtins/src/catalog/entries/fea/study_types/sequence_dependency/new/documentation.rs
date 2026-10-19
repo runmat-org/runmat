@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when a step id is empty or `reason` is not a `fea.SequenceDependencyReason`.",
         "`RunMat:fea:Internal` if the value cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 

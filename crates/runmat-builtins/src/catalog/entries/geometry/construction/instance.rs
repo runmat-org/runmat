@@ -20,7 +20,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
         paragraphs: &[
-            "Each transform follows the `geometry.transform` convention: `T(1:3,1:3)` is the linear part, `T(1:3,4)` is the translation in meters, and the final row is `[0 0 0 1]`. At least one transform is required, and the transforms are kept in call order.",
+            "Each transform follows the `geometry.transform` convention: `T(1:3,1:3)` is the linear part, `T(1:3,4)` is the translation in meters, and the final row must be `[0 0 0 1]`; every transform is checked when the call is made. At least one transform is required, and the transforms are kept in call order.",
             "The result holds only the transformed copies. The untransformed `source` is not included unless one of the transforms is `eye(4)`. Combine the copies with other bodies using `geometry.union` or `geometry.subtract`, for example to cut a hole pattern.",
             DEFERRED_REALIZATION,
             SI_VALUES,
@@ -37,9 +37,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:instance:InvalidInput` reports a `source` that is not a `geometry.Feature`, a call with no transform, or a transform that does not contain exactly 16 finite real values.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:instance:InvalidInput` reports every failure of the call: the wrong number of arguments, a `source` that is not a `geometry.Feature`, a call with no transform, or a transform that is not a finite real 4-by-4 matrix with final row `[0 0 0 1]`, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -77,9 +75,9 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructionDocumentat
     examples: EXAMPLES,
     faqs: FAQS,
     implementation: &[PRIMITIVES_SOURCE, GRAPH_VALIDATION_SOURCE],
-    verification: &[INSTANCE_TEST],
+    verification: &[INSTANCE_TEST, AFFINE_TEST],
     notes: &[],
-    status: BuiltinDocumentationStatus::Experimental,
+    status: BuiltinDocumentationStatus::Stable,
 });
 
 pub(super) const ENTRY: BuiltinCatalogEntry = entry(

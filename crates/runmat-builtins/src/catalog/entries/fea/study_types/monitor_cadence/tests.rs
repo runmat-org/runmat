@@ -10,4 +10,3 @@ fn monitor_cadence_constructors_follow_their_positional_contract() {
         assert_constructor_contract(entry, signature);
     }
 }
-

@@ -11,62 +11,26 @@ use crate::builtins::fea::study_values::{
     from_typed_value, register_immutable_class, to_typed_value, VALUE_FIELD,
 };
 
-pub(super) const QUANTITY_CLASS: &str = "fea.ObservationQuantity";
-pub(super) const FIELD_LOCATION_CLASS: &str = "fea.FieldLocation";
-pub(super) const RECOVERY_CLASS: &str = "fea.RecoveryPolicy";
-pub(super) const COMPONENT_CLASS: &str = "fea.ObservationComponent";
-pub(super) const SIGN_CLASS: &str = "fea.SignConvention";
-pub(super) const COMPLEX_CLASS: &str = "fea.ComplexRepresentation";
-pub(super) const SPATIAL_REDUCTION_CLASS: &str = "fea.SpatialReduction";
-pub(super) const SERIES_REDUCTION_CLASS: &str = "fea.SeriesReduction";
-pub(super) const SERIES_WEIGHTING_CLASS: &str = "fea.SeriesWeighting";
-pub(super) const EXTREMA_TIE_CLASS: &str = "fea.ExtremaTiePolicy";
-pub(super) const PARTIAL_ACCESS_CLASS: &str = "fea.PartialAccessPolicy";
-pub(super) const PURPOSE_CLASS: &str = "fea.ObservationPurpose";
-pub(super) const DIAGNOSTIC_KIND_CLASS: &str = "fea.DiagnosticKind";
+use runmat_builtins::fea_contract::policy_types::classes;
 
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-const CHOICE_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Typed FEA observation-policy constructors have no integer inputs.",
-};
+pub(super) const QUANTITY_CLASS: &str = classes::OBSERVATION_QUANTITY.display_name();
+pub(super) const FIELD_LOCATION_CLASS: &str = classes::FIELD_LOCATION.display_name();
+pub(super) const RECOVERY_CLASS: &str = classes::RECOVERY_POLICY.display_name();
+pub(super) const COMPONENT_CLASS: &str = classes::OBSERVATION_COMPONENT.display_name();
+pub(super) const SIGN_CLASS: &str = classes::SIGN_CONVENTION.display_name();
+pub(super) const COMPLEX_CLASS: &str = classes::COMPLEX_REPRESENTATION.display_name();
+pub(super) const SPATIAL_REDUCTION_CLASS: &str = classes::SPATIAL_REDUCTION.display_name();
+pub(super) const SERIES_REDUCTION_CLASS: &str = classes::SERIES_REDUCTION.display_name();
+pub(super) const SERIES_WEIGHTING_CLASS: &str = classes::SERIES_WEIGHTING.display_name();
+pub(super) const EXTREMA_TIE_CLASS: &str = classes::EXTREMA_TIE_POLICY.display_name();
+pub(super) const PARTIAL_ACCESS_CLASS: &str = classes::PARTIAL_ACCESS_POLICY.display_name();
+pub(super) const PURPOSE_CLASS: &str = classes::OBSERVATION_PURPOSE.display_name();
+pub(super) const DIAGNOSTIC_KIND_CLASS: &str = classes::DIAGNOSTIC_KIND.display_name();
+
 
 macro_rules! choice {
-    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $class:expr, $value:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: concat!("value = ", $builtin, "()"),
-            inputs: &NO_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-        #[runtime_builtin(
-                            name = $builtin,
-                            category = "fea",
-                            summary = "Select a typed FEA observation policy.",
-                            keywords = "fea,observation,output,policy,typed",
-                            descriptor($descriptor),
-                            integer_audit(CHOICE_INTEGER_AUDIT),
-                            builtin_path = "crate::builtins::fea::study_policies::observation"
-                        )]
+    ($function:ident, $builtin:literal, $class:expr, $value:expr) => {
+        #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::study_policies::observation")]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value($builtin, $class, $value)
         }
@@ -74,353 +38,257 @@ macro_rules! choice {
 }
 
 macro_rules! quantity_choices {
-    ($(($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $value:ident)),+ $(,)?) => {
-        $(choice!($function, $descriptor, $signatures, $builtin, QUANTITY_CLASS, ObservationQuantity::$value);)+
+    ($(($function:ident, $builtin:literal, $value:ident)),+ $(,)?) => {
+        $(choice!($function, $builtin, QUANTITY_CLASS, ObservationQuantity::$value);)+
     };
 }
 
 quantity_choices!(
     (
         quantity_displacement,
-        Q_DISPLACEMENT_DESCRIPTOR,
-        Q_DISPLACEMENT_SIGNATURES,
         "fea.ObservationQuantity.displacement",
         Displacement
     ),
     (
         quantity_rotation,
-        Q_ROTATION_DESCRIPTOR,
-        Q_ROTATION_SIGNATURES,
         "fea.ObservationQuantity.rotation",
         Rotation
     ),
     (
         quantity_velocity,
-        Q_VELOCITY_DESCRIPTOR,
-        Q_VELOCITY_SIGNATURES,
         "fea.ObservationQuantity.velocity",
         Velocity
     ),
     (
         quantity_acceleration,
-        Q_ACCELERATION_DESCRIPTOR,
-        Q_ACCELERATION_SIGNATURES,
         "fea.ObservationQuantity.acceleration",
         Acceleration
     ),
     (
         quantity_strain,
-        Q_STRAIN_DESCRIPTOR,
-        Q_STRAIN_SIGNATURES,
         "fea.ObservationQuantity.strain",
         Strain
     ),
     (
         quantity_stress,
-        Q_STRESS_DESCRIPTOR,
-        Q_STRESS_SIGNATURES,
         "fea.ObservationQuantity.stress",
         Stress
     ),
     (
         quantity_von_mises_stress,
-        Q_VON_MISES_STRESS_DESCRIPTOR,
-        Q_VON_MISES_STRESS_SIGNATURES,
         "fea.ObservationQuantity.vonMisesStress",
         VonMisesStress
     ),
     (
         quantity_reaction_force,
-        Q_REACTION_FORCE_DESCRIPTOR,
-        Q_REACTION_FORCE_SIGNATURES,
         "fea.ObservationQuantity.reactionForce",
         ReactionForce
     ),
     (
         quantity_reaction_moment,
-        Q_REACTION_MOMENT_DESCRIPTOR,
-        Q_REACTION_MOMENT_SIGNATURES,
         "fea.ObservationQuantity.reactionMoment",
         ReactionMoment
     ),
     (
         quantity_strain_energy,
-        Q_STRAIN_ENERGY_DESCRIPTOR,
-        Q_STRAIN_ENERGY_SIGNATURES,
         "fea.ObservationQuantity.strainEnergy",
         StrainEnergy
     ),
     (
         quantity_beam_axial_force,
-        Q_BEAM_AXIAL_FORCE_DESCRIPTOR,
-        Q_BEAM_AXIAL_FORCE_SIGNATURES,
         "fea.ObservationQuantity.beamAxialForce",
         BeamAxialForce
     ),
     (
         quantity_beam_shear_force,
-        Q_BEAM_SHEAR_FORCE_DESCRIPTOR,
-        Q_BEAM_SHEAR_FORCE_SIGNATURES,
         "fea.ObservationQuantity.beamShearForce",
         BeamShearForce
     ),
     (
         quantity_beam_torsion_moment,
-        Q_BEAM_TORSION_MOMENT_DESCRIPTOR,
-        Q_BEAM_TORSION_MOMENT_SIGNATURES,
         "fea.ObservationQuantity.beamTorsionMoment",
         BeamTorsionMoment
     ),
     (
         quantity_beam_bending_moment,
-        Q_BEAM_BENDING_MOMENT_DESCRIPTOR,
-        Q_BEAM_BENDING_MOMENT_SIGNATURES,
         "fea.ObservationQuantity.beamBendingMoment",
         BeamBendingMoment
     ),
     (
         quantity_beam_bending_stress,
-        Q_BEAM_BENDING_STRESS_DESCRIPTOR,
-        Q_BEAM_BENDING_STRESS_SIGNATURES,
         "fea.ObservationQuantity.beamBendingStress",
         BeamBendingStress
     ),
     (
         quantity_beam_torsion_stress,
-        Q_BEAM_TORSION_STRESS_DESCRIPTOR,
-        Q_BEAM_TORSION_STRESS_SIGNATURES,
         "fea.ObservationQuantity.beamTorsionStress",
         BeamTorsionStress
     ),
     (
         quantity_shell_membrane_force,
-        Q_SHELL_MEMBRANE_FORCE_DESCRIPTOR,
-        Q_SHELL_MEMBRANE_FORCE_SIGNATURES,
         "fea.ObservationQuantity.shellMembraneForce",
         ShellMembraneForce
     ),
     (
         quantity_shell_bending_moment,
-        Q_SHELL_BENDING_MOMENT_DESCRIPTOR,
-        Q_SHELL_BENDING_MOMENT_SIGNATURES,
         "fea.ObservationQuantity.shellBendingMoment",
         ShellBendingMoment
     ),
     (
         quantity_shell_transverse_shear,
-        Q_SHELL_TRANSVERSE_SHEAR_DESCRIPTOR,
-        Q_SHELL_TRANSVERSE_SHEAR_SIGNATURES,
         "fea.ObservationQuantity.shellTransverseShear",
         ShellTransverseShear
     ),
     (
         quantity_shell_von_mises,
-        Q_SHELL_VON_MISES_DESCRIPTOR,
-        Q_SHELL_VON_MISES_SIGNATURES,
         "fea.ObservationQuantity.shellVonMises",
         ShellVonMises
     ),
     (
         quantity_temperature,
-        Q_TEMPERATURE_DESCRIPTOR,
-        Q_TEMPERATURE_SIGNATURES,
         "fea.ObservationQuantity.temperature",
         Temperature
     ),
     (
         quantity_temperature_gradient,
-        Q_TEMPERATURE_GRADIENT_DESCRIPTOR,
-        Q_TEMPERATURE_GRADIENT_SIGNATURES,
         "fea.ObservationQuantity.temperatureGradient",
         TemperatureGradient
     ),
     (
         quantity_heat_flux,
-        Q_HEAT_FLUX_DESCRIPTOR,
-        Q_HEAT_FLUX_SIGNATURES,
         "fea.ObservationQuantity.heatFlux",
         HeatFlux
     ),
     (
         quantity_heat_rate,
-        Q_HEAT_RATE_DESCRIPTOR,
-        Q_HEAT_RATE_SIGNATURES,
         "fea.ObservationQuantity.heatRate",
         HeatRate
     ),
     (
         quantity_electric_potential,
-        Q_ELECTRIC_POTENTIAL_DESCRIPTOR,
-        Q_ELECTRIC_POTENTIAL_SIGNATURES,
         "fea.ObservationQuantity.electricPotential",
         ElectricPotential
     ),
     (
         quantity_electric_field,
-        Q_ELECTRIC_FIELD_DESCRIPTOR,
-        Q_ELECTRIC_FIELD_SIGNATURES,
         "fea.ObservationQuantity.electricField",
         ElectricField
     ),
     (
         quantity_electric_current,
-        Q_ELECTRIC_CURRENT_DESCRIPTOR,
-        Q_ELECTRIC_CURRENT_SIGNATURES,
         "fea.ObservationQuantity.electricCurrent",
         ElectricCurrent
     ),
     (
         quantity_electric_current_density,
-        Q_ELECTRIC_CURRENT_DENSITY_DESCRIPTOR,
-        Q_ELECTRIC_CURRENT_DENSITY_SIGNATURES,
         "fea.ObservationQuantity.electricCurrentDensity",
         ElectricCurrentDensity
     ),
     (
         quantity_electric_charge,
-        Q_ELECTRIC_CHARGE_DESCRIPTOR,
-        Q_ELECTRIC_CHARGE_SIGNATURES,
         "fea.ObservationQuantity.electricCharge",
         ElectricCharge
     ),
     (
         quantity_magnetic_vector_potential,
-        Q_MAGNETIC_VECTOR_POTENTIAL_DESCRIPTOR,
-        Q_MAGNETIC_VECTOR_POTENTIAL_SIGNATURES,
         "fea.ObservationQuantity.magneticVectorPotential",
         MagneticVectorPotential
     ),
     (
         quantity_magnetic_flux_density,
-        Q_MAGNETIC_FLUX_DENSITY_DESCRIPTOR,
-        Q_MAGNETIC_FLUX_DENSITY_SIGNATURES,
         "fea.ObservationQuantity.magneticFluxDensity",
         MagneticFluxDensity
     ),
     (
         quantity_magnetic_field_intensity,
-        Q_MAGNETIC_FIELD_INTENSITY_DESCRIPTOR,
-        Q_MAGNETIC_FIELD_INTENSITY_SIGNATURES,
         "fea.ObservationQuantity.magneticFieldIntensity",
         MagneticFieldIntensity
     ),
     (
         quantity_acoustic_pressure,
-        Q_ACOUSTIC_PRESSURE_DESCRIPTOR,
-        Q_ACOUSTIC_PRESSURE_SIGNATURES,
         "fea.ObservationQuantity.acousticPressure",
         AcousticPressure
     ),
     (
         quantity_acoustic_particle_velocity,
-        Q_ACOUSTIC_PARTICLE_VELOCITY_DESCRIPTOR,
-        Q_ACOUSTIC_PARTICLE_VELOCITY_SIGNATURES,
         "fea.ObservationQuantity.acousticParticleVelocity",
         AcousticParticleVelocity
     ),
     (
         quantity_sound_pressure_level,
-        Q_SOUND_PRESSURE_LEVEL_DESCRIPTOR,
-        Q_SOUND_PRESSURE_LEVEL_SIGNATURES,
         "fea.ObservationQuantity.soundPressureLevel",
         SoundPressureLevel
     ),
     (
         quantity_fluid_pressure,
-        Q_FLUID_PRESSURE_DESCRIPTOR,
-        Q_FLUID_PRESSURE_SIGNATURES,
         "fea.ObservationQuantity.fluidPressure",
         FluidPressure
     ),
     (
         quantity_fluid_velocity,
-        Q_FLUID_VELOCITY_DESCRIPTOR,
-        Q_FLUID_VELOCITY_SIGNATURES,
         "fea.ObservationQuantity.fluidVelocity",
         FluidVelocity
     ),
     (
         quantity_vorticity,
-        Q_VORTICITY_DESCRIPTOR,
-        Q_VORTICITY_SIGNATURES,
         "fea.ObservationQuantity.vorticity",
         Vorticity
     ),
     (
         quantity_mass_flow_rate,
-        Q_MASS_FLOW_RATE_DESCRIPTOR,
-        Q_MASS_FLOW_RATE_SIGNATURES,
         "fea.ObservationQuantity.massFlowRate",
         MassFlowRate
     ),
     (
         quantity_wall_shear_stress,
-        Q_WALL_SHEAR_STRESS_DESCRIPTOR,
-        Q_WALL_SHEAR_STRESS_SIGNATURES,
         "fea.ObservationQuantity.wallShearStress",
         WallShearStress
     ),
     (
         quantity_modal_frequency,
-        Q_MODAL_FREQUENCY_DESCRIPTOR,
-        Q_MODAL_FREQUENCY_SIGNATURES,
         "fea.ObservationQuantity.modalFrequency",
         ModalFrequency
     ),
     (
         quantity_modal_participation,
-        Q_MODAL_PARTICIPATION_DESCRIPTOR,
-        Q_MODAL_PARTICIPATION_SIGNATURES,
         "fea.ObservationQuantity.modalParticipation",
         ModalParticipation
     ),
     (
         quantity_eigenvalue,
-        Q_EIGENVALUE_DESCRIPTOR,
-        Q_EIGENVALUE_SIGNATURES,
         "fea.ObservationQuantity.eigenvalue",
         Eigenvalue
     ),
     (
         quantity_residual,
-        Q_RESIDUAL_DESCRIPTOR,
-        Q_RESIDUAL_SIGNATURES,
         "fea.ObservationQuantity.residual",
         Residual
     ),
     (
         quantity_balance,
-        Q_BALANCE_DESCRIPTOR,
-        Q_BALANCE_SIGNATURES,
         "fea.ObservationQuantity.balance",
         Balance
     ),
     (
         quantity_constraint_violation,
-        Q_CONSTRAINT_VIOLATION_DESCRIPTOR,
-        Q_CONSTRAINT_VIOLATION_SIGNATURES,
         "fea.ObservationQuantity.constraintViolation",
         ConstraintViolation
     ),
     (
         quantity_contact_gap,
-        Q_CONTACT_GAP_DESCRIPTOR,
-        Q_CONTACT_GAP_SIGNATURES,
         "fea.ObservationQuantity.contactGap",
         ContactGap
     ),
     (
         quantity_contact_pressure,
-        Q_CONTACT_PRESSURE_DESCRIPTOR,
-        Q_CONTACT_PRESSURE_SIGNATURES,
         "fea.ObservationQuantity.contactPressure",
         ContactPressure
     ),
 );
 
 macro_rules! choices {
-    ($class:expr, $(($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $value:expr)),+ $(,)?) => {
-        $(choice!($function, $descriptor, $signatures, $builtin, $class, $value);)+
+    ($class:expr, $(($function:ident, $builtin:literal, $value:expr)),+ $(,)?) => {
+        $(choice!($function, $builtin, $class, $value);)+
     };
 }
 
@@ -428,92 +296,66 @@ choices!(
     FIELD_LOCATION_CLASS,
     (
         location_node,
-        LOCATION_NODE_DESCRIPTOR,
-        LOCATION_NODE_SIGNATURES,
         "fea.FieldLocation.node",
         FieldLocation::Node
     ),
     (
         location_point,
-        LOCATION_POINT_DESCRIPTOR,
-        LOCATION_POINT_SIGNATURES,
         "fea.FieldLocation.point",
         FieldLocation::Point
     ),
     (
         location_cell,
-        LOCATION_CELL_DESCRIPTOR,
-        LOCATION_CELL_SIGNATURES,
         "fea.FieldLocation.cell",
         FieldLocation::Cell
     ),
     (
         location_element,
-        LOCATION_ELEMENT_DESCRIPTOR,
-        LOCATION_ELEMENT_SIGNATURES,
         "fea.FieldLocation.element",
         FieldLocation::Element
     ),
     (
         location_integration_point,
-        LOCATION_INTEGRATION_POINT_DESCRIPTOR,
-        LOCATION_INTEGRATION_POINT_SIGNATURES,
         "fea.FieldLocation.integrationPoint",
         FieldLocation::IntegrationPoint
     ),
     (
         location_face,
-        LOCATION_FACE_DESCRIPTOR,
-        LOCATION_FACE_SIGNATURES,
         "fea.FieldLocation.face",
         FieldLocation::Face
     ),
     (
         location_edge,
-        LOCATION_EDGE_DESCRIPTOR,
-        LOCATION_EDGE_SIGNATURES,
         "fea.FieldLocation.edge",
         FieldLocation::Edge
     ),
     (
         location_interface,
-        LOCATION_INTERFACE_DESCRIPTOR,
-        LOCATION_INTERFACE_SIGNATURES,
         "fea.FieldLocation.interface",
         FieldLocation::Interface
     ),
     (
         location_connector,
-        LOCATION_CONNECTOR_DESCRIPTOR,
-        LOCATION_CONNECTOR_SIGNATURES,
         "fea.FieldLocation.connector",
         FieldLocation::Connector
     ),
     (
         location_constraint,
-        LOCATION_CONSTRAINT_DESCRIPTOR,
-        LOCATION_CONSTRAINT_SIGNATURES,
         "fea.FieldLocation.constraint",
         FieldLocation::Constraint
     ),
     (
         location_reference_point,
-        LOCATION_REFERENCE_POINT_DESCRIPTOR,
-        LOCATION_REFERENCE_POINT_SIGNATURES,
         "fea.FieldLocation.referencePoint",
         FieldLocation::ReferencePoint
     ),
     (
         location_mode,
-        LOCATION_MODE_DESCRIPTOR,
-        LOCATION_MODE_SIGNATURES,
         "fea.FieldLocation.mode",
         FieldLocation::Mode
     ),
     (
         location_global,
-        LOCATION_GLOBAL_DESCRIPTOR,
-        LOCATION_GLOBAL_SIGNATURES,
         "fea.FieldLocation.globalLocation",
         FieldLocation::Global
     )
@@ -522,43 +364,31 @@ choices!(
     RECOVERY_CLASS,
     (
         recovery_native,
-        RECOVERY_NATIVE_DESCRIPTOR,
-        RECOVERY_NATIVE_SIGNATURES,
         "fea.RecoveryPolicy.native",
         RecoveryPolicy::Native
     ),
     (
         recovery_extrapolate,
-        RECOVERY_EXTRAPOLATE_DESCRIPTOR,
-        RECOVERY_EXTRAPOLATE_SIGNATURES,
         "fea.RecoveryPolicy.extrapolate",
         RecoveryPolicy::Extrapolate
     ),
     (
         recovery_volume_average,
-        RECOVERY_VOLUME_AVERAGE_DESCRIPTOR,
-        RECOVERY_VOLUME_AVERAGE_SIGNATURES,
         "fea.RecoveryPolicy.volumeWeightedAverage",
         RecoveryPolicy::VolumeWeightedAverage
     ),
     (
         recovery_area_average,
-        RECOVERY_AREA_AVERAGE_DESCRIPTOR,
-        RECOVERY_AREA_AVERAGE_SIGNATURES,
         "fea.RecoveryPolicy.areaWeightedAverage",
         RecoveryPolicy::AreaWeightedAverage
     ),
     (
         recovery_conservative,
-        RECOVERY_CONSERVATIVE_DESCRIPTOR,
-        RECOVERY_CONSERVATIVE_SIGNATURES,
         "fea.RecoveryPolicy.conservativeProjection",
         RecoveryPolicy::ConservativeProjection
     ),
     (
         recovery_shape_function,
-        RECOVERY_SHAPE_FUNCTION_DESCRIPTOR,
-        RECOVERY_SHAPE_FUNCTION_SIGNATURES,
         "fea.RecoveryPolicy.shapeFunctionInterpolation",
         RecoveryPolicy::ShapeFunctionInterpolation
     )
@@ -567,99 +397,71 @@ choices!(
     COMPONENT_CLASS,
     (
         component_all,
-        COMPONENT_ALL_DESCRIPTOR,
-        COMPONENT_ALL_SIGNATURES,
         "fea.ObservationComponent.all",
         ObservationComponent::All
     ),
     (
         component_x,
-        COMPONENT_X_DESCRIPTOR,
-        COMPONENT_X_SIGNATURES,
         "fea.ObservationComponent.x",
         ObservationComponent::X
     ),
     (
         component_y,
-        COMPONENT_Y_DESCRIPTOR,
-        COMPONENT_Y_SIGNATURES,
         "fea.ObservationComponent.y",
         ObservationComponent::Y
     ),
     (
         component_z,
-        COMPONENT_Z_DESCRIPTOR,
-        COMPONENT_Z_SIGNATURES,
         "fea.ObservationComponent.z",
         ObservationComponent::Z
     ),
     (
         component_normal,
-        COMPONENT_NORMAL_DESCRIPTOR,
-        COMPONENT_NORMAL_SIGNATURES,
         "fea.ObservationComponent.normal",
         ObservationComponent::Normal
     ),
     (
         component_tangent1,
-        COMPONENT_TANGENT1_DESCRIPTOR,
-        COMPONENT_TANGENT1_SIGNATURES,
         "fea.ObservationComponent.tangent1",
         ObservationComponent::Tangent1
     ),
     (
         component_tangent2,
-        COMPONENT_TANGENT2_DESCRIPTOR,
-        COMPONENT_TANGENT2_SIGNATURES,
         "fea.ObservationComponent.tangent2",
         ObservationComponent::Tangent2
     ),
     (
         component_trace,
-        COMPONENT_TRACE_DESCRIPTOR,
-        COMPONENT_TRACE_SIGNATURES,
         "fea.ObservationComponent.trace",
         ObservationComponent::Trace
     ),
     (
         component_hydrostatic,
-        COMPONENT_HYDROSTATIC_DESCRIPTOR,
-        COMPONENT_HYDROSTATIC_SIGNATURES,
         "fea.ObservationComponent.hydrostatic",
         ObservationComponent::Hydrostatic
     ),
     (
         component_deviatoric,
-        COMPONENT_DEVIATORIC_DESCRIPTOR,
-        COMPONENT_DEVIATORIC_SIGNATURES,
         "fea.ObservationComponent.deviatoric",
         ObservationComponent::Deviatoric
     ),
     (
         component_von_mises,
-        COMPONENT_VON_MISES_DESCRIPTOR,
-        COMPONENT_VON_MISES_SIGNATURES,
         "fea.ObservationComponent.vonMises",
         ObservationComponent::VonMises
     ),
     (
         component_max_principal,
-        COMPONENT_MAX_PRINCIPAL_DESCRIPTOR,
-        COMPONENT_MAX_PRINCIPAL_SIGNATURES,
         "fea.ObservationComponent.maximumPrincipal",
         ObservationComponent::MaximumPrincipal
     ),
     (
         component_min_principal,
-        COMPONENT_MIN_PRINCIPAL_DESCRIPTOR,
-        COMPONENT_MIN_PRINCIPAL_SIGNATURES,
         "fea.ObservationComponent.minimumPrincipal",
         ObservationComponent::MinimumPrincipal
     ),
     (
         component_magnitude,
-        COMPONENT_MAGNITUDE_DESCRIPTOR,
-        COMPONENT_MAGNITUDE_SIGNATURES,
         "fea.ObservationComponent.magnitude",
         ObservationComponent::Magnitude
     )
@@ -668,36 +470,26 @@ choices!(
     SIGN_CLASS,
     (
         sign_native,
-        SIGN_NATIVE_DESCRIPTOR,
-        SIGN_NATIVE_SIGNATURES,
         "fea.SignConvention.native",
         SignConvention::Native
     ),
     (
         sign_tension,
-        SIGN_TENSION_DESCRIPTOR,
-        SIGN_TENSION_SIGNATURES,
         "fea.SignConvention.tensionPositive",
         SignConvention::TensionPositive
     ),
     (
         sign_compression,
-        SIGN_COMPRESSION_DESCRIPTOR,
-        SIGN_COMPRESSION_SIGNATURES,
         "fea.SignConvention.compressionPositive",
         SignConvention::CompressionPositive
     ),
     (
         sign_outward,
-        SIGN_OUTWARD_DESCRIPTOR,
-        SIGN_OUTWARD_SIGNATURES,
         "fea.SignConvention.outwardPositive",
         SignConvention::OutwardPositive
     ),
     (
         sign_inward,
-        SIGN_INWARD_DESCRIPTOR,
-        SIGN_INWARD_SIGNATURES,
         "fea.SignConvention.inwardPositive",
         SignConvention::InwardPositive
     )
@@ -706,36 +498,26 @@ choices!(
     COMPLEX_CLASS,
     (
         complex_real,
-        COMPLEX_REAL_DESCRIPTOR,
-        COMPLEX_REAL_SIGNATURES,
         "fea.ComplexRepresentation.real",
         ComplexRepresentation::Real
     ),
     (
         complex_imaginary,
-        COMPLEX_IMAGINARY_DESCRIPTOR,
-        COMPLEX_IMAGINARY_SIGNATURES,
         "fea.ComplexRepresentation.imaginary",
         ComplexRepresentation::Imaginary
     ),
     (
         complex_magnitude,
-        COMPLEX_MAGNITUDE_DESCRIPTOR,
-        COMPLEX_MAGNITUDE_SIGNATURES,
         "fea.ComplexRepresentation.magnitude",
         ComplexRepresentation::Magnitude
     ),
     (
         complex_phase,
-        COMPLEX_PHASE_DESCRIPTOR,
-        COMPLEX_PHASE_SIGNATURES,
         "fea.ComplexRepresentation.phaseRadians",
         ComplexRepresentation::PhaseRadians
     ),
     (
         complex_complex,
-        COMPLEX_COMPLEX_DESCRIPTOR,
-        COMPLEX_COMPLEX_SIGNATURES,
         "fea.ComplexRepresentation.complexValue",
         ComplexRepresentation::Complex
     )
@@ -744,87 +526,47 @@ choices!(
     SPATIAL_REDUCTION_CLASS,
     (
         spatial_none,
-        SPATIAL_NONE_DESCRIPTOR,
-        SPATIAL_NONE_SIGNATURES,
         "fea.SpatialReduction.none",
         SpatialReduction::None
     ),
     (
         spatial_integral,
-        SPATIAL_INTEGRAL_DESCRIPTOR,
-        SPATIAL_INTEGRAL_SIGNATURES,
         "fea.SpatialReduction.integral",
         SpatialReduction::Integral
     ),
     (
         spatial_average,
-        SPATIAL_AVERAGE_DESCRIPTOR,
-        SPATIAL_AVERAGE_SIGNATURES,
         "fea.SpatialReduction.average",
         SpatialReduction::Average
     ),
     (
         spatial_rms,
-        SPATIAL_RMS_DESCRIPTOR,
-        SPATIAL_RMS_SIGNATURES,
         "fea.SpatialReduction.rootMeanSquare",
         SpatialReduction::RootMeanSquare
     ),
     (
         spatial_norm,
-        SPATIAL_NORM_DESCRIPTOR,
-        SPATIAL_NORM_SIGNATURES,
         "fea.SpatialReduction.euclideanNorm",
         SpatialReduction::EuclideanNorm
     ),
     (
         spatial_minimum,
-        SPATIAL_MINIMUM_DESCRIPTOR,
-        SPATIAL_MINIMUM_SIGNATURES,
         "fea.SpatialReduction.minimum",
         SpatialReduction::Minimum
     ),
     (
         spatial_maximum,
-        SPATIAL_MAXIMUM_DESCRIPTOR,
-        SPATIAL_MAXIMUM_SIGNATURES,
         "fea.SpatialReduction.maximum",
         SpatialReduction::Maximum
     ),
     (
         spatial_resultant,
-        SPATIAL_RESULTANT_DESCRIPTOR,
-        SPATIAL_RESULTANT_SIGNATURES,
         "fea.SpatialReduction.resultant",
         SpatialReduction::Resultant
     )
 );
 
-const SPATIAL_MOMENT_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "about",
-    BuiltinParamType::Any,
-    "Typed fea.Position defining the moment reference point.",
-)];
-const SPATIAL_MOMENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "value = fea.SpatialReduction.moment(about)",
-    inputs: &SPATIAL_MOMENT_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const SPATIAL_MOMENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SPATIAL_MOMENT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-#[runtime_builtin(
-    name = "fea.SpatialReduction.moment",
-    category = "fea",
-    summary = "Integrate the moment of a force-like field about an explicit point.",
-    keywords = "fea,observation,reduction,moment,reference point,typed",
-    descriptor(SPATIAL_MOMENT_DESCRIPTOR),
-    integer_audit(CHOICE_INTEGER_AUDIT),
-    builtin_path = "crate::builtins::fea::study_policies::observation"
-)]
+#[runtime_builtin(name = "fea.SpatialReduction.moment", binding_variant = "default", builtin_path = "crate::builtins::fea::study_policies::observation")]
 pub async fn spatial_moment(about: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.SpatialReduction.moment";
     let about = Position::new(super::super::values::position_meters(NAME, &about)?);
@@ -838,36 +580,26 @@ choices!(
     SERIES_REDUCTION_CLASS,
     (
         series_none,
-        SERIES_NONE_DESCRIPTOR,
-        SERIES_NONE_SIGNATURES,
         "fea.SeriesReduction.none",
         SeriesReduction::None
     ),
     (
         series_minimum,
-        SERIES_MINIMUM_DESCRIPTOR,
-        SERIES_MINIMUM_SIGNATURES,
         "fea.SeriesReduction.minimum",
         SeriesReduction::Minimum
     ),
     (
         series_maximum,
-        SERIES_MAXIMUM_DESCRIPTOR,
-        SERIES_MAXIMUM_SIGNATURES,
         "fea.SeriesReduction.maximum",
         SeriesReduction::Maximum
     ),
     (
         series_absolute_maximum,
-        SERIES_ABSOLUTE_MAXIMUM_DESCRIPTOR,
-        SERIES_ABSOLUTE_MAXIMUM_SIGNATURES,
         "fea.SeriesReduction.absoluteMaximum",
         SeriesReduction::AbsoluteMaximum
     ),
     (
         series_envelope,
-        SERIES_ENVELOPE_DESCRIPTOR,
-        SERIES_ENVELOPE_SIGNATURES,
         "fea.SeriesReduction.envelope",
         SeriesReduction::Envelope
     )
@@ -876,48 +608,20 @@ choices!(
     SERIES_WEIGHTING_CLASS,
     (
         series_weighting_uniform,
-        SERIES_WEIGHTING_UNIFORM_DESCRIPTOR,
-        SERIES_WEIGHTING_UNIFORM_SIGNATURES,
         "fea.SeriesWeighting.uniformSamples",
         SeriesWeighting::UniformSamples
     ),
     (
         series_weighting_trapezoidal,
-        SERIES_WEIGHTING_TRAPEZOIDAL_DESCRIPTOR,
-        SERIES_WEIGHTING_TRAPEZOIDAL_SIGNATURES,
         "fea.SeriesWeighting.trapezoidalIndependentDomain",
         SeriesWeighting::TrapezoidalIndependentDomain
     )
 );
 
-const SERIES_STATISTIC_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "weighting",
-    BuiltinParamType::Any,
-    "Typed weighting over the independent-domain samples.",
-)];
 
 macro_rules! series_statistic {
-    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $variant:ident) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: concat!("value = ", $builtin, "(weighting)"),
-            inputs: &SERIES_STATISTIC_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-        #[runtime_builtin(
-                            name = $builtin,
-                            category = "fea",
-                            summary = "Select a typed, explicitly weighted series statistic.",
-                            keywords = "fea,observation,series,reduction,weighting,typed",
-                            descriptor($descriptor),
-                            integer_audit(CHOICE_INTEGER_AUDIT),
-                            builtin_path = "crate::builtins::fea::study_policies::observation"
-                        )]
+    ($function:ident, $builtin:literal, $variant:ident) => {
+        #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::study_policies::observation")]
         pub async fn $function(weighting: Value) -> BuiltinResult<Value> {
             to_typed_value(
                 $builtin,
@@ -932,22 +636,16 @@ macro_rules! series_statistic {
 
 series_statistic!(
     series_rms,
-    SERIES_RMS_DESCRIPTOR,
-    SERIES_RMS_SIGNATURES,
     "fea.SeriesReduction.rootMeanSquare",
     RootMeanSquare
 );
 series_statistic!(
     series_mean,
-    SERIES_MEAN_DESCRIPTOR,
-    SERIES_MEAN_SIGNATURES,
     "fea.SeriesReduction.mean",
     Mean
 );
 series_statistic!(
     series_variance,
-    SERIES_VARIANCE_DESCRIPTOR,
-    SERIES_VARIANCE_SIGNATURES,
     "fea.SeriesReduction.variance",
     Variance
 );
@@ -955,15 +653,11 @@ choices!(
     EXTREMA_TIE_CLASS,
     (
         tie_first,
-        TIE_FIRST_DESCRIPTOR,
-        TIE_FIRST_SIGNATURES,
         "fea.ExtremaTiePolicy.firstCanonical",
         ExtremaTiePolicy::FirstCanonical
     ),
     (
         tie_all,
-        TIE_ALL_DESCRIPTOR,
-        TIE_ALL_SIGNATURES,
         "fea.ExtremaTiePolicy.allLocations",
         ExtremaTiePolicy::AllLocations
     )
@@ -972,15 +666,11 @@ choices!(
     PARTIAL_ACCESS_CLASS,
     (
         partial_chunks,
-        PARTIAL_CHUNKS_DESCRIPTOR,
-        PARTIAL_CHUNKS_SIGNATURES,
         "fea.PartialAccessPolicy.manifestAndChunks",
         PartialAccessPolicy::ManifestAndChunks
     ),
     (
         partial_whole,
-        PARTIAL_WHOLE_DESCRIPTOR,
-        PARTIAL_WHOLE_SIGNATURES,
         "fea.PartialAccessPolicy.wholeArtifact",
         PartialAccessPolicy::WholeArtifact
     )
@@ -989,29 +679,21 @@ choices!(
     PURPOSE_CLASS,
     (
         purpose_publication,
-        PURPOSE_PUBLICATION_DESCRIPTOR,
-        PURPOSE_PUBLICATION_SIGNATURES,
         "fea.ObservationPurpose.publication",
         ObservationPurpose::Publication
     ),
     (
         purpose_solver,
-        PURPOSE_SOLVER_DESCRIPTOR,
-        PURPOSE_SOLVER_SIGNATURES,
         "fea.ObservationPurpose.solverControl",
         ObservationPurpose::SolverControl
     ),
     (
         purpose_visualization,
-        PURPOSE_VISUALIZATION_DESCRIPTOR,
-        PURPOSE_VISUALIZATION_SIGNATURES,
         "fea.ObservationPurpose.visualization",
         ObservationPurpose::Visualization
     ),
     (
         purpose_downstream,
-        PURPOSE_DOWNSTREAM_DESCRIPTOR,
-        PURPOSE_DOWNSTREAM_SIGNATURES,
         "fea.ObservationPurpose.downstreamState",
         ObservationPurpose::DownstreamState
     )
@@ -1020,50 +702,36 @@ choices!(
     DIAGNOSTIC_KIND_CLASS,
     (
         diagnostic_convergence,
-        DIAGNOSTIC_CONVERGENCE_DESCRIPTOR,
-        DIAGNOSTIC_CONVERGENCE_SIGNATURES,
         "fea.DiagnosticKind.convergence",
         DiagnosticKind::Convergence
     ),
     (
         diagnostic_balance,
-        DIAGNOSTIC_BALANCE_DESCRIPTOR,
-        DIAGNOSTIC_BALANCE_SIGNATURES,
         "fea.DiagnosticKind.balance",
         DiagnosticKind::Balance
     ),
     (
         diagnostic_constraint,
-        DIAGNOSTIC_CONSTRAINT_DESCRIPTOR,
-        DIAGNOSTIC_CONSTRAINT_SIGNATURES,
         "fea.DiagnosticKind.constraint",
         DiagnosticKind::Constraint
     ),
     (
         diagnostic_contact,
-        DIAGNOSTIC_CONTACT_DESCRIPTOR,
-        DIAGNOSTIC_CONTACT_SIGNATURES,
         "fea.DiagnosticKind.contact",
         DiagnosticKind::Contact
     ),
     (
         diagnostic_adaptation,
-        DIAGNOSTIC_ADAPTATION_DESCRIPTOR,
-        DIAGNOSTIC_ADAPTATION_SIGNATURES,
         "fea.DiagnosticKind.adaptation",
         DiagnosticKind::Adaptation
     ),
     (
         diagnostic_resource,
-        DIAGNOSTIC_RESOURCE_DESCRIPTOR,
-        DIAGNOSTIC_RESOURCE_SIGNATURES,
         "fea.DiagnosticKind.resource",
         DiagnosticKind::Resource
     ),
     (
         diagnostic_equivalence,
-        DIAGNOSTIC_EQUIVALENCE_DESCRIPTOR,
-        DIAGNOSTIC_EQUIVALENCE_SIGNATURES,
         "fea.DiagnosticKind.executionEquivalence",
         DiagnosticKind::ExecutionEquivalence
     )

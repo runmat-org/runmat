@@ -364,7 +364,7 @@ fn parse_model_constructor_options(
         match pair.key.as_str() {
             "frame" => {
                 let text = scalar_string(pair.value, builtin, &ERROR_INPUT)?;
-                options.frame = Some(parse_scalar_enum(&text, "Frame")?);
+                options.frame = Some(parse_scalar_enum_for_builtin(builtin, &text, "Frame")?);
             }
             "materials" => options.materials = material_vec_from_value(builtin, pair.value)?,
             "materialassignments" => {
@@ -635,7 +635,8 @@ pub(super) fn create_material_assignment_object_from_args(
             }
             "confidence" => {
                 let text = scalar_string(pair.value, MATERIAL_ASSIGNMENT_NAME, &ERROR_INPUT)?;
-                confidence = parse_scalar_enum(&text, "Confidence")?;
+                confidence =
+                    parse_scalar_enum_for_builtin(MATERIAL_ASSIGNMENT_NAME, &text, "Confidence")?;
             }
             other => {
                 return Err(builtin_error(
@@ -909,12 +910,19 @@ fn material_to_object(material: MaterialModel) -> BuiltinResult<Value> {
 fn material_assignment_to_object(
     assignment: GeometryBoundMaterialAssignment,
 ) -> BuiltinResult<Value> {
-    serializable_to_object(
+    let mut object = serializable_to_object_value(
         MATERIAL_ASSIGNMENT_NAME,
         &ERROR_INTERNAL,
         FEA_MATERIAL_ASSIGNMENT_CLASS,
         &assignment,
-    )
+    )?;
+    // Same revision type as `geometry.Asset` and every other geometry-bound
+    // FEA model object.
+    object.properties.insert(
+        "geometry_revision".into(),
+        Value::Int(IntValue::U32(assignment.geometry_revision)),
+    );
+    Ok(Value::Object(object))
 }
 
 fn model_to_object(composed: ComposedModel) -> BuiltinResult<Value> {

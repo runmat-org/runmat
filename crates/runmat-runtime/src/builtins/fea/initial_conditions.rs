@@ -11,89 +11,31 @@ use runmat_analysis_core::{
     SignalId, SignalShape,
 };
 
-pub(super) const TARGET_CLASS: &str = "fea.InitialConditionTarget";
-pub(super) const STRUCTURAL_CLASS: &str = "fea.StructuralInitialCondition";
-pub(super) const THERMAL_CLASS: &str = "fea.ThermalInitialCondition";
-pub(super) const ELECTRICAL_CLASS: &str = "fea.ElectricalInitialCondition";
-pub(super) const MAGNETIC_CLASS: &str = "fea.MagneticInitialCondition";
-pub(super) const ACOUSTIC_CLASS: &str = "fea.AcousticInitialCondition";
-pub(super) const FLUID_CLASS: &str = "fea.FluidInitialCondition";
+pub(super) const TARGET_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_INITIAL_CONDITION_TARGET_CLASS
+        .display_name();
+pub(super) const STRUCTURAL_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_INITIAL_CONDITION_CLASS
+        .display_name();
+pub(super) const THERMAL_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_THERMAL_INITIAL_CONDITION_CLASS
+        .display_name();
+pub(super) const ELECTRICAL_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_ELECTRICAL_INITIAL_CONDITION_CLASS
+        .display_name();
+pub(super) const MAGNETIC_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_MAGNETIC_INITIAL_CONDITION_CLASS
+        .display_name();
+pub(super) const ACOUSTIC_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_ACOUSTIC_INITIAL_CONDITION_CLASS
+        .display_name();
+pub(super) const FLUID_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_FLUID_INITIAL_CONDITION_CLASS
+        .display_name();
 
 const TARGET_FIELDS: &[&str] = &["whole_model"];
 const CONDITION_FIELDS: &[&str] = &["geometry_id", "geometry_revision", "condition"];
 const CONDITION_REQUIRED_FIELDS: &[&str] = &["condition"];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const CONDITION_INPUTS: [BuiltinParamDescriptor; 6] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable initial-condition identifier.",
-    ),
-    required(
-        "target",
-        BuiltinParamType::Any,
-        "A geometry.Region or fea.InitialConditionTarget.wholeModel() value.",
-    ),
-    required(
-        "signal",
-        BuiltinParamType::Any,
-        "Typed signal with the quantity and shape required by the concrete method.",
-    ),
-    required(
-        "abscissa",
-        BuiltinParamType::NumericScalar,
-        "Finite signal abscissa sampled for the initial state.",
-    ),
-    required(
-        "sampleApproach",
-        BuiltinParamType::Any,
-        "Typed fea.SignalSampleApproach policy.",
-    ),
-    required(
-        "beforeStepId",
-        BuiltinParamType::StringScalar,
-        "Procedure step that consumes the initial state.",
-    ),
-];
-const INITIAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "abscissa",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The exact scalar is checked before conversion to the signal domain's canonical binary64 abscissa.",
-    }];
-const INITIAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "typed signal-sampled initial condition",
-        inputs: &INITIAL_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Initial-condition authoring is a host-only immutable object construction boundary.",
-    }];
-const TARGET_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "The whole-model target constructor has no numeric role.",
-};
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WholeModelTarget {
@@ -128,28 +70,16 @@ impl GeometryBoundInitialCondition {
     }
 }
 
-const TARGET_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "target = fea.InitialConditionTarget.wholeModel()",
-    inputs: &NO_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const TARGET_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TARGET_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.InitialConditionTarget.wholeModel",
-    category = "fea",
-    summary = "Create a typed whole-model initial-condition target.",
-    keywords = "fea,initial,condition,target,whole,model,typed",
-    descriptor(crate::builtins::fea::initial_conditions::TARGET_DESCRIPTOR),
-    integer_audit(TARGET_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::initial_conditions"
 )]
 pub async fn whole_model_target() -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_INITIAL_CONDITION_TARGET_WHOLE_MODEL_DESCRIPTOR,
+        "fea.InitialConditionTarget.wholeModel",
+    )?;
     serializable_to_object(
         "fea.InitialConditionTarget.wholeModel",
         &ERROR_INTERNAL,
@@ -162,7 +92,8 @@ fn target_from_value(
     builtin: &'static str,
     value: &Value,
 ) -> BuiltinResult<(Option<(String, u32)>, InitialConditionTarget)> {
-    if matches!(value, Value::Object(object) if object.class_name.display_name() == TARGET_CLASS) {
+    if matches!(value, Value::Object(object) if object.class_name.is(runmat_builtins::fea_contract::model_types::classes::FEA_INITIAL_CONDITION_TARGET_CLASS))
+    {
         let target: WholeModelTarget = object_payload(builtin, value, TARGET_CLASS)?;
         if !target.whole_model {
             return Err(builtin_error(
@@ -211,30 +142,14 @@ fn condition_to_object(
 
 macro_rules! initial_condition_builtin {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin:literal, $label:literal, $summary:literal, $class:expr,
+        $function:ident, $descriptor:ident, $builtin:literal, $class:expr,
         $signal_variant:path, $condition_variant:path, $shape:pat
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &CONDITION_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
-                                    name = $builtin,
-                                    category = "fea",
-                                    summary = $summary,
-                                    keywords = "fea,initial,condition,signal,state,typed",
-                                    descriptor($descriptor),
-                                    integer_capabilities(INITIAL_INTEGER_CAPABILITIES),
-                                    builtin_path = "crate::builtins::fea::initial_conditions"
-                                )]
+                    name = $builtin,
+                    binding_variant = "default",
+                    builtin_path = "crate::builtins::fea::initial_conditions"
+                )]
         pub async fn $function(
             id: String,
             target: Value,
@@ -243,6 +158,10 @@ macro_rules! initial_condition_builtin {
             sample_approach: Value,
             before_step_id: String,
         ) -> BuiltinResult<Value> {
+            crate::builtins::fea::constraints::fixed_outputs(
+                &runmat_builtins::$descriptor,
+                $builtin,
+            )?;
             if id.trim().is_empty() || before_step_id.trim().is_empty() {
                 return Err(builtin_error(
                     $builtin,
@@ -253,10 +172,8 @@ macro_rules! initial_condition_builtin {
             let abscissa = crate::builtins::fea::values::finite_numeric_scalar(
                 $builtin, &abscissa, "abscissa",
             )?;
-            let approach = super::signal_policies::sample_approach_from_value(
-                $builtin,
-                &sample_approach,
-            )?;
+            let approach =
+                super::signal_policies::sample_approach_from_value($builtin, &sample_approach)?;
             let signal = super::signals::physical_signal_from_value($builtin, &signal)?;
             let $signal_variant(signal) = signal else {
                 return Err(builtin_error(
@@ -289,19 +206,64 @@ macro_rules! initial_condition_builtin {
     };
 }
 
-initial_condition_builtin!(structural_displacement, STRUCTURAL_DISPLACEMENT_DESCRIPTOR, STRUCTURAL_DISPLACEMENT_SIGNATURES, "fea.StructuralInitialCondition.displacement", "condition = fea.StructuralInitialCondition.displacement(id, target, signal, abscissa, sampleApproach, beforeStepId)", "Create a structural displacement initial condition from a typed signal sample.", STRUCTURAL_CLASS, PhysicalSignal::Displacement, InitialCondition::Displacement, SignalShape::Vector3);
-initial_condition_builtin!(structural_velocity, STRUCTURAL_VELOCITY_DESCRIPTOR, STRUCTURAL_VELOCITY_SIGNATURES, "fea.StructuralInitialCondition.velocity", "condition = fea.StructuralInitialCondition.velocity(id, target, signal, abscissa, sampleApproach, beforeStepId)", "Create a structural velocity initial condition from a typed signal sample.", STRUCTURAL_CLASS, PhysicalSignal::Velocity, InitialCondition::Velocity, SignalShape::Vector3);
-initial_condition_builtin!(structural_angular_velocity, STRUCTURAL_ANGULAR_VELOCITY_DESCRIPTOR, STRUCTURAL_ANGULAR_VELOCITY_SIGNATURES, "fea.StructuralInitialCondition.angularVelocity", "condition = fea.StructuralInitialCondition.angularVelocity(id, target, signal, abscissa, sampleApproach, beforeStepId)", "Create a structural angular-velocity initial condition from a typed signal sample.", STRUCTURAL_CLASS, PhysicalSignal::AngularVelocity, InitialCondition::AngularVelocity, SignalShape::Vector3);
-initial_condition_builtin!(thermal_temperature, THERMAL_TEMPERATURE_DESCRIPTOR, THERMAL_TEMPERATURE_SIGNATURES, "fea.ThermalInitialCondition.temperature", "condition = fea.ThermalInitialCondition.temperature(id, target, signal, abscissa, sampleApproach, beforeStepId)", "Create a thermal temperature initial condition from a typed signal sample.", THERMAL_CLASS, PhysicalSignal::Temperature, InitialCondition::Temperature, SignalShape::Scalar);
-initial_condition_builtin!(electrical_potential, ELECTRICAL_POTENTIAL_DESCRIPTOR, ELECTRICAL_POTENTIAL_SIGNATURES, "fea.ElectricalInitialCondition.potential", "condition = fea.ElectricalInitialCondition.potential(id, target, signal, abscissa, sampleApproach, beforeStepId)", "Create an electrical-potential initial condition from a typed signal sample.", ELECTRICAL_CLASS, PhysicalSignal::ElectricPotential, InitialCondition::ElectricPotential, SignalShape::Scalar);
-initial_condition_builtin!(magnetic_vector_potential, MAGNETIC_VECTOR_POTENTIAL_DESCRIPTOR, MAGNETIC_VECTOR_POTENTIAL_SIGNATURES, "fea.MagneticInitialCondition.vectorPotential", "condition = fea.MagneticInitialCondition.vectorPotential(id, target, signal, abscissa, sampleApproach, beforeStepId)", "Create a magnetic-vector-potential initial condition from a typed signal sample.", MAGNETIC_CLASS, PhysicalSignal::MagneticVectorPotential, InitialCondition::MagneticVectorPotential, SignalShape::Vector3);
+initial_condition_builtin!(
+    structural_displacement,
+    FEA_STRUCTURAL_INITIAL_CONDITION_DISPLACEMENT_DESCRIPTOR,
+    "fea.StructuralInitialCondition.displacement",
+    STRUCTURAL_CLASS,
+    PhysicalSignal::Displacement,
+    InitialCondition::Displacement,
+    SignalShape::Vector3
+);
+initial_condition_builtin!(
+    structural_velocity,
+    FEA_STRUCTURAL_INITIAL_CONDITION_VELOCITY_DESCRIPTOR,
+    "fea.StructuralInitialCondition.velocity",
+    STRUCTURAL_CLASS,
+    PhysicalSignal::Velocity,
+    InitialCondition::Velocity,
+    SignalShape::Vector3
+);
+initial_condition_builtin!(
+    structural_angular_velocity,
+    FEA_STRUCTURAL_INITIAL_CONDITION_ANGULAR_VELOCITY_DESCRIPTOR,
+    "fea.StructuralInitialCondition.angularVelocity",
+    STRUCTURAL_CLASS,
+    PhysicalSignal::AngularVelocity,
+    InitialCondition::AngularVelocity,
+    SignalShape::Vector3
+);
+initial_condition_builtin!(
+    thermal_temperature,
+    FEA_THERMAL_INITIAL_CONDITION_TEMPERATURE_DESCRIPTOR,
+    "fea.ThermalInitialCondition.temperature",
+    THERMAL_CLASS,
+    PhysicalSignal::Temperature,
+    InitialCondition::Temperature,
+    SignalShape::Scalar
+);
+initial_condition_builtin!(
+    electrical_potential,
+    FEA_ELECTRICAL_INITIAL_CONDITION_POTENTIAL_DESCRIPTOR,
+    "fea.ElectricalInitialCondition.potential",
+    ELECTRICAL_CLASS,
+    PhysicalSignal::ElectricPotential,
+    InitialCondition::ElectricPotential,
+    SignalShape::Scalar
+);
+initial_condition_builtin!(
+    magnetic_vector_potential,
+    FEA_MAGNETIC_INITIAL_CONDITION_VECTOR_POTENTIAL_DESCRIPTOR,
+    "fea.MagneticInitialCondition.vectorPotential",
+    MAGNETIC_CLASS,
+    PhysicalSignal::MagneticVectorPotential,
+    InitialCondition::MagneticVectorPotential,
+    SignalShape::Vector3
+);
 initial_condition_builtin!(
     acoustic_pressure,
-    ACOUSTIC_PRESSURE_DESCRIPTOR,
-    ACOUSTIC_PRESSURE_SIGNATURES,
+    FEA_ACOUSTIC_INITIAL_CONDITION_PRESSURE_DESCRIPTOR,
     "fea.AcousticInitialCondition.pressure",
-    "condition = fea.AcousticInitialCondition.pressure(id, target, signal, abscissa, sampleApproach, beforeStepId)",
-    "Create an acoustic-pressure initial condition from a typed signal sample.",
     ACOUSTIC_CLASS,
     PhysicalSignal::Pressure,
     InitialCondition::AcousticPressure,
@@ -309,11 +271,8 @@ initial_condition_builtin!(
 );
 initial_condition_builtin!(
     fluid_pressure,
-    FLUID_PRESSURE_DESCRIPTOR,
-    FLUID_PRESSURE_SIGNATURES,
+    FEA_FLUID_INITIAL_CONDITION_PRESSURE_DESCRIPTOR,
     "fea.FluidInitialCondition.pressure",
-    "condition = fea.FluidInitialCondition.pressure(id, target, signal, abscissa, sampleApproach, beforeStepId)",
-    "Create a fluid-pressure initial condition from a typed signal sample.",
     FLUID_CLASS,
     PhysicalSignal::Pressure,
     InitialCondition::FluidPressure,
@@ -321,11 +280,8 @@ initial_condition_builtin!(
 );
 initial_condition_builtin!(
     fluid_velocity,
-    FLUID_VELOCITY_DESCRIPTOR,
-    FLUID_VELOCITY_SIGNATURES,
+    FEA_FLUID_INITIAL_CONDITION_VELOCITY_DESCRIPTOR,
     "fea.FluidInitialCondition.velocity",
-    "condition = fea.FluidInitialCondition.velocity(id, target, signal, abscissa, sampleApproach, beforeStepId)",
-    "Create a fluid-velocity initial condition from a typed signal sample.",
     FLUID_CLASS,
     PhysicalSignal::Velocity,
     InitialCondition::FluidVelocity,

@@ -19,10 +19,19 @@ pub mod test_support;
 
 pub use super::descriptors::{ERROR_INPUT, ERROR_INTERNAL};
 
-/// Typed study constructors validate their inputs (`ERROR_INPUT`) and convert
-/// the immutable analysis value into a RunMat object (`ERROR_INTERNAL`). They
-/// never run a validation, plan, or solve operation.
-pub const FEA_STUDY_TYPE_ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INPUT, ERROR_INTERNAL];
+/// A typed study constructor returns exactly one immutable value.
+pub const FEA_STUDY_TYPE_ERROR_OUTPUTS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.FEA.STUDY_TYPE.TOO_MANY_OUTPUTS",
+    identifier: Some("RunMat:fea:TooManyOutputs"),
+    when: "More than one output is requested from a typed study constructor.",
+    message: "fea: too many output arguments",
+};
+
+/// Typed study constructors validate their inputs (`ERROR_INPUT`), convert
+/// the immutable analysis value into a RunMat object (`ERROR_INTERNAL`), and
+/// return one output. They never run a validation, plan, or solve operation.
+pub const FEA_STUDY_TYPE_ERRORS: [BuiltinErrorDescriptor; 3] =
+    [ERROR_INPUT, ERROR_INTERNAL, FEA_STUDY_TYPE_ERROR_OUTPUTS];
 
 pub const fn required(
     name: &'static str,

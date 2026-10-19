@@ -5,6 +5,7 @@
 //! signature, documentation, and argument rules; this module owns only the
 //! rule interpreter, the shared example fixture, and shared integer facts.
 
+pub mod classes;
 pub mod fixtures;
 pub mod inference;
 pub mod integer;

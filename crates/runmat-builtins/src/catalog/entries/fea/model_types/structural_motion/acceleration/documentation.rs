@@ -8,7 +8,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "The displacement history is reconstructed exactly for a piecewise-linear acceleration: velocity is the integral of acceleration plus the initial velocity, and displacement the integral of velocity plus the initial displacement. Because the reconstruction is exact rather than numerically re-integrated, displacement, velocity, and acceleration stay consistent.",
             "`acceleration` must be a time-domain, real64, three-component acceleration signal in the global frame, for example from `fea.AccelerationSignal.fromTimeSamples`. A constant signal has no time domain and is rejected. Only the component selected by `dof` drives the support; the motion stores the signal id, not a copy of the samples.",
             "`initialDisplacement` is a `fea.Displacement` and `initialVelocity` a `fea.Velocity`; both are scalars for the selected component.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },

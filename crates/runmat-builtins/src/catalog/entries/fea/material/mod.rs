@@ -23,7 +23,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isa(steel, 'fea.Material'));\nassert(strcmp(steel.material_id, \"steel\"));\nassert(strcmp(steel.name, \"Structural steel\"));",
+            source: "assert(isa(steel, 'fea.Material'));\nassert(strcmp(steel.material_id, \"steel\"));\nassert(strcmp(steel.name, \"Structural steel\"));\nassert(steel.mass_density_kg_per_m3 == 7850);",
         },
     },
     BuiltinExample {
@@ -71,6 +71,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[doc_links::MODELS, doc_links::TYPES_AND_UNITS],
     implementation: &[doc_links::FEA_MODELING_SOURCE],
     verification: &[
+        doc_links::PORTABLE_SCHEMA_TEST,
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Materials require explicit capabilities and the canonical density name", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_material_requires_explicit_capabilities_and_canonical_density_name" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Materials preserve typed Rayleigh damping", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_material_preserves_typed_rayleigh_damping" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Numeric constructors convert every integer class once to binary64", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_numeric_constructors_cross_all_integer_classes_once_into_binary64" },

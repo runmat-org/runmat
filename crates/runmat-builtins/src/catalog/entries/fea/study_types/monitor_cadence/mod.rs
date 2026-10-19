@@ -9,7 +9,5 @@ mod tests;
 
 use descriptor::*;
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
-    &accepted_increments::ENTRY,
-    &wall_seconds::ENTRY,
-];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
+    &[&accepted_increments::ENTRY, &wall_seconds::ENTRY];

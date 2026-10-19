@@ -47,3 +47,51 @@ pub const FEA_FIELD_SELECTOR_CLASSES: [StaticClassIdentity; 4] = [
     FEA_RANDOM_RESPONSE_FIELD_CLASS,
     FEA_OUTPUT_FIELD_CLASS,
 ];
+
+/// Dimensioned value classes (`fea.<Quantity>.<unit>` constructors).
+pub const FEA_DISPLACEMENT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Displacement");
+pub const FEA_ROTATION_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Rotation");
+pub const FEA_TEMPERATURE_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Temperature");
+pub const FEA_TEMPERATURE_DIFFERENCE_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.TemperatureDifference");
+pub const FEA_PRESSURE_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Pressure");
+pub const FEA_VELOCITY_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Velocity");
+pub const FEA_HEAT_FLUX_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.HeatFlux");
+pub const FEA_HEAT_TRANSFER_COEFFICIENT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.HeatTransferCoefficient");
+pub const FEA_SPECIFIC_ACOUSTIC_IMPEDANCE_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.SpecificAcousticImpedance");
+pub const FEA_ELECTRIC_POTENTIAL_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.ElectricPotential");
+pub const FEA_ELECTRIC_CURRENT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.ElectricCurrent");
+pub const FEA_MAGNETIC_VECTOR_POTENTIAL_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.MagneticVectorPotential");
+pub const FEA_LENGTH_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Length");
+pub const FEA_POSITION_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Position");
+pub const FEA_TRANSLATION_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.Translation");
+pub const FEA_COMPLEX_PHASE_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.ComplexPhase");
+pub const FEA_THERMAL_CONTACT_RESISTANCE_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.ThermalContactResistance");
+pub const FEA_FRICTION_COEFFICIENT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.FrictionCoefficient");
+pub const FEA_MASS_DENSITY_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.MassDensity");
+pub const FEA_DYNAMIC_VISCOSITY_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.DynamicViscosity");
+pub const FEA_TURBULENCE_INTENSITY_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.TurbulenceIntensity");
+pub const FEA_RAYLEIGH_MASS_COEFFICIENT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.RayleighMassCoefficient");
+pub const FEA_RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS: StaticClassIdentity =
+    StaticClassIdentity::new("fea.RayleighStiffnessCoefficient");

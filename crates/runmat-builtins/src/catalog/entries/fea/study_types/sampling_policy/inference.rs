@@ -21,7 +21,10 @@ pub(super) fn final_sample(request: &CallRequest, entry: &BuiltinCatalogEntry) -
 
 pub(super) const EVERY_ACCEPTED_INCREMENT: StudyConstructorSignature =
     StudyConstructorSignature::new(&[], FEA_SAMPLING_POLICY_CLASS);
-pub(super) fn every_accepted_increment(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn every_accepted_increment(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &EVERY_ACCEPTED_INCREMENT)
 }
 
@@ -31,9 +34,14 @@ pub(super) fn time_seconds(request: &CallRequest, entry: &BuiltinCatalogEntry) -
     infer_study_constructor(request, entry, &TIME_SECONDS)
 }
 
-pub(super) const TIME_INTERVAL_SECONDS: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[RealScalar, RealScalar, RealScalar], FEA_SAMPLING_POLICY_CLASS);
-pub(super) fn time_interval_seconds(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) const TIME_INTERVAL_SECONDS: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[RealScalar, RealScalar, RealScalar],
+    FEA_SAMPLING_POLICY_CLASS,
+);
+pub(super) fn time_interval_seconds(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &TIME_INTERVAL_SECONDS)
 }
 
@@ -44,8 +52,14 @@ pub(super) fn frequency_hertz(request: &CallRequest, entry: &BuiltinCatalogEntry
 }
 
 pub(super) const FREQUENCY_INTERVAL_HERTZ: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[RealScalar, RealScalar, RealScalar], FEA_SAMPLING_POLICY_CLASS);
-pub(super) fn frequency_interval_hertz(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+    StudyConstructorSignature::new(
+        &[RealScalar, RealScalar, RealScalar],
+        FEA_SAMPLING_POLICY_CLASS,
+    );
+pub(super) fn frequency_interval_hertz(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &FREQUENCY_INTERVAL_HERTZ)
 }
 
@@ -55,15 +69,23 @@ pub(super) fn load_factors(request: &CallRequest, entry: &BuiltinCatalogEntry) -
     infer_study_constructor(request, entry, &LOAD_FACTORS)
 }
 
-pub(super) const LOAD_FACTOR_INTERVAL: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[RealScalar, RealScalar, RealScalar], FEA_SAMPLING_POLICY_CLASS);
-pub(super) fn load_factor_interval(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) const LOAD_FACTOR_INTERVAL: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[RealScalar, RealScalar, RealScalar],
+    FEA_SAMPLING_POLICY_CLASS,
+);
+pub(super) fn load_factor_interval(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &LOAD_FACTOR_INTERVAL)
 }
 
 pub(super) const STUDY_PARAMETER_VALUES: StudyConstructorSignature =
     StudyConstructorSignature::new(&[RealValues], FEA_SAMPLING_POLICY_CLASS);
-pub(super) fn study_parameter_values(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn study_parameter_values(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &STUDY_PARAMETER_VALUES)
 }
 

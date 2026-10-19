@@ -2,7 +2,7 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_PLAN_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_model_setup, BOX_STUDY},
+    example_fixtures::{fea_box_model_setup, BOX_STUDY, NATIVE_CAD},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     operation_inference::{infer_evidence, FeaEvidenceKind},
@@ -26,9 +26,9 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: BOX_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
+    requirements: NATIVE_CAD,
     verification: BuiltinExampleVerification::Assertions {
-        source: "assert(isa(plan, 'fea.Plan'));\nassert(strcmp(plan.study_id, \"box_static\"));\nassert(numel(plan.operation_sequence) >= 1);\nassert(~isempty(plan.study_fingerprint));",
+        source: "assert(isa(plan, 'fea.Plan'));\nassert(strcmp(plan.study_id, \"box_static\"));\nassert(strcmp(plan.sequence_id, \"box_model.sequence\"));\nassert(numel(plan.steps) == 1);\nassert(numel(plan.operation_sequence) >= 1);\nassert(~isempty(plan.study_fingerprint));",
     },
 }];
 
@@ -60,6 +60,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     links: &[doc_links::SOLVES, doc_links::STUDY_CONTRACTS, doc_links::OPERATION_REFERENCE],
     implementation: &[doc_links::FEA_ENTRYPOINTS_SOURCE, doc_links::ANALYSIS_OPERATIONS_SOURCE],
     verification: &[
+        doc_links::PORTABLE_SCHEMA_TEST,
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "A linear-static study plans its canonical sequence", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_plan_study_returns_canonical_linear_static_sequence" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sweep planning returns typed plan entries", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_plan_study_sweep_returns_typed_plan_entries" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Sweep planning continues after a study failure", location: "crates/runmat-runtime/src/analysis/tests.rs::analysis_plan_study_sweep_can_continue_on_study_failure" },

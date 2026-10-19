@@ -12,6 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     ] },
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:Internal` if the event cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 

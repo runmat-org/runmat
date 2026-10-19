@@ -345,9 +345,9 @@ fn typed_signal_excitation_and_case_compose_through_compiled_runmat_code() {
         geom = geometry.load("{}", "Units", "meter");
         loadPad = geometry.region(geom, "name:Default Region");
         forceSignal = fea.ForceSignal.constantNewtons("tip.signal", [0 -1250 0]);
-        tipLoad = fea.StructuralExcitation.force("tip", "service", loadPad, forceSignal);
+        tipLoad = fea.StructuralExcitation.force("tip", loadPad, forceSignal);
         serviceLoads = fea.ExcitationCase.always("service", {{tipLoad}});
-        model = fea.model("bracket", geom, "Template", "linear_static_structural", "Signals", {{forceSignal}}, "Excitations", {{tipLoad}}, "ExcitationCases", {{serviceLoads}});
+        model = fea.model("bracket", geom, "Steps", {{fea.StructuralStep.static("static")}}, "Signals", {{forceSignal}}, "Excitations", {{tipLoad}}, "ExcitationCases", {{serviceLoads}});
         "#,
         path.to_string_lossy()
     );
@@ -405,7 +405,7 @@ fn sampled_signal_initial_state_and_response_spectrum_compose_through_compiled_c
         construction = fea.SpectrumConstruction.authoredDesign();
         evidence = fea.SpectrumEvidence.bounded(0.95, 0.01);
         spectrum = fea.ResponseSpectrum.new("launch", axis, [12 18 9], damping, response, envelope, spectrumInterpolation, spectrumExtrapolation, direction, modalCombination, directionalCombination, truncation, construction, evidence, "sha256:launch-spectrum");
-        model = fea.model("launch-model", geom, "Template", "linear_static_structural", "Signals", {{acceleration, displacement}}, "InitialConditions", {{initial}}, "ResponseSpectra", {{spectrum}});
+        model = fea.model("launch-model", geom, "Steps", {{fea.StructuralStep.static("static")}}, "Signals", {{acceleration, displacement}}, "InitialConditions", {{initial}}, "ResponseSpectra", {{spectrum}});
         "#,
         path.to_string_lossy()
     );

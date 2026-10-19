@@ -18,15 +18,8 @@ use runmat_analysis_core::{
     ThermalConstraint, ThermalConstraintKind, ThermalContactResistance, ThermalInterfaceTransfer,
     ThermoMechanicalDomain, Translation, TranslationDofValue, TurbulenceIntensity, Velocity,
 };
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinIntegerBackendRule,
-    BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-    BuiltinOutputMode, BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType,
-    BuiltinSignatureDescriptor,
-};
+use runmat_builtins::fea_contract::identities;
+use runmat_builtins::{BuiltinDescriptor, BuiltinErrorDescriptor};
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
 use runmat_types::MethodName;
@@ -134,586 +127,16 @@ pub(crate) fn ensure_value_classes_registered() {
     study_policies::ensure_study_policy_classes_registered();
 }
 
-const OUT_ANY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "result",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "FEA object or operation result.",
-}];
-const IN_INPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "study",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "A fea.Study or fea.Sweep object.",
-}];
-const IN_STUDY_ARGS: [BuiltinParamDescriptor; 4] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Study id.",
-    },
-    BuiltinParamDescriptor {
-        name: "geometry",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "geometry.Asset returned by geometry.load.",
-    },
-    BuiltinParamDescriptor {
-        name: "model",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Explicit fea.Model bound to the supplied geometry revision.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional Mesh and Execution settings.",
-    },
-];
-const IN_VARIADIC_ARGS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "args",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Constructor or query arguments.",
-}];
-
-const MODEL_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Model id.",
-    },
-    BuiltinParamDescriptor {
-        name: "geometry",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Existing geometry.Asset object.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Explicit frame, materials, assignments, constraints, boundaries, signals, excitations, steps or sequence, domains, and interfaces.",
-    },
-];
-const MATERIAL_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Material id.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Mechanical, thermal, acoustic, electrical, and plastic material fields.",
-    },
-];
-const SWEEP_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "id",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Sweep id.",
-    },
-    BuiltinParamDescriptor {
-        name: "studies",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "A fea.Study or cell array of fea.Study objects.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Optional logical FailFast control.",
-    },
-];
-const RESULTS_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "runOrRunId",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Persisted run id, fea.RunResult, or fea.Results object.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Field, diagnostic, one-based mode/snapshot selector, and inclusion options.",
-    },
-];
-const TRENDS_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "Name, Value",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Variadic,
-    default: None,
-    description: "Optional positive integer WindowSize.",
-}];
-const FIELD_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "resultsOrRun",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "fea.Results, fea.RunResult, or persisted run id.",
-    },
-    BuiltinParamDescriptor {
-        name: "field",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed quantity or authored-output selector, such as fea.StructuralField.stress() or fea.OutputField.named(\"peak_stress\").",
-    },
-    BuiltinParamDescriptor {
-        name: "sample",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: None,
-        description: "Typed independent-domain sample, such as fea.Frequency.hertz(120).",
-    },
-];
-const FIELD_PAGE_INPUTS: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "field",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Artifact-backed fea.Field returned by fea.field.",
-    },
-    BuiltinParamDescriptor {
-        name: "start",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("1"),
-        description: "One-based logical value index.",
-    },
-    BuiltinParamDescriptor {
-        name: "count",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Optional,
-        default: Some("256"),
-        description: "Positive maximum logical value count, capped at 4096.",
-    },
-];
-const PLOT_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "field",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "FEA field carrying result and study context.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Visualization options such as Edges, Overlay, or Deformed.",
-    },
-];
-const MESH_CONTEXT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "context",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "FEA run, results, or field carrying mesh context.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Mesh display options such as Source or Edges.",
-    },
-];
-const COMPARE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "baselineRunId",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Baseline persisted run id.",
-    },
-    BuiltinParamDescriptor {
-        name: "candidateRunId",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Candidate persisted run id.",
-    },
-];
-
-const STUDY_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "study = fea.study(id, geometry, model, Name, Value, ...)",
-    inputs: &IN_STUDY_ARGS,
-    outputs: &OUT_ANY,
-}];
-const VALIDATE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "result = fea.validate(studyOrSweep)",
-    inputs: &IN_INPUT,
-    outputs: &OUT_ANY,
-}];
-const PLAN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "plan = fea.plan(study)",
-    inputs: &IN_INPUT,
-    outputs: &OUT_ANY,
-}];
-const RUN_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "run = fea.run(studyOrSweep)",
-    inputs: &IN_INPUT,
-    outputs: &OUT_ANY,
-}];
-const SWEEP_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "sweep = fea.sweep(id, studies, Name, Value, ...)",
-    inputs: &SWEEP_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const MODEL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "model = fea.model(id, geometry, Name, Value, ...)",
-    inputs: &MODEL_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const MATERIAL_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "material = fea.material(id, Name, Value, ...)",
-    inputs: &MATERIAL_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const COMPONENT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "component = fea.component(args, ...)",
-    inputs: &IN_VARIADIC_ARGS,
-    outputs: &OUT_ANY,
-}];
-const RESULTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "results = fea.results(runOrRunId, Name, Value, ...)",
-    inputs: &RESULTS_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const FIELD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "field = fea.field(resultsOrRun, fieldSelector, sample)",
-    inputs: &FIELD_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const FIELD_PAGE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "page = fea.fieldPage(field, start, count)",
-    inputs: &FIELD_PAGE_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const PLOT_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "figure = plot(field, Name, Value, ...)",
-    inputs: &PLOT_CONTEXT_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const MESH_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "figure = mesh(runOrResultsOrField, Name, Value, ...)",
-    inputs: &MESH_CONTEXT_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const COMPARE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "comparison = fea.compare(baselineRunId, candidateRunId)",
-    inputs: &COMPARE_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const TRENDS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "trends = fea.trends(Name, Value, ...)",
-    inputs: &TRENDS_INPUTS,
-    outputs: &OUT_ANY,
-}];
-
-const ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEA.BUILTIN.INVALID_INPUT",
-    identifier: Some("RunMat:fea:InvalidInput"),
-    when: "A builtin receives an unsupported argument pattern or object type.",
-    message: "fea: invalid input",
+// Descriptors, error descriptors, parameter lists, and integer facts for the
+// FEA operation surface are owned by the canonical catalog in runmat-builtins.
+pub(crate) use runmat_builtins::fea_contract::descriptors::{
+    ERROR_INPUT, ERROR_INTERNAL, ERROR_OPERATION,
 };
-const ERROR_OPERATION: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEA.BUILTIN.OPERATION_FAILED",
-    identifier: Some("RunMat:fea:OperationFailed"),
-    when: "A validation, planning, run, result-query, comparison, or trend operation fails.",
-    message: "fea: operation failed",
-};
-const ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.FEA.BUILTIN.INTERNAL",
-    identifier: Some("RunMat:fea:Internal"),
-    when: "An FEA object or operation result cannot be converted to a RunMat value.",
-    message: "fea: internal error",
-};
-const ERRORS: [BuiltinErrorDescriptor; 3] = [ERROR_INPUT, ERROR_OPERATION, ERROR_INTERNAL];
-pub const FEA_STUDY_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STUDY_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_VALIDATE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &VALIDATE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_PLAN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PLAN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_RUN_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RUN_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_SWEEP_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SWEEP_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_MODEL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MODEL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_MATERIAL_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MATERIAL_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_COMPONENT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COMPONENT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const fn fea_floating_input(
-    name: &'static str,
-    scalar_double: BuiltinIntegerScalarDoubleRule,
-) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double,
-        notes: "Host integers cross once into a finite binary64 physics field; provider-resident values are rejected.",
-    }
-}
-
-const fn fea_floating_capability(
-    form: &'static str,
-    inputs: &'static [BuiltinIntegerInputCapability],
-    overload: BuiltinIntegerOverloadKind,
-) -> BuiltinIntegerCapabilityDescriptor {
-    BuiltinIntegerCapabilityDescriptor {
-        form,
-        inputs,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload,
-        notes: "The RunMat-native constructor validates its host value and performs one explicit IEEE-754 binary64 model-storage conversion; wide integers can round.",
-    }
-}
-
-const MATERIAL_MECHANICAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [fea_floating_input(
-        "mechanical numeric fields",
-        BuiltinIntegerScalarDoubleRule::Allowed,
-    )];
-const MATERIAL_THERMAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "thermal numeric fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-const MATERIAL_ACOUSTIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "acoustic numeric fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-const MATERIAL_ELECTRICAL_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [fea_floating_input(
-        "electrical numeric fields",
-        BuiltinIntegerScalarDoubleRule::Allowed,
-    )];
-const MATERIAL_RESPONSE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "conductivity response numeric fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-const MATERIAL_PLASTIC_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [fea_floating_input(
-    "plastic numeric fields",
-    BuiltinIntegerScalarDoubleRule::Allowed,
-)];
-pub const FEA_MATERIAL_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 6] = [
-    fea_floating_capability(
-        "mechanical material fields",
-        &MATERIAL_MECHANICAL_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::ScalarOnly,
-    ),
-    fea_floating_capability(
-        "thermal material fields",
-        &MATERIAL_THERMAL_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::ScalarOnly,
-    ),
-    fea_floating_capability(
-        "acoustic material fields",
-        &MATERIAL_ACOUSTIC_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::ScalarOnly,
-    ),
-    fea_floating_capability(
-        "electrical material fields",
-        &MATERIAL_ELECTRICAL_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::ScalarOnly,
-    ),
-    fea_floating_capability(
-        "electrical frequency-response fields",
-        &MATERIAL_RESPONSE_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::Multiple,
-    ),
-    fea_floating_capability(
-        "plastic material fields",
-        &MATERIAL_PLASTIC_INTEGER_INPUTS,
-        BuiltinIntegerOverloadKind::ScalarOnly,
-    ),
-];
-
-pub const FEA_STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "This RunMat-native FEA API accepts object, text, or enum inputs rather than numeric data; nested typed objects retain their already-defined numeric contracts and no provider gather occurs.",
-};
-
-const RESULTS_SELECTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "one-based result indices",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Host numeric scalars or vectors are decoded exactly, require positive one-based indices, preserve order and duplicates, and reject matrix and provider-resident inputs.",
-    }];
-const RESULTS_FLAG_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "numeric inclusion predicate",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Host scalar logical values and exact numeric zero or one are accepted; every other numeric value and provider-resident input is rejected.",
-    }];
-pub const FEA_RESULTS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 3] = [
-    BuiltinIntegerCapabilityDescriptor { form: "ModeIndices", inputs: &RESULTS_SELECTOR_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The one-based public selector is translated once to the operation layer's zero-based index and public structural result fields remain exact." },
-    BuiltinIntegerCapabilityDescriptor { form: "TransientSnapshotIndices", inputs: &RESULTS_SELECTOR_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The one-based public selector is translated once to the operation layer's zero-based index and public structural result fields remain exact." },
-    BuiltinIntegerCapabilityDescriptor { form: "numeric inclusion predicates", inputs: &RESULTS_FLAG_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::Multiple, notes: "Logical and numeric zero/one select query projections without converting provider data." },
-];
-
-const TRENDS_WINDOW_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "WindowSize",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A positive host integer scalar or integral scalar double is decoded exactly as usize; provider-resident values are rejected.",
-    }];
-pub const FEA_TRENDS_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor { form: "WindowSize", inputs: &TRENDS_WINDOW_INPUTS, computation_domain: BuiltinIntegerComputationDomain::Structural, output_class: BuiltinIntegerOutputClassRule::FunctionSpecific, overflow: BuiltinIntegerOverflowRule::Error, backend: BuiltinIntegerBackendRule::HostOnly, overload: BuiltinIntegerOverloadKind::StructuralParameter, notes: "The positive window size and structural trend counts remain exact in the public result object; time and rate fields remain binary64." }];
-pub const FEA_RESULTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &RESULTS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_FIELD_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FIELD_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const FIELD_PAGE_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "start",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A positive one-based host integer or integral scalar double; provider-resident values are rejected.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "count",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A positive host integer or integral scalar double, capped by the field-page contract; provider-resident values are rejected.",
-    },
-];
-pub const FEA_FIELD_PAGE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "field page bounds",
-        inputs: &FIELD_PAGE_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::FunctionSpecific,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Paging indexes and counts remain exact native integers; numerical field values retain their real or complex floating representation.",
-    }];
-pub const FEA_FIELD_PAGE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &FIELD_PAGE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_PLOT_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &PLOT_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &ERRORS,
-};
-pub const FEA_MESH_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &MESH_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::MethodOnly,
-    errors: &ERRORS,
-};
-pub const FEA_COMPARE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &COMPARE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub const FEA_TRENDS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &TRENDS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
+pub use runmat_builtins::fea_contract::integer::FEA_STRUCTURAL_INTEGER_AUDIT;
 
 #[runtime_builtin(
     name = "fea.study",
-    category = "fea",
-    summary = "Create a typed FEA study from geometry, model data, and run settings.",
-    keywords = "fea,study,geometry,run",
-    descriptor(crate::builtins::fea::FEA_STUDY_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -722,11 +145,7 @@ pub async fn fea_study_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.sweep",
-    category = "fea",
-    summary = "Create a FEA study sweep from study objects.",
-    keywords = "fea,sweep,study,run",
-    descriptor(crate::builtins::fea::FEA_SWEEP_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -735,11 +154,7 @@ pub async fn fea_sweep_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.model",
-    category = "fea",
-    summary = "Create a typed FEA model object from geometry and model components.",
-    keywords = "fea,model,materials,boundary,loads,domains",
-    descriptor(crate::builtins::fea::FEA_MODEL_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -748,11 +163,7 @@ pub async fn fea_model_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.material",
-    category = "fea",
-    summary = "Create a typed FEA material object.",
-    keywords = "fea,material,mechanical,thermal,electrical,plastic",
-    descriptor(crate::builtins::fea::FEA_MATERIAL_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_MATERIAL_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -761,11 +172,7 @@ pub async fn fea_material_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.validate",
-    category = "fea",
-    summary = "Validate a FEA study or sweep without planning or solving.",
-    keywords = "fea,validate,study,sweep",
-    descriptor(crate::builtins::fea::FEA_VALIDATE_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
@@ -789,11 +196,7 @@ pub async fn fea_validate_builtin(input: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.plan",
-    category = "fea",
-    summary = "Plan a FEA study or sweep without solving it.",
-    keywords = "fea,plan,study,sweep",
-    descriptor(crate::builtins::fea::FEA_PLAN_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
@@ -813,11 +216,7 @@ pub async fn fea_plan_builtin(input: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.run",
-    category = "fea",
-    summary = "Run a FEA study or sweep.",
-    keywords = "fea,run,study,sweep,solve",
-    descriptor(crate::builtins::fea::FEA_RUN_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
@@ -843,11 +242,7 @@ pub async fn fea_run_builtin(input: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.results",
-    category = "fea",
-    summary = "Load or project FEA run results for post-processing.",
-    keywords = "fea,results,run_id,fields,diagnostics",
-    descriptor(crate::builtins::fea::FEA_RESULTS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_RESULTS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -856,11 +251,7 @@ pub async fn fea_results_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.field",
-    category = "fea",
-    summary = "Extract a field from FEA results or a run result.",
-    keywords = "fea,field,displacement,von_mises,post",
-    descriptor(crate::builtins::fea::FEA_FIELD_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -869,11 +260,7 @@ pub async fn fea_field_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.fieldPage",
-    category = "fea",
-    summary = "Read a bounded page of real or complex values from an artifact-backed FEA field.",
-    keywords = "fea,field,page,values,complex,artifact",
-    descriptor(crate::builtins::fea::FEA_FIELD_PAGE_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_FIELD_PAGE_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_field_page_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -882,11 +269,7 @@ pub async fn fea_field_page_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__runmat_fea_plot",
-    category = "fea",
-    summary = "Implement plot overloads for FEA result objects.",
-    keywords = "fea,plot,visualize,mesh,von_mises,stress,field",
-    descriptor(crate::builtins::fea::FEA_PLOT_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -895,11 +278,7 @@ pub async fn fea_plot_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "__runmat_fea_mesh",
-    category = "fea",
-    summary = "Implement mesh overloads for FEA result objects.",
-    keywords = "fea,mesh,visualize,topology,solver,cad",
-    descriptor(crate::builtins::fea::FEA_MESH_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_mesh_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -908,11 +287,7 @@ pub async fn fea_mesh_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.compare",
-    category = "fea",
-    summary = "Compare two persisted FEA runs by run id.",
-    keywords = "fea,compare,run_id,quality",
-    descriptor(crate::builtins::fea::FEA_COMPARE_DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -921,11 +296,7 @@ pub async fn fea_compare_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.trends",
-    category = "fea",
-    summary = "Summarize recent persisted FEA run trends.",
-    keywords = "fea,trends,history,quality",
-    descriptor(crate::builtins::fea::FEA_TRENDS_DESCRIPTOR),
-    integer_capabilities(crate::builtins::fea::FEA_TRENDS_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea"
 )]
 pub async fn fea_trends_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -937,12 +308,12 @@ async fn resolve_document_input(
     builtin: &'static str,
 ) -> BuiltinResult<RuntimeResolvedDocument> {
     match input {
-        Value::Object(ref object) if object.class_name.display_name() == FEA_STUDY_CLASS => {
+        Value::Object(ref object) if object.class_name.is(identities::FEA_STUDY_CLASS) => {
             modeling::study_from_value_with_generators(builtin, &input)
                 .map(Box::new)
                 .map(RuntimeResolvedDocument::Study)
         }
-        Value::Object(ref object) if object.class_name.display_name() == FEA_SWEEP_CLASS => {
+        Value::Object(ref object) if object.class_name.is(identities::FEA_SWEEP_CLASS) => {
             modeling::sweep_from_value_with_generators(builtin, &input)
                 .map(RuntimeResolvedDocument::Sweep)
         }
@@ -968,7 +339,7 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     if let Value::Object(object) = &args[0] {
-        if object.class_name.display_name() == FEA_RESULTS_CLASS && args.len() == 1 {
+        if object.class_name.is(identities::FEA_RESULTS_CLASS) && args.len() == 1 {
             return Ok(args[0].clone());
         }
     }
@@ -1264,7 +635,7 @@ fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery
 
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::Object(object) if object.class_name.display_name() == FEA_RUN_RESULT_CLASS => {
+        Value::Object(object) if object.class_name.is(identities::FEA_RUN_RESULT_CLASS) => {
             let aggregate: crate::analysis::AnalysisStudyRunData =
                 object_payload(builtin, value, FEA_RUN_RESULT_CLASS)?;
             match aggregate.steps.as_slice() {
@@ -1281,7 +652,7 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
                 )),
             }
         }
-        Value::Object(object) if object.class_name.display_name() == FEA_STEP_RUN_RESULT_CLASS => {
+        Value::Object(object) if object.class_name.is(identities::FEA_STEP_RUN_RESULT_CLASS) => {
             run_id_from_object(object).ok_or_else(|| {
                 builtin_error(
                     builtin,
@@ -1290,7 +661,7 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
                 )
             })
         }
-        Value::Object(object) if object.class_name.display_name() == FEA_SWEEP_RUN_RESULT_CLASS => {
+        Value::Object(object) if object.class_name.is(identities::FEA_SWEEP_RUN_RESULT_CLASS) => {
             Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
@@ -1323,7 +694,7 @@ fn results_data_from_value(
     value: &Value,
 ) -> BuiltinResult<crate::analysis::AnalysisResultsData> {
     match value {
-        Value::Object(object) if object.class_name.display_name() == FEA_RESULTS_CLASS => {
+        Value::Object(object) if object.class_name.is(identities::FEA_RESULTS_CLASS) => {
             object_payload(builtin, value, FEA_RESULTS_CLASS)
         }
         _ => {
@@ -1404,7 +775,7 @@ fn study_context_value(value: &Value) -> Option<Value> {
     let Value::Object(object) = value else {
         return None;
     };
-    if object.class_name.display_name() == FEA_STUDY_CLASS {
+    if object.class_name.is(identities::FEA_STUDY_CLASS) {
         return Some(value.clone());
     }
     object.properties.get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
@@ -1444,7 +815,7 @@ fn field_object(
 ) -> BuiltinResult<ObjectInstance> {
     ensure_fea_classes_registered();
     let materialized = values.is_some();
-    let mut object = ObjectInstance::new(FEA_FIELD_CLASS.to_string());
+    let mut object = ObjectInstance::new(identities::FEA_FIELD_CLASS);
     object.properties.insert(
         "field_id".to_string(),
         Value::String(descriptor.field_id.clone()),
@@ -1797,6 +1168,20 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
                 .numeric_value_at(0)
                 .expect("validated scalar tensor storage"),
         ),
+        // A `1xN` row is the typed-object form of a JSON vector.
+        Value::Tensor(tensor) if tensor.shape().len() == 2 && tensor.shape()[0] == 1 => {
+            (0..tensor.shape()[1])
+                .map(|index| {
+                    numeric_scalar_to_json(
+                        builtin,
+                        tensor
+                            .numeric_value_at(index)
+                            .expect("validated row tensor storage"),
+                    )
+                })
+                .collect::<BuiltinResult<Vec<_>>>()
+                .map(serde_json::Value::Array)
+        }
         Value::Tensor(tensor) => nested_array_to_json(builtin, &tensor.shape(), |index| {
             numeric_scalar_to_json(
                 builtin,
@@ -2480,7 +1865,50 @@ fn value_from_json_preserving_integer_kinds(
     let mut converted = value_from_json(json)
         .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
     promote_json_scalar_kinds(builtin, error, &mut converted, json)?;
+    orient_json_vectors_as_rows(builtin, error, &mut converted)?;
     Ok(converted)
+}
+
+/// JSON arrays decode to rank-1 tensors, which report `1xN` from `size` but
+/// do not combine with ordinary row vectors in `==` or `isequal`. Typed FEA
+/// objects expose authored coordinate vectors as `1xN` rows instead. A
+/// single-element array keeps its rank-1 shape so it still re-encodes as a
+/// one-element JSON array rather than a scalar (see `value_to_json`).
+fn orient_json_vectors_as_rows(
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+    value: &mut Value,
+) -> BuiltinResult<()> {
+    match value {
+        Value::Tensor(tensor) if tensor.shape().len() == 1 && tensor.shape()[0] >= 2 => {
+            let columns = tensor.shape()[0];
+            tensor
+                .reshape_in_place(vec![1, columns])
+                .map_err(|message| builtin_error(builtin, error, message))?;
+        }
+        Value::StringArray(array) if array.shape.len() == 1 && array.shape[0] >= 2 => {
+            let columns = array.shape[0];
+            *array = runmat_value::StringArray::new(std::mem::take(&mut array.data), vec![1, columns])
+                .map_err(|message| builtin_error(builtin, error, message))?;
+        }
+        Value::Struct(structure) => {
+            for child in structure.fields.values_mut() {
+                orient_json_vectors_as_rows(builtin, error, child)?;
+            }
+        }
+        Value::Object(object) => {
+            for child in object.properties.values_mut() {
+                orient_json_vectors_as_rows(builtin, error, child)?;
+            }
+        }
+        Value::Cell(cell) => {
+            for child in cell.data.iter_mut() {
+                orient_json_vectors_as_rows(builtin, error, child)?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn promote_json_scalar_kinds(
@@ -2687,10 +2115,6 @@ fn scalar_string(
             format!("{builtin} expected a text scalar"),
         )),
     }
-}
-
-fn parse_scalar_enum<T: DeserializeOwned>(text: &str, label: &str) -> BuiltinResult<T> {
-    parse_scalar_enum_for_builtin(STUDY_NAME, text, label)
 }
 
 fn parse_scalar_enum_for_builtin<T: DeserializeOwned>(
@@ -3793,9 +3217,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
-        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(vec![
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
             Value::String(geometry_path.to_string_lossy().to_string()),
-        ]))
+            Vec::new(),
+        ))
         .expect("geometry should load");
 
         let err = block_on(fea_study_builtin(vec![
@@ -3814,9 +3239,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
-        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(vec![
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
             Value::String(geometry_path.to_string_lossy().to_string()),
-        ]))
+            Vec::new(),
+        ))
         .expect("geometry should load");
 
         let err = block_on(fea_model_builtin(vec![
@@ -3831,15 +3257,197 @@ mod tests {
     }
 
     #[test]
+    fn material_and_plan_objects_match_their_portable_schemas() {
+        let _guard = crate::analysis::storage::artifact_store_test_guard();
+        ensure_value_classes_registered();
+        let material = block_on(fea_material_builtin(vec![
+            Value::String("steel".into()),
+            Value::String("YoungsModulusPa".into()),
+            Value::Num(200e9),
+            Value::String("PoissonRatio".into()),
+            Value::Num(0.3),
+            Value::String("MassDensityKgPerM3".into()),
+            Value::Num(7850.0),
+        ]))
+        .expect("material");
+        let encoded = crate::execution::value_codec::encode_inline_value(&material)
+            .expect("a material must satisfy its portable schema");
+        assert_eq!(
+            crate::execution::value_codec::decode_inline_value(&encoded).expect("decode"),
+            material
+        );
+        for property in ["mass_density_kg_per_m3", "elasticity", "provenance"] {
+            assert!(
+                crate::class_registry::lookup_property(FEA_MATERIAL_CLASS, property).is_some(),
+                "fea.Material must expose {property}"
+            );
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry_path = tmp.path().join("part.step");
+        std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
+            Value::String(geometry_path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
+        .expect("geometry should load");
+        let region_id = geometry_asset_from_value(MODEL_NAME, &geometry)
+            .expect("geometry payload")
+            .regions
+            .first()
+            .expect("fixture region")
+            .region_id
+            .clone();
+        let region = || {
+            block_on(crate::builtins::geometry::region::geometry_region_builtin(
+                geometry.clone(),
+                region_id.clone(),
+            ))
+            .expect("region")
+        };
+        let target = block_on(fea_property_region_target_solid_builtin(region())).expect("target");
+        let assignment = block_on(fea_material_assignment_builtin(vec![
+            target,
+            material.clone(),
+        ]))
+        .expect("assignment");
+        let fixed = block_on(structural_fixed_builtin("support".to_string(), region()))
+            .expect("constraint");
+        let step =
+            block_on(structural_static_builtin(Value::String("static".into()))).expect("step");
+        let model = block_on(fea_model_builtin(vec![
+            Value::String("schema_model".into()),
+            geometry.clone(),
+            Value::String("Materials".into()),
+            cell(vec![material]),
+            Value::String("MaterialAssignments".into()),
+            cell(vec![assignment]),
+            Value::String("Constraints".into()),
+            cell(vec![fixed]),
+            Value::String("Steps".into()),
+            cell(vec![step]),
+        ]))
+        .expect("model");
+        let study = block_on(fea_study_builtin(vec![
+            Value::String("schema_study".into()),
+            geometry,
+            model,
+        ]))
+        .expect("study");
+        let plan = block_on(fea_plan_builtin(study)).expect("plan");
+        let encoded = crate::execution::value_codec::encode_inline_value(&plan)
+            .expect("a plan must satisfy its portable schema");
+        assert_eq!(
+            crate::execution::value_codec::decode_inline_value(&encoded).expect("decode"),
+            plan
+        );
+        for property in ["sequence_id", "steps", "operation_sequence"] {
+            assert!(
+                crate::class_registry::lookup_property(FEA_PLAN_CLASS, property).is_some(),
+                "fea.Plan must expose {property}"
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_enum_errors_are_attributed_to_the_calling_builtin() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry = test_support::load_stl_fixture(&tmp.path().join("part.stl"), 1.0);
+        let step = block_on(structural_static_builtin(Value::String("static".into())))
+            .expect("static step");
+        let frame_error = block_on(fea_model_builtin(vec![
+            Value::String("framed".into()),
+            geometry.clone(),
+            Value::String("Steps".into()),
+            step,
+            Value::String("Frame".into()),
+            Value::String("not_a_frame".into()),
+        ]))
+        .expect_err("an unknown frame must be rejected");
+        assert_eq!(frame_error.context.builtin.as_deref(), Some(MODEL_NAME));
+        assert_eq!(frame_error.identifier(), Some("RunMat:fea:InvalidInput"));
+
+        let material = block_on(fea_material_builtin(vec![
+            Value::String("steel".into()),
+            Value::String("YoungsModulusPa".into()),
+            Value::Num(200e9),
+            Value::String("PoissonRatio".into()),
+            Value::Num(0.3),
+        ]))
+        .expect("material");
+        let target = block_on(fea_property_region_target_all_solids_builtin(geometry))
+            .expect("all-solids target");
+        let confidence_error = block_on(fea_material_assignment_builtin(vec![
+            target,
+            material,
+            Value::String("Confidence".into()),
+            Value::String("certain".into()),
+        ]))
+        .expect_err("an unknown confidence must be rejected");
+        assert_eq!(
+            confidence_error.context.builtin.as_deref(),
+            Some(MATERIAL_ASSIGNMENT_NAME)
+        );
+    }
+
+    #[test]
+    fn material_assignment_revision_is_uint32_and_round_trips_into_a_model() {
+        let tmp = tempfile::tempdir().expect("tempdir should be created");
+        let geometry = test_support::load_stl_fixture(&tmp.path().join("part.stl"), 1.0);
+        let revision = geometry_asset_from_value(MODEL_NAME, &geometry)
+            .expect("geometry payload")
+            .revision;
+        let material = block_on(fea_material_builtin(vec![
+            Value::String("steel".into()),
+            Value::String("YoungsModulusPa".into()),
+            Value::Num(200e9),
+            Value::String("PoissonRatio".into()),
+            Value::Num(0.3),
+        ]))
+        .expect("material");
+        let target = block_on(fea_property_region_target_all_solids_builtin(
+            geometry.clone(),
+        ))
+        .expect("all-solids target");
+        let assignment = block_on(fea_material_assignment_builtin(vec![
+            target,
+            material.clone(),
+        ]))
+        .expect("assignment");
+        let Value::Object(object) = &assignment else {
+            panic!("expected fea.MaterialAssignment");
+        };
+        assert_eq!(
+            object.properties.get("geometry_revision"),
+            Some(&Value::Int(IntValue::U32(revision)))
+        );
+        let step = block_on(structural_static_builtin(Value::String("static".into())))
+            .expect("static step");
+        block_on(fea_model_builtin(vec![
+            Value::String("uint32_revision".into()),
+            geometry,
+            Value::String("Materials".into()),
+            cell(vec![material]),
+            Value::String("MaterialAssignments".into()),
+            cell(vec![assignment]),
+            Value::String("Steps".into()),
+            step,
+        ]))
+        .expect("a uint32 revision must decode when the assignment enters a model");
+    }
+
+    #[test]
     fn fea_model_rejects_ambiguous_component_option_aliases() {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
-        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(vec![
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
             Value::String(geometry_path.to_string_lossy().to_string()),
-            Value::String("Units".to_string()),
-            Value::String("meter".to_string()),
-        ]))
+            vec![
+                Value::String("Units".to_string()),
+                Value::String("meter".to_string()),
+            ],
+        ))
         .expect("geometry should load");
 
         for alias in ["Assignments", "Cases"] {
@@ -3862,9 +3470,10 @@ mod tests {
         let geometry_path = tmp.path().join("part.step");
         std::fs::write(&geometry_path, SIMPLE_STEP).expect("geometry fixture should write");
 
-        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(vec![
+        let geometry = block_on(crate::builtins::geometry::geometry_load_builtin(
             Value::String(geometry_path.to_string_lossy().to_string()),
-        ]))
+            Vec::new(),
+        ))
         .expect("geometry should load");
         let asset = geometry_asset_from_value(MODEL_NAME, &geometry)
             .expect("geometry payload should decode");
@@ -4380,9 +3989,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir should be created");
         std::fs::write(tmp.path().join("part.stl"), TRIANGLE_STL)
             .expect("geometry fixture should write");
-        let geometry_value = block_on(crate::builtins::geometry::geometry_load_builtin(vec![
+        let geometry_value = block_on(crate::builtins::geometry::geometry_load_builtin(
             Value::String(tmp.path().join("part.stl").to_string_lossy().to_string()),
-        ]))
+            Vec::new(),
+        ))
         .expect("geometry should load");
         let geometry = geometry_asset_from_value(STUDY_NAME, &geometry_value)
             .expect("geometry payload should decode");

@@ -19,8 +19,10 @@ pub(super) fn static_domain(request: &CallRequest, entry: &BuiltinCatalogEntry) 
     infer_study_constructor(request, entry, &STATIC_DOMAIN)
 }
 
-pub(super) const TIME_SECONDS: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[RealScalar, RealScalar, RealScalar, Count], FEA_INDEPENDENT_DOMAIN_CLASS);
+pub(super) const TIME_SECONDS: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[RealScalar, RealScalar, RealScalar, Count],
+    FEA_INDEPENDENT_DOMAIN_CLASS,
+);
 pub(super) fn time_seconds(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &TIME_SECONDS)
 }
@@ -51,6 +53,9 @@ pub(super) fn study_parameter(request: &CallRequest, entry: &BuiltinCatalogEntry
 
 pub(super) const RESPONSE_SPECTRA: StudyConstructorSignature =
     StudyConstructorSignature::new(&[ObjectList(SPECTRA_CLASSES)], FEA_INDEPENDENT_DOMAIN_CLASS);
-pub(super) fn response_spectra(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn response_spectra(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &RESPONSE_SPECTRA)
 }

@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when `spectra` is empty, contains a non-spectrum value, or repeats a spectrum id.",
         "`RunMat:fea:Internal` if the value cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 
@@ -58,6 +59,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation =
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Catalog inference contract", location: "crates/runmat-builtins/src/catalog/entries/fea/study_types/independent_domain/tests.rs::independent_domain_constructors_follow_their_positional_contract" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Response-spectrum domain", location: "crates/runmat-runtime/src/builtins/fea/sequences.rs::tests::response_spectrum_domain_retains_typed_spectrum_id" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Spectrum ids", location: "crates/runmat-analysis/core/src/validate_sequence/tests.rs::modal_response_requires_typed_existing_spectrum_ids" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Static constructor table", location: "crates/runmat-runtime/src/builtins/fea/sequences.rs::tests::independent_domain_class_exposes_every_static_constructor" },
         ],
-        notes: &["`responseSpectra` is not listed in the runtime class method table of `fea.IndependentDomain`; it is reachable as the builtin `fea.IndependentDomain.responseSpectra`."],
+        notes: &[],
     });

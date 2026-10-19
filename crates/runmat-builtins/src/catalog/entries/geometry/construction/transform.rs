@@ -21,7 +21,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Behavior",
         paragraphs: &[
             "`T` is a 4-by-4 real matrix. `T(1:3,1:3)` is the linear part (rotation, and optionally scaling or shear) and `T(1:3,4)` is the translation in meters; the final row must be `[0 0 0 1]`. A pure translation is `T = eye(4); T(1:3,4) = [dx; dy; dz];`.",
-            "At construction the builder requires exactly 16 finite real values; whether the final row is `[0 0 0 1]` is checked when the graph is realized. The result is one new feature that depends on `source`; `source` itself is unchanged and remains usable.",
+            "The call checks that `T` is a finite real 4-by-4 matrix with final row `[0 0 0 1]` and converts it to the row-major form that the exact-CAD kernel consumes, so the transform you write is the one that is realized. The result is one new feature that depends on `source`; `source` itself is unchanged and remains usable.",
             DEFERRED_REALIZATION,
             SI_VALUES,
             VALIDATION_BEFORE_RESULT,
@@ -37,9 +37,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:transform:InvalidInput` reports a `source` that is not a `geometry.Feature`, or a matrix that does not contain exactly 16 finite real values.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:transform:InvalidInput` reports every failure of the call: the wrong number of arguments, a `source` that is not a `geometry.Feature`, or a matrix that is not a finite real 4-by-4 matrix with final row `[0 0 0 1]`, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -50,6 +48,18 @@ const EXAMPLES: &[BuiltinExample] = &[
         "Move a plate 100 mm along x",
         "plate = geometry.box(80e-3, 50e-3, 8e-3);\nT = eye(4);\nT(1:3, 4) = [100e-3; 0; 0];\nmoved = geometry.transform(plate, T);\nclass(moved)",
         "assert(isa(moved, 'geometry.Feature'));",
+    ),
+    example(
+        "rotate",
+        "Rotate a plate 90 degrees about z and lift it 10 mm",
+        "plate = geometry.box(80e-3, 50e-3, 8e-3);\nc = cos(pi/2); s = sin(pi/2);\nT = eye(4);\nT(1:2, 1:2) = [c -s; s c];\nT(1:3, 4) = [0; 0; 10e-3];\nturned = geometry.transform(plate, T);\nclass(turned)",
+        "assert(isa(turned, 'geometry.Feature'));",
+    ),
+    error_example(
+        "not-affine",
+        "A matrix whose final row is not [0 0 0 1] is rejected",
+        "plate = geometry.box(80e-3, 50e-3, 8e-3);\nT = eye(4);\nT(4, 1) = 0.5;\nmoved = geometry.transform(plate, T);",
+        "RunMat:geometry:transform:InvalidInput",
     ),
     error_example(
         "wrong-size",
@@ -77,9 +87,9 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructionDocumentat
     examples: EXAMPLES,
     faqs: FAQS,
     implementation: &[PRIMITIVES_SOURCE, GRAPH_VALIDATION_SOURCE],
-    verification: &[BUILDER_TESTS],
+    verification: &[TRANSFORM_TEST, AFFINE_TEST],
     notes: &[],
-    status: BuiltinDocumentationStatus::Experimental,
+    status: BuiltinDocumentationStatus::Stable,
 });
 
 pub(super) const ENTRY: BuiltinCatalogEntry = entry(

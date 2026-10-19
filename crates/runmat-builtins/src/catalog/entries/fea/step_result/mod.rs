@@ -2,7 +2,7 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
     descriptors::FEA_STEP_RESULT_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_run_setup, BOX_STUDY},
+    example_fixtures::{fea_box_run_setup, BOX_STUDY, NATIVE_CAD_MESHING},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     result_inference::{infer_result, FeaResultKind},
 };
@@ -25,7 +25,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: BOX_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
+    requirements: NATIVE_CAD_MESHING,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isa(staticRun, 'fea.StepRunResult'));\nassert(~isempty(staticRun.run_id));\nassert(isa(results, 'fea.Results'));",
     },
@@ -56,7 +56,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     ],
     links: &[doc_links::STUDY_CONTRACTS, doc_links::EVIDENCE],
     implementation: &[doc_links::FEA_RUN_RESULTS_SOURCE],
-    verification: &[doc_links::SWEEP_CLASSES_TEST],
+    verification: &[doc_links::STEP_RESULT_TEST, doc_links::SWEEP_CLASSES_TEST],
     notes: &[],
 });
 

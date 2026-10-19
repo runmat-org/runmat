@@ -8,31 +8,44 @@ use crate::analysis::value_admission::{
 use crate::class_registry::declaration::{
     immutable_properties, register_value_class, static_methods,
 };
+use runmat_builtins::fea_contract::identities;
 
-pub(super) const DISPLACEMENT_CLASS: &str = "fea.Displacement";
-pub(super) const ROTATION_CLASS: &str = "fea.Rotation";
-pub(super) const TEMPERATURE_CLASS: &str = "fea.Temperature";
-pub(super) const TEMPERATURE_DIFFERENCE_CLASS: &str = "fea.TemperatureDifference";
-pub(super) const PRESSURE_CLASS: &str = "fea.Pressure";
-pub(super) const VELOCITY_CLASS: &str = "fea.Velocity";
-pub(super) const HEAT_FLUX_CLASS: &str = "fea.HeatFlux";
-pub(super) const HEAT_TRANSFER_COEFFICIENT_CLASS: &str = "fea.HeatTransferCoefficient";
-pub(super) const ACOUSTIC_IMPEDANCE_CLASS: &str = "fea.SpecificAcousticImpedance";
-pub(super) const ELECTRIC_POTENTIAL_CLASS: &str = "fea.ElectricPotential";
-pub(super) const ELECTRIC_CURRENT_CLASS: &str = "fea.ElectricCurrent";
-pub(super) const MAGNETIC_VECTOR_POTENTIAL_CLASS: &str = "fea.MagneticVectorPotential";
-pub(super) const LENGTH_CLASS: &str = "fea.Length";
-pub(super) const POSITION_CLASS: &str = "fea.Position";
-pub(super) const TRANSLATION_CLASS: &str = "fea.Translation";
-pub(super) const COMPLEX_PHASE_CLASS: &str = "fea.ComplexPhase";
-pub(super) const THERMAL_CONTACT_RESISTANCE_CLASS: &str = "fea.ThermalContactResistance";
-pub(super) const FRICTION_COEFFICIENT_CLASS: &str = "fea.FrictionCoefficient";
-pub(super) const FREQUENCY_CLASS: &str = "fea.Frequency";
-pub(super) const MASS_DENSITY_CLASS: &str = "fea.MassDensity";
-pub(super) const DYNAMIC_VISCOSITY_CLASS: &str = "fea.DynamicViscosity";
-pub(super) const TURBULENCE_INTENSITY_CLASS: &str = "fea.TurbulenceIntensity";
-pub(super) const RAYLEIGH_MASS_COEFFICIENT_CLASS: &str = "fea.RayleighMassCoefficient";
-pub(super) const RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS: &str = "fea.RayleighStiffnessCoefficient";
+pub(super) const DISPLACEMENT_CLASS: &str = identities::FEA_DISPLACEMENT_CLASS.display_name();
+pub(super) const ROTATION_CLASS: &str = identities::FEA_ROTATION_CLASS.display_name();
+pub(super) const TEMPERATURE_CLASS: &str = identities::FEA_TEMPERATURE_CLASS.display_name();
+pub(super) const TEMPERATURE_DIFFERENCE_CLASS: &str =
+    identities::FEA_TEMPERATURE_DIFFERENCE_CLASS.display_name();
+pub(super) const PRESSURE_CLASS: &str = identities::FEA_PRESSURE_CLASS.display_name();
+pub(super) const VELOCITY_CLASS: &str = identities::FEA_VELOCITY_CLASS.display_name();
+pub(super) const HEAT_FLUX_CLASS: &str = identities::FEA_HEAT_FLUX_CLASS.display_name();
+pub(super) const HEAT_TRANSFER_COEFFICIENT_CLASS: &str =
+    identities::FEA_HEAT_TRANSFER_COEFFICIENT_CLASS.display_name();
+pub(super) const ACOUSTIC_IMPEDANCE_CLASS: &str =
+    identities::FEA_SPECIFIC_ACOUSTIC_IMPEDANCE_CLASS.display_name();
+pub(super) const ELECTRIC_POTENTIAL_CLASS: &str =
+    identities::FEA_ELECTRIC_POTENTIAL_CLASS.display_name();
+pub(super) const ELECTRIC_CURRENT_CLASS: &str =
+    identities::FEA_ELECTRIC_CURRENT_CLASS.display_name();
+pub(super) const MAGNETIC_VECTOR_POTENTIAL_CLASS: &str =
+    identities::FEA_MAGNETIC_VECTOR_POTENTIAL_CLASS.display_name();
+pub(super) const LENGTH_CLASS: &str = identities::FEA_LENGTH_CLASS.display_name();
+pub(super) const POSITION_CLASS: &str = identities::FEA_POSITION_CLASS.display_name();
+pub(super) const TRANSLATION_CLASS: &str = identities::FEA_TRANSLATION_CLASS.display_name();
+pub(super) const COMPLEX_PHASE_CLASS: &str = identities::FEA_COMPLEX_PHASE_CLASS.display_name();
+pub(super) const THERMAL_CONTACT_RESISTANCE_CLASS: &str =
+    identities::FEA_THERMAL_CONTACT_RESISTANCE_CLASS.display_name();
+pub(super) const FRICTION_COEFFICIENT_CLASS: &str =
+    identities::FEA_FRICTION_COEFFICIENT_CLASS.display_name();
+pub(super) const FREQUENCY_CLASS: &str = identities::FEA_FREQUENCY_CLASS.display_name();
+pub(super) const MASS_DENSITY_CLASS: &str = identities::FEA_MASS_DENSITY_CLASS.display_name();
+pub(super) const DYNAMIC_VISCOSITY_CLASS: &str =
+    identities::FEA_DYNAMIC_VISCOSITY_CLASS.display_name();
+pub(super) const TURBULENCE_INTENSITY_CLASS: &str =
+    identities::FEA_TURBULENCE_INTENSITY_CLASS.display_name();
+pub(super) const RAYLEIGH_MASS_COEFFICIENT_CLASS: &str =
+    identities::FEA_RAYLEIGH_MASS_COEFFICIENT_CLASS.display_name();
+pub(super) const RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS: &str =
+    identities::FEA_RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS.display_name();
 
 const METERS: &[&str] = &["meters"];
 const RADIANS: &[&str] = &["radians"];
@@ -53,100 +66,16 @@ const PASCAL_SECONDS: &[&str] = &["pascal_seconds"];
 const PER_SECOND: &[&str] = &["per_second"];
 const SECONDS: &[&str] = &["seconds"];
 
-const QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "value",
-    ty: BuiltinParamType::NumericScalar,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Finite real scalar in the unit named by the constructor.",
-}];
-const QUANTITY_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "quantity",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Immutable dimensioned FEA value in canonical SI storage.",
-}];
-const VECTOR_QUANTITY_INPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "components",
-    ty: BuiltinParamType::NumericArray,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Finite real three-component vector in the unit named by the constructor.",
-}];
-const VECTOR_QUANTITY_OUTPUTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "quantity",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Immutable three-component dimensioned FEA value in canonical meter storage.",
-}];
-
-const QUANTITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "value",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The exact scalar is validated before one explicit conversion to canonical binary64 SI storage; sufficiently wide integers can round.",
-    }];
-pub(super) const QUANTITY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "dimensioned scalar value",
-        inputs: &QUANTITY_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "Unit conversion and canonical storage are binary64 operations; resident values are rejected without provider execution.",
-    }];
-const VECTOR_QUANTITY_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "components",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "A three-component real integer vector is shape-checked before one explicit conversion to canonical binary64 meter storage; sufficiently wide integers can round.",
-    }];
-pub(super) const VECTOR_QUANTITY_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "three-component dimensioned vector",
-        inputs: &VECTOR_QUANTITY_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Unit conversion and canonical vector storage are binary64 operations; resident values are rejected without provider execution.",
-    }];
-
 macro_rules! scalar_quantity_builtin {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin_name:literal, $label:literal, $summary:literal,
+        $function:ident, $builtin_name:literal,
         $class:expr, $field:literal, $scale:expr, $offset:expr
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &QUANTITY_INPUTS,
-            outputs: &QUANTITY_OUTPUTS,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
-                                            name = $builtin_name,
-                                            category = "fea",
-                                            summary = $summary,
-                                            keywords = "fea,quantity,units,typed",
-                                            descriptor($descriptor),
-                                            integer_capabilities(QUANTITY_INTEGER_CAPABILITIES),
-                                            builtin_path = "crate::builtins::fea::values"
-                                        )]
+                            name = $builtin_name,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::values"
+                        )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin_name, &value, "value")?;
             quantity_to_value($builtin_name, $class, $field, value * $scale + $offset)
@@ -156,11 +85,7 @@ macro_rules! scalar_quantity_builtin {
 
 scalar_quantity_builtin!(
     displacement_meters_builtin,
-    DISPLACEMENT_METERS_DESCRIPTOR,
-    DISPLACEMENT_METERS_SIGNATURES,
     "fea.Displacement.meters",
-    "value = fea.Displacement.meters(meters)",
-    "Create a displacement value from meters.",
     DISPLACEMENT_CLASS,
     "meters",
     1.0,
@@ -168,11 +93,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     thermal_contact_resistance_builtin,
-    THERMAL_CONTACT_RESISTANCE_DESCRIPTOR,
-    THERMAL_CONTACT_RESISTANCE_SIGNATURES,
     "fea.ThermalContactResistance.squareMeterKelvinPerWatt",
-    "value = fea.ThermalContactResistance.squareMeterKelvinPerWatt(value)",
-    "Create a thermal contact resistance from square meter-kelvin per watt.",
     THERMAL_CONTACT_RESISTANCE_CLASS,
     "square_meter_kelvin_per_watt",
     1.0,
@@ -180,11 +101,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     friction_coefficient_builtin,
-    FRICTION_COEFFICIENT_DESCRIPTOR,
-    FRICTION_COEFFICIENT_SIGNATURES,
     "fea.FrictionCoefficient.ratio",
-    "value = fea.FrictionCoefficient.ratio(value)",
-    "Create a non-negative friction coefficient.",
     FRICTION_COEFFICIENT_CLASS,
     "ratio",
     1.0,
@@ -192,11 +109,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     frequency_builtin,
-    FREQUENCY_DESCRIPTOR,
-    FREQUENCY_SIGNATURES,
     "fea.Frequency.hertz",
-    "value = fea.Frequency.hertz(value)",
-    "Create a positive frequency from hertz.",
     FREQUENCY_CLASS,
     "hertz",
     1.0,
@@ -204,11 +117,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     mass_density_builtin,
-    MASS_DENSITY_DESCRIPTOR,
-    MASS_DENSITY_SIGNATURES,
     "fea.MassDensity.kilogramsPerCubicMeter",
-    "value = fea.MassDensity.kilogramsPerCubicMeter(value)",
-    "Create a positive mass density from kilograms per cubic meter.",
     MASS_DENSITY_CLASS,
     "kilograms_per_cubic_meter",
     1.0,
@@ -216,11 +125,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     dynamic_viscosity_builtin,
-    DYNAMIC_VISCOSITY_DESCRIPTOR,
-    DYNAMIC_VISCOSITY_SIGNATURES,
     "fea.DynamicViscosity.pascalSeconds",
-    "value = fea.DynamicViscosity.pascalSeconds(value)",
-    "Create a positive dynamic viscosity from pascal-seconds.",
     DYNAMIC_VISCOSITY_CLASS,
     "pascal_seconds",
     1.0,
@@ -228,11 +133,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     turbulence_intensity_builtin,
-    TURBULENCE_INTENSITY_DESCRIPTOR,
-    TURBULENCE_INTENSITY_SIGNATURES,
     "fea.TurbulenceIntensity.ratio",
-    "value = fea.TurbulenceIntensity.ratio(value)",
-    "Create a turbulence intensity ratio in the closed interval [0, 1].",
     TURBULENCE_INTENSITY_CLASS,
     "ratio",
     1.0,
@@ -240,11 +141,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     rayleigh_mass_coefficient_builtin,
-    RAYLEIGH_MASS_COEFFICIENT_DESCRIPTOR,
-    RAYLEIGH_MASS_COEFFICIENT_SIGNATURES,
     "fea.RayleighMassCoefficient.perSecond",
-    "coefficient = fea.RayleighMassCoefficient.perSecond(value)",
-    "Create a non-negative Rayleigh mass-proportional damping coefficient.",
     RAYLEIGH_MASS_COEFFICIENT_CLASS,
     "per_second",
     1.0,
@@ -252,11 +149,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     rayleigh_stiffness_coefficient_builtin,
-    RAYLEIGH_STIFFNESS_COEFFICIENT_DESCRIPTOR,
-    RAYLEIGH_STIFFNESS_COEFFICIENT_SIGNATURES,
     "fea.RayleighStiffnessCoefficient.seconds",
-    "coefficient = fea.RayleighStiffnessCoefficient.seconds(value)",
-    "Create a non-negative Rayleigh stiffness-proportional damping coefficient.",
     RAYLEIGH_STIFFNESS_COEFFICIENT_CLASS,
     "seconds",
     1.0,
@@ -264,11 +157,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     complex_phase_radians_builtin,
-    COMPLEX_PHASE_RADIANS_DESCRIPTOR,
-    COMPLEX_PHASE_RADIANS_SIGNATURES,
     "fea.ComplexPhase.radians",
-    "phase = fea.ComplexPhase.radians(radians)",
-    "Create a complex phase shift from radians.",
     COMPLEX_PHASE_CLASS,
     "radians",
     1.0,
@@ -276,11 +165,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     complex_phase_degrees_builtin,
-    COMPLEX_PHASE_DEGREES_DESCRIPTOR,
-    COMPLEX_PHASE_DEGREES_SIGNATURES,
     "fea.ComplexPhase.degrees",
-    "phase = fea.ComplexPhase.degrees(degrees)",
-    "Create a complex phase shift from degrees.",
     COMPLEX_PHASE_CLASS,
     "radians",
     std::f64::consts::PI / 180.0,
@@ -288,11 +173,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     displacement_millimeters_builtin,
-    DISPLACEMENT_MILLIMETERS_DESCRIPTOR,
-    DISPLACEMENT_MILLIMETERS_SIGNATURES,
     "fea.Displacement.millimeters",
-    "value = fea.Displacement.millimeters(millimeters)",
-    "Create a displacement value from millimeters.",
     DISPLACEMENT_CLASS,
     "meters",
     1.0e-3,
@@ -300,11 +181,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     displacement_micrometers_builtin,
-    DISPLACEMENT_MICROMETERS_DESCRIPTOR,
-    DISPLACEMENT_MICROMETERS_SIGNATURES,
     "fea.Displacement.micrometers",
-    "value = fea.Displacement.micrometers(micrometers)",
-    "Create a displacement value from micrometers.",
     DISPLACEMENT_CLASS,
     "meters",
     1.0e-6,
@@ -312,11 +189,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     rotation_radians_builtin,
-    ROTATION_RADIANS_DESCRIPTOR,
-    ROTATION_RADIANS_SIGNATURES,
     "fea.Rotation.radians",
-    "value = fea.Rotation.radians(radians)",
-    "Create a rotation value from radians.",
     ROTATION_CLASS,
     "radians",
     1.0,
@@ -324,11 +197,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     rotation_degrees_builtin,
-    ROTATION_DEGREES_DESCRIPTOR,
-    ROTATION_DEGREES_SIGNATURES,
     "fea.Rotation.degrees",
-    "value = fea.Rotation.degrees(degrees)",
-    "Create a rotation value from degrees.",
     ROTATION_CLASS,
     "radians",
     std::f64::consts::PI / 180.0,
@@ -336,11 +205,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     temperature_kelvin_builtin,
-    TEMPERATURE_KELVIN_DESCRIPTOR,
-    TEMPERATURE_KELVIN_SIGNATURES,
     "fea.Temperature.kelvin",
-    "value = fea.Temperature.kelvin(kelvin)",
-    "Create an absolute temperature value from kelvin.",
     TEMPERATURE_CLASS,
     "kelvin",
     1.0,
@@ -348,11 +213,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     temperature_celsius_builtin,
-    TEMPERATURE_CELSIUS_DESCRIPTOR,
-    TEMPERATURE_CELSIUS_SIGNATURES,
     "fea.Temperature.celsius",
-    "value = fea.Temperature.celsius(celsius)",
-    "Create an absolute temperature value from degrees Celsius.",
     TEMPERATURE_CLASS,
     "kelvin",
     1.0,
@@ -360,11 +221,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     temperature_difference_kelvin_builtin,
-    TEMPERATURE_DIFFERENCE_KELVIN_DESCRIPTOR,
-    TEMPERATURE_DIFFERENCE_KELVIN_SIGNATURES,
     "fea.TemperatureDifference.kelvin",
-    "difference = fea.TemperatureDifference.kelvin(value)",
-    "Create a temperature difference from kelvin.",
     TEMPERATURE_DIFFERENCE_CLASS,
     "kelvin",
     1.0,
@@ -372,11 +229,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     temperature_difference_celsius_builtin,
-    TEMPERATURE_DIFFERENCE_CELSIUS_DESCRIPTOR,
-    TEMPERATURE_DIFFERENCE_CELSIUS_SIGNATURES,
     "fea.TemperatureDifference.celsius",
-    "difference = fea.TemperatureDifference.celsius(value)",
-    "Create a temperature difference from degrees Celsius.",
     TEMPERATURE_DIFFERENCE_CLASS,
     "kelvin",
     1.0,
@@ -384,11 +237,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     pressure_pascals_builtin,
-    PRESSURE_PASCALS_DESCRIPTOR,
-    PRESSURE_PASCALS_SIGNATURES,
     "fea.Pressure.pascals",
-    "value = fea.Pressure.pascals(pascals)",
-    "Create a pressure value from pascals.",
     PRESSURE_CLASS,
     "pascals",
     1.0,
@@ -396,11 +245,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     velocity_meters_per_second_builtin,
-    VELOCITY_METERS_PER_SECOND_DESCRIPTOR,
-    VELOCITY_METERS_PER_SECOND_SIGNATURES,
     "fea.Velocity.metersPerSecond",
-    "value = fea.Velocity.metersPerSecond(value)",
-    "Create a velocity value from meters per second.",
     VELOCITY_CLASS,
     "meters_per_second",
     1.0,
@@ -408,11 +253,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     heat_flux_watts_per_square_meter_builtin,
-    HEAT_FLUX_DESCRIPTOR,
-    HEAT_FLUX_SIGNATURES,
     "fea.HeatFlux.wattsPerSquareMeter",
-    "value = fea.HeatFlux.wattsPerSquareMeter(value)",
-    "Create a heat-flux value from watts per square meter.",
     HEAT_FLUX_CLASS,
     "watts_per_square_meter",
     1.0,
@@ -420,11 +261,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     heat_transfer_coefficient_builtin,
-    HEAT_TRANSFER_COEFFICIENT_DESCRIPTOR,
-    HEAT_TRANSFER_COEFFICIENT_SIGNATURES,
     "fea.HeatTransferCoefficient.wattsPerSquareMeterKelvin",
-    "value = fea.HeatTransferCoefficient.wattsPerSquareMeterKelvin(value)",
-    "Create a heat-transfer coefficient from watts per square meter-kelvin.",
     HEAT_TRANSFER_COEFFICIENT_CLASS,
     "watts_per_square_meter_kelvin",
     1.0,
@@ -432,11 +269,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     specific_acoustic_impedance_builtin,
-    ACOUSTIC_IMPEDANCE_DESCRIPTOR,
-    ACOUSTIC_IMPEDANCE_SIGNATURES,
     "fea.SpecificAcousticImpedance.pascalSecondsPerMeter",
-    "value = fea.SpecificAcousticImpedance.pascalSecondsPerMeter(value)",
-    "Create a specific acoustic impedance from pascal-seconds per meter.",
     ACOUSTIC_IMPEDANCE_CLASS,
     "pascal_seconds_per_meter",
     1.0,
@@ -444,11 +277,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     electric_potential_volts_builtin,
-    ELECTRIC_POTENTIAL_DESCRIPTOR,
-    ELECTRIC_POTENTIAL_SIGNATURES,
     "fea.ElectricPotential.volts",
-    "value = fea.ElectricPotential.volts(volts)",
-    "Create an electric-potential value from volts.",
     ELECTRIC_POTENTIAL_CLASS,
     "volts",
     1.0,
@@ -456,11 +285,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     electric_current_amperes_builtin,
-    ELECTRIC_CURRENT_DESCRIPTOR,
-    ELECTRIC_CURRENT_SIGNATURES,
     "fea.ElectricCurrent.amperes",
-    "value = fea.ElectricCurrent.amperes(amperes)",
-    "Create an electric-current value from amperes.",
     ELECTRIC_CURRENT_CLASS,
     "amperes",
     1.0,
@@ -468,11 +293,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     magnetic_vector_potential_builtin,
-    MAGNETIC_VECTOR_POTENTIAL_DESCRIPTOR,
-    MAGNETIC_VECTOR_POTENTIAL_SIGNATURES,
     "fea.MagneticVectorPotential.webersPerMeter",
-    "value = fea.MagneticVectorPotential.webersPerMeter(value)",
-    "Create a magnetic-vector-potential value from webers per meter.",
     MAGNETIC_VECTOR_POTENTIAL_CLASS,
     "webers_per_meter",
     1.0,
@@ -480,11 +301,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     length_meters_builtin,
-    LENGTH_METERS_DESCRIPTOR,
-    LENGTH_METERS_SIGNATURES,
     "fea.Length.meters",
-    "value = fea.Length.meters(meters)",
-    "Create a length value from meters.",
     LENGTH_CLASS,
     "meters",
     1.0,
@@ -492,11 +309,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     length_millimeters_builtin,
-    LENGTH_MILLIMETERS_DESCRIPTOR,
-    LENGTH_MILLIMETERS_SIGNATURES,
     "fea.Length.millimeters",
-    "value = fea.Length.millimeters(millimeters)",
-    "Create a length value from millimeters.",
     LENGTH_CLASS,
     "meters",
     1.0e-3,
@@ -504,11 +317,7 @@ scalar_quantity_builtin!(
 );
 scalar_quantity_builtin!(
     length_micrometers_builtin,
-    LENGTH_MICROMETERS_DESCRIPTOR,
-    LENGTH_MICROMETERS_SIGNATURES,
     "fea.Length.micrometers",
-    "value = fea.Length.micrometers(micrometers)",
-    "Create a length value from micrometers.",
     LENGTH_CLASS,
     "meters",
     1.0e-6,
@@ -517,29 +326,13 @@ scalar_quantity_builtin!(
 
 macro_rules! vector_quantity_builtin {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin_name:literal, $label:literal, $summary:literal, $class:expr, $scale:expr
+        $function:ident, $builtin_name:literal, $class:expr, $scale:expr
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &VECTOR_QUANTITY_INPUTS,
-            outputs: &VECTOR_QUANTITY_OUTPUTS,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
-                                                    name = $builtin_name,
-                                                    category = "fea",
-                                                    summary = $summary,
-                                            keywords = "fea,quantity,vector,components,units,typed",
-                                            descriptor($descriptor),
-                                            integer_capabilities(VECTOR_QUANTITY_INTEGER_CAPABILITIES),
-                                            builtin_path = "crate::builtins::fea::values"
-                                                )]
+                            name = $builtin_name,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::values"
+                        )]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let components = finite_numeric_vector3($builtin_name, &value, "components")?;
             let components = components.map(|value| value * $scale);
@@ -550,41 +343,25 @@ macro_rules! vector_quantity_builtin {
 
 vector_quantity_builtin!(
     position_meters_builtin,
-    POSITION_METERS_DESCRIPTOR,
-    POSITION_METERS_SIGNATURES,
     "fea.Position.meters",
-    "position = fea.Position.meters(coordinates)",
-    "Create a position from meter coordinates.",
     POSITION_CLASS,
     1.0
 );
 vector_quantity_builtin!(
     position_millimeters_builtin,
-    POSITION_MILLIMETERS_DESCRIPTOR,
-    POSITION_MILLIMETERS_SIGNATURES,
     "fea.Position.millimeters",
-    "position = fea.Position.millimeters(coordinates)",
-    "Create a position from millimeter coordinates.",
     POSITION_CLASS,
     1.0e-3
 );
 vector_quantity_builtin!(
     translation_meters_builtin,
-    TRANSLATION_METERS_DESCRIPTOR,
-    TRANSLATION_METERS_SIGNATURES,
     "fea.Translation.meters",
-    "translation = fea.Translation.meters(components)",
-    "Create a translation vector from meter components.",
     TRANSLATION_CLASS,
     1.0
 );
 vector_quantity_builtin!(
     translation_millimeters_builtin,
-    TRANSLATION_MILLIMETERS_DESCRIPTOR,
-    TRANSLATION_MILLIMETERS_SIGNATURES,
     "fea.Translation.millimeters",
-    "translation = fea.Translation.millimeters(components)",
-    "Create a translation vector from millimeter components.",
     TRANSLATION_CLASS,
     1.0e-3
 );

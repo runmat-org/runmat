@@ -12,25 +12,6 @@ pub const GEOMETRY_GENERATED_CLASS: runmat_types::StaticClassIdentity =
 pub const GEOMETRY_REGION_OUTPUT_CLASS: runmat_types::StaticClassIdentity =
     runmat_types::StaticClassIdentity::new("geometry.RegionOutput");
 
-/// Contract validation shared by every feature-producing builder. The runtime
-/// validates the complete feature graph after the operation is appended and
-/// reports violations under this owner rather than the calling builtin.
-pub const GEOMETRY_FEATURE_ERROR_CONTRACT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GEOMETRY.FEATURE.INVALID_CONTRACT",
-    identifier: Some("RunMat:geometry:feature:InvalidInput"),
-    when: "The appended operation violates the exact feature-graph contract: a length, radius, depth, distance, or angle is not positive, a direction is all zero, or operands are inconsistent.",
-    message: "geometry.feature: invalid feature contract",
-};
-
-/// Revalidation of a finished part after a region output is added. The runtime
-/// reports it under the `geometry.finish` owner.
-pub const GEOMETRY_GENERATED_ERROR_CONTRACT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.GEOMETRY.GENERATED.INVALID_CONTRACT",
-    identifier: Some("RunMat:geometry:finish:InvalidInput"),
-    when: "A region output names a feature that is not in the part's feature graph.",
-    message: "geometry.finish: invalid generated geometry",
-};
-
 macro_rules! geometry_descriptor {
     (
         $name:ident,
@@ -43,12 +24,17 @@ macro_rules! geometry_descriptor {
         $message:literal,
         $when:literal,
         [$(($input:literal, $ty:ident, $arity:ident, $description:literal)),* $(,)?],
-        [$($extra:expr),* $(,)?]
+        []
     ) => {
         pub const $error: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
             code: $code,
             identifier: Some($identifier),
-            when: $when,
+            // Every failure of the builder reports this one identifier.
+            when: concat!(
+                "The wrong number of arguments is passed. ",
+                $when,
+                " A value violates the feature-graph contract."
+            ),
             message: $message,
         };
         pub const $name: BuiltinDescriptor = BuiltinDescriptor {
@@ -71,7 +57,7 @@ macro_rules! geometry_descriptor {
             }],
             output_mode: BuiltinOutputMode::Fixed,
             completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &[$error $(, $extra)*],
+            errors: &[$error],
         };
     };
 }
@@ -106,7 +92,7 @@ geometry_descriptor!(
             "Positive extent along +z, in meters."
         ),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_CYLINDER_DESCRIPTOR,
@@ -124,7 +110,7 @@ geometry_descriptor!(
         ("axis", NumericArray, Required, "Finite nonzero three-element axis direction."),
         ("origin", NumericArray, Required, "Center of the base circle, in meters."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_SPHERE_DESCRIPTOR,
@@ -145,7 +131,7 @@ geometry_descriptor!(
         ),
         ("center", NumericArray, Required, "Sphere center in meters."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_TRANSFORM_DESCRIPTOR,
@@ -156,17 +142,17 @@ geometry_descriptor!(
     "RM.GEOMETRY.TRANSFORM.INVALID_INPUT",
     "RunMat:geometry:transform:InvalidInput",
     "geometry.transform: invalid input",
-    "source is not a geometry.Feature, or matrix does not contain exactly 16 finite real values.",
+    "source is not a geometry.Feature, or matrix is not a finite real 4-by-4 matrix whose final row is [0 0 0 1].",
     [
         ("source", Any, Required, "geometry.Feature to transform."),
         (
             "matrix",
             NumericArray,
             Required,
-            "4-by-4 homogeneous affine transform; translation in meters."
+            "4-by-4 homogeneous affine transform: T(1:3,1:3) linear part, T(1:3,4) translation in meters, final row [0 0 0 1]."
         ),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_INSTANCE_DESCRIPTOR,
@@ -177,12 +163,12 @@ geometry_descriptor!(
     "RM.GEOMETRY.INSTANCE.INVALID_INPUT",
     "RunMat:geometry:instance:InvalidInput",
     "geometry.instance: invalid input",
-    "source is not a geometry.Feature, no transform is given, or a transform does not contain exactly 16 finite real values.",
+    "source is not a geometry.Feature, no transform is given, or a transform is not a finite real 4-by-4 matrix whose final row is [0 0 0 1].",
     [
         ("source", Any, Required, "geometry.Feature to place."),
-        ("transform", NumericArray, Variadic, "One or more 4-by-4 homogeneous affine transforms."),
+        ("transform", NumericArray, Variadic, "One or more 4-by-4 homogeneous affine transforms; translation in T(1:3,4), in meters."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_EXTRUDE_DESCRIPTOR,
@@ -199,7 +185,7 @@ geometry_descriptor!(
         ("distance", NumericScalar, Required, "Positive sweep length in meters."),
         ("direction", NumericArray, Required, "Finite nonzero three-element sweep direction."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_REVOLVE_DESCRIPTOR,
@@ -217,7 +203,7 @@ geometry_descriptor!(
         ("origin", NumericArray, Required, "Point on the rotation axis, in meters."),
         ("angle", NumericScalar, Required, "Sweep angle in radians, in (0, 2*pi]."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_HOLE_DESCRIPTOR,
@@ -236,7 +222,7 @@ geometry_descriptor!(
         ("axis", NumericArray, Required, "Finite nonzero three-element drilling direction."),
         ("origin", NumericArray, Required, "Center of the hole entry circle, in meters."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_POCKET_DESCRIPTOR,
@@ -254,7 +240,7 @@ geometry_descriptor!(
         ("depth", NumericScalar, Required, "Positive sweep length in meters."),
         ("direction", NumericArray, Required, "Finite nonzero three-element sweep direction."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_FILLET_DESCRIPTOR,
@@ -271,7 +257,7 @@ geometry_descriptor!(
         ("edges", Any, Required, "Edge selection from geometry.edges or geometry.edgesIntroducedBy."),
         ("radius", NumericScalar, Required, "Positive fillet radius in meters."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_CHAMFER_DESCRIPTOR,
@@ -288,7 +274,7 @@ geometry_descriptor!(
         ("edges", Any, Required, "Edge selection from geometry.edges or geometry.edgesIntroducedBy."),
         ("distance", NumericScalar, Required, "Positive symmetric chamfer distance in meters."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_UNION_DESCRIPTOR,
@@ -301,7 +287,7 @@ geometry_descriptor!(
     "geometry.union: invalid input",
     "Fewer than two operands are given, an operand is not a geometry.Feature, or the operand graphs define one feature identity differently.",
     [("feature", Any, Variadic, "Two or more geometry.Feature operands.")],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_INTERSECT_DESCRIPTOR,
@@ -314,7 +300,7 @@ geometry_descriptor!(
     "geometry.intersect: invalid input",
     "Fewer than two operands are given, an operand is not a geometry.Feature, or the operand graphs define one feature identity differently.",
     [("feature", Any, Variadic, "Two or more geometry.Feature operands.")],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_SUBTRACT_DESCRIPTOR,
@@ -330,7 +316,7 @@ geometry_descriptor!(
         ("base", Any, Required, "geometry.Feature to cut."),
         ("tool", Any, Variadic, "One or more geometry.Feature tools."),
     ],
-    [GEOMETRY_FEATURE_ERROR_CONTRACT]
+    []
 );
 geometry_descriptor!(
     GEOMETRY_FINISH_DESCRIPTOR,
@@ -449,13 +435,13 @@ geometry_descriptor!(
     "RM.GEOMETRY.WITH_REGION.INVALID_INPUT",
     "RunMat:geometry:withRegion:InvalidInput",
     "geometry.withRegion: invalid input",
-    "part is not a geometry.Generated value, output is not a geometry.RegionOutput, or name is blank, longer than 256 bytes, contains a control character, or is already declared.",
+    "part is not a geometry.Generated value, output is not a geometry.RegionOutput or names a feature outside the part, or name is not scalar text, is blank, longer than 256 bytes, contains a control character, or is already declared.",
     [
         ("part", Any, Required, "geometry.Generated product from geometry.finish."),
         ("name", StringScalar, Required, "Unique region-output name."),
         ("output", Any, Required, "geometry.RegionOutput from a selection builtin."),
     ],
-    [GEOMETRY_GENERATED_ERROR_CONTRACT]
+    []
 );
 
 pub const GEOMETRY_CONSTRUCTION_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =

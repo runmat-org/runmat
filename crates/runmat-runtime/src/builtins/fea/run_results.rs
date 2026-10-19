@@ -1,41 +1,8 @@
 use super::*;
 
-const INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "run",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Aggregate fea.RunResult returned by fea.run.",
-    },
-    BuiltinParamDescriptor {
-        name: "stepId",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Exact authored procedure-step id.",
-    },
-];
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "stepRun = fea.stepResult(run, stepId)",
-    inputs: &INPUTS,
-    outputs: &OUT_ANY,
-}];
-
-pub(super) const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 #[runtime_builtin(
     name = "fea.stepResult",
-    category = "fea",
-    summary = "Select one typed procedure-step result from an aggregate FEA run.",
-    keywords = "fea,run,result,step,sequence",
-    descriptor(crate::builtins::fea::run_results::DESCRIPTOR),
-    integer_audit(crate::builtins::fea::FEA_STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::run_results"
 )]
 pub async fn step_result(run: Value, step_id: String) -> BuiltinResult<Value> {
@@ -60,4 +27,13 @@ pub async fn step_result(run: Value, step_id: String) -> BuiltinResult<Value> {
     )?;
     copy_study_context_property(&run, &mut object);
     Ok(Value::Object(object))
+}
+
+/// Wraps an aggregate run payload as the public `fea.RunResult` object, as
+/// `fea.run` does, for tests that exercise step selection.
+#[cfg(test)]
+pub(crate) fn run_result_object_for_tests(data: &crate::analysis::AnalysisStudyRunData) -> Value {
+    serializable_to_object_value("fea.run", &ERROR_INTERNAL, FEA_RUN_RESULT_CLASS, data)
+        .map(Value::Object)
+        .expect("run payload should convert to fea.RunResult")
 }

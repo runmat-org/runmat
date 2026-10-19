@@ -1,13 +1,14 @@
 //! Static argument rules for `fea.StructuralDofValue` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const TRANSLATION: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralTranslationDofValue"),
+    result: classes::FEA_STRUCTURAL_TRANSLATION_DOF_VALUE_CLASS,
     arguments: &[
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.StructuralTranslationDof")]),
+        ModelArg::Typed(&[classes::FEA_STRUCTURAL_TRANSLATION_DOF_CLASS]),
         ModelArg::Typed(&[StaticClassIdentity::new("fea.Displacement")]),
     ],
 };
@@ -17,9 +18,9 @@ pub(super) fn translation(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
 }
 
 pub(super) const ROTATION: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralRotationDofValue"),
+    result: classes::FEA_STRUCTURAL_ROTATION_DOF_VALUE_CLASS,
     arguments: &[
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.StructuralRotationDof")]),
+        ModelArg::Typed(&[classes::FEA_STRUCTURAL_ROTATION_DOF_CLASS]),
         ModelArg::Typed(&[StaticClassIdentity::new("fea.Rotation")]),
     ],
 };

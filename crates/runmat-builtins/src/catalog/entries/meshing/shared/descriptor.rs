@@ -195,12 +195,6 @@ pub const MESHING_ERROR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor
     message: "meshing operation failed",
 };
 const ERRORS: [BuiltinErrorDescriptor; 1] = [MESHING_ERROR_INVALID];
-// meshing.generate decodes its geometry.Asset through the shared asset codec,
-// which reports a non-asset argument under the inspect-family identifier.
-const GENERATE_ERRORS: [BuiltinErrorDescriptor; 2] = [
-    MESHING_ERROR_INVALID,
-    crate::GEOMETRY_INSPECT_ERROR_INTERNAL,
-];
 
 const fn public_descriptor(
     signatures: &'static [BuiltinSignatureDescriptor],
@@ -215,7 +209,7 @@ const fn public_descriptor(
 }
 
 pub const MESHING_GENERATE_DESCRIPTOR: BuiltinDescriptor =
-    public_descriptor(&GENERATE_SIGNATURES, &GENERATE_ERRORS);
+    public_descriptor(&GENERATE_SIGNATURES, &ERRORS);
 pub const MESHING_LOAD_DESCRIPTOR: BuiltinDescriptor = public_descriptor(&LOAD_SIGNATURES, &ERRORS);
 pub const MESHING_SAVE_DESCRIPTOR: BuiltinDescriptor = public_descriptor(&SAVE_SIGNATURES, &ERRORS);
 pub const MESHING_NODES_DESCRIPTOR: BuiltinDescriptor =

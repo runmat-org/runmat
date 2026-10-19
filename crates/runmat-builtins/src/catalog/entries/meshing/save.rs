@@ -97,9 +97,9 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(MeshingDocumentation {
         BuiltinDocumentationSection {
             heading: "Behavior",
             paragraphs: &[
-                "`meshPath` and `evidencePath` are scalar text and must differ. Missing parent directories are created. The files are the canonical CBOR encodings, identical to the files `runmat mesh` writes for the same mesh, and they can be read back with `meshing.load`.",
-                "Existing destinations are protected: if either file exists, the call fails and neither file is changed, unless the only option, `Force`, is `true`. `Force` must be logical; numeric `1` is rejected.",
-                "Both files are staged before either destination is replaced. If publishing the second file fails, the first is rolled back, so the pair on disk always matches. The call returns `true` only after both files are in place.",
+                "`meshPath` and `evidencePath` are scalar text and must differ. Missing parent directories are created. The two artifacts are the canonical CBOR encodings, identical to the files `runmat mesh` writes for the same mesh, and they can be read back with `meshing.load`. A third file, `<meshPath>.regions.json`, records the importer's region aliases bound to the mesh's canonical digest, so `meshing.load` restores them.",
+                "Existing destinations are protected: if any of the three files exists, the call fails and none is changed, unless the only option, `Force`, is `true`. `Force` must be logical; numeric `1` is rejected.",
+                "All files are staged before any destination is replaced. If publishing one fails, the files already replaced are rolled back, so the set on disk always matches. The call returns `true` only after every file is in place.",
             ],
         },
         BuiltinDocumentationSection {
@@ -127,11 +127,18 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(MeshingDocumentation {
             ),
         },
     ],
-    verification: &[BuiltinEvidenceReference {
-        kind: BuiltinEvidenceKind::UnitTest,
-        label: "Output paths must be distinct and are not clobbered by default",
-        location: "crates/runmat-cli/src/commands/mesh.rs::output_paths_must_be_distinct_and_do_not_clobber_by_default",
-    }],
+    verification: &[
+        BuiltinEvidenceReference {
+            kind: BuiltinEvidenceKind::UnitTest,
+            label: "Save and load retain region aliases through the sidecar",
+            location: "crates/runmat-runtime/src/builtins/meshing/mod.rs::save_and_load_retain_region_aliases_through_the_sidecar",
+        },
+        BuiltinEvidenceReference {
+            kind: BuiltinEvidenceKind::UnitTest,
+            label: "Pair writes protect and replace existing destinations",
+            location: "crates/runmat-runtime/src/meshing/persistence.rs::pair_write_protects_and_replaces_existing_destinations",
+        },
+    ],
 });
 
 pub const MESHING_SAVE_CATALOG_ENTRY: BuiltinCatalogEntry = entry(MeshingEntryDefinition {

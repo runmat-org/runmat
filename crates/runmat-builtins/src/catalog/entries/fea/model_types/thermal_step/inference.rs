@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.ThermalStep` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
 pub(super) const STEADY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ThermalStep"),
+    result: classes::FEA_THERMAL_STEP_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -14,7 +15,7 @@ pub(super) fn steady(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Call
 }
 
 pub(super) const TRANSIENT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ThermalStep"),
+    result: classes::FEA_THERMAL_STEP_CLASS,
     arguments: &[ModelArg::Text],
 };
 

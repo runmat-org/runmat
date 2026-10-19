@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.ElectricalExcitation` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const TERMINAL_VOLTAGE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ElectricalExcitation"),
+    result: classes::FEA_ELECTRICAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -21,7 +22,7 @@ pub(super) fn terminal_voltage(
 }
 
 pub(super) const CURRENT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ElectricalExcitation"),
+    result: classes::FEA_ELECTRICAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -34,7 +35,7 @@ pub(super) fn current(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
 }
 
 pub(super) const CHARGE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ElectricalExcitation"),
+    result: classes::FEA_ELECTRICAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -47,7 +48,7 @@ pub(super) fn charge(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Call
 }
 
 pub(super) const CURRENT_DENSITY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ElectricalExcitation"),
+    result: classes::FEA_ELECTRICAL_EXCITATION_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),

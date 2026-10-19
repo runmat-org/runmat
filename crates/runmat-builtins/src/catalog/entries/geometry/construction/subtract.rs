@@ -36,9 +36,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:subtract:InvalidInput` reports a call with no tool, an operand that is not a `geometry.Feature`, or conflicting feature definitions.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:subtract:InvalidInput` reports every failure of the call: the wrong number of arguments, a call with no tool, an operand that is not a `geometry.Feature`, or conflicting feature definitions, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];

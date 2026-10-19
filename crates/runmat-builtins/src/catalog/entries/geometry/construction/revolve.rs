@@ -37,9 +37,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:revolve:InvalidInput` reports a `profile` that is not a `geometry.Feature`, an `axis` or `origin` that is not a finite three-element real vector, or an angle that cannot be converted.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:revolve:InvalidInput` reports every failure of the call: the wrong number of arguments, a `profile` that is not a `geometry.Feature`, an `axis` or `origin` that is not a finite three-element real vector, or an angle that cannot be converted, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -55,7 +53,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         "negative-angle",
         "A negative angle is rejected",
         "profile = geometry.box(10e-3, 1e-3, 20e-3);\nturned = geometry.revolve(profile, [0 1 0], [0 0 0], -pi);",
-        "RunMat:geometry:feature:InvalidInput",
+        "RunMat:geometry:revolve:InvalidInput",
     ),
 ];
 

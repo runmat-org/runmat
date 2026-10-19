@@ -38,11 +38,13 @@ pub const ERROR_INVALID: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     when: "The selector is empty, uses an unsupported prefix, matches no region, or matches more than one region.",
     message: "geometry.region: invalid region selection",
 };
-// Asset decoding is shared with the asset queries and reports the inspect-family
-// internal identifier for a value that is not a geometry.Asset.
-pub const ERROR_ASSET: BuiltinErrorDescriptor =
-    super::super::inspect::GEOMETRY_INSPECT_ERROR_INTERNAL;
-const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID, ERROR_ASSET];
+pub const ERROR_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
+    code: "RM.GEOMETRY.REGION.INVALID_INPUT",
+    identifier: Some("RunMat:geometry:region:InvalidInput"),
+    when: "The call does not pass exactly a geometry.Asset and a scalar text selector.",
+    message: "geometry.region: invalid input",
+};
+const ERRORS: [BuiltinErrorDescriptor; 2] = [ERROR_INVALID, ERROR_INPUT];
 
 pub const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
     signatures: &SIGNATURES,

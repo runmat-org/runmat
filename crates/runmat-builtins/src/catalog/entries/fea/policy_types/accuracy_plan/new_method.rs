@@ -98,6 +98,10 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/accuracy_plan/tests.rs::accuracy_plan_identities_conform",
         ),
         unit_test(
+            "Plans accept criteria cells and round-trip portably",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::plans_accept_criteria_cells_and_round_trip_portably",
+        ),
+        unit_test(
             "Accuracy plan validation rejects nonpositive tolerances",
             "crates/runmat-analysis/core/src/validate_accuracy.rs::rejects_nonpositive_tolerance",
         ),

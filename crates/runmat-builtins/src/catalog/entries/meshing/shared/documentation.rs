@@ -60,12 +60,20 @@ pub(in crate::catalog::entries::meshing) const BOX_FIXTURE: BuiltinExampleFixtur
 pub(in crate::catalog::entries::meshing) const NATIVE_MESHING: BuiltinExampleRequirements =
     BuiltinExampleRequirements {
         host: BuiltinExampleHostRequirement::NativeOnly,
+        runtime: &[
+            BuiltinRuntimeCapability::NativeCad,
+            BuiltinRuntimeCapability::NativeMeshing,
+        ],
         ..BuiltinExampleRequirements::NONE
     };
 pub(in crate::catalog::entries::meshing) const NATIVE_MESHING_PLOT_CORE:
     BuiltinExampleRequirements = BuiltinExampleRequirements {
     host: BuiltinExampleHostRequirement::NativeOnly,
-    runtime: &[BuiltinRuntimeCapability::PlotCore],
+    runtime: &[
+        BuiltinRuntimeCapability::PlotCore,
+        BuiltinRuntimeCapability::NativeCad,
+        BuiltinRuntimeCapability::NativeMeshing,
+    ],
     ..BuiltinExampleRequirements::NONE
 };
 

@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when `id` is empty or `values` is not a nonempty finite numeric array.",
         "`RunMat:fea:Internal` if the value cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 
@@ -26,7 +27,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         harness: BuiltinExampleHarness::Portable,
         fixture: BuiltinExampleFixture::None,
         requirements: BuiltinExampleRequirements::NONE,
-        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(domain), 'fea.IndependentDomain'));\nassert(strcmp(domain.value.study_parameter.parameter_id, 'plate_thickness'));\nassert(isequal(reshape(domain.value.study_parameter.canonical_values, 1, []), [0.002 0.003 0.004]));" },
+        verification: BuiltinExampleVerification::Assertions { source: "assert(strcmp(class(domain), 'fea.IndependentDomain'));\nassert(strcmp(domain.value.study_parameter.parameter_id, 'plate_thickness'));\nassert(isequal(domain.value.study_parameter.canonical_values, [0.002 0.003 0.004]));" },
     },
 ];
 

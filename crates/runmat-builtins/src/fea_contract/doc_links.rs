@@ -125,3 +125,19 @@ pub const VECTOR_QUANTITY_TEST: BuiltinEvidenceReference = unit(
     "Positions preserve vector shape and unit conversion",
     "crates/runmat-runtime/src/builtins/fea/values.rs::positions_preserve_vector_shape_and_unit_conversion",
 );
+pub const PORTABLE_SCHEMA_TEST: BuiltinEvidenceReference = unit(
+    "Material and plan objects match their portable schemas",
+    "crates/runmat-runtime/src/builtins/fea/mod.rs::material_and_plan_objects_match_their_portable_schemas",
+);
+pub const ENUM_ATTRIBUTION_TEST: BuiltinEvidenceReference = unit(
+    "Frame and Confidence errors are attributed to the calling builtin",
+    "crates/runmat-runtime/src/builtins/fea/mod.rs::scalar_enum_errors_are_attributed_to_the_calling_builtin",
+);
+pub const STEP_RESULT_TEST: BuiltinEvidenceReference = unit(
+    "A step result is selected by its authored step id",
+    "crates/runmat-runtime/src/analysis/tests.rs::fea_step_result_selects_one_procedure_step_by_authored_id",
+);
+pub const ASSIGNMENT_REVISION_TEST: BuiltinEvidenceReference = unit(
+    "Material assignments expose a uint32 geometry revision",
+    "crates/runmat-runtime/src/builtins/fea/mod.rs::material_assignment_revision_is_uint32_and_round_trips_into_a_model",
+);

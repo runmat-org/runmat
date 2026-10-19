@@ -15,29 +15,24 @@ use runmat_analysis_core::{
     SpectrumInterpolation, SpectrumResponse,
 };
 
-pub(super) const AXIS_CLASS: &str = "fea.SpectrumAxis";
-pub(super) const DAMPING_CLASS: &str = "fea.SpectrumDamping";
-pub(super) const DIRECTION_CLASS: &str = "fea.SpectrumDirection";
-pub(super) const RESPONSE_CLASS: &str = "fea.SpectrumResponse";
-pub(super) const ENVELOPE_CLASS: &str = "fea.SpectrumEnvelope";
-pub(super) const INTERPOLATION_CLASS: &str = "fea.SpectrumInterpolation";
-pub(super) const EXTRAPOLATION_CLASS: &str = "fea.SpectrumExtrapolation";
-pub(super) const MODAL_COMBINATION_CLASS: &str = "fea.ModalCombination";
-pub(super) const DIRECTIONAL_COMBINATION_CLASS: &str = "fea.DirectionalCombination";
-pub(super) const TRUNCATION_CLASS: &str = "fea.ModalTruncation";
-pub(super) const TRUNCATION_CORRECTION_CLASS: &str = "fea.ModalTruncationCorrection";
-pub(super) const RIGID_RESPONSE_CLASS: &str = "fea.RigidResponse";
-pub(super) const CONSTRUCTION_CLASS: &str = "fea.SpectrumConstruction";
-pub(super) const EVIDENCE_CLASS: &str = "fea.SpectrumEvidence";
+use runmat_builtins::fea_contract::policy_types::classes;
+
+pub(super) const AXIS_CLASS: &str = classes::SPECTRUM_AXIS.display_name();
+pub(super) const DAMPING_CLASS: &str = classes::SPECTRUM_DAMPING.display_name();
+pub(super) const DIRECTION_CLASS: &str = classes::SPECTRUM_DIRECTION.display_name();
+pub(super) const RESPONSE_CLASS: &str = classes::SPECTRUM_RESPONSE.display_name();
+pub(super) const ENVELOPE_CLASS: &str = classes::SPECTRUM_ENVELOPE.display_name();
+pub(super) const INTERPOLATION_CLASS: &str = classes::SPECTRUM_INTERPOLATION.display_name();
+pub(super) const EXTRAPOLATION_CLASS: &str = classes::SPECTRUM_EXTRAPOLATION.display_name();
+pub(super) const MODAL_COMBINATION_CLASS: &str = classes::MODAL_COMBINATION.display_name();
+pub(super) const DIRECTIONAL_COMBINATION_CLASS: &str = classes::DIRECTIONAL_COMBINATION.display_name();
+pub(super) const TRUNCATION_CLASS: &str = classes::MODAL_TRUNCATION.display_name();
+pub(super) const TRUNCATION_CORRECTION_CLASS: &str = classes::MODAL_TRUNCATION_CORRECTION.display_name();
+pub(super) const RIGID_RESPONSE_CLASS: &str = classes::RIGID_RESPONSE.display_name();
+pub(super) const CONSTRUCTION_CLASS: &str = classes::SPECTRUM_CONSTRUCTION.display_name();
+pub(super) const EVIDENCE_CLASS: &str = classes::SPECTRUM_EVIDENCE.display_name();
 
 const VALUE_FIELDS: &[&str] = &["value"];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const POLICY_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes:
-        "The concrete method fixes a closed response-spectrum policy and accepts no numeric input.",
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -45,34 +40,6 @@ struct TypedValue<T> {
     value: T,
 }
 
-macro_rules! noarg_policy {
-    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $label:literal,
-     $summary:literal, $class:expr, $value:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &NO_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-        #[runtime_builtin(
-                            name = $builtin,
-                            category = "fea",
-                            summary = $summary,
-                            keywords = "fea,response,spectrum,policy,typed",
-                            descriptor($descriptor),
-                            integer_audit(POLICY_AUDIT),
-                            builtin_path = "crate::builtins::fea::response_spectrum_policies::choices"
-                        )]
-        pub async fn $function() -> BuiltinResult<Value> {
-            typed_value($builtin, $class, $value)
-        }
-    };
-}
 
 fn typed_value<T: Serialize>(
     builtin: &'static str,
@@ -91,171 +58,14 @@ fn typed_value_from<T: DeserializeOwned>(
     Ok(value.value)
 }
 
-const VECTOR_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "values",
-    BuiltinParamType::NumericArray,
-    "Finite nonempty numeric row or column vector in the unit named by the constructor.",
-)];
-const SCALAR_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "value",
-    BuiltinParamType::NumericScalar,
-    "Finite scalar value.",
-)];
-const DIRECTION_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required("frame", BuiltinParamType::Any, "Typed fea.CoordinateFrame."),
-    required(
-        "vector",
-        BuiltinParamType::NumericArray,
-        "Finite nonzero three-component direction vector.",
-    ),
-];
-const PERCENTAGE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "primary",
-        BuiltinParamType::NumericScalar,
-        "Primary fraction.",
-    ),
-    required(
-        "secondary",
-        BuiltinParamType::NumericScalar,
-        "Secondary fraction.",
-    ),
-];
-const TRUNCATION_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "minimumMassRatio",
-        BuiltinParamType::NumericScalar,
-        "Required cumulative modal-mass fraction.",
-    ),
-    required(
-        "correction",
-        BuiltinParamType::Any,
-        "Typed fea.ModalTruncationCorrection.",
-    ),
-];
-const CONSTRUCTION_SIGNAL_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "accelerationSignal",
-    BuiltinParamType::Any,
-    "Typed time-domain fea.AccelerationSignal source.",
-)];
-const EVIDENCE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "samplingAdequacyRatio",
-        BuiltinParamType::NumericScalar,
-        "Finite nonnegative sampling adequacy ratio.",
-    ),
-    required(
-        "maximumInterpolationError",
-        BuiltinParamType::NumericScalar,
-        "Finite nonnegative interpolation-error bound.",
-    ),
-];
 
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
 
-const SCALAR_NUMERIC_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "value",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "The physical or dimensionless value is checked before conversion to canonical binary64 storage.",
-}];
-const SCALAR_NUMERIC_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "typed response-spectrum numeric component",
-        inputs: &SCALAR_NUMERIC_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Response-spectrum authoring is a portable host construction boundary.",
-    }];
 
-macro_rules! numeric_capabilities {
-    ($inputs:ident, $capabilities:ident, $form:literal, [$($name:literal),+ $(,)?]) => {
-        const $inputs: [BuiltinIntegerInputCapability; numeric_capabilities!(@count $($name),+)] = [
-            $(BuiltinIntegerInputCapability {
-                name: $name,
-                classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-                availability: BuiltinIntegerInputAvailability::Documented,
-                scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-                notes: "Numeric input is checked before conversion to canonical binary64 storage.",
-            }),+
-        ];
-        const $capabilities: [BuiltinIntegerCapabilityDescriptor; 1] =
-            [BuiltinIntegerCapabilityDescriptor {
-                form: $form,
-                inputs: &$inputs,
-                computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-                output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-                overflow: BuiltinIntegerOverflowRule::NotApplicable,
-                backend: BuiltinIntegerBackendRule::HostOnly,
-                overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-                notes: "Response-spectrum authoring is a portable host construction boundary.",
-            }];
-    };
-    (@count $head:literal $(, $tail:literal)*) => {
-        1usize $(+ numeric_capabilities!(@one $tail))*
-    };
-    (@one $value:literal) => { 1usize };
-}
 
-numeric_capabilities!(
-    AXIS_NUMERIC_INPUTS,
-    AXIS_NUMERIC_CAPABILITIES,
-    "typed response-spectrum axis",
-    ["values"]
-);
-numeric_capabilities!(
-    DIRECTION_NUMERIC_INPUTS,
-    DIRECTION_NUMERIC_CAPABILITIES,
-    "typed response-spectrum direction",
-    ["vector"]
-);
-numeric_capabilities!(
-    PERCENTAGE_NUMERIC_INPUTS,
-    PERCENTAGE_NUMERIC_CAPABILITIES,
-    "typed response-spectrum directional percentage rule",
-    ["primary", "secondary"]
-);
-numeric_capabilities!(
-    TRUNCATION_NUMERIC_INPUTS,
-    TRUNCATION_NUMERIC_CAPABILITIES,
-    "typed response-spectrum modal truncation policy",
-    ["minimumMassRatio"]
-);
-numeric_capabilities!(
-    GUPTA_NUMERIC_INPUTS,
-    GUPTA_NUMERIC_CAPABILITIES,
-    "typed Gupta rigid-response policy",
-    ["periodicFrequencyHertz", "rigidFrequencyHertz"]
-);
-numeric_capabilities!(
-    EVIDENCE_NUMERIC_INPUTS,
-    EVIDENCE_NUMERIC_CAPABILITIES,
-    "typed response-spectrum evidence",
-    ["samplingAdequacyRatio", "maximumInterpolationError"]
-);
 
 macro_rules! unary_policy {
-    ($function:ident, $descriptor:ident, $signatures:ident, $builtin:literal, $label:literal,
-     $summary:literal, $class:expr, $body:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor { label: $label, inputs: &SCALAR_INPUTS, outputs: &OUT_ANY }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor { signatures: &$signatures, output_mode: BuiltinOutputMode::Fixed, completion_policy: BuiltinCompletionPolicy::Public, errors: &ERRORS };
-        #[runtime_builtin(name = $builtin, category = "fea", summary = $summary, keywords = "fea,response,spectrum,typed", descriptor($descriptor), integer_capabilities(SCALAR_NUMERIC_CAPABILITIES), builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
+    ($function:ident, $builtin:literal, $class:expr, $body:expr) => {
+        #[runtime_builtin(name = $builtin, binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectrum_policies::parameters")]
         pub async fn $function(value: Value) -> BuiltinResult<Value> {
             let value = finite_numeric_scalar($builtin, &value, "value")?;
             typed_value($builtin, $class, ($body)(value)?)

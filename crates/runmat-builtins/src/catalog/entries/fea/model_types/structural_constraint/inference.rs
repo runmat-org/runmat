@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.StructuralConstraint` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const FIXED: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -17,22 +18,22 @@ pub(super) fn fixed(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 pub(super) const PRESCRIBED: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::TypedOrCell(&[
-            StaticClassIdentity::new("fea.StructuralTranslationDofValue"),
-            StaticClassIdentity::new("fea.StructuralRotationDofValue"),
+            classes::FEA_STRUCTURAL_TRANSLATION_DOF_VALUE_CLASS,
+            classes::FEA_STRUCTURAL_ROTATION_DOF_VALUE_CLASS,
         ]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.GlobalCoordinateFrame"),
-            StaticClassIdentity::new("fea.MaterialCoordinateFrame"),
-            StaticClassIdentity::new("fea.ElementCoordinateFrame"),
-            StaticClassIdentity::new("fea.BoundaryNormalTangentFrame"),
-            StaticClassIdentity::new("fea.CartesianCoordinateFrame"),
-            StaticClassIdentity::new("fea.CylindricalCoordinateFrame"),
-            StaticClassIdentity::new("fea.SphericalCoordinateFrame"),
+            classes::FEA_GLOBAL_COORDINATE_FRAME_CLASS,
+            classes::FEA_MATERIAL_COORDINATE_FRAME_CLASS,
+            classes::FEA_ELEMENT_COORDINATE_FRAME_CLASS,
+            classes::FEA_BOUNDARY_NORMAL_TANGENT_FRAME_CLASS,
+            classes::FEA_CARTESIAN_COORDINATE_FRAME_CLASS,
+            classes::FEA_CYLINDRICAL_COORDINATE_FRAME_CLASS,
+            classes::FEA_SPHERICAL_COORDINATE_FRAME_CLASS,
         ]),
     ],
 };
@@ -42,11 +43,11 @@ pub(super) fn prescribed(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
 }
 
 pub(super) const PRESCRIBED_MOTION: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
-        ModelArg::TypedOrCell(&[StaticClassIdentity::new("fea.StructuralTranslationMotion")]),
+        ModelArg::TypedOrCell(&[classes::FEA_STRUCTURAL_TRANSLATION_MOTION_CLASS]),
     ],
 };
 
@@ -58,7 +59,7 @@ pub(super) fn prescribed_motion(
 }
 
 pub(super) const SYMMETRY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -70,7 +71,7 @@ pub(super) fn symmetry(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const ANTISYMMETRY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -82,7 +83,7 @@ pub(super) fn antisymmetry(request: &CallRequest, entry: &BuiltinCatalogEntry) -
 }
 
 pub(super) const NORMAL_DISPLACEMENT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -98,11 +99,11 @@ pub(super) fn normal_displacement(
 }
 
 pub(super) const RIGID_COUPLING: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.ReferencePoint")]),
+        ModelArg::Typed(&[classes::FEA_REFERENCE_POINT_CLASS]),
     ],
 };
 
@@ -111,11 +112,11 @@ pub(super) fn rigid_coupling(request: &CallRequest, entry: &BuiltinCatalogEntry)
 }
 
 pub(super) const DISTRIBUTING_COUPLING: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.ReferencePoint")]),
+        ModelArg::Typed(&[classes::FEA_REFERENCE_POINT_CLASS]),
     ],
 };
 
@@ -127,14 +128,14 @@ pub(super) fn distributing_coupling(
 }
 
 pub(super) const TIE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
     ],
 };
@@ -144,19 +145,19 @@ pub(super) fn tie(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInf
 }
 
 pub(super) const PERIODIC: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StructuralConstraint"),
+    result: classes::FEA_STRUCTURAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.IdentityPeriodicTransform"),
-            StaticClassIdentity::new("fea.TranslationPeriodicTransform"),
-            StaticClassIdentity::new("fea.RotationPeriodicTransform"),
+            classes::FEA_IDENTITY_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_ROTATION_PERIODIC_TRANSFORM_CLASS,
         ]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
     ],
 };

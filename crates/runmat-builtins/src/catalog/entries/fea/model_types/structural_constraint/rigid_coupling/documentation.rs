@@ -11,7 +11,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "`region` must be a `geometry.Region` returned by `geometry.region(asset, selector)`. The object stores the region id together with the region's `geometry_id` and `geometry_revision` (exposed as read-only properties, the revision as `uint32`), so `fea.model` rejects it when the model is built on a different asset or a different revision of the same asset.",
             "The region is recorded as a boundary-face target (`entity_dimension` `face`, cardinality one or more faces). Whether the selected region really is a set of faces is checked when the model is meshed and validated, not by the constructor.",
             "`referencePoint` must be a `fea.ReferencePoint` from `fea.ReferencePoint.fromCoordinates(id, position)`; its position may lie off the geometry.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -79,6 +79,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Prescribed DOFs and reference-point couplings are fully typed",
         location: "crates/runmat-runtime/src/builtins/fea/constraints.rs::tests::prescribed_structural_dofs_and_reference_couplings_are_fully_typed",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Every region constraint method builds its family kind",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::every_region_constraint_method_builds_its_family_kind",
     },
 ];
 

@@ -6,7 +6,8 @@ use crate::class_registry::declaration::{
 };
 use runmat_analysis_core::{ResponseSpectrum, ResponseSpectrumId};
 
-pub(super) const RESPONSE_SPECTRUM_CLASS: &str = "fea.ResponseSpectrum";
+pub(super) const RESPONSE_SPECTRUM_CLASS: &str =
+    runmat_builtins::fea_contract::policy_types::classes::RESPONSE_SPECTRUM.display_name();
 const BUILTIN: &str = "fea.ResponseSpectrum.new";
 const FIELDS: &[&str] = &[
     "spectrum_id",
@@ -26,137 +27,9 @@ const FIELDS: &[&str] = &[
     "evidence",
 ];
 
-const INPUTS: [BuiltinParamDescriptor; 16] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable response-spectrum identifier.",
-    ),
-    required("axis", BuiltinParamType::Any, "Typed fea.SpectrumAxis."),
-    required(
-        "ordinates",
-        BuiltinParamType::NumericArray,
-        "Finite nonnegative spectrum ordinates.",
-    ),
-    required(
-        "damping",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumDamping.",
-    ),
-    required(
-        "response",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumResponse.",
-    ),
-    required(
-        "envelope",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumEnvelope.",
-    ),
-    required(
-        "interpolation",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumInterpolation.",
-    ),
-    required(
-        "extrapolation",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumExtrapolation.",
-    ),
-    required(
-        "direction",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumDirection.",
-    ),
-    required(
-        "modalCombination",
-        BuiltinParamType::Any,
-        "Typed fea.ModalCombination.",
-    ),
-    required(
-        "directionalCombination",
-        BuiltinParamType::Any,
-        "Typed fea.DirectionalCombination.",
-    ),
-    required(
-        "truncation",
-        BuiltinParamType::Any,
-        "Typed fea.ModalTruncation.",
-    ),
-    required(
-        "rigidResponse",
-        BuiltinParamType::Any,
-        "Typed fea.RigidResponse policy.",
-    ),
-    required(
-        "construction",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumConstruction.",
-    ),
-    required(
-        "evidence",
-        BuiltinParamType::Any,
-        "Typed fea.SpectrumEvidence.",
-    ),
-    required(
-        "provenanceDigest",
-        BuiltinParamType::StringScalar,
-        "Nonempty provenance digest for the spectrum data.",
-    ),
-];
-const SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "spectrum = fea.ResponseSpectrum.new(id, axis, ordinates, damping, response, envelope, interpolation, extrapolation, direction, modalCombination, directionalCombination, truncation, rigidResponse, construction, evidence, provenanceDigest)",
-    inputs: &INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "ordinates",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes: "Spectrum ordinates are checked before conversion to canonical binary64 storage.",
-}];
-const INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "typed response spectrum",
-        inputs: &INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Response-spectrum authoring produces an immutable portable host value.",
-    }];
 
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
 
-#[runtime_builtin(
-    name = "fea.ResponseSpectrum.new",
-    category = "fea",
-    summary = "Create an immutable typed response spectrum.",
-    keywords = "fea,response,spectrum,srs,modal,typed",
-    descriptor(crate::builtins::fea::response_spectra::DESCRIPTOR),
-    integer_capabilities(INTEGER_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::response_spectra"
-)]
+#[runtime_builtin(name = "fea.ResponseSpectrum.new", binding_variant = "default", builtin_path = "crate::builtins::fea::response_spectra")]
 pub async fn response_spectrum(args: Vec<Value>) -> BuiltinResult<Value> {
     let [id, axis, ordinates, damping, response, envelope, interpolation, extrapolation, direction, modal_combination, directional_combination, truncation, rigid_response, construction, evidence, provenance_digest] =
         <[Value; 16]>::try_from(args).map_err(|args| {

@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.StepObjectRef` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
 pub(super) const CONSTRAINT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StepObjectRef"),
+    result: classes::FEA_STEP_OBJECT_REF_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -14,7 +15,7 @@ pub(super) fn constraint(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
 }
 
 pub(super) const BOUNDARY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StepObjectRef"),
+    result: classes::FEA_STEP_OBJECT_REF_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -23,7 +24,7 @@ pub(super) fn boundary(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const CONNECTOR: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StepObjectRef"),
+    result: classes::FEA_STEP_OBJECT_REF_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -32,7 +33,7 @@ pub(super) fn connector(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 }
 
 pub(super) const INTERFACE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StepObjectRef"),
+    result: classes::FEA_STEP_OBJECT_REF_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -41,7 +42,7 @@ pub(super) fn interface(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 }
 
 pub(super) const EXCITATION: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StepObjectRef"),
+    result: classes::FEA_STEP_OBJECT_REF_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -50,7 +51,7 @@ pub(super) fn excitation(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
 }
 
 pub(super) const INITIAL_CONDITION: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StepObjectRef"),
+    result: classes::FEA_STEP_OBJECT_REF_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -62,7 +63,7 @@ pub(super) fn initial_condition(
 }
 
 pub(super) const MATERIAL_PARAMETER: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.StepObjectRef"),
+    result: classes::FEA_STEP_OBJECT_REF_CLASS,
     arguments: &[ModelArg::Text],
 };
 

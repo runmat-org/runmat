@@ -53,6 +53,10 @@ pub enum BuiltinRuntimeCapability {
     Python,
     NumPy,
     PlotCore,
+    /// Native exact-CAD import (OCCT): STEP, IGES, and BREP topology.
+    NativeCad,
+    /// The native meshing execution service installed by RunMat hosts.
+    NativeMeshing,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]

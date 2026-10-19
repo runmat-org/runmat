@@ -7,127 +7,13 @@ use crate::class_registry::declaration::{
 };
 use runmat_analysis_core::{GeneratorDomain, SignalSamplingPolicy};
 
-pub(super) const DOMAIN_CLASS: &str = "fea.SignalDomain";
-pub(super) const SAMPLING_CLASS: &str = "fea.SignalSampling";
+use runmat_builtins::fea_contract::policy_types::classes;
+
+pub(super) const DOMAIN_CLASS: &str = classes::SIGNAL_DOMAIN.display_name();
+pub(super) const SAMPLING_CLASS: &str = classes::SIGNAL_SAMPLING.display_name();
 
 const DOMAIN_FIELDS: &[&str] = &["domain"];
 const SAMPLING_FIELDS: &[&str] = &["sampling"];
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const STUDY_PARAMETER_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "parameterId",
-    BuiltinParamType::StringScalar,
-    "Stable study-parameter identifier.",
-)];
-const UNIFORM_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "start",
-        BuiltinParamType::NumericScalar,
-        "Finite first canonical sample coordinate.",
-    ),
-    required(
-        "end",
-        BuiltinParamType::NumericScalar,
-        "Finite last canonical sample coordinate.",
-    ),
-    required(
-        "sampleCount",
-        BuiltinParamType::NumericScalar,
-        "Integer number of samples, at least two.",
-    ),
-];
-const ADAPTIVE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "start",
-        BuiltinParamType::NumericScalar,
-        "Finite first canonical sample coordinate.",
-    ),
-    required(
-        "end",
-        BuiltinParamType::NumericScalar,
-        "Finite last canonical sample coordinate.",
-    ),
-    required(
-        "maxAbsoluteError",
-        BuiltinParamType::NumericScalar,
-        "Finite positive absolute interpolation-error target.",
-    ),
-    required(
-        "maxSamples",
-        BuiltinParamType::NumericScalar,
-        "Integer sample budget, at least two.",
-    ),
-];
-const POINTS_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "points",
-    BuiltinParamType::NumericArray,
-    "Strictly increasing finite canonical sample coordinates.",
-)];
-const OUT_POLICY: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "policy",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Typed signal-generator policy.",
-}];
-const NO_NUMERIC_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "This constructor accepts no numeric values.",
-};
-const NUMERIC_INPUTS: [BuiltinIntegerInputCapability; 4] = [
-    integer_input(
-        "start",
-        "Canonical coordinates are converted once to binary64.",
-    ),
-    integer_input(
-        "end",
-        "Canonical coordinates are converted once to binary64.",
-    ),
-    integer_input(
-        "sampleCount",
-        "Sample counts must be exact non-negative platform integers.",
-    ),
-    integer_input(
-        "maxSamples",
-        "Sample budgets must be exact non-negative platform integers.",
-    ),
-];
-const NUMERIC_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "typed signal-generator sampling policy",
-        inputs: &NUMERIC_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FloatingPoint,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes:
-            "Coordinates enter canonical binary64 storage; counts retain exact integer semantics.",
-    }];
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
-const fn integer_input(name: &'static str, notes: &'static str) -> BuiltinIntegerInputCapability {
-    BuiltinIntegerInputCapability {
-        name,
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes,
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -142,73 +28,18 @@ struct SamplingObject {
 }
 
 macro_rules! no_input_domain_builtin {
-    ($function:ident, $descriptor:ident, $signatures:ident, $name:literal, $method:literal, $summary:literal, $domain:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: concat!("domain = fea.SignalDomain.", $method, "()"),
-            inputs: &NO_INPUTS,
-            outputs: &OUT_POLICY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-        #[runtime_builtin(
-                                    name = $name,
-                                    category = "fea",
-                                    summary = $summary,
-                                    keywords = "fea,signal,generator,domain,typed",
-                                    descriptor($descriptor),
-                                    integer_audit(NO_NUMERIC_AUDIT),
-                                    builtin_path = "crate::builtins::fea::generator_policies"
-                                )]
+    ($function:ident, $name:literal, $domain:expr) => {
+        #[runtime_builtin(name = $name, binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
         pub async fn $function() -> BuiltinResult<Value> {
             domain_object($name, $domain)
         }
     };
 }
 
-no_input_domain_builtin!(
-    time_domain,
-    TIME_DOMAIN_DESCRIPTOR,
-    TIME_DOMAIN_SIGNATURES,
-    "fea.SignalDomain.time",
-    "time",
-    "Select time in seconds as a callable signal domain.",
-    GeneratorDomain::TimeSeconds
-);
-no_input_domain_builtin!(
-    frequency_domain,
-    FREQUENCY_DOMAIN_DESCRIPTOR,
-    FREQUENCY_DOMAIN_SIGNATURES,
-    "fea.SignalDomain.frequency",
-    "frequency",
-    "Select frequency in hertz as a callable signal domain.",
-    GeneratorDomain::FrequencyHertz
-);
+no_input_domain_builtin!(time_domain, "fea.SignalDomain.time", GeneratorDomain::TimeSeconds);
+no_input_domain_builtin!(frequency_domain, "fea.SignalDomain.frequency", GeneratorDomain::FrequencyHertz);
 
-const STUDY_PARAMETER_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "domain = fea.SignalDomain.studyParameter(parameterId)",
-    inputs: &STUDY_PARAMETER_INPUTS,
-    outputs: &OUT_POLICY,
-}];
-pub(super) const STUDY_PARAMETER_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &STUDY_PARAMETER_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-#[runtime_builtin(
-    name = "fea.SignalDomain.studyParameter",
-    category = "fea",
-    summary = "Select a named study parameter as a callable signal domain.",
-    keywords = "fea,signal,generator,domain,parameter,typed",
-    descriptor(STUDY_PARAMETER_DESCRIPTOR),
-    integer_audit(NO_NUMERIC_AUDIT),
-    builtin_path = "crate::builtins::fea::generator_policies"
-)]
+#[runtime_builtin(name = "fea.SignalDomain.studyParameter", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
 pub async fn study_parameter_domain(parameter_id: String) -> BuiltinResult<Value> {
     if parameter_id.trim().is_empty() {
         return Err(builtin_error(
@@ -223,27 +54,8 @@ pub async fn study_parameter_domain(parameter_id: String) -> BuiltinResult<Value
     )
 }
 
-const UNIFORM_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "sampling = fea.SignalSampling.uniform(start, end, sampleCount)",
-    inputs: &UNIFORM_INPUTS,
-    outputs: &OUT_POLICY,
-}];
-pub(super) const UNIFORM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &UNIFORM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
-#[runtime_builtin(
-    name = "fea.SignalSampling.uniform",
-    category = "fea",
-    summary = "Create uniform callable signal sampling.",
-    keywords = "fea,signal,generator,sampling,uniform,typed",
-    descriptor(UNIFORM_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::generator_policies"
-)]
+#[runtime_builtin(name = "fea.SignalSampling.uniform", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
 pub async fn uniform_sampling(
     start: Value,
     end: Value,
@@ -260,27 +72,8 @@ pub async fn uniform_sampling(
     )
 }
 
-const ADAPTIVE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "sampling = fea.SignalSampling.adaptive(start, end, maxAbsoluteError, maxSamples)",
-    inputs: &ADAPTIVE_INPUTS,
-    outputs: &OUT_POLICY,
-}];
-pub(super) const ADAPTIVE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ADAPTIVE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
-#[runtime_builtin(
-    name = "fea.SignalSampling.adaptive",
-    category = "fea",
-    summary = "Create error-bounded adaptive callable signal sampling.",
-    keywords = "fea,signal,generator,sampling,adaptive,typed",
-    descriptor(ADAPTIVE_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::generator_policies"
-)]
+#[runtime_builtin(name = "fea.SignalSampling.adaptive", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
 pub async fn adaptive_sampling(
     start: Value,
     end: Value,
@@ -303,27 +96,8 @@ pub async fn adaptive_sampling(
     )
 }
 
-const POINTS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "sampling = fea.SignalSampling.canonicalPoints(points)",
-    inputs: &POINTS_INPUTS,
-    outputs: &OUT_POLICY,
-}];
-pub(super) const POINTS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &POINTS_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
 
-#[runtime_builtin(
-    name = "fea.SignalSampling.canonicalPoints",
-    category = "fea",
-    summary = "Create explicit callable signal sample coordinates.",
-    keywords = "fea,signal,generator,sampling,points,typed",
-    descriptor(POINTS_DESCRIPTOR),
-    integer_capabilities(NUMERIC_CAPABILITIES),
-    builtin_path = "crate::builtins::fea::generator_policies"
-)]
+#[runtime_builtin(name = "fea.SignalSampling.canonicalPoints", binding_variant = "default", builtin_path = "crate::builtins::fea::generator_policies")]
 pub async fn canonical_point_sampling(points: Value) -> BuiltinResult<Value> {
     let builtin = "fea.SignalSampling.canonicalPoints";
     sampling_object(

@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.FluidConstraint` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const NO_SLIP_WALL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidConstraint"),
+    result: classes::FEA_FLUID_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -17,7 +18,7 @@ pub(super) fn no_slip_wall(request: &CallRequest, entry: &BuiltinCatalogEntry) -
 }
 
 pub(super) const SLIP_WALL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidConstraint"),
+    result: classes::FEA_FLUID_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -29,7 +30,7 @@ pub(super) fn slip_wall(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 }
 
 pub(super) const SYMMETRY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidConstraint"),
+    result: classes::FEA_FLUID_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -41,7 +42,7 @@ pub(super) fn symmetry(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const PRESCRIBED_VELOCITY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidConstraint"),
+    result: classes::FEA_FLUID_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -57,7 +58,7 @@ pub(super) fn prescribed_velocity(
 }
 
 pub(super) const MOVING_WALL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidConstraint"),
+    result: classes::FEA_FLUID_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -70,7 +71,7 @@ pub(super) fn moving_wall(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
 }
 
 pub(super) const PRESSURE_REFERENCE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidConstraint"),
+    result: classes::FEA_FLUID_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -86,19 +87,19 @@ pub(super) fn pressure_reference(
 }
 
 pub(super) const PERIODIC: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidConstraint"),
+    result: classes::FEA_FLUID_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.IdentityPeriodicTransform"),
-            StaticClassIdentity::new("fea.TranslationPeriodicTransform"),
-            StaticClassIdentity::new("fea.RotationPeriodicTransform"),
+            classes::FEA_IDENTITY_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_ROTATION_PERIODIC_TRANSFORM_CLASS,
         ]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
     ],
 };

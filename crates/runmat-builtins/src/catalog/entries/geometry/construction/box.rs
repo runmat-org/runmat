@@ -36,8 +36,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
+            "`RunMat:geometry:box:InvalidInput` reports every failure of the call: the wrong number of arguments, a dimension that is not a real numeric scalar, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -53,7 +52,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         "zero-thickness",
         "A zero dimension is rejected",
         "plate = geometry.box(80e-3, 50e-3, 0);",
-        "RunMat:geometry:feature:InvalidInput",
+        "RunMat:geometry:box:InvalidInput",
     ),
 ];
 
@@ -76,7 +75,7 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructionDocumentat
     examples: EXAMPLES,
     faqs: FAQS,
     implementation: &[PRIMITIVES_SOURCE, GRAPH_VALIDATION_SOURCE],
-    verification: &[COMPOSITION_TEST, FULL_SURFACE_TEST],
+    verification: &[COMPOSITION_TEST, ERROR_OWNER_TEST, INTEGER_TEST],
     notes: &[],
     status: BuiltinDocumentationStatus::Stable,
 });

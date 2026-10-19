@@ -2,7 +2,7 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_RUN_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_run_setup, BOX_STUDY},
+    example_fixtures::{fea_box_run_setup, BOX_STUDY, NATIVE_CAD_MESHING},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     operation_inference::{infer_evidence, FeaEvidenceKind},
@@ -22,7 +22,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: BOX_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
+    requirements: NATIVE_CAD_MESHING,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isa(run, 'fea.RunResult'));\nassert(strcmp(run.study_id, \"box_static\"));\nassert(numel(run.steps) == 1);\nassert(~isempty(run.evidence_artifact_path));",
     },

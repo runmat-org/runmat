@@ -36,7 +36,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:facesIntroducedBy:InvalidInput` reports an argument that is not a `geometry.Feature` value. Selection errors at realization, such as an empty selection, a cardinality mismatch, or missing topology history, are reported by the `.fea` geometry materialization that resolves the region, before meshing or assembly.",
+            "`RunMat:geometry:facesIntroducedBy:InvalidInput` reports a call that does not pass exactly one `geometry.Feature` value. Selection errors at realization, such as an empty selection, a cardinality mismatch, or missing topology history, are reported by the `.fea` geometry materialization that resolves the region, before meshing or assembly.",
         ],
     },
 ];

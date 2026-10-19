@@ -12,7 +12,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "`transform` maps a point on the primary region to its partner on the secondary region: `fea.PeriodicTransform.identity()`, `.translation(translation)`, or `.rotation(origin, axis, angle)`. It must match the real periodicity of the geometry; the constructor does not infer it.",
             "`pairing` decides how entities on the two regions are matched: `fea.PeriodicPairing.matching()` requires a mesh that already matches one-to-one, and `fea.PeriodicPairing.geometric(tolerance)` pairs entities whose mapped positions agree within a `fea.Length` tolerance.",
             "`phase` must be a `fea.ComplexPhase` (`fea.ComplexPhase.degrees(90)` stores pi/2 rad).",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },

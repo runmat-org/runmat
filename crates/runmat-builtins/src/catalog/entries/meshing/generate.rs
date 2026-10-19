@@ -129,8 +129,7 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(MeshingDocumentation {
         BuiltinDocumentationSection {
             heading: "Errors",
             paragraphs: &[
-                "`RunMat:meshing:InvalidInput` reports malformed options, an unsupported element order, out-of-range values, a host without meshing, a changed or unreadable source file, and meshing failures such as invalid geometry, unsatisfiable constraints, unreachable quality, or an exceeded budget; the message names the cause and stage.",
-                "`RunMat:geometry:inspect:Internal` reports a first argument that is not a `geometry.Asset`.",
+                "`RunMat:meshing:InvalidInput` reports every failure: a first argument that is not a `geometry.Asset`, malformed options, an unsupported element order, out-of-range values, a host without meshing, a changed or unreadable source file, and meshing failures such as invalid geometry, unsatisfiable constraints, unreachable quality, or an exceeded budget; the message names the cause and stage.",
             ],
         },
     ],

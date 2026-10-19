@@ -6,7 +6,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Behavior",
         paragraphs: &[
             "The object stores `axis` as `uint8(0)` (0 for x, 1 for y, 2 for z). The axis is interpreted in the coordinate frame of the constraint that uses it, so in a cylindrical frame the first, second, and third axes are radial, tangential, and axial. Rotational DOFs only constrain formulations that carry rotations, such as beams and shells.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -58,6 +58,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Prescribed DOFs and reference-point couplings are fully typed",
         location: "crates/runmat-runtime/src/builtins/fea/constraints.rs::tests::prescribed_structural_dofs_and_reference_couplings_are_fully_typed",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Rotation transform and every structural DOF are typed",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::rotation_transform_and_every_structural_dof_are_typed",
     },
 ];
 

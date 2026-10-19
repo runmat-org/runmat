@@ -4,191 +4,6 @@ use crate::builtins::fea::values::{
     quantity_scalar, COMPLEX_PHASE_CLASS, TEMPERATURE_DIFFERENCE_CLASS,
 };
 
-const TIE_INPUTS: [BuiltinParamDescriptor; 4] = [
-    parameter(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Constraint identifier.",
-    ),
-    parameter("primary", BuiltinParamType::Any, "Primary geometry.Region."),
-    parameter(
-        "secondary",
-        BuiltinParamType::Any,
-        "Secondary geometry.Region.",
-    ),
-    parameter(
-        "pairing",
-        BuiltinParamType::Any,
-        "Typed fea.PeriodicPairing policy.",
-    ),
-];
-const PERIODIC_INPUTS: [BuiltinParamDescriptor; 5] = [
-    parameter(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Constraint identifier.",
-    ),
-    parameter("primary", BuiltinParamType::Any, "Primary geometry.Region."),
-    parameter(
-        "secondary",
-        BuiltinParamType::Any,
-        "Secondary geometry.Region.",
-    ),
-    parameter(
-        "transform",
-        BuiltinParamType::Any,
-        "Typed fea.PeriodicTransform.",
-    ),
-    parameter(
-        "pairing",
-        BuiltinParamType::Any,
-        "Typed fea.PeriodicPairing policy.",
-    ),
-];
-const PHASE_PERIODIC_INPUTS: [BuiltinParamDescriptor; 6] = [
-    parameter(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Constraint identifier.",
-    ),
-    parameter("primary", BuiltinParamType::Any, "Primary geometry.Region."),
-    parameter(
-        "secondary",
-        BuiltinParamType::Any,
-        "Secondary geometry.Region.",
-    ),
-    parameter(
-        "transform",
-        BuiltinParamType::Any,
-        "Typed fea.PeriodicTransform.",
-    ),
-    parameter(
-        "pairing",
-        BuiltinParamType::Any,
-        "Typed fea.PeriodicPairing policy.",
-    ),
-    parameter(
-        "phase",
-        BuiltinParamType::Any,
-        "Typed fea.ComplexPhase shift.",
-    ),
-];
-const AFFINE_JUMP_INPUTS: [BuiltinParamDescriptor; 6] = [
-    parameter(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Constraint identifier.",
-    ),
-    parameter("primary", BuiltinParamType::Any, "Primary geometry.Region."),
-    parameter(
-        "secondary",
-        BuiltinParamType::Any,
-        "Secondary geometry.Region.",
-    ),
-    parameter(
-        "transform",
-        BuiltinParamType::Any,
-        "Typed fea.PeriodicTransform.",
-    ),
-    parameter(
-        "pairing",
-        BuiltinParamType::Any,
-        "Typed fea.PeriodicPairing policy.",
-    ),
-    parameter(
-        "jump",
-        BuiltinParamType::Any,
-        "Typed fea.TemperatureDifference affine jump.",
-    ),
-];
-
-const fn parameter(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
-macro_rules! descriptor {
-    ($name:ident, $signatures:ident, $label:literal, $inputs:ident) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: &$inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $name: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-descriptor!(
-    STRUCTURAL_TIE_DESCRIPTOR,
-    STRUCTURAL_TIE_SIGNATURES,
-    "constraint = fea.StructuralConstraint.tie(id, primary, secondary, pairing)",
-    TIE_INPUTS
-);
-descriptor!(
-    THERMAL_TIE_DESCRIPTOR,
-    THERMAL_TIE_SIGNATURES,
-    "constraint = fea.ThermalConstraint.tie(id, primary, secondary, pairing)",
-    TIE_INPUTS
-);
-descriptor!(
-    STRUCTURAL_PERIODIC_DESCRIPTOR,
-    STRUCTURAL_PERIODIC_SIGNATURES,
-    "constraint = fea.StructuralConstraint.periodic(id, primary, secondary, transform, pairing)",
-    PERIODIC_INPUTS
-);
-descriptor!(
-    THERMAL_PERIODIC_DESCRIPTOR,
-    THERMAL_PERIODIC_SIGNATURES,
-    "constraint = fea.ThermalConstraint.periodic(id, primary, secondary, transform, pairing)",
-    PERIODIC_INPUTS
-);
-descriptor!(
-    ELECTRICAL_PERIODIC_DESCRIPTOR,
-    ELECTRICAL_PERIODIC_SIGNATURES,
-    "constraint = fea.ElectricalConstraint.periodic(id, primary, secondary, transform, pairing)",
-    PERIODIC_INPUTS
-);
-descriptor!(
-    MAGNETIC_PERIODIC_DESCRIPTOR,
-    MAGNETIC_PERIODIC_SIGNATURES,
-    "constraint = fea.MagneticConstraint.periodic(id, primary, secondary, transform, pairing)",
-    PERIODIC_INPUTS
-);
-descriptor!(
-    ACOUSTIC_PERIODIC_DESCRIPTOR,
-    ACOUSTIC_PERIODIC_SIGNATURES,
-    "constraint = fea.AcousticConstraint.periodic(id, primary, secondary, transform, pairing)",
-    PERIODIC_INPUTS
-);
-descriptor!(
-    FLUID_PERIODIC_DESCRIPTOR,
-    FLUID_PERIODIC_SIGNATURES,
-    "constraint = fea.FluidConstraint.periodic(id, primary, secondary, transform, pairing)",
-    PERIODIC_INPUTS
-);
-descriptor!(MAGNETIC_PHASE_PERIODIC_DESCRIPTOR, MAGNETIC_PHASE_PERIODIC_SIGNATURES, "constraint = fea.MagneticConstraint.phaseShiftedPeriodic(id, primary, secondary, transform, pairing, phase)", PHASE_PERIODIC_INPUTS);
-descriptor!(ACOUSTIC_PHASE_PERIODIC_DESCRIPTOR, ACOUSTIC_PHASE_PERIODIC_SIGNATURES, "constraint = fea.AcousticConstraint.phaseShiftedPeriodic(id, primary, secondary, transform, pairing, phase)", PHASE_PERIODIC_INPUTS);
-descriptor!(
-    AFFINE_JUMP_DESCRIPTOR,
-    AFFINE_JUMP_SIGNATURES,
-    "constraint = fea.ThermalConstraint.affineJump(id, primary, secondary, transform, pairing, jump)",
-    AFFINE_JUMP_INPUTS
-);
-
 fn periodic_from_values(
     builtin: &'static str,
     pair: PairedConstraint,
@@ -203,20 +18,17 @@ fn periodic_from_values(
 macro_rules! tie_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $constraint:ident, $kind:ident $(, $field:ident : $field_value:expr)?) => {
         #[runtime_builtin(
-                            name = $name,
-                            category = "fea",
-                            summary = "Create a typed tie constraint between two geometry regions.",
-                            keywords = "fea,constraint,tie,pairing,region,typed",
-                            descriptor(crate::builtins::fea::constraints::paired::$descriptor),
-                            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
-                            builtin_path = "crate::builtins::fea::constraints::paired"
-                        )]
+            name = $name,
+            binding_variant = "default",
+            builtin_path = "crate::builtins::fea::constraints::paired"
+        )]
         pub async fn $function(
             id: String,
             primary: Value,
             secondary: Value,
             pairing: Value,
         ) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let (id, geometry_id, geometry_revision, pair) =
                 bound_region_pair($name, id, &primary, &secondary, &pairing)?;
             bound_constraint_to_object(
@@ -238,11 +50,7 @@ macro_rules! periodic_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $constraint:ident, $kind:ident $(, $field:ident : $field_value:expr)?) => {
         #[runtime_builtin(
             name = $name,
-            category = "fea",
-            summary = "Create a typed transformed periodic constraint between two geometry regions.",
-            keywords = "fea,constraint,periodic,transform,pairing,region,typed",
-            descriptor(crate::builtins::fea::constraints::paired::$descriptor),
-            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+            binding_variant = "default",
             builtin_path = "crate::builtins::fea::constraints::paired"
         )]
         pub async fn $function(
@@ -252,6 +60,7 @@ macro_rules! periodic_builtin {
             transform: Value,
             pairing: Value,
         ) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let (id, geometry_id, geometry_revision, pair) =
                 bound_region_pair($name, id, &primary, &secondary, &pairing)?;
             let periodic = periodic_from_values($name, pair, &transform)?;
@@ -272,7 +81,7 @@ macro_rules! periodic_builtin {
 
 tie_builtin!(
     structural_tie_builtin,
-    STRUCTURAL_TIE_DESCRIPTOR,
+    FEA_STRUCTURAL_CONSTRAINT_TIE_DESCRIPTOR,
     "fea.StructuralConstraint.tie",
     FEA_STRUCTURAL_CONSTRAINT_CLASS,
     StructuralConstraint,
@@ -281,7 +90,7 @@ tie_builtin!(
 );
 tie_builtin!(
     thermal_tie_builtin,
-    THERMAL_TIE_DESCRIPTOR,
+    FEA_THERMAL_CONSTRAINT_TIE_DESCRIPTOR,
     "fea.ThermalConstraint.tie",
     FEA_THERMAL_CONSTRAINT_CLASS,
     ThermalConstraint,
@@ -290,7 +99,7 @@ tie_builtin!(
 
 periodic_builtin!(
     structural_periodic_builtin,
-    STRUCTURAL_PERIODIC_DESCRIPTOR,
+    FEA_STRUCTURAL_CONSTRAINT_PERIODIC_DESCRIPTOR,
     "fea.StructuralConstraint.periodic",
     FEA_STRUCTURAL_CONSTRAINT_CLASS,
     StructuralConstraint,
@@ -299,7 +108,7 @@ periodic_builtin!(
 );
 periodic_builtin!(
     thermal_periodic_builtin,
-    THERMAL_PERIODIC_DESCRIPTOR,
+    FEA_THERMAL_CONSTRAINT_PERIODIC_DESCRIPTOR,
     "fea.ThermalConstraint.periodic",
     FEA_THERMAL_CONSTRAINT_CLASS,
     ThermalConstraint,
@@ -307,7 +116,7 @@ periodic_builtin!(
 );
 periodic_builtin!(
     electrical_periodic_builtin,
-    ELECTRICAL_PERIODIC_DESCRIPTOR,
+    FEA_ELECTRICAL_CONSTRAINT_PERIODIC_DESCRIPTOR,
     "fea.ElectricalConstraint.periodic",
     FEA_ELECTRICAL_CONSTRAINT_CLASS,
     ElectricalConstraint,
@@ -315,7 +124,7 @@ periodic_builtin!(
 );
 periodic_builtin!(
     magnetic_periodic_builtin,
-    MAGNETIC_PERIODIC_DESCRIPTOR,
+    FEA_MAGNETIC_CONSTRAINT_PERIODIC_DESCRIPTOR,
     "fea.MagneticConstraint.periodic",
     FEA_MAGNETIC_CONSTRAINT_CLASS,
     MagneticConstraint,
@@ -323,7 +132,7 @@ periodic_builtin!(
 );
 periodic_builtin!(
     acoustic_periodic_builtin,
-    ACOUSTIC_PERIODIC_DESCRIPTOR,
+    FEA_ACOUSTIC_CONSTRAINT_PERIODIC_DESCRIPTOR,
     "fea.AcousticConstraint.periodic",
     FEA_ACOUSTIC_CONSTRAINT_CLASS,
     AcousticConstraint,
@@ -331,7 +140,7 @@ periodic_builtin!(
 );
 periodic_builtin!(
     fluid_periodic_builtin,
-    FLUID_PERIODIC_DESCRIPTOR,
+    FEA_FLUID_CONSTRAINT_PERIODIC_DESCRIPTOR,
     "fea.FluidConstraint.periodic",
     FEA_FLUID_CONSTRAINT_CLASS,
     FluidConstraint,
@@ -341,14 +150,10 @@ periodic_builtin!(
 macro_rules! phase_periodic_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $constraint:ident, $kind:ident) => {
         #[runtime_builtin(
-            name = $name,
-            category = "fea",
-            summary = "Create a typed phase-shifted periodic constraint for a complex harmonic field.",
-            keywords = "fea,constraint,periodic,bloch,phase,transform,pairing,typed",
-            descriptor(crate::builtins::fea::constraints::paired::$descriptor),
-            integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
-            builtin_path = "crate::builtins::fea::constraints::paired"
-        )]
+                    name = $name,
+                    binding_variant = "default",
+                    builtin_path = "crate::builtins::fea::constraints::paired"
+                )]
         pub async fn $function(
             id: String,
             primary: Value,
@@ -357,6 +162,7 @@ macro_rules! phase_periodic_builtin {
             pairing: Value,
             phase: Value,
         ) -> BuiltinResult<Value> {
+            fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let (id, geometry_id, geometry_revision, pair) =
                 bound_region_pair($name, id, &primary, &secondary, &pairing)?;
             let periodic = periodic_from_values($name, pair, &transform)?;
@@ -385,7 +191,7 @@ macro_rules! phase_periodic_builtin {
 
 phase_periodic_builtin!(
     magnetic_phase_periodic_builtin,
-    MAGNETIC_PHASE_PERIODIC_DESCRIPTOR,
+    FEA_MAGNETIC_CONSTRAINT_PHASE_SHIFTED_PERIODIC_DESCRIPTOR,
     "fea.MagneticConstraint.phaseShiftedPeriodic",
     FEA_MAGNETIC_CONSTRAINT_CLASS,
     MagneticConstraint,
@@ -393,7 +199,7 @@ phase_periodic_builtin!(
 );
 phase_periodic_builtin!(
     acoustic_phase_periodic_builtin,
-    ACOUSTIC_PHASE_PERIODIC_DESCRIPTOR,
+    FEA_ACOUSTIC_CONSTRAINT_PHASE_SHIFTED_PERIODIC_DESCRIPTOR,
     "fea.AcousticConstraint.phaseShiftedPeriodic",
     FEA_ACOUSTIC_CONSTRAINT_CLASS,
     AcousticConstraint,
@@ -402,11 +208,7 @@ phase_periodic_builtin!(
 
 #[runtime_builtin(
     name = "fea.ThermalConstraint.affineJump",
-    category = "fea",
-    summary = "Create a transformed periodic thermal relation with a prescribed temperature jump.",
-    keywords = "fea,thermal,constraint,periodic,affine,jump,typed",
-    descriptor(crate::builtins::fea::constraints::paired::AFFINE_JUMP_DESCRIPTOR),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::paired"
 )]
 pub async fn thermal_affine_jump_builtin(
@@ -417,6 +219,10 @@ pub async fn thermal_affine_jump_builtin(
     pairing: Value,
     jump: Value,
 ) -> BuiltinResult<Value> {
+    fixed_outputs(
+        &runmat_builtins::FEA_THERMAL_CONSTRAINT_AFFINE_JUMP_DESCRIPTOR,
+        "fea.ThermalConstraint.affineJump",
+    )?;
     let (id, geometry_id, geometry_revision, pair) = bound_region_pair(
         "fea.ThermalConstraint.affineJump",
         id,

@@ -5,26 +5,22 @@ use runmat_geometry_core::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
+use super::args::{exactly, text};
 use super::codec::{
     feature_from_value, generated_from_value, generated_value, region_output_from_value,
     region_output_value,
 };
-use super::{generated_type, invalid, region_output_type};
+use super::invalid;
 use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "geometry.solid",
-    category = "geometry",
-    summary = "Select the exactly-one solid result of a typed geometry feature.",
-    keywords = "geometry,cad,region,solid,generated",
-    type_resolver(region_output_type),
-    descriptor(super::metadata::SOLID_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_solid_builtin(feature: Value) -> BuiltinResult<Value> {
+pub async fn geometry_solid_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     feature_output(
-        feature,
+        args,
         "geometry.solid",
         GeometryRegionRole::Solid,
         GeometryRegionCardinality::ExactlyOne,
@@ -34,17 +30,12 @@ pub async fn geometry_solid_builtin(feature: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "geometry.faces",
-    category = "geometry",
-    summary = "Select one or more final faces belonging to a typed geometry feature result.",
-    keywords = "geometry,cad,region,faces,generated",
-    type_resolver(region_output_type),
-    descriptor(super::metadata::FACES_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_faces_builtin(feature: Value) -> BuiltinResult<Value> {
+pub async fn geometry_faces_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     feature_output(
-        feature,
+        args,
         "geometry.faces",
         GeometryRegionRole::Face,
         GeometryRegionCardinality::OneOrMore,
@@ -54,17 +45,12 @@ pub async fn geometry_faces_builtin(feature: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "geometry.edges",
-    category = "geometry",
-    summary = "Select one or more final edges belonging to a typed geometry feature result.",
-    keywords = "geometry,cad,region,edges,generated",
-    type_resolver(region_output_type),
-    descriptor(super::metadata::EDGES_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_edges_builtin(feature: Value) -> BuiltinResult<Value> {
+pub async fn geometry_edges_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     feature_output(
-        feature,
+        args,
         "geometry.edges",
         GeometryRegionRole::Edge,
         GeometryRegionCardinality::OneOrMore,
@@ -74,17 +60,12 @@ pub async fn geometry_edges_builtin(feature: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "geometry.facesIntroducedBy",
-    category = "geometry",
-    summary = "Select final faces proven to have been introduced by a typed feature.",
-    keywords = "geometry,cad,region,faces,history,generated",
-    type_resolver(region_output_type),
-    descriptor(super::metadata::FACES_INTRODUCED_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_faces_introduced_by_builtin(feature: Value) -> BuiltinResult<Value> {
+pub async fn geometry_faces_introduced_by_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     feature_output(
-        feature,
+        args,
         "geometry.facesIntroducedBy",
         GeometryRegionRole::Face,
         GeometryRegionCardinality::OneOrMore,
@@ -94,17 +75,12 @@ pub async fn geometry_faces_introduced_by_builtin(feature: Value) -> BuiltinResu
 
 #[runtime_builtin(
     name = "geometry.edgesIntroducedBy",
-    category = "geometry",
-    summary = "Select final edges proven to have been introduced by a typed feature.",
-    keywords = "geometry,cad,region,edges,history,generated",
-    type_resolver(region_output_type),
-    descriptor(super::metadata::EDGES_INTRODUCED_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_edges_introduced_by_builtin(feature: Value) -> BuiltinResult<Value> {
+pub async fn geometry_edges_introduced_by_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     feature_output(
-        feature,
+        args,
         "geometry.edgesIntroducedBy",
         GeometryRegionRole::Edge,
         GeometryRegionCardinality::OneOrMore,
@@ -114,28 +90,22 @@ pub async fn geometry_edges_introduced_by_builtin(feature: Value) -> BuiltinResu
 
 #[runtime_builtin(
     name = "geometry.withRegion",
-    category = "geometry",
-    summary = "Add one uniquely named typed region output to generated geometry.",
-    keywords = "geometry,cad,region,output,generated",
-    type_resolver(generated_type),
-    descriptor(super::metadata::WITH_REGION_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::regions"
 )]
-pub async fn geometry_with_region_builtin(
-    generated: Value,
-    name: String,
-    output: Value,
-) -> BuiltinResult<Value> {
+pub async fn geometry_with_region_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let builtin = "geometry.withRegion";
+    let args = exactly(builtin, args, 3)?;
+    let name = text(&args[1], builtin, "name")?;
+    let (generated, output) = (&args[0], &args[2]);
     if name.trim().is_empty()
         || name.len() > 256
         || name.chars().any(|character| character.is_control())
     {
         return Err(invalid(builtin, "region name is invalid"));
     }
-    let mut generated = generated_from_value(&generated, builtin)?;
-    let output = region_output_from_value(&output, builtin)?;
+    let mut generated = generated_from_value(generated, builtin)?;
+    let output = region_output_from_value(output, builtin)?;
     if generated
         .region_outputs
         .insert(name.clone(), output)
@@ -146,25 +116,29 @@ pub async fn geometry_with_region_builtin(
             format!("region output `{name}` is already declared"),
         ));
     }
-    generated_value(generated)
+    generated_value(generated, builtin)
 }
 
 fn feature_output(
-    feature: Value,
+    args: Vec<Value>,
     builtin: &'static str,
     role: GeometryRegionRole,
     cardinality: GeometryRegionCardinality,
     introduced: bool,
 ) -> BuiltinResult<Value> {
-    let graph = feature_from_value(&feature, builtin)?;
+    let args = exactly(builtin, args, 1)?;
+    let graph = feature_from_value(&args[0], builtin)?;
     let selector = if introduced {
         GeometryRegionSelector::BoundaryIntroducedBy(graph.result)
     } else {
         GeometryRegionSelector::FeatureResult(graph.result)
     };
-    region_output_value(&GeneratedGeometryRegionOutput {
-        role,
-        selector,
-        cardinality,
-    })
+    region_output_value(
+        &GeneratedGeometryRegionOutput {
+            role,
+            selector,
+            cardinality,
+        },
+        builtin,
+    )
 }

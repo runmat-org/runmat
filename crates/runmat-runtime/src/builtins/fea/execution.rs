@@ -8,149 +8,20 @@ use crate::builtins::fea::study_values::{
     from_typed_value, object_or_cell, register_immutable_class, to_typed_value, VALUE_FIELD,
 };
 
-const BACKEND_CLASS: &str = "fea.ComputeBackend";
-const REQUIREMENT_CLASS: &str = "fea.FormulationRequirement";
-const SOLVER_OPTIONS_CLASS: &str = "fea.SolverOptions";
-const EXECUTION_STEP_CLASS: &str = "fea.ExecutionStep";
-const EXECUTION_PLAN_CLASS: &str = "fea.ExecutionPlan";
+use runmat_builtins::fea_contract::policy_types::classes;
+
+const BACKEND_CLASS: &str = classes::COMPUTE_BACKEND.display_name();
+const REQUIREMENT_CLASS: &str = classes::FORMULATION_REQUIREMENT.display_name();
+const SOLVER_OPTIONS_CLASS: &str = classes::SOLVER_OPTIONS.display_name();
+const EXECUTION_STEP_CLASS: &str = classes::EXECUTION_STEP.display_name();
+const EXECUTION_PLAN_CLASS: &str = classes::EXECUTION_PLAN.display_name();
 
 const EXECUTION_STEP_FIELDS: &[&str] = &["step_id", "backend", "requirement", "solver_options"];
 const EXECUTION_PLAN_FIELDS: &[&str] = &["steps"];
 
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const STEP_INPUT: [BuiltinParamDescriptor; 1] = [required(
-    "step",
-    BuiltinParamType::Any,
-    "Typed family-specific procedure step.",
-)];
-const DEFAULT_PLAN_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "sequence",
-        BuiltinParamType::Any,
-        "Typed analysis sequence.",
-    ),
-    required("backend", BuiltinParamType::Any, "Typed compute backend."),
-    required(
-        "requirement",
-        BuiltinParamType::Any,
-        "Typed formulation requirement.",
-    ),
-];
-const STEP_EXECUTION_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required("step", BuiltinParamType::Any, "Typed procedure step."),
-    required("backend", BuiltinParamType::Any, "Typed compute backend."),
-    required(
-        "requirement",
-        BuiltinParamType::Any,
-        "Typed formulation requirement.",
-    ),
-    required(
-        "solverOptions",
-        BuiltinParamType::Any,
-        "Typed solver options compatible with the procedure step.",
-    ),
-];
-const PLAN_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "sequence",
-        BuiltinParamType::Any,
-        "Typed analysis sequence.",
-    ),
-    required(
-        "steps",
-        BuiltinParamType::Any,
-        "Typed execution step or cell array.",
-    ),
-];
-
-macro_rules! descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: $inputs,
-            outputs: &OUT_ANY,
-        }];
-        const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-descriptor!(
-    BACKEND_CPU_DESCRIPTOR,
-    BACKEND_CPU_SIGNATURES,
-    "backend = fea.ComputeBackend.cpu()",
-    &NO_INPUTS
-);
-descriptor!(
-    BACKEND_GPU_DESCRIPTOR,
-    BACKEND_GPU_SIGNATURES,
-    "backend = fea.ComputeBackend.gpu()",
-    &NO_INPUTS
-);
-descriptor!(
-    REQUIREMENT_PRODUCTION_DESCRIPTOR,
-    REQUIREMENT_PRODUCTION_SIGNATURES,
-    "requirement = fea.FormulationRequirement.production()",
-    &NO_INPUTS
-);
-descriptor!(
-    REQUIREMENT_EXPERIMENTAL_DESCRIPTOR,
-    REQUIREMENT_EXPERIMENTAL_SIGNATURES,
-    "requirement = fea.FormulationRequirement.experimental()",
-    &NO_INPUTS
-);
-descriptor!(
-    SOLVER_DEFAULTS_DESCRIPTOR,
-    SOLVER_DEFAULTS_SIGNATURES,
-    "options = fea.SolverOptions.defaults(step)",
-    &STEP_INPUT
-);
-descriptor!(
-    EXECUTION_STEP_DESCRIPTOR,
-    EXECUTION_STEP_SIGNATURES,
-    "execution = fea.ExecutionStep.new(step, backend, requirement, solverOptions)",
-    &STEP_EXECUTION_INPUTS
-);
-descriptor!(
-    EXECUTION_PLAN_DESCRIPTOR,
-    EXECUTION_PLAN_SIGNATURES,
-    "plan = fea.ExecutionPlan.new(sequence, steps)",
-    &PLAN_INPUTS
-);
-descriptor!(
-    EXECUTION_DEFAULT_PLAN_DESCRIPTOR,
-    EXECUTION_DEFAULT_PLAN_SIGNATURES,
-    "plan = fea.ExecutionPlan.defaults(sequence, backend, requirement)",
-    &DEFAULT_PLAN_INPUTS
-);
-
-const STRUCTURAL_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Execution authoring accepts typed immutable study values only.",
-};
-
 macro_rules! choice {
-    ($function:ident, $name:literal, $descriptor:ident, $class:expr, $value:expr) => {
-        #[runtime_builtin(name = $name, category = "fea", summary = "Create a typed FEA execution policy value.", keywords = "fea,execution,typed", descriptor($descriptor), integer_audit(STRUCTURAL_AUDIT), builtin_path = "crate::builtins::fea::execution")]
+    ($function:ident, $name:literal, $class:expr, $value:expr) => {
+        #[runtime_builtin(name = $name, binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
         pub async fn $function() -> BuiltinResult<Value> {
             to_typed_value($name, $class, $value)
         }
@@ -160,28 +31,24 @@ macro_rules! choice {
 choice!(
     backend_cpu,
     "fea.ComputeBackend.cpu",
-    BACKEND_CPU_DESCRIPTOR,
     BACKEND_CLASS,
     ComputeBackend::Cpu
 );
 choice!(
     backend_gpu,
     "fea.ComputeBackend.gpu",
-    BACKEND_GPU_DESCRIPTOR,
     BACKEND_CLASS,
     ComputeBackend::Gpu
 );
 choice!(
     requirement_production,
     "fea.FormulationRequirement.production",
-    REQUIREMENT_PRODUCTION_DESCRIPTOR,
     REQUIREMENT_CLASS,
     FormulationRequirement::Production
 );
 choice!(
     requirement_experimental,
     "fea.FormulationRequirement.experimental",
-    REQUIREMENT_EXPERIMENTAL_DESCRIPTOR,
     REQUIREMENT_CLASS,
     FormulationRequirement::Experimental
 );
@@ -198,15 +65,7 @@ fn procedure_step(name: &'static str, value: &Value) -> BuiltinResult<ProcedureS
     Ok(steps.remove(0))
 }
 
-#[runtime_builtin(
-    name = "fea.SolverOptions.defaults",
-    category = "fea",
-    summary = "Create solver options selected by a typed procedure step.",
-    keywords = "fea,execution,solver,options,typed",
-    descriptor(SOLVER_DEFAULTS_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::execution"
-)]
+#[runtime_builtin(name = "fea.SolverOptions.defaults", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
 pub async fn solver_defaults(step: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.SolverOptions.defaults";
     let step = procedure_step(NAME, &step)?;
@@ -215,15 +74,7 @@ pub async fn solver_defaults(step: Value) -> BuiltinResult<Value> {
     to_typed_value(NAME, SOLVER_OPTIONS_CLASS, options)
 }
 
-#[runtime_builtin(
-    name = "fea.ExecutionStep.new",
-    category = "fea",
-    summary = "Bind a typed procedure step to backend, maturity, and solver options.",
-    keywords = "fea,execution,step,backend,solver,typed",
-    descriptor(EXECUTION_STEP_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::execution"
-)]
+#[runtime_builtin(name = "fea.ExecutionStep.new", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
 pub async fn execution_step(
     step: Value,
     backend: Value,
@@ -249,15 +100,7 @@ pub async fn execution_step(
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_STEP_CLASS, &execution)
 }
 
-#[runtime_builtin(
-    name = "fea.ExecutionPlan.new",
-    category = "fea",
-    summary = "Create a typed execution plan for an analysis sequence.",
-    keywords = "fea,execution,plan,sequence,typed",
-    descriptor(EXECUTION_PLAN_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::execution"
-)]
+#[runtime_builtin(name = "fea.ExecutionPlan.new", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
 pub async fn execution_plan(sequence: Value, steps: Value) -> BuiltinResult<Value> {
     const NAME: &str = "fea.ExecutionPlan.new";
     let sequence = super::sequences::sequence_from_value(NAME, &sequence)?;
@@ -269,15 +112,7 @@ pub async fn execution_plan(sequence: Value, steps: Value) -> BuiltinResult<Valu
     serializable_to_object(NAME, &ERROR_INTERNAL, EXECUTION_PLAN_CLASS, &plan)
 }
 
-#[runtime_builtin(
-    name = "fea.ExecutionPlan.defaults",
-    category = "fea",
-    summary = "Create default solver options for every step in a typed sequence.",
-    keywords = "fea,execution,plan,sequence,defaults,typed",
-    descriptor(EXECUTION_DEFAULT_PLAN_DESCRIPTOR),
-    integer_audit(STRUCTURAL_AUDIT),
-    builtin_path = "crate::builtins::fea::execution"
-)]
+#[runtime_builtin(name = "fea.ExecutionPlan.defaults", binding_variant = "default", builtin_path = "crate::builtins::fea::execution")]
 pub async fn execution_plan_defaults(
     sequence: Value,
     backend: Value,

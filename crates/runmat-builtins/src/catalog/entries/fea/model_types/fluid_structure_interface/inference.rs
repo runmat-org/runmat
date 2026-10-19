@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.FluidStructureInterface` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const NO_SLIP: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidStructureInterface"),
+    result: classes::FEA_FLUID_STRUCTURE_INTERFACE_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),

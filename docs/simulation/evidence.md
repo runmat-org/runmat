@@ -116,7 +116,7 @@ results = fea.results(stepRun.run_id);
 stress = fea.field(results, fea.StructuralField.vonMises());
 ```
 
-`fea.results(...)` can include or omit fields, diagnostics, modal results, transient snapshots, nonlinear results, and electromagnetic payloads through Name/Value options. `fea.compare(baselineRunId, candidateRunId)` compares two persisted runs. `fea.trends("WindowSize", 16)` summarizes recent persisted runs from the artifact store.
+`fea.results(...)` can include or omit fields, field values, diagnostics, modal results, transient snapshots, and nonlinear results through Name/Value options (`IncludeFields`, `IncludeFieldValues`, `IncludeDiagnostics`, `DiagnosticCodes`, `IncludeModalResults`, `ModeIndices`, `IncludeTransientResults`, `TransientSnapshotIndices`, and `IncludeNonlinearResults`). `fea.compare(baselineRunId, candidateRunId)` compares two persisted runs. `fea.trends("WindowSize", 16)` summarizes recent persisted runs from the artifact store.
 
 ## Governance Inputs
 

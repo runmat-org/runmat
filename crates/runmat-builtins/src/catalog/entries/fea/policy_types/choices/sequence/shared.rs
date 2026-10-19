@@ -60,6 +60,10 @@ pub(super) const VERIFICATION: &[BuiltinEvidenceReference] = &[
         "crates/runmat-runtime/src/builtins/fea/sequences.rs::tests::configured_sequence_round_trips_with_typed_study_contracts",
     ),
     unit_test(
+        "Sequence choices return typed catalog values",
+        "crates/runmat-runtime/src/builtins/fea/study_policies/sequence/tests.rs::sequence_choices_return_typed_catalog_values",
+    ),
+    unit_test(
         "Catalog contract conformance",
         "crates/runmat-builtins/src/catalog/entries/fea/policy_types/choices/sequence/tests.rs::sequence_policy_choices_conform",
     ),

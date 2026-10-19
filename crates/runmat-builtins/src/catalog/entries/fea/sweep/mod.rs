@@ -3,7 +3,7 @@ use crate::fea_contract::{
     constructor_inference::{infer_constructor, FeaConstructorKind},
     descriptors::FEA_SWEEP_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_model_setup, BOX_STUDY},
+    example_fixtures::{fea_box_model_setup, BOX_STUDY, NATIVE_CAD},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
 };
 use crate::*;
@@ -20,7 +20,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
         fea_box_model_setup!(),
         "steelStudy = fea.study(\"box_steel\", part, model);\n",
         "aluminum = fea.material(\"aluminum\", \"YoungsModulusPa\", 68.9e9, \"PoissonRatio\", 0.33, \"MassDensityKgPerM3\", 2700);\n",
-        "aluminumBody = fea.materialAssignment(fea.PropertyRegionTarget.solid(geometry.region(part, \"solid_000001\")), aluminum);\n",
+        "aluminumBody = fea.materialAssignment(fea.PropertyRegionTarget.allSolids(part), aluminum);\n",
         "aluminumModel = fea.model(\"box_aluminum_model\", part, \"Materials\", {aluminum}, \"MaterialAssignments\", {aluminumBody}, ...\n",
         "    \"Constraints\", {support}, \"Signals\", {tipForce}, \"Excitations\", {tipLoad}, ...\n",
         "    \"ExcitationCases\", {service}, \"Steps\", {staticStep});\n",
@@ -31,7 +31,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: BOX_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
+    requirements: NATIVE_CAD,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isa(sweep, 'fea.Sweep'));\nassert(strcmp(sweep.sweep_id, \"box_materials\"));\nassert(sweep.fail_fast == false);",
     },

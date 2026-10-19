@@ -13,16 +13,16 @@ use crate::class_registry::declaration::{instance_methods, register_value_class}
 use crate::class_registry::RuntimeMethod;
 use crate::BuiltinResult;
 
-pub const MESH_CLASS: &str = "meshing.Mesh";
-pub const EVIDENCE_CLASS: &str = "meshing.Evidence";
+/// Derived from the catalog class identity.
+pub const MESH_CLASS: &str = runmat_builtins::MESHING_MESH_OBJECT_CLASS.display_name();
+/// Derived from the catalog class identity.
+pub const EVIDENCE_CLASS: &str = runmat_builtins::MESHING_EVIDENCE_CLASS.display_name();
 const ARTIFACT_PROPERTY: &str = "__runmat_meshing_artifact_cbor";
 const EVIDENCE_PROPERTY: &str = "__runmat_meshing_evidence_cbor";
 const REGION_MAP_PROPERTY: &str = "__runmat_meshing_region_map_json";
 
 static MESHING_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
-        MESH_CLASS,
-    ));
+    crate::class_registry::ClassRegistration::new(runmat_builtins::MESHING_MESH_OBJECT_CLASS);
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct MeshPayload {
@@ -45,7 +45,7 @@ pub(super) fn mesh_object(payload: MeshPayload) -> BuiltinResult<Value> {
         .evidence
         .canonical_encode()
         .map_err(|cause| error(GENERATE_NAME, cause.to_string()))?;
-    let mut object = ObjectInstance::new(MESH_CLASS.to_string());
+    let mut object = ObjectInstance::new(runmat_builtins::MESHING_MESH_OBJECT_CLASS);
     object.properties.insert(
         "canonical_digest".to_string(),
         Value::String(digest_hex(payload.artifact.canonical_digest.bytes())),
@@ -91,7 +91,7 @@ pub(super) fn evidence_object(evidence: MeshingEvidence) -> BuiltinResult<Value>
     let evidence_bytes = evidence
         .canonical_encode()
         .map_err(|cause| error(EVIDENCE_NAME, cause.to_string()))?;
-    let mut object = ObjectInstance::new(EVIDENCE_CLASS.to_string());
+    let mut object = ObjectInstance::new(runmat_builtins::MESHING_EVIDENCE_CLASS);
     object.properties.insert(
         "artifact_digest".to_string(),
         Value::String(digest_hex(evidence.artifact_digest.bytes())),
@@ -228,7 +228,10 @@ pub(super) fn payload_from_value(
     let Value::Object(object) = value else {
         return Err(error(builtin, "expected a meshing.Mesh"));
     };
-    if object.class_name.display_name() != MESH_CLASS {
+    if !object
+        .class_name
+        .is(runmat_builtins::MESHING_MESH_OBJECT_CLASS)
+    {
         return Err(error(builtin, format!("expected {MESH_CLASS}")));
     }
     let artifact =

@@ -1,5 +1,5 @@
-use crate::*;
 use super::*;
+use crate::*;
 use runmat_types::{
     CallRequest, DynamicReason, LiteralContext, LiteralValue, OutputSelection,
     RequestedOutputCount, ValueFact, ValueKindFact,

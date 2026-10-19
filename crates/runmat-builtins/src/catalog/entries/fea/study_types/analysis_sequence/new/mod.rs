@@ -6,15 +6,14 @@ use crate::*;
 
 mod documentation;
 
-pub(super) const ENTRY: BuiltinCatalogEntry =
-    catalog_entry::entry(ConstructorEntryDefinition {
-        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-        name: "fea.AnalysisSequence.new",
-        documentation: documentation::DOCUMENTATION,
-        descriptor: &super::FEA_ANALYSIS_SEQUENCE_NEW_DESCRIPTOR,
-        inference: super::inference::new,
-        integer_capabilities: &[],
-        integer_audit: Some(&FEA_SEQUENCE_STRUCTURAL_INTEGER_AUDIT),
-        filesystem_read: false,
-        distributed: BuiltinDistributedPolicy::Unsupported,
-    });
+pub(super) const ENTRY: BuiltinCatalogEntry = catalog_entry::entry(ConstructorEntryDefinition {
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    name: "fea.AnalysisSequence.new",
+    documentation: documentation::DOCUMENTATION,
+    descriptor: &super::FEA_ANALYSIS_SEQUENCE_NEW_DESCRIPTOR,
+    inference: super::inference::new,
+    integer_capabilities: &[],
+    integer_audit: Some(&FEA_SEQUENCE_STRUCTURAL_INTEGER_AUDIT),
+    filesystem_read: false,
+    distributed: BuiltinDistributedPolicy::Unsupported,
+});

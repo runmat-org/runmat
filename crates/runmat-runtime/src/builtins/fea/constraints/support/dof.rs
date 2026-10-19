@@ -8,67 +8,35 @@ use crate::class_registry::RuntimeMethod;
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_types::MethodName;
 
-const STRUCTURAL_DOF_CLASS: &str = "fea.StructuralDof";
-const STRUCTURAL_DOF_VALUE_CLASS: &str = "fea.StructuralDofValue";
-const TRANSLATION_DOF_CLASS: &str = "fea.StructuralTranslationDof";
-const ROTATION_DOF_CLASS: &str = "fea.StructuralRotationDof";
-const TRANSLATION_VALUE_CLASS: &str = "fea.StructuralTranslationDofValue";
-const ROTATION_VALUE_CLASS: &str = "fea.StructuralRotationDofValue";
+const STRUCTURAL_DOF_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_DOF_CLASS.display_name();
+const STRUCTURAL_DOF_VALUE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_DOF_VALUE_CLASS
+        .display_name();
+const TRANSLATION_DOF_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_TRANSLATION_DOF_CLASS
+        .display_name();
+const ROTATION_DOF_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_ROTATION_DOF_CLASS
+        .display_name();
+const TRANSLATION_VALUE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_TRANSLATION_DOF_VALUE_CLASS
+        .display_name();
+const ROTATION_VALUE_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_ROTATION_DOF_VALUE_CLASS
+        .display_name();
 const AXIS_FIELDS: &[&str] = &["axis"];
 const DOF_VALUE_FIELDS: &[&str] = &["dof", "value"];
 
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const DOF_INPUTS: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "dof",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Typed structural translation or rotation degree of freedom.",
-    },
-    BuiltinParamDescriptor {
-        name: "value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Dimensioned displacement or rotation value matching the DOF family.",
-    },
-];
-const NO_ARG_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "dof = fea.StructuralDof.component()",
-    inputs: &NO_INPUTS,
-    outputs: &OUT_ANY,
-}];
-const DOF_VALUE_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "entry = fea.StructuralDofValue.component(dof, value)",
-    inputs: &DOF_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const DOF_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &NO_ARG_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-pub(super) const DOF_VALUE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &DOF_VALUE_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
 macro_rules! dof_builtin {
-    ($function:ident, $name:literal, $class:expr, $axis:expr) => {
+    ($function:ident, $descriptor:ident, $name:literal, $class:expr, $axis:expr) => {
         #[runtime_builtin(
                     name = $name,
-                    category = "fea",
-                    summary = "Create a typed structural degree of freedom.",
-                    keywords = "fea,structural,dof,typed",
-                    descriptor(crate::builtins::fea::constraints::support::dof::DOF_DESCRIPTOR),
-                    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+                    binding_variant = "default",
                     builtin_path = "crate::builtins::fea::constraints::support::dof"
                 )]
         pub async fn $function() -> BuiltinResult<Value> {
+            crate::builtins::fea::constraints::fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             ensure_dof_classes_registered();
             let mut object = ObjectInstance::new($class);
             object
@@ -81,36 +49,42 @@ macro_rules! dof_builtin {
 
 dof_builtin!(
     structural_dof_ux_builtin,
+    FEA_STRUCTURAL_DOF_UX_DESCRIPTOR,
     "fea.StructuralDof.ux",
     TRANSLATION_DOF_CLASS,
     0
 );
 dof_builtin!(
     structural_dof_uy_builtin,
+    FEA_STRUCTURAL_DOF_UY_DESCRIPTOR,
     "fea.StructuralDof.uy",
     TRANSLATION_DOF_CLASS,
     1
 );
 dof_builtin!(
     structural_dof_uz_builtin,
+    FEA_STRUCTURAL_DOF_UZ_DESCRIPTOR,
     "fea.StructuralDof.uz",
     TRANSLATION_DOF_CLASS,
     2
 );
 dof_builtin!(
     structural_dof_rx_builtin,
+    FEA_STRUCTURAL_DOF_RX_DESCRIPTOR,
     "fea.StructuralDof.rx",
     ROTATION_DOF_CLASS,
     0
 );
 dof_builtin!(
     structural_dof_ry_builtin,
+    FEA_STRUCTURAL_DOF_RY_DESCRIPTOR,
     "fea.StructuralDof.ry",
     ROTATION_DOF_CLASS,
     1
 );
 dof_builtin!(
     structural_dof_rz_builtin,
+    FEA_STRUCTURAL_DOF_RZ_DESCRIPTOR,
     "fea.StructuralDof.rz",
     ROTATION_DOF_CLASS,
     2
@@ -118,17 +92,17 @@ dof_builtin!(
 
 #[runtime_builtin(
     name = "fea.StructuralDofValue.translation",
-    category = "fea",
-    summary = "Bind a structural translation DOF to a displacement value.",
-    keywords = "fea,structural,dof,displacement,typed",
-    descriptor(crate::builtins::fea::constraints::support::dof::DOF_VALUE_DESCRIPTOR),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::dof"
 )]
 pub async fn structural_translation_value_builtin(
     dof: Value,
     value: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_STRUCTURAL_DOF_VALUE_TRANSLATION_DESCRIPTOR,
+        "fea.StructuralDofValue.translation",
+    )?;
     translation_dof_from_value("fea.StructuralDofValue.translation", &dof)?;
     quantity_scalar(
         "fea.StructuralDofValue.translation",
@@ -141,14 +115,14 @@ pub async fn structural_translation_value_builtin(
 
 #[runtime_builtin(
     name = "fea.StructuralDofValue.rotation",
-    category = "fea",
-    summary = "Bind a structural rotation DOF to a rotation value.",
-    keywords = "fea,structural,dof,rotation,typed",
-    descriptor(crate::builtins::fea::constraints::support::dof::DOF_VALUE_DESCRIPTOR),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::dof"
 )]
 pub async fn structural_rotation_value_builtin(dof: Value, value: Value) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_STRUCTURAL_DOF_VALUE_ROTATION_DESCRIPTOR,
+        "fea.StructuralDofValue.rotation",
+    )?;
     rotation_dof_from_value("fea.StructuralDofValue.rotation", &dof)?;
     quantity_scalar(
         "fea.StructuralDofValue.rotation",

@@ -37,9 +37,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:chamfer:InvalidInput` reports a `target` that is not a `geometry.Feature`, an `edges` value that is not a `geometry.RegionOutput` with edge topology, or a distance that cannot be converted.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:chamfer:InvalidInput` reports every failure of the call: the wrong number of arguments, a `target` that is not a `geometry.Feature`, an `edges` value that is not a `geometry.RegionOutput` with edge topology, or a distance that cannot be converted, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -55,7 +53,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         "zero-distance",
         "A zero distance is rejected",
         "block = geometry.box(40e-3, 40e-3, 20e-3);\nbeveled = geometry.chamfer(block, geometry.edges(block), 0);",
-        "RunMat:geometry:feature:InvalidInput",
+        "RunMat:geometry:chamfer:InvalidInput",
     ),
 ];
 

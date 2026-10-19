@@ -10,7 +10,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
             "`id` names the constraint. It must be nonempty text (a character vector or string scalar) and should be unique among objects of the same kind in one model; validation messages and run evidence report it. Step activations refer to it with `fea.StepObjectRef.constraint(id)`.",
             "`primary` and `secondary` must be two distinct `geometry.Region` values from the same asset and revision; the constructor rejects regions from different geometries and a region paired with itself. Both regions are recorded as boundary-face targets.",
             "`pairing` decides how entities on the two regions are matched: `fea.PeriodicPairing.matching()` requires a mesh that already matches one-to-one, and `fea.PeriodicPairing.geometric(tolerance)` pairs entities whose mapped positions agree within a `fea.Length` tolerance.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -73,6 +73,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Paired tie, periodic, phase-shifted, and affine-jump relations are typed and dimensionally checked",
         location: "crates/runmat-runtime/src/builtins/fea/constraints.rs::tests::paired_relations_are_typed_transformed_and_dimensionally_sound",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Thermal tie and acoustic periodic relations build their family kind",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::paired_tie_and_periodic_methods_cover_thermal_and_acoustic_families",
     },
 ];
 

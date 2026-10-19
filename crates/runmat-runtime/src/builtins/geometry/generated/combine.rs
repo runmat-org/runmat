@@ -7,18 +7,14 @@ use runmat_geometry_core::{
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
+use super::args::exactly;
 use super::codec::{feature_from_value, feature_value, generated_value};
-use super::{feature_type, generated_type, invalid};
+use super::invalid;
 use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "geometry.union",
-    category = "geometry",
-    summary = "Create an exact Boolean union of two or more typed features.",
-    keywords = "geometry,cad,union,boolean,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::UNION_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
 pub async fn geometry_union_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -29,12 +25,7 @@ pub async fn geometry_union_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "geometry.intersect",
-    category = "geometry",
-    summary = "Create an exact Boolean intersection of two or more typed features.",
-    keywords = "geometry,cad,intersect,boolean,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::INTERSECT_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
 pub async fn geometry_intersect_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -45,12 +36,7 @@ pub async fn geometry_intersect_builtin(args: Vec<Value>) -> BuiltinResult<Value
 
 #[runtime_builtin(
     name = "geometry.subtract",
-    category = "geometry",
-    summary = "Subtract one or more exact tool features from a typed base feature.",
-    keywords = "geometry,cad,subtract,boolean,generated",
-    type_resolver(feature_type),
-    descriptor(super::metadata::SUBTRACT_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
 pub async fn geometry_subtract_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -60,29 +46,30 @@ pub async fn geometry_subtract_builtin(args: Vec<Value>) -> BuiltinResult<Value>
             "requires one base and at least one tool",
         ));
     }
-    let (graph, operands) = merge_values(args, "geometry.subtract")?;
+    let builtin = "geometry.subtract";
+    let (graph, operands) = merge_values(args, builtin)?;
     let operation = GeometryFeatureOperation::Subtract {
         base: operands[0].clone(),
         tools: operands[1..].to_vec(),
     };
-    feature_value(append_operation(graph, operation)?)
+    feature_value(append_operation(graph, operation, builtin)?, builtin)
 }
 
 #[runtime_builtin(
     name = "geometry.finish",
-    category = "geometry",
-    summary = "Finish a typed feature graph as a portable generated-geometry result.",
-    keywords = "geometry,cad,finish,generated",
-    type_resolver(generated_type),
-    descriptor(super::metadata::FINISH_DESCRIPTOR),
-    integer_audit(super::GENERATED_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::geometry::generated::combine"
 )]
-pub async fn geometry_finish_builtin(feature: Value) -> BuiltinResult<Value> {
-    generated_value(GeneratedGeometryProduct {
-        graph: feature_from_value(&feature, "geometry.finish")?,
-        region_outputs: BTreeMap::new(),
-    })
+pub async fn geometry_finish_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+    let builtin = "geometry.finish";
+    let args = exactly(builtin, args, 1)?;
+    generated_value(
+        GeneratedGeometryProduct {
+            graph: feature_from_value(&args[0], builtin)?,
+            region_outputs: BTreeMap::new(),
+        },
+        builtin,
+    )
 }
 
 fn boolean(
@@ -94,7 +81,10 @@ fn boolean(
         return Err(invalid(builtin, "requires at least two operands"));
     }
     let (graph, operands) = merge_values(args, builtin)?;
-    feature_value(append_operation(graph, operation(operands))?)
+    feature_value(
+        append_operation(graph, operation(operands), builtin)?,
+        builtin,
+    )
 }
 
 pub(super) fn merge_values(
@@ -135,17 +125,19 @@ pub(super) fn merge_values(
 pub(super) fn unary_operation(
     graph: GeometryFeatureGraph,
     operation: GeometryFeatureOperation,
+    builtin: &'static str,
 ) -> BuiltinResult<GeometryFeatureGraph> {
-    append_operation(graph, operation)
+    append_operation(graph, operation, builtin)
 }
 
 pub(super) fn append_operation(
     mut graph: GeometryFeatureGraph,
     operation: GeometryFeatureOperation,
+    builtin: &'static str,
 ) -> BuiltinResult<GeometryFeatureGraph> {
     let digest = operation
         .canonical_digest()
-        .map_err(|error| invalid("geometry.feature", error.to_string()))?;
+        .map_err(|error| invalid(builtin, error.to_string()))?;
     let digest = digest.bytes();
     let feature_id = format!(
         "feature_{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
@@ -162,7 +154,7 @@ pub(super) fn append_operation(
     {
         Some(existing) if existing != &feature => {
             return Err(invalid(
-                "geometry.feature",
+                builtin,
                 "feature identity collision has conflicting definitions",
             ));
         }

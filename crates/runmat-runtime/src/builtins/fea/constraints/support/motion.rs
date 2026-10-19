@@ -14,54 +14,16 @@ use runmat_analysis_core::{
     TranslationDofMotion, Velocity,
 };
 
-const MOTION_CLASS: &str = "fea.StructuralMotion";
-const TRANSLATION_MOTION_CLASS: &str = "fea.StructuralTranslationMotion";
+const MOTION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_MOTION_CLASS.display_name();
+const TRANSLATION_MOTION_CLASS: &str =
+    runmat_builtins::fea_contract::model_types::classes::FEA_STRUCTURAL_TRANSLATION_MOTION_CLASS
+        .display_name();
 const MOTION_FIELDS: &[&str] = &["dof", "history"];
-
-const ACCELERATION_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required("dof", "Typed translational structural degree of freedom."),
-    required(
-        "acceleration",
-        "Real64 three-component time-domain acceleration signal.",
-    ),
-    required(
-        "initialDisplacement",
-        "Support displacement at the start of the step.",
-    ),
-    required(
-        "initialVelocity",
-        "Support velocity at the start of the step.",
-    ),
-];
-const ACCELERATION_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-    label: "motion = fea.StructuralMotion.acceleration(dof, acceleration, initialDisplacement, initialVelocity)",
-    inputs: &ACCELERATION_INPUTS,
-    outputs: &OUT_ANY,
-}];
-pub(super) const ACCELERATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &ACCELERATION_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const fn required(name: &'static str, description: &'static str) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
 
 #[runtime_builtin(
     name = "fea.StructuralMotion.acceleration",
-    category = "fea",
-    summary = "Create derivative-consistent support motion from an acceleration history.",
-    keywords = "fea,structural,constraint,support,motion,acceleration,transient",
-    descriptor(crate::builtins::fea::constraints::support::motion::ACCELERATION_DESCRIPTOR),
-    integer_audit(TYPED_CONSTRAINT_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::constraints::support::motion"
 )]
 pub async fn structural_acceleration_motion_builtin(
@@ -70,6 +32,10 @@ pub async fn structural_acceleration_motion_builtin(
     initial_displacement: Value,
     initial_velocity: Value,
 ) -> BuiltinResult<Value> {
+    crate::builtins::fea::constraints::fixed_outputs(
+        &runmat_builtins::FEA_STRUCTURAL_MOTION_ACCELERATION_DESCRIPTOR,
+        "fea.StructuralMotion.acceleration",
+    )?;
     let builtin = "fea.StructuralMotion.acceleration";
     let dof = translation_dof_from_value(builtin, &dof)?;
     let acceleration =

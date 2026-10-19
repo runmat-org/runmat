@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.ElectroThermalDomain` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const AT_REFERENCE_TEMPERATURE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ElectroThermalDomain"),
+    result: classes::FEA_ELECTRO_THERMAL_DOMAIN_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "fea.Temperature",
     )])],

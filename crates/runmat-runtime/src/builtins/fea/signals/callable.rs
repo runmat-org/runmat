@@ -7,83 +7,13 @@ use runmat_analysis_core::{
 };
 use runmat_execution::value::{CallableOwner, CallableValue, InlineValue, ValuePayload};
 
-const CALLABLE_INPUTS: [BuiltinParamDescriptor; 5] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Stable signal identifier.",
-    ),
-    required(
-        "callable",
-        BuiltinParamType::Any,
-        "Semantically bound RunMat function handle or immutable closure.",
-    ),
-    required(
-        "domain",
-        BuiltinParamType::Any,
-        "Typed fea.SignalDomain value.",
-    ),
-    required(
-        "sampling",
-        BuiltinParamType::Any,
-        "Typed fea.SignalSampling value.",
-    ),
-    BuiltinParamDescriptor {
-        name: "Name, Value",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description:
-            "Optional Arguments cell array and typed Interpolation/Extrapolation policies.",
-    },
-];
-const INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "Numeric generator arguments are immutable values inside an explicit cell array and retain exact integer kind; domain and sampling are typed objects.",
-};
-
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
 macro_rules! callable_signal_builtin {
     (
-        $function:ident, $descriptor:ident, $signatures:ident,
-        $builtin:literal, $class:expr, $shape:expr, $variant:path
+        $function:ident, $builtin:literal, $class:expr, $shape:expr, $variant:path $(,)?
     ) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: concat!(
-                "signal = ",
-                $builtin,
-                "(id, callable, domain, sampling, Name, Value)"
-            ),
-            inputs: &CALLABLE_INPUTS,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
         #[runtime_builtin(
                     name = $builtin,
-                    category = "fea",
-                    summary = "Create a typed physical signal from a frozen RunMat callable.",
-                    keywords = "fea,signal,function,closure,generator,typed",
-                    descriptor($descriptor),
-                    integer_audit(INTEGER_AUDIT),
+                    binding_variant = "default",
                     builtin_path = "crate::builtins::fea::signals::callable"
                 )]
         pub async fn $function(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -94,210 +24,164 @@ macro_rules! callable_signal_builtin {
 
 callable_signal_builtin!(
     displacement,
-    DISPLACEMENT_DESCRIPTOR,
-    DISPLACEMENT_SIGNATURES,
     "fea.DisplacementSignal.fromFunction",
     DISPLACEMENT_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::Displacement
+    PhysicalSignal::Displacement,
 );
 callable_signal_builtin!(
     rotation,
-    ROTATION_DESCRIPTOR,
-    ROTATION_SIGNATURES,
     "fea.RotationSignal.fromFunction",
     ROTATION_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::Rotation
+    PhysicalSignal::Rotation,
 );
 callable_signal_builtin!(
     velocity,
-    VELOCITY_DESCRIPTOR,
-    VELOCITY_SIGNATURES,
     "fea.VelocitySignal.fromFunction",
     VELOCITY_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::Velocity
+    PhysicalSignal::Velocity,
 );
 callable_signal_builtin!(
     acceleration,
-    ACCELERATION_DESCRIPTOR,
-    ACCELERATION_SIGNATURES,
     "fea.AccelerationSignal.fromFunction",
     ACCELERATION_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::Acceleration
+    PhysicalSignal::Acceleration,
 );
 callable_signal_builtin!(
     angular_velocity,
-    ANGULAR_VELOCITY_DESCRIPTOR,
-    ANGULAR_VELOCITY_SIGNATURES,
     "fea.AngularVelocitySignal.fromFunction",
     ANGULAR_VELOCITY_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::AngularVelocity
+    PhysicalSignal::AngularVelocity,
 );
 callable_signal_builtin!(
     angular_acceleration,
-    ANGULAR_ACCELERATION_DESCRIPTOR,
-    ANGULAR_ACCELERATION_SIGNATURES,
     "fea.AngularAccelerationSignal.fromFunction",
     ANGULAR_ACCELERATION_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::AngularAcceleration
+    PhysicalSignal::AngularAcceleration,
 );
 callable_signal_builtin!(
     force,
-    FORCE_DESCRIPTOR,
-    FORCE_SIGNATURES,
     "fea.ForceSignal.fromFunction",
     FORCE_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::Force
+    PhysicalSignal::Force,
 );
 callable_signal_builtin!(
     moment,
-    MOMENT_DESCRIPTOR,
-    MOMENT_SIGNATURES,
     "fea.MomentSignal.fromFunction",
     MOMENT_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::Moment
+    PhysicalSignal::Moment,
 );
 callable_signal_builtin!(
     traction,
-    TRACTION_DESCRIPTOR,
-    TRACTION_SIGNATURES,
     "fea.TractionSignal.fromFunction",
     TRACTION_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::Traction
+    PhysicalSignal::Traction,
 );
 callable_signal_builtin!(
     pressure,
-    PRESSURE_DESCRIPTOR,
-    PRESSURE_SIGNATURES,
     "fea.PressureSignal.fromFunction",
     PRESSURE_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::Pressure
+    PhysicalSignal::Pressure,
 );
 callable_signal_builtin!(
     body_force,
-    BODY_FORCE_DESCRIPTOR,
-    BODY_FORCE_SIGNATURES,
     "fea.BodyForceSignal.fromFunction",
     BODY_FORCE_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::BodyForceDensity
+    PhysicalSignal::BodyForceDensity,
 );
 callable_signal_builtin!(
     temperature,
-    TEMPERATURE_DESCRIPTOR,
-    TEMPERATURE_SIGNATURES,
     "fea.TemperatureSignal.fromFunction",
     TEMPERATURE_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::Temperature
+    PhysicalSignal::Temperature,
 );
 callable_signal_builtin!(
     temperature_difference,
-    TEMPERATURE_DIFFERENCE_DESCRIPTOR,
-    TEMPERATURE_DIFFERENCE_SIGNATURES,
     "fea.TemperatureDifferenceSignal.fromFunction",
     TEMPERATURE_DIFFERENCE_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::TemperatureDifference
+    PhysicalSignal::TemperatureDifference,
 );
 callable_signal_builtin!(
     heat_flux,
-    HEAT_FLUX_DESCRIPTOR,
-    HEAT_FLUX_SIGNATURES,
     "fea.HeatFluxSignal.fromFunction",
     HEAT_FLUX_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::HeatFlux
+    PhysicalSignal::HeatFlux,
 );
 callable_signal_builtin!(
     heat_generation,
-    HEAT_GENERATION_DESCRIPTOR,
-    HEAT_GENERATION_SIGNATURES,
     "fea.HeatGenerationSignal.fromFunction",
     HEAT_GENERATION_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::HeatGenerationDensity
+    PhysicalSignal::HeatGenerationDensity,
 );
 callable_signal_builtin!(
     electric_potential,
-    ELECTRIC_POTENTIAL_DESCRIPTOR,
-    ELECTRIC_POTENTIAL_SIGNATURES,
     "fea.ElectricPotentialSignal.fromFunction",
     ELECTRIC_POTENTIAL_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::ElectricPotential
+    PhysicalSignal::ElectricPotential,
 );
 callable_signal_builtin!(
     electric_current,
-    ELECTRIC_CURRENT_DESCRIPTOR,
-    ELECTRIC_CURRENT_SIGNATURES,
     "fea.ElectricCurrentSignal.fromFunction",
     ELECTRIC_CURRENT_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::ElectricCurrent
+    PhysicalSignal::ElectricCurrent,
 );
 callable_signal_builtin!(
     electric_charge,
-    ELECTRIC_CHARGE_DESCRIPTOR,
-    ELECTRIC_CHARGE_SIGNATURES,
     "fea.ElectricChargeSignal.fromFunction",
     ELECTRIC_CHARGE_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::ElectricCharge
+    PhysicalSignal::ElectricCharge,
 );
 callable_signal_builtin!(
     current_density,
-    CURRENT_DENSITY_DESCRIPTOR,
-    CURRENT_DENSITY_SIGNATURES,
     "fea.CurrentDensitySignal.fromFunction",
     CURRENT_DENSITY_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::ElectricCurrentDensity
+    PhysicalSignal::ElectricCurrentDensity,
 );
 callable_signal_builtin!(
     charge_density,
-    CHARGE_DENSITY_DESCRIPTOR,
-    CHARGE_DENSITY_SIGNATURES,
     "fea.ChargeDensitySignal.fromFunction",
     CHARGE_DENSITY_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::ElectricChargeDensity
+    PhysicalSignal::ElectricChargeDensity,
 );
 callable_signal_builtin!(
     magnetic_vector_potential,
-    MAGNETIC_VECTOR_POTENTIAL_DESCRIPTOR,
-    MAGNETIC_VECTOR_POTENTIAL_SIGNATURES,
     "fea.MagneticVectorPotentialSignal.fromFunction",
     MAGNETIC_VECTOR_POTENTIAL_SIGNAL_CLASS,
     SignalShape::Vector3,
-    PhysicalSignal::MagneticVectorPotential
+    PhysicalSignal::MagneticVectorPotential,
 );
 callable_signal_builtin!(
     mass_flow,
-    MASS_FLOW_DESCRIPTOR,
-    MASS_FLOW_SIGNATURES,
     "fea.MassFlowSignal.fromFunction",
     MASS_FLOW_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::MassFlowRate
+    PhysicalSignal::MassFlowRate,
 );
 callable_signal_builtin!(
     volume_flow,
-    VOLUME_FLOW_DESCRIPTOR,
-    VOLUME_FLOW_SIGNATURES,
     "fea.VolumeFlowSignal.fromFunction",
     VOLUME_FLOW_SIGNAL_CLASS,
     SignalShape::Scalar,
-    PhysicalSignal::VolumeFlowRate
+    PhysicalSignal::VolumeFlowRate,
 );
 
 fn callable_signal<Q>(

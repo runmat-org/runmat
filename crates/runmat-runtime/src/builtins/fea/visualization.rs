@@ -1,11 +1,12 @@
 use runmat_value::Value;
 
+use runmat_builtins::fea_contract::identities;
+
 use super::{
     analysis_results_by_run_id_op, bool_from_value, builtin_error, find_field, normalize_token,
     operation_error, run_id_context_from_value, run_id_from_value, scalar_string,
     study_context_from_value, AnalysisFieldValues, AnalysisResultsQuery, AnalysisStudySpec,
-    BuiltinResult, OperationContext, ERROR_INPUT, ERROR_OPERATION, FEA_FIELD_CLASS, MESH_NAME,
-    PLOT_NAME,
+    BuiltinResult, OperationContext, ERROR_INPUT, ERROR_OPERATION, MESH_NAME, PLOT_NAME,
 };
 
 pub(super) fn create_plot_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -218,7 +219,7 @@ pub(super) fn plot_request_from_args(args: &[Value]) -> BuiltinResult<FeaPlotReq
             "plot requires an fea.Field",
         ));
     };
-    if object.class_name.display_name() != FEA_FIELD_CLASS {
+    if !object.class_name.is(identities::FEA_FIELD_CLASS) {
         return Err(builtin_error(
             PLOT_NAME,
             &ERROR_INPUT,

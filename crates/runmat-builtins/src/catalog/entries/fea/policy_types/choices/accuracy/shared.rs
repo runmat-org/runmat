@@ -47,6 +47,10 @@ pub(super) const IMPLEMENTATION: &[BuiltinDocumentationLink] = &[
 ];
 pub(super) const VERIFICATION: &[BuiltinEvidenceReference] = &[
     unit_test(
+        "Accuracy choices return typed catalog values",
+        "crates/runmat-runtime/src/builtins/fea/study_policies/accuracy/tests.rs::accuracy_choices_return_typed_catalog_values",
+    ),
+    unit_test(
         "Catalog contract conformance",
         "crates/runmat-builtins/src/catalog/entries/fea/policy_types/choices/accuracy/tests.rs::accuracy_policy_choices_conform",
     ),

@@ -7,9 +7,11 @@ fn monitor_stop_condition_constructors_follow_their_positional_contract() {
         (&none::ENTRY, &inference::NONE),
         (&less_than::ENTRY, &inference::LESS_THAN),
         (&greater_than::ENTRY, &inference::GREATER_THAN),
-        (&absolute_change_below::ENTRY, &inference::ABSOLUTE_CHANGE_BELOW),
+        (
+            &absolute_change_below::ENTRY,
+            &inference::ABSOLUTE_CHANGE_BELOW,
+        ),
     ] {
         assert_constructor_contract(entry, signature);
     }
 }
-

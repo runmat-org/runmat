@@ -3,7 +3,7 @@ use crate::fea_contract::{
     constructor_inference::{infer_constructor, FeaConstructorKind},
     descriptors::FEA_MODEL_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_model_setup, BOX_STUDY},
+    example_fixtures::{fea_box_model_setup, BOX_STUDY, NATIVE_CAD},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
 };
 use crate::*;
@@ -21,7 +21,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
     compatibility: BuiltinExampleCompatibility::RunMat,
     harness: BuiltinExampleHarness::NativeFilesystem,
     fixture: BOX_STUDY,
-    requirements: BuiltinExampleRequirements::NONE,
+    requirements: NATIVE_CAD,
     verification: BuiltinExampleVerification::Assertions {
         source: "assert(isa(model, 'fea.Model'));\nassert(strcmp(model.model_id, \"box_model\"));\nassert(numel(model.materials) == 1);\nassert(numel(model.constraints) == 1);",
     },
@@ -58,6 +58,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     implementation: &[doc_links::FEA_MODELING_SOURCE],
     verification: &[
         doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST,
+        doc_links::ENUM_ATTRIBUTION_TEST,
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "A model requires an explicit procedure sequence", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_model_requires_explicit_procedure_sequence" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Ambiguous component option aliases are rejected", location: "crates/runmat-runtime/src/builtins/fea/mod.rs::fea_model_rejects_ambiguous_component_option_aliases" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Concrete steps compose and mislabeled steps are rejected", location: "crates/runmat-runtime/src/builtins/fea/steps.rs::model_composition_accepts_concrete_steps_and_rejects_mislabeled_steps" },

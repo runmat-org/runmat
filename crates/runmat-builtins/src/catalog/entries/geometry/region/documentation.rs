@@ -37,7 +37,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
             heading: "Errors",
             paragraphs: &[
                 "`RunMat:geometry:region:InvalidRegion` reports an empty selector or value, an unsupported prefix, a selector that matches no region, or one that matches several regions; the message names the selector and the match count.",
-                "`RunMat:geometry:inspect:Internal` reports a first argument that is not a `geometry.Asset`.",
+                "`RunMat:geometry:region:InvalidInput` reports a call that does not pass exactly a `geometry.Asset` and a scalar text selector.",
             ],
         },
     ],

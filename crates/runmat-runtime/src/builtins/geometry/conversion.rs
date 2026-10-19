@@ -40,17 +40,27 @@ pub(crate) fn geometry_asset_from_value_with_builtin(
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<GeometryAsset> {
+    geometry_asset_from_value_with_error(value, builtin, &GEOMETRY_INSPECT_ERROR_INTERNAL)
+}
+
+/// Decode a `geometry.Asset` argument, reporting a non-asset value under the
+/// caller's own error descriptor.
+pub(crate) fn geometry_asset_from_value_with_error(
+    value: &Value,
+    builtin: &'static str,
+    error: &'static BuiltinErrorDescriptor,
+) -> BuiltinResult<GeometryAsset> {
     let Value::Object(object) = value else {
         return Err(builtin_error(
             builtin,
-            &GEOMETRY_INSPECT_ERROR_INTERNAL,
+            error,
             format!("{builtin}: expected geometry.Asset"),
         ));
     };
     if object.class_name != GEOMETRY_ASSET_CLASS {
         return Err(builtin_error(
             builtin,
-            &GEOMETRY_INSPECT_ERROR_INTERNAL,
+            error,
             format!(
                 "{builtin}: expected {GEOMETRY_ASSET_CLASS}, got {}",
                 object.class_name

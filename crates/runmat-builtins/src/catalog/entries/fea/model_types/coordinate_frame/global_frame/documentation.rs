@@ -6,7 +6,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Behavior",
         paragraphs: &[
             "The frame has no parameters and no properties. This is the frame most constraints use by default.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -58,6 +58,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Coordinate frames validate and round-trip",
         location: "crates/runmat-runtime/src/builtins/fea/constraints.rs::tests::coordinate_frames_validate_and_round_trip_without_string_dispatch",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Frames build every class and reject non-orthogonal axes before construction",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::frames_build_every_class_and_reject_non_orthogonal_axes_before_construction",
     },
 ];
 

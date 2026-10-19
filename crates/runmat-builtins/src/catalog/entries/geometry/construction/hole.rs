@@ -43,9 +43,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:hole:InvalidInput` reports a `target` that is not a `geometry.Feature`, a dimension that cannot be converted, or an `axis` or `origin` that is not a finite three-element real vector.",
-            "`RunMat:geometry:feature:InvalidInput` (`RM.GEOMETRY.FEATURE.INVALID_CONTRACT`) reports a value that converts but violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. Either error leaves earlier values unchanged; builder values are immutable.",
-            "A scalar argument that is not a real numeric scalar (for example text, a logical, or a vector) is rejected while arguments are converted, before the builder runs.",
+            "`RunMat:geometry:hole:InvalidInput` reports every failure of the call: the wrong number of arguments, a `target` that is not a `geometry.Feature`, a dimension that cannot be converted, or an `axis` or `origin` that is not a finite three-element real vector, or a value that violates the feature-graph contract, such as a zero or negative dimension, a non-finite value, or an all-zero direction. A failed call returns nothing, and earlier values are unchanged because builder values are immutable.",
         ],
     },
 ];
@@ -61,7 +59,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         "zero-radius",
         "A zero radius is rejected",
         "plate = geometry.box(80e-3, 50e-3, 8e-3);\nholed = geometry.hole(plate, 0, 8e-3, [0 0 1], [40e-3 25e-3 0]);",
-        "RunMat:geometry:feature:InvalidInput",
+        "RunMat:geometry:hole:InvalidInput",
     ),
 ];
 

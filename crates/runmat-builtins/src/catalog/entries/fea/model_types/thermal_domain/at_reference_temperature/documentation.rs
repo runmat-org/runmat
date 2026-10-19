@@ -7,7 +7,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "The reference temperature is the constitutive reference state of the thermal formulation, the temperature at which temperature-dependent properties are referenced.",
             "`referenceTemperature` must be a `fea.Temperature` (stored in kelvin); `fea.Temperature.celsius(20)` stores 293.15 K. Any other class, including `fea.Frequency` or `fea.TemperatureDifference`, is rejected. The value is stored as `reference_temperature`.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },

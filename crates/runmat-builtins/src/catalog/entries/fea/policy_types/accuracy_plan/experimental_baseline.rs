@@ -77,6 +77,10 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/accuracy_plan/tests.rs::accuracy_plan_identities_conform",
         ),
         unit_test(
+            "Experimental baseline matches the core baseline",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::experimental_baseline_matches_the_core_baseline",
+        ),
+        unit_test(
             "Experimental baseline validates",
             "crates/runmat-analysis/core/src/validate_accuracy.rs::experimental_baseline_is_valid",
         ),

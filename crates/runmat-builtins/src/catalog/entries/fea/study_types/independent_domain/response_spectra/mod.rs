@@ -6,15 +6,14 @@ use crate::*;
 
 mod documentation;
 
-pub(super) const ENTRY: BuiltinCatalogEntry =
-    catalog_entry::entry(ConstructorEntryDefinition {
-        provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
-        name: "fea.IndependentDomain.responseSpectra",
-        documentation: documentation::DOCUMENTATION,
-        descriptor: &super::FEA_INDEPENDENT_DOMAIN_RESPONSE_SPECTRA_DESCRIPTOR,
-        inference: super::inference::response_spectra,
-        integer_capabilities: &[],
-        integer_audit: Some(&FEA_SEQUENCE_STRUCTURAL_INTEGER_AUDIT),
-        filesystem_read: false,
-        distributed: BuiltinDistributedPolicy::Unsupported,
-    });
+pub(super) const ENTRY: BuiltinCatalogEntry = catalog_entry::entry(ConstructorEntryDefinition {
+    provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),
+    name: "fea.IndependentDomain.responseSpectra",
+    documentation: documentation::DOCUMENTATION,
+    descriptor: &super::FEA_INDEPENDENT_DOMAIN_RESPONSE_SPECTRA_DESCRIPTOR,
+    inference: super::inference::response_spectra,
+    integer_capabilities: &[],
+    integer_audit: Some(&FEA_SEQUENCE_STRUCTURAL_INTEGER_AUDIT),
+    filesystem_read: false,
+    distributed: BuiltinDistributedPolicy::Unsupported,
+});

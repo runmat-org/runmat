@@ -6,7 +6,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Behavior",
         paragraphs: &[
             "The reference stores only the kind and the id (`value.connector`); it does not hold the object. The id must match the id given to the connector object in the model, which is checked when the configured step is validated against the model. `id` must be nonempty text.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -59,6 +59,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Configured sequence round-trips with typed activations",
         location: "crates/runmat-runtime/src/builtins/fea/sequences.rs::tests::configured_sequence_round_trips_with_typed_study_contracts",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Every step reference and lifecycle round-trips through an activation",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::every_step_reference_and_lifecycle_round_trips_through_an_activation",
     },
 ];
 

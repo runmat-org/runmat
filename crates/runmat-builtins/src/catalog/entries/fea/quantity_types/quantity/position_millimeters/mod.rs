@@ -1,15 +1,16 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
+    identities,
     quantity_entry::{
         infer_vector, quantity_descriptor, VECTOR_QUANTITY_INPUTS,
         VECTOR_QUANTITY_INTEGER_CAPABILITIES, VECTOR_QUANTITY_OUTPUTS,
     },
 };
 use crate::*;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
-    infer_vector(request, entry, StaticClassIdentity::new("fea.Position"))
+    infer_vector(request, entry, identities::FEA_POSITION_CLASS)
 }
 
 const POSITION_MILLIMETERS_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {

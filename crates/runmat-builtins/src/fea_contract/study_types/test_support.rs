@@ -109,10 +109,9 @@ fn output_class(inference: &CallInference) -> Option<String> {
 }
 
 fn has_code(inference: &CallInference, code: &str, argument: Option<usize>) -> bool {
-    inference
-        .diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.code == code && (argument.is_none() || diagnostic.argument == argument))
+    inference.diagnostics.iter().any(|diagnostic| {
+        diagnostic.code == code && (argument.is_none() || diagnostic.argument == argument)
+    })
 }
 
 /// Valid, wrong-arity, wrong-kind, device-resident, and unknown-input checks.
@@ -121,7 +120,12 @@ pub fn assert_constructor_contract(
     signature: &StudyConstructorSignature,
 ) {
     let name = entry.identity.name;
-    let valid: Vec<_> = signature.arguments.iter().copied().map(valid_fact).collect();
+    let valid: Vec<_> = signature
+        .arguments
+        .iter()
+        .copied()
+        .map(valid_fact)
+        .collect();
     let accepted = infer(entry, valid.clone());
     assert!(
         accepted.diagnostics.is_empty(),
@@ -134,15 +138,25 @@ pub fn assert_constructor_contract(
         result_class(signature, &valid),
         "{name}: result class"
     );
-    assert_eq!(accepted.outputs[0].shape, ShapeFact::Scalar, "{name}: scalar object");
+    assert_eq!(
+        accepted.outputs[0].shape,
+        ShapeFact::Scalar,
+        "{name}: scalar object"
+    );
 
     let mut extra = valid.clone();
     extra.push(ValueFact::scalar(ValueKindFact::String));
-    assert!(has_code(&infer(entry, extra), ARITY_CODE, None), "{name}: extra argument");
+    assert!(
+        has_code(&infer(entry, extra), ARITY_CODE, None),
+        "{name}: extra argument"
+    );
     if !valid.is_empty() {
         let mut missing = valid.clone();
         missing.pop();
-        assert!(has_code(&infer(entry, missing), ARITY_CODE, None), "{name}: missing argument");
+        assert!(
+            has_code(&infer(entry, missing), ARITY_CODE, None),
+            "{name}: missing argument"
+        );
     }
 
     for (index, kind) in signature.arguments.iter().copied().enumerate() {
@@ -168,7 +182,10 @@ pub fn assert_constructor_contract(
         dynamic.diagnostics
     );
     if let StudyResult::SameClassAs { .. } = signature.result {
-        assert!(matches!(dynamic.outputs[0].certainty, CertaintyFact::Dynamic(_)));
+        assert!(matches!(
+            dynamic.outputs[0].certainty,
+            CertaintyFact::Dynamic(_)
+        ));
     } else {
         assert_eq!(output_class(&dynamic), result_class(signature, &valid));
     }

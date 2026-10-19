@@ -8,6 +8,4 @@ mod tests;
 
 use descriptor::*;
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
-    &new::ENTRY,
-];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[&new::ENTRY];

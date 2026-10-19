@@ -10,8 +10,5 @@ mod tests;
 
 use descriptor::*;
 
-pub(super) const ENTRIES: &[&BuiltinCatalogEntry] = &[
-    &lossless::ENTRY,
-    &none::ENTRY,
-    &error_bounded::ENTRY,
-];
+pub(super) const ENTRIES: &[&BuiltinCatalogEntry] =
+    &[&lossless::ENTRY, &none::ENTRY, &error_bounded::ENTRY];

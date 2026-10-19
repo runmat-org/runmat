@@ -1,14 +1,15 @@
 use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition, ConstructorEntryDefinition},
+    identities,
     quantity_entry::{
         infer_scalar, quantity_descriptor, QuantityRange, ScalarQuantity, QUANTITY_INPUTS,
         QUANTITY_INTEGER_CAPABILITIES, QUANTITY_OUTPUTS,
     },
 };
 use crate::*;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
-const QUANTITY: ScalarQuantity = ScalarQuantity { class: StaticClassIdentity::new("fea.FrictionCoefficient"), scale: 1.0, offset: 0.0, range: QuantityRange::NonNegative };
+const QUANTITY: ScalarQuantity = ScalarQuantity { class: identities::FEA_FRICTION_COEFFICIENT_CLASS, scale: 1.0, offset: 0.0, range: QuantityRange::NonNegative };
 
 fn infer(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_scalar(request, entry, QUANTITY)

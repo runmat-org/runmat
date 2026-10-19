@@ -8,7 +8,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "The case is active only in the steps whose ids are listed, which sequences loads through a multi-step analysis, for example a bolt preload followed by an operating load. Step ids are matched against the ids of the model's steps when the model is validated.",
             "`id` names the case and must be nonempty text. `actions` is one excitation action or a cell array of them (from the `fea.*Excitation` constructors); at least one is required. The case records only the action ids (`action_ids`); the actions themselves, and their signals, must also be passed to the model.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -23,6 +23,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "`RunMat:fea:InvalidInput`: an argument has the wrong class or shape, an identifier is empty, or a value violates the constructor's range rules.",
             "`RunMat:fea:Internal`: the validated object could not be converted to a RunMat value (not expected in normal use).",
+            "Errors are attributed to the method that raised them, for example `fea.ExcitationCase.duringSteps`, in the error's builtin context.",
         ],
     },
 ];
@@ -81,6 +82,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Model composition accepts separate signal, action, and case objects",
         location: "crates/runmat-runtime/src/builtins/fea/excitations.rs::tests::model_composition_accepts_the_separate_signal_action_and_case_objects",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Excitation-case errors name the failing method",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::excitation_case_errors_name_the_failing_method",
     },
 ];
 

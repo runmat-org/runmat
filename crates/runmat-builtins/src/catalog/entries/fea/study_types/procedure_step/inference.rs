@@ -20,8 +20,20 @@ const ACCURACY_CLASSES: &[StaticClassIdentity] = &[FEA_ACCURACY_PLAN_CLASS];
 const RESTART_CLASSES: &[StaticClassIdentity] = &[FEA_RESTART_POLICY_CLASS];
 
 pub(super) const CONFIGURE: StudyConstructorSignature = StudyConstructorSignature {
-    arguments: &[Object(&FEA_PROCEDURE_STEP_CLASSES), Object(DOMAIN_CLASSES), ObjectList(ACTIVATION_CLASSES), ObjectList(STATE_INPUT_CLASSES), ObjectList(STATE_OUTPUT_CLASSES), ObjectList(OBSERVATION_CLASSES), Object(ACCURACY_CLASSES), Object(RESTART_CLASSES)],
-    result: StudyResult::SameClassAs { argument: 0, admitted: &FEA_PROCEDURE_STEP_CLASSES },
+    arguments: &[
+        Object(&FEA_PROCEDURE_STEP_CLASSES),
+        Object(DOMAIN_CLASSES),
+        ObjectList(ACTIVATION_CLASSES),
+        ObjectList(STATE_INPUT_CLASSES),
+        ObjectList(STATE_OUTPUT_CLASSES),
+        ObjectList(OBSERVATION_CLASSES),
+        Object(ACCURACY_CLASSES),
+        Object(RESTART_CLASSES),
+    ],
+    result: StudyResult::SameClassAs {
+        argument: 0,
+        admitted: &FEA_PROCEDURE_STEP_CLASSES,
+    },
 };
 pub(super) fn configure(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &CONFIGURE)

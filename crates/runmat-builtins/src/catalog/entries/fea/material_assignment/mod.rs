@@ -3,7 +3,7 @@ use crate::fea_contract::{
     constructor_inference::{infer_constructor, FeaConstructorKind},
     descriptors::FEA_MATERIAL_ASSIGNMENT_DESCRIPTOR,
     doc_links,
-    example_fixtures::BOX_STUDY,
+    example_fixtures::{BOX_STUDY, NATIVE_CAD},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
 };
 use crate::*;
@@ -20,16 +20,16 @@ const EXAMPLES: &[BuiltinExample] = &[
         program: concat!(
             "part = geometry.load(\"box.brep\", \"Units\", \"m\");\n",
             "steel = fea.material(\"steel\", \"YoungsModulusPa\", 200e9, \"PoissonRatio\", 0.3, \"MassDensityKgPerM3\", 7850);\n",
-            "body = fea.PropertyRegionTarget.solid(geometry.region(part, \"solid_000001\"));\n",
+            "body = fea.PropertyRegionTarget.allSolids(part);\n",
             "assignment = fea.materialAssignment(body, steel);",
         ),
         display_output: None,
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD,
         verification: BuiltinExampleVerification::Assertions {
-            source: "assert(isa(assignment, 'fea.MaterialAssignment'));\nassert(strcmp(assignment.assigned_material_id, \"steel\"));\nassert(strcmp(assignment.expected_material_id, \"steel\"));\nassert(strcmp(assignment.confidence, \"verified\"));",
+            source: "assert(isa(assignment, 'fea.MaterialAssignment'));\nassert(strcmp(assignment.assigned_material_id, \"steel\"));\nassert(strcmp(assignment.expected_material_id, \"steel\"));\nassert(strcmp(assignment.confidence, \"verified\"));\nassert(isa(assignment.geometry_revision, 'uint32'));",
         },
     },
     BuiltinExample {
@@ -46,7 +46,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(strcmp(assignment.assigned_material_id, \"steel\"));\nassert(strcmp(assignment.expected_material_id, \"stainless_304\"));\nassert(strcmp(assignment.confidence, \"probable\"));",
         },
@@ -65,7 +65,7 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "The material must be a `fea.Material` object. The assignment stores the material id; the material definition itself goes in the model's `Materials` option. Text region selectors and material ids are not accepted.",
             "`ExpectedMaterial` (or `ExpectedMaterialId`) takes another `fea.Material` and records the material the source data specified when it differs from the one assigned, for example a documented substitution. It defaults to the assigned material.",
             "`Confidence` is `\"verified\"` (the default), `\"probable\"`, or `\"inferred\"`, matched case-insensitively. It is evidence carried into study results; it does not change the solve.",
-            "The assignment records the geometry id and revision of its target. `fea.model` rejects an assignment whose target came from a different geometry asset.",
+            "The assignment records the geometry id and revision of its target in `geometry_id` and `geometry_revision`; the revision is a `uint32`, the same type as the `geometry.Asset` revision. `fea.model` rejects an assignment whose target came from a different geometry asset.",
         ] },
         BuiltinDocumentationSection { heading: "Use in a study", paragraphs: &[
             "Pass assignments to `fea.model` through `MaterialAssignments`, together with the assigned materials in `Materials`. Each assigned material id must name a material in `Materials`; the model's material ownership is validated when the model is placed in a study with `fea.study`, before any solver runs.",
@@ -81,7 +81,11 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
     ],
     links: &[doc_links::MODELS, doc_links::STUDY_CONTRACTS],
     implementation: &[doc_links::FEA_MODELING_SOURCE],
-    verification: &[doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST],
+    verification: &[
+        doc_links::STUDY_AND_SWEEP_CONSTRUCTION_TEST,
+        doc_links::ENUM_ATTRIBUTION_TEST,
+        doc_links::ASSIGNMENT_REVISION_TEST,
+    ],
     notes: &[],
 });
 

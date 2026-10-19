@@ -348,10 +348,17 @@ CadDocument read_iges_shape(const std::string& path,
         "OCCT IGES reader did not return IFSelect_RetDone (status " +
         std::to_string(static_cast<int>(status)) + ")");
   }
+  // IGES declares physical units like STEP. Exact imports request the stable
+  // millimetre kernel representation; preview imports request the asset's
+  // coordinate unit so the reported unit matches the coordinates.
+  if (!std::isfinite(options.step_coordinate_unit_m) ||
+      options.step_coordinate_unit_m <= 0.0) {
+    throw std::runtime_error("IGES transfer requires a finite positive length unit");
+  }
   CadDocument result;
   result.document = new_xcaf_document();
   const Handle(TDocStd_Document)& document = result.document;
-  XCAFDoc_DocumentTool::SetLengthUnit(document, 0.001);
+  XCAFDoc_DocumentTool::SetLengthUnit(document, options.step_coordinate_unit_m);
   RunmatCancelProgressIndicator transfer_progress(options);
   if (!reader.Transfer(document, transfer_progress.Start())) {
     check_cancelled(options);

@@ -19,20 +19,29 @@ pub(super) fn none(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
     infer_study_constructor(request, entry, &NONE)
 }
 
-pub(super) const LESS_THAN: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Object(QUANTITY_CLASSES), RealScalar], FEA_MONITOR_STOP_CONDITION_CLASS);
+pub(super) const LESS_THAN: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[Object(QUANTITY_CLASSES), RealScalar],
+    FEA_MONITOR_STOP_CONDITION_CLASS,
+);
 pub(super) fn less_than(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &LESS_THAN)
 }
 
-pub(super) const GREATER_THAN: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Object(QUANTITY_CLASSES), RealScalar], FEA_MONITOR_STOP_CONDITION_CLASS);
+pub(super) const GREATER_THAN: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[Object(QUANTITY_CLASSES), RealScalar],
+    FEA_MONITOR_STOP_CONDITION_CLASS,
+);
 pub(super) fn greater_than(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
     infer_study_constructor(request, entry, &GREATER_THAN)
 }
 
-pub(super) const ABSOLUTE_CHANGE_BELOW: StudyConstructorSignature =
-    StudyConstructorSignature::new(&[Object(QUANTITY_CLASSES), RealScalar, Count], FEA_MONITOR_STOP_CONDITION_CLASS);
-pub(super) fn absolute_change_below(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) const ABSOLUTE_CHANGE_BELOW: StudyConstructorSignature = StudyConstructorSignature::new(
+    &[Object(QUANTITY_CLASSES), RealScalar, Count],
+    FEA_MONITOR_STOP_CONDITION_CLASS,
+);
+pub(super) fn absolute_change_below(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &ABSOLUTE_CHANGE_BELOW)
 }

@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.FluidDomain` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const NEWTONIAN: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.FluidDomain"),
+    result: classes::FEA_FLUID_DOMAIN_CLASS,
     arguments: &[
         ModelArg::Typed(&[StaticClassIdentity::new("fea.MassDensity")]),
         ModelArg::Typed(&[StaticClassIdentity::new("fea.DynamicViscosity")]),

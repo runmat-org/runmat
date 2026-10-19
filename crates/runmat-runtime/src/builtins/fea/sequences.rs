@@ -7,22 +7,35 @@ use runmat_analysis_core::{
 };
 
 use super::*;
+use crate::builtins::fea::observations::study_outputs;
 use crate::builtins::fea::study_policies::sequence as policy;
 use crate::builtins::fea::study_values::{
     from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
     VALUE_FIELD,
 };
 use crate::class_registry::declaration::{register_value_class, static_methods};
+use runmat_builtins::fea_contract::study_types::{
+    classes::{
+        FEA_ANALYSIS_SEQUENCE_CLASS, FEA_INDEPENDENT_DOMAIN_CLASS, FEA_PROCEDURE_STEP_CLASS,
+        FEA_RESTART_POLICY_CLASS, FEA_SEQUENCE_BRANCH_CLASS, FEA_SEQUENCE_DEPENDENCY_CLASS,
+        FEA_STATE_INPUT_CLASS, FEA_STATE_OUTPUT_CLASS, FEA_STATE_TRANSITION_CLASS,
+    },
+    descriptors::{
+        analysis_sequence::*, independent_domain::*, procedure_step::*, restart_policy::*,
+        sequence_branch::*, sequence_dependency::*, state_input::*, state_output::*,
+        state_transition::*,
+    },
+};
 
-pub(super) const INDEPENDENT_DOMAIN_CLASS: &str = "fea.IndependentDomain";
-pub(super) const RESTART_POLICY_CLASS: &str = "fea.RestartPolicy";
-pub(super) const STATE_INPUT_CLASS: &str = "fea.StateInput";
-pub(super) const STATE_OUTPUT_CLASS: &str = "fea.StateOutput";
-pub(super) const DEPENDENCY_CLASS: &str = "fea.SequenceDependency";
-pub(super) const TRANSITION_CLASS: &str = "fea.StateTransition";
-pub(super) const BRANCH_CLASS: &str = "fea.SequenceBranch";
-pub(super) const SEQUENCE_CLASS: &str = "fea.AnalysisSequence";
-pub(super) const PROCEDURE_STEP_CLASS: &str = "fea.ProcedureStep";
+pub(super) const INDEPENDENT_DOMAIN_CLASS: &str = FEA_INDEPENDENT_DOMAIN_CLASS.display_name();
+pub(super) const RESTART_POLICY_CLASS: &str = FEA_RESTART_POLICY_CLASS.display_name();
+pub(super) const STATE_INPUT_CLASS: &str = FEA_STATE_INPUT_CLASS.display_name();
+pub(super) const STATE_OUTPUT_CLASS: &str = FEA_STATE_OUTPUT_CLASS.display_name();
+pub(super) const DEPENDENCY_CLASS: &str = FEA_SEQUENCE_DEPENDENCY_CLASS.display_name();
+pub(super) const TRANSITION_CLASS: &str = FEA_STATE_TRANSITION_CLASS.display_name();
+pub(super) const BRANCH_CLASS: &str = FEA_SEQUENCE_BRANCH_CLASS.display_name();
+pub(super) const SEQUENCE_CLASS: &str = FEA_ANALYSIS_SEQUENCE_CLASS.display_name();
+pub(super) const PROCEDURE_STEP_CLASS: &str = FEA_PROCEDURE_STEP_CLASS.display_name();
 
 const STATE_INPUT_FIELDS: &[&str] = &["input_id", "required_kind", "source", "use_as", "conflict"];
 const STATE_OUTPUT_FIELDS: &[&str] = &["state_id", "kind", "completeness", "persistence"];
@@ -45,168 +58,16 @@ const SEQUENCE_FIELDS: &[&str] = &[
     "branches",
 ];
 
-const fn required(
-    name: &'static str,
-    ty: BuiltinParamType,
-    description: &'static str,
-) -> BuiltinParamDescriptor {
-    BuiltinParamDescriptor {
-        name,
-        ty,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description,
-    }
-}
-
-const NO_INPUTS: [BuiltinParamDescriptor; 0] = [];
-const DOMAIN_TIME_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "origin",
-        BuiltinParamType::NumericScalar,
-        "Total-time origin in seconds.",
-    ),
-    required(
-        "start",
-        BuiltinParamType::NumericScalar,
-        "Step start time in seconds.",
-    ),
-    required(
-        "end",
-        BuiltinParamType::NumericScalar,
-        "Step end time in seconds.",
-    ),
-    required(
-        "intervalCount",
-        BuiltinParamType::NumericScalar,
-        "Positive number of equal time intervals.",
-    ),
-];
-const DOMAIN_VALUES_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "values",
-    BuiltinParamType::NumericArray,
-    "Finite domain coordinates.",
-)];
-const DOMAIN_RANGE_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required("start", BuiltinParamType::NumericScalar, "Domain start."),
-    required("end", BuiltinParamType::NumericScalar, "Domain end."),
-];
-const DOMAIN_COUNT_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "count",
-    BuiltinParamType::NumericScalar,
-    "Positive requested mode count.",
-)];
-const DOMAIN_PARAMETER_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Typed study-parameter identifier.",
-    ),
-    required(
-        "values",
-        BuiltinParamType::NumericArray,
-        "Finite canonical parameter values.",
-    ),
-];
-const DOMAIN_SPECTRA_INPUTS: [BuiltinParamDescriptor; 1] = [required(
-    "spectra",
-    BuiltinParamType::Any,
-    "One or more typed fea.ResponseSpectrum values consumed by the procedure.",
-)];
-const DOMAIN_INTEGER_INPUTS: [BuiltinIntegerInputCapability; 1] = [BuiltinIntegerInputCapability {
-    name: "count or coordinates",
-    classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-    availability: BuiltinIntegerInputAvailability::Documented,
-    scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-    notes:
-        "Mode counts remain exact; physical coordinates cross once into canonical binary64 storage.",
-}];
-const DOMAIN_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 1] =
-    [BuiltinIntegerCapabilityDescriptor {
-        form: "independent-domain construction",
-        inputs: &DOMAIN_INTEGER_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::Multiple,
-        notes: "Typed domains are immutable host authoring values.",
-    }];
-const STRUCTURAL_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor = BuiltinIntegerAuditDescriptor {
-    kind: BuiltinIntegerAuditKind::NotApplicable,
-    canonical_builtin: None,
-    notes: "This typed sequence constructor accepts identifiers and typed FEA objects only.",
-};
-
-macro_rules! descriptor {
-    ($descriptor:ident, $signatures:ident, $label:literal, $inputs:expr) => {
-        const $signatures: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescriptor {
-            label: $label,
-            inputs: $inputs,
-            outputs: &OUT_ANY,
-        }];
-        pub(super) const $descriptor: BuiltinDescriptor = BuiltinDescriptor {
-            signatures: &$signatures,
-            output_mode: BuiltinOutputMode::Fixed,
-            completion_policy: BuiltinCompletionPolicy::Public,
-            errors: &ERRORS,
-        };
-    };
-}
-
-descriptor!(
-    DOMAIN_STATIC_DESCRIPTOR,
-    DOMAIN_STATIC_SIGNATURES,
-    "domain = fea.IndependentDomain.staticDomain()",
-    &NO_INPUTS
-);
-descriptor!(
-    DOMAIN_TIME_DESCRIPTOR,
-    DOMAIN_TIME_SIGNATURES,
-    "domain = fea.IndependentDomain.timeSeconds(origin, start, end, intervalCount)",
-    &DOMAIN_TIME_INPUTS
-);
-descriptor!(
-    DOMAIN_FREQUENCY_DESCRIPTOR,
-    DOMAIN_FREQUENCY_SIGNATURES,
-    "domain = fea.IndependentDomain.frequencyHertz(values)",
-    &DOMAIN_VALUES_INPUTS
-);
-descriptor!(
-    DOMAIN_LOAD_DESCRIPTOR,
-    DOMAIN_LOAD_SIGNATURES,
-    "domain = fea.IndependentDomain.loadFactor(start, end)",
-    &DOMAIN_RANGE_INPUTS
-);
-descriptor!(
-    DOMAIN_EIGENVALUE_DESCRIPTOR,
-    DOMAIN_EIGENVALUE_SIGNATURES,
-    "domain = fea.IndependentDomain.eigenvalue(count)",
-    &DOMAIN_COUNT_INPUTS
-);
-descriptor!(
-    DOMAIN_PARAMETER_DESCRIPTOR,
-    DOMAIN_PARAMETER_SIGNATURES,
-    "domain = fea.IndependentDomain.studyParameter(id, values)",
-    &DOMAIN_PARAMETER_INPUTS
-);
-descriptor!(
-    DOMAIN_SPECTRA_DESCRIPTOR,
-    DOMAIN_SPECTRA_SIGNATURES,
-    "domain = fea.IndependentDomain.responseSpectra(spectra)",
-    &DOMAIN_SPECTRA_INPUTS
-);
-
 #[runtime_builtin(
     name = "fea.IndependentDomain.staticDomain",
-    category = "fea",
-    summary = "Create a static independent domain.",
-    keywords = "fea,step,domain,static,typed",
-    descriptor(DOMAIN_STATIC_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn domain_static() -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_INDEPENDENT_DOMAIN_STATIC_DOMAIN_DESCRIPTOR,
+        "fea.IndependentDomain.staticDomain",
+    )?;
     to_typed_value(
         "fea.IndependentDomain.staticDomain",
         INDEPENDENT_DOMAIN_CLASS,
@@ -239,11 +100,7 @@ fn numeric_values(builtin: &'static str, value: &Value, field: &str) -> BuiltinR
 
 #[runtime_builtin(
     name = "fea.IndependentDomain.timeSeconds",
-    category = "fea",
-    summary = "Create a typed time domain in seconds.",
-    keywords = "fea,step,domain,time,typed",
-    descriptor(DOMAIN_TIME_DESCRIPTOR),
-    integer_capabilities(DOMAIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn domain_time(
@@ -252,6 +109,10 @@ pub async fn domain_time(
     end: Value,
     interval_count: Value,
 ) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_INDEPENDENT_DOMAIN_TIME_SECONDS_DESCRIPTOR,
+        "fea.IndependentDomain.timeSeconds",
+    )?;
     const NAME: &str = "fea.IndependentDomain.timeSeconds";
     let interval_count = usize_from_value(NAME, &interval_count)?;
     if interval_count == 0 {
@@ -275,14 +136,14 @@ pub async fn domain_time(
 
 #[runtime_builtin(
     name = "fea.IndependentDomain.frequencyHertz",
-    category = "fea",
-    summary = "Create a typed frequency domain in hertz.",
-    keywords = "fea,step,domain,frequency,typed",
-    descriptor(DOMAIN_FREQUENCY_DESCRIPTOR),
-    integer_capabilities(DOMAIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn domain_frequency(values: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_INDEPENDENT_DOMAIN_FREQUENCY_HERTZ_DESCRIPTOR,
+        "fea.IndependentDomain.frequencyHertz",
+    )?;
     const NAME: &str = "fea.IndependentDomain.frequencyHertz";
     to_typed_value(
         NAME,
@@ -293,14 +154,14 @@ pub async fn domain_frequency(values: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.IndependentDomain.loadFactor",
-    category = "fea",
-    summary = "Create a typed load-factor domain.",
-    keywords = "fea,step,domain,load,factor,typed",
-    descriptor(DOMAIN_LOAD_DESCRIPTOR),
-    integer_capabilities(DOMAIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn domain_load(start: Value, end: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_INDEPENDENT_DOMAIN_LOAD_FACTOR_DESCRIPTOR,
+        "fea.IndependentDomain.loadFactor",
+    )?;
     const NAME: &str = "fea.IndependentDomain.loadFactor";
     to_typed_value(
         NAME,
@@ -314,14 +175,14 @@ pub async fn domain_load(start: Value, end: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.IndependentDomain.eigenvalue",
-    category = "fea",
-    summary = "Create a typed eigenvalue domain.",
-    keywords = "fea,step,domain,eigenvalue,modes,typed",
-    descriptor(DOMAIN_EIGENVALUE_DESCRIPTOR),
-    integer_capabilities(DOMAIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn domain_eigenvalue(count: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_INDEPENDENT_DOMAIN_EIGENVALUE_DESCRIPTOR,
+        "fea.IndependentDomain.eigenvalue",
+    )?;
     const NAME: &str = "fea.IndependentDomain.eigenvalue";
     to_typed_value(
         NAME,
@@ -334,14 +195,14 @@ pub async fn domain_eigenvalue(count: Value) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "fea.IndependentDomain.studyParameter",
-    category = "fea",
-    summary = "Create a typed parameter-sampling domain.",
-    keywords = "fea,step,domain,parameter,sweep,typed",
-    descriptor(DOMAIN_PARAMETER_DESCRIPTOR),
-    integer_capabilities(DOMAIN_INTEGER_CAPABILITIES),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn domain_parameter(id: String, values: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_INDEPENDENT_DOMAIN_STUDY_PARAMETER_DESCRIPTOR,
+        "fea.IndependentDomain.studyParameter",
+    )?;
     const NAME: &str = "fea.IndependentDomain.studyParameter";
     to_typed_value(
         NAME,
@@ -355,14 +216,14 @@ pub async fn domain_parameter(id: String, values: Value) -> BuiltinResult<Value>
 
 #[runtime_builtin(
     name = "fea.IndependentDomain.responseSpectra",
-    category = "fea",
-    summary = "Bind a modal-response procedure to typed response spectra.",
-    keywords = "fea,step,domain,response,spectrum,typed",
-    descriptor(DOMAIN_SPECTRA_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn domain_response_spectra(spectra: Value) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_INDEPENDENT_DOMAIN_RESPONSE_SPECTRA_DESCRIPTOR,
+        "fea.IndependentDomain.responseSpectra",
+    )?;
     const NAME: &str = "fea.IndependentDomain.responseSpectra";
     let spectra = super::response_spectra::response_spectrum_vec_from_value(NAME, &spectra)?;
     if spectra.is_empty() {
@@ -395,37 +256,9 @@ pub async fn domain_response_spectra(spectra: Value) -> BuiltinResult<Value> {
     )
 }
 
-const STATE_OUTPUT_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Published state identifier.",
-    ),
-    required("kind", BuiltinParamType::Any, "Typed fea.StateKind."),
-    required(
-        "completeness",
-        BuiltinParamType::Any,
-        "Typed fea.StateCompleteness.",
-    ),
-    required(
-        "persistence",
-        BuiltinParamType::Any,
-        "Typed fea.StatePersistence.",
-    ),
-];
-descriptor!(
-    STATE_OUTPUT_DESCRIPTOR,
-    STATE_OUTPUT_SIGNATURES,
-    "output = fea.StateOutput.new(id, kind, completeness, persistence)",
-    &STATE_OUTPUT_INPUTS
-);
 #[runtime_builtin(
     name = "fea.StateOutput.new",
-    category = "fea",
-    summary = "Declare a typed procedure-state output.",
-    keywords = "fea,sequence,state,output,typed",
-    descriptor(STATE_OUTPUT_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn state_output(
@@ -434,6 +267,7 @@ pub async fn state_output(
     completeness: Value,
     persistence: Value,
 ) -> BuiltinResult<Value> {
+    study_outputs(&FEA_STATE_OUTPUT_NEW_DESCRIPTOR, "fea.StateOutput.new")?;
     const NAME: &str = "fea.StateOutput.new";
     serializable_to_object(
         NAME,
@@ -447,57 +281,6 @@ pub async fn state_output(
         },
     )
 }
-
-const INITIAL_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "State-input identifier.",
-    ),
-    required("kind", BuiltinParamType::Any, "Typed required state kind."),
-    required("useAs", BuiltinParamType::Any, "Typed state-use policy."),
-    required(
-        "conflict",
-        BuiltinParamType::Any,
-        "Typed initial-state conflict policy.",
-    ),
-];
-const UPSTREAM_INPUTS: [BuiltinParamDescriptor; 6] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "State-input identifier.",
-    ),
-    required("kind", BuiltinParamType::Any, "Typed required state kind."),
-    required(
-        "producerStepId",
-        BuiltinParamType::StringScalar,
-        "Producer procedure-step identifier.",
-    ),
-    required(
-        "stateId",
-        BuiltinParamType::StringScalar,
-        "Producer state identifier.",
-    ),
-    required("useAs", BuiltinParamType::Any, "Typed state-use policy."),
-    required(
-        "conflict",
-        BuiltinParamType::Any,
-        "Typed initial-state conflict policy.",
-    ),
-];
-descriptor!(
-    STATE_INPUT_INITIAL_DESCRIPTOR,
-    STATE_INPUT_INITIAL_SIGNATURES,
-    "input = fea.StateInput.initialConditions(id, kind, useAs, conflict)",
-    &INITIAL_INPUTS
-);
-descriptor!(
-    STATE_INPUT_UPSTREAM_DESCRIPTOR,
-    STATE_INPUT_UPSTREAM_SIGNATURES,
-    "input = fea.StateInput.upstream(id, kind, producerStepId, stateId, useAs, conflict)",
-    &UPSTREAM_INPUTS
-);
 
 fn build_state_input(
     name: &'static str,
@@ -523,11 +306,7 @@ fn build_state_input(
 
 #[runtime_builtin(
     name = "fea.StateInput.initialConditions",
-    category = "fea",
-    summary = "Consume authored initial conditions as typed state.",
-    keywords = "fea,sequence,state,input,initial,typed",
-    descriptor(STATE_INPUT_INITIAL_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn state_input_initial(
@@ -536,6 +315,10 @@ pub async fn state_input_initial(
     use_as: Value,
     conflict: Value,
 ) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_STATE_INPUT_INITIAL_CONDITIONS_DESCRIPTOR,
+        "fea.StateInput.initialConditions",
+    )?;
     build_state_input(
         "fea.StateInput.initialConditions",
         id,
@@ -548,11 +331,7 @@ pub async fn state_input_initial(
 
 #[runtime_builtin(
     name = "fea.StateInput.upstream",
-    category = "fea",
-    summary = "Consume a typed state from an upstream procedure step.",
-    keywords = "fea,sequence,state,input,upstream,typed",
-    descriptor(STATE_INPUT_UPSTREAM_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn state_input_upstream(
@@ -563,6 +342,10 @@ pub async fn state_input_upstream(
     use_as: Value,
     conflict: Value,
 ) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_STATE_INPUT_UPSTREAM_DESCRIPTOR,
+        "fea.StateInput.upstream",
+    )?;
     const NAME: &str = "fea.StateInput.upstream";
     let source = StateSource::Upstream {
         producer_step: ProcedureStepId(nonempty_id(NAME, "producer step id", producer)?),
@@ -571,36 +354,9 @@ pub async fn state_input_upstream(
     build_state_input(NAME, id, &kind, source, &use_as, &conflict)
 }
 
-const DEPENDENCY_INPUTS: [BuiltinParamDescriptor; 3] = [
-    required(
-        "predecessorStepId",
-        BuiltinParamType::StringScalar,
-        "Predecessor step identifier.",
-    ),
-    required(
-        "successorStepId",
-        BuiltinParamType::StringScalar,
-        "Successor step identifier.",
-    ),
-    required(
-        "reason",
-        BuiltinParamType::Any,
-        "Typed sequence-dependency reason.",
-    ),
-];
-descriptor!(
-    DEPENDENCY_DESCRIPTOR,
-    DEPENDENCY_SIGNATURES,
-    "dependency = fea.SequenceDependency.new(predecessorStepId, successorStepId, reason)",
-    &DEPENDENCY_INPUTS
-);
 #[runtime_builtin(
     name = "fea.SequenceDependency.new",
-    category = "fea",
-    summary = "Declare a typed semantic dependency between procedure steps.",
-    keywords = "fea,sequence,dependency,typed",
-    descriptor(DEPENDENCY_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn dependency(
@@ -608,6 +364,10 @@ pub async fn dependency(
     successor: String,
     reason: Value,
 ) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_SEQUENCE_DEPENDENCY_NEW_DESCRIPTOR,
+        "fea.SequenceDependency.new",
+    )?;
     const NAME: &str = "fea.SequenceDependency.new";
     serializable_to_object(
         NAME,
@@ -621,54 +381,16 @@ pub async fn dependency(
     )
 }
 
-const TRANSITION_INPUTS: [BuiltinParamDescriptor; 7] = [
-    required(
-        "id",
-        BuiltinParamType::StringScalar,
-        "Transition identifier.",
-    ),
-    required(
-        "producerStepId",
-        BuiltinParamType::StringScalar,
-        "Producer step identifier.",
-    ),
-    required(
-        "consumerStepId",
-        BuiltinParamType::StringScalar,
-        "Consumer step identifier.",
-    ),
-    required(
-        "stateId",
-        BuiltinParamType::StringScalar,
-        "Transferred state identifier.",
-    ),
-    required(
-        "method",
-        BuiltinParamType::Any,
-        "Typed state-transition method.",
-    ),
-    required(
-        "topology",
-        BuiltinParamType::Any,
-        "Typed topology-transition policy.",
-    ),
-    required(
-        "reference",
-        BuiltinParamType::Any,
-        "Typed reference-state policy.",
-    ),
-];
-descriptor!(TRANSITION_DESCRIPTOR, TRANSITION_SIGNATURES, "transition = fea.StateTransition.new(id, producerStepId, consumerStepId, stateId, method, topology, reference)", &TRANSITION_INPUTS);
 #[runtime_builtin(
     name = "fea.StateTransition.new",
-    category = "fea",
-    summary = "Declare a typed state transition between procedure steps.",
-    keywords = "fea,sequence,state,transition,typed",
-    descriptor(TRANSITION_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn transition(args: Vec<Value>) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_STATE_TRANSITION_NEW_DESCRIPTOR,
+        "fea.StateTransition.new",
+    )?;
     const NAME: &str = "fea.StateTransition.new";
     if args.len() != 7 {
         return Err(builtin_error(
@@ -709,37 +431,9 @@ pub async fn transition(args: Vec<Value>) -> BuiltinResult<Value> {
     )
 }
 
-const BRANCH_INPUTS: [BuiltinParamDescriptor; 4] = [
-    required("id", BuiltinParamType::StringScalar, "Branch identifier."),
-    required(
-        "producerStepId",
-        BuiltinParamType::StringScalar,
-        "Producer step identifier.",
-    ),
-    required(
-        "stateIds",
-        BuiltinParamType::Any,
-        "State identifier or cell array of identifiers.",
-    ),
-    required(
-        "consumerStepIds",
-        BuiltinParamType::Any,
-        "Consumer identifier or cell array of identifiers.",
-    ),
-];
-descriptor!(
-    BRANCH_DESCRIPTOR,
-    BRANCH_SIGNATURES,
-    "branch = fea.SequenceBranch.new(id, producerStepId, stateIds, consumerStepIds)",
-    &BRANCH_INPUTS
-);
 #[runtime_builtin(
     name = "fea.SequenceBranch.new",
-    category = "fea",
-    summary = "Declare immutable downstream consumers of a published state.",
-    keywords = "fea,sequence,branch,state,typed",
-    descriptor(BRANCH_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn branch(
@@ -748,6 +442,10 @@ pub async fn branch(
     states: Value,
     consumers: Value,
 ) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_SEQUENCE_BRANCH_NEW_DESCRIPTOR,
+        "fea.SequenceBranch.new",
+    )?;
     const NAME: &str = "fea.SequenceBranch.new";
     let states = string_vec_from_value(NAME, &states)?
         .into_iter()
@@ -770,58 +468,16 @@ pub async fn branch(
     )
 }
 
-const RESTART_COMPLETED_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "producerStepId",
-        BuiltinParamType::StringScalar,
-        "Completed producer step identifier.",
-    ),
-    required(
-        "stateId",
-        BuiltinParamType::StringScalar,
-        "Complete producer state identifier.",
-    ),
-];
-const RESTART_CHECKPOINT_INPUTS: [BuiltinParamDescriptor; 2] = [
-    required(
-        "checkpointId",
-        BuiltinParamType::StringScalar,
-        "Checkpoint identifier.",
-    ),
-    required(
-        "requiredStateDigest",
-        BuiltinParamType::StringScalar,
-        "Required checkpoint-state digest.",
-    ),
-];
-descriptor!(
-    RESTART_FRESH_DESCRIPTOR,
-    RESTART_FRESH_SIGNATURES,
-    "policy = fea.RestartPolicy.fresh()",
-    &NO_INPUTS
-);
-descriptor!(
-    RESTART_COMPLETED_DESCRIPTOR,
-    RESTART_COMPLETED_SIGNATURES,
-    "policy = fea.RestartPolicy.continueFromCompletedState(producerStepId, stateId)",
-    &RESTART_COMPLETED_INPUTS
-);
-descriptor!(
-    RESTART_CHECKPOINT_DESCRIPTOR,
-    RESTART_CHECKPOINT_SIGNATURES,
-    "policy = fea.RestartPolicy.resumeCheckpoint(checkpointId, requiredStateDigest)",
-    &RESTART_CHECKPOINT_INPUTS
-);
 #[runtime_builtin(
     name = "fea.RestartPolicy.fresh",
-    category = "fea",
-    summary = "Start a procedure from fresh state.",
-    keywords = "fea,sequence,restart,fresh,typed",
-    descriptor(RESTART_FRESH_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn restart_fresh() -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_RESTART_POLICY_FRESH_DESCRIPTOR,
+        "fea.RestartPolicy.fresh",
+    )?;
     to_typed_value(
         "fea.RestartPolicy.fresh",
         RESTART_POLICY_CLASS,
@@ -830,14 +486,14 @@ pub async fn restart_fresh() -> BuiltinResult<Value> {
 }
 #[runtime_builtin(
     name = "fea.RestartPolicy.continueFromCompletedState",
-    category = "fea",
-    summary = "Continue from a complete immutable state.",
-    keywords = "fea,sequence,restart,state,typed",
-    descriptor(RESTART_COMPLETED_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn restart_completed(producer: String, state: String) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_RESTART_POLICY_CONTINUE_FROM_COMPLETED_STATE_DESCRIPTOR,
+        "fea.RestartPolicy.continueFromCompletedState",
+    )?;
     const NAME: &str = "fea.RestartPolicy.continueFromCompletedState";
     to_typed_value(
         NAME,
@@ -850,14 +506,14 @@ pub async fn restart_completed(producer: String, state: String) -> BuiltinResult
 }
 #[runtime_builtin(
     name = "fea.RestartPolicy.resumeCheckpoint",
-    category = "fea",
-    summary = "Resume a procedure from a digest-fenced checkpoint.",
-    keywords = "fea,sequence,restart,checkpoint,typed",
-    descriptor(RESTART_CHECKPOINT_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn restart_checkpoint(checkpoint: String, digest: String) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_RESTART_POLICY_RESUME_CHECKPOINT_DESCRIPTOR,
+        "fea.RestartPolicy.resumeCheckpoint",
+    )?;
     const NAME: &str = "fea.RestartPolicy.resumeCheckpoint";
     to_typed_value(
         NAME,
@@ -869,45 +525,16 @@ pub async fn restart_checkpoint(checkpoint: String, digest: String) -> BuiltinRe
     )
 }
 
-const SEQUENCE_INPUTS: [BuiltinParamDescriptor; 5] = [
-    required("id", BuiltinParamType::StringScalar, "Sequence identifier."),
-    required(
-        "steps",
-        BuiltinParamType::Any,
-        "Typed procedure step or cell array.",
-    ),
-    required(
-        "dependencies",
-        BuiltinParamType::Any,
-        "Typed dependency or cell array.",
-    ),
-    required(
-        "transitions",
-        BuiltinParamType::Any,
-        "Typed transition or cell array.",
-    ),
-    required(
-        "branches",
-        BuiltinParamType::Any,
-        "Typed branch or cell array.",
-    ),
-];
-descriptor!(
-    SEQUENCE_DESCRIPTOR,
-    SEQUENCE_SIGNATURES,
-    "sequence = fea.AnalysisSequence.new(id, steps, dependencies, transitions, branches)",
-    &SEQUENCE_INPUTS
-);
 #[runtime_builtin(
     name = "fea.AnalysisSequence.new",
-    category = "fea",
-    summary = "Create an explicit semantic procedure sequence.",
-    keywords = "fea,analysis,sequence,state,transition,typed",
-    descriptor(SEQUENCE_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn sequence(args: Vec<Value>) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_ANALYSIS_SEQUENCE_NEW_DESCRIPTOR,
+        "fea.AnalysisSequence.new",
+    )?;
     const NAME: &str = "fea.AnalysisSequence.new";
     if args.len() != 5 {
         return Err(builtin_error(
@@ -931,52 +558,16 @@ pub async fn sequence(args: Vec<Value>) -> BuiltinResult<Value> {
     serializable_to_object(NAME, &ERROR_INTERNAL, SEQUENCE_CLASS, &sequence)
 }
 
-const CONFIGURE_STEP_INPUTS: [BuiltinParamDescriptor; 8] = [
-    required(
-        "step",
-        BuiltinParamType::Any,
-        "Typed family-specific procedure step.",
-    ),
-    required(
-        "independentDomain",
-        BuiltinParamType::Any,
-        "Typed independent domain.",
-    ),
-    required(
-        "activations",
-        BuiltinParamType::Any,
-        "Typed step-object activation or cell array.",
-    ),
-    required(
-        "stateInputs",
-        BuiltinParamType::Any,
-        "Typed state input or cell array.",
-    ),
-    required(
-        "stateOutputs",
-        BuiltinParamType::Any,
-        "Typed state output or cell array.",
-    ),
-    required(
-        "observations",
-        BuiltinParamType::Any,
-        "Typed observation or cell array.",
-    ),
-    required("accuracy", BuiltinParamType::Any, "Typed accuracy plan."),
-    required("restart", BuiltinParamType::Any, "Typed restart policy."),
-];
-descriptor!(CONFIGURE_STEP_DESCRIPTOR, CONFIGURE_STEP_SIGNATURES, "step = fea.ProcedureStep.configure(step, independentDomain, activations, stateInputs, stateOutputs, observations, accuracy, restart)", &CONFIGURE_STEP_INPUTS);
-
 #[runtime_builtin(
     name = "fea.ProcedureStep.configure",
-    category = "fea",
-    summary = "Configure a family-specific procedure step with typed study contracts.",
-    keywords = "fea,procedure,step,sequence,observation,accuracy,state,typed",
-    descriptor(CONFIGURE_STEP_DESCRIPTOR),
-    integer_audit(STRUCTURAL_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::fea::sequences"
 )]
 pub async fn configure_step(args: Vec<Value>) -> BuiltinResult<Value> {
+    study_outputs(
+        &FEA_PROCEDURE_STEP_CONFIGURE_DESCRIPTOR,
+        "fea.ProcedureStep.configure",
+    )?;
     const NAME: &str = "fea.ProcedureStep.configure";
     if args.len() != 8 {
         return Err(builtin_error(NAME, &ERROR_INPUT, "expected step, independentDomain, activations, stateInputs, stateOutputs, observations, accuracy, and restart"));
@@ -1054,6 +645,7 @@ pub(super) fn ensure_sequence_classes_registered() {
                 ("loadFactor", "fea.IndependentDomain.loadFactor"),
                 ("eigenvalue", "fea.IndependentDomain.eigenvalue"),
                 ("studyParameter", "fea.IndependentDomain.studyParameter"),
+                ("responseSpectra", "fea.IndependentDomain.responseSpectra"),
             ],
         );
         register_immutable_class(
@@ -1126,6 +718,27 @@ mod tests {
     fn cell(values: Vec<Value>) -> Value {
         let columns = values.len();
         Value::Cell(CellArray::new(values, 1, columns).expect("valid row cell"))
+    }
+
+    #[test]
+    fn independent_domain_class_exposes_every_static_constructor() {
+        super::super::ensure_value_classes_registered();
+        let class = crate::class_registry::get_class(
+            &runmat_types::ClassIdentity::new(INDEPENDENT_DOMAIN_CLASS).expect("class identity"),
+        )
+        .expect("registered fea.IndependentDomain");
+        for builtin in [
+            "fea.IndependentDomain.staticDomain",
+            "fea.IndependentDomain.responseSpectra",
+        ] {
+            assert!(
+                class
+                    .methods
+                    .values()
+                    .any(|method| method.function_name == builtin),
+                "{builtin} is a static method of fea.IndependentDomain"
+            );
+        }
     }
 
     #[tokio::test]

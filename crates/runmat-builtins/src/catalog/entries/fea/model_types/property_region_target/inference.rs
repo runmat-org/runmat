@@ -5,7 +5,7 @@ use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const BEAM: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Region",
     )])],
@@ -16,7 +16,7 @@ pub(super) fn beam(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
 }
 
 pub(super) const SHELL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Region",
     )])],
@@ -27,7 +27,7 @@ pub(super) fn shell(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 pub(super) const SOLID: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Region",
     )])],
@@ -38,7 +38,7 @@ pub(super) fn solid(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallI
 }
 
 pub(super) const CELL: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Region",
     )])],
@@ -49,7 +49,7 @@ pub(super) fn cell(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallIn
 }
 
 pub(super) const ALL_BEAMS: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Asset",
     )])],
@@ -60,7 +60,7 @@ pub(super) fn all_beams(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 }
 
 pub(super) const ALL_SHELLS: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Asset",
     )])],
@@ -71,7 +71,7 @@ pub(super) fn all_shells(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
 }
 
 pub(super) const ALL_SOLIDS: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Asset",
     )])],
@@ -82,7 +82,7 @@ pub(super) fn all_solids(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
 }
 
 pub(super) const ALL_CELLS: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.PropertyRegionTarget"),
+    result: crate::fea_contract::identities::FEA_PROPERTY_REGION_TARGET_CLASS,
     arguments: &[ModelArg::Typed(&[StaticClassIdentity::new(
         "geometry.Asset",
     )])],

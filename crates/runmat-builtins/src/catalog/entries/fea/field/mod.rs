@@ -2,7 +2,7 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_FIELD_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_run_setup, BOX_STUDY},
+    example_fixtures::{fea_box_run_setup, BOX_STUDY, NATIVE_CAD_MESHING},
     integer::FEA_STRUCTURAL_INTEGER_AUDIT,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     result_inference::{infer_result, FeaResultKind},
@@ -27,7 +27,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD_MESHING,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(stress, 'fea.Field'));\nassert(strcmp(stress.field_id, \"structural.von_mises\"));\nassert(strcmp(stress.location, \"element\"));\nassert(stress.value_count > 0);",
         },
@@ -43,7 +43,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD_MESHING,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(displacement, 'fea.Field'));\nassert(strcmp(displacement.location, \"node\"));\nassert(~isempty(displacement.run_id));",
         },

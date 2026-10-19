@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.ConjugateHeatTransferInterface` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const PERFECT: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ConjugateHeatTransferInterface"),
+    result: classes::FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -18,7 +19,7 @@ pub(super) fn perfect(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Cal
 }
 
 pub(super) const CONDUCTANCE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ConjugateHeatTransferInterface"),
+    result: classes::FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -32,7 +33,7 @@ pub(super) fn conductance(request: &CallRequest, entry: &BuiltinCatalogEntry) ->
 }
 
 pub(super) const RESISTANCE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ConjugateHeatTransferInterface"),
+    result: classes::FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),

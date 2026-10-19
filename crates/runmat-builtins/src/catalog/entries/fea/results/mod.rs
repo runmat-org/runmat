@@ -2,7 +2,7 @@ use crate::fea_contract::{
     catalog_entry::{self, ConstructorDocumentationDefinition},
     descriptors::FEA_RESULTS_DESCRIPTOR,
     doc_links,
-    example_fixtures::{fea_box_run_setup, BOX_STUDY},
+    example_fixtures::{fea_box_run_setup, BOX_STUDY, NATIVE_CAD_MESHING},
     integer::FEA_RESULTS_INTEGER_CAPABILITIES,
     operation_entry::{self, OperationEffectProfile, OperationEntryDefinition},
     result_inference::{infer_result, FeaResultKind},
@@ -23,7 +23,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD_MESHING,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(results, 'fea.Results'));\nassert(strcmp(results.run_id, run.steps(1).run_id));\nassert(results.summary.field_count > 0);",
         },
@@ -40,7 +40,7 @@ const EXAMPLES: &[BuiltinExample] = &[
         compatibility: BuiltinExampleCompatibility::RunMat,
         harness: BuiltinExampleHarness::NativeFilesystem,
         fixture: BOX_STUDY,
-        requirements: BuiltinExampleRequirements::NONE,
+        requirements: NATIVE_CAD_MESHING,
         verification: BuiltinExampleVerification::Assertions {
             source: "assert(isa(results, 'fea.Results'));\nassert(strcmp(results.run_id, runId));",
         },

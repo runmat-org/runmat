@@ -13,6 +13,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection { heading: "Errors", paragraphs: &[
         "`RunMat:fea:InvalidInput` when any argument is not a nonnegative integer scalar or does not fit in 64 bits.",
         "`RunMat:fea:Internal` if the value cannot be converted into a RunMat object.",
+        "`RunMat:fea:TooManyOutputs` when more than one output is requested.",
     ] },
 ];
 
@@ -48,6 +49,7 @@ pub(super) const DOCUMENTATION: BuiltinDocumentation =
         verification: &[
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Catalog inference contract", location: "crates/runmat-builtins/src/catalog/entries/fea/study_types/observation_cost/tests.rs::observation_cost_constructors_follow_their_positional_contract" },
         BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Typed sequence round trip", location: "crates/runmat-runtime/src/builtins/fea/sequences.rs::tests::configured_sequence_round_trips_with_typed_study_contracts" },
+        BuiltinEvidenceReference { kind: BuiltinEvidenceKind::UnitTest, label: "Cost codec round trip", location: "crates/runmat-runtime/src/builtins/fea/observations/tests.rs::observation_cost_encodes_through_its_registered_schema" },
         ],
-        notes: &["Known gap: the immutable-value schema registered for `fea.ObservationCost` lists the five count fields, while the constructed object exposes `mode` and `limit`, so encoding a standalone cost object through the value codec (for example across a process boundary) is rejected. Costs nested inside an observation are unaffected."],
+        notes: &[],
     });

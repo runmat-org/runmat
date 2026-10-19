@@ -1,20 +1,21 @@
 //! Static argument rules for `fea.ExcitationCase` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
 pub(super) const ALWAYS: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ExcitationCase"),
+    result: classes::FEA_EXCITATION_CASE_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::TypedOrCell(&[
-            StaticClassIdentity::new("fea.StructuralExcitation"),
-            StaticClassIdentity::new("fea.ThermalExcitation"),
-            StaticClassIdentity::new("fea.ElectricalExcitation"),
-            StaticClassIdentity::new("fea.MagneticExcitation"),
-            StaticClassIdentity::new("fea.AcousticExcitation"),
-            StaticClassIdentity::new("fea.FluidExcitation"),
+            classes::FEA_STRUCTURAL_EXCITATION_CLASS,
+            classes::FEA_THERMAL_EXCITATION_CLASS,
+            classes::FEA_ELECTRICAL_EXCITATION_CLASS,
+            classes::FEA_MAGNETIC_EXCITATION_CLASS,
+            classes::FEA_ACOUSTIC_EXCITATION_CLASS,
+            classes::FEA_FLUID_EXCITATION_CLASS,
         ]),
     ],
 };
@@ -24,16 +25,16 @@ pub(super) fn always(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Call
 }
 
 pub(super) const DURING_STEPS: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ExcitationCase"),
+    result: classes::FEA_EXCITATION_CASE_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::TypedOrCell(&[
-            StaticClassIdentity::new("fea.StructuralExcitation"),
-            StaticClassIdentity::new("fea.ThermalExcitation"),
-            StaticClassIdentity::new("fea.ElectricalExcitation"),
-            StaticClassIdentity::new("fea.MagneticExcitation"),
-            StaticClassIdentity::new("fea.AcousticExcitation"),
-            StaticClassIdentity::new("fea.FluidExcitation"),
+            classes::FEA_STRUCTURAL_EXCITATION_CLASS,
+            classes::FEA_THERMAL_EXCITATION_CLASS,
+            classes::FEA_ELECTRICAL_EXCITATION_CLASS,
+            classes::FEA_MAGNETIC_EXCITATION_CLASS,
+            classes::FEA_ACOUSTIC_EXCITATION_CLASS,
+            classes::FEA_FLUID_EXCITATION_CLASS,
         ]),
         ModelArg::TextList,
     ],
@@ -44,16 +45,16 @@ pub(super) fn during_steps(request: &CallRequest, entry: &BuiltinCatalogEntry) -
 }
 
 pub(super) const MUTUALLY_EXCLUSIVE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ExcitationCase"),
+    result: classes::FEA_EXCITATION_CASE_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::TypedOrCell(&[
-            StaticClassIdentity::new("fea.StructuralExcitation"),
-            StaticClassIdentity::new("fea.ThermalExcitation"),
-            StaticClassIdentity::new("fea.ElectricalExcitation"),
-            StaticClassIdentity::new("fea.MagneticExcitation"),
-            StaticClassIdentity::new("fea.AcousticExcitation"),
-            StaticClassIdentity::new("fea.FluidExcitation"),
+            classes::FEA_STRUCTURAL_EXCITATION_CLASS,
+            classes::FEA_THERMAL_EXCITATION_CLASS,
+            classes::FEA_ELECTRICAL_EXCITATION_CLASS,
+            classes::FEA_MAGNETIC_EXCITATION_CLASS,
+            classes::FEA_ACOUSTIC_EXCITATION_CLASS,
+            classes::FEA_FLUID_EXCITATION_CLASS,
         ]),
         ModelArg::Text,
     ],

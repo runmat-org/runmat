@@ -99,7 +99,8 @@ const EXAMPLES: &[BuiltinExample] = &[
     },
 ];
 
-const DOCUMENTATION: BuiltinDocumentation = documentation(MeshingDocumentation {
+// Hidden method-only binding: no public title or slug (user syntax is `mesh(solverMesh)`).
+const DOCUMENTATION: BuiltinDocumentation = hidden(documentation(MeshingDocumentation {
     title: "__runmat_meshing_mesh",
     summary: "Display a solver mesh with `mesh(solverMesh)`, optionally by region or as a section.",
     description: "`mesh(solverMesh)` and `mesh(solverMesh, Name, Value, ...)` draw the boundary of a `meshing.Mesh` and return the figure handle. RunMat's object dispatch routes `mesh` on a `meshing.Mesh` to this method-only binding; numeric `mesh(X, Y, Z)` is unchanged.",
@@ -151,7 +152,13 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(MeshingDocumentation {
             location: "crates/runmat-runtime/src/builtins/meshing/mod.rs::standard_mesh_dispatches_solver_meshes_through_object_protocol",
         },
     ],
-});
+}));
+
+const fn hidden(mut documentation: BuiltinDocumentation) -> BuiltinDocumentation {
+    documentation.title = None;
+    documentation.slug = None;
+    documentation
+}
 
 pub const MESHING_MESH_METHOD_CATALOG_ENTRY: BuiltinCatalogEntry = entry(MeshingEntryDefinition {
     provenance: BuiltinCatalogProvenance::new(file!(), module_path!()),

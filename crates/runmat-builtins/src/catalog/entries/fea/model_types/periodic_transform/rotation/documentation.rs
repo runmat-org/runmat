@@ -6,7 +6,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         heading: "Behavior",
         paragraphs: &[
             "The axis passes through `origin` (a `fea.Position`) along `axis` (a `fea.Direction`), and the rotation by `angle` (a `fea.Rotation`) follows the right-hand rule about the axis direction. For a sector of a part with N identical sectors the angle is 360/N degrees. The three inputs are stored as given.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -61,6 +61,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Paired tie, periodic, phase-shifted, and affine-jump relations are typed and dimensionally checked",
         location: "crates/runmat-runtime/src/builtins/fea/constraints.rs::tests::paired_relations_are_typed_transformed_and_dimensionally_sound",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Rotation transform and every structural DOF are typed",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::rotation_transform_and_every_structural_dof_are_typed",
     },
 ];
 

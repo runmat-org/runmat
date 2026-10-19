@@ -95,6 +95,10 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "Catalog contract conformance",
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/accuracy_resource_ceiling/tests.rs::accuracy_resource_ceiling_identities_conform",
         ),
+        unit_test(
+            "Resource ceilings stay exact",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::resource_ceilings_stay_exact_and_reject_invalid_counts",
+        ),
     ],
     notes: &[],
 });

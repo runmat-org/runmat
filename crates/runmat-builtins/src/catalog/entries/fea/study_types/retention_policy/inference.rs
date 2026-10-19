@@ -19,7 +19,10 @@ pub(super) fn canonical(request: &CallRequest, entry: &BuiltinCatalogEntry) -> C
 
 pub(super) const UNTIL_DEPENDENTS_COMPLETE: StudyConstructorSignature =
     StudyConstructorSignature::new(&[], FEA_RETENTION_POLICY_CLASS);
-pub(super) fn until_dependents_complete(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn until_dependents_complete(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &UNTIL_DEPENDENTS_COMPLETE)
 }
 
@@ -31,6 +34,9 @@ pub(super) fn latest_samples(request: &CallRequest, entry: &BuiltinCatalogEntry)
 
 pub(super) const EXPLICIT_SAMPLES: StudyConstructorSignature =
     StudyConstructorSignature::new(&[Count], FEA_RETENTION_POLICY_CLASS);
-pub(super) fn explicit_samples(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn explicit_samples(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &EXPLICIT_SAMPLES)
 }

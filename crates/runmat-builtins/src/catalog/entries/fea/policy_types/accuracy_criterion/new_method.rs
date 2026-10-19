@@ -104,6 +104,10 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/accuracy_criterion/tests.rs::accuracy_criterion_identities_conform",
         ),
         unit_test(
+            "Criteria require typed policies and a logical flag",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::criterion_requires_typed_policies_and_a_logical_mandatory_flag",
+        ),
+        unit_test(
             "Recovery evidence compatibility",
             "crates/runmat-analysis/core/src/validate_accuracy.rs::a_posteriori_recovery_evidence_is_valid_without_relabeling_transfer",
         ),

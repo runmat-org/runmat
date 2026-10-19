@@ -102,7 +102,12 @@ pub fn infer_study_constructor(
             diagnostics.push(diagnostic);
         }
     }
-    finish_fixed(entry, request, result_fact(request, signature.result), diagnostics)
+    finish_fixed(
+        entry,
+        request,
+        result_fact(request, signature.result),
+        diagnostics,
+    )
 }
 
 fn check_argument(
@@ -265,7 +270,12 @@ fn result_fact(request: &CallRequest, result: StudyResult) -> ValueFact {
                 ValueKindFact::Object(object) => object.runtime_class.as_ref(),
                 _ => None,
             })
-            .and_then(|class| admitted.iter().copied().find(|expected| class.is(*expected))),
+            .and_then(|class| {
+                admitted
+                    .iter()
+                    .copied()
+                    .find(|expected| class.is(*expected))
+            }),
     };
     let mut fact = ValueFact::proven(
         ValueKindFact::Object(ObjectFact {

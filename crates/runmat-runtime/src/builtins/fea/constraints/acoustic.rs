@@ -3,15 +3,10 @@ use crate::builtins::fea::values::PRESSURE_CLASS;
 
 define_quantity_constraint!(
     acoustic_prescribed_pressure_builtin,
-    ACOUSTIC_PRESCRIBED_PRESSURE_DESCRIPTOR,
-    ACOUSTIC_PRESCRIBED_PRESSURE_SIGNATURES,
-    ACOUSTIC_PRESCRIBED_PRESSURE_INPUTS,
+    FEA_ACOUSTIC_CONSTRAINT_PRESCRIBED_PRESSURE_DESCRIPTOR,
     "fea.AcousticConstraint.prescribedPressure",
-    "constraint = fea.AcousticConstraint.prescribedPressure(id, region, pressure)",
-    "Create a prescribed acoustic-pressure constraint.",
     FEA_ACOUSTIC_CONSTRAINT_CLASS,
     "crate::builtins::fea::constraints::acoustic",
-    "pressure",
     PRESSURE_CLASS,
     "pascals",
     |constraint_id, target, pascals| AcousticConstraint {

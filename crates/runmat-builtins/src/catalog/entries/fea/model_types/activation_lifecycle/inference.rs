@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.ActivationLifecycle` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
-use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
+use runmat_types::{CallInference, CallRequest};
 
 pub(super) const ACTIVATE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ActivationLifecycle"),
+    result: classes::FEA_ACTIVATION_LIFECYCLE_CLASS,
     arguments: &[],
 };
 
@@ -14,7 +15,7 @@ pub(super) fn activate(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const CONTINUE_FROM: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ActivationLifecycle"),
+    result: classes::FEA_ACTIVATION_LIFECYCLE_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -23,7 +24,7 @@ pub(super) fn continue_from(request: &CallRequest, entry: &BuiltinCatalogEntry) 
 }
 
 pub(super) const DEACTIVATE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ActivationLifecycle"),
+    result: classes::FEA_ACTIVATION_LIFECYCLE_CLASS,
     arguments: &[ModelArg::Text],
 };
 
@@ -32,10 +33,10 @@ pub(super) fn deactivate(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
 }
 
 pub(super) const MODIFY: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ActivationLifecycle"),
+    result: classes::FEA_ACTIVATION_LIFECYCLE_CLASS,
     arguments: &[
         ModelArg::Text,
-        ModelArg::Typed(&[StaticClassIdentity::new("fea.StepObjectRef")]),
+        ModelArg::Typed(&[classes::FEA_STEP_OBJECT_REF_CLASS]),
     ],
 };
 

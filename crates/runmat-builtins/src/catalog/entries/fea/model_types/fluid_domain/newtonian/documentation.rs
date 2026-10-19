@@ -7,7 +7,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
         paragraphs: &[
             "A Newtonian fluid has a shear stress proportional to the strain rate, with constant density rho and dynamic viscosity mu; the kinematic viscosity is mu / rho. Water at 20 degrees C has rho = 998.2 kg/m^3 and mu = 1.002e-3 Pa s; air has about 1.204 kg/m^3 and 1.81e-5 Pa s.",
             "`density` must be a `fea.MassDensity`, `dynamicViscosity` a `fea.DynamicViscosity`, and `turbulenceIntensity` a `fea.TurbulenceIntensity` (a ratio from 0 to 1, for example 0.05 for 5 percent). The quantity constructors enforce their ranges. The values are stored as `density`, `dynamic_viscosity`, and `turbulence_intensity`.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },

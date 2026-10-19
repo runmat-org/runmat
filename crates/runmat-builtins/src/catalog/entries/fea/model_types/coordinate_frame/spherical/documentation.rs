@@ -5,9 +5,9 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Behavior",
         paragraphs: &[
-            "At each point the components are radial (from `origin` to the point), polar, and azimuthal (polarAxis x radial). The constructor rejects an `azimuthReference` parallel to `polarAxis`; the structural solve additionally requires the two to be orthogonal. The frame is undefined at the origin. Use it for domes and spherical shells.",
+            "At each point the components are radial (from `origin` to the point), polar, and azimuthal (polarAxis x radial). `azimuthReference` must be orthogonal to `polarAxis`; the constructor rejects parallel or non-orthogonal directions with `RunMat:fea:InvalidInput` before building the frame. The frame is undefined at the origin. Use it for domes and spherical shells.",
             "`id` names the frame. `origin` must be a `fea.Position`; `polarAxis` and `azimuthReference` must be `fea.Direction` values. The frame is validated when it is built: parallel or degenerate axes are rejected. The inputs are stored as the properties `frame_id`, `origin`, `polar_axis`, and `azimuth_reference`.",
-            "All inputs are checked before anything is built: a wrong argument count, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
+            "All inputs are checked before anything is built: a wrong argument count, a request for more than one output, a value of the wrong class, an empty identifier, or an out-of-range value raises `RunMat:fea:InvalidInput` and no object is returned.",
             "The result is an immutable host value object, not a handle: assigning it to another variable copies the value, and its properties are read-only. It encodes portably, so it can cross an execution boundary unchanged.",
         ],
     },
@@ -43,7 +43,7 @@ const EXAMPLES: &[BuiltinExample] = &[BuiltinExample {
 const FAQS: &[BuiltinDocumentationFaq] = &[
     BuiltinDocumentationFaq {
         question: "What happens if the two directions are parallel?",
-        answer: "The constructor rejects the frame with `RunMat:fea:InvalidInput`, because the second direction is needed to fix the orientation about the first.",
+        answer: "The constructor rejects the frame with `RunMat:fea:InvalidInput`, because the second direction is needed to fix the orientation about the first. Cartesian and spherical frames also reject directions that are not orthogonal; a cylindrical radial reference only has to be nonparallel to the axis.",
     },
 ];
 
@@ -64,6 +64,11 @@ const VERIFICATION: &[BuiltinEvidenceReference] = &[
         kind: BuiltinEvidenceKind::UnitTest,
         label: "Coordinate frames validate and round-trip",
         location: "crates/runmat-runtime/src/builtins/fea/constraints.rs::tests::coordinate_frames_validate_and_round_trip_without_string_dispatch",
+    },
+    BuiltinEvidenceReference {
+        kind: BuiltinEvidenceKind::UnitTest,
+        label: "Frames build every class and reject non-orthogonal axes before construction",
+        location: "crates/runmat-runtime/src/builtins/fea/constraints/coverage_tests.rs::frames_build_every_class_and_reject_non_orthogonal_axes_before_construction",
     },
 ];
 

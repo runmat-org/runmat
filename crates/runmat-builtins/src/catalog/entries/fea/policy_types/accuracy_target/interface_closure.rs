@@ -67,6 +67,10 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/accuracy_target/tests.rs::accuracy_target_identities_conform",
         ),
         unit_test(
+            "Targets preserve typed values and reject untyped inputs",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::targets_preserve_typed_values_and_reject_empty_or_untyped_inputs",
+        ),
+        unit_test(
             "Accuracy plan validation rejects nonpositive tolerances",
             "crates/runmat-analysis/core/src/validate_accuracy.rs::rejects_nonpositive_tolerance",
         ),

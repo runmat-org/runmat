@@ -13,7 +13,10 @@ use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const ACCEPTED_INCREMENTS: StudyConstructorSignature =
     StudyConstructorSignature::new(&[Count], FEA_MONITOR_CADENCE_CLASS);
-pub(super) fn accepted_increments(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInference {
+pub(super) fn accepted_increments(
+    request: &CallRequest,
+    entry: &BuiltinCatalogEntry,
+) -> CallInference {
     infer_study_constructor(request, entry, &ACCEPTED_INCREMENTS)
 }
 

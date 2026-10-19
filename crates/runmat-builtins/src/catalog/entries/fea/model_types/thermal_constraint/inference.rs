@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.ThermalConstraint` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const PRESCRIBED: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ThermalConstraint"),
+    result: classes::FEA_THERMAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -18,14 +19,14 @@ pub(super) fn prescribed(request: &CallRequest, entry: &BuiltinCatalogEntry) -> 
 }
 
 pub(super) const TIE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ThermalConstraint"),
+    result: classes::FEA_THERMAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
     ],
 };
@@ -35,19 +36,19 @@ pub(super) fn tie(request: &CallRequest, entry: &BuiltinCatalogEntry) -> CallInf
 }
 
 pub(super) const PERIODIC: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ThermalConstraint"),
+    result: classes::FEA_THERMAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.IdentityPeriodicTransform"),
-            StaticClassIdentity::new("fea.TranslationPeriodicTransform"),
-            StaticClassIdentity::new("fea.RotationPeriodicTransform"),
+            classes::FEA_IDENTITY_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_ROTATION_PERIODIC_TRANSFORM_CLASS,
         ]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
     ],
 };
@@ -57,19 +58,19 @@ pub(super) fn periodic(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const AFFINE_JUMP: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.ThermalConstraint"),
+    result: classes::FEA_THERMAL_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.IdentityPeriodicTransform"),
-            StaticClassIdentity::new("fea.TranslationPeriodicTransform"),
-            StaticClassIdentity::new("fea.RotationPeriodicTransform"),
+            classes::FEA_IDENTITY_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_ROTATION_PERIODIC_TRANSFORM_CLASS,
         ]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
         ModelArg::Typed(&[StaticClassIdentity::new("fea.TemperatureDifference")]),
     ],

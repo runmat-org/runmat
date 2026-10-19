@@ -67,6 +67,10 @@ const DOCUMENTATION: BuiltinDocumentation = catalog_entry::documentation(Constru
             "crates/runmat-builtins/src/catalog/entries/fea/policy_types/numerical_equivalence_policy/tests.rs::numerical_equivalence_identities_conform",
         ),
         unit_test(
+            "Equivalence policies store finite scalars",
+            "crates/runmat-runtime/src/builtins/fea/accuracy.rs::tolerances_and_equivalence_store_finite_scalars_and_reject_non_numeric_inputs",
+        ),
+        unit_test(
             "Accuracy plan validation rejects nonpositive tolerances",
             "crates/runmat-analysis/core/src/validate_accuracy.rs::rejects_nonpositive_tolerance",
         ),

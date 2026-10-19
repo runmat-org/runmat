@@ -1,11 +1,12 @@
 //! Static argument rules for `fea.AcousticConstraint` constructors.
 
+use crate::fea_contract::model_types::classes;
 use crate::fea_contract::model_types::inference::{infer_model_object, ModelArg, ModelObjectCall};
 use crate::BuiltinCatalogEntry;
 use runmat_types::{CallInference, CallRequest, StaticClassIdentity};
 
 pub(super) const PRESCRIBED_PRESSURE: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.AcousticConstraint"),
+    result: classes::FEA_ACOUSTIC_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
@@ -21,19 +22,19 @@ pub(super) fn prescribed_pressure(
 }
 
 pub(super) const PERIODIC: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.AcousticConstraint"),
+    result: classes::FEA_ACOUSTIC_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.IdentityPeriodicTransform"),
-            StaticClassIdentity::new("fea.TranslationPeriodicTransform"),
-            StaticClassIdentity::new("fea.RotationPeriodicTransform"),
+            classes::FEA_IDENTITY_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_ROTATION_PERIODIC_TRANSFORM_CLASS,
         ]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
     ],
 };
@@ -43,19 +44,19 @@ pub(super) fn periodic(request: &CallRequest, entry: &BuiltinCatalogEntry) -> Ca
 }
 
 pub(super) const PHASE_SHIFTED_PERIODIC: ModelObjectCall = ModelObjectCall {
-    result: StaticClassIdentity::new("fea.AcousticConstraint"),
+    result: classes::FEA_ACOUSTIC_CONSTRAINT_CLASS,
     arguments: &[
         ModelArg::Text,
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[StaticClassIdentity::new("geometry.Region")]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.IdentityPeriodicTransform"),
-            StaticClassIdentity::new("fea.TranslationPeriodicTransform"),
-            StaticClassIdentity::new("fea.RotationPeriodicTransform"),
+            classes::FEA_IDENTITY_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_TRANSLATION_PERIODIC_TRANSFORM_CLASS,
+            classes::FEA_ROTATION_PERIODIC_TRANSFORM_CLASS,
         ]),
         ModelArg::Typed(&[
-            StaticClassIdentity::new("fea.MatchingPeriodicPairing"),
-            StaticClassIdentity::new("fea.GeometricPeriodicPairing"),
+            classes::FEA_MATCHING_PERIODIC_PAIRING_CLASS,
+            classes::FEA_GEOMETRIC_PERIODIC_PAIRING_CLASS,
         ]),
         ModelArg::Typed(&[StaticClassIdentity::new("fea.ComplexPhase")]),
     ],

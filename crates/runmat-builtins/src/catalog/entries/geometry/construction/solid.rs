@@ -36,7 +36,7 @@ const SECTIONS: &[BuiltinDocumentationSection] = &[
     BuiltinDocumentationSection {
         heading: "Errors",
         paragraphs: &[
-            "`RunMat:geometry:solid:InvalidInput` reports an argument that is not a `geometry.Feature` value. Selection errors at realization, such as an empty selection, a cardinality mismatch, or missing topology history, are reported by the `.fea` geometry materialization that resolves the region, before meshing or assembly.",
+            "`RunMat:geometry:solid:InvalidInput` reports a call that does not pass exactly one `geometry.Feature` value. Selection errors at realization, such as an empty selection, a cardinality mismatch, or missing topology history, are reported by the `.fea` geometry materialization that resolves the region, before meshing or assembly.",
         ],
     },
 ];
@@ -67,7 +67,7 @@ const DOCUMENTATION: BuiltinDocumentation = documentation(ConstructionDocumentat
     examples: EXAMPLES,
     faqs: FAQS,
     implementation: &[REGIONS_SOURCE],
-    verification: &[COMPOSITION_TEST],
+    verification: &[COMPOSITION_TEST, ERROR_OWNER_TEST],
     notes: &[],
     status: BuiltinDocumentationStatus::Stable,
 });
