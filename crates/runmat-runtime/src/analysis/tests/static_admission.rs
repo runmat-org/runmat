@@ -49,9 +49,6 @@ fn static_gpu_with_upload_only_provider_rejects_before_upload() {
         fn download<'a>(&'a self, _: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
             Box::pin(async { Err(anyhow::anyhow!("unadmitted download")) })
         }
-        fn free(&self, _: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
-        }
         fn device_info(&self) -> String {
             "upload-only-contract-fixture".into()
         }

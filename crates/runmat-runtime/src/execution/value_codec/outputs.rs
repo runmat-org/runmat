@@ -73,15 +73,15 @@ mod tests {
         let cell =
             Value::Cell(CellArray::new(vec![Value::Num(7.0), Value::Num(9.0)], 1, 2).unwrap());
         for (value, count) in [
-            (Value::OutputList(vec![]), 0),
+            (Value::output_list(vec![]), 0),
             (cell.clone(), 1),
-            (Value::OutputList(vec![cell.clone(), Value::Num(11.0)]), 2),
+            (Value::output_list(vec![cell.clone(), Value::Num(11.0)]), 2),
         ] {
             let payloads = encode_inline_outputs(&value, count).unwrap();
             assert_eq!(decode_inline_outputs(&payloads, count).unwrap(), value);
             assert!(decode_inline_outputs(&payloads, count + 1).is_err());
         }
         assert!(encode_inline_outputs(&cell, 2).is_err());
-        assert!(encode_inline_outputs(&Value::OutputList(vec![cell]), 2).is_err());
+        assert!(encode_inline_outputs(&Value::output_list(vec![cell]), 2).is_err());
     }
 }

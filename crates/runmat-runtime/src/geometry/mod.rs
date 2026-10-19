@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 use runmat_geometry_core::{
@@ -1039,7 +1039,7 @@ pub fn geometry_preview_scene(
                 chunk_end_triangle += 1;
             }
             let triangles = &surface_mesh.triangles[chunk_start_triangle..chunk_end_triangle];
-            let mut remap = HashMap::<u32, u32>::with_capacity(triangles.len() * 3);
+            let mut remap = std::collections::HashMap::<u32, u32>::with_capacity(triangles.len() * 3);
             let mut local_positions = Vec::<[f32; 3]>::new();
             let mut local_colors = Vec::<[f32; 4]>::new();
             let mut indices = Vec::<u32>::with_capacity(triangles.len() * 3);

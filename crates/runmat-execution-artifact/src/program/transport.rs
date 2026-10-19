@@ -460,8 +460,7 @@ fn collect_references(values: &[ValuePayload]) -> Vec<&ValueRef> {
         match value {
             ValuePayload::Object(reference) => references.push(reference),
             ValuePayload::Inline(value) => match value.as_ref() {
-                runmat_execution::value::InlineValue::Cell { values, .. }
-                | runmat_execution::value::InlineValue::OutputList(values) => {
+                runmat_execution::value::InlineValue::Cell { values, .. } => {
                     values.iter().for_each(|value| visit(value, references));
                 }
                 runmat_execution::value::InlineValue::Struct(fields) => fields

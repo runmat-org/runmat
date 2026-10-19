@@ -73,9 +73,9 @@ fn invalid_identity_and_cancelled_preparation_never_publish_staged_children() {
             publication.completion.published.data.study_fingerprint =
                 Digest::sha256(b"foreign-study").to_string();
         }
-        let _interrupt = crate::interrupt::replace_interrupt(Some(Arc::new(
+        let _interrupt = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(Arc::new(
             std::sync::atomic::AtomicBool::new(cancelled),
-        )));
+        ))));
         let error = PreparedStudyPublication::new(publication.completion, manifest)
             .err()
             .unwrap();

@@ -626,7 +626,7 @@ mod tests {
     use super::*;
     use runmat_accelerate_api::{
         AccelDownloadFuture, AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
-        HostTensorView, NumericElementType,
+        HostTensorView,
     };
     use runmat_types::{
         DistributedFact, DistributedValueId, ParallelRegionId, ProgramFunctionId, RegionId,
@@ -761,10 +761,10 @@ mod tests {
                 function: ProgramFunctionId(0),
                 ordinal: 1,
             },
-            owner: ParallelRegionId(RegionId {
+            owner: runmat_types::DistributedOwner::Region(ParallelRegionId(RegionId {
                 function: ProgramFunctionId(0),
                 ordinal: 2,
-            }),
+            })),
             scheme: None,
             value: Box::new(value_fact(&Value::Num(0.0))),
             materializable: true,
@@ -797,7 +797,10 @@ mod tests {
         );
     }
 
-    struct DownloadProvider;
+    /// Owns real fixture allocations; downloads return the admitted values.
+    struct DownloadProvider {
+        owner: runmat_accelerate_api::test_support::TestAllocationOwner,
+    }
 
     impl AccelProvider for DownloadProvider {
         fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
@@ -808,14 +811,10 @@ mod tests {
             Box::pin(async move {
                 Ok(HostTensorOwned {
                     data: vec![4.0, 5.0],
-                    shape: handle.shape.clone(),
+                    shape: handle.shape().to_vec(),
                     storage: GpuTensorStorage::Real,
                 })
             })
-        }
-
-        fn free(&self, _handle: &GpuTensorHandle) -> anyhow::Result<()> {
-            Ok(())
         }
 
         fn device_info(&self) -> String {
@@ -823,16 +822,25 @@ mod tests {
         }
 
         fn device_id(&self) -> u32 {
-            9901
+            self.owner.device_id()
         }
     }
 
     #[test]
     fn device_download_is_explicit_and_accounts_for_transferred_bytes() {
-        static PROVIDER: DownloadProvider = DownloadProvider;
-        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
-        let handle = GpuTensorHandle::new(vec![2, 1], PROVIDER.device_id(), 7)
-            .with_numeric_descriptor(NumericElementType::F64, GpuTensorStorage::Real);
+        let provider: &'static DownloadProvider = Box::leak(Box::new(DownloadProvider {
+            owner: runmat_accelerate_api::test_support::TestAllocationOwner::new(),
+        }));
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(provider));
+        let handle = provider
+            .owner
+            .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![4.0, 5.0]),
+                shape: vec![2, 1],
+                storage: GpuTensorStorage::Real,
+            })
+            .expect("fixture allocation")
+            .handle;
         let value = Value::GpuTensor(handle.clone());
 
         let rejected = pollster::block_on(admit_owned_real64_async(
@@ -854,7 +862,7 @@ mod tests {
         assert_eq!(
             admitted.receipt().transfer,
             ValueAdmissionTransfer::DeviceToHost {
-                device_id: PROVIDER.device_id()
+                device_id: provider.device_id()
             }
         );
         assert_eq!(admitted.receipt().copies.device_to_host_bytes, 16);
@@ -864,6 +872,6 @@ mod tests {
             ValueAdmissionOwnership::Materialized
         );
 
-        assert_eq!(handle.device_id, PROVIDER.device_id());
+        assert_eq!(handle.device_id(), provider.device_id());
     }
 }

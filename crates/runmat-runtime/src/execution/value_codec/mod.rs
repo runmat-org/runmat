@@ -81,7 +81,7 @@ mod tests {
 
     fn test_object(id: &str) -> ObjectInstance {
         ensure_test_class_registered();
-        let mut object = ObjectInstance::new(TEST_CLASS.into());
+        let mut object = ObjectInstance::new(TEST_CLASS);
         object
             .properties
             .insert("id".into(), Value::String(id.into()));
@@ -1008,7 +1008,7 @@ mod tests {
     #[test]
     fn immutable_class_encoding_and_identity_ignore_property_insertion_order() {
         ensure_test_class_registered();
-        let mut first = ObjectInstance::new(TEST_CLASS.into());
+        let mut first = ObjectInstance::new(TEST_CLASS);
         first
             .properties
             .insert("id".into(), Value::String("stable".into()));
@@ -1016,7 +1016,7 @@ mod tests {
             .properties
             .insert("count".into(), Value::Int(IntValue::U32(7)));
 
-        let mut second = ObjectInstance::new(TEST_CLASS.into());
+        let mut second = ObjectInstance::new(TEST_CLASS);
         second
             .properties
             .insert("count".into(), Value::Int(IntValue::U32(7)));
@@ -1037,13 +1037,13 @@ mod tests {
     fn immutable_class_schema_and_object_shape_fail_closed() {
         ensure_test_class_registered();
 
-        let unknown = Value::Object(ObjectInstance::new("runmat.test.Unknown".into()));
+        let unknown = Value::Object(ObjectInstance::new("runmat.test.Unknown"));
         assert!(matches!(
             encode_inline_value(&unknown),
             Err(ValueCodecError::Unsupported { .. })
         ));
 
-        let missing = Value::Object(ObjectInstance::new(TEST_CLASS.into()));
+        let missing = Value::Object(ObjectInstance::new(TEST_CLASS));
         assert!(encode_inline_value(&missing)
             .unwrap_err()
             .to_string()
