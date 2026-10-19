@@ -27,6 +27,7 @@ pub(crate) use managed_ledger::{
 };
 mod output_permit;
 mod stage;
+pub(in crate::context) use stage::HostEffectStageAuthority;
 mod workload;
 pub(crate) fn hash_serializable<T: serde::Serialize>(facts: &T) -> Digest {
     Digest::sha256_serialized(facts).expect("typed host effect facts serialize")

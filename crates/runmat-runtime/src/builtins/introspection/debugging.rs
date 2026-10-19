@@ -459,8 +459,10 @@ fn empty_value() -> Value {
 
 fn text_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
         _ => None,
     }
@@ -500,8 +502,8 @@ fn stack_struct(frame: &crate::debug_context::DebugFrameInfo, complete_names: bo
             .unwrap_or(&frame.file)
             .to_string()
     };
-    st.insert("file", Value::String(file));
-    st.insert("name", Value::String(frame.function.clone()));
+    st.insert("file", Value::string(file));
+    st.insert("name", Value::string(frame.function.clone()));
     st.insert("line", Value::Num(frame.line as f64));
     st
 }
@@ -803,8 +805,8 @@ pub(crate) fn dispatch_getcallinfo(args: Vec<Value>) -> BuiltinResult<Value> {
             file: String::new(),
             line: 0,
         });
-    info.insert("name", Value::String(current.function));
-    info.insert("file", Value::String(current.file));
+    info.insert("name", Value::string(current.function));
+    info.insert("file", Value::string(current.file));
     info.insert("line", Value::Num(current.line as f64));
     info.insert("stack", stack_value(0, false)?);
     Ok(Value::Struct(info))

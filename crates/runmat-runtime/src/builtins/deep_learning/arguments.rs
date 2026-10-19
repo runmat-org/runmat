@@ -5,9 +5,9 @@ pub(in crate::builtins) fn scalar_text(
     function: &'static str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.to_string()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].to_string()),
         other => Err(deep_learning_error(
             function,
             format!("{function}: expected text scalar, got {other:?}"),

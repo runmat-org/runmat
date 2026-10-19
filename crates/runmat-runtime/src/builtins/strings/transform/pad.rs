@@ -12,7 +12,7 @@ use runmat_builtins::{
     BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, IntValue, StringArray, Value};
+use runmat_value::{CellArray, CharArray, IntValue, StringArray, Utf8Text, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -457,15 +457,22 @@ async fn pad_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     }
 }
 
-fn pad_string(text: String, options: PadOptions) -> BuiltinResult<Value> {
+fn pad_string(text: Utf8Text, options: PadOptions) -> BuiltinResult<Value> {
     if is_missing_string(&text) {
-        return Ok(Value::String(text));
+        return Ok(Value::string(text));
     }
     let char_count = string_length(&text);
     let base_target = options.base_target(char_count);
     let target_len = element_target_length(&options, base_target, char_count);
-    let padded = apply_padding_owned(text, char_count, target_len, &options)?;
-    Ok(Value::String(padded))
+    if char_count >= target_len {
+        return Ok(Value::String(text));
+    }
+    Ok(Value::string(apply_padding_owned(
+        text.as_str(),
+        char_count,
+        target_len,
+        &options,
+    )?))
 }
 
 fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Value> {
@@ -479,18 +486,30 @@ fn pad_string_array(array: StringArray, options: PadOptions) -> BuiltinResult<Va
         }
     }
     let base_target = options.base_target(auto_len);
-    let mut padded: Vec<String> = Vec::with_capacity(data.len());
-    for text in data.into_iter() {
+    let mut padded: Vec<Utf8Text> = Vec::with_capacity(data.len());
+    let values: Vec<Utf8Text> = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(data) => data.iter().cloned().collect(),
+    };
+    for text in values {
         if is_missing_string(&text) {
             padded.push(text);
             continue;
         }
         let char_count = string_length(&text);
         let target_len = element_target_length(&options, base_target, char_count);
-        let new_text = apply_padding_owned(text, char_count, target_len, &options)?;
-        padded.push(new_text);
+        if char_count >= target_len {
+            padded.push(text);
+        } else {
+            padded.push(Utf8Text::new(apply_padding_owned(
+                text.as_str(),
+                char_count,
+                target_len,
+                &options,
+            )?));
+        }
     }
-    let result = StringArray::new(padded, shape)
+    let result = StringArray::from_texts_unbounded(padded, shape.to_vec())
         .map_err(|e| pad_error_with_message(format!("{BUILTIN_NAME}: {e}"), &PAD_ERROR_INTERNAL))?;
     Ok(Value::StringArray(result))
 }
@@ -525,7 +544,7 @@ fn pad_char_array(array: CharArray, options: PadOptions) -> BuiltinResult<Value>
     for row_text in rows_text.into_iter() {
         let char_count = string_length(&row_text);
         let target_len = element_target_length(&options, base_target, char_count);
-        let padded = apply_padding_owned(row_text, char_count, target_len, &options)?;
+        let padded = apply_padding_owned(&row_text, char_count, target_len, &options)?;
         final_cols = final_cols.max(string_length(&padded));
         padded_rows.push(padded);
     }
@@ -575,7 +594,7 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                 }
             }
             Value::StringArray(sa) if sa.data.len() == 1 => {
-                let text = sa.data.into_iter().next().unwrap_or_default();
+                let text = sa.data.first().cloned().unwrap_or_default();
                 let is_missing = is_missing_string(&text);
                 let len = if is_missing { 0 } else { string_length(&text) };
                 if !is_missing {
@@ -598,7 +617,7 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
                 auto_len = auto_len.max(len);
                 CellItem {
                     kind: CellKind::Char { rows: ca.rows },
-                    text,
+                    text: Utf8Text::new(text),
                     char_count: len,
                     is_missing: false,
                 }
@@ -613,13 +632,14 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
     let mut results: Vec<Value> = Vec::with_capacity(total);
     for item in items.into_iter() {
         if item.is_missing {
-            results.push(Value::String(item.text));
+            results.push(Value::string(item.text));
             continue;
         }
         let target_len = element_target_length(&options, base_target, item.char_count);
-        let padded = apply_padding_owned(item.text, item.char_count, target_len, &options)?;
+        let padded =
+            apply_padding_owned(item.text.as_str(), item.char_count, target_len, &options)?;
         match item.kind {
-            CellKind::String => results.push(Value::String(padded)),
+            CellKind::String => results.push(Value::string(padded)),
             CellKind::Char { rows } => {
                 let chars: Vec<char> = padded.chars().collect();
                 let cols = chars.len();
@@ -638,7 +658,7 @@ async fn pad_cell_array(cell: CellArray, options: PadOptions) -> BuiltinResult<V
 #[derive(Clone)]
 struct CellItem {
     kind: CellKind,
-    text: String,
+    text: Utf8Text,
     char_count: usize,
     is_missing: bool,
 }
@@ -785,10 +805,10 @@ fn parse_pad_char(value: &Value) -> BuiltinResult<char> {
 
 fn value_to_single_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
-                Some(sa.data[0].clone())
+                Some(sa.data[0].as_str().to_owned())
             } else {
                 None
             }
@@ -816,13 +836,13 @@ fn element_target_length(options: &PadOptions, base_target: usize, current_len: 
 }
 
 fn apply_padding_owned(
-    text: String,
+    text: &str,
     current_len: usize,
     target_len: usize,
     options: &PadOptions,
 ) -> BuiltinResult<String> {
     if current_len >= target_len {
-        return Ok(text);
+        return Ok(text.to_owned());
     }
     let delta = target_len - current_len;
     let (left_pad, right_pad) = match options.direction {
@@ -847,7 +867,7 @@ fn apply_padding_owned(
     for _ in 0..left_pad {
         result.push(options.pad_char);
     }
-    result.push_str(&text);
+    result.push_str(text);
     for _ in 0..right_pad {
         result.push(options.pad_char);
     }

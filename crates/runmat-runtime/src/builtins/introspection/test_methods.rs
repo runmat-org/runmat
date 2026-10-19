@@ -369,7 +369,7 @@ async fn overidx_read_step(
             Value::String(field),
         ) => {
             // If field exists, return it; otherwise sentinel 77
-            if let Some(v) = o.properties.get(&field) {
+            if let Some(v) = o.properties.get(field.as_str()) {
                 Ok(v.clone())
             } else {
                 Ok(Value::Num(77.0))
@@ -446,7 +446,7 @@ async fn overidx_write_step(
             crate::object::indexing::ObjectIndexKind::Member,
             Value::String(field),
         ) => {
-            o.properties.insert(field, rhs);
+            o.properties.insert(field.as_str().to_owned(), rhs);
             Ok(())
         }
         (
@@ -574,7 +574,7 @@ pub(crate) async fn overidx_saveobj(obj: Value) -> crate::BuiltinResult<Value> {
     }
     payload.insert(
         "saved_by".to_string(),
-        Value::String("OverIdx.saveobj".to_string()),
+        Value::string("OverIdx.saveobj".to_string()),
     );
     Ok(Value::Struct(payload))
 }
@@ -624,7 +624,7 @@ pub(crate) async fn overidx_loadobj(payload: Value) -> crate::BuiltinResult<Valu
     }
     object.properties.insert(
         "loaded_by".to_string(),
-        Value::String("OverIdx.loadobj".to_string()),
+        Value::string("OverIdx.loadobj".to_string()),
     );
     Ok(Value::Object(object))
 }

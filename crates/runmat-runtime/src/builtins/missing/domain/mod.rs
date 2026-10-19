@@ -22,6 +22,7 @@ mod moving;
 mod numeric;
 mod removal;
 mod standardize;
+mod text_output;
 
 use errors::{gather_error, internal_error, invalid_argument, unsupported_type};
 use metadata::MISSING_TEXT;

@@ -12,7 +12,7 @@ fn capture_free_nested_closure_round_trips_without_an_activation() {
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),
             source_role: FunctionSourceRole::Nested,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
             lexical_environment: None,
         }));
         let mut admitted_layouts = layouts();
@@ -106,7 +106,7 @@ fn admitted_nested_copies_and_anonymous_by_value_captures_round_trip() {
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),
             source_role: FunctionSourceRole::Nested,
             source_file: None,
-            captures: vec![Value::Num(11.0)],
+            captures: vec![Value::Num(11.0)].into(),
             lexical_environment: Some(environment),
         }));
         let anonymous = Value::Closure(Closure::from_data(runmat_value::ClosureData {
@@ -114,7 +114,7 @@ fn admitted_nested_copies_and_anonymous_by_value_captures_round_trip() {
             binding: Some(BoundFunctionBinding::portable(3, origin(3))),
             source_role: FunctionSourceRole::Anonymous,
             source_file: None,
-            captures: vec![Value::Num(17.0)],
+            captures: vec![Value::Num(17.0)].into(),
             lexical_environment: None,
         }));
         let graph = encode_payload_graph_in_context(

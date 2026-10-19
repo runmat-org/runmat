@@ -591,8 +591,8 @@ pub(crate) fn vector_to_value(
 
 pub(crate) fn field_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
         Value::CharArray(CharArray { data, rows: 1, .. }) => Ok(data.iter().collect()),
         other => Err(optim_error(
             "optimset",
@@ -1216,7 +1216,7 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }));
         let canonical = canonicalize_callback_handle(&raw);
         assert_eq!(
@@ -1227,7 +1227,7 @@ mod tests {
                 binding: Some(runmat_value::BoundFunctionBinding::unavailable(48)),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::Num(9.0)],
+                captures: vec![Value::Num(9.0)].into(),
             }))
         );
     }
@@ -1240,7 +1240,7 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }));
         let canonical = canonicalize_callback_handle(&raw);
         assert_eq!(canonical, raw);

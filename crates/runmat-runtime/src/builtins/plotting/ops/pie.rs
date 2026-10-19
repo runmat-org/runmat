@@ -401,7 +401,12 @@ async fn tensor_from_value(value: Value) -> crate::BuiltinResult<Tensor> {
 
 fn parse_labels(value: Value, value_len: usize) -> crate::BuiltinResult<PieLabelsArg> {
     match value {
-        Value::StringArray(arr) => Ok(PieLabelsArg::Explicit(arr.data)),
+        Value::StringArray(arr) => Ok(PieLabelsArg::Explicit(
+            arr.data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        )),
         Value::Cell(cell) => {
             let mut labels = Vec::new();
             for row in 0..cell.rows {
@@ -459,12 +464,13 @@ mod tests {
         let _ = futures::executor::block_on(pie_builtin(vec![
             Value::Tensor(vec_tensor(&[1.0, 2.0, 3.0])),
             Value::Tensor(vec_tensor(&[0.0, 1.0, 0.0])),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["A".into(), "B".into(), "C".into()],
-                shape: vec![1, 3],
-                rows: 1,
-                cols: 3,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(
+                    vec!["A".into(), "B".into(), "C".into()],
+                    vec![1, 3],
+                )
+                .unwrap(),
+            ),
         ]));
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Pie(pie) = fig.plots().next().unwrap() else {
@@ -512,12 +518,10 @@ mod tests {
         let _ = futures::executor::block_on(pie_builtin(vec![
             ax,
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["Left".into(), "Right".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["Left".into(), "Right".into()], vec![1, 2])
+                    .unwrap(),
+            ),
         ]));
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Pie(_)));
@@ -525,12 +529,9 @@ mod tests {
 
         let err = futures::executor::block_on(pie_builtin(vec![
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["Only".into()],
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["Only".into()], vec![1, 1]).unwrap(),
+            ),
         ]))
         .unwrap_err();
         assert!(err.to_string().contains("labels must match values length"));

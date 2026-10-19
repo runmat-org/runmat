@@ -383,9 +383,9 @@ pub fn scatter_complex_with_plan(
 }
 
 pub enum StringRhsView {
-    Scalar(String),
+    Scalar(runmat_value::Utf8Text),
     Tensor {
-        data: Vec<String>,
+        data: runmat_value::ExactArrayStorage<runmat_value::Utf8Text>,
         shape: Vec<usize>,
         strides: Vec<usize>,
     },
@@ -453,12 +453,17 @@ pub fn build_string_rhs_view(
 ) -> Result<StringRhsView, RuntimeError> {
     let scalar = match rhs {
         Value::String(s) => Some(s.clone()),
-        Value::CharArray(chars) => Some(chars.row_string().ok_or_else(|| {
-            mex(
-                "InvalidSliceAssignmentRhs",
-                "rhs character array must be a row vector",
-            )
-        })?),
+        Value::CharArray(chars) => Some(
+            chars
+                .row_string()
+                .ok_or_else(|| {
+                    mex(
+                        "InvalidSliceAssignmentRhs",
+                        "rhs character array must be a row vector",
+                    )
+                })?
+                .into(),
+        ),
         _ => None,
     };
     if let Some(s) = scalar {
@@ -484,15 +489,18 @@ pub fn build_string_rhs_view(
         let mut data = Vec::with_capacity(cell.data.len());
         for value in &cell.data {
             match cell_string_element(value)? {
-                CellStringElement::Text(text) => data.push(text.to_owned()),
-                CellStringElement::Chars(chars) => {
-                    data.push(chars.row_string().ok_or_else(|| {
-                        mex(
-                            "InvalidSliceAssignmentRhs",
-                            "rhs cell character arrays must be row vectors",
-                        )
-                    })?)
-                }
+                CellStringElement::Text(text) => data.push(runmat_value::Utf8Text::from(text)),
+                CellStringElement::Chars(chars) => data.push(
+                    chars
+                        .row_string()
+                        .ok_or_else(|| {
+                            mex(
+                                "InvalidSliceAssignmentRhs",
+                                "rhs cell character arrays must be row vectors",
+                            )
+                        })?
+                        .into(),
+                ),
             }
         }
         let shape =
@@ -504,7 +512,7 @@ pub fn build_string_rhs_view(
             racc *= shape[d];
         }
         return Ok(StringRhsView::Tensor {
-            data,
+            data: runmat_value::ExactArrayStorage::shared_unbounded(data),
             shape,
             strides: rstrides,
         });
@@ -530,6 +538,20 @@ pub fn scatter_string_with_plan(
     } else {
         plan.selection_lengths.clone()
     };
+    if !sa.data.is_exact() {
+        sa.data.make_unique_unbounded().map_err(|error| {
+            mex(
+                "StringSliceOwner",
+                format!("string assignment owner unavailable: {error}"),
+            )
+        })?;
+    }
+    let destination_data = sa.try_data_mut_unique().ok_or_else(|| {
+        mex(
+            "StringSliceOwner",
+            "shared exact string assignment requires a preadmitted replacement owner",
+        )
+    })?;
     loop {
         match rhs_view {
             StringRhsView::Scalar(val) => {
@@ -543,7 +565,7 @@ pub fn scatter_string_with_plan(
                     p
                 };
                 let dst = plan.indices[lin_pos] as usize;
-                sa.data[dst] = val.clone();
+                destination_data[dst] = val.clone();
             }
             StringRhsView::Tensor {
                 data,
@@ -566,7 +588,7 @@ pub fn scatter_string_with_plan(
                     p
                 };
                 let dst = plan.indices[lin_pos] as usize;
-                sa.data[dst] = data[rlin].clone();
+                destination_data[dst] = data[rlin].clone();
             }
         }
         let mut d = 0usize;
@@ -2561,7 +2583,8 @@ mod tests {
         let StringRhsView::Tensor { data, .. } = view else {
             panic!("cellstr RHS should materialize as a string tensor");
         };
-        assert_eq!(data, vec!["AvgOrders", "AvgRevenue"]);
+        assert_eq!(data[0], "AvgOrders");
+        assert_eq!(data[1], "AvgRevenue");
     }
 
     #[test]

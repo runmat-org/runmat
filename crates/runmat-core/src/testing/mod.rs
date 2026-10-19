@@ -2,6 +2,8 @@ mod attempt;
 mod discovery;
 mod executor;
 mod procedure;
+pub(crate) use procedure::function_name as test_procedure_function_name;
+pub(crate) use procedure::method_name as test_procedure_method_name;
 mod run;
 pub(crate) mod runtime_adapter;
 mod source_catalog;

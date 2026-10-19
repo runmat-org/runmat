@@ -418,14 +418,26 @@ fn restore_knnsearch_value_protecting(
             }
             Ok(restored)
         }
-        Value::Cell(cell) => {
-            let shape = cell.shape.clone();
-            let values = cell
-                .data
-                .into_iter()
-                .map(|value| restore_knnsearch_value_protecting(value, source, protected_outputs))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            CellArray::new_with_shape(values, shape)
+        Value::Cell(mut cell) => {
+            if !cell.data.is_unique() {
+                cell.data
+                    .make_unique_unbounded()
+                    .map_err(|error| distance_error(KNNSEARCH_NAME, error.to_string()))?;
+            }
+            let slots = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+                distance_error(
+                    KNNSEARCH_NAME,
+                    "shared admitted Cell output requires an admitted replacement",
+                )
+            })?;
+            for slot in slots {
+                *slot = restore_knnsearch_value_protecting(
+                    std::mem::replace(slot, Value::Num(0.0)),
+                    source,
+                    protected_outputs,
+                )?;
+            }
+            CellArray::from_shared_storage(cell.data, cell.shape)
                 .map(Value::Cell)
                 .map_err(|error| distance_error(KNNSEARCH_NAME, error))
         }

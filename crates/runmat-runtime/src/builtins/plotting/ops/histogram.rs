@@ -625,7 +625,7 @@ pub(crate) fn color_to_property_string(color: glam::Vec4) -> String {
 
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) => Some(chars.data.iter().collect()),
         _ => None,
     }

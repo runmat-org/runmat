@@ -1409,8 +1409,12 @@ fn embedding_from_object(object: &ObjectInstance, fn_name: &str) -> BuiltinResul
             ),
         ));
     }
-    let vocabulary = match object.properties.get("Vocabulary") {
-        Some(Value::StringArray(array)) => array.data.clone(),
+    let vocabulary: Vec<String> = match object.properties.get("Vocabulary") {
+        Some(Value::StringArray(array)) => array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect(),
         other => {
             return Err(embedding_error(
                 fn_name,
@@ -1614,13 +1618,16 @@ fn ensure_word_embedding_class_registered() {
         for name in ["Dimension", "Vocabulary", VECTOR_PROPERTY] {
             properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: WORD_EMBEDDING_CLASS.into(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-            events: Default::default(),
-        });
+        crate::class_registry::register_builtin_class(
+            WORD_EMBEDDING_CLASS,
+            crate::class_registry::RuntimeClass {
+                name: WORD_EMBEDDING_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+                events: Default::default(),
+            },
+        );
     });
 }
 
@@ -2700,8 +2707,8 @@ fn dense_doc2sequence_limit_error(fn_name: &str) -> crate::RuntimeError {
 
 fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array.data.iter().map(|text| text.as_str().to_owned()).collect()),
         Value::CharArray(array) if array.rows <= 1 => Ok(vec![char_row_to_string(array)]),
         Value::CharArray(array) => {
             let mut words = Vec::with_capacity(array.rows);
@@ -2718,8 +2725,8 @@ fn words_from_value(value: &Value, fn_name: &str) -> BuiltinResult<Vec<String>> 
             .data
             .iter()
             .map(|item| match item {
-                Value::String(text) => Ok(text.clone()),
-                Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+                Value::String(text) => Ok(text.as_str().to_owned()),
+                Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
                 Value::CharArray(array) if array.rows <= 1 => Ok(char_row_to_string(array)),
                 other => Err(embedding_error(
                     fn_name,

@@ -1,24 +1,20 @@
 use super::*;
 
-mod envelope;
-use super::assembly::{root_cell, root_struct, root_struct_array, SerializationPhase};
-use envelope::restore_envelope;
+use super::assembly::{
+    root_cell, root_output_list, root_restored_object_array, root_struct, root_struct_array,
+};
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-mod pending_tests;
 
 enum Step {
     Enter(Value, usize),
+    EnterRetained(runmat_value::RetainedArrayValue, usize),
     Struct(Vec<String>),
     Cell(Vec<usize>, usize),
+    OutputList(usize),
     StructArray(Vec<String>, Vec<usize>, usize),
-    Envelope {
-        class_name: String,
-        kind: String,
-        had_saveobj: bool,
-    },
+    ObjectArray(runmat_types::ClassIdentity, Vec<usize>, usize),
 }
 
 #[cfg(test)]
@@ -28,7 +24,7 @@ pub(super) async fn restore_value_after_load(value: Value) -> crate::BuiltinResu
 
 pub(super) async fn restore_value_after_load_in_context(
     value: Value,
-    runtime: Option<&crate::context::RuntimeContext>,
+    _runtime: Option<&crate::context::RuntimeContext>,
 ) -> crate::BuiltinResult<RootedValue> {
     // The canonical Value tracer is iterative, so even an over-depth input
     // can be retained safely before the first effectful restoration step.
@@ -46,18 +42,6 @@ pub(super) async fn restore_value_after_load_in_context(
                         "nested object deserialization exceeded the supported depth",
                     ));
                 }
-                let value = match into_serialized_envelope(value) {
-                    Ok((class_name, kind, had_saveobj, payload)) => {
-                        work.push(Step::Envelope {
-                            class_name,
-                            kind,
-                            had_saveobj,
-                        });
-                        work.push(Step::Enter(payload, depth + 1));
-                        continue;
-                    }
-                    Err(value) => value,
-                };
                 match value {
                     Value::Struct(structure) => {
                         let mut names = Vec::with_capacity(structure.fields.len());
@@ -93,9 +77,48 @@ pub(super) async fn restore_value_after_load_in_context(
                     }
                     Value::Cell(cell) => {
                         let count = cell.data.len();
-                        work.push(Step::Cell(cell.shape, count));
+                        work.push(Step::Cell(cell.shape.to_vec(), count));
+                        match cell.into_owned_data() {
+                            Ok(values) => work.extend(
+                                values
+                                    .into_iter()
+                                    .rev()
+                                    .map(|value| Step::Enter(value, depth + 1)),
+                            ),
+                            Err(cell) => work.extend((0..count).rev().map(|index| {
+                                Step::EnterRetained(
+                                    cell.data.retain_value_at(index).expect("shared cell child"),
+                                    depth + 1,
+                                )
+                            })),
+                        }
+                    }
+                    Value::OutputList(values) => {
+                        let count = values.len();
+                        work.push(Step::OutputList(count));
+                        match values.try_into_owned() {
+                            Ok(values) => work.extend(
+                                values
+                                    .into_iter()
+                                    .rev()
+                                    .map(|value| Step::Enter(value, depth + 1)),
+                            ),
+                            Err(values) => work.extend((0..count).rev().map(|index| {
+                                Step::EnterRetained(
+                                    values.retain_value_at(index).expect("shared output child"),
+                                    depth + 1,
+                                )
+                            })),
+                        }
+                    }
+                    Value::ObjectArray(array) if !array.is_empty() => {
+                        let count = array.len();
+                        let class_name = array.class_name().clone();
+                        let shape = array.shape().to_vec();
+                        work.push(Step::ObjectArray(class_name, shape, count));
                         work.extend(
-                            cell.data
+                            array
+                                .into_data()
                                 .into_iter()
                                 .rev()
                                 .map(|value| Step::Enter(value, depth + 1)),
@@ -104,27 +127,123 @@ pub(super) async fn restore_value_after_load_in_context(
                     other => results.push(root_value(other)?),
                 }
             }
+            Step::EnterRetained(value, depth) => {
+                if depth > MAX_SERIALIZATION_DEPTH {
+                    return Err(serialization_error(
+                        LOADOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_RECURSION,
+                        "nested object deserialization exceeded the supported depth",
+                    ));
+                }
+                match value.value() {
+                    Value::Cell(cell) => {
+                        let count = cell.data.len();
+                        work.push(Step::Cell(cell.shape.to_vec(), count));
+                        work.extend((0..count).rev().map(|index| {
+                            Step::EnterRetained(
+                                value
+                                    .project(|parent| match parent {
+                                        Value::Cell(cell) => cell.data.get(index),
+                                        _ => None,
+                                    })
+                                    .expect("retained cell child"),
+                                depth + 1,
+                            )
+                        }));
+                    }
+                    Value::OutputList(values) => {
+                        let count = values.len();
+                        work.push(Step::OutputList(count));
+                        work.extend((0..count).rev().map(|index| {
+                            Step::EnterRetained(
+                                value
+                                    .project(|parent| match parent {
+                                        Value::OutputList(values) => values.get(index),
+                                        _ => None,
+                                    })
+                                    .expect("retained output child"),
+                                depth + 1,
+                            )
+                        }));
+                    }
+                    Value::Struct(structure) => {
+                        let names: Vec<String> = structure.fields.keys().cloned().collect();
+                        work.push(Step::Struct(names.clone()));
+                        work.extend(names.into_iter().rev().map(|name| {
+                            Step::EnterRetained(
+                                value
+                                    .project(|parent| match parent {
+                                        Value::Struct(structure) => structure.fields.get(&name),
+                                        _ => None,
+                                    })
+                                    .expect("retained struct child"),
+                                depth + 1,
+                            )
+                        }));
+                    }
+                    Value::StructArray(array) => {
+                        let names: Vec<String> = array.field_names().cloned().collect();
+                        let shape = array.shape().to_vec();
+                        let field_len = shape.iter().product::<usize>();
+                        let count = names.len() * field_len;
+                        work.push(Step::StructArray(names.clone(), shape, count));
+                        for name in names.into_iter().rev() {
+                            for index in (0..field_len).rev() {
+                                work.push(Step::EnterRetained(
+                                    value
+                                        .project(|parent| match parent {
+                                            Value::StructArray(array) => array
+                                                .field_values(&name)
+                                                .and_then(|column| column.get(index)),
+                                            _ => None,
+                                        })
+                                        .expect("retained struct-array child"),
+                                    depth + 1,
+                                ));
+                            }
+                        }
+                    }
+                    Value::ObjectArray(array) if !array.is_empty() => {
+                        let count = array.len();
+                        work.push(Step::ObjectArray(
+                            array.class_name().clone(),
+                            array.shape().to_vec(),
+                            count,
+                        ));
+                        work.extend((0..count).rev().map(|index| {
+                            Step::EnterRetained(
+                                value
+                                    .project(|parent| match parent {
+                                        Value::ObjectArray(array) => array.get_linear(index),
+                                        _ => None,
+                                    })
+                                    .expect("retained object-array child"),
+                                depth + 1,
+                            )
+                        }));
+                    }
+                    _ => results.push(root_value(value.value().clone())?),
+                }
+            }
             Step::Struct(names) => {
                 let restored = root_struct(names, &mut results)?;
                 results.push(restored);
             }
             Step::Cell(shape, count) => {
-                let restored = root_cell(shape, count, &mut results, SerializationPhase::Load)?;
+                let restored = root_cell(shape, count, &mut results)?;
+                results.push(restored);
+            }
+            Step::OutputList(count) => {
+                let restored = root_output_list(count, &mut results)?;
                 results.push(restored);
             }
             Step::StructArray(names, shape, count) => {
-                let restored =
-                    root_struct_array(names, shape, count, &mut results, SerializationPhase::Load)?;
+                let restored = root_struct_array(names, shape, count, &mut results)?;
                 results.push(restored);
             }
-            Step::Envelope {
-                class_name,
-                kind,
-                had_saveobj,
-            } => {
-                let payload = results.pop().expect("restored envelope payload");
-                results
-                    .push(restore_envelope(payload, class_name, kind, had_saveobj, runtime).await?);
+            Step::ObjectArray(class_name, shape, count) => {
+                let restored = root_restored_object_array(class_name, shape, count, &mut results)?;
+                results.push(restored);
             }
         }
     }

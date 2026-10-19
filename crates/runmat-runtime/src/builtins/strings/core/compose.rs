@@ -143,8 +143,8 @@ fn string_array_to_cellstr(formatted: StringArray) -> BuiltinResult<Value> {
     let cols = formatted.shape.get(1).copied().unwrap_or(1);
     let values = formatted
         .data
-        .into_iter()
-        .map(|text| Value::CharArray(CharArray::new_row(&text)))
+        .iter()
+        .map(|text| Value::CharArray(CharArray::new_row(text.as_str())))
         .collect();
     CellArray::new(values, rows, cols)
         .map(Value::Cell)
@@ -161,7 +161,8 @@ fn format_spec_data_to_string_array(spec: FormatSpecData) -> BuiltinResult<Strin
     } else {
         spec.shape
     };
-    StringArray::new(spec.specs, shape).map_err(|_| compose_error(&COMPOSE_ERROR_INTERNAL))
+    StringArray::from_shared_storage(spec.specs, runmat_value::SharedShape::new_unmanaged(shape))
+        .map_err(|_| compose_error(&COMPOSE_ERROR_INTERNAL))
 }
 
 #[cfg(test)]

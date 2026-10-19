@@ -14,7 +14,7 @@ fn test_value_conversions() {
     let int_val = Value::Int(runmat_value::IntValue::I32(42));
     let num_val = Value::Num(3.15);
     let bool_val = Value::Bool(true);
-    let str_val = Value::String("hello".to_string());
+    let str_val = Value::string("hello".to_string());
 
     // Test From implementations
     assert_eq!(Value::from(42), int_val);
@@ -64,7 +64,7 @@ fn test_cell_arrays() {
         CellArray::new(
             vec![
                 Value::Int(runmat_value::IntValue::I32(1)),
-                Value::String("test".to_string()),
+                Value::string("test".to_string()),
                 Value::Bool(false),
             ],
             1,
@@ -79,7 +79,7 @@ fn test_cell_arrays() {
             &contents.data[0],
             &Value::Int(runmat_value::IntValue::I32(1))
         );
-        assert_eq!(&contents.data[1], &Value::String("test".to_string()));
+        assert_eq!(&contents.data[1], &Value::string("test".to_string()));
         assert_eq!(&contents.data[2], &Value::Bool(false));
     } else {
         panic!("Expected Cell value");

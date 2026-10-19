@@ -131,6 +131,7 @@ pub(super) struct DecodeMachine<'a> {
     values: Vec<PartialValue>,
     source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
     frame_sources: Option<&'a dyn super::InlineFrameSourceAuthority>,
+    runtime: Option<&'a crate::context::RuntimeContext>,
 }
 
 impl<'a> DecodeMachine<'a> {
@@ -149,6 +150,17 @@ impl<'a> DecodeMachine<'a> {
         Self::new_with_frame_sources(payload, path, source_resolver, None)
     }
 
+    pub(super) fn new_with_runtime(
+        payload: &'a ValuePayload,
+        path: String,
+        source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
+        runtime: Option<&'a crate::context::RuntimeContext>,
+    ) -> Self {
+        let mut machine = Self::new(payload, path, source_resolver);
+        machine.runtime = runtime;
+        machine
+    }
+
     pub(super) fn new_with_frame_sources(
         payload: &'a ValuePayload,
         path: String,
@@ -160,11 +172,16 @@ impl<'a> DecodeMachine<'a> {
             values: Vec::new(),
             source_resolver,
             frame_sources,
+            runtime: None,
         }
     }
 
     pub(super) fn frame_sources(&self) -> Option<&'a dyn super::InlineFrameSourceAuthority> {
         self.frame_sources
+    }
+
+    pub(super) fn runtime(&self) -> Option<&'a crate::context::RuntimeContext> {
+        self.runtime
     }
 
     pub(super) fn source_resolver(
@@ -259,6 +276,7 @@ mod tests {
                 values: Vec::new(),
                 source_resolver: None,
                 frame_sources: None,
+                runtime: None,
             };
             machine.push_aggregate(cell, children);
             let DecodeProgress::Complete { .. } = machine

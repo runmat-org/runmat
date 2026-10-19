@@ -32,7 +32,7 @@ fn string_diagnostic(value: Value) -> BuiltinResult<Value> {
     crate::testing::ensure_testing_classes();
     let message = match value {
         Value::String(message) => message,
-        Value::CharArray(chars) if chars.rows <= 1 => chars.data.iter().collect(),
+        Value::CharArray(chars) if chars.rows <= 1 => chars.data.iter().collect::<String>().into(),
         _ => {
             return Err(
                 crate::build_runtime_error("StringDiagnostic: expected scalar text")
@@ -45,7 +45,7 @@ fn string_diagnostic(value: Value) -> BuiltinResult<Value> {
     let mut object = ObjectInstance::new(runmat_types::standard::UNIT_TEST_STRING_DIAGNOSTIC);
     object
         .properties
-        .insert("Identifier".into(), Value::String(String::new()));
+        .insert("Identifier".into(), Value::string(String::new()));
     object
         .properties
         .insert("Message".into(), Value::String(message.clone()));
@@ -157,7 +157,7 @@ fn named_verbosity(level: &str) -> BuiltinResult<u8> {
 
 fn diagnostic_message(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(message) => Ok(message.clone()),
+        Value::String(message) => Ok(message.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
         Value::Object(object)
             if crate::class_registry::is_class_or_subclass(
@@ -169,7 +169,7 @@ fn diagnostic_message(value: &Value) -> BuiltinResult<String> {
                 .properties
                 .get("Message")
                 .and_then(|value| match value {
-                    Value::String(message) => Some(message.clone()),
+                    Value::String(message) => Some(message.as_str().to_owned()),
                     _ => None,
                 })
                 .ok_or_else(|| testing_diagnostic_error("log: diagnostic has no text Message"))

@@ -93,9 +93,11 @@ pub(super) async fn anymissing_builtin(value: Value) -> BuiltinResult<Value> {
 #[runtime_builtin(
     name = "standardizeMissing",
     binding_variant = "default",
-    builtin_path = "crate::builtins::missing"
+    builtin_path = "crate::builtins::missing",
+    context = true
 )]
 pub(super) async fn standardize_missing_builtin(
+    runtime: Option<RuntimeContext>,
     value: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
@@ -121,7 +123,7 @@ pub(super) async fn standardize_missing_builtin(
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| gather_error("standardizeMissing", "input", err))?;
-    standardize_missing_value(value, &indicators)
+    standardize_missing_value(runtime.as_ref(), value, &indicators)
 }
 
 #[runtime_builtin(
@@ -178,9 +180,14 @@ pub(super) async fn rmmissing_builtin(value: Value, rest: Vec<Value>) -> Builtin
 #[runtime_builtin(
     name = "fillmissing",
     binding_variant = "default",
-    builtin_path = "crate::builtins::missing"
+    builtin_path = "crate::builtins::missing",
+    context = true
 )]
-pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+pub(super) async fn fillmissing_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> BuiltinResult<Value> {
     ensure_output_arity("fillmissing", 2)?;
     if is_real_typed_integer_value(&value) {
         crate::compatibility::ensure_builtin_extension_enabled(
@@ -193,12 +200,15 @@ pub(super) async fn fillmissing_builtin(value: Value, rest: Vec<Value>) -> Built
             "fillmissing",
         )?;
     }
-    let options = FillOptions::parse(&rest)?;
+    let options = FillOptions::parse(rest)?;
     options.preflight(&value)?;
     let value = gather_if_needed_async(&value)
         .await
         .map_err(|err| gather_error("fillmissing", "input", err))?;
-    let (result, mask) = fill_missing_value(value, &options)?;
+    let (result, mask) = fill_missing_value(runtime.as_ref(), value, &options)?;
+    if matches!(result, Value::StringArray(_)) {
+        return super::text_output::fill_outputs(runtime.as_ref(), result, mask);
+    }
     match crate::output_count::current_output_count() {
         Some(0) => Ok(Value::output_list(Vec::new())),
         Some(1) => Ok(Value::output_list(vec![result])),

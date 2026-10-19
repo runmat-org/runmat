@@ -167,7 +167,7 @@ pub(super) fn option_token(value: &Value) -> BuiltinResult<Option<String>> {
 
 async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.clone()]),
+        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
         Value::CharArray(ca) => {
             let rows = char_array_rows_as_strings(ca);
             if rows.is_empty() && ca.rows > 0 {
@@ -181,7 +181,7 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
         Value::StringArray(sa) => {
             let mut names = Vec::with_capacity(sa.data.len());
             for s in &sa.data {
-                names.push(s.clone());
+                names.push(s.as_str().to_owned());
             }
             Ok(names)
         }
@@ -215,9 +215,9 @@ async fn extract_names(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
         _ => None,
     }
 }

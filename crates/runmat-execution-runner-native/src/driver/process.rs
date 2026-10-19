@@ -27,6 +27,9 @@ pub(super) enum GraphProcessQuarantine {
         scratch_path: PathBuf,
         reason: String,
         retired: bool,
+        /// A preserved RetirementBoundChild has already surrendered numeric
+        /// group-signal authority; retain it only for durable quarantine.
+        retryable: bool,
     },
     /// Windows may fail JobObject assignment after a runnable child spawned.
     /// No root-only kill can certify its descendants, so retain the private
@@ -74,6 +77,16 @@ impl AttemptChild {
         }
     }
 
+    /// Observe an owned leader before reaping it, then retire its entire
+    /// process group while that PID is still pinned. Cancellation leaves the
+    /// ProcessHost phase ready for a signal-free retirement retry.
+    async fn wait_and_retire_tree(&mut self) -> ProcessHostResult<ProcessExit> {
+        match self {
+            Self::Direct(child) => child.wait_and_retire_tree().await,
+            Self::Graph(child) => child.wait_and_retire_tree().await,
+        }
+    }
+
     async fn terminate_tree(&mut self) -> ProcessHostResult<()> {
         match self {
             Self::Direct(child) => child.terminate_tree().await,
@@ -99,8 +112,16 @@ pub(super) fn retry_unverified_quarantine(entries: &mut Vec<GraphProcessQuaranti
                     return;
                 };
                 for entry in entries.iter_mut() {
-                    if let GraphProcessQuarantine::KnownChild { child, retired, .. } = entry {
-                        *retired = runtime.block_on(child.terminate_tree()).is_ok();
+                    if let GraphProcessQuarantine::KnownChild {
+                        child,
+                        retired,
+                        retryable,
+                        ..
+                    } = entry
+                    {
+                        if *retryable {
+                            *retired = runtime.block_on(child.terminate_tree()).is_ok();
+                        }
                     }
                 }
             });
@@ -376,6 +397,7 @@ async fn run_process(
         None => AttemptChild::Direct(child),
     };
     let mut child_retired = false;
+    let mut child_preserved_reason = None;
     let outcome = async {
     if completion.is_cancelled() {
         if !matches!(&request, WorkerLaunchRequest::StagedGraph(_)) {
@@ -472,9 +494,9 @@ async fn run_process(
                 }
                 WorkerProcessMessage::Completed { response } => break response,
                 WorkerProcessMessage::InfrastructureFailure { message } => {
-                    // A root exit does not retire foreign-adapter descendants;
-                    // the outer Graph error path still closes the group.
-                    let _ = tokio::time::timeout(Duration::from_secs(5), child.wait()).await;
+                    // Do not reap the owned Graph leader before the outer
+                    // error path retires its group. A completion wait here
+                    // would release the PID while descendants remain.
                     return Err(TransferFailure::Infrastructure(message));
                 }
                 WorkerProcessMessage::RetirementUnverified { message } => {
@@ -492,22 +514,26 @@ async fn run_process(
         // the terminal frame so that read observes EOF before child wait.
         // No cancellation or collective command is legal after completion.
         drop(writer);
-        if let Ok(Ok(_)) = tokio::time::timeout(Duration::from_secs(5), child.wait()).await {
-            // A completed root is not proof that its foreign-adapter children
-            // have retired. Close the entire process group before publishing
-            // a Graph terminal response or releasing its private roots.
-            child.terminate_tree().await.map_err(|error| {
-                TransferFailure::RetirementUnverified(format!(
+        match tokio::time::timeout(Duration::from_secs(5), child.wait_and_retire_tree()).await {
+            Ok(Ok(_)) => child_retired = true,
+            Ok(Err(error)) => {
+                let message = format!(
                     "Graph worker replied, but its process tree could not be retired: {error}"
-                ))
-            })?;
-            child_retired = true;
-        } else {
-            return Err(if completion.is_cancelled() {
-                TransferFailure::Cancelled
-            } else {
-                TransferFailure::WorkerLost("Graph worker did not retire after its response".into())
-            });
+                );
+                // RetirementBoundChild already persisted its exact lease and
+                // forbids a second numeric group signal after this error.
+                child_preserved_reason = Some(message.clone());
+                return Err(TransferFailure::RetirementUnverified(message));
+            }
+            Err(_) => {
+                return Err(if completion.is_cancelled() {
+                    TransferFailure::Cancelled
+                } else {
+                    TransferFailure::WorkerLost(
+                        "Graph worker did not retire after its response".into(),
+                    )
+                });
+            }
         }
     } else {
         let _ = child.wait().await;
@@ -556,6 +582,24 @@ async fn run_process(
     }
     .await;
     if matches!(&request, WorkerLaunchRequest::StagedGraph(_)) && !child_retired {
+        if let Some(reason) = child_preserved_reason {
+            let AttemptChild::Graph(child) = child else {
+                unreachable!("a staged Graph worker owns a retirement-bound child")
+            };
+            driver
+                .graph_quarantine
+                .lock()
+                .expect("Graph quarantine lock poisoned")
+                .push(GraphProcessQuarantine::KnownChild {
+                    child: Box::new(child),
+                    scratch_path: graph_scratch_path
+                        .expect("staged Graph has private attempt scratch"),
+                    reason,
+                    retired: false,
+                    retryable: false,
+                });
+            return outcome;
+        }
         let mut retirement_error = None;
         for _ in 0..2 {
             match child.terminate_tree().await {
@@ -583,6 +627,7 @@ async fn run_process(
                         .expect("staged Graph has private attempt scratch"),
                     reason: message.clone(),
                     retired: false,
+                    retryable: true,
                 });
             return Err(TransferFailure::RetirementUnverified(message));
         }

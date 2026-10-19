@@ -64,7 +64,7 @@ impl WritableData {
             }),
             Value::StringArray(array) => Ok(Self::Strings {
                 data: encode_strings(builtin, &array.data)?,
-                shape: array.shape,
+                shape: array.shape.to_vec(),
             }),
             Value::CharArray(chars) => Ok(Self::Strings {
                 data: encode_strings(builtin, &char_rows(&chars))?,

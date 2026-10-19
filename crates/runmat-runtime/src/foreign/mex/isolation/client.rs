@@ -17,7 +17,6 @@ use runmat_process_host::ipc::{
 };
 use runmat_process_host::shared_memory::SharedSnapshotStore;
 use runmat_process_host::{ChildProcess, HiddenMode, HostCommand, ProcessGroupPlacement};
-use runmat_value::Value;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use super::{
@@ -243,7 +242,7 @@ impl IsolatedMexClient {
 
     pub async fn invoke(
         &mut self,
-        arguments: &[Value],
+        arguments: &crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         api: Option<MexApi>,
         tier: MexBinaryTier,
@@ -256,7 +255,7 @@ impl IsolatedMexClient {
         self.settle_pending().await?;
         let request_id = self.take_request_id()?;
         let mut transferred_arguments = Vec::with_capacity(arguments.len());
-        for value in arguments {
+        for value in arguments.iter() {
             let host_value = crate::gather_if_needed_async(value)
                 .await
                 .map_err(|error| wire_error("RunMat:MEX:ValueGather", error.to_string(), None))?;

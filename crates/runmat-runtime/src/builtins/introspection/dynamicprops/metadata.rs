@@ -73,9 +73,9 @@ pub(super) fn empty_default_value() -> Value {
 
 pub(super) fn metadata_string(value: &Value, field: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         _ => Err(dynamic_error(
             DYNAMIC_PROPERTY_CLASS,
             &DYNAMIC_ERROR_UNSUPPORTED_METADATA,
@@ -124,7 +124,7 @@ pub(super) fn access_value(access: &MemberAccess) -> Value {
         MemberAccess::Private => "private",
         MemberAccess::Protected => "protected",
     };
-    Value::String(text.to_string())
+    Value::string(text.to_string())
 }
 
 pub(super) fn dynamic_def_to_metadata_object(
@@ -135,7 +135,7 @@ pub(super) fn dynamic_def_to_metadata_object(
     let mut object = ObjectInstance::new(class_name);
     object
         .properties
-        .insert("Name".to_string(), Value::String(def.name.clone()));
+        .insert("Name".to_string(), Value::string(def.name.clone()));
     object.properties.insert(
         "DefiningClass".to_string(),
         Value::ClassRef(def.defining_class.clone()),
@@ -169,7 +169,7 @@ pub(super) fn dynamic_def_to_metadata_object(
         .insert("GetObservable".to_string(), Value::Bool(def.get_observable));
     object.properties.insert(
         "Description".to_string(),
-        Value::String(def.description.clone()),
+        Value::string(def.description.clone()),
     );
     object
         .properties
@@ -441,7 +441,7 @@ pub fn object_dynamic_property_names(obj: &ObjectInstance) -> Vec<String> {
 
 pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
     let mut fields = StructValue::new();
-    fields.insert("Name", Value::String(def.name.clone()));
+    fields.insert("Name", Value::string(def.name.clone()));
     fields.insert("DefiningClass", Value::ClassRef(def.defining_class.clone()));
     fields.insert("GetAccess", access_value(&def.get_access));
     fields.insert("SetAccess", access_value(&def.set_access));
@@ -452,6 +452,6 @@ pub fn dynamic_property_metadata_struct(def: &DynamicPropertyDef) -> Value {
     fields.insert("AbortSet", Value::Bool(def.abort_set));
     fields.insert("SetObservable", Value::Bool(def.set_observable));
     fields.insert("GetObservable", Value::Bool(def.get_observable));
-    fields.insert("Description", Value::String(def.description.clone()));
+    fields.insert("Description", Value::string(def.description.clone()));
     Value::Struct(fields)
 }

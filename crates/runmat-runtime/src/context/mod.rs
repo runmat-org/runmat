@@ -9,6 +9,7 @@ mod cancellation_context;
 pub(crate) use cancellation_context::RuntimeCancellationContext;
 mod cleanup_lifecycle;
 mod callable_artifacts;
+mod current_class_product;
 mod graphics_presentation;
 #[cfg(all(feature = "gui", not(target_arch = "wasm32")))]
 mod native_graphics;
@@ -77,6 +78,7 @@ pub use callable_artifacts::{
 pub use capability::{RuntimeCapability, RuntimeCapabilityError};
 pub use catch::{ActiveCatchFuture, ActiveCatchGuard, UnboxedActiveCatchFuture};
 pub use cleanup_lifecycle::RuntimeLifecycleHost;
+pub use current_class_product::{CurrentClassProductResolution, CurrentClassProductResolver};
 pub use graphics_callbacks::{
     GraphicsBoundCallbackResponder, GraphicsCallbackDisposition, GraphicsCallbackDriveError,
     GraphicsCallbackHandler, GraphicsCallbackHostEvent, GraphicsCallbackHostFailure,
@@ -136,7 +138,8 @@ pub use runtime::{
     RuntimeLanguageMode, RuntimeLanguagePolicy, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 pub use scope::{
-    ContextFuture, PreparedRuntimeFutureScope, PreparedRuntimeScope, RuntimeContextGuard,
+    ContextFuture, DeferredRuntimeFuture, PreparedRuntimeFutureScope, PreparedRuntimeScope,
+    RuntimeContextGuard,
 };
 pub(crate) use services::complete_process_output_requires_evidence;
 #[cfg(test)]

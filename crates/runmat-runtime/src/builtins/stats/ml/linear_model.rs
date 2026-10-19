@@ -261,7 +261,7 @@ fn ensure_fitlm_integer_extensions(
                         FITLM_NAME,
                     )?;
                 }
-                weights_name = scalar_text(value);
+                weights_name = scalar_text(value).map(|text| text.into_owned());
             }
             FitlmOption::Exclude if is_typed_integer_value(value) => {
                 crate::compatibility::ensure_builtin_extension_enabled(
@@ -269,7 +269,9 @@ fn ensure_fitlm_integer_extensions(
                     FITLM_NAME,
                 )?;
             }
-            FitlmOption::ResponseVar => response_name = scalar_text(value),
+            FitlmOption::ResponseVar => {
+                response_name = scalar_text(value).map(|text| text.into_owned())
+            }
             FitlmOption::PredictorVars => {
                 predictor_names = text_list(value, "PredictorVars").ok();
             }
@@ -300,7 +302,7 @@ fn ensure_fitlm_integer_extensions(
                 } else if is_known_model_spec(text) {
                     None
                 } else {
-                    Some(text.clone())
+                    Some(text.as_ref().to_owned())
                 }
             });
         }

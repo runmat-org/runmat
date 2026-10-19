@@ -791,7 +791,7 @@ fn ngrams_from_bag(object: &ObjectInstance) -> BuiltinResult<Vec<Vec<String>>> {
     for row in 0..array.rows {
         let mut ngram = Vec::new();
         for col in 0..array.cols {
-            let word = array.data[row + col * array.rows].clone();
+            let word = array.data[row + col * array.rows].as_str().to_owned();
             if !word.is_empty() && !is_missing_string(&word) {
                 ngram.push(word);
             }

@@ -428,7 +428,7 @@ async fn cell_from_rows(
     let mut values = Vec::with_capacity(row_count * col_count);
     for row in rows {
         for col in 0..col_count {
-            values.push(Value::String(row.get(col).cloned().unwrap_or_default()));
+            values.push(Value::string(row.get(col).cloned().unwrap_or_default()));
         }
         cooperation.completed(col_count).await?;
     }
@@ -443,7 +443,7 @@ async fn cell_from_row(
 ) -> BuiltinResult<Value> {
     let mut entries = Vec::with_capacity(values.len());
     for value in values {
-        entries.push(Value::String(value.clone()));
+        entries.push(Value::string(value.clone()));
         cooperation.completed(value.len()).await?;
     }
     CellArray::new(entries, 1, values.len())
@@ -457,7 +457,7 @@ async fn cell_from_col(
 ) -> BuiltinResult<Value> {
     let mut entries = Vec::with_capacity(values.len());
     for value in values {
-        entries.push(Value::String(value.clone()));
+        entries.push(Value::string(value.clone()));
         cooperation.completed(value.len()).await?;
     }
     CellArray::new(entries, values.len(), 1)

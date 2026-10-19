@@ -17,7 +17,7 @@ use runmat_builtins::{
     BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
 };
 use runmat_macros::runtime_builtin;
-use runmat_value::{CellArray, CharArray, StringArray, Value};
+use runmat_value::{CellArray, CharArray, StringArray, Utf8Text, Value};
 
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
@@ -842,7 +842,7 @@ impl SplitOptions {
 }
 
 struct TextMatrix {
-    data: Vec<String>,
+    data: Vec<Utf8Text>,
     rows: usize,
     cols: usize,
 }
@@ -855,11 +855,17 @@ impl TextMatrix {
                 rows: 1,
                 cols: 1,
             }),
-            Value::StringArray(array) => Ok(Self {
-                data: array.data,
-                rows: array.rows,
-                cols: array.cols,
-            }),
+            Value::StringArray(array) => {
+                let data = match array.data.try_into_owned() {
+                    Ok(values) => values.into_iter().collect(),
+                    Err(data) => data.iter().cloned().collect(),
+                };
+                Ok(Self {
+                    data,
+                    rows: array.rows,
+                    cols: array.cols,
+                })
+            }
             Value::CharArray(array) => Self::from_char_array(array),
             Value::Cell(cell) => Self::from_cell_array(cell),
             _ => Err(split_error(&SPLIT_ERROR_INVALID_INPUT)),
@@ -879,7 +885,7 @@ impl TextMatrix {
         }
         let mut strings = Vec::with_capacity(rows);
         for row in 0..rows {
-            strings.push(char_row_to_string_slice(&data, cols, row));
+            strings.push(char_row_to_string_slice(&data, cols, row).into());
         }
         Ok(Self {
             data: strings,
@@ -899,7 +905,8 @@ impl TextMatrix {
                 let value_ref: &Value = &data[idx];
                 strings.push(
                     cell_element_to_string(value_ref)
-                        .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?,
+                        .ok_or_else(|| split_error(&SPLIT_ERROR_CELL_ELEMENT))?
+                        .into(),
                 );
             }
         }
@@ -1262,8 +1269,12 @@ fn advance_whitespace(text: &str, mut start: usize) -> usize {
 
 fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(array) => {
             if array.rows == 0 {
                 return Ok(Vec::new());
@@ -1290,8 +1301,10 @@ fn extract_delimiters(value: &Value) -> BuiltinResult<Vec<String>> {
 
 fn cell_element_to_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
@@ -1305,8 +1318,10 @@ fn cell_element_to_string(value: &Value) -> Option<String> {
 
 fn value_to_scalar_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
@@ -1408,7 +1423,7 @@ fn builtin_error_with_descriptor(
     builder.build()
 }
 
-fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, String)> {
+fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, Utf8Text)> {
     match value {
         Value::String(text) => Ok((StrsplitInputKind::String, text)),
         Value::StringArray(array) if array.data.len() == 1 => {
@@ -1416,11 +1431,11 @@ fn extract_strsplit_subject(value: Value) -> BuiltinResult<(StrsplitInputKind, S
         }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
-                Ok((StrsplitInputKind::Char, String::new()))
+                Ok((StrsplitInputKind::Char, String::new().into()))
             } else {
                 Ok((
                     StrsplitInputKind::Char,
-                    char_row_to_string_slice(&array.data, array.cols, 0),
+                    char_row_to_string_slice(&array.data, array.cols, 0).into(),
                 ))
             }
         }
@@ -1493,7 +1508,7 @@ fn make_strsplit_output(tokens: Vec<String>, kind: StrsplitInputKind) -> Builtin
             Ok(Value::StringArray(array))
         }
         StrsplitInputKind::Char => {
-            let values: Vec<Value> = tokens.into_iter().map(Value::String).collect();
+            let values: Vec<Value> = tokens.into_iter().map(Value::string).collect();
             let len = values.len();
             make_cell(values, 1, len).map_err(|err| {
                 strsplit_error_with_message(format!("strsplit: {err}"), &STRSPLIT_ERROR_INTERNAL)

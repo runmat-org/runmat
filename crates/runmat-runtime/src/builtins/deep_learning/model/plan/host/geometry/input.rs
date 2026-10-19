@@ -55,7 +55,7 @@ pub(super) fn metadata<'a>(
     let format = match input {
         Value::Object(object) if object.class_name.is(DLARRAY_CLASS) => {
             match object.properties.get("Format") {
-                Some(Value::String(value)) => value.clone(),
+                Some(Value::String(value)) => value.to_string(),
                 None => String::new(),
                 _ => return Err(fail(function, "dlarray Format must be text")),
             }

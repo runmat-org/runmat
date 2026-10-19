@@ -22,7 +22,7 @@ fn functiontests_builtin(handles: Value) -> BuiltinResult<Value> {
 fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
     let mut fixtures = HashMap::<String, Value>::new();
     let mut tests = Vec::<(String, Value)>::new();
-    for handle in handles.data {
+    let mut classify = |handle: Value| -> BuiltinResult<()> {
         let Some(name) = handle_name(&handle) else {
             return Err(functiontests_error(
                 "functiontests: every input element must be a named function handle",
@@ -34,6 +34,19 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
             }
             name_lower if name_lower.starts_with("test") => tests.push((name, handle)),
             _ => {}
+        }
+        Ok(())
+    };
+    match handles.data.try_into_owned() {
+        Ok(owned) => {
+            for handle in owned {
+                classify(handle)?;
+            }
+        }
+        Err(shared) => {
+            for handle in shared.iter() {
+                classify(clone_named_callable(handle)?)?;
+            }
         }
     }
 
@@ -64,17 +77,17 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
 
     let values = tests
         .into_iter()
-        .map(|(name, handle)| {
+        .map(|(name, handle)| -> BuiltinResult<Value> {
             let mut object = ObjectInstance::new(crate::testing::TEST_SUITE_CLASS);
             object
                 .properties
-                .insert("Name".into(), Value::String(format!("{suite_name}/{name}")));
+                .insert("Name".into(), Value::string(format!("{suite_name}/{name}")));
             object
                 .properties
-                .insert("ProcedureName".into(), Value::String(name));
+                .insert("ProcedureName".into(), Value::string(name));
             object
                 .properties
-                .insert("TestFile".into(), Value::String(source_path.clone()));
+                .insert("TestFile".into(), Value::string(source_path.clone()));
             object.properties.insert(
                 "Tags".into(),
                 Value::StringArray(
@@ -86,15 +99,29 @@ fn build_function_suite(handles: CellArray) -> BuiltinResult<Value> {
                 .properties
                 .insert("__runmat_procedure".into(), handle);
             for (fixture_name, fixture) in &fixtures {
-                object
-                    .properties
-                    .insert(format!("__runmat_fixture_{fixture_name}"), fixture.clone());
+                object.properties.insert(
+                    format!("__runmat_fixture_{fixture_name}"),
+                    clone_named_callable(fixture)?,
+                );
             }
-            Value::Object(object)
+            Ok(Value::Object(object))
         })
-        .collect::<Vec<_>>();
+        .collect::<BuiltinResult<Vec<_>>>()?;
     crate::testing::object_array_or_scalar(crate::testing::TEST_SUITE_CLASS, values)
         .map_err(functiontests_error)
+}
+
+fn clone_named_callable(handle: &Value) -> BuiltinResult<Value> {
+    match handle {
+        Value::FunctionHandle(value) => Ok(Value::FunctionHandle(value.clone())),
+        Value::ExternalFunctionHandle(value) => Ok(Value::ExternalFunctionHandle(value.clone())),
+        Value::MethodFunctionHandle(value) => Ok(Value::MethodFunctionHandle(value.clone())),
+        Value::BoundFunctionHandle(value) => Ok(Value::BoundFunctionHandle(value.clone())),
+        Value::Closure(value) => Ok(Value::Closure(value.clone())),
+        _ => Err(functiontests_error(
+            "functiontests: every input element must be a named function handle",
+        )),
+    }
 }
 
 fn handle_name(handle: &Value) -> Option<String> {

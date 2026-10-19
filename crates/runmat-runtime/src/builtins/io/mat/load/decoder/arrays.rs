@@ -32,6 +32,11 @@ pub(super) fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<Parse
         .ok_or_else(|| load_error("load: unsupported MATLAB class"))?;
     let is_logical = (flags0 & FLAG_LOGICAL) != 0;
     let has_imag = (flags0 & FLAG_COMPLEX) != 0;
+    if class == MatClass::Object && (is_logical || has_imag) {
+        return Err(load_error(
+            "load: object MAT arrays cannot carry logical or complex flags",
+        ));
+    }
     if is_logical && class != MatClass::Sparse {
         class = MatClass::Logical;
     }
@@ -95,6 +100,7 @@ pub(super) fn parse_matrix(buffer: &[u8], endian: Endian) -> BuiltinResult<Parse
         MatClass::Char => parse_char_array(&mut cursor, dims, endian)?,
         MatClass::Cell => parse_cell_array(&mut cursor, dims, endian)?,
         MatClass::Struct => parse_struct(&mut cursor, dims, endian)?,
+        MatClass::Object => parse_object(&mut cursor, dims, endian)?,
         MatClass::Sparse => parse_sparse_array(&mut cursor, dims, has_imag, is_logical, endian)?,
     };
 
@@ -331,7 +337,51 @@ fn parse_struct(
     dims: Vec<usize>,
     endian: Endian,
 ) -> BuiltinResult<MatArray> {
-    let element_count = shape_elements(&dims)?;
+    let (field_names, field_values) = parse_fields(cursor, &dims, endian)?;
+    Ok(MatArray {
+        class: MatClass::Struct,
+        dims,
+        data: MatData::Struct {
+            field_names,
+            field_values,
+        },
+    })
+}
+
+fn parse_object(
+    cursor: &mut Cursor<&[u8]>,
+    dims: Vec<usize>,
+    endian: Endian,
+) -> BuiltinResult<MatArray> {
+    let class = read_tagged(cursor, false, endian)?
+        .ok_or_else(|| load_error("load: object missing class name"))?;
+    if !matches!(class.data_type, MI_INT8 | MI_UINT8) {
+        return Err(load_error(
+            "load: object class name must use MI_INT8/MI_UINT8",
+        ));
+    }
+    let class_name = bytes_to_string(&class.data);
+    if class_name.is_empty() {
+        return Err(load_error("load: object class name is empty"));
+    }
+    let (field_names, field_values) = parse_fields(cursor, &dims, endian)?;
+    Ok(MatArray {
+        class: MatClass::Object,
+        dims,
+        data: MatData::Object {
+            class_name,
+            field_names,
+            field_values,
+        },
+    })
+}
+
+fn parse_fields(
+    cursor: &mut Cursor<&[u8]>,
+    dims: &[usize],
+    endian: Endian,
+) -> BuiltinResult<(Vec<String>, Vec<MatArray>)> {
+    let element_count = shape_elements(dims)?;
     let len_elem = read_tagged(cursor, false, endian)?
         .ok_or_else(|| load_error("load: struct missing maximum field length specifier"))?;
     if len_elem.data_type != MI_INT32 || len_elem.data.len() != 4 {
@@ -385,14 +435,7 @@ fn parse_struct(
         field_values.push(parsed.array);
     }
 
-    Ok(MatArray {
-        class: MatClass::Struct,
-        dims,
-        data: MatData::Struct {
-            field_names,
-            field_values,
-        },
-    })
+    Ok((field_names, field_values))
 }
 
 fn shape_elements(dims: &[usize]) -> BuiltinResult<usize> {

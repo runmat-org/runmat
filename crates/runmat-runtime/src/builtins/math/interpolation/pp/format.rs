@@ -41,7 +41,7 @@ pub fn pp_to_value(pp: PiecewisePolynomial, name: &'static str) -> BuiltinResult
     let mut st = StructValue::new();
     st.insert(
         "form",
-        Value::String(PiecewiseForm::Polynomial.keyword().to_string()),
+        Value::string(PiecewiseForm::Polynomial.keyword().to_string()),
     );
     st.insert("breaks", Value::Tensor(breaks));
     st.insert("coefs", Value::Tensor(coefs));

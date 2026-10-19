@@ -96,19 +96,22 @@ pub(super) fn ensure_datetime_class_registered() {
                 is_dependent: false,
                 get_access: MemberAccess::Public,
                 set_access: MemberAccess::Public,
-                default_value: Some(Value::String(DEFAULT_DATETIME_FORMAT.to_string())),
+                default_value: Some(Value::string(DEFAULT_DATETIME_FORMAT.to_string())),
             },
         );
 
         let methods = crate::class_registry::standard_runtime_methods(DATETIME_CLASS);
 
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: DATETIME_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            DATETIME_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: DATETIME_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -132,13 +135,16 @@ pub(super) fn ensure_calendar_duration_class_registered() {
 
         let methods = crate::class_registry::standard_runtime_methods(CALENDAR_DURATION_CLASS);
 
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: CALENDAR_DURATION_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            CALENDAR_DURATION_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: CALENDAR_DURATION_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -156,8 +162,8 @@ pub(super) async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
 
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
         _ => Err(datetime_error(format!(
             "datetime: {context} must be a string scalar or character vector"
@@ -284,8 +290,10 @@ pub(super) fn serial_tensor_from_value(value: Value, context: &str) -> BuiltinRe
 
 pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
     match obj.properties.get(FORMAT_FIELD) {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::StringArray(array)) if array.data.len() == 1 => array.data[0].clone(),
+        Some(Value::String(text)) => text.as_str().to_owned(),
+        Some(Value::StringArray(array)) if array.data.len() == 1 => {
+            array.data[0].as_str().to_owned()
+        }
         Some(Value::CharArray(array)) if array.rows == 1 => array.data.iter().collect(),
         _ => DEFAULT_DATETIME_FORMAT.to_string(),
     }
@@ -314,7 +322,7 @@ pub(crate) fn datetime_object_from_serial_tensor(
         .insert(SERIAL_FIELD.to_string(), Value::Tensor(serials));
     object
         .properties
-        .insert(FORMAT_FIELD.to_string(), Value::String(format.into()));
+        .insert(FORMAT_FIELD.to_string(), Value::string(format.into()));
     Ok(Value::Object(object))
 }
 

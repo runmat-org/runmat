@@ -12,6 +12,7 @@ mod mex_artifacts;
 mod native_interfaces;
 mod output;
 mod program;
+mod target_test;
 mod python_artifacts;
 #[cfg(feature = "source-evaluation")]
 mod source_service;
@@ -132,6 +133,93 @@ pub unsafe extern "C" fn runmat_aot_main(
         }
         Err(_) => {
             output::error("standalone runtime aborted after an internal panic");
+            EXIT_RUNTIME_FAILURE
+        }
+    }
+}
+
+/// Distinct generated test-image entry. Its immutable paired header is an
+/// additional linked symbol; stdin carries exactly one bounded framed request
+/// and stdout carries exactly one framed receiver result.
+///
+/// # Safety
+/// The first nineteen arguments have the same contracts as `runmat_aot_main`.
+/// `paired_header` points to immutable linked bytes of `paired_header_len` for
+/// the duration of this call.
+#[no_mangle]
+pub unsafe extern "C" fn runmat_aot_test_main(
+    argc: i32,
+    argv: *const *const std::ffi::c_char,
+    function_resolver: *const std::ffi::c_void,
+    builtin_resolver: *const std::ffi::c_void,
+    source_service_factory: *const std::ffi::c_void,
+    native_ir: *const u8,
+    native_ir_len: u64,
+    program: *const u8,
+    program_len: u64,
+    resume_points: *const u8,
+    resume_points_len: u64,
+    native_interfaces: *const u8,
+    native_interfaces_len: u64,
+    mex_artifacts: *const u8,
+    mex_artifacts_len: u64,
+    java_artifacts: *const u8,
+    java_artifacts_len: u64,
+    python_artifacts: *const u8,
+    python_artifacts_len: u64,
+    paired_header: *const u8,
+    paired_header_len: u64,
+) -> i32 {
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let image = input::LinkedProcessImage {
+            argc,
+            argv,
+            function_resolver,
+            builtin_resolver,
+            source_service_factory,
+            native_ir,
+            native_ir_len,
+            program,
+            program_len,
+            resume_points,
+            resume_points_len,
+            native_interfaces,
+            native_interfaces_len,
+            mex_artifacts,
+            mex_artifacts_len,
+            java_artifacts,
+            java_artifacts_len,
+            python_artifacts,
+            python_artifacts_len,
+        };
+        // SAFETY: the generated launcher supplies the same verified linked
+        // symbols as the ordinary entry plus its immutable paired header.
+        let input = unsafe { AotProcessInput::copy_from_linked(image) }?;
+        let header_bytes = unsafe {
+            input::copy_bounded(
+                paired_header,
+                paired_header_len,
+                runmat_execution_artifact::target_test::MAX_NATIVE_TARGET_TEST_WIRE_BYTES,
+                "paired header",
+            )
+        }?;
+        let header = runmat_execution_artifact::target_test::NativePairedProductHeader::from_canonical_bytes(&header_bytes)
+            .map_err(|error| format!("paired test header is invalid: {error}"))?;
+        // SAFETY: this call is available only from the qualified generated
+        // test launcher and retains the selected link provenance.
+        let linked = unsafe {
+            input::LinkedAotProcessInput::from_verified_link(input, source_service_factory)
+        };
+        target_test::run(linked, header)
+    }));
+    match result {
+        Ok(Ok(())) => EXIT_SUCCESS,
+        Ok(Err(error)) => {
+            output::error(&error);
+            EXIT_INVALID_PROGRAM
+        }
+        Err(_) => {
+            output::error("standalone target-test runtime aborted after an internal panic");
             EXIT_RUNTIME_FAILURE
         }
     }

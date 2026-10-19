@@ -17,7 +17,7 @@ pub(crate) fn label_columns(
         .ok_or_else(|| "an empty group has no source label row".to_string())?;
     columns
         .iter()
-        .map(|column| select_group_rows(&column.value, &rows))
+        .map(|column| select_group_rows(column.value(), &rows))
         .collect()
 }
 

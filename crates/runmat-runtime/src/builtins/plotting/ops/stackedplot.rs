@@ -705,7 +705,7 @@ fn parse_options(
                 }
             }
             "color" | "linestyle" | "linewidth" | "marker" | "markersize" => {
-                style_tokens.push(Value::String(key));
+                style_tokens.push(Value::string(key));
                 style_tokens.push(args[idx + 1].clone());
             }
             other => {
@@ -858,8 +858,8 @@ pub(crate) fn get_stackedplot_property(
             );
             st.insert("XData", stacked_x_data_value(state)?);
             st.insert("YData", stacked_y_data_value(state)?);
-            st.insert("XLabel", Value::String(state.x_label.clone()));
-            st.insert("Title", Value::String(state.title.clone()));
+            st.insert("XLabel", Value::string(state.x_label.clone()));
+            st.insert("Title", Value::string(state.title.clone()));
             st.insert(
                 "Visible",
                 Value::String(if state.visible { "on" } else { "off" }.into()),
@@ -869,7 +869,7 @@ pub(crate) fn get_stackedplot_property(
             st.insert("LineWidth", Value::Num(state.appearance.line_width as f64));
             st.insert(
                 "LineStyle",
-                Value::String(line_style_name(state.appearance.line_style)),
+                Value::string(line_style_name(state.appearance.line_style)),
             );
             st.insert("Color", color_value(state.appearance.color)?);
             Ok(Value::Struct(st))
@@ -885,15 +885,15 @@ pub(crate) fn get_stackedplot_property(
             "combinematchingnames" => Ok(Value::Bool(state.combine_matching_names)),
             "xdata" => stacked_x_data_value(state),
             "ydata" => stacked_y_data_value(state),
-            "xlabel" => Ok(Value::String(state.x_label.clone())),
-            "title" => Ok(Value::String(state.title.clone())),
+            "xlabel" => Ok(Value::string(state.x_label.clone())),
+            "title" => Ok(Value::string(state.title.clone())),
             "visible" => Ok(Value::String(
                 if state.visible { "on" } else { "off" }.into(),
             )),
             "gridvisible" => Ok(on_off_value(state.grid_visible)),
             "xlimits" => limits_output(state.x_limits),
             "linewidth" => Ok(Value::Num(state.appearance.line_width as f64)),
-            "linestyle" => Ok(Value::String(line_style_name(state.appearance.line_style))),
+            "linestyle" => Ok(Value::string(line_style_name(state.appearance.line_style))),
             "color" => color_value(state.appearance.color),
             other => Err(stacked_runtime_error(
                 builtin,
@@ -946,7 +946,7 @@ pub(crate) fn apply_stackedplot_property_for_property(
         "gridvisible" => next.grid_visible = visible_bool(value)?,
         "xlimits" => next.x_limits = Some(parse_limits(value, "XLimits")?),
         "color" | "linestyle" | "linewidth" | "marker" | "markersize" => {
-            let tokens = [Value::String(key.to_string()), value.clone()];
+            let tokens = [Value::string(key.to_string()), value.clone()];
             let parsed =
                 parse_line_style_args(&tokens, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
             next.appearance = merge_appearance(&next.appearance, parsed.appearance, key);
@@ -1187,8 +1187,12 @@ fn tensor_column_source(tensor: &Tensor, col: usize) -> BuiltinResult<(Vec<f64>,
 
 fn variable_selector(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(array) => {
             if array.rows == 1 {
                 Ok(vec![array.to_string().trim().to_string()])
@@ -1386,8 +1390,8 @@ fn on_off_value(enabled: bool) -> Value {
 
 fn string_or_row_value(values: &[String]) -> BuiltinResult<Value> {
     match values.len() {
-        0 => Ok(Value::String(String::new())),
-        1 => Ok(Value::String(values[0].clone())),
+        0 => Ok(Value::string(String::new())),
+        1 => Ok(Value::string(values[0].clone())),
         _ => string_row(values.to_vec()).map(Value::StringArray),
     }
 }

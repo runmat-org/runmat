@@ -353,7 +353,7 @@ async fn h5disp_builtin(filename: Value, rest: Vec<Value>) -> BuiltinResult<Valu
         record_console_line(ConsoleStream::Stdout, result)?;
         Ok(Value::output_list(Vec::new()))
     } else {
-        Ok(Value::String(result))
+        Ok(Value::string(result))
     }
 }
 

@@ -2,16 +2,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StringArray, Tensor, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::dependencies::{
     dependency_details_from_object, dependency_heads_from_object,
 };
@@ -32,167 +27,9 @@ use crate::{gather_if_needed_async, BuiltinResult};
 const TYPE_DETAILS_PROPERTY: &str = "TypeDetails";
 const SENTENCE_NUMBERS_PROPERTY: &str = "SentenceNumbers";
 
-const OUT_DETAILS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "tdetails",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Token detail table.",
-}];
-
-const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "newDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated tokenized document object.",
-}];
-
-const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const IN_DOCUMENTS_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: DiscardKnownValues, TopLevelDomains.",
-    },
-];
-
-const IN_DOCUMENTS_SENTENCE_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: Abbreviations, Starters, DiscardKnownValues.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS.TOKEN_DETAILS.INVALID_INPUT",
-    identifier: Some("RunMat:tokenDetails:InvalidInput"),
-    when: "Input is not a supported tokenizedDocument object or option form.",
-    message: "tokenDetails: invalid input",
-};
-
-const ERROR_ADD_TYPE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS.ADD_TYPE_DETAILS.INVALID_INPUT",
-    identifier: Some("RunMat:addTypeDetails:InvalidInput"),
-    when: "Input is not a supported tokenizedDocument object or option form.",
-    message: "addTypeDetails: invalid input",
-};
-
-const ERROR_ADD_SENTENCE_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS.ADD_SENTENCE_DETAILS.INVALID_INPUT",
-    identifier: Some("RunMat:addSentenceDetails:InvalidInput"),
-    when: "Input is not a supported tokenizedDocument object or option form.",
-    message: "addSentenceDetails: invalid input",
-};
-
-const TOKEN_DETAILS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-const ADD_TYPE_DETAILS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_ADD_TYPE_INVALID_INPUT];
-const ADD_SENTENCE_DETAILS_ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_ADD_SENTENCE_INVALID_INPUT];
-
-pub const TOKEN_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "tdetails = tokenDetails(documents)",
-        inputs: &IN_DOCUMENTS,
-        outputs: &OUT_DETAILS,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &TOKEN_DETAILS_ERRORS,
-};
-pub const TOKEN_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "tokenDetails accepts only tokenizedDocument objects. Its generated document, sentence, line, and dependency ordinals are table metadata stored as double columns rather than caller-provided integer data.",
-    };
-
-pub const ADD_TYPE_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = addTypeDetails(documents)",
-            inputs: &IN_DOCUMENTS,
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = addTypeDetails(documents,Name,Value)",
-            inputs: &IN_DOCUMENTS_REST,
-            outputs: &OUT_DOCUMENTS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ADD_TYPE_DETAILS_ERRORS,
-};
-
-pub const ADD_SENTENCE_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = addSentenceDetails(documents)",
-            inputs: &IN_DOCUMENTS,
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "newDocuments = addSentenceDetails(documents,Name,Value)",
-            inputs: &IN_DOCUMENTS_SENTENCE_REST,
-            outputs: &OUT_DOCUMENTS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ADD_SENTENCE_DETAILS_ERRORS,
-};
-const ADD_TYPE_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "addTypeDetails accepts a tokenizedDocument plus text collections and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical token types.",
-    };
-const ADD_SENTENCE_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "addSentenceDetails accepts a tokenizedDocument plus text collections and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores sentence numbers as double metadata.",
-    };
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 #[runtime_builtin(
     name = "tokenDetails",
-    category = "strings/text_analytics",
-    summary = "Return token details for tokenizedDocument objects.",
-    keywords = "tokenDetails,text analytics,tokenizedDocument,token types",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::details::TOKEN_DETAILS_DESCRIPTOR),
-    integer_audit(crate::builtins::strings::text_analytics::details::TOKEN_DETAILS_INTEGER_AUDIT),
+    binding_variant = "default",
     builtin_path = "crate::builtins::strings::text_analytics::details"
 )]
 pub(in crate::builtins::strings::text_analytics) async fn token_details_builtin(
@@ -228,20 +65,16 @@ fn direct_numeric_or_resident_input(value: &Value) -> bool {
 
 #[runtime_builtin(
     name = "addTypeDetails",
-    category = "strings/text_analytics",
-    summary = "Add token type details to tokenizedDocument objects.",
-    keywords = "addTypeDetails,text analytics,tokenizedDocument,token types",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::details::ADD_TYPE_DETAILS_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::details::ADD_TYPE_DETAILS_INTEGER_AUDIT
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::details"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::details",
+    context = true
 )]
-async fn add_type_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn add_type_details_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let gathered = gather_args(args, "addTypeDetails").await?;
-    let (documents, options) = parse_add_type_details_args(gathered)?;
+    let (documents, options) = parse_add_type_details_args(runtime.as_ref(), gathered)?;
     let mut object = tokenized_document_object(documents, "addTypeDetails")?;
     let mut document_options = options_from_document_object(&object);
     if let Some(top_level_domains) = options.top_level_domains {
@@ -270,22 +103,16 @@ async fn add_type_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 #[runtime_builtin(
     name = "addSentenceDetails",
-    category = "strings/text_analytics",
-    summary = "Add sentence numbers to tokenizedDocument objects.",
-    keywords = "addSentenceDetails,text analytics,tokenizedDocument,sentences",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::details::ADD_SENTENCE_DETAILS_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::details::ADD_SENTENCE_DETAILS_INTEGER_AUDIT
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::details"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::details",
+    context = true
 )]
 pub(in crate::builtins::strings::text_analytics) async fn add_sentence_details_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let gathered = gather_args(args, "addSentenceDetails").await?;
-    let (documents, options) = parse_add_sentence_details_args(gathered)?;
+    let (documents, options) = parse_add_sentence_details_args(runtime.as_ref(), gathered)?;
     let mut object = tokenized_document_object(documents, "addSentenceDetails")?;
     let documents = documents_from_object(&object, "addSentenceDetails")?;
     let sentence_numbers = if options.discard_known_values {
@@ -342,6 +169,7 @@ struct AddTypeDetailsOptions {
 }
 
 fn parse_add_sentence_details_args(
+    runtime: Option<&crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<(Value, AddSentenceDetailsOptions)> {
     if args.is_empty() {
@@ -359,18 +187,25 @@ fn parse_add_sentence_details_args(
     let mut options = AddSentenceDetailsOptions::default();
     let mut idx = 1usize;
     while idx < args.len() {
-        let name = scalar_text(&args[idx], "addSentenceDetails")
-            .map_err(|err| text_analytics_error("addSentenceDetails", err.to_string()))?;
-        if name.eq_ignore_ascii_case("DiscardKnownValues") {
+        let name = scalar_text_input(&args[idx], runtime, |runtime, cause| {
+            text_input_admission("addSentenceDetails", runtime, cause)
+        })?
+        .ok_or_else(|| {
+            text_analytics_error(
+                "addSentenceDetails",
+                "addSentenceDetails: expected text option",
+            )
+        })?;
+        if name.as_str().eq_ignore_ascii_case("DiscardKnownValues") {
             options.discard_known_values = logical_scalar(&args[idx + 1], "addSentenceDetails")?;
-        } else if name.eq_ignore_ascii_case("Abbreviations") {
+        } else if name.as_str().eq_ignore_ascii_case("Abbreviations") {
             options.abbreviations = parse_abbreviations(&args[idx + 1])?;
-        } else if name.eq_ignore_ascii_case("Starters") {
+        } else if name.as_str().eq_ignore_ascii_case("Starters") {
             options.starters = parse_sentence_starters(&args[idx + 1])?;
         } else {
             return Err(text_analytics_error(
                 "addSentenceDetails",
-                format!("addSentenceDetails: unsupported option '{name}'"),
+                format!("addSentenceDetails: unsupported option '{}'", name.as_str()),
             ));
         }
         idx += 2;
@@ -378,7 +213,10 @@ fn parse_add_sentence_details_args(
     Ok((args[0].clone(), options))
 }
 
-fn parse_add_type_details_args(args: Vec<Value>) -> BuiltinResult<(Value, AddTypeDetailsOptions)> {
+fn parse_add_type_details_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, AddTypeDetailsOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
             "addTypeDetails",
@@ -397,17 +235,21 @@ fn parse_add_type_details_args(args: Vec<Value>) -> BuiltinResult<(Value, AddTyp
     };
     let mut idx = 1usize;
     while idx < args.len() {
-        let name = scalar_text(&args[idx], "addTypeDetails")
-            .map_err(|err| text_analytics_error("addTypeDetails", err.to_string()))?;
-        if name.eq_ignore_ascii_case("DiscardKnownValues") {
+        let name = scalar_text_input(&args[idx], runtime, |runtime, cause| {
+            text_input_admission("addTypeDetails", runtime, cause)
+        })?
+        .ok_or_else(|| {
+            text_analytics_error("addTypeDetails", "addTypeDetails: expected text option")
+        })?;
+        if name.as_str().eq_ignore_ascii_case("DiscardKnownValues") {
             options.discard_known_values = logical_scalar(&args[idx + 1], "addTypeDetails")?;
-        } else if name.eq_ignore_ascii_case("TopLevelDomains") {
+        } else if name.as_str().eq_ignore_ascii_case("TopLevelDomains") {
             options.top_level_domains =
                 Some(parse_top_level_domains(&args[idx + 1], "addTypeDetails")?);
         } else {
             return Err(text_analytics_error(
                 "addTypeDetails",
-                format!("addTypeDetails: unsupported option '{name}'"),
+                format!("addTypeDetails: unsupported option '{}'", name.as_str()),
             ));
         }
         idx += 2;
@@ -541,7 +383,7 @@ fn token_details_table(object: &ObjectInstance) -> BuiltinResult<Value> {
                         .as_ref()
                         .and_then(|entities| entities.get(doc_idx))
                         .and_then(|entities| entities.get(token_idx))
-                        .cloned()
+                        .map(|text| (*text).to_owned())
                         .unwrap_or_else(|| "non-entity".to_string()),
                 );
             }
@@ -1058,9 +900,9 @@ fn validate_sentence_number_shapes(
     Ok(())
 }
 
-fn validate_text_detail_shapes(
+fn validate_text_detail_shapes<T>(
     documents: &[Vec<String>],
-    stored: Option<&[Vec<String>]>,
+    stored: Option<&[Vec<T>]>,
     property: &str,
 ) -> BuiltinResult<()> {
     let Some(stored) = stored else {
@@ -1157,7 +999,13 @@ fn type_details_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid TypeDetails entry"),
             ));
         };
-        out.push(array.data.clone());
+        out.push(
+            array
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        );
     }
     Ok(Some(out))
 }
@@ -1219,11 +1067,11 @@ mod tests {
     }
 
     fn run_add_type(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_type_details_builtin(args))
+        futures::executor::block_on(add_type_details_builtin(None, args))
     }
 
     fn run_add_sentence(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_sentence_details_builtin(args))
+        futures::executor::block_on(add_sentence_details_builtin(None, args))
     }
 
     fn object(value: Value) -> ObjectInstance {

@@ -308,9 +308,9 @@ fn value_shape(value: &Value) -> Result<Vec<usize>, RuntimeError> {
         Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::ComplexTensor(tensor) => Ok(tensor.shape().to_vec()),
         Value::LogicalArray(array) => Ok(array.shape.to_vec()),
-        Value::StringArray(array) => Ok(array.shape.clone()),
-        Value::CharArray(array) => Ok(array.shape.clone()),
-        Value::Cell(array) => Ok(array.shape.clone()),
+        Value::StringArray(array) => Ok(array.shape().to_vec()),
+        Value::CharArray(array) => Ok(array.shape().to_vec()),
+        Value::Cell(array) => Ok(array.shape().to_vec()),
         Value::StructArray(array) => Ok(array.shape().to_vec()),
         Value::GpuTensor(handle) => Ok(handle.shape().to_vec()),
         Value::Num(_)
@@ -410,9 +410,11 @@ fn reshape_value(value: Value, shape: &[usize]) -> crate::BuiltinResult<Value> {
         Value::LogicalArray(array) => LogicalArray::from_host_buffer(array.data, shape.to_vec())
             .map(Value::LogicalArray)
             .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),
-        Value::StringArray(array) => StringArray::new(array.data, shape.to_vec())
-            .map(Value::StringArray)
-            .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),
+        Value::StringArray(array) => {
+            StringArray::from_shared_storage(array.data, shape.to_vec().into())
+                .map(Value::StringArray)
+                .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error))
+        }
         Value::Cell(array) => CellArray::from_column_major(array.to_column_major(), shape.to_vec())
             .map(Value::Cell)
             .map_err(|error| shiftdim_error(&SHIFTDIM_ERROR_UNSUPPORTED_INPUT, error)),

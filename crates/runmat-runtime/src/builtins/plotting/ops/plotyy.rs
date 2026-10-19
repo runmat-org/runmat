@@ -312,7 +312,7 @@ fn outputs(ax: Value, h1: Value, h2: Value) -> BuiltinResult<Value> {
 
 fn selector_from_value(value: &Value) -> BuiltinResult<PlotSelector> {
     let text = match value {
-        Value::String(text) => text.clone(),
+        Value::String(text) => text.as_str().to_owned(),
         Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect::<String>(),
         Value::FunctionHandle(name) => name.name().to_owned(),
         Value::ExternalFunctionHandle(name) => name.name().to_owned(),

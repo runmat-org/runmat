@@ -171,7 +171,7 @@ fn query_mode(target: AxesTarget) -> BuiltinResult<Value> {
             })?,
         None => data_aspect_ratio_snapshot(),
     };
-    Ok(Value::String(mode))
+    Ok(Value::string(mode))
 }
 
 fn current_ratio(target: AxesTarget) -> BuiltinResult<[f64; 3]> {
@@ -205,7 +205,7 @@ fn ratio_value(ratio: [f64; 3]) -> Value {
 
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) => chars.row_string(),
         _ => None,
     }

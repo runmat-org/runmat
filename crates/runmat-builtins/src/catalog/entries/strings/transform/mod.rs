@@ -16,6 +16,8 @@ mod lower;
 mod strjoin;
 mod strtrim;
 mod upper;
+mod strjust;
+mod strip;
 
 pub use self::append::*;
 pub use self::deblank::*;
@@ -29,7 +31,9 @@ pub use self::extractbetween::*;
 pub use self::insertafter::*;
 pub use self::insertbefore::*;
 pub use self::lower::*;
+pub use self::strip::*;
 pub use self::strjoin::*;
+pub use self::strjust::*;
 pub use self::strtrim::*;
 pub use self::upper::*;
 
@@ -49,4 +53,6 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(strjoin::ENTRIES.iter().copied());
     values.extend(strtrim::ENTRIES.iter().copied());
     values.extend(upper::ENTRIES.iter().copied());
+    values.extend(strjust::ENTRIES.iter().copied());
+    values.extend(strip::ENTRIES.iter().copied());
 }

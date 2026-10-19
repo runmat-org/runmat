@@ -53,11 +53,11 @@ pub use runmat_builtins::{
 
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
             Ok(array.data.iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         _ => Err(archive_error(
             name,
             format!("{name}: {arg} must be a string scalar or character vector"),

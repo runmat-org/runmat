@@ -322,9 +322,9 @@ pub(super) fn machine_format_from_label(label: &str) -> Result<MachineFormat, St
 
 pub(super) fn scalar_string(value: &Value, err: &str) -> Result<String, String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
         _ => Err(err.to_string()),
     }
 }

@@ -70,7 +70,7 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
             binding: Some(binding.clone()),
             source_role: runmat_types::FunctionSourceRole::Nested,
             source_file: None,
-            captures: vec![handle_value(captured.handle())],
+            captures: vec![handle_value(captured.handle())].into(),
             lexical_environment: Some(LexicalEnvironment::new(
                 activation.handle(),
                 Some(LexicalEnvironment::new(parent.handle(), None)),
@@ -107,7 +107,7 @@ fn deferred_callable_targets_keep_activation_ancestors_anonymous_captures_and_ar
                             binding: None,
                             source_role: runmat_types::FunctionSourceRole::Anonymous,
                             source_file: None,
-                            captures: vec![handle_value(anonymous_capture.handle())],
+                            captures: vec![handle_value(anonymous_capture.handle())].into(),
                             lexical_environment: None,
                         },
                     ))),

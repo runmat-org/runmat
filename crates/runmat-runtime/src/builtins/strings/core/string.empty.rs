@@ -175,12 +175,12 @@ fn ensure_empty_shape(shape: &[usize]) -> BuiltinResult<()> {
 
 fn prototype_dims(proto: &Value) -> Vec<usize> {
     match proto {
-        Value::StringArray(sa) => sa.shape.clone(),
-        Value::CharArray(ca) => ca.shape.clone(),
+        Value::StringArray(sa) => sa.shape().to_vec(),
+        Value::CharArray(ca) => ca.shape.to_vec(),
         Value::Tensor(t) => t.shape().to_vec(),
         Value::ComplexTensor(t) => t.shape().to_vec(),
         Value::LogicalArray(l) => l.shape.to_vec(),
-        Value::Cell(cell) => cell.shape.clone(),
+        Value::Cell(cell) => cell.shape.to_vec(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => vec![1, 1],
         Value::String(_) => vec![1, 1],

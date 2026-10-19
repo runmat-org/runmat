@@ -20,7 +20,7 @@ pub use blocking_cpu::{OwnedCpuJob, RuntimeBlockingCpuService};
 pub use capture::{validate_spawn_capture, validate_spawn_captures};
 pub use completion::{
     RootedResult, RootedValue, RootedValueLease, RootedValueSequence, RootedValues,
-    RootedValuesBuilder,
+    RootedValuesBuilder, RootedValuesIntoIter,
 };
 pub(crate) use completion::{
     RootedValueAdmissionError, RootedValueChildren, RootedValueHandles, RootedValueMember,

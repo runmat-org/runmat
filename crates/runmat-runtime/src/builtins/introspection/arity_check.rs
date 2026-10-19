@@ -129,8 +129,10 @@ fn arity_violation(actual: usize, min: usize, max: ArityBound) -> Option<ArityVi
 
 fn scalar_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        Value::String(value) => Some(value.as_str().to_owned()),
+        Value::StringArray(value) if value.data.len() == 1 => {
+            Some(value.data[0].as_str().to_owned())
+        }
         Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
         _ => None,
     }

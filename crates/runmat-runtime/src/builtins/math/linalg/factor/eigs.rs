@@ -705,7 +705,7 @@ async fn compute_subset(request: Request) -> BuiltinResult<SubsetEval> {
     if let Some(b) = request.b {
         eig_args.push(b);
     }
-    eig_args.push(Value::String("vector".to_string()));
+    eig_args.push(Value::string("vector".to_string()));
     let eval = eig::evaluate(request.a, &eig_args, false)
         .await
         .map_err(with_context)?;
@@ -1256,8 +1256,10 @@ fn numeric_vector_values(value: &Value, name: &str) -> BuiltinResult<Vec<f64>> {
 
 fn text_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
         _ => None,
     }

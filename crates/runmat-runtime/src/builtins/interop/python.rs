@@ -62,13 +62,14 @@ async fn invoke_python(
             .require_foreign(symbol)
             .map_err(|error| error.into_runtime_error())?
             .clone();
+        let arguments = crate::execution::RootedValues::in_context(arguments, &context)?;
         let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
                     adapter: runmat_python::PYTHON_ADAPTER_ID.into(),
                     symbol: symbol.into(),
-                    arguments,
+                    arguments: crate::call::RootedFunctionArguments::ordinary(arguments),
                     requested_outputs: crate::current_requested_outputs(),
                 },
             ))
@@ -120,7 +121,7 @@ fn pyargs_builtin(arguments: Vec<Value>) -> BuiltinResult<Value> {
         if name.is_empty() {
             return Err(invalid_call("pyargs names must be non-empty"));
         }
-        names.push(Value::String(name));
+        names.push(Value::String(name.into()));
         values.push(arguments.next().expect("even argument count"));
     }
     let length = names.len();

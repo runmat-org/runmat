@@ -264,7 +264,7 @@ pub(in crate::builtins::fea) fn plot_request_from_context_value(
             .properties
             .get("field_id")
             .and_then(|value| match value {
-                Value::String(field_id) => Some(field_id.clone()),
+                Value::String(field_id) => Some(field_id.to_string()),
                 _ => None,
             }),
         _ => None,

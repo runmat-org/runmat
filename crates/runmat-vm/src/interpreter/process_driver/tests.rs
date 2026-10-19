@@ -327,6 +327,36 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
                     })?
                     .await?;
                 assert_eq!(scoped, 64);
+                let unpolled_constructed = Rc::new(Cell::new(false));
+                let constructed_in_unpolled = Rc::clone(&unpolled_constructed);
+                let unpolled_dropped = Rc::new(Cell::new(false));
+                let dropped_in_unpolled = Rc::clone(&unpolled_dropped);
+                let scope_id = child_runtime.execution().scope_id();
+                let scope = child_runtime.prepare_poll_scope()?;
+                let drop_probe = ScopedFutureDrop {
+                    scope_id,
+                    dropped: dropped_in_unpolled,
+                };
+                let unpolled =
+                    handle.enqueue_owned_scoped_in_context(&child_runtime, scope, move || {
+                        constructed_in_unpolled.set(true);
+                        async move {
+                            let _drop_probe = drop_probe;
+                            Ok::<_, RuntimeError>(65_usize)
+                        }
+                    })?;
+                assert!(!unpolled_constructed.get());
+                drop(unpolled);
+                // A later sibling makes the driver service the canceled entry;
+                // its factory must be destroyed without ever running.
+                let sibling = handle
+                    .enqueue_owned_in_context(&child_runtime, || async move {
+                        Ok::<_, RuntimeError>(66_usize)
+                    })?
+                    .await?;
+                assert_eq!(sibling, 66);
+                assert!(!unpolled_constructed.get());
+                assert!(unpolled_dropped.get());
                 let constructed = Rc::new(Cell::new(false));
                 let constructed_in_factory = Rc::clone(&constructed);
                 let dropped = Rc::new(Cell::new(false));
@@ -343,13 +373,13 @@ fn managed_queue_reuses_one_exact_task_slot_across_sequential_children() {
                         };
                         async move {
                             let _drop_probe = drop_probe;
-                            Ok::<_, RuntimeError>(65_usize)
+                            Ok::<_, RuntimeError>(67_usize)
                         }
-                    });
-                let error = match refused {
-                    Ok(_) => panic!("canceled scoped child must not be published"),
-                    Err(error) => error,
-                };
+                    })?;
+                assert!(!constructed.get(), "queued factory ran on the caller stack");
+                let error = refused
+                    .await
+                    .expect_err("post-factory cancellation must remain typed");
                 assert!(constructed.get());
                 assert!(dropped.get());
                 assert_runtime_cancellation(&error);

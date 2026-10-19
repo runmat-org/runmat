@@ -136,8 +136,8 @@ pub(super) fn present(
             "dlarray",
             vec![
                 ("Data", data),
-                ("Format", Value::String(format.clone())),
-                ("Labels", Value::String(format)),
+                ("Format", Value::string(format.clone())),
+                ("Labels", Value::string(format)),
             ],
         )
     } else {

@@ -58,7 +58,7 @@ pub(super) fn fit_info_value(
     st.insert("Iterations", row_tensor(&path.iterations)?);
     st.insert(
         "Distribution",
-        Value::String(distribution.public_name().to_string()),
+        Value::string(distribution.public_name().to_string()),
     );
     st.insert("PredictorNames", predictor_names_value(options)?);
     st.insert("UseCovariance", logical_scalar(false)?);

@@ -155,6 +155,9 @@ impl From<&runmat_mir::MirLocalKind> for NativeLocalKind {
 #[serde(deny_unknown_fields)]
 pub struct NativeFunction {
     pub id: ProgramFunctionId,
+    /// SHA-256 of the canonical MIR (function metadata, body) pair. This is
+    /// source identity, not a hash of generated machine code.
+    pub mir_body_digest: runmat_execution::Digest,
     pub source: ProgramSourceId,
     pub name: String,
     pub source_role: runmat_types::FunctionSourceRole,

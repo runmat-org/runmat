@@ -12,19 +12,22 @@ pub(super) fn ensure_duration_class_registered() {
                 is_dependent: false,
                 get_access: MemberAccess::Public,
                 set_access: MemberAccess::Public,
-                default_value: Some(Value::String(DEFAULT_DURATION_FORMAT.to_string())),
+                default_value: Some(Value::string(DEFAULT_DURATION_FORMAT.to_string())),
             },
         );
 
         let methods = crate::class_registry::standard_runtime_methods(DURATION_CLASS);
 
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: DURATION_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            DURATION_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: DURATION_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -182,8 +185,8 @@ pub(super) fn broadcast_duration_days(
 
 pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
         _ => Err(duration_error(
             DurationErrorKind::InvalidArgument,
@@ -247,8 +250,10 @@ pub(super) fn component_tensor(value: Value, context: &str) -> BuiltinResult<Ten
 
 pub(super) fn format_for_object(obj: &ObjectInstance) -> String {
     match obj.properties.get(FORMAT_FIELD) {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::StringArray(array)) if array.data.len() == 1 => array.data[0].clone(),
+        Some(Value::String(text)) => text.as_str().to_owned(),
+        Some(Value::StringArray(array)) if array.data.len() == 1 => {
+            array.data[0].as_str().to_owned()
+        }
         Some(Value::CharArray(array)) if array.rows == 1 => array.data.iter().collect(),
         _ => DEFAULT_DURATION_FORMAT.to_string(),
     }
@@ -297,7 +302,7 @@ pub(crate) fn duration_object_from_days_tensor(
         .insert(DAYS_FIELD.to_string(), Value::Tensor(days));
     object
         .properties
-        .insert(FORMAT_FIELD.to_string(), Value::String(format.into()));
+        .insert(FORMAT_FIELD.to_string(), Value::string(format.into()));
     Ok(Value::Object(object))
 }
 

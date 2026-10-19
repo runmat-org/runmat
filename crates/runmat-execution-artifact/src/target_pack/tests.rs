@@ -5,6 +5,8 @@ use runmat_types::{CapabilitySet, EffectKind, EffectSet};
 use std::collections::{BTreeMap, BTreeSet};
 #[path = "tests/product.rs"]
 mod product;
+#[path = "tests/target_test.rs"]
+mod target_test;
 
 fn id(name: &str) -> ComponentId {
     ComponentId::new(name).unwrap()

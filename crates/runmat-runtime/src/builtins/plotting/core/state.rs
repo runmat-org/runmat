@@ -6,7 +6,9 @@ use runmat_plot::plots::{
     TextStyle,
 };
 use runmat_thread_local::runmat_thread_local;
-use runmat_value::{GraphicsReceiverKind, GraphicsReceiverRef, GraphicsSceneLease, Tensor};
+use runmat_value::{
+    GraphicsReceiverKind, GraphicsReceiverRef, GraphicsSceneLease, StringArray, Tensor,
+};
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::ops::{Deref, DerefMut};
@@ -664,12 +666,7 @@ pub enum RootPropertyValue {
     Num(f64),
     String(String),
     Tensor(Tensor),
-    StringArray {
-        rows: usize,
-        cols: usize,
-        shape: Vec<usize>,
-        data: Vec<String>,
-    },
+    StringArray(StringArray),
 }
 
 #[derive(Clone, Debug)]

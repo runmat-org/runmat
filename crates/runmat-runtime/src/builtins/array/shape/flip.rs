@@ -512,7 +512,7 @@ pub(crate) fn flip_string_array_with(
         return Ok(array);
     }
     let data = flip_generic(&array.data, &array.shape, dims, builtin)?;
-    StringArray::new(data, array.shape.clone())
+    StringArray::from_texts_unbounded(data, array.shape.to_vec())
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))
 }
 
@@ -528,7 +528,7 @@ pub(crate) fn flip_char_array_with(
     if array.data.is_empty() || dims.is_empty() {
         return Ok(array);
     }
-    let shape = array.shape.clone();
+    let shape = array.shape.to_vec();
     let data = flip_generic(&array.to_column_major(), &shape, dims, builtin)?;
     CharArray::from_column_major(data, shape)
         .map_err(|e| flip_error_for(builtin, format!("{builtin}: {e}")))

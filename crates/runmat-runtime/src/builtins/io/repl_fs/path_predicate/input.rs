@@ -34,7 +34,7 @@ pub(super) fn parse(
                 .iter()
                 .map(|text| path(text, builtin))
                 .collect::<BuiltinResult<_>>()?,
-            shape: array.shape.clone(),
+            shape: array.shape.as_slice().to_vec(),
         }),
         Value::Cell(array) => Ok(PathInputs::Shaped {
             paths: array
@@ -46,7 +46,7 @@ pub(super) fn parse(
                     _ => Err(descriptor_error(path_error, builtin)),
                 })
                 .collect::<BuiltinResult<_>>()?,
-            shape: array.shape.clone(),
+            shape: array.shape.as_slice().to_vec(),
         }),
         _ => Err(descriptor_error(path_error, builtin)),
     }

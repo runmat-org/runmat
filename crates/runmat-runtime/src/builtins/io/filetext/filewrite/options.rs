@@ -94,13 +94,13 @@ fn is_keyword(value: &Value) -> BuiltinResult<bool> {
 
 fn keyword_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::CharArray(_) => Err(filewrite_error_with_detail(
             &FILEWRITE_ERROR_INVALID_OPTION,
             "keyword names must be 1-by-N character vectors",
         )),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
         Value::StringArray(_) => Err(filewrite_error_with_detail(
             &FILEWRITE_ERROR_INVALID_OPTION,
             "keyword inputs must be scalar string arrays",

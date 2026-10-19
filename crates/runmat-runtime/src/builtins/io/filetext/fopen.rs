@@ -404,15 +404,19 @@ fn parse_encoding(value: Option<&Value>, permission: &Permission) -> BuiltinResu
     }
 }
 
-fn scalar_string(
-    value: &Value,
+fn scalar_string<'a>(
+    value: &'a Value,
     err_detail: &str,
     error: &'static BuiltinErrorDescriptor,
-) -> BuiltinResult<String> {
+) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Ok(std::borrow::Cow::Owned(ca.data.iter().collect()))
+        }
+        Value::StringArray(sa) if sa.data.len() == 1 => {
+            Ok(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        }
         _ => Err(fopen_error_with_detail(error, err_detail)),
     }
 }

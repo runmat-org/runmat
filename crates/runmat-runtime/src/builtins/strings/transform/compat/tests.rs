@@ -669,6 +669,7 @@ fn splitlines_reverse_deblank_and_matches_work() {
     }
     assert_eq!(
         block(strjust_builtin(
+            None,
             Value::CharArray(CharArray::new_row("  x")),
             vec![Value::String("left".into())],
         ))

@@ -5,6 +5,12 @@ use runmat_types::ProgramFunctionId;
 
 use crate::{AotError, AotResult};
 
+mod paired;
+pub use paired::{
+    emit_selected_paired_native_objects, materialize_selected_paired_native_artifacts,
+    PairedNativeArtifacts, PairedNativeObjects,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct NativeObjectOptions {
     pub optimization: NativeOptimization,
@@ -17,6 +23,36 @@ pub struct NativeObjectOptions {
     pub mex_artifacts: runmat_mex::MexArtifactBundle,
     pub java_artifacts: runmat_java::JavaArtifactBundle,
     pub python_artifacts: runmat_python::PythonArtifactBundle,
+}
+
+fn object_data_options(
+    options: &NativeObjectOptions,
+) -> AotResult<runmat_core::AotObjectDataOptions> {
+    Ok(runmat_core::AotObjectDataOptions {
+        runtime_binding_mode: options.runtime_binding_mode,
+        builtin_bindings: options.retained_builtin_bindings.clone(),
+        foreign_policy: options.foreign_policy.clone(),
+        native_interfaces: options
+            .native_interfaces
+            .canonical_bytes()
+            .map_err(|error| {
+                AotError::contract("aot.compile.native_interfaces", error.to_string())
+            })?,
+        mex_artifacts: options
+            .mex_artifacts
+            .canonical_bytes()
+            .map_err(|error| AotError::contract("aot.compile.mex_artifacts", error.to_string()))?,
+        java_artifacts: options
+            .java_artifacts
+            .canonical_bytes()
+            .map_err(|error| AotError::contract("aot.compile.java_artifacts", error.to_string()))?,
+        python_artifacts: options
+            .python_artifacts
+            .canonical_bytes()
+            .map_err(|error| {
+                AotError::contract("aot.compile.python_artifacts", error.to_string())
+            })?,
+    })
 }
 
 impl Default for NativeObjectOptions {
@@ -93,30 +129,7 @@ fn emit_object(
     let assembly = input
         .lower(target)
         .map_err(|error| AotError::contract("aot.compile.lower", error.to_string()))?;
-    let object_data_options =
-        runmat_core::AotObjectDataOptions {
-            runtime_binding_mode: options.runtime_binding_mode,
-            builtin_bindings: options.retained_builtin_bindings.clone(),
-            foreign_policy: options.foreign_policy,
-            native_interfaces: options
-                .native_interfaces
-                .canonical_bytes()
-                .map_err(|error| {
-                    AotError::contract("aot.compile.native_interfaces", error.to_string())
-                })?,
-            mex_artifacts: options.mex_artifacts.canonical_bytes().map_err(|error| {
-                AotError::contract("aot.compile.mex_artifacts", error.to_string())
-            })?,
-            java_artifacts: options.java_artifacts.canonical_bytes().map_err(|error| {
-                AotError::contract("aot.compile.java_artifacts", error.to_string())
-            })?,
-            python_artifacts: options
-                .python_artifacts
-                .canonical_bytes()
-                .map_err(|error| {
-                    AotError::contract("aot.compile.python_artifacts", error.to_string())
-                })?,
-        };
+    let object_data_options = object_data_options(&options)?;
     let data = match selected {
         Some(product) => {
             input.aot_object_data_for_selected(&assembly, object_data_options, product)

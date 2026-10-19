@@ -260,7 +260,9 @@ fn text_scalar(value: &Value) -> BuiltinResult<String> {
     }
     match value {
         Value::CharArray(CharArray { data, rows: 1, .. }) => Ok(data.iter().collect()),
-        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => Ok(data[0].clone()),
+        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => {
+            Ok(data[0].as_str().to_owned())
+        }
         other => Err(statset_error(
             &STATSET_ERROR_INVALID_OPTION,
             format!("option names must be text scalars, got {other:?}"),

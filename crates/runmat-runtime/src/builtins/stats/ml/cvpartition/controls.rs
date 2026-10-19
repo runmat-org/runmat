@@ -1,4 +1,5 @@
 use super::*;
+use std::borrow::Cow;
 
 pub(super) fn materialized_mask_len(rows: usize, cols: usize, label: &str) -> BuiltinResult<usize> {
     let len = rows
@@ -147,11 +148,13 @@ pub(super) fn scalar_bool(value: &Value, label: &str) -> BuiltinResult<bool> {
     }
 }
 
-pub(super) fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::CharArray(chars) => Ok(Cow::Owned(chars.data.iter().collect())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Cow::Borrowed(array.data[0].as_str()))
+        }
         other => Err(invalid_argument(format!(
             "cvpartition: {label} must be a string scalar, got {other:?}"
         ))),

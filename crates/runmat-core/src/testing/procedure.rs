@@ -40,12 +40,8 @@ pub(super) fn invocation_for(
     Ok(ProcedureInvocation::function(function_name, arguments))
 }
 
-fn function_name(procedure: &ProcedureDescriptor) -> Result<String, String> {
-    let item = procedure
-        .semantic_path
-        .rsplit_once("::")
-        .map_or(procedure.semantic_path.as_str(), |(_, item)| item);
-    let segments = item.split('/').collect::<Vec<_>>();
+pub(crate) fn function_name(procedure: &ProcedureDescriptor) -> Result<String, String> {
+    let segments = semantic_segments(procedure);
     match procedure.kind {
         ProcedureKind::Function | ProcedureKind::SuiteFactory => segments
             .last()
@@ -71,10 +67,27 @@ fn function_name(procedure: &ProcedureDescriptor) -> Result<String, String> {
     }
 }
 
-fn class_name(procedure: &ProcedureDescriptor) -> Option<String> {
+pub(crate) fn method_name(procedure: &ProcedureDescriptor) -> Result<&str, String> {
+    if procedure.kind != ProcedureKind::Method {
+        return Err("test procedure is not a method".into());
+    }
+    let segments = semantic_segments(procedure);
+    if segments.len() < 2 {
+        return Err("method semantic path has no class owner".into());
+    }
+    Ok(segments[segments.len() - 1])
+}
+
+fn semantic_segments(procedure: &ProcedureDescriptor) -> Vec<&str> {
     let item = procedure
         .semantic_path
         .rsplit_once("::")
         .map_or(procedure.semantic_path.as_str(), |(_, item)| item);
-    item.split('/').next().map(str::to_owned)
+    item.split('/').collect()
+}
+
+fn class_name(procedure: &ProcedureDescriptor) -> Option<String> {
+    semantic_segments(procedure)
+        .first()
+        .map(|name| (*name).to_owned())
 }

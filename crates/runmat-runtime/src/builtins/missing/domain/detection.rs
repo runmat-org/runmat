@@ -115,7 +115,7 @@ pub(super) fn ismissing_value(value: &Value) -> BuiltinResult<Value> {
         )),
         Value::StringArray(array) => logical_from_iter(
             array.data.iter().map(|text| is_missing_text(text)),
-            array.shape.clone(),
+            array.shape.as_slice().to_vec(),
         ),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => logical_from_iter(
             vec![false; tensor_utils::tensor_element_len(tensor)],

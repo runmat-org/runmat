@@ -52,14 +52,14 @@ pub fn load_static_member(
                 binding,
                 source_role: runmat_types::FunctionSourceRole::Method,
                 source_file,
-                captures: vec![],
+                captures: vec![].into(),
             },
         )))
     } else if crate::class_registry::class_has_enumeration_member(cls, field) {
         let mut value = runmat_value::ObjectInstance::new(cls.clone());
         value.properties.insert(
             "__enum_member__".to_string(),
-            Value::String(field.to_string()),
+            Value::string(field.to_string()),
         );
         Ok(Value::Object(value))
     } else {
@@ -75,7 +75,7 @@ pub fn load_static_member(
                     binding: None,
                     source_role: runmat_types::FunctionSourceRole::Method,
                     source_file: None,
-                    captures: vec![],
+                    captures: vec![].into(),
                 },
             )))
         } else {

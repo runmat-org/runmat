@@ -3,6 +3,7 @@ use runmat_value::{IntValue, IntegerStorage, LogicalArray, Tensor};
 
 fn classify_with_flag(flag: Value) -> crate::BuiltinResult<Value> {
     futures::executor::block_on(isstrprop_builtin(
+        None,
         Value::String("A".into()),
         Value::String("alpha".into()),
         vec![Value::String("ForceCellOutput".into()), flag],

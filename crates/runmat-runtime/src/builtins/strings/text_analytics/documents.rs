@@ -587,13 +587,16 @@ fn ensure_tokenized_document_class_registered() {
         ] {
             properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: TOKENIZED_DOCUMENT_CLASS.into(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        crate::class_registry::register_builtin_class(
+            TOKENIZED_DOCUMENT_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: TOKENIZED_DOCUMENT_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+            },
+        );
     });
 }
 
@@ -603,13 +606,16 @@ fn ensure_bag_of_words_class_registered() {
         for name in ["Counts", "Vocabulary", "NumWords", "NumDocuments"] {
             properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: BAG_OF_WORDS_CLASS.into(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        crate::class_registry::register_builtin_class(
+            BAG_OF_WORDS_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: BAG_OF_WORDS_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+            },
+        );
     });
 }
 
@@ -1685,17 +1691,17 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             })
         }
         Value::StringArray(array) => {
-            let shape = array.shape.clone();
+            let shape = array.shape.to_vec();
             let mut docs = Vec::with_capacity(array.data.len());
             let mut type_details = options.requires_type_details().then(Vec::new);
-            for text in array.data {
-                let tokenized = if is_missing_string(&text) {
+            for text in array.data.iter() {
+                let tokenized = if is_missing_string(text) {
                     TokenizedText {
                         tokens: Vec::new(),
                         types: type_details.as_ref().map(|_| Vec::new()),
                     }
                 } else {
-                    tokenize_text(&text, options)
+                    tokenize_text(text, options)
                 };
                 if let Some(details) = &mut type_details {
                     details.push(tokenized.types.unwrap_or_default());
@@ -1741,11 +1747,11 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
             })
         }
         Value::Cell(cell) => {
-            let shape = cell.shape.clone();
+            let shape = cell.shape.to_vec();
             let mut docs = Vec::with_capacity(cell.data.len());
             let mut type_details = options.requires_type_details().then(Vec::new);
-            for item in cell.data {
-                let text = scalar_text(&item, "tokenizedDocument")
+            for item in cell.data.iter() {
+                let text = scalar_text(item, "tokenizedDocument")
                     .map_err(|err| text_analytics_error("tokenizedDocument", err.to_string()))?;
                 let tokenized = tokenize_text(&text, options);
                 if let Some(details) = &mut type_details {
@@ -1769,15 +1775,16 @@ fn text_documents(value: Value, options: &DocumentOptions) -> BuiltinResult<Pars
 fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
     match value {
         Value::String(text) => Ok(ParsedDocuments {
-            documents: vec![vec![text]],
+            documents: vec![vec![text.as_str().to_owned()]],
             shape: vec![1, 1],
             type_details: None,
         }),
         Value::StringArray(array) => Ok(ParsedDocuments {
             documents: vec![array
                 .data
-                .into_iter()
+                .iter()
                 .filter(|text| !is_missing_string(text))
+                .map(|text| text.as_str().to_owned())
                 .collect()],
             shape: vec![1, 1],
             type_details: None,
@@ -1795,7 +1802,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
             })
         }
         Value::Cell(cell) => {
-            let shape = cell.shape.clone();
+            let shape = cell.shape.to_vec();
             if cell.data.len() == 1 {
                 if let Value::StringArray(array) = &cell.data[0] {
                     return Ok(ParsedDocuments {
@@ -1803,7 +1810,7 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
                             .data
                             .iter()
                             .filter(|text| !is_missing_string(text))
-                            .cloned()
+                            .map(|text| text.as_str().to_owned())
                             .collect()],
                         shape: vec![1, 1],
                         type_details: None,
@@ -1812,18 +1819,19 @@ fn pretokenized_documents(value: Value) -> BuiltinResult<ParsedDocuments> {
             }
             let mut all_string_arrays = true;
             let mut docs = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
+            for item in cell.data.iter() {
                 match item {
                     Value::StringArray(array) => docs.push(
                         array
                             .data
-                            .into_iter()
+                            .iter()
                             .filter(|text| !is_missing_string(text))
+                            .map(|text| text.as_str().to_owned())
                             .collect(),
                     ),
                     other => {
                         all_string_arrays = false;
-                        docs.push(vec![scalar_text(&other, "tokenizedDocument").map_err(
+                        docs.push(vec![scalar_text(other, "tokenizedDocument").map_err(
                             |err| text_analytics_error("tokenizedDocument", err.to_string()),
                         )?]);
                     }
@@ -2202,7 +2210,7 @@ fn tokenized_document_value(
     );
     object.properties.insert(
         "TokenizeMethod".to_string(),
-        Value::String(
+        Value::string(
             match options.tokenize_method {
                 TokenizeMethod::Unicode => "unicode",
                 TokenizeMethod::None => "none",
@@ -2212,7 +2220,7 @@ fn tokenized_document_value(
     );
     object
         .properties
-        .insert("Language".to_string(), Value::String(options.language));
+        .insert("Language".to_string(), Value::string(options.language));
     object.properties.insert(
         "DetectPatterns".to_string(),
         detect_patterns_value(options.detect_patterns)?,
@@ -2250,8 +2258,8 @@ fn type_details_cell(type_details: &[Vec<String>]) -> BuiltinResult<Value> {
 
 fn detect_patterns_value(patterns: DetectPatterns) -> BuiltinResult<Value> {
     match patterns {
-        DetectPatterns::All => Ok(Value::String("all".to_string())),
-        DetectPatterns::None => Ok(Value::String("none".to_string())),
+        DetectPatterns::All => Ok(Value::string("all".to_string())),
+        DetectPatterns::None => Ok(Value::string("none".to_string())),
         DetectPatterns::Selected(selected) => {
             let mut values = Vec::new();
             if selected.email_address {
@@ -2289,7 +2297,7 @@ pub(in crate::builtins::strings::text_analytics) fn tokenized_document_language(
     object: &ObjectInstance,
 ) -> String {
     match object.properties.get("Language") {
-        Some(Value::String(value)) => value.clone(),
+        Some(Value::String(value)) => value.as_str().to_owned(),
         _ => "en".to_string(),
     }
 }
@@ -2467,8 +2475,8 @@ fn explicit_type_details(
     let mut all_types = Vec::with_capacity(documents.len());
     for (value, document) in cell.data.iter().zip(documents) {
         let types = match value {
-            Value::StringArray(array) => array.data.clone(),
-            Value::String(text) if document.len() == 1 => vec![text.clone()],
+            Value::StringArray(array) => array.data.as_slice(),
+            Value::String(text) if document.len() == 1 => std::slice::from_ref(text),
             _ => {
                 return Err(text_analytics_error(
                     fn_name,
@@ -2482,7 +2490,7 @@ fn explicit_type_details(
                 format!("{fn_name}: token type details do not match document tokens"),
             ));
         }
-        all_types.push(types);
+        all_types.push(types.iter().map(|text| text.as_str().to_owned()).collect());
     }
     Ok(Some(all_types))
 }
@@ -2867,7 +2875,7 @@ pub(in crate::builtins::strings::text_analytics) fn options_from_document_object
         _ => TokenizeMethod::Unicode,
     };
     let language = match object.properties.get("Language") {
-        Some(Value::String(value)) => value.clone(),
+        Some(Value::String(value)) => value.as_str().to_owned(),
         _ => "en".to_string(),
     };
     let detect_patterns = object
@@ -3144,12 +3152,12 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector(
     fn_name: &str,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::StringArray(array) => Ok(array
             .data
             .iter()
             .filter(|text| !is_missing_string(text))
-            .cloned()
+            .map(|text| text.as_str().to_owned())
             .collect()),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
@@ -3186,8 +3194,12 @@ pub(in crate::builtins::strings::text_analytics) fn words_from_word_vector_prese
     fn_name: &str,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(array) if array.rows <= 1 => {
             let text = if array.rows == 0 {
                 String::new()

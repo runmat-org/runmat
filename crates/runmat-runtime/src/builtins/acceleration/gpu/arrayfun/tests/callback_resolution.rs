@@ -89,7 +89,7 @@ fn arrayfun_name_only_closure_prefers_semantic_handle_binding_when_resolved() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(5.0)],
+            captures: vec![Value::Num(5.0)].into(),
         },
     )))
     .expect("closure callback should parse");
@@ -125,7 +125,7 @@ fn arrayfun_name_only_closure_call_uses_semantic_resolver_when_unbound() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(5.0)],
+            captures: vec![Value::Num(5.0)].into(),
         },
     )))
     .expect("closure callback should parse");

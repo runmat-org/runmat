@@ -282,8 +282,8 @@ fn parse_options(value: Option<Value>) -> BuiltinResult<Option<StructValue>> {
 
 fn option_string(field: &str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         other => Err(fminbnd_error_with_detail(
             &FMINBND_ERROR_INVALID_ARGUMENT,

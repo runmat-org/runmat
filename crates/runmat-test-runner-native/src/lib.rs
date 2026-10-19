@@ -4,6 +4,7 @@ pub mod artifact;
 pub mod host;
 pub mod snapshot;
 pub mod telemetry;
+pub mod target_test;
 pub mod transport;
 pub mod worker;
 

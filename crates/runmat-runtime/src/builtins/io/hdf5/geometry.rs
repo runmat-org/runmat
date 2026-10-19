@@ -76,7 +76,7 @@ pub(super) fn matlab_value_from_strings(
 ) -> BuiltinResult<Value> {
     let shape = shape_or_scalar(shape);
     if data.len() == 1 {
-        Ok(Value::String(data[0].clone()))
+        Ok(Value::string(data[0].clone()))
     } else {
         StringArray::new(data, shape)
             .map(Value::StringArray)

@@ -109,10 +109,12 @@ impl IncludedEdge {
     }
 }
 
-pub(super) fn scalar_text(value: &Value) -> Option<String> {
+pub(super) fn scalar_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(value) => Some(value.clone()),
-        Value::CharArray(value) if value.rows <= 1 => Some(value.data.iter().collect()),
+        Value::String(value) => Some(std::borrow::Cow::Borrowed(value.as_str())),
+        Value::CharArray(value) if value.rows <= 1 => {
+            Some(std::borrow::Cow::Owned(value.data.iter().collect()))
+        }
         _ => None,
     }
 }

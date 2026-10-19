@@ -389,9 +389,9 @@ fn parse_cutoff(value: Value) -> BuiltinResult<Vec<f64>> {
 
 fn parse_option_token(value: Value) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text),
-        Value::CharArray(chars) => Ok(chars.data.into_iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.into_string_unbounded()),
+        Value::CharArray(chars) => Ok(chars.data.into_char_iter().collect()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         other => Err(butter_error_with_detail(
             &BUTTER_ERROR_INVALID_OPTION,
             format!("expected a string option, received {other:?}"),

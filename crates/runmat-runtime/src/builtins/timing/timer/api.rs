@@ -138,7 +138,7 @@ pub async fn timer_startat_builtin(
         Some(delay) => {
             prepare_timer_property_pairs(
                 Some(&runtime),
-                &[Value::String("StartDelay".to_string()), delay.clone()],
+                &[Value::string("StartDelay".to_string()), delay.clone()],
                 false,
             )
             .await?

@@ -267,10 +267,12 @@ async fn fit(
     })
 }
 
-fn scalar_text(value: &Value) -> Option<String> {
+fn scalar_text(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Some(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Some(chars.data.iter().collect::<String>().into())
+        }
         _ => None,
     }
 }

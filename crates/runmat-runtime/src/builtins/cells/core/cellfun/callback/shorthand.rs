@@ -60,9 +60,9 @@ async fn is_class(arguments: &[Value]) -> BuiltinResult<Value> {
 
 fn class_identity(value: &Value) -> Option<runmat_types::ClassIdentity> {
     let text = match value {
-        Value::String(text) => text.clone(),
+        Value::String(text) => text.to_string(),
         Value::CharArray(value) if value.rows == 1 => value.data.iter().collect(),
-        Value::StringArray(value) if value.data.len() == 1 => value.data[0].clone(),
+        Value::StringArray(value) if value.data.len() == 1 => value.data[0].to_string(),
         _ => return None,
     };
     runmat_types::ClassIdentity::new(text.trim()).ok()

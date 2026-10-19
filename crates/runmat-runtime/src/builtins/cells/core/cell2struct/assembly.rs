@@ -6,7 +6,7 @@ pub(super) fn build(
     dimension: usize,
 ) -> crate::BuiltinResult<Value> {
     let rank = cells.shape.len().max(dimension);
-    let mut input_shape = cells.shape.clone();
+    let mut input_shape = cells.shape.as_slice().to_vec();
     input_shape
         .try_reserve_exact(rank.saturating_sub(input_shape.len()))
         .map_err(|_| super::error::invalid("dim exceeds platform limits"))?;

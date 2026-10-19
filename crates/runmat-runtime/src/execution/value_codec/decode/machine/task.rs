@@ -212,9 +212,11 @@ fn decode_task<'a>(
             Value::Complex(f64::from_bits(*real), f64::from_bits(*imaginary)),
             &path,
         )?,
-        InlineValue::String(value) => machine
-            .tasks
-            .push(Task::Text(TextValueTask::string(value, path))),
+        InlineValue::String(value) => {
+            let runtime = machine.runtime();
+            let task = TextValueTask::string(value, path, runtime)?;
+            machine.tasks.push(Task::Text(task));
+        }
         InlineValue::Char { shape, code_points } => machine.tasks.push(Task::Text(
             TextValueTask::character(shape, code_points, path),
         )),

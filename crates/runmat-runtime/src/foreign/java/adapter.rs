@@ -14,8 +14,7 @@ use runmat_types::{
     ForeignTypeIdentity,
 };
 use runmat_value::{
-    CellArray, CharArray, ForeignRef, ForeignResourceKey, IntValue, ObjectInstance, Value,
-    WeakForeignRef,
+    CellArray, CharArray, ForeignRef, ForeignResourceKey, ObjectInstance, Value, WeakForeignRef,
 };
 
 use super::super::project_retirement::ProjectRetirementAuthority;
@@ -63,7 +62,7 @@ pub struct JavaAdapter {
 }
 
 struct JavaCallbackRegistration {
-    callable: crate::execution::RetainedValueReadLease,
+    callable: crate::call::RetainedCallableTarget,
     origin: crate::context::RuntimeContextLocalId,
     context: RuntimeContext,
     foreign: std::rc::Weak<dyn crate::context::RuntimeForeignService>,
@@ -324,10 +323,11 @@ impl JavaAdapter {
     fn argument_to_java(
         &self,
         context: &RuntimeContext,
-        value: Value,
+        value: crate::call::RootedArgumentValue,
     ) -> Result<JavaValue, RuntimeError> {
-        if super::super::is_callable(&value) {
+        if super::super::is_callable(value.value()) {
             let instance = value
+                .value()
                 .callable_instance_key()
                 .expect("every callable value has a physical instance");
             if let Some((token, _)) = self.callbacks.borrow().iter().find(|(_, registration)| {
@@ -347,7 +347,16 @@ impl JavaAdapter {
                     invalid_conversion("Java callback identity space is exhausted")
                 })?,
             );
-            let callable = crate::execution::RetainedValueReadLease::prepare_owned(value, context)?;
+            let callable = match value {
+                crate::call::RootedArgumentValue::Owned(value) => {
+                    crate::call::RetainedCallableTarget::Direct(
+                        crate::execution::RetainedValueReadLease::prepare_owned(value, context)?,
+                    )
+                }
+                crate::call::RootedArgumentValue::Captured(value) => {
+                    crate::call::RetainedCallableTarget::Captured(value)
+                }
+            };
             let callback_context = context
                 .clone()
                 .with_service_ports(context.service_ports().clone().without_foreign());
@@ -362,9 +371,13 @@ impl JavaAdapter {
             );
             return Ok(JavaValue::Callback(token));
         }
-        let Value::Foreign(reference) = value else {
-            return value_to_java(value);
+        let Value::Foreign(reference) = value.value() else {
+            return match value.into_owned() {
+                Ok(value) => value_to_java(value),
+                Err(value) => super::conversion::value_ref_to_java(value.value()),
+            };
         };
+        let reference = reference.clone();
         if reference.type_identity.family != JAVA_ADAPTER_ID {
             return Err(invalid_conversion("foreign argument is not a Java object"));
         }
@@ -377,13 +390,11 @@ impl JavaAdapter {
 
     fn classpath_value(
         &self,
-        arguments: Vec<Value>,
+        layer_argument: Option<&Value>,
         snapshot: ClasspathSnapshot,
     ) -> Result<Value, RuntimeError> {
-        let layer = arguments
-            .into_iter()
-            .next()
-            .map(|value| string_argument(Some(value), "Java classpath layer"))
+        let layer = layer_argument
+            .map(|value| string_argument_ref(Some(value), "Java classpath layer"))
             .transpose()?;
         let layer = layer
             .as_deref()
@@ -417,7 +428,7 @@ impl JavaAdapter {
             ObjectInstance::new(runmat_builtins::JAVA_ENVIRONMENT_CLASS.display_name());
         status.properties.insert(
             "Version".into(),
-            Value::String(
+            Value::string(
                 installation
                     .as_ref()
                     .map(|value| value.version.raw.clone())
@@ -426,7 +437,7 @@ impl JavaAdapter {
         );
         status.properties.insert(
             "Home".into(),
-            Value::String(
+            Value::string(
                 installation
                     .as_ref()
                     .map(|value| value.home.display().to_string())
@@ -435,7 +446,7 @@ impl JavaAdapter {
         );
         status.properties.insert(
             "Library".into(),
-            Value::String(
+            Value::string(
                 installation
                     .as_ref()
                     .map(|value| value.library.display().to_string())
@@ -448,7 +459,7 @@ impl JavaAdapter {
         );
         status.properties.insert(
             "Configuration".into(),
-            Value::String({
+            Value::string({
                 let discovery = self.discovery.borrow();
                 discovery
                     .explicit_home
@@ -477,7 +488,10 @@ impl JavaAdapter {
         }
     }
 
-    fn configure_value(&self, arguments: Vec<Value>) -> Result<Value, RuntimeError> {
+    fn configure_value(
+        &self,
+        arguments: crate::call::RootedFunctionArguments,
+    ) -> Result<Value, RuntimeError> {
         if self.is_running() {
             return Err(invalid_conversion(
                 "jenv cannot change Java configuration after JVM startup",
@@ -488,9 +502,8 @@ impl JavaAdapter {
                 "jenv configuration requires one name-value pair",
             ));
         }
-        let mut arguments = arguments.into_iter();
-        let name = string_argument(arguments.next(), "jenv option")?;
-        let value = string_argument(arguments.next(), "jenv option value")?;
+        let name = string_argument_ref(arguments.get(0), "jenv option")?;
+        let value = string_argument_ref(arguments.get(1), "jenv option value")?;
         let control = runmat_builtins::JavaEnvironmentControl::parse(&name).ok_or_else(|| {
             invalid_conversion("jenv supports the 'Version' and 'ExecutionMode' options")
         })?;
@@ -693,42 +706,6 @@ fn string_argument_ref(value: Option<&Value>, label: &str) -> Result<String, Run
         None => Err(invalid_conversion(format!(
             "{label} must be non-empty text"
         ))),
-    }
-}
-
-fn foreign_argument(value: Option<Value>) -> Result<ForeignRef, RuntimeError> {
-    match value {
-        Some(Value::Foreign(reference)) if reference.type_identity.family == JAVA_ADAPTER_ID => {
-            Ok(reference)
-        }
-        _ => Err(invalid_conversion("Java receiver must be a Java object")),
-    }
-}
-
-fn java_dimension(value: Value) -> Result<usize, RuntimeError> {
-    match value {
-        Value::Int(value) => match value {
-            IntValue::I8(value) => usize::try_from(value),
-            IntValue::I16(value) => usize::try_from(value),
-            IntValue::I32(value) => usize::try_from(value),
-            IntValue::I64(value) => usize::try_from(value),
-            IntValue::U8(value) => Ok(usize::from(value)),
-            IntValue::U16(value) => Ok(usize::from(value)),
-            IntValue::U32(value) => usize::try_from(value),
-            IntValue::U64(value) => usize::try_from(value),
-        }
-        .map_err(|_| invalid_conversion("Java array dimensions must be nonnegative integers")),
-        Value::Num(value)
-            if value.is_finite()
-                && value >= 0.0
-                && value.fract() == 0.0
-                && value <= usize::MAX as f64 =>
-        {
-            Ok(value as usize)
-        }
-        _ => Err(invalid_conversion(
-            "Java array dimensions must be nonnegative integer scalars",
-        )),
     }
 }
 

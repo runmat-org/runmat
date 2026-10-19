@@ -2,6 +2,8 @@ use runmat_value::{LogicalArray, StringArray, SymbolicArray, Value};
 
 use super::super::{error, plan::PartitionPlan};
 
+pub(super) mod managed_strings;
+
 pub(super) fn logical(array: LogicalArray, dimensions: &[usize]) -> crate::BuiltinResult<Value> {
     let plan = PartitionPlan::new(&array.shape, dimensions)?;
     let cells = plan
@@ -24,9 +26,17 @@ pub(super) fn logical(array: LogicalArray, dimensions: &[usize]) -> crate::Built
     super::output(&plan, cells)
 }
 
-pub(super) fn strings(array: StringArray, dimensions: &[usize]) -> crate::BuiltinResult<Value> {
+pub(super) fn strings(
+    array: StringArray,
+    dimensions: &[usize],
+    _runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<Value> {
     let plan = PartitionPlan::new(&array.shape, dimensions)?;
-    let mut values = options(array.data);
+    let values = match array.data.try_into_owned() {
+        Ok(values) => values.into_iter().collect::<Vec<_>>(),
+        Err(shared) => shared.iter().cloned().collect(),
+    };
+    let mut values = options(values);
     let cells = plan
         .groups()
         .map(|indices| {
@@ -37,7 +47,7 @@ pub(super) fn strings(array: StringArray, dimensions: &[usize]) -> crate::Builti
                     .map(Value::String)
                     .ok_or_else(|| error::internal("string group is empty"));
             }
-            StringArray::new(group, plan.slice_shape.clone())
+            StringArray::from_texts_unbounded(group, plan.slice_shape.clone())
                 .map(Value::StringArray)
                 .map_err(error::internal)
         })

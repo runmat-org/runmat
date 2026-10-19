@@ -39,10 +39,15 @@ pub(super) fn set_property(handle: &HandleRef, name: &str, value: Value) -> Buil
     }
 }
 
-pub(super) fn string_property(handle: &HandleRef, name: &str) -> BuiltinResult<String> {
+pub(super) fn string_property(
+    handle: &HandleRef,
+    name: &str,
+) -> BuiltinResult<runmat_value::Utf8Text> {
     match property(handle, name)? {
         Value::String(text) => Ok(text),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            Ok(chars.data.iter().collect::<String>().into())
+        }
         other => Err(timer_error(
             &TIMER_ERROR_INVALID_PROPERTY,
             format!("timer: property '{name}' must be text, got {other:?}"),

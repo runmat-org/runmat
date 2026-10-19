@@ -248,13 +248,13 @@ impl MatrixData {
                 Ok(MatrixData::Text {
                     rows,
                     cols,
-                    data: sa.data,
+                    data: sa.data.iter().map(|text| text.as_str().to_owned()).collect(),
                 })
             }
             Value::String(s) => Ok(MatrixData::Text {
                 rows: 1,
                 cols: 1,
-                data: vec![s],
+                data: vec![s.into_string_unbounded()],
             }),
             Value::CharArray(_) => Err(writematrix_error_with(
                 &WRITEMATRIX_ERROR_DATA,

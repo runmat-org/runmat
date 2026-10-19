@@ -66,7 +66,7 @@ pub(super) fn annotate_network_object(network: &mut ObjectInstance) -> BuiltinRe
 
     // Construct and validate the new State table before either owner commits.
     let state = model::state::stage_annotated(network, state, "dlfeval")?;
-    model::parameters::install_annotated(network, parameters);
+    model::parameters::install_annotated(network, parameters)?;
     model::state::install_annotated(network, state);
     Ok(())
 }
@@ -113,10 +113,10 @@ fn annotate_payload(value: Value, payload: NodeValue) -> BuiltinResult<Value> {
             wrapper.properties.insert("Data".into(), value);
             wrapper
                 .properties
-                .insert("Format".into(), Value::String(String::new()));
+                .insert("Format".into(), Value::string(String::new()));
             wrapper
                 .properties
-                .insert("Labels".into(), Value::String(String::new()));
+                .insert("Labels".into(), Value::string(String::new()));
             annotate_dlarray_object_with_value(&mut wrapper, payload)?;
             Ok(Value::Object(wrapper))
         }

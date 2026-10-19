@@ -87,9 +87,14 @@ fn add_plugin(runner: Value, plugin: Value) -> BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(
     name = "matlab.unittest.TestRunner.run",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::testing::testrunner"
 )]
-async fn run(runner: Value, suite: Value) -> BuiltinResult<Value> {
+async fn run(
+    runtime: Option<crate::context::RuntimeContext>,
+    runner: Value,
+    suite: Value,
+) -> BuiltinResult<crate::execution::RootedValue> {
     let Value::HandleObject(handle) = &runner else {
         return Err(runner_error("TestRunner.run requires a TestRunner handle"));
     };
@@ -103,12 +108,12 @@ async fn run(runner: Value, suite: Value) -> BuiltinResult<Value> {
         };
         match object.properties.get("Plugins") {
             Some(Value::Cell(plugins)) => Some(plugins.data.clone()),
-            _ => Some(Vec::new()),
+            _ => Some(runmat_value::OutputListStorage::unbounded(Vec::new())),
         }
     })
     .map_err(|error| runner_error(format!("failed to read runner plugins: {error}")))?
     .ok_or_else(|| runner_error("TestRunner plugin storage is invalid"))?;
-    crate::testing::run_test_suite(suite, plugins).await
+    crate::testing::run_test_suite_in_context(runtime, suite, plugins)?.await
 }
 
 fn set_plugins(runner: &Value, plugins: Vec<Value>) -> BuiltinResult<()> {

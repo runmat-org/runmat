@@ -271,7 +271,7 @@ async fn xmlread_builtin(
         .insert("Filename".to_string(), char_value(&filename));
     object
         .properties
-        .insert("Text".to_string(), Value::String(text));
+        .insert("Text".to_string(), Value::string(text));
     object
         .properties
         .insert("DocumentElementName".to_string(), char_value(&root.name));

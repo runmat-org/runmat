@@ -113,6 +113,13 @@ fn kfold_partition_exposes_balanced_masks() {
 
 #[test]
 fn numeric_group_order_keeps_seed_repeatability_and_each_class_covered() {
+    assert_eq!(
+        char_row_labels(runmat_value::CharArray::new(vec!['a', '1', 'b', '2'], 2, 2).unwrap()),
+        vec![
+            Some(PartitionLabel::Text("a1".into())),
+            Some(PartitionLabel::Text("b2".into())),
+        ],
+    );
     let _lock = random::test_guard();
     let partition = || {
         cv(

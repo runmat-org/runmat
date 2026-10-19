@@ -102,6 +102,7 @@ pub(super) fn fixture(value: Value) -> (NativeFunction, NativeWorkspaceInput) {
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,
         id: ProgramFunctionId(0),
+        mir_body_digest: runmat_execution::Digest::sha256(b"fixture:native-workspace-snapshot"),
         source: ProgramSourceId(0),
         name: "snapshot".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,

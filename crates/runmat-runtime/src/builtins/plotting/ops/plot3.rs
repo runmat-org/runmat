@@ -889,12 +889,9 @@ mod tests {
             Value::Tensor(vec_tensor(&[1.0, 2.0])),
             Value::Tensor(vec_tensor(&[2.0, 3.0])),
             Value::String("LineStyleOrder".into()),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["--".into(), ":".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["--".into(), ":".into()], vec![1, 2]).unwrap(),
+            ),
             Value::Tensor(vec_tensor(&[0.0, 1.0])),
             Value::Tensor(vec_tensor(&[2.0, 3.0])),
             Value::Tensor(vec_tensor(&[4.0, 5.0])),

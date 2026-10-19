@@ -213,7 +213,7 @@ fn gradient_tree_for_target_impl(
                 .iter()
                 .map(|value| gradient_tree_for_target_impl(value, gradients))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            CellArray::new_with_shape(data, cell.shape.clone())
+            CellArray::new_with_shape(data, cell.shape.as_slice().to_vec())
                 .map(Value::Cell)
                 .map_err(|err| deep_learning_error("dlgradient", err))
         }
@@ -239,7 +239,7 @@ fn gradient_network_table(
     variables.insert(
         "Value",
         Value::Cell(
-            CellArray::new_with_shape(gradients, values.shape.clone())
+            CellArray::new_with_shape(gradients, values.shape.as_slice().to_vec())
                 .map_err(|error| deep_learning_error("dlgradient", error))?,
         ),
     );

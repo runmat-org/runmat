@@ -23,7 +23,7 @@ async fn path_fixture(path: Value) -> BuiltinResult<Value> {
     let path = scalar_text("PathFixture", path)?;
     let fixture = crate::new_handle_object_builtin(PATH_FIXTURE_CLASS.into()).await?;
     set_handle_property(&fixture, "Name", Value::String("PathFixture".into()))?;
-    set_handle_property(&fixture, "Path", Value::String(path))?;
+    set_handle_property(&fixture, "Path", Value::string(path))?;
     Ok(fixture)
 }
 
@@ -46,7 +46,7 @@ async fn temporary_folder_fixture(args: Vec<Value>) -> BuiltinResult<Value> {
         "Name",
         Value::String("TemporaryFolderFixture".into()),
     )?;
-    set_handle_property(&fixture, "Folder", Value::String(String::new()))?;
+    set_handle_property(&fixture, "Folder", Value::string(String::new()))?;
     Ok(fixture)
 }
 
@@ -64,10 +64,10 @@ async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> 
     match kind {
         FixtureKind::Path => {
             let path = handle_text_property(&handle, "Path")?;
-            crate::call_builtin_async("addpath", &[Value::String(path.clone())]).await?;
+            crate::call_builtin_async("addpath", &[Value::string(path.clone())]).await?;
             crate::testing::record_runtime_teardown(
                 Value::FunctionHandle("rmpath".into()),
-                vec![Value::String(path)],
+                vec![Value::string(path)],
             )
             .map_err(|message| testing_error("applyFixture", message))?;
         }
@@ -81,10 +81,10 @@ async fn apply_fixture(receiver: Value, fixture: Value) -> BuiltinResult<Value> 
                         format!("applyFixture: could not create '{folder}': {error}"),
                     )
                 })?;
-            set_handle_property(&fixture, "Folder", Value::String(folder.clone()))?;
+            set_handle_property(&fixture, "Folder", Value::string(folder.clone()))?;
             crate::testing::record_runtime_teardown(
                 Value::FunctionHandle("rmdir".into()),
-                vec![Value::String(folder), Value::String("s".into())],
+                vec![Value::string(folder), Value::String("s".into())],
             )
             .map_err(|message| testing_error("applyFixture", message))?;
         }
@@ -174,7 +174,7 @@ fn validate_test_case(receiver: &Value) -> BuiltinResult<()> {
 fn handle_text_property(handle: &HandleRef, name: &str) -> BuiltinResult<String> {
     runmat_gc::gc_with_value(&handle.target, |target| match target {
         Value::Object(object) => object.properties.get(name).and_then(|value| match value {
-            Value::String(value) => Some(value.clone()),
+            Value::String(value) => Some(value.as_str().to_owned()),
             _ => None,
         }),
         _ => None,
@@ -217,7 +217,7 @@ fn set_handle_property(handle: &Value, name: &str, value: Value) -> BuiltinResul
 
 fn scalar_text(builtin: &'static str, value: Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value),
+        Value::String(value) => Ok(value.into_string_unbounded()),
         Value::CharArray(chars) if chars.rows <= 1 => Ok(chars.data.iter().collect()),
         _ => Err(testing_error(
             builtin,

@@ -81,8 +81,7 @@ async fn cospi_builtin(value: Value) -> BuiltinResult<Value> {
 
 fn cospi_char_array(array: CharArray) -> BuiltinResult<Value> {
     let data = array
-        .data
-        .into_iter()
+        .iter_column_major()
         .map(|value| if u32::from(value) % 2 == 0 { 1.0 } else { -1.0 })
         .collect();
     let tensor = Tensor::new(data, array.shape)

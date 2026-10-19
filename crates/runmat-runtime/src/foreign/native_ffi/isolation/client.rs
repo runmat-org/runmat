@@ -315,7 +315,11 @@ impl IsolatedNativeFfiClient {
         let releases = self.translate_releases(released_local_handles);
         let mut callbacks = BTreeMap::new();
         let mut arguments = Vec::with_capacity(call.arguments.len());
-        for value in &call.arguments {
+        for value in call
+            .arguments
+            .try_into_values()
+            .map_err(|error| foreign_error(ForeignErrorKind::InvalidCall, error.to_string()))?
+        {
             arguments.push(
                 self.encode_driver_value(value, &mut callbacks)
                     .await
@@ -378,7 +382,7 @@ impl IsolatedNativeFfiClient {
         &mut self,
         request_id: u64,
         runtime: RuntimeContext,
-        callbacks: BTreeMap<u64, Value>,
+        callbacks: BTreeMap<u64, crate::call::RetainedCallableTarget>,
         handles: &ForeignHandleRegistry,
         host_identity: &str,
     ) -> Result<RootedValues, RuntimeError> {
@@ -430,7 +434,7 @@ impl IsolatedNativeFfiClient {
         &mut self,
         callback: NativeCallbackRequest,
         runtime: RuntimeContext,
-        callbacks: &BTreeMap<u64, Value>,
+        callbacks: &BTreeMap<u64, crate::call::RetainedCallableTarget>,
     ) -> NativeCallbackResult {
         let outcome = async {
             let callable = callbacks
@@ -459,21 +463,33 @@ impl IsolatedNativeFfiClient {
             let arguments = arguments
                 .finish()
                 .map_err(|error| wire_error("RunMat:NativeFFI:ValueDecode", error.to_string()))?;
-            let result = crate::call_feval_async_with_outputs_in_context(
-                &runtime,
-                callable,
-                arguments.values(),
-                1,
-            )
-            .await
-            .map_err(|error| wire_error("RunMat:NativeFFI:CallbackFailed", error.to_string()))?;
+            let request =
+                crate::foreign::foreign_callback_request_rooted(&runtime, &callable, arguments, 1)
+                    .map_err(|error| {
+                        wire_error("RunMat:NativeFFI:CallbackFailed", error.to_string())
+                    })?;
+            let sequence = crate::foreign::invoke_foreign_callback(runtime.clone(), request)
+                .await
+                .map_err(|error| {
+                    wire_error("RunMat:NativeFFI:CallbackFailed", error.to_string())
+                })?;
+            let result = sequence
+                .value()
+                .as_slice()
+                .first()
+                .cloned()
+                .ok_or_else(|| {
+                    wire_error(
+                        "RunMat:NativeFFI:CallbackFailed",
+                        "callback returned no value",
+                    )
+                })?;
             let host_value = crate::gather_if_needed_async(&result)
                 .await
                 .map_err(|error| wire_error("RunMat:NativeFFI:ValueGather", error.to_string()))?;
             let encoded = encode_portable(&host_value, self.child.lease())
                 .map(NativeWireValue::Portable)
                 .map(|value| vec![value]);
-            drop(arguments);
             encoded
         }
         .await;
@@ -486,10 +502,10 @@ impl IsolatedNativeFfiClient {
 
     async fn encode_driver_value(
         &mut self,
-        value: &Value,
-        callbacks: &mut BTreeMap<u64, Value>,
+        value: crate::call::RootedArgumentValue,
+        callbacks: &mut BTreeMap<u64, crate::call::RetainedCallableTarget>,
     ) -> Result<NativeWireValue, NativeWireError> {
-        if super::super::is_callable(value) {
+        if super::super::is_callable(value.value()) {
             let id = self.next_callback_id;
             self.next_callback_id = self.next_callback_id.checked_add(1).ok_or_else(|| {
                 wire_error(
@@ -497,10 +513,26 @@ impl IsolatedNativeFfiClient {
                     "callback identity exhausted",
                 )
             })?;
-            callbacks.insert(id, value.clone());
+            let owner = match value {
+                crate::call::RootedArgumentValue::Owned(value) => {
+                    let generation = runmat_value::SharedValueGeneration::unbounded(value);
+                    crate::call::RetainedCallableTarget::Direct(
+                        crate::execution::RetainedValueReadLease::retain_shared_generation(
+                            generation, None,
+                        )
+                        .map_err(|error| {
+                            wire_error("RunMat:NativeFFI:ValueEncode", error.to_string())
+                        })?,
+                    )
+                }
+                crate::call::RootedArgumentValue::Captured(value) => {
+                    crate::call::RetainedCallableTarget::Captured(value)
+                }
+            };
+            callbacks.insert(id, owner);
             return Ok(NativeWireValue::Callback { id });
         }
-        match value {
+        match value.value() {
             Value::Foreign(reference) => {
                 let id = self
                     .local_to_remote
@@ -525,11 +557,12 @@ impl IsolatedNativeFfiClient {
                 "transient output sequences cannot be encoded as nested native FFI values",
             )),
             _ => {
-                let host_value = crate::gather_if_needed_async(value)
-                    .await
-                    .map_err(|error| {
-                        wire_error("RunMat:NativeFFI:ValueGather", error.to_string())
-                    })?;
+                let host_value =
+                    crate::gather_if_needed_async(value.value())
+                        .await
+                        .map_err(|error| {
+                            wire_error("RunMat:NativeFFI:ValueGather", error.to_string())
+                        })?;
                 encode_portable(&host_value, self.child.lease()).map(NativeWireValue::Portable)
             }
         }

@@ -16,10 +16,10 @@ pub(in crate::builtins::deep_learning::model) fn public_value(value: Option<&Val
     wrapper.properties.insert("Data".into(), value.clone());
     wrapper
         .properties
-        .insert("Format".into(), Value::String(String::new()));
+        .insert("Format".into(), Value::string(String::new()));
     wrapper
         .properties
-        .insert("Labels".into(), Value::String(String::new()));
+        .insert("Labels".into(), Value::string(String::new()));
     Value::Object(wrapper)
 }
 

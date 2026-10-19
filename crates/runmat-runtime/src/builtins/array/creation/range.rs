@@ -243,9 +243,13 @@ fn parse_arguments(args: &[Value]) -> crate::BuiltinResult<(DimSelection, NanMod
 
 fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
     let text = match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data.len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        }
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(std::borrow::Cow::Owned(ca.data.iter().collect::<String>()))
+        }
         _ => None,
     };
     let Some(text) = text else {
@@ -261,9 +265,13 @@ fn parse_nan_flag(value: &Value) -> crate::BuiltinResult<Option<NanMode>> {
 
 fn is_all_flag(value: &Value) -> crate::BuiltinResult<bool> {
     let text = match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data.len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        }
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(std::borrow::Cow::Owned(ca.data.iter().collect::<String>()))
+        }
         _ => None,
     };
     Ok(text

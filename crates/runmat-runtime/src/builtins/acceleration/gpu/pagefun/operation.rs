@@ -7,10 +7,10 @@ pub(super) enum PageOperation {
 impl PageOperation {
     pub(super) fn from_callable(value: Value) -> BuiltinResult<Self> {
         let raw = match value {
-            Value::FunctionHandle(func) => func.into_name(),
-            Value::ExternalFunctionHandle(func) => func.into_name(),
+            Value::FunctionHandle(func) => func.into_name_unbounded(),
+            Value::ExternalFunctionHandle(func) => func.into_name_unbounded(),
             Value::BoundFunctionHandle(handle) => handle.into_data().name,
-            Value::String(s) => s,
+            Value::String(s) => s.into_string_unbounded(),
             Value::StringArray(sa) => {
                 if sa.data.len() != 1 {
                     return Err(pagefun_error_with_detail(
@@ -18,7 +18,7 @@ impl PageOperation {
                         "function string array must contain exactly one element",
                     ));
                 }
-                sa.data[0].clone()
+                sa.data[0].as_str().to_owned()
             }
             Value::CharArray(chars) => {
                 if chars.rows != 1 {

@@ -520,7 +520,7 @@ fn parse_dimension_float(rounded: f64) -> BuiltinResult<Option<usize>> {
 }
 
 struct JoinInput {
-    data: Vec<String>,
+    data: Vec<runmat_value::Utf8Text>,
     shape: Vec<usize>,
     kind: OutputKind,
 }
@@ -540,15 +540,21 @@ impl JoinInput {
                 shape: vec![1, 1],
                 kind: OutputKind::StringScalar,
             }),
-            Value::StringArray(array) => Ok(Self {
-                data: array.data,
-                shape: array.shape,
-                kind: OutputKind::StringArray,
-            }),
+            Value::StringArray(array) => {
+                let data = match array.data.try_into_owned() {
+                    Ok(values) => values.into_iter().collect(),
+                    Err(data) => data.iter().cloned().collect(),
+                };
+                Ok(Self {
+                    data,
+                    shape: array.shape.to_vec(),
+                    kind: OutputKind::StringArray,
+                })
+            }
             Value::CharArray(array) => {
                 let strings = char_array_rows_to_strings(&array);
                 Ok(Self {
-                    data: strings,
+                    data: strings.into_iter().map(Into::into).collect(),
                     shape: vec![array.rows, 1],
                     kind: OutputKind::StringArray,
                 })
@@ -588,11 +594,19 @@ impl JoinInput {
     }
 }
 
-fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> BuiltinResult<Value> {
+fn build_value<T: Default + Into<runmat_value::Utf8Text> + AsRef<str>>(
+    kind: OutputKind,
+    data: Vec<T>,
+    shape: Vec<usize>,
+) -> BuiltinResult<Value> {
     match kind {
-        OutputKind::StringScalar => Ok(Value::String(data.into_iter().next().unwrap_or_default())),
+        OutputKind::StringScalar => Ok(Value::string(data.into_iter().next().unwrap_or_default())),
         OutputKind::StringArray => {
-            let array = StringArray::new(data, shape).map_err(|e| {
+            let array = StringArray::from_texts_unbounded(
+                data.into_iter().map(Into::into).collect(),
+                shape,
+            )
+            .map_err(|e| {
                 join_error_with_message(format!("{BUILTIN_NAME}: {e}"), &JOIN_ERROR_INTERNAL)
             })?;
             Ok(Value::StringArray(array))
@@ -609,8 +623,7 @@ fn build_value(kind: OutputKind, data: Vec<String>, shape: Vec<usize>) -> Builti
             for row in 0..rows {
                 for col in 0..cols {
                     let idx = row + col * rows;
-                    let text = data[idx].clone();
-                    let chars: Vec<char> = text.chars().collect();
+                    let chars: Vec<char> = data[idx].as_ref().chars().collect();
                     let cols_count = chars.len();
                     let char_array = CharArray::new(chars, 1, cols_count).map_err(|e| {
                         join_error_with_message(
@@ -636,7 +649,9 @@ fn char_array_rows_to_strings(array: &CharArray) -> Vec<String> {
     strings
 }
 
-fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
+fn cell_array_to_strings(
+    cell: CellArray,
+) -> BuiltinResult<(Vec<runmat_value::Utf8Text>, Vec<usize>)> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -646,7 +661,8 @@ fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usi
             let idx = row * cols + col;
             strings.push(
                 cell_element_to_string(&data[idx])
-                    .ok_or_else(|| join_error(&JOIN_ERROR_INPUT_TYPE))?,
+                    .ok_or_else(|| join_error(&JOIN_ERROR_INPUT_TYPE))?
+                    .into(),
             );
         }
     }
@@ -655,8 +671,10 @@ fn cell_array_to_strings(cell: CellArray) -> BuiltinResult<(Vec<String>, Vec<usi
 
 fn cell_element_to_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
@@ -733,7 +751,7 @@ impl DelimiterArray {
 
 fn value_to_scalar_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows <= 1 => {
             if array.rows == 0 {
                 Some(String::new())
@@ -741,7 +759,9 @@ fn value_to_scalar_string(value: &Value) -> Option<String> {
                 Some(char_row_to_string_slice(&array.data, array.cols, 0))
             }
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::Cell(cell) if cell.data.len() == 1 => cell_element_to_string(&cell.data[0]),
         _ => None,
     }
@@ -749,10 +769,22 @@ fn value_to_scalar_string(value: &Value) -> Option<String> {
 
 fn value_to_string_array(value: Value) -> BuiltinResult<(Vec<String>, Vec<usize>)> {
     match value {
-        Value::StringArray(array) => Ok((array.data, array.shape)),
+        Value::StringArray(array) => Ok((
+            array
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+            array.shape.to_vec(),
+        )),
         Value::Cell(cell) => {
             let (data, shape) = cell_array_to_strings(cell)?;
-            Ok((data, shape))
+            Ok((
+                data.into_iter()
+                    .map(|text| text.as_str().to_owned())
+                    .collect(),
+                shape,
+            ))
         }
         Value::CharArray(array) => {
             let rows = array.rows;
@@ -796,7 +828,7 @@ fn normalize_delimiter_shape(
 }
 
 fn perform_join(
-    data: &[String],
+    data: &[runmat_value::Utf8Text],
     full_shape: &[usize],
     axis_idx: usize,
     delimiter: &Delimiter,

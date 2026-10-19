@@ -90,12 +90,16 @@ impl Invocation {
             Self::Missing => block_on(missing_builtin(vec![resident])),
             Self::IsMissing => block_on(ismissing_builtin(resident)),
             Self::AnyMissing => block_on(anymissing_builtin(resident)),
-            Self::StandardizeInput => {
-                block_on(standardize_missing_builtin(resident, vec![Value::Num(0.0)]))
-            }
-            Self::StandardizeIndicators => {
-                block_on(standardize_missing_builtin(Value::Num(1.0), vec![resident]))
-            }
+            Self::StandardizeInput => block_on(standardize_missing_builtin(
+                None,
+                resident,
+                vec![Value::Num(0.0)],
+            )),
+            Self::StandardizeIndicators => block_on(standardize_missing_builtin(
+                None,
+                Value::Num(1.0),
+                vec![resident],
+            )),
             Self::Remove => block_on(rmmissing_builtin(resident, Vec::new())),
             Self::Fill => block_on(fillmissing_builtin(
                 resident,

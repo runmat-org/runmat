@@ -91,7 +91,7 @@ fn deferred_nested_closure_keeps_one_capture_and_its_selected_source() {
                 binding: Some(BoundFunctionBinding::portable(2, origin(2))),
                 source_role: FunctionSourceRole::Nested,
                 source_file: None,
-                captures: vec![Value::Num(11.0)],
+                captures: vec![Value::Num(11.0)].into(),
                 lexical_environment: Some(environment),
             })),
             vec![Value::Num(17.0)],
@@ -202,7 +202,7 @@ fn deferred_nested_closure_keeps_one_capture_and_its_selected_source() {
                 binding: None,
                 source_role: FunctionSourceRole::Nested,
                 source_file: None,
-                captures: vec![Value::Num(11.0)],
+                captures: vec![Value::Num(11.0)].into(),
                 lexical_environment: closure.lexical_environment.clone(),
             })),
             vec![Value::Num(17.0)],
@@ -289,7 +289,7 @@ fn builtin_arguments_keep_a_nested_activation_as_graph_roots() {
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),
             source_role: FunctionSourceRole::Nested,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
             lexical_environment: Some(environment),
         }));
         let invocation = DeferredInvocation::Program {
@@ -332,7 +332,7 @@ fn builtin_route_inspects_nested_values_without_encoding_numeric_inputs() {
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),
             source_role: FunctionSourceRole::Nested,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
             lexical_environment: Some(environment),
         }));
         let invocation = DeferredInvocation::Program {
@@ -354,7 +354,7 @@ fn builtin_route_inspects_nested_values_without_encoding_numeric_inputs() {
                     binding: Some(BoundFunctionBinding::portable(3, origin(3))),
                     source_role: FunctionSourceRole::Anonymous,
                     source_file: None,
-                    captures: vec![Value::Num(2.0)],
+                    captures: vec![Value::Num(2.0)].into(),
                     lexical_environment: None,
                 })),
             ],

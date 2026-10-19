@@ -34,15 +34,9 @@ fn flat_mat_classes_root_without_recursive_restoration_and_preserve_exact_values
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
-fn containers_and_serialized_envelopes_keep_recursive_restoration() {
+fn containers_keep_recursive_restoration() {
     let mut structure = StructValue::new();
     structure.insert("value", Value::Num(1.0));
-    let envelope = super::super::serialized_object_envelope(
-        "Container".into(),
-        super::super::SERIALIZED_KIND_VALUE,
-        false,
-        Value::Struct(structure.clone()),
-    );
     let array = StructArray::with_fields(
         vec!["value".into()],
         vec![structure.clone(), structure.clone()],
@@ -53,7 +47,6 @@ fn containers_and_serialized_envelopes_keep_recursive_restoration() {
         Value::Struct(structure),
         Value::StructArray(array),
         Value::Cell(CellArray::new_with_shape(vec![Value::Num(1.0)], vec![1, 1]).unwrap()),
-        envelope,
     ] {
         assert!(matches!(
             classify_mat_load_restoration(value),

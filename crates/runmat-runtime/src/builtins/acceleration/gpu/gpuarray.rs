@@ -172,7 +172,7 @@ fn gpu_array_value_shape(value: &Value) -> Vec<usize> {
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.to_vec(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
-        Value::CharArray(array) => array.shape.clone(),
+        Value::CharArray(array) => array.shape().to_vec(),
         Value::String(text) => vec![1, text.chars().count()],
         _ => vec![1, 1],
     }

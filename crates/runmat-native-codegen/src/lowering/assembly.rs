@@ -165,6 +165,7 @@ pub fn lower_executable(input: NativeLoweringInput<'_>) -> NativeCodegenResult<N
                 })?;
         functions.push(super::function::lower_function(
             function_id,
+            entrypoint_body_digest(input.mir, function_id)?,
             &input,
             metadata,
             retained_callable_parent,
@@ -318,6 +319,13 @@ pub fn verify_against_mir(
             )
             .at_function(function_id)
         })?;
+        if native.mir_body_digest != entrypoint_body_digest(mir, function_id)? {
+            return Err(NativeCodegenError::new(
+                "native.ir.mir_body_digest",
+                "Native IR function body identity differs from canonical MIR",
+            )
+            .at_function(function_id));
+        }
         if native.locals.len() != body.locals.len() {
             return Err(NativeCodegenError::new(
                 "native.ir.mir_locals",

@@ -1725,8 +1725,16 @@ async fn run_interpreter_inner(
     let registry_for_function_invoker = std::rc::Rc::new(function_registry.current_view());
     let _semantic_function_guard =
         user_functions::install_local_semantic_function_invoker(std::rc::Rc::new(
-            move |selected, function: usize, args: &[Value], requested_outputs: usize| {
-                let args = args.to_vec();
+            move |selected,
+                  function: usize,
+                  args: runmat_runtime::call::RootedFunctionArguments,
+                  requested_outputs: usize| {
+                let lexical_environment = args.callable().and_then(|callable| {
+                    let Value::Closure(closure) = callable.value() else {
+                        return None;
+                    };
+                    closure.lexical_environment.clone()
+                });
                 let previous_invoker = previous_semantic_invoker.clone();
                 let function_registry = std::rc::Rc::clone(&registry_for_function_invoker);
                 let same_owner = selected.as_ref().is_none_or(|context| {
@@ -1762,18 +1770,18 @@ async fn run_interpreter_inner(
                     if !local_function {
                         if let Some(invoker) = previous_invoker {
                             let future =
-                                invoker(Some(runtime.clone()), function, &args, requested_outputs);
+                                invoker(Some(runtime.clone()), function, args, requested_outputs);
                             return await_prior_semantic_invoker(driver, runtime, future).await;
                         }
                     }
-                    invoke_semantic_function_value_with_capture_updates(
+                    invoke_semantic_function_with_rooted_captures(
                         function,
-                        &args,
+                        args,
                         requested_outputs,
                         &function_registry,
                         runtime,
                         driver,
-                        None,
+                        lexical_environment,
                     )
                     .await
                     .map(|(value, _)| value)

@@ -644,7 +644,8 @@ async fn assemble_sliced_results(
                     let offset_value = slice_offset_value(executable, *access, vars)?;
                     let mut assembled = destination;
                     for iteration in &iterations[chunk.start..chunk.start + chunk.len] {
-                        assembled = runmat_runtime::parallel::assembly::merge_slice(
+                        assembled = runmat_runtime::parallel::assembly::merge_slice_in_context(
+                            runtime,
                             assembled,
                             worker_value,
                             *access,

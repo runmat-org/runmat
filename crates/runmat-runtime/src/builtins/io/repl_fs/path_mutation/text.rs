@@ -21,7 +21,7 @@ pub(in crate::builtins::io::repl_fs) async fn decode(
     policy: NumericPolicy,
 ) -> Result<Vec<String>, DecodeError> {
     let mut admitted = Vec::new();
-    for value in values {
+    for value in &values {
         admit(value, builtin, policy, &mut admitted)?;
     }
     let mut output = Vec::new();
@@ -48,16 +48,17 @@ enum AdmittedToken {
 }
 
 fn admit(
-    value: Value,
+    value: &Value,
     builtin: &'static str,
     policy: NumericPolicy,
     output: &mut Vec<AdmittedToken>,
 ) -> Result<(), DecodeError> {
     match value {
-        Value::String(text) => output.push(AdmittedToken::Text(text)),
-        Value::StringArray(StringArray { data, .. }) => {
-            output.extend(data.into_iter().map(AdmittedToken::Text))
-        }
+        Value::String(text) => output.push(AdmittedToken::Text(text.as_str().to_owned())),
+        Value::StringArray(StringArray { data, .. }) => output.extend(
+            data.iter()
+                .map(|text| AdmittedToken::Text(text.as_str().to_owned())),
+        ),
         Value::CharArray(chars)
             if crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
@@ -65,18 +66,18 @@ fn admit(
         }
         Value::Tensor(tensor) => {
             admit_numeric(builtin, policy)?;
-            output.push(AdmittedToken::Text(decode_numeric_row(&tensor)?));
+            output.push(AdmittedToken::Text(decode_numeric_row(tensor)?));
         }
         Value::GpuTensor(ref handle) => {
             admit_numeric(builtin, policy)?;
             if !numeric_row(handle.shape()) {
                 return Err(DecodeError::InvalidInput);
             }
-            output.push(AdmittedToken::Resident(value));
+            output.push(AdmittedToken::Resident((*value).clone()));
         }
         Value::Cell(cell) => {
             for value in cell.iter_column_major() {
-                admit(value.clone(), builtin, policy, output)?;
+                admit(value, builtin, policy, output)?;
             }
         }
         _ => return Err(DecodeError::InvalidInput),
@@ -94,7 +95,7 @@ fn admit_numeric(builtin: &'static str, policy: NumericPolicy) -> Result<(), Dec
     }
 }
 
-fn collect_char_rows(chars: CharArray, output: &mut Vec<AdmittedToken>) {
+fn collect_char_rows(chars: &CharArray, output: &mut Vec<AdmittedToken>) {
     for row in 0..chars.rows {
         let start = row * chars.cols;
         let text: String = chars.data[start..start + chars.cols].iter().collect();

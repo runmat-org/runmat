@@ -211,13 +211,16 @@ fn ensure_bag_of_ngrams_class_registered() {
         ] {
             properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: BAG_OF_NGRAMS_CLASS.into(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        crate::class_registry::register_builtin_class(
+            BAG_OF_NGRAMS_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: BAG_OF_NGRAMS_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+            },
+        );
     });
 }
 
@@ -597,7 +600,7 @@ fn unique_ngrams_from_value(
                 let mut ngram = Vec::new();
                 let mut row_has_missing = false;
                 for col in 0..array.cols {
-                    let word = array.data[row + col * array.rows].clone();
+                    let word = array.data[row + col * array.rows].as_str().to_owned();
                     if is_missing_string(&word) {
                         row_has_missing = true;
                         break;
@@ -724,7 +727,7 @@ pub(in crate::builtins::strings::text_analytics) fn ngrams_from_bag(
                 for col in 0..array.cols {
                     let word = &array.data[row + col * array.rows];
                     if !word.is_empty() && !is_missing_string(word) {
-                        ngram.push(word.clone());
+                        ngram.push(word.as_str().to_owned());
                     }
                 }
                 if ngram.is_empty() {

@@ -75,14 +75,14 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             })
         }
         Value::String(text) => Ok(LabelVector {
-            labels: vec![Label::Text(text)],
+            labels: vec![Label::Text(text.as_str().to_owned())],
             kind: LabelKind::String,
             categories: None,
         }),
         Value::StringArray(array) => {
             ensure_vector_shape(&array.shape, name)?;
             Ok(LabelVector {
-                labels: array.data.into_iter().map(Label::Text).collect(),
+                labels: array.data.iter().map(|text| Label::Text(text.as_str().to_owned())).collect(),
                 kind: LabelKind::String,
                 categories: None,
             })
@@ -95,8 +95,8 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
         Value::Cell(cell) => {
             ensure_vector_shape(&[cell.rows, cell.cols], name)?;
             let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
-                labels.push(Label::Text(scalar_text(&item, name)?));
+            for item in cell.data.iter() {
+                labels.push(Label::Text(scalar_text(item, name)?));
             }
             Ok(LabelVector {
                 labels,
@@ -212,7 +212,13 @@ pub(super) fn categorical_categories(
     object: &ObjectInstance,
 ) -> BuiltinResult<Option<Vec<String>>> {
     match object.properties.get("Categories") {
-        Some(Value::StringArray(array)) => Ok(Some(array.data.clone())),
+        Some(Value::StringArray(array)) => Ok(Some(
+            array
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        )),
         Some(_) => Err(invalid("perfcurve: categorical Categories must be strings")),
         None => Ok(None),
     }
@@ -388,8 +394,8 @@ pub(super) fn char_rows(array: &CharArray) -> Vec<String> {
 
 pub(super) fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(value) => Ok(value.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect::<String>()),
         Value::Num(value) if value.is_finite() => Ok(format_number(*value)),
         Value::Int(value) => Ok(value.decimal_string()),

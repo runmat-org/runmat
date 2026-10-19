@@ -7,7 +7,7 @@ pub(super) fn dlarray_format(value: &Value) -> String {
             .properties
             .get("Format")
             .and_then(|value| match value {
-                Value::String(text) => Some(text.clone()),
+                Value::String(text) => Some(text.to_string()),
                 _ => None,
             })
             .unwrap_or_default(),

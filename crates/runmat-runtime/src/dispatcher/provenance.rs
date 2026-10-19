@@ -18,8 +18,53 @@ pub(super) fn project(value: &mut Value, explicit: bool) -> Result<(), RuntimeEr
             })?;
         }
         Value::Cell(cell) => {
-            for value in &mut cell.data {
+            if !cell
+                .data()
+                .iter()
+                .any(super::owned_gpu::has_transformable_gpu)
+            {
+                return Ok(());
+            }
+            let mut retained = None;
+            if cell.try_data_mut_unique().is_none() {
+                if super::owned_gather::unbounded_shared_cell_policy()? {
+                    cell.data.make_unique_unbounded().map_err(|error| {
+                        build_runtime_error(format!("GPU result cell alias: {error}"))
+                            .with_identifier("RunMat:Gpu:InvalidResult")
+                            .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                            .with_source(error)
+                            .build()
+                    })?;
+                } else {
+                    let context = crate::context::legacy::active().ok_or_else(|| {
+                        crate::runtime_error::semantic_error(
+                            "ManagedOwnerUnavailable",
+                            "shared Cell provenance has no active allocation owner",
+                        )
+                    })?;
+                    let (replacement, receipt) =
+                        super::cell_alias::prepare_shared_cell(cell, &context)?;
+                    *cell = replacement;
+                    retained = Some((context, receipt));
+                }
+            }
+            let values = cell.try_data_mut_unique().ok_or_else(|| {
+                crate::sequence::sequence_error_to_runtime(
+                    runmat_value::ValueSequenceError::SharedOutputStorage,
+                )
+            })?;
+            for value in values {
                 project(value, explicit)?;
+            }
+            if let Some((context, receipt)) = retained {
+                receipt.checkpoint(&context).map_err(|source| {
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        Some(&context),
+                        "RunMat:Gpu:InvalidResult",
+                        "shared Cell provenance authority changed",
+                        source,
+                    )
+                })?;
             }
         }
         Value::Struct(object) => {
@@ -88,22 +133,12 @@ pub(super) fn project(value: &mut Value, explicit: bool) -> Result<(), RuntimeEr
                 unreachable!("matched closure")
             };
             let mut data = closure.into_data();
-            let result = data
-                .captures
-                .iter_mut()
-                .try_for_each(|value| project(value, explicit));
+            let result = project_values(&mut data.captures, explicit);
             *value = Value::Closure(runmat_value::Closure::from_data(data));
             result?;
         }
         Value::OutputList(values) => {
-            let values = values.try_as_mut_slice_unique().ok_or_else(|| {
-                crate::sequence::sequence_error_to_runtime(
-                    runmat_value::ValueSequenceError::SharedOutputStorage,
-                )
-            })?;
-            for value in values {
-                project(value, explicit)?;
-            }
+            project_values(values, explicit)?;
         }
         // These values publish shared identities, not owned payloads. Their
         // producer-stored provenance survives unchanged, including in object
@@ -111,6 +146,57 @@ pub(super) fn project(value: &mut Value, explicit: bool) -> Result<(), RuntimeEr
         // rewrite every alias and could recurse through cycles or live borrows.
         Value::HandleObject(_) | Value::Listener(_) => {}
         _ => {}
+    }
+    Ok(())
+}
+
+fn project_values(
+    values: &mut runmat_value::OutputListStorage,
+    explicit: bool,
+) -> Result<(), RuntimeError> {
+    if !values.iter().any(super::owned_gpu::has_transformable_gpu) {
+        return Ok(());
+    }
+    let mut retained = None;
+    if values.try_as_mut_slice_unique().is_none() {
+        if super::owned_gather::unbounded_shared_cell_policy()? {
+            values.make_unique_unbounded().map_err(|error| {
+                build_runtime_error(format!("GPU result list alias: {error}"))
+                    .with_identifier("RunMat:Gpu:InvalidResult")
+                    .with_gpu_gather_retry(crate::GpuGatherRetry::Never)
+                    .with_source(error)
+                    .build()
+            })?;
+        } else {
+            let context = crate::context::legacy::active().ok_or_else(|| {
+                crate::runtime_error::semantic_error(
+                    "ManagedOwnerUnavailable",
+                    "shared result list provenance has no active allocation owner",
+                )
+            })?;
+            let (replacement, receipt) =
+                super::cell_alias::prepare_shared_values(values, &context)?;
+            *values = replacement;
+            retained = Some((context, receipt));
+        }
+    }
+    let elements = values.try_as_mut_slice_unique().ok_or_else(|| {
+        crate::sequence::sequence_error_to_runtime(
+            runmat_value::ValueSequenceError::SharedOutputStorage,
+        )
+    })?;
+    for value in elements {
+        project(value, explicit)?;
+    }
+    if let Some((context, receipt)) = retained {
+        receipt.checkpoint(&context).map_err(|source| {
+            crate::context::host_allocation::host_allocation_runtime_error(
+                Some(&context),
+                "RunMat:Gpu:InvalidResult",
+                "shared result list provenance authority changed",
+                source,
+            )
+        })?;
     }
     Ok(())
 }

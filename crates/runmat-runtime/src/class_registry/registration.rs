@@ -184,6 +184,7 @@ fn register_classes(
         let order = preflight::validate(&proposed, state, parent_admission)?;
         let mut retired = Vec::with_capacity(order.len());
         for name in order {
+            state.builtin_issuances.remove(&name);
             let registration = proposed
                 .remove(&name)
                 .expect("preflight returned only proposed classes");

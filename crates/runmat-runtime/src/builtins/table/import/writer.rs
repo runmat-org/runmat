@@ -104,7 +104,7 @@ pub(in crate::builtins::table) fn table_delimited_text(
 
 pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> String {
     match value {
-        Value::String(text) => text.clone(),
+        Value::String(text) => text.to_string(),
         Value::CharArray(array) if array.rows == 1 => array.data.iter().collect(),
         Value::Num(value) => format_key_number(*value),
         Value::Int(value) => value.decimal_string(),
@@ -120,7 +120,7 @@ pub(in crate::builtins::table) fn cell_to_text(value: &Value) -> String {
             .and_then(|storage| storage.value_at(0))
             .map(|value| value.decimal_string())
             .unwrap_or_else(|| format_key_number(tensor::tensor_value_f64(tensor, 0))),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
+        Value::StringArray(array) if array.data.len() == 1 => array.data[0].to_string(),
         other => other.to_string(),
     }
 }

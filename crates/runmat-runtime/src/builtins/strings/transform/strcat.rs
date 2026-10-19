@@ -167,7 +167,7 @@ enum OperandKind {
 
 #[derive(Clone)]
 struct TextElement {
-    text: String,
+    text: runmat_value::Utf8Text,
     missing: bool,
 }
 
@@ -190,7 +190,7 @@ impl TextOperand {
         }
     }
 
-    fn from_string_scalar(text: String) -> Self {
+    fn from_string_scalar(text: runmat_value::Utf8Text) -> Self {
         let missing = is_missing_string(&text);
         Self {
             data: vec![TextElement { text, missing }],
@@ -202,13 +202,16 @@ impl TextOperand {
 
     fn from_string_array(array: StringArray) -> Self {
         let missing_flags: Vec<bool> = array.data.iter().map(|s| is_missing_string(s)).collect();
-        let data = array
-            .data
+        let values: Vec<_> = match array.data.try_into_owned() {
+            Ok(values) => values.into_iter().collect(),
+            Err(data) => data.iter().cloned().collect(),
+        };
+        let data = values
             .into_iter()
             .zip(missing_flags)
             .map(|(text, missing)| TextElement { text, missing })
             .collect();
-        let shape = array.shape.clone();
+        let shape = array.shape.to_vec();
         let strides = compute_strides(&shape);
         Self {
             data,
@@ -226,7 +229,7 @@ impl TextOperand {
             let text = char_row_to_string_slice(&array.data, cols, row);
             let trimmed = trim_trailing_spaces(&text);
             elements.push(TextElement {
-                text: trimmed,
+                text: trimmed.into(),
                 missing: false,
             });
         }
@@ -247,7 +250,7 @@ impl TextOperand {
             let text_element = cell_element_to_text(handle)?;
             elements.push(text_element);
         }
-        let shape = array.shape.clone();
+        let shape = array.shape.to_vec();
         let strides = compute_row_major_strides(&shape);
         Ok(Self {
             data: elements,
@@ -346,7 +349,7 @@ fn cell_element_to_text(value: &Value) -> BuiltinResult<TextElement> {
                 char_row_to_string_slice(&ca.data, ca.cols, 0)
             };
             Ok(TextElement {
-                text: trim_trailing_spaces(&text),
+                text: trim_trailing_spaces(&text).into(),
                 missing: false,
             })
         }
@@ -437,7 +440,7 @@ fn build_string_output(data: Vec<String>, shape: &[usize]) -> BuiltinResult<Valu
 
     let is_scalar = shape.is_empty() || shape.iter().all(|&dim| dim == 1);
     if is_scalar {
-        return Ok(Value::String(data[0].clone()));
+        return Ok(Value::string(data[0].clone()));
     }
 
     let array = StringArray::new(data, shape.to_vec()).map_err(|e| {

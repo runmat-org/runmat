@@ -41,5 +41,6 @@ pub mod tensor;
 pub mod test_support;
 pub(crate) mod uniform_scalar_output;
 pub mod validation;
+pub(crate) mod character_output;
 
 pub(crate) use self::control_flow_error::map_control_flow_with_builtin;

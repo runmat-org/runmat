@@ -203,7 +203,7 @@ async fn strrep_builtin(
     }
 
     match gathered_str {
-        Value::String(text) => Ok(Value::String(strrep_string_value(
+        Value::String(text) => Ok(Value::string(strrep_string_value(
             text, &old_text, &new_text,
         ))),
         Value::StringArray(array) => strrep_string_array(array, &old_text, &new_text),
@@ -213,7 +213,7 @@ async fn strrep_builtin(
     }
 }
 
-fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
+fn parse_pattern(value: Value) -> BuiltinResult<(runmat_value::Utf8Text, PatternKind)> {
     match value {
         Value::String(text) => Ok((text, PatternKind::String)),
         Value::StringArray(array) => {
@@ -230,7 +230,7 @@ fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
                 } else {
                     char_row_to_string_slice(&array.data, array.cols, 0)
                 };
-                Ok((text, PatternKind::Char))
+                Ok((text.into(), PatternKind::Char))
             } else {
                 Err(strrep_error(&STRREP_ERROR_PATTERN_TYPE))
             }
@@ -239,21 +239,29 @@ fn parse_pattern(value: Value) -> BuiltinResult<(String, PatternKind)> {
     }
 }
 
-fn strrep_string_value(text: String, old: &str, new: &str) -> String {
+fn strrep_string_value(
+    text: runmat_value::Utf8Text,
+    old: &str,
+    new: &str,
+) -> runmat_value::Utf8Text {
     if is_missing_string(&text) {
         text
     } else {
-        text.replace(old, new)
+        text.replace(old, new).into()
     }
 }
 
 fn strrep_string_array(array: StringArray, old: &str, new: &str) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
-    let replaced = data
+    let values: Vec<_> = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(data) => data.iter().cloned().collect(),
+    };
+    let replaced = values
         .into_iter()
         .map(|text| strrep_string_value(text, old, new))
         .collect::<Vec<_>>();
-    let rebuilt = StringArray::new(replaced, shape).map_err(|e| {
+    let rebuilt = StringArray::from_texts_unbounded(replaced, shape.to_vec()).map_err(|e| {
         strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
     })?;
     Ok(Value::StringArray(rebuilt))
@@ -306,14 +314,14 @@ fn strrep_cell_array(cell: CellArray, old: &str, new: &str) -> BuiltinResult<Val
     for ptr in &data {
         replaced.push(strrep_cell_element(ptr, old, new)?);
     }
-    make_cell_with_shape(replaced, shape).map_err(|e| {
+    make_cell_with_shape(replaced, shape.to_vec()).map_err(|e| {
         strrep_error_with_message(format!("{BUILTIN_NAME}: {e}"), &STRREP_ERROR_INTERNAL)
     })
 }
 
 fn strrep_cell_element(value: &Value, old: &str, new: &str) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(strrep_string_value(text.clone(), old, new))),
+        Value::String(text) => Ok(Value::string(strrep_string_value(text.clone(), old, new))),
         Value::StringArray(array) => strrep_string_array(array.clone(), old, new),
         Value::CharArray(array) => strrep_char_array(array.clone(), old, new),
         _ => Err(strrep_error(&STRREP_ERROR_CELL_ELEMENT)),

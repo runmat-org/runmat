@@ -4,9 +4,6 @@ use super::cooperation::MatCodecCooperation;
 use super::format::{MatArray, MatClass, MatData};
 
 mod diagnostics;
-use crate::builtins::introspection::object_serialization::{
-    prepare_value_for_mat_save, prepare_value_for_mat_save_in_context,
-};
 use crate::{gather_if_needed_async, BuiltinResult};
 use diagnostics::MatEncodingFailure;
 pub(crate) use diagnostics::MatEncodingOwner;
@@ -53,24 +50,9 @@ pub(crate) async fn encode_workspace_to_mat_bytes_for_owner(
     let mut mat_vars = Vec::with_capacity(entries.len());
     for (name, value) in entries {
         completed(&mut cooperation, 0).await?;
-        let value = match cooperation.as_deref_mut() {
-            Some(cooperation) => {
-                let runtime = cooperation.runtime();
-                cooperation
-                    .await_io(prepare_value_for_mat_save_in_context(
-                        value.clone(),
-                        runtime,
-                    ))
-                    .await??
-            }
-            None => prepare_value_for_mat_save(value.clone()).await?,
-        };
-        completed(&mut cooperation, 0).await?;
-        let array = value
-            .with_owned_async(|value| {
-                convert_value_with_cooperation(value, owner, cooperation.as_deref_mut())
-            })
-            .await?;
+        let array =
+            convert_value_with_cooperation(value.clone(), owner, cooperation.as_deref_mut())
+                .await?;
         mat_vars.push(MatVar {
             name: name.clone(),
             array,

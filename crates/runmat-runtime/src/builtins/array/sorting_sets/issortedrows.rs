@@ -467,8 +467,15 @@ impl Args {
 }
 
 fn parse_direction_list(value: &Value) -> crate::BuiltinResult<Option<Vec<Direction>>> {
+    use std::borrow::Cow;
     let strings = match value {
-        Value::StringArray(array) => Some(array.data.clone()),
+        Value::StringArray(array) => Some(
+            array
+                .data
+                .iter()
+                .map(|text| Cow::Borrowed(text.as_str()))
+                .collect::<Vec<_>>(),
+        ),
         Value::Cell(cell) => {
             let mut strings = Vec::with_capacity(cell.data.len());
             for value in &cell.data {
@@ -477,11 +484,11 @@ fn parse_direction_list(value: &Value) -> crate::BuiltinResult<Option<Vec<Direct
                         "issortedrows: direction cell arrays must contain character vectors or strings",
                     ));
                 };
-                strings.push(value);
+                strings.push(Cow::Owned(value));
             }
             Some(strings)
         }
-        _ => tensor::value_to_string(value).map(|value| vec![value]),
+        _ => tensor::value_to_string(value).map(|value| vec![Cow::Owned(value)]),
     };
     let Some(strings) = strings else {
         return Ok(None);
@@ -860,7 +867,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.to_vec(),
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
-        Value::CharArray(array) => array.shape.clone(),
+        Value::CharArray(array) => array.shape().to_vec(),
         _ => vec![1, 1],
     }
 }

@@ -12,9 +12,9 @@ pub(super) enum AdmittedText {
 
 pub(super) fn admit(value: Value) -> BuiltinResult<AdmittedText> {
     match value {
-        Value::String(text) => Ok(AdmittedText::Text(text)),
+        Value::String(text) => Ok(AdmittedText::Text(text.into_string_unbounded())),
         Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(AdmittedText::Text(array.data[0].clone()))
+            Ok(AdmittedText::Text(array.data[0].as_str().to_owned()))
         }
         Value::CharArray(chars)
             if chars.rows == 1

@@ -110,15 +110,19 @@ async fn dictionary_read_step(
 #[runtime_builtin(
     name = "dictionary.subsasgn",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::table::builtins"
 )]
 pub(crate) async fn dictionary_subsasgn(
+    runtime: Option<crate::context::RuntimeContext>,
     obj: Value,
     subscript: Value,
     rhs: Value,
 ) -> BuiltinResult<RootedValue> {
     let path = crate::object::indexing::parse_standard_substruct(&subscript)?;
-    crate::object::protocol::execute_owned_subsasgn(
+    let runtime_for_write = runtime.clone();
+    crate::object::protocol::execute_owned_subsasgn_with_context(
+        runtime.as_ref(),
         obj,
         path,
         vec![rhs],
@@ -127,7 +131,7 @@ pub(crate) async fn dictionary_subsasgn(
             let rhs = values
                 .pop()
                 .ok_or_else(|| invalid_index("dictionary assignment value is missing"))?;
-            dictionary_write_step(obj, step, rhs).await
+            dictionary_write_step(runtime_for_write.as_ref(), obj, step, rhs).await
         },
         None,
     )
@@ -135,6 +139,7 @@ pub(crate) async fn dictionary_subsasgn(
 }
 
 async fn dictionary_write_step(
+    runtime: Option<&crate::context::RuntimeContext>,
     obj: Value,
     step: crate::object::indexing::ObjectSubscript,
     rhs: Value,
@@ -154,7 +159,7 @@ async fn dictionary_write_step(
         }
         crate::object::indexing::ObjectIndexKind::Paren
         | crate::object::indexing::ObjectIndexKind::Brace => {
-            dictionary_assign(object, &payload, rhs)
+            dictionary_assign_in_context(runtime, object, &payload, rhs)
         }
     }?;
     RootedValue::new(value).map_err(|error| error.into_runtime_error())

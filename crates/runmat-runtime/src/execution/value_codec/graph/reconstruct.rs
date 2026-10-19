@@ -771,7 +771,7 @@ impl Decoder<'_> {
                             binding,
                             source_role: callable.source_role,
                             source_file: source_file.clone().map(String::into_boxed_str),
-                            captures,
+                            captures: captures.into(),
                             lexical_environment: environment,
                         }))
                     }

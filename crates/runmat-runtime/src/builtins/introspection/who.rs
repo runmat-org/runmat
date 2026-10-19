@@ -63,7 +63,7 @@ async fn who_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     let mut cells = Vec::with_capacity(names.len());
     for name in names.into_iter() {
-        cells.push(Value::String(name));
+        cells.push(Value::string(name));
     }
     let rows = cells.len();
     make_cell(cells, rows, 1).map_err(|err| build_runtime_error(err).with_builtin("who").build())

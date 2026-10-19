@@ -207,13 +207,13 @@ pub(crate) async fn invoke(
                 ));
             }
 
-            let c = c.into_data();
-
             if c.function_name == CALL_METHOD_BUILTIN_NAME && c.captures.len() >= 2 {
                 let base = c.captures[0].clone();
                 let method = match &c.captures[1] {
-                    Value::String(name) => name.clone(),
-                    Value::CharArray(chars) if chars.rows == 1 => chars.data.iter().collect(),
+                    Value::String(name) => name.as_str().to_owned(),
+                    Value::CharArray(chars) if chars.rows == 1 => {
+                        chars.data.iter().collect::<String>()
+                    }
                     _ => {
                         return Err(build_runtime_error(
                             "call_method: closure captures must include method name text",
@@ -239,29 +239,31 @@ pub(crate) async fn invoke(
                 });
             }
 
-            let mut args = c.captures.clone();
-            args.extend(rest);
-            if let Some(result) = crate::callsite::with_function_input_callsite(
-                input_callsite.clone(),
-                crate::user_functions::try_call_semantic_function_by_name_in_context(
-                    runtime,
-                    &c.function_name,
-                    &args,
-                    requested_outputs,
-                ),
-            )
-            .await?
-            {
-                return result;
+            // Keep the capture generation in the canonical callable descriptor.
+            // It supplies segmented rooted arguments to selected semantic and
+            // foreign targets without flattening the captured Value forest.
+            struct DynamicResolver;
+            impl crate::call::descriptor::FunctionNameResolver for DynamicResolver {
+                fn resolve_function(&self, _name: &str) -> Option<runmat_types::FunctionId> {
+                    None
+                }
             }
-            call_by_name(
-                runtime,
-                &c.function_name,
-                &args,
+            let descriptor = crate::call::descriptor::CallableDescriptor::from_feval_value(
+                Value::Closure(c),
+                rest,
                 requested_outputs,
-                input_callsite,
-            )
-            .await
+                &DynamicResolver,
+            );
+            let result = match runtime {
+                Some(runtime) => {
+                    crate::call::descriptor::execute_callable_descriptor_in_context(
+                        runtime, descriptor,
+                    )
+                    .await
+                }
+                None => crate::call::descriptor::execute_callable_descriptor(descriptor).await,
+            };
+            result
         }
         receiver @ Value::Object(_) | receiver @ Value::HandleObject(_) => {
             let path = crate::object::indexing::ObjectSubscriptPath::single(

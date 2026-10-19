@@ -839,11 +839,11 @@ fn value_as_bool(value: &Value, name: &str) -> BuiltinResult<bool> {
     }
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
+fn value_as_string(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect::<String>().into()),
         _ => None,
     }
 }

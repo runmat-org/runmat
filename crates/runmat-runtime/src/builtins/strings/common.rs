@@ -1,4 +1,15 @@
 //! Shared helpers for string builtins.
+mod borrowed_output;
+mod case_output;
+mod text_input;
+
+pub(crate) use borrowed_output::{
+    transform_scalar_borrowed, transform_string_array_borrowed,
+    transform_string_array_borrowed_indexed,
+};
+pub(crate) use case_output::{transform_scalar_case, transform_string_array_case, TextCase};
+pub(crate) use text_input::{scalar_text_input, text_input_admission, TextInput};
+
 use runmat_value::CharArray;
 
 use runmat_value::Value;
@@ -45,6 +56,7 @@ pub(crate) fn is_missing_string(text: &str) -> bool {
 
 /// Convert text to lowercase while preserving MATLAB's `<missing>` sentinel.
 #[inline]
+#[cfg(test)]
 pub(crate) fn lowercase_preserving_missing(text: String) -> String {
     if is_missing_string(&text) {
         MISSING_SENTINEL.to_string()
@@ -55,6 +67,7 @@ pub(crate) fn lowercase_preserving_missing(text: String) -> String {
 
 /// Convert text to uppercase while preserving MATLAB's `<missing>` sentinel.
 #[inline]
+#[cfg(test)]
 pub(crate) fn uppercase_preserving_missing(text: String) -> String {
     if is_missing_string(&text) {
         MISSING_SENTINEL.to_string()
@@ -75,6 +88,13 @@ pub(crate) fn char_row_to_string_slice(data: &[char], cols: usize, row: usize) -
     let start = row * cols;
     let end = start + cols;
     data[start..end].iter().collect()
+}
+
+/// MATLAB treats these four Unicode whitespace characters as significant at
+/// text boundaries; RunMat extension mode retains the broader Rust predicate.
+pub(crate) fn trimmable_whitespace(c: char, strict: bool) -> bool {
+    c.is_whitespace()
+        && (!strict || !matches!(c, '\u{0085}' | '\u{00A0}' | '\u{2007}' | '\u{202F}'))
 }
 
 /// Return `true` for a direct numeric text operand or a recursively nested resident value.

@@ -105,6 +105,104 @@ pub(super) fn value_to_python(value: Value) -> Result<PythonValue, RuntimeError>
     value_to_python_inner(value)
 }
 
+pub(super) fn value_ref_to_python(value: &Value) -> Result<PythonValue, RuntimeError> {
+    runmat_value::validate_no_transient_sequence(value).map_err(|_| {
+        crate::runtime_error::semantic_error(
+            "TransientSequenceNotPortable",
+            "transient output sequences cannot cross the Python value boundary",
+        )
+    })?;
+    match value {
+        Value::Bool(value) => Ok(PythonValue::Bool(*value)),
+        Value::Num(value) => Ok(PythonValue::Float(*value)),
+        Value::Complex(real, imaginary) => Ok(PythonValue::Complex {
+            real: *real,
+            imaginary: *imaginary,
+        }),
+        Value::Int(value) => value_to_python_inner(Value::Int(value.clone())),
+        Value::String(value) => Ok(PythonValue::String(value.as_str().to_owned())),
+        Value::CharArray(value) => value
+            .row_string()
+            .map(PythonValue::String)
+            .ok_or_else(|| invalid_conversion("character conversion requires a row vector")),
+        Value::StringArray(value) => Ok(PythonValue::List(
+            value
+                .data
+                .iter()
+                .map(|value| PythonValue::String(value.as_str().to_owned()))
+                .collect(),
+        )),
+        Value::Tensor(value) => Ok(PythonValue::Array(PythonArray {
+            dtype: python_dtype(value.numeric_dtype()),
+            shape: value.shape().to_vec(),
+            column_major: true,
+            read_only: true,
+            owner: Arc::new(NumericOwner(value.host_buffer().clone())),
+        })),
+        Value::LogicalArray(value) => Ok(PythonValue::Array(PythonArray {
+            dtype: PythonDType::Bool,
+            shape: value.shape.to_vec(),
+            column_major: true,
+            read_only: true,
+            owner: Arc::new(LogicalOwner(value.data.clone())),
+        })),
+        Value::ComplexTensor(value) => {
+            let (dtype, owner): (PythonDType, Arc<dyn PythonBufferOwner>) =
+                match value.complex_storage() {
+                    ComplexStorage::F64(owner) => (
+                        PythonDType::Complex128,
+                        Arc::new(ComplexF64Owner(owner.clone())),
+                    ),
+                    ComplexStorage::F32(owner) => (
+                        PythonDType::Complex64,
+                        Arc::new(ComplexF32Owner(owner.clone())),
+                    ),
+                    ComplexStorage::Integer(_) => {
+                        return Err(invalid_conversion(
+                            "integer-complex arrays require an explicit Python conversion",
+                        ))
+                    }
+                };
+            Ok(PythonValue::Array(PythonArray {
+                dtype,
+                shape: value.shape().to_vec(),
+                column_major: true,
+                read_only: true,
+                owner,
+            }))
+        }
+        Value::Cell(value) => Ok(PythonValue::Tuple(
+            value
+                .data
+                .iter()
+                .map(value_ref_to_python)
+                .collect::<Result<_, _>>()?,
+        )),
+        Value::Struct(value) => Ok(PythonValue::Dict(
+            value
+                .fields
+                .iter()
+                .map(|(name, value)| {
+                    Ok((
+                        PythonValue::String(name.clone()),
+                        value_ref_to_python(value)?,
+                    ))
+                })
+                .collect::<Result<_, RuntimeError>>()?,
+        )),
+        Value::StructArray(_) => Err(invalid_conversion(
+            "structure arrays require a shape-preserving Python conversion",
+        )),
+        Value::Foreign(_) => Err(invalid_conversion(
+            "foreign objects must be resolved by their owning adapter",
+        )),
+        other => Err(invalid_conversion(format!(
+            "RunMat value {} is not convertible to Python",
+            value_kind(other)
+        ))),
+    }
+}
+
 fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
     match value {
         Value::Bool(value) => Ok(PythonValue::Bool(value)),
@@ -120,13 +218,17 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
             IntValue::U32(value) => PythonValue::Unsigned(u64::from(value)),
             IntValue::U64(value) => PythonValue::Unsigned(value),
         }),
-        Value::String(value) => Ok(PythonValue::String(value)),
+        Value::String(value) => Ok(PythonValue::String(value.into_string_unbounded())),
         Value::CharArray(value) => value
             .row_string()
             .map(PythonValue::String)
             .ok_or_else(|| invalid_conversion("character conversion requires a row vector")),
         Value::StringArray(value) => Ok(PythonValue::List(
-            value.data.into_iter().map(PythonValue::String).collect(),
+            value
+                .data
+                .iter()
+                .map(|value| PythonValue::String(value.as_str().to_owned()))
+                .collect(),
         )),
         Value::Tensor(value) => {
             let dtype = python_dtype(value.numeric_dtype());
@@ -180,8 +282,8 @@ fn value_to_python_inner(value: Value) -> Result<PythonValue, RuntimeError> {
         Value::Cell(value) => Ok(PythonValue::Tuple(
             value
                 .data
-                .into_iter()
-                .map(value_to_python_inner)
+                .iter()
+                .map(value_ref_to_python)
                 .collect::<Result<_, _>>()?,
         )),
         Value::Struct(value) => Ok(PythonValue::Dict(
@@ -267,7 +369,7 @@ pub(super) fn value_from_python(value: PythonValue) -> Result<Value, RuntimeErro
         PythonValue::Unsigned(value) => Ok(Value::Int(IntValue::U64(value))),
         PythonValue::Float(value) => Ok(Value::Num(value)),
         PythonValue::Complex { real, imaginary } => Ok(Value::Complex(real, imaginary)),
-        PythonValue::String(value) => Ok(Value::String(value)),
+        PythonValue::String(value) => Ok(Value::String(value.into())),
         PythonValue::Bytes(value) => {
             let length = value.len();
             Tensor::new_integer(IntegerStorage::U8(value), vec![1, length])

@@ -470,7 +470,7 @@ fn names(object: &ObjectInstance, property: &str, expected: usize) -> BuiltinRes
         Some(Value::StringArray(strings))
             if strings.shape.len() <= 2 && (strings.rows == 1 || strings.cols == 1) =>
         {
-            strings.data.clone()
+            strings.data.iter().map(ToString::to_string).collect()
         }
         _ => {
             return Err(invalid(format!(

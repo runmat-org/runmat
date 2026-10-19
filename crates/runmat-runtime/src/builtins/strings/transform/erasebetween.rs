@@ -259,9 +259,9 @@ fn is_resident_or_contains_resident(value: &Value) -> bool {
 fn raw_text_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
         Value::String(_) => Some(vec![1, 1]),
-        Value::StringArray(array) => Some(array.shape.clone()),
+        Value::StringArray(array) => Some(array.shape.to_vec()),
         Value::CharArray(array) => Some(vec![array.rows, 1]),
-        Value::Cell(cell) => Some(cell.shape.clone()),
+        Value::Cell(cell) => Some(cell.shape.to_vec()),
         _ => None,
     }
 }
@@ -269,9 +269,9 @@ fn raw_text_shape(value: &Value) -> Option<Vec<usize>> {
 fn raw_boundary_shape(value: &Value) -> Option<Vec<usize>> {
     match value {
         Value::String(_) | Value::Num(_) | Value::Int(_) | Value::Object(_) => Some(vec![1, 1]),
-        Value::StringArray(array) => Some(array.shape.clone()),
+        Value::StringArray(array) => Some(array.shape.to_vec()),
         Value::CharArray(array) => Some(vec![array.rows, 1]),
-        Value::Cell(cell) => Some(cell.shape.clone()),
+        Value::Cell(cell) => Some(cell.shape.to_vec()),
         Value::Tensor(tensor) => Some(tensor.shape().to_vec()),
         Value::GpuTensor(handle) => Some(handle.shape().to_vec()),
         _ => None,
@@ -332,8 +332,8 @@ async fn parse_boundaries_option(args: &[Value]) -> BuiltinResult<Option<Boundar
 
 fn value_to_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
         Value::CharArray(ca) if ca.rows <= 1 => {
             if ca.rows == 0 {
                 Some(String::new())
@@ -506,13 +506,17 @@ impl NormalizedText {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
-                data: vec![s],
+                data: vec![s.as_str().to_owned()],
                 shape: vec![1, 1],
                 kind: TextKind::StringScalar,
             }),
             Value::StringArray(sa) => Ok(Self {
-                data: sa.data.clone(),
-                shape: sa.shape.clone(),
+                data: sa
+                    .data
+                    .iter()
+                    .map(|text| text.as_str().to_owned())
+                    .collect(),
+                shape: sa.shape.to_vec(),
                 kind: TextKind::StringArray,
             }),
             Value::CharArray(ca) => {
@@ -528,17 +532,17 @@ impl NormalizedText {
                 })
             }
             Value::Cell(cell) => {
-                let shape = cell.shape.clone();
+                let shape = cell.shape.to_vec();
                 let mut data = Vec::with_capacity(cell.data.len());
                 let mut kinds = Vec::with_capacity(cell.data.len());
                 for element in &cell.data {
                     match &element {
                         Value::String(s) => {
-                            data.push(s.clone());
+                            data.push(s.as_str().to_owned());
                             kinds.push(CellElementKind::String);
                         }
                         Value::StringArray(sa) if sa.data.len() == 1 => {
-                            data.push(sa.data[0].clone());
+                            data.push(sa.data[0].as_str().to_owned());
                             kinds.push(CellElementKind::String);
                         }
                         Value::CharArray(ca) if ca.rows <= 1 => {
@@ -609,7 +613,7 @@ impl NormalizedText {
                         .into_iter()
                         .next()
                         .unwrap_or_else(|| EraseResult::text(String::new()));
-                    Ok(Value::String(value.text))
+                    Ok(Value::string(value.text))
                 } else {
                     let data = results.into_iter().map(|r| r.text).collect::<Vec<_>>();
                     let array = StringArray::new(data, output_shape).map_err(|e| {
@@ -676,7 +680,7 @@ impl NormalizedText {
                 let mut values = Vec::with_capacity(results.len());
                 for (idx, result) in results.into_iter().enumerate() {
                     match info.element_kinds[idx] {
-                        CellElementKind::String => values.push(Value::String(result.text)),
+                        CellElementKind::String => values.push(Value::string(result.text)),
                         CellElementKind::Char => {
                             let ca = CharArray::new_row(&result.text);
                             values.push(Value::CharArray(ca));
@@ -789,7 +793,7 @@ impl BoundaryText {
     fn from_value(value: Value) -> BuiltinResult<Self> {
         match value {
             Value::String(s) => Ok(Self {
-                data: vec![BoundaryMarker::Literal(s)],
+                data: vec![BoundaryMarker::Literal(s.as_str().to_owned())],
                 shape: vec![1, 1],
             }),
             Value::StringArray(sa) => Ok(Self {
@@ -797,9 +801,9 @@ impl BoundaryText {
                     .data
                     .iter()
                     .cloned()
-                    .map(BoundaryMarker::Literal)
+                    .map(|text| BoundaryMarker::Literal(text.as_str().to_owned()))
                     .collect(),
-                shape: sa.shape.clone(),
+                shape: sa.shape.to_vec(),
             }),
             Value::CharArray(ca) => {
                 let mut data = Vec::with_capacity(ca.rows);
@@ -814,13 +818,15 @@ impl BoundaryText {
                 })
             }
             Value::Cell(cell) => {
-                let shape = cell.shape.clone();
+                let shape = cell.shape.to_vec();
                 let mut data = Vec::with_capacity(cell.data.len());
                 for element in &cell.data {
                     match &element {
-                        Value::String(s) => data.push(BoundaryMarker::Literal(s.clone())),
+                        Value::String(s) => {
+                            data.push(BoundaryMarker::Literal(s.as_str().to_owned()))
+                        }
                         Value::StringArray(sa) if sa.data.len() == 1 => {
-                            data.push(BoundaryMarker::Literal(sa.data[0].clone()));
+                            data.push(BoundaryMarker::Literal(sa.data[0].as_str().to_owned()));
                         }
                         Value::CharArray(ca) if ca.rows <= 1 => {
                             if ca.rows == 0 {

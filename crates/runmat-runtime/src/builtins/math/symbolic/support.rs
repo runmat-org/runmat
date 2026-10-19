@@ -246,9 +246,11 @@ pub(crate) fn empty_return_value() -> Value {
 
 pub(crate) fn text_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

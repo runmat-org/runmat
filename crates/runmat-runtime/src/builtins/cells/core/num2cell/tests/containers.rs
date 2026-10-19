@@ -90,12 +90,13 @@ fn rank_zero_value_arrays_have_one_cell_but_an_empty_cell_array_stays_empty() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn empty_cell_shape_revalidates_payload_cardinality_and_cached_geometry() {
     let malformed = CellArray {
-        data: vec![Value::Num(1.0)],
-        shape: vec![],
+        data: vec![Value::Num(1.0)].into(),
+        shape: vec![].into(),
         rows: 0,
         cols: 0,
     };
     let error = block_on(super::super::num2cell_builtin(
+        None,
         Value::Cell(malformed),
         Vec::new(),
     ))
@@ -104,8 +105,8 @@ fn empty_cell_shape_revalidates_payload_cardinality_and_cached_geometry() {
     assert!(error.to_string().contains("Cell data length 1"));
 
     let stale_cache = CellArray {
-        data: Vec::new(),
-        shape: vec![],
+        data: Vec::new().into(),
+        shape: vec![].into(),
         rows: 7,
         cols: 8,
     };

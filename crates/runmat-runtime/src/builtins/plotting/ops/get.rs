@@ -312,12 +312,10 @@ mod tests {
         let _ = crate::builtins::plotting::set::set_builtin(vec![
             Value::Num(h),
             Value::String("String".into()),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["Top".into(), "Bottom".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["Top".into(), "Bottom".into()], vec![1, 2])
+                    .unwrap(),
+            ),
         ])
         .unwrap();
         let multiline = get_builtin(vec![Value::Num(h), Value::String("String".into())]).unwrap();

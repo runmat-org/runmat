@@ -9,15 +9,16 @@ use runmat_value::{
 use std::num::NonZeroUsize;
 use std::rc::Rc;
 
-use crate::execution::{
-    CpuCooperationBudget, ExecutionServiceError, RootedValues, RootedValuesBuilder,
-};
+use crate::execution::{CpuCooperationBudget, ExecutionServiceError, RootedValues};
 
 use super::ValueCodecError;
 
 #[path = "decode/machine.rs"]
 mod machine;
 use machine::{DecodeMachine, DecodeProgress};
+#[path = "decode/completion.rs"]
+mod completion;
+use completion::DecodedCollection;
 
 const DECODE_WORK_QUANTUM: NonZeroUsize = NonZeroUsize::new(8 * 1024).unwrap();
 
@@ -41,10 +42,18 @@ impl InlineFrameSourceAuthority for super::graph::GraphSourceIssuer {
 /// errors remain typed and are never flattened into execution diagnostics.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum CooperativeValueCodecError {
-    #[error(transparent)]
-    Value(#[from] ValueCodecError),
-    #[error(transparent)]
-    Execution(#[from] ExecutionServiceError),
+    #[error("{0}")]
+    Value(
+        #[from]
+        #[source]
+        ValueCodecError,
+    ),
+    #[error("{0}")]
+    Execution(
+        #[from]
+        #[source]
+        ExecutionServiceError,
+    ),
 }
 
 pub fn decode_inline_value(payload: &ValuePayload) -> Result<Value, ValueCodecError> {
@@ -112,7 +121,25 @@ pub async fn decode_inline_values_cooperatively(
         &mut cooperation,
     )
     .await?;
-    decode_validated_values(payloads, source_resolver, &mut cooperation).await
+    decode_validated_values(payloads, source_resolver, &mut cooperation, None).await
+}
+
+/// Decode into one admitted final argument backing under a selected Runtime.
+/// This charges the outer collection, not decoder task/child allocations or
+/// their construction-root metadata, which retain independent L25 owners.
+pub async fn decode_inline_values_cooperatively_in_context(
+    payloads: &[ValuePayload],
+    limits: ValueLimits,
+    source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
+    mut cooperation: Option<&mut CpuCooperationBudget>,
+    runtime: &crate::context::RuntimeContext,
+) -> Result<RootedValues, CooperativeValueCodecError> {
+    validate_values_cooperatively(
+        ValuePayloadValidationCursor::new(payloads, limits),
+        &mut cooperation,
+    )
+    .await?;
+    decode_validated_values(payloads, source_resolver, &mut cooperation, Some(runtime)).await
 }
 
 /// Decode a complete durable batch under one shared admission budget and the
@@ -130,7 +157,7 @@ pub async fn decode_durable_values_cooperatively(
         &mut cooperation,
     )
     .await?;
-    decode_validated_values(payloads, None, &mut cooperation).await
+    decode_validated_values(payloads, None, &mut cooperation, None).await
 }
 
 async fn validate_values_cooperatively(
@@ -158,28 +185,36 @@ async fn decode_validated_values(
     payloads: &[ValuePayload],
     source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
     cooperation: &mut Option<&mut CpuCooperationBudget>,
+    runtime: Option<&crate::context::RuntimeContext>,
 ) -> Result<RootedValues, CooperativeValueCodecError> {
-    let mut values = RootedValuesBuilder::with_capacity(payloads.len());
+    let mut values = DecodedCollection::new(payloads.len(), runtime)?;
     for payload in payloads {
-        let mut machine = DecodeMachine::new(payload, "$".to_owned(), source_resolver.clone());
+        let mut machine = DecodeMachine::new_with_runtime(
+            payload,
+            "$".to_owned(),
+            source_resolver.clone(),
+            runtime,
+        );
         loop {
             match machine.advance(DECODE_WORK_QUANTUM)? {
                 DecodeProgress::Pending { completed_work } => {
                     if let Some(budget) = cooperation.as_deref_mut() {
                         budget.checkpoint(completed_work as u64).await?;
                     }
+                    values.checkpoint()?;
                 }
                 DecodeProgress::Complete { completed_work } => {
                     if let Some(budget) = cooperation.as_deref_mut() {
                         budget.checkpoint(completed_work as u64).await?;
                     }
-                    values.push_rooted(machine.take_completed());
+                    values.checkpoint()?;
+                    values.push(machine.take_completed())?;
                     break;
                 }
             }
         }
     }
-    Ok(values.finish()?)
+    values.finish()
 }
 
 fn drain_machine(payload: &ValuePayload) -> Result<Value, ValueCodecError> {

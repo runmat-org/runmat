@@ -103,8 +103,8 @@ pub(super) async fn dlarray_builtin(data: Value, rest: Vec<Value>) -> BuiltinRes
         runmat_types::standard::DL_ARRAY.display_name(),
         vec![
             (runmat_builtins::DLARRAY_DATA_PROPERTY, data),
-            ("Format", Value::String(format.clone())),
-            ("Labels", Value::String(format)),
+            ("Format", Value::string(format.clone())),
+            ("Labels", Value::string(format)),
         ],
     ))
 }

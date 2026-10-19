@@ -2,6 +2,12 @@ use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ValueCodecError {
+    #[error("allocation for value at `{path}` failed: {source}")]
+    Allocation {
+        path: String,
+        #[source]
+        source: crate::context::host_allocation::HostAllocationError,
+    },
     #[error("value at `{path}` is not portable: {rule}")]
     Unsupported { path: String, rule: &'static str },
     #[error("invalid value payload at `{path}`: {message}")]
@@ -11,6 +17,16 @@ pub enum ValueCodecError {
 }
 
 impl ValueCodecError {
+    pub(super) fn allocation(
+        path: &str,
+        source: crate::context::host_allocation::HostAllocationError,
+    ) -> Self {
+        Self::Allocation {
+            path: path.to_owned(),
+            source,
+        }
+    }
+
     pub(super) fn unsupported(path: &str, rule: &'static str) -> Self {
         Self::Unsupported {
             path: path.to_owned(),

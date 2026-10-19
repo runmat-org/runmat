@@ -19,7 +19,7 @@ impl XlsTable {
             Value::StringArray(strings) => {
                 Self::from_string_array(strings, cooperation, selected).await
             }
-            Value::String(text) => Ok(Self::single(CellValue::Text(text))),
+            Value::String(text) => Ok(Self::single(CellValue::Text(text.into_string_unbounded()))),
             Value::CharArray(chars) => Self::from_char_array(chars, cooperation, selected).await,
             Value::Num(value) => Ok(Self::single(CellValue::Number(value))),
             Value::Int(value) => Ok(Self::single(CellValue::Integer(value))),
@@ -45,17 +45,20 @@ impl XlsTable {
         checked_cell_count(cell.rows, cell.cols, "cell array")?;
         let mut cells = reserved_cells(cell.data.len())?;
         let mut work = 0;
-        for value in cell.data {
+        for value in cell.data.iter() {
             let materialized = if matches!(value, Value::GpuTensor(_)) {
                 checkpoint_input(cooperation, selected, work).await?;
                 work = 0;
-                await_io(runtime, BUILTIN_NAME, gather_if_needed_async(&value))
-                    .await?
-                    .map_err(map_control_flow)?
+                Some(
+                    await_io(runtime, BUILTIN_NAME, gather_if_needed_async(value))
+                        .await?
+                        .map_err(map_control_flow)?,
+                )
             } else {
-                value
+                None
             };
-            cells.push(cell_value_from_scalar(materialized, cooperation, selected).await?);
+            let scalar = materialized.as_ref().unwrap_or(value);
+            cells.push(cell_value_from_scalar(scalar, cooperation, selected).await?);
             work += 1;
             if work == 1024 {
                 checkpoint_input(cooperation, selected, work).await?;
@@ -224,10 +227,10 @@ impl XlsTable {
             checkpoint_input(cooperation, selected, chunk).await?;
         }
         let mut work = 0;
-        for (index, text) in strings.data.into_iter().enumerate() {
+        for (index, text) in strings.data.iter().enumerate() {
             let row = index % rows;
             let col = index / rows;
-            cells[row * cols + col] = CellValue::Text(text);
+            cells[row * cols + col] = CellValue::Text(text.as_str().to_owned());
             work += 1;
             if work == 1024 {
                 checkpoint_input(cooperation, selected, work).await?;
@@ -252,7 +255,7 @@ impl XlsTable {
         let rows = if chars.rows == 1 { 1 } else { chars.rows };
         let mut cells = reserved_cells(rows)?;
         let character_count = chars.data.len();
-        let mut characters = chars.data.into_iter();
+        let mut characters = chars.data.into_char_iter();
         let mut work = 0;
         for _row in 0..rows {
             let mut text = String::new();
@@ -305,16 +308,16 @@ fn reserved_cells(count: usize) -> BuiltinResult<Vec<CellValue>> {
 mod tests;
 
 async fn cell_value_from_scalar(
-    value: Value,
+    value: &Value,
     cooperation: &mut TabularCooperation<'_>,
     selected: &TabularFsPath,
 ) -> BuiltinResult<CellValue> {
-    admit_cell_value(&value)?;
+    admit_cell_value(value)?;
     match value {
-        Value::Num(n) => Ok(CellValue::Number(n)),
-        Value::Int(i) => Ok(CellValue::Integer(i)),
-        Value::Bool(b) => Ok(CellValue::Boolean(b)),
-        Value::String(s) => Ok(CellValue::Text(s)),
+        Value::Num(n) => Ok(CellValue::Number(*n)),
+        Value::Int(i) => Ok(CellValue::Integer(i.clone())),
+        Value::Bool(b) => Ok(CellValue::Boolean(*b)),
+        Value::String(s) => Ok(CellValue::Text(s.as_str().to_owned())),
         Value::CharArray(chars) if chars.rows == 1 => {
             let mut text = String::new();
             text.try_reserve(chars.data.len()).map_err(|source| {
@@ -325,8 +328,8 @@ async fn cell_value_from_scalar(
                 )
             })?;
             let mut work = 0;
-            for character in chars.data {
-                text.push(character);
+            for character in chars.data.iter() {
+                text.push(*character);
                 work += 1;
                 if work == 1024 {
                     checkpoint_input(cooperation, selected, work).await?;
@@ -337,13 +340,11 @@ async fn cell_value_from_scalar(
             Ok(CellValue::Text(text))
         }
         Value::StringArray(strings) if strings.data.is_empty() => Ok(CellValue::Empty),
-        Value::StringArray(strings) => Ok(CellValue::Text(
-            strings.data.into_iter().next().expect("scalar string"),
-        )),
-        Value::Tensor(tensor) if tensor::is_scalar_tensor(&tensor) => {
-            writecell::scalar_tensor_cell_value(&tensor)
+        Value::StringArray(strings) => Ok(CellValue::Text(strings.data[0].as_str().to_owned())),
+        Value::Tensor(tensor) if tensor::is_scalar_tensor(tensor) => {
+            writecell::scalar_tensor_cell_value(tensor)
         }
-        Value::Tensor(tensor) if tensor::tensor_element_len(&tensor) == 0 => Ok(CellValue::Empty),
+        Value::Tensor(tensor) if tensor::tensor_element_len(tensor) == 0 => Ok(CellValue::Empty),
         Value::LogicalArray(logical) if logical.data.len() == 1 => {
             Ok(CellValue::Boolean(logical.data[0] != 0))
         }

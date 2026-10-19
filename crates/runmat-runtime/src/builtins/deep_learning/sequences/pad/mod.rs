@@ -214,11 +214,11 @@ pub(in crate::builtins::deep_learning) async fn padsequences_builtin(
                 masks.push(Value::LogicalArray(mask));
             }
         }
-        let output = CellArray::new_with_shape(cells, cell.shape.clone())
+        let output = CellArray::new_with_shape(cells, cell.shape().to_vec())
             .map(Value::Cell)
             .map_err(|err| deep_learning_error("padsequences", err))?;
         if requested_outputs == 2 {
-            let mask = CellArray::new_with_shape(masks, cell.shape)
+            let mask = CellArray::new_with_shape(masks, cell.shape().to_vec())
                 .map(Value::Cell)
                 .map_err(|err| deep_learning_error("padsequences", err))?;
             return Ok(Value::output_list(vec![output, mask]));

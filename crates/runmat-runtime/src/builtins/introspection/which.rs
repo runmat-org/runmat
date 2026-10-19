@@ -327,9 +327,11 @@ async fn canonical_path(path: &Path) -> String {
 
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

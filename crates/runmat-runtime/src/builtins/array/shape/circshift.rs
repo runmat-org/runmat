@@ -681,7 +681,7 @@ fn circshift_string_array(
     let StringArray { data, shape, .. } = array;
     let plan = build_shift_plan(&shape, dims, shifts)?;
     if data.is_empty() || plan.is_noop() {
-        return StringArray::new(data, shape)
+        return StringArray::from_shared_storage(data, shape)
             .map_err(|e| circshift_internal(format!("circshift: {e}")));
     }
     let ShiftPlan {
@@ -690,7 +690,8 @@ fn circshift_string_array(
         ..
     } = plan;
     let rotated = circshift_generic(&data, &ext_shape, &positive)?;
-    StringArray::new(rotated, ext_shape).map_err(|e| circshift_internal(format!("circshift: {e}")))
+    StringArray::from_texts_unbounded(rotated, ext_shape)
+        .map_err(|e| circshift_internal(format!("circshift: {e}")))
 }
 
 fn circshift_char_array(
@@ -698,7 +699,7 @@ fn circshift_char_array(
     dims: &[usize],
     shifts: &[isize],
 ) -> crate::BuiltinResult<Value> {
-    let shape = array.shape.clone();
+    let shape = array.shape.to_vec();
     let plan = build_shift_plan(&shape, dims, shifts)?;
     let data = array.to_column_major();
     if data.is_empty() || plan.is_noop() {

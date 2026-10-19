@@ -1,10 +1,5 @@
 //! Dependency-detail helpers for Text Analytics tokenized documents.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StringArray, Tensor, Value};
 
@@ -29,68 +24,16 @@ fn dependency_row_vector(tensor: &Tensor) -> bool {
     }
 }
 
-const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "updatedDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated tokenized document object.",
-}];
-
-const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS.ADD_DEPENDENCY_DETAILS.INVALID_INPUT",
-    identifier: Some("RunMat:addDependencyDetails:InvalidInput"),
-    when: "Input is not a supported tokenizedDocument object.",
-    message: "addDependencyDetails: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const ADD_DEPENDENCY_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "updatedDocuments = addDependencyDetails(documents)",
-        inputs: &IN_DOCUMENTS,
-        outputs: &OUT_DOCUMENTS,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const ADD_DEPENDENCY_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "addDependencyDetails accepts and returns tokenizedDocument objects only; it has no numeric arguments, and the Head token indices exposed through tokenDetails are double metadata rather than integer-class results.",
-    };
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 #[runtime_builtin(
     name = "addDependencyDetails",
-    category = "strings/text_analytics",
-    summary = "Add dependency parse details to tokenizedDocument objects.",
-    keywords = "addDependencyDetails,text analytics,tokenizedDocument,dependency,head,universal dependencies",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(
-        crate::builtins::strings::text_analytics::dependencies::ADD_DEPENDENCY_DETAILS_DESCRIPTOR
-    ),
-    integer_audit(
-        crate::builtins::strings::text_analytics::dependencies::ADD_DEPENDENCY_DETAILS_INTEGER_AUDIT
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::dependencies"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::dependencies",
+    context = true
 )]
-async fn add_dependency_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn add_dependency_details_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let gathered = gather_args(args).await?;
     let documents = parse_args(gathered)?;
     let mut object = tokenized_document_object(documents)?;
@@ -100,7 +43,7 @@ async fn add_dependency_details_builtin(args: Vec<Value>) -> BuiltinResult<Value
     )?;
 
     if !object.properties.contains_key("SentenceNumbers") {
-        object = add_sentence_details_for_dependencies(object).await?;
+        object = add_sentence_details_for_dependencies(runtime.as_ref(), object).await?;
     }
 
     let documents = documents_from_object(&object, "addDependencyDetails")?;
@@ -168,9 +111,11 @@ fn tokenized_document_object(value: Value) -> BuiltinResult<ObjectInstance> {
 }
 
 async fn add_sentence_details_for_dependencies(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
 ) -> BuiltinResult<ObjectInstance> {
-    let Value::Object(object) = add_sentence_details_builtin(vec![Value::Object(object)]).await?
+    let Value::Object(object) =
+        add_sentence_details_builtin(runtime.cloned(), vec![Value::Object(object)]).await?
     else {
         return Err(text_analytics_error(
             "addDependencyDetails",
@@ -508,7 +453,13 @@ pub(in crate::builtins::strings::text_analytics) fn dependency_details_from_obje
                 ),
             ));
         }
-        out.push(array.data.clone());
+        out.push(
+            array
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        );
     }
     Ok(Some(out))
 }
@@ -566,7 +517,7 @@ mod tests {
     }
 
     fn run_add_dependency(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_dependency_details_builtin(args))
+        futures::executor::block_on(add_dependency_details_builtin(None, args))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {

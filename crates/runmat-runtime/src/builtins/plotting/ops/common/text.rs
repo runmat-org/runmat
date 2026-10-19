@@ -38,15 +38,20 @@ pub struct LegendCommand {
 
 pub fn value_as_text_lines(value: &Value) -> Option<Vec<String>> {
     match value {
-        Value::String(text) => Some(vec![text.clone()]),
+        Value::String(text) => Some(vec![text.as_str().to_owned()]),
         Value::CharArray(chars) => Some(vec![chars.data.iter().collect()]),
-        Value::StringArray(arr) => Some(arr.data.clone()),
+        Value::StringArray(arr) => Some(
+            arr.data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        ),
         Value::Cell(cell) => {
             let mut lines = Vec::new();
             for row in 0..cell.rows {
                 for col in 0..cell.cols {
-                    let value = cell.get(row, col).ok()?;
-                    lines.push(value_as_string(&value)?);
+                    let value = &cell.data[row * cell.cols + col];
+                    lines.push(value_as_string(value)?);
                 }
             }
             Some(lines)
@@ -308,14 +313,14 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
     let mut labels = Vec::new();
     for arg in args {
         match arg {
-            Value::StringArray(arr) => labels.extend(arr.data.iter().cloned()),
+            Value::StringArray(arr) => {
+                labels.extend(arr.data.iter().map(|text| text.as_str().to_owned()))
+            }
             Value::Cell(cell) => {
                 for row in 0..cell.rows {
                     for col in 0..cell.cols {
-                        let value = cell.get(row, col).map_err(|err| {
-                            plotting_error(builtin, format!("legend: invalid label cell: {err}"))
-                        })?;
-                        labels.push(value_as_text_string(&value).ok_or_else(|| {
+                        let value = &cell.data[row * cell.cols + col];
+                        labels.push(value_as_text_string(value).ok_or_else(|| {
                             plotting_error(builtin, "legend: labels must be strings or char arrays")
                         })?);
                     }

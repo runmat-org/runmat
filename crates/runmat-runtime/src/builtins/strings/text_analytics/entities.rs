@@ -1,14 +1,9 @@
 //! Entity detail helpers for Text Analytics tokenized documents.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 
-use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
     replace_tokenized_document_documents, text_analytics_error, tokenized_document_language,
@@ -22,92 +17,18 @@ use crate::{gather_if_needed_async, BuiltinResult};
 pub(in crate::builtins::strings::text_analytics) const ENTITY_DETAILS_PROPERTY: &str =
     "EntityDetails";
 
-const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "updatedDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated tokenized document object.",
-}];
-
-const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const IN_DOCUMENTS_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: RetokenizeMethod, DiscardKnownValues, Model.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS.ADD_ENTITY_DETAILS.INVALID_INPUT",
-    identifier: Some("RunMat:addEntityDetails:InvalidInput"),
-    when: "Input is not a supported tokenizedDocument object or option form.",
-    message: "addEntityDetails: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const ADD_ENTITY_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "updatedDocuments = addEntityDetails(documents)",
-            inputs: &IN_DOCUMENTS,
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "updatedDocuments = addEntityDetails(documents,Name,Value)",
-            inputs: &IN_DOCUMENTS_REST,
-            outputs: &OUT_DOCUMENTS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const ADD_ENTITY_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "addEntityDetails accepts a tokenizedDocument, text or model options, and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical entity tags.",
-    };
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 #[runtime_builtin(
     name = "addEntityDetails",
-    category = "strings/text_analytics",
-    summary = "Add named-entity details to tokenizedDocument objects.",
-    keywords = "addEntityDetails,text analytics,tokenizedDocument,entity,named entity,ner",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::entities::ADD_ENTITY_DETAILS_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::entities::ADD_ENTITY_DETAILS_INTEGER_AUDIT
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::entities"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::entities",
+    context = true
 )]
-async fn add_entity_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn add_entity_details_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let gathered = gather_args(args).await?;
-    let (documents, options) = parse_args(gathered)?;
+    let (documents, options) = parse_args(runtime.as_ref(), gathered)?;
     let mut object = tokenized_document_object(documents)?;
     let language = EntityLanguage::from_document(&tokenized_document_language(&object))?;
 
@@ -126,7 +47,7 @@ async fn add_entity_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if !object.properties.contains_key(POS_DETAILS_PROPERTY)
         || !object.properties.contains_key("SentenceNumbers")
     {
-        object = add_part_of_speech_details_for_entities(object).await?;
+        object = add_part_of_speech_details_for_entities(runtime.as_ref(), object).await?;
     }
 
     let documents = documents_from_object(&object, "addEntityDetails")?;
@@ -186,13 +107,16 @@ enum RetokenizeMethod {
 
 impl RetokenizeMethod {
     fn parse(value: &str) -> BuiltinResult<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "entity" => Ok(Self::Entity),
-            "none" => Ok(Self::None),
-            other => Err(text_analytics_error(
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("entity") {
+            Ok(Self::Entity)
+        } else if value.eq_ignore_ascii_case("none") {
+            Ok(Self::None)
+        } else {
+            Err(text_analytics_error(
                 "addEntityDetails",
-                format!("addEntityDetails: unsupported RetokenizeMethod '{other}'"),
-            )),
+                format!("addEntityDetails: unsupported RetokenizeMethod '{value}'"),
+            ))
         }
     }
 }
@@ -220,7 +144,10 @@ impl EntityLanguage {
     }
 }
 
-fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, AddEntityOptions)> {
+fn parse_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, AddEntityOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
             "addEntityDetails",
@@ -236,20 +163,28 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, AddEntityOptions)> {
     let mut options = AddEntityOptions::default();
     let mut idx = 1usize;
     while idx < args.len() {
-        let name = scalar_text(&args[idx], "addEntityDetails")
-            .map_err(|err| text_analytics_error("addEntityDetails", err.to_string()))?;
-        if name.eq_ignore_ascii_case("DiscardKnownValues") {
+        let name = scalar_text_input(&args[idx], runtime, |runtime, cause| {
+            text_input_admission("addEntityDetails", runtime, cause)
+        })?
+        .ok_or_else(|| {
+            text_analytics_error("addEntityDetails", "addEntityDetails: expected text option")
+        })?;
+        if name.as_str().eq_ignore_ascii_case("DiscardKnownValues") {
             options.discard_known_values = logical_scalar(&args[idx + 1])?;
-        } else if name.eq_ignore_ascii_case("RetokenizeMethod") {
-            let value = scalar_text(&args[idx + 1], "addEntityDetails")
-                .map_err(|err| text_analytics_error("addEntityDetails", err.to_string()))?;
-            options.retokenize_method = RetokenizeMethod::parse(&value)?;
-        } else if name.eq_ignore_ascii_case("Model") {
-            parse_model_option(&args[idx + 1])?;
+        } else if name.as_str().eq_ignore_ascii_case("RetokenizeMethod") {
+            let value = scalar_text_input(&args[idx + 1], runtime, |runtime, cause| {
+                text_input_admission("addEntityDetails", runtime, cause)
+            })?
+            .ok_or_else(|| {
+                text_analytics_error("addEntityDetails", "addEntityDetails: expected text method")
+            })?;
+            options.retokenize_method = RetokenizeMethod::parse(value.as_str())?;
+        } else if name.as_str().eq_ignore_ascii_case("Model") {
+            parse_model_option(runtime, &args[idx + 1])?;
         } else {
             return Err(text_analytics_error(
                 "addEntityDetails",
-                format!("addEntityDetails: unsupported option '{name}'"),
+                format!("addEntityDetails: unsupported option '{}'", name.as_str()),
             ));
         }
         idx += 2;
@@ -257,10 +192,14 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, AddEntityOptions)> {
     Ok((args[0].clone(), options))
 }
 
-fn parse_model_option(value: &Value) -> BuiltinResult<()> {
-    if scalar_text(value, "addEntityDetails")
-        .map(|model| model.eq_ignore_ascii_case("auto"))
-        .unwrap_or(false)
+fn parse_model_option(
+    runtime: Option<&crate::context::RuntimeContext>,
+    value: &Value,
+) -> BuiltinResult<()> {
+    if scalar_text_input(value, runtime, |runtime, cause| {
+        text_input_admission("addEntityDetails", runtime, cause)
+    })?
+    .is_some_and(|model| model.as_str().eq_ignore_ascii_case("auto"))
     {
         return Ok(());
     }
@@ -302,13 +241,17 @@ fn clear_token_aligned_details(object: &mut ObjectInstance) {
 }
 
 async fn add_part_of_speech_details_for_entities(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
 ) -> BuiltinResult<ObjectInstance> {
-    let Value::Object(object) = add_part_of_speech_details_builtin(vec![
-        Value::Object(object),
-        Value::String("RetokenizeMethod".to_string()),
-        Value::String("none".to_string()),
-    ])
+    let Value::Object(object) = add_part_of_speech_details_builtin(
+        runtime.cloned(),
+        vec![
+            Value::Object(object),
+            Value::string("RetokenizeMethod".to_string()),
+            Value::string("none".to_string()),
+        ],
+    )
     .await?
     else {
         return Err(text_analytics_error(
@@ -321,7 +264,7 @@ async fn add_part_of_speech_details_for_entities(
 
 fn entity_details_for_documents(
     documents: &[Vec<String>],
-    stored: Option<&[Vec<String>]>,
+    stored: Option<&[Vec<&str>]>,
     language: EntityLanguage,
     options: &crate::builtins::strings::text_analytics::documents::DocumentOptions,
     discard_known_values: bool,
@@ -340,7 +283,7 @@ fn entity_details_for_documents(
                             .and_then(|values| values.get(token_idx))
                             .filter(|tag| is_known_entity(tag))
                         {
-                            return tag.clone();
+                            return (*tag).to_owned();
                         }
                     }
                     entity_for_token(token, language, options).to_string()
@@ -559,7 +502,7 @@ fn mark_entity_pos_as_proper_nouns(object: &mut ObjectInstance) -> BuiltinResult
     for (doc_idx, entity_doc) in entities.iter().enumerate() {
         if let Some(pos_doc) = pos.get_mut(doc_idx) {
             for (token_idx, entity) in entity_doc.iter().enumerate() {
-                if entity != "non-entity" {
+                if *entity != "non-entity" {
                     if let Some(pos_tag) = pos_doc.get_mut(token_idx) {
                         *pos_tag = "proper-noun".to_string();
                     }
@@ -592,10 +535,10 @@ fn is_known_entity(value: &str) -> bool {
         && !crate::builtins::strings::common::is_missing_string(trimmed)
 }
 
-pub(in crate::builtins::strings::text_analytics) fn entity_details_from_object(
-    object: &ObjectInstance,
+pub(in crate::builtins::strings::text_analytics) fn entity_details_from_object<'a>(
+    object: &'a ObjectInstance,
     fn_name: &str,
-) -> BuiltinResult<Option<Vec<Vec<String>>>> {
+) -> BuiltinResult<Option<Vec<Vec<&'a str>>>> {
     let Some(value) = object.properties.get(ENTITY_DETAILS_PROPERTY) else {
         return Ok(None);
     };
@@ -627,7 +570,7 @@ pub(in crate::builtins::strings::text_analytics) fn entity_details_from_object(
                 ),
             ));
         }
-        out.push(array.data.clone());
+        out.push(array.data.iter().map(|text| text.as_str()).collect());
     }
     Ok(Some(out))
 }
@@ -658,7 +601,7 @@ mod tests {
     }
 
     fn run_add_entity(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_entity_details_builtin(args))
+        futures::executor::block_on(add_entity_details_builtin(None, args))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {

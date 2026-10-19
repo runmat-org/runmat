@@ -117,14 +117,14 @@ fn reshape_value(value: Value, dims: &[usize]) -> crate::BuiltinResult<Value> {
             if dims.len() <= 2 && dims.iter().all(|&d| d == 1) {
                 Ok(Value::String(s))
             } else {
-                StringArray::new(vec![s], dims.to_vec())
+                StringArray::from_texts_unbounded(vec![s], dims.to_vec())
                     .map(Value::StringArray)
                     .map_err(|e| reshape_error(format!("reshape: {e}")))
             }
         }
         Value::StringArray(strings) => {
             let StringArray { data, .. } = strings;
-            StringArray::new(data, dims.to_vec())
+            StringArray::from_shared_storage(data, runmat_value::SharedShape::new_unmanaged(dims.to_vec()))
                 .map(Value::StringArray)
                 .map_err(|e| reshape_error(format!("reshape: {e}")))
         }

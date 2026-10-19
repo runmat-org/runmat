@@ -28,12 +28,13 @@ fn fitctree_table_response_name_predicts_string_labels() {
         vec!["A".into(), "Y".into()],
         vec![
             tensor_value(vec![0.0, 1.0, 2.0, 3.0], 4, 1),
-            Value::StringArray(StringArray {
-                data: vec!["low".into(), "low".into(), "high".into(), "high".into()],
-                shape: vec![4, 1],
-                rows: 4,
-                cols: 1,
-            }),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "low".into(), "high".into(), "high".into()],
+                    vec![4, 1],
+                )
+                .unwrap(),
+            ),
         ],
     )
     .unwrap();

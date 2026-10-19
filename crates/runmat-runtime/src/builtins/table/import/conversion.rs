@@ -25,23 +25,23 @@ pub(in crate::builtins::table) fn import_cell_value(
     options: &ReadTableOptions,
 ) -> Value {
     match cell {
-        ImportCell::Empty => Value::String(String::new()),
+        ImportCell::Empty => Value::string(String::new()),
         ImportCell::Text(text) => {
             let token = unquote(text.trim()).trim();
             if options.is_missing(token) {
-                Value::String(String::new())
+                Value::string(String::new())
             } else if let Some(value) = parse_logical(token) {
                 Value::Bool(value)
             } else if let Some(value) = parse_numeric(token) {
                 Value::Num(value)
             } else {
-                Value::String(token.to_string())
+                Value::string(token.to_string())
             }
         }
         ImportCell::Number(value) => Value::Num(value),
         ImportCell::Logical(value) => Value::Bool(value),
         ImportCell::DateTime(serial) => Value::Num(serial),
-        ImportCell::Error(text) => Value::String(text),
+        ImportCell::Error(text) => Value::string(text),
     }
 }
 

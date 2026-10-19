@@ -14,6 +14,7 @@ hkdf = { workspace = true }
 minicbor = { workspace = true }
 runmat-execution = { workspace = true }
 runmat-package = { workspace = true }
+runmat-test = { workspace = true }
 runmat-types = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

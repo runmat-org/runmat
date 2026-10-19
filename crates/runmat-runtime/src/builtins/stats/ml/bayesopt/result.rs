@@ -279,7 +279,7 @@ fn variable_descriptions(variables: &[Variable]) -> BuiltinResult<Value> {
             let mut object = ObjectInstance::new(OPTIMIZABLE_VARIABLE_CLASS);
             object
                 .properties
-                .insert("Name".into(), Value::String(var.name.clone()));
+                .insert("Name".into(), Value::string(var.name.clone()));
             object.properties.insert(
                 "Type".into(),
                 Value::String(

@@ -1,7 +1,7 @@
 mod parse;
 mod prototype;
 
-use runmat_value::{ComplexStorage, IntegerComplexStorage, NumericStorage};
+use runmat_value::{ComplexStorage, ExactArrayStorage, IntegerComplexStorage, NumericStorage};
 
 use super::error::{cell2mat_error_with_message, CELL2MAT_ERROR_INVALID_CONTENTS};
 use crate::{gather_if_needed_async, BuiltinResult};
@@ -28,7 +28,7 @@ pub(super) enum EntryData {
     Complex(ComplexStorage),
     TypedComplexInteger(IntegerComplexStorage),
     Logical(Vec<u8>),
-    Character(Vec<char>),
+    Character(ExactArrayStorage<char>),
 }
 
 impl EntryData {

@@ -57,7 +57,7 @@ async fn gpu_info_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
             .into());
     }
     let info = active_device_metadata().map(|metadata| metadata.into_struct());
-    Ok(Value::String(format_summary(info.as_ref())))
+    Ok(Value::string(format_summary(info.as_ref())))
 }
 
 fn format_summary(info: Option<&StructValue>) -> String {

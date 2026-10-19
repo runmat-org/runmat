@@ -24,7 +24,22 @@ pub(in crate::builtins) fn layers_from_network_value(
             }
         }
         Value::Object(object) => Ok(vec![Value::Object(object)]),
-        Value::Cell(cell) => Ok(cell.data),
+        Value::Cell(cell) => cell
+            .data
+            .try_into_owned()
+            .map_err(|_| {
+                deep_learning_error(
+                    function,
+                    format!("{function}: shared Layers require an admitted replacement"),
+                )
+            })?
+            .try_into_unbounded_vec()
+            .map_err(|_| {
+                deep_learning_error(
+                    function,
+                    format!("{function}: admitted Layers cannot become an unclaimed vector"),
+                )
+            }),
         Value::OutputList(values) => values
             .try_into_owned()
             .map_err(|_| {

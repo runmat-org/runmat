@@ -30,7 +30,7 @@ fn convert_value(value: Value) -> BuiltinResult<Value> {
                     text.push(array.data[row * array.cols + col]);
                 }
             }
-            Ok(Value::String(text))
+            Ok(Value::string(text))
         }
         Value::Cell(cell) => {
             if !cell.data.iter().all(is_character_vector) {
@@ -38,7 +38,7 @@ fn convert_value(value: Value) -> BuiltinResult<Value> {
             }
             let data = cell
                 .data
-                .into_iter()
+                .iter()
                 .map(|value| match value {
                     Value::CharArray(array) if array.rows == 0 => Ok(String::new()),
                     Value::CharArray(array) => {
@@ -49,7 +49,7 @@ fn convert_value(value: Value) -> BuiltinResult<Value> {
                     )),
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            StringArray::new(data, cell.shape)
+            StringArray::new(data, cell.shape().to_vec())
                 .map(Value::StringArray)
                 .map_err(conversion_error)
         }

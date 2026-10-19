@@ -1,9 +1,11 @@
 //! Level-5 MAT element decoder and value restoration.
 
+use super::super::format::MatArray;
 use super::super::format::{MAT_HEADER_LEN, MI_COMPRESSED, MI_MATRIX};
 use super::{load_error, load_error_with_source, LOAD_ERROR_IO};
 use crate::BuiltinResult;
 use flate2::read::ZlibDecoder;
+#[cfg(test)]
 use runmat_value::Value;
 use std::io::{Cursor, Read};
 
@@ -73,7 +75,15 @@ impl Endian {
     }
 }
 
+#[cfg(test)]
 pub(super) fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, Value)>> {
+    read_mat_arrays(reader)?
+        .into_iter()
+        .map(|(name, array)| Ok((name, mat_array_to_value(array)?)))
+        .collect()
+}
+
+pub(super) fn read_mat_arrays<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, MatArray)>> {
     let endian = read_mat_header(reader)?;
     read_variables_from_elements(reader, endian)
 }
@@ -106,14 +116,13 @@ fn read_mat_header<R: Read>(reader: &mut R) -> BuiltinResult<Endian> {
 fn read_variables_from_elements<R: Read>(
     reader: &mut R,
     endian: Endian,
-) -> BuiltinResult<Vec<(String, Value)>> {
+) -> BuiltinResult<Vec<(String, MatArray)>> {
     let mut variables = Vec::new();
     while let Some(tagged) = read_tagged(reader, true, endian)? {
         match tagged.data_type {
             MI_MATRIX => {
                 let parsed = parse_matrix(&tagged.data, endian)?;
-                let value = mat_array_to_value(parsed.array)?;
-                variables.push((parsed.name, value));
+                variables.push((parsed.name, parsed.array));
             }
             MI_COMPRESSED => {
                 let mut decoder = ZlibDecoder::new(Cursor::new(tagged.data));
@@ -137,10 +146,22 @@ fn read_variables_from_elements<R: Read>(
 /// Decode opened MAT elements while charging real input/decompression work to
 /// the invocation. A compressed stream is parsed directly rather than first
 /// expanding its entire payload into an unbounded second byte vector.
+#[cfg(test)]
 pub(super) async fn read_mat_reader_cooperative<R: Read>(
     reader: &mut R,
     cooperation: &mut MatCodecCooperation<'_>,
 ) -> BuiltinResult<Vec<(String, Value)>> {
+    read_mat_arrays_cooperative(reader, cooperation)
+        .await?
+        .into_iter()
+        .map(|(name, array)| Ok((name, mat_array_to_value(array)?)))
+        .collect()
+}
+
+pub(super) async fn read_mat_arrays_cooperative<R: Read>(
+    reader: &mut R,
+    cooperation: &mut MatCodecCooperation<'_>,
+) -> BuiltinResult<Vec<(String, MatArray)>> {
     cooperation.completed(0).await?;
     let endian = read_mat_header(reader)?;
     cooperation.completed(MAT_HEADER_LEN).await?;
@@ -156,8 +177,7 @@ pub(super) async fn read_mat_reader_cooperative<R: Read>(
         match tagged.data_type {
             MI_MATRIX => {
                 let parsed = parse_matrix(&tagged.data, endian)?;
-                let value = mat_array_to_value(parsed.array)?;
-                variables.push((parsed.name, value));
+                variables.push((parsed.name, parsed.array));
                 cooperation.completed(tagged.data.len()).await?;
             }
             MI_COMPRESSED => {

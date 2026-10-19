@@ -38,7 +38,7 @@ pub(super) fn text(
 ) -> BuiltinResult<Vec<String>> {
     match variables(table, property, function)?.fields.get(name) {
         Some(Value::StringArray(array)) if array.shape == [array.data.len(), 1] => {
-            Ok(array.data.clone())
+            Ok(array.data.iter().map(ToString::to_string).collect())
         }
         // Kept only as an input extension for older value-network callers.
         Some(Value::Cell(cell)) if cell.shape == [cell.data.len(), 1] => cell

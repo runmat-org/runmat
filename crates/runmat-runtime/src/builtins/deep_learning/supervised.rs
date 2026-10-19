@@ -158,7 +158,7 @@ fn training_info(
     );
     info.insert(
         "StopReason",
-        Value::String("MaxEpochs completed".to_string()),
+        Value::string("MaxEpochs completed".to_string()),
     );
     Ok(Value::Struct(info))
 }

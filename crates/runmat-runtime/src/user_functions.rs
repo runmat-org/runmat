@@ -20,12 +20,22 @@ pub type UserFunctionFuture =
 /// Host selectors may return `Continue` only before invocation effects and
 /// must return the original argument vector, not a replacement or a clone.
 /// After selection, retirement, cancellation and invocation errors are `Break`.
-pub type DynamicFunctionLoadAttempt =
-    ControlFlow<Result<crate::execution::RootedValueSequence, RuntimeError>, Vec<Value>>;
+pub type DynamicFunctionLoadAttempt = ControlFlow<
+    Result<crate::execution::RootedValueSequence, RuntimeError>,
+    crate::call::RootedFunctionArguments,
+>;
+pub(crate) type CallableAttempt = ControlFlow<
+    Result<crate::execution::RootedValueSequence, RuntimeError>,
+    crate::call::RootedFunctionArguments,
+>;
 pub type DynamicFunctionLoadFuture = Pin<Box<dyn Future<Output = DynamicFunctionLoadAttempt>>>;
 pub type DynamicFunctionClearFuture = Pin<Box<dyn Future<Output = Result<(), RuntimeError>>>>;
-pub type FunctionInvoker =
-    dyn Fn(Option<crate::context::RuntimeContext>, usize, &[Value], usize) -> UserFunctionFuture;
+pub type FunctionInvoker = dyn Fn(
+    Option<crate::context::RuntimeContext>,
+    usize,
+    crate::call::RootedFunctionArguments,
+    usize,
+) -> UserFunctionFuture;
 /// Compatibility entrypoint for an embedding callback without a selected
 /// RuntimeContext. It cannot mint foreign reentry authority.
 pub type UnscopedFunctionInvoker = dyn Fn(usize, &[Value], usize) -> UserFunctionFuture;
@@ -36,11 +46,11 @@ pub type BoundFunctionInvoker = dyn Fn(
     usize,
     Option<runmat_value::LexicalEnvironment>,
 ) -> UserFunctionFuture;
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ExternalFunctionCall {
     pub function: usize,
     pub display_name: String,
-    pub arguments: Vec<Value>,
+    pub arguments: crate::call::RootedFunctionArguments,
     pub requested_outputs: usize,
 }
 pub type ExternalFunctionInvoker =
@@ -117,8 +127,12 @@ pub type NativeNameObserver = dyn Fn(String) -> NativeNameObserverFuture;
 
 /// Trusted selected-host resolution and invocation. An absent target follows
 /// the same original-owner, pre-effect contract as [`DynamicFunctionLoadAttempt`].
-pub type SelectedNativeInvoker =
-    dyn Fn(crate::context::RuntimeContext, String, Vec<Value>, usize) -> DynamicFunctionLoadFuture;
+pub type SelectedNativeInvoker = dyn Fn(
+    crate::context::RuntimeContext,
+    String,
+    crate::call::RootedFunctionArguments,
+    usize,
+) -> DynamicFunctionLoadFuture;
 
 /// Native resolution is either session-owned or confined to a selected
 /// product. A selected product without a grant cannot use the session owner.
@@ -158,7 +172,7 @@ impl SelectedNativeRoute {
         &self,
         runtime: crate::context::RuntimeContext,
         name: String,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
     ) -> DynamicFunctionLoadFuture {
         (self.invoker)(runtime, name, arguments, requested_outputs)
@@ -208,7 +222,7 @@ pub enum DynamicFunctionLoadPhase {
 pub type DynamicFunctionLoader = dyn Fn(
     crate::context::RuntimeContext,
     String,
-    Vec<Value>,
+    crate::call::RootedFunctionArguments,
     usize,
     DynamicFunctionLoadPhase,
     Option<crate::callsite::CallsiteInfo>,

@@ -558,8 +558,8 @@ fn html_tree_value(value: Value) -> BuiltinResult<Value> {
     let list = text_items(value, "htmlTree")?;
     let mut objects = Vec::with_capacity(list.items.len());
     for item in list.items {
-        let html = item.unwrap_or_else(|| MISSING.to_string());
-        objects.push(Value::Object(parse_html_tree(&html)?.into_object(None)?));
+        let html = item.as_ref().map(|text| text.as_str()).unwrap_or(MISSING);
+        objects.push(Value::Object(parse_html_tree(html)?.into_object(None)?));
     }
     if objects.len() == 1 {
         Ok(objects.remove(0))
@@ -574,7 +574,7 @@ pub(in crate::builtins::strings::text_analytics) fn extract_html_text_value(
 ) -> BuiltinResult<Value> {
     match value {
         Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
-            Ok(Value::String(extract_from_object(&object, method)?))
+            Ok(Value::string(extract_from_object(&object, method)?))
         }
         Value::Object(object) => Err(html_error(
             "extractHTMLText",
@@ -605,12 +605,12 @@ pub(in crate::builtins::strings::text_analytics) fn extract_html_text_value(
 }
 
 fn extract_html_text_from_cell(cell: CellArray, method: ExtractionMethod) -> BuiltinResult<Value> {
-    let shape = cell.shape.clone();
+    let shape = cell.shape().to_vec();
     let mut texts = Vec::with_capacity(cell.data.len());
-    for value in cell.data {
+    for value in &cell.data {
         match value {
             Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
-                texts.push(extract_from_object(&object, method)?);
+                texts.push(extract_from_object(object, method)?);
             }
             Value::Object(object) => {
                 return Err(html_error(
@@ -622,7 +622,7 @@ fn extract_html_text_from_cell(cell: CellArray, method: ExtractionMethod) -> Bui
                 ));
             }
             other => {
-                let html = scalar_text(&other, "extractHTMLText")?;
+                let html = scalar_text(other, "extractHTMLText")?;
                 let tree = parse_html_tree(&html)?;
                 texts.push(tree.extract_text(method));
             }
@@ -637,7 +637,7 @@ fn is_html_tree_value(value: &Value) -> bool {
 
 fn string_output(data: Vec<String>, shape: Vec<usize>, fn_name: &str) -> BuiltinResult<Value> {
     if data.len() == 1 {
-        Ok(Value::String(data.into_iter().next().unwrap_or_default()))
+        Ok(Value::string(data.into_iter().next().unwrap_or_default()))
     } else {
         StringArray::new(data, shape)
             .map(Value::StringArray)
@@ -658,10 +658,10 @@ fn find_element_value(value: Value, selector: &str) -> BuiltinResult<Value> {
             collect_selector_matches(&root, &selector, &mut matches)?;
         }
         Value::Cell(cell) => {
-            for item in cell.data {
+            for item in &cell.data {
                 match item {
                     Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
-                        let root = node_from_object(&object, "findElement")?;
+                        let root = node_from_object(object, "findElement")?;
                         collect_selector_matches(&root, &selector, &mut matches)?;
                     }
                     other => {
@@ -715,7 +715,7 @@ fn get_attribute_value(value: Value, attr: &str) -> BuiltinResult<Value> {
     }
     match value {
         Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
-            Ok(Value::String(attribute_from_object(&object, &attr)?))
+            Ok(Value::string(attribute_from_object(&object, &attr)?))
         }
         Value::Object(object) => Err(html_error(
             "getAttribute",
@@ -725,12 +725,12 @@ fn get_attribute_value(value: Value, attr: &str) -> BuiltinResult<Value> {
             ),
         )),
         Value::Cell(cell) => {
-            let shape = cell.shape.clone();
+            let shape = cell.shape().to_vec();
             let mut values = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
+            for item in &cell.data {
                 match item {
                     Value::Object(object) if object.is_class(HTML_TREE_CLASS) => {
-                        values.push(attribute_from_object(&object, &attr)?);
+                        values.push(attribute_from_object(object, &attr)?);
                     }
                     other => {
                         return Err(html_error(
@@ -1866,13 +1866,13 @@ impl HtmlNode {
                 let decoded = normalize_space(&decode_html_entities(&text));
                 object
                     .properties
-                    .insert("Name".to_string(), Value::String("#text".to_string()));
+                    .insert("Name".to_string(), Value::string("#text".to_string()));
                 object
                     .properties
-                    .insert("RawHTML".to_string(), Value::String(text));
+                    .insert("RawHTML".to_string(), Value::string(text));
                 object
                     .properties
-                    .insert("Text".to_string(), Value::String(decoded));
+                    .insert("Text".to_string(), Value::string(decoded));
                 object
                     .properties
                     .insert("Attributes".to_string(), Value::Struct(StructValue::new()));
@@ -1889,29 +1889,30 @@ impl HtmlNode {
                 let text = HtmlNode::Element(element.clone()).extract_text(ExtractionMethod::Tree);
                 let mut attr_struct = StructValue::new();
                 for (key, value) in &element.attrs {
-                    attr_struct.insert(key.clone(), Value::String(value.clone()));
+                    attr_struct.insert(key.clone(), Value::string(value.clone()));
                 }
                 let children = element
                     .children
                     .into_iter()
                     .map(|child| child.into_object(Some(&name)).map(Value::Object))
                     .collect::<BuiltinResult<Vec<_>>>()?;
+                let child_count = children.len();
                 object
                     .properties
-                    .insert("Name".to_string(), Value::String(name));
+                    .insert("Name".to_string(), Value::string(name));
                 object
                     .properties
-                    .insert("RawHTML".to_string(), Value::String(element.raw));
+                    .insert("RawHTML".to_string(), Value::string(element.raw));
                 object
                     .properties
-                    .insert("Text".to_string(), Value::String(text));
+                    .insert("Text".to_string(), Value::string(text));
                 object
                     .properties
                     .insert("Attributes".to_string(), Value::Struct(attr_struct));
                 object.properties.insert(
                     "Children".to_string(),
                     Value::Cell(
-                        CellArray::new(children.clone(), children.len(), 1)
+                        CellArray::new(children, child_count, 1)
                             .map_err(|err| html_error("htmlTree", format!("htmlTree: {err}")))?,
                     ),
                 );
@@ -1919,7 +1920,7 @@ impl HtmlNode {
         }
         object.properties.insert(
             "Parent".to_string(),
-            Value::String(parent_name.unwrap_or(MISSING).to_string()),
+            Value::string(parent_name.unwrap_or(MISSING).to_string()),
         );
         Ok(object)
     }

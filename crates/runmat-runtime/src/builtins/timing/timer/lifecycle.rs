@@ -41,7 +41,7 @@ impl TimerRunConfig {
                 // Capture through the executor's source catalog, then release
                 // the preflight lease. Each actual firing captures its own
                 // source identity so callback property edits remain visible.
-                let request = text_callback_request(runtime, handle, slot, text)?;
+                let request = text_callback_request(runtime, handle, slot, &text)?;
                 drop(request);
                 requires_source_evaluation = true;
             }
@@ -99,11 +99,11 @@ pub(super) fn duration_property(seconds: f64, name: &str) -> BuiltinResult<Durat
     })
 }
 
-fn nonempty_text_callback(value: &Value) -> Option<String> {
+fn nonempty_text_callback(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(text) if !text.trim().is_empty() => Some(text.clone()),
+        Value::String(text) if !text.trim().is_empty() => Some(std::borrow::Cow::Borrowed(text)),
         Value::CharArray(chars) if chars.data.iter().any(|ch| !ch.is_whitespace()) => {
-            Some(chars.data.iter().collect())
+            Some(std::borrow::Cow::Owned(chars.data.iter().collect()))
         }
         _ => None,
     }

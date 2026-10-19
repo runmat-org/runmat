@@ -156,8 +156,15 @@ async fn invoke_closure(
             function: function.to_string(),
         });
     }
-    let mut merged = closure.captures.clone();
-    merged.extend_from_slice(arguments);
+    // This legacy slice ABI still requires a contiguous argument list. Keep
+    // its semantic-first/builtin fallback behavior until the complete argument
+    // boundary can retain both input owners without nested copies.
+    let merged: Vec<Value> = closure
+        .captures
+        .iter()
+        .chain(arguments.iter())
+        .cloned()
+        .collect();
     if let Some(result) = user_functions::try_call_semantic_function_by_name_in_context(
         context,
         &closure.function_name,

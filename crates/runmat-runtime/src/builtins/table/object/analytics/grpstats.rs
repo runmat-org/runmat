@@ -668,7 +668,11 @@ fn grouping_atoms(value: &Value, rows: usize) -> BuiltinResult<Vec<GroupAtom>> {
             .iter()
             .map(|value| GroupAtom::Logical(*value != 0))
             .collect()),
-        Value::StringArray(array) => Ok(array.data.iter().cloned().map(text_group_atom).collect()),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text_group_atom(text.to_string()))
+            .collect()),
         Value::CharArray(array) => Ok((0..array.rows)
             .map(|row| {
                 let start = row * array.cols;
@@ -698,7 +702,7 @@ fn cell_atom(value: &Value) -> GroupAtom {
         Value::Num(value) => number_group_atom(*value),
         Value::Int(value) => GroupAtom::Integer(value.clone()),
         Value::Bool(value) => GroupAtom::Logical(*value),
-        Value::String(value) => text_group_atom(value.clone()),
+        Value::String(value) => text_group_atom(value.to_string()),
         Value::CharArray(array) if array.rows == 1 => {
             text_group_atom(array.data.iter().collect::<String>().trim().to_string())
         }

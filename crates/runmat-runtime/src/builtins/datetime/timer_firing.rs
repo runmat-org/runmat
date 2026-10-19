@@ -88,8 +88,15 @@ fn clamp_startat_month(month: f64) -> f64 {
 
 fn timer_text_serials(value: &Value, reference: NaiveDateTime) -> BuiltinResult<Tensor> {
     let (texts, shape): (Vec<String>, Vec<usize>) = match value {
-        Value::String(text) => (vec![text.clone()], vec![1, 1]),
-        Value::StringArray(array) => (array.data.clone(), array.shape.clone()),
+        Value::String(text) => (vec![text.as_str().to_owned()], vec![1, 1]),
+        Value::StringArray(array) => (
+            array
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+            array.shape.as_slice().to_vec(),
+        ),
         Value::CharArray(array) => (
             (0..array.rows)
                 .map(|row| {

@@ -287,14 +287,17 @@ fn ensure_on_cleanup_class_registered() {
             role: runmat_types::ClassMethodRole::Ordinary,
         },
     );
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: ON_CLEANUP_CLASS.into(),
-        parent: Some(runmat_types::standard::HANDLE.into()),
-        properties:
-            HashMap::<runmat_types::MemberName, crate::class_registry::RuntimeProperty>::new(),
-        methods,
-    });
+    crate::class_registry::register_builtin_class(
+        ON_CLEANUP_CLASS,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: ON_CLEANUP_CLASS.into(),
+            parent: Some(runmat_types::standard::HANDLE.into()),
+            properties:
+                HashMap::<runmat_types::MemberName, crate::class_registry::RuntimeProperty>::new(),
+            methods,
+        },
+    );
 }
 
 fn canonicalize_cleanup_callback(callback: Value) -> BuiltinResult<Value> {

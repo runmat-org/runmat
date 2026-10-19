@@ -22,7 +22,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, LogicalArray,
-    NumericStorage, StringArray, Tensor, Value,
+    NumericStorage, StringArray, Tensor, Utf8Text, Value,
 };
 
 use super::{
@@ -621,7 +621,7 @@ fn unique_host(value: Value, opts: &UniqueOptions) -> crate::BuiltinResult<Uniqu
         Value::CharArray(array) => unique_char_array(array, opts),
         Value::StringArray(array) => unique_string_array(array, opts),
         Value::String(s) => {
-            let array = StringArray::new(vec![s], vec![1, 1]).map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+            let array = StringArray::from_texts_unbounded(vec![s], vec![1, 1]).map_err(|e| unique_internal_error(format!("unique: {e}")))?;
             unique_string_array(array, opts)
         }
         other => Err(unique_error_with(
@@ -1568,11 +1568,11 @@ fn unique_string_elements(
     }
 
     let mut entries = Vec::<StringElementEntry>::new();
-    let mut map: HashMap<String, usize> = HashMap::new();
+    let mut map: HashMap<&str, usize> = HashMap::new();
     let mut element_entry_index = Vec::with_capacity(len);
 
     for (idx, value) in array.data.iter().enumerate() {
-        match map.get(value) {
+        match map.get(value.as_str()) {
             Some(&entry_idx) => {
                 entries[entry_idx].last = idx;
                 element_entry_index.push(entry_idx);
@@ -1580,11 +1580,11 @@ fn unique_string_elements(
             None => {
                 let entry_idx = entries.len();
                 entries.push(StringElementEntry {
-                    value: value.clone(),
+                    value,
                     first: idx,
                     last: idx,
                 });
-                map.insert(value.clone(), entry_idx);
+                map.insert(value.as_str(), entry_idx);
                 element_entry_index.push(entry_idx);
             }
         }
@@ -1592,7 +1592,7 @@ fn unique_string_elements(
 
     let mut order: Vec<usize> = (0..entries.len()).collect();
     if opts.order == UniqueOrder::Sorted {
-        order.sort_by(|&a, &b| entries[a].value.cmp(&entries[b].value));
+        order.sort_by(|&a, &b| entries[a].value.cmp(entries[b].value));
     }
 
     let mut entry_to_position = vec![0usize; entries.len()];
@@ -1618,8 +1618,9 @@ fn unique_string_elements(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = StringArray::new(values, unique_element_values_shape(&shape, order.len()))
-        .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
+    let value_array =
+        StringArray::from_texts_unbounded(values, unique_element_values_shape(&shape, order.len()))
+            .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![order.len(), 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ic_tensor =
@@ -1663,7 +1664,7 @@ fn unique_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows;
-            row_values.push(array.data[idx].clone());
+            row_values.push(&array.data[idx]);
         }
         let key = RowStringKey(row_values.clone());
         match map.get(&key) {
@@ -1695,12 +1696,12 @@ fn unique_string_rows(
     }
 
     let unique_rows_count = order.len();
-    let mut values = vec![String::new(); unique_rows_count * cols];
+    let mut values = vec![Utf8Text::default(); unique_rows_count * cols];
     for (row_pos, &entry_idx) in order.iter().enumerate() {
         let row = &entries[entry_idx].row_data;
         for (col, value) in row.iter().enumerate().take(cols) {
             let dest = row_pos + col * unique_rows_count;
-            values[dest] = value.clone();
+            values[dest] = (*value).clone();
         }
     }
 
@@ -1720,7 +1721,7 @@ fn unique_string_rows(
         ic.push((pos + 1) as f64);
     }
 
-    let value_array = StringArray::new(values, vec![unique_rows_count, cols])
+    let value_array = StringArray::from_texts_unbounded(values, vec![unique_rows_count, cols])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
     let ia_tensor = Tensor::new(ia, vec![unique_rows_count, 1])
         .map_err(|e| unique_internal_error(format!("unique: {e}")))?;
@@ -1824,18 +1825,18 @@ struct CharRowEntry {
 }
 
 #[derive(Debug, Clone)]
-struct StringElementEntry {
-    value: String,
+struct StringElementEntry<'a> {
+    value: &'a Utf8Text,
     first: usize,
     last: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a Utf8Text>);
 
 #[derive(Debug, Clone)]
-struct StringRowEntry {
-    row_data: Vec<String>,
+struct StringRowEntry<'a> {
+    row_data: Vec<&'a Utf8Text>,
     first: usize,
     last: usize,
 }
@@ -1905,7 +1906,7 @@ fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
+fn compare_string_rows(a: &[&Utf8Text], b: &[&Utf8Text]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {

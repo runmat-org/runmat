@@ -97,7 +97,7 @@ fn str2double_string_array(array: StringArray) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let mut values = Vec::with_capacity(data.len());
     for text in &data {
-        values.push(parse_numeric_scalar(text));
+        values.push(parse_numeric_scalar(text.as_str()));
     }
     let tensor =
         Tensor::new(values, shape).map_err(|_| str2double_error(&STR2DOUBLE_ERROR_INTERNAL))?;

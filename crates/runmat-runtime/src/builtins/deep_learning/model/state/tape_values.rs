@@ -69,7 +69,9 @@ fn map_values(
     let Some(Value::Cell(column)) = variables.fields.get_mut("Value") else {
         unreachable!("canonical State validation admitted the Value column")
     };
-    for (key, slot) in keys.iter().zip(&mut column.data) {
+    let slots =
+        crate::builtins::deep_learning::layer_helpers::mutable_cell_values(column, function)?;
+    for (key, slot) in keys.iter().zip(slots.iter_mut()) {
         let value = mapper(key, slot.clone())?;
         schema::validate_value(&value, key, function)?;
         *slot = value;

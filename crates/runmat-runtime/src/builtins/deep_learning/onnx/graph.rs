@@ -263,13 +263,13 @@ pub(super) fn network_name(
     match value {
         Value::StringArray(array) if array.data.is_empty() => Ok(None),
         Value::StringArray(array) if array.data.len() == 1 && !array.data[0].is_empty() => {
-            Ok(Some(array.data[0].clone()))
+            Ok(Some(array.data[0].to_string()))
         }
         Value::StringArray(_) => Err(deep_learning_error(
             EXPORT_ONNX,
             format!("exportONNXNetwork: network {property} metadata must contain exactly one non-empty name"),
         )),
-        Value::String(name) if !name.is_empty() => Ok(Some(name.clone())),
+        Value::String(name) if !name.is_empty() => Ok(Some(name.to_string())),
         Value::String(_) => Ok(None),
         _ => Err(deep_learning_error(
             EXPORT_ONNX,

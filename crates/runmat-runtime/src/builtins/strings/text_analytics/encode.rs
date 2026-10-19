@@ -3,13 +3,8 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinExtensionDescriptor,
-    BuiltinExtensionMode, BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor,
-    BuiltinIntegerComputationDomain, BuiltinIntegerInputAvailability,
-    BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule, BuiltinIntegerOverflowRule,
-    BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor,
-    ResolveContext, Type,
+    ENCODE_ERROR_INVALID_INPUT, ENCODE_NUMERIC_FORCE_CELL_OUTPUT_EXTENSION,
+    ENCODE_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
 };
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, SparseTensor, Value};
@@ -17,12 +12,13 @@ use runmat_value::{CellArray, ObjectInstance, SparseTensor, Value};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
 };
-use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::documents::{
     documents_from_object, vocabulary_from_bag, words_from_word_vector, BAG_OF_WORDS_CLASS,
     TOKENIZED_DOCUMENT_CLASS,
 };
 use crate::builtins::strings::text_analytics::ngrams::{ngrams_from_bag, BAG_OF_NGRAMS_CLASS};
+use crate::context::RuntimeContext;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult};
 
 #[runmat_macros::register_gpu_spec(
@@ -43,135 +39,9 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     notes: "The builtin owns resident arguments so object/text rejection and ForceCellOutput compatibility gates run before provider access; admitted scalar controls gather explicitly and count outputs remain host sparse values.",
 };
 
-const OUT_COUNTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "counts",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Sparse word or n-gram count matrix.",
-}];
-
-const IN_BAG_INPUT_REST: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "bag",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "bagOfWords or bagOfNgrams model.",
-    },
-    BuiltinParamDescriptor {
-        name: "documentsOrWords",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object or row word vector.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: DocumentsIn, ForceCellOutput.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.ENCODE.INVALID_INPUT",
-    identifier: Some("RunMat:encode:InvalidInput"),
-    when: "Inputs do not match a supported Text Analytics encode form.",
-    message: "encode: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const ENCODE_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[BuiltinSignatureDescriptor {
-        label: "counts = encode(bag, documentsOrWords, Name, Value, ...)",
-        inputs: &IN_BAG_INPUT_REST,
-        outputs: &OUT_COUNTS,
-    }],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-
-const ENCODE_NUMERIC_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "encode-numeric-force-cell-output",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "encode with a numeric ForceCellOutput value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EncodeNumericForceCellOutputExtension"),
-    };
-
-const ENCODE_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION: BuiltinExtensionDescriptor =
-    BuiltinExtensionDescriptor {
-        id: "encode-resident-force-cell-output",
-        mode: BuiltinExtensionMode::RunMatOnly,
-        description: "encode with a resident ForceCellOutput value is a RunMat extension",
-        error_identifier: Some("RunMat:compatibility:EncodeResidentForceCellOutputExtension"),
-    };
-
-pub const ENCODE_EXTENSIONS: [BuiltinExtensionDescriptor; 2] = [
-    ENCODE_NUMERIC_FORCE_CELL_OUTPUT_EXTENSION,
-    ENCODE_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
-];
-
-const ENCODE_REJECTED_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 2] = [
-    BuiltinIntegerInputCapability {
-        name: "bag",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "The model role requires a bagOfWords or bagOfNgrams object; integer values are not model payloads and reject before provider access.",
-    },
-    BuiltinIntegerInputCapability {
-        name: "documentsOrWords",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Rejected,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Rejected,
-        notes: "The document role is tokenizedDocument or text; integer values are not converted to words and reject before provider access.",
-    },
-];
-
-const ENCODE_INTEGER_FORCE_CELL_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "ForceCellOutput",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::RunMatOnly,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "RunMat mode accepts exact scalar integer zero as false and every nonzero integer as true; MATLAB-compatible mode requires logical.",
-    }];
-
-pub const ENCODE_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "counts = encode(bag, documentsOrWords)",
-        inputs: &ENCODE_REJECTED_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::FunctionSpecific,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::HostOnly,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "encode is object/text based. Its integer-valued counts intentionally cross the documented sparse-double output boundary rather than using integer sparse storage.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "counts = encode(___, 'ForceCellOutput', integer_value)",
-        inputs: &ENCODE_INTEGER_FORCE_CELL_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Predicate,
-        output_class: BuiltinIntegerOutputClassRule::NotApplicable,
-        overflow: BuiltinIntegerOverflowRule::NotApplicable,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::ScalarOnly,
-        notes: "The compatibility-gated integer control only selects sparse-double versus cell-of-sparse-double representation; it never changes count storage.",
-    },
-];
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 fn encode_error(message: impl Into<String>) -> crate::RuntimeError {
     let mut builder = build_runtime_error(message).with_builtin("encode");
-    if let Some(identifier) = ERROR_INVALID_INPUT.identifier {
+    if let Some(identifier) = ENCODE_ERROR_INVALID_INPUT.identifier {
         builder = builder.with_identifier(identifier);
     }
     builder.build()
@@ -179,20 +49,12 @@ fn encode_error(message: impl Into<String>) -> crate::RuntimeError {
 
 #[runtime_builtin(
     name = "encode",
-    category = "strings/text_analytics",
-    summary = "Encode documents as sparse word or n-gram count matrices.",
-    keywords = "encode,text analytics,bagOfWords,bagOfNgrams,count matrix",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::encode::ENCODE_DESCRIPTOR),
-    extensions(crate::builtins::strings::text_analytics::encode::ENCODE_EXTENSIONS),
-    integer_capabilities(
-        crate::builtins::strings::text_analytics::encode::ENCODE_INTEGER_CAPABILITIES
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::encode"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::encode",
+    context = true
 )]
-async fn encode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
-    let (bag, input, options) = parse_args(args).await?;
+async fn encode_builtin(runtime: Option<RuntimeContext>, args: Vec<Value>) -> BuiltinResult<Value> {
+    let (bag, input, options) = parse_args(args, runtime.as_ref()).await?;
     let sparse = match bag {
         Value::Object(object) if object.is_class(BAG_OF_WORDS_CLASS) => {
             encode_words(&object, input, options.documents_in)?
@@ -242,7 +104,10 @@ impl Default for EncodeOptions {
     }
 }
 
-async fn parse_args(mut args: Vec<Value>) -> BuiltinResult<(Value, Value, EncodeOptions)> {
+async fn parse_args(
+    mut args: Vec<Value>,
+    runtime: Option<&RuntimeContext>,
+) -> BuiltinResult<(Value, Value, EncodeOptions)> {
     if args.len() < 2 {
         return Err(encode_error(
             "encode: expected bag model and documents or words input",
@@ -284,53 +149,55 @@ async fn parse_args(mut args: Vec<Value>) -> BuiltinResult<(Value, Value, Encode
     let mut options = EncodeOptions::default();
     let mut idx = 0;
     while idx < args.len() {
-        let name =
-            scalar_text(&args[idx], "encode").map_err(|err| encode_error(err.to_string()))?;
-        match name.to_ascii_lowercase().as_str() {
-            "documentsin" => {
-                let value = scalar_text(&args[idx + 1], "encode")
-                    .map_err(|err| encode_error(err.to_string()))?;
-                options.documents_in = match value.to_ascii_lowercase().as_str() {
-                    "rows" => DocumentsIn::Rows,
-                    "columns" => DocumentsIn::Columns,
-                    other => {
-                        return Err(encode_error(format!(
-                            "encode: DocumentsIn must be 'rows' or 'columns', got '{other}'"
-                        )))
-                    }
-                };
-            }
-            "forcecelloutput" => {
-                let raw = &args[idx + 1];
-                let resident = crate::dispatcher::value_contains_gpu(raw);
-                if resident {
-                    validate_scalar_control_shape(raw)?;
-                    crate::compatibility::ensure_builtin_extension_enabled(
-                        &ENCODE_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
-                        "encode",
-                    )?;
-                }
-                let host = if resident {
-                    gather_if_needed_async(raw).await.map_err(|err| {
-                        encode_error(format!("encode: failed to gather ForceCellOutput: {err}"))
-                    })?
-                } else {
-                    raw.clone()
-                };
-                let parsed = parse_bool_scalar(&host)?;
-                if is_numeric_bool_value(&host) {
-                    crate::compatibility::ensure_builtin_extension_enabled(
-                        &ENCODE_NUMERIC_FORCE_CELL_OUTPUT_EXTENSION,
-                        "encode",
-                    )?;
-                }
-                options.force_cell_output = parsed;
-            }
-            other => {
+        let name = scalar_text_input(&args[idx], runtime, |runtime, cause| {
+            text_input_admission("encode", runtime, cause)
+        })?
+        .ok_or_else(|| encode_error("encode: option name must be scalar text"))?;
+        if name.as_str().eq_ignore_ascii_case("documentsin") {
+            let value = scalar_text_input(&args[idx + 1], runtime, |runtime, cause| {
+                text_input_admission("encode", runtime, cause)
+            })?
+            .ok_or_else(|| encode_error("encode: DocumentsIn must be scalar text"))?;
+            options.documents_in = if value.as_str().eq_ignore_ascii_case("rows") {
+                DocumentsIn::Rows
+            } else if value.as_str().eq_ignore_ascii_case("columns") {
+                DocumentsIn::Columns
+            } else {
                 return Err(encode_error(format!(
-                    "encode: unsupported option '{other}'"
-                )))
+                    "encode: DocumentsIn must be 'rows' or 'columns', got '{}'",
+                    value.as_str()
+                )));
+            };
+        } else if name.as_str().eq_ignore_ascii_case("forcecelloutput") {
+            let raw = &args[idx + 1];
+            let resident = crate::dispatcher::value_contains_gpu(raw);
+            if resident {
+                validate_scalar_control_shape(raw)?;
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ENCODE_RESIDENT_FORCE_CELL_OUTPUT_EXTENSION,
+                    "encode",
+                )?;
             }
+            let host = if resident {
+                gather_if_needed_async(raw).await.map_err(|err| {
+                    encode_error(format!("encode: failed to gather ForceCellOutput: {err}"))
+                })?
+            } else {
+                raw.clone()
+            };
+            let parsed = parse_bool_scalar(&host)?;
+            if is_numeric_bool_value(&host) {
+                crate::compatibility::ensure_builtin_extension_enabled(
+                    &ENCODE_NUMERIC_FORCE_CELL_OUTPUT_EXTENSION,
+                    "encode",
+                )?;
+            }
+            options.force_cell_output = parsed;
+        } else {
+            return Err(encode_error(format!(
+                "encode: unsupported option '{}'",
+                name.as_str()
+            )));
         }
         idx += 2;
     }
@@ -608,7 +475,7 @@ mod tests {
     use runmat_value::{IntValue, IntegerStorage, StringArray, Tensor};
 
     fn run_encode(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(encode_builtin(args))
+        futures::executor::block_on(encode_builtin(None, args))
     }
 
     fn sparse(value: Value) -> SparseTensor {

@@ -5,7 +5,10 @@
 //! read lease owns the separate GC roots, and drops those roots before the
 //! final shared generation owner can retire.
 
-use runmat_value::{SharedValueGeneration, Value};
+use runmat_value::{
+    CallableGenerationInput, CallableGenerationPrepareError, ExactArrayClaimPromotionError,
+    SharedValueGeneration, Value,
+};
 
 use crate::context::host_allocation::{
     host_allocation_runtime_error, HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
@@ -66,6 +69,75 @@ impl RetainedValueReadLease {
         })
     }
 
+    /// Retain one callable generation together with its shallow physical
+    /// name/source/capture-list backing. Nested capture Values and authority
+    /// graphs keep their independent admission policy.
+    pub(crate) fn prepare_callable_owned(
+        value: Value,
+        context: &RuntimeContext,
+    ) -> Result<Self, RuntimeError> {
+        let roots = RootedValueLease::for_value_in_context(&value, context)
+            .map_err(|source| root_error(context, source))?;
+        runmat_value::validate_no_transient_sequence(&value).map_err(|source| {
+            semantic_error_with_source(
+                "RunMat:Callable:RepeatableSelection",
+                "transient retained callable",
+                source,
+            )
+        })?;
+        let quote = SharedValueGeneration::callable_quote(&value)
+            .map_err(|source| host_error(context, HostAllocationError::Numeric(source)))?
+            .ok_or_else(|| {
+                crate::runtime_error::semantic_error(
+                    "RunMat:Callable:RepeatableSelection",
+                    "repeatable target is not a callable Value",
+                )
+            })?;
+        let raw = u64::try_from(quote.requested_bytes)
+            .map_err(|_| host_error(context, HostAllocationError::Overflow))?;
+        let retained = HostAllocationPlan::retained_exact_output_bytes(raw, quote.retained_claims)
+            .map_err(|source| host_error(context, source))?;
+        let plan =
+            HostAllocationPlan::new(0, retained).map_err(|source| host_error(context, source))?;
+        let generation = match HostAllocationReceipt::admit(Some(context), plan)
+            .map_err(|source| host_error(context, source))?
+        {
+            Some(receipt) => {
+                let permit = receipt
+                    .output_permit(context)
+                    .map_err(|source| host_error(context, source))?;
+                let mut input = CallableGenerationInput::new(value);
+                let generation = SharedValueGeneration::prepare_callable(&mut input, &permit);
+                if let Err(source) = receipt.checkpoint(context) {
+                    // Root registrations retire before either a successfully
+                    // prepared generation or the caller-owned failed input.
+                    drop(roots);
+                    drop(generation);
+                    drop(input);
+                    return Err(host_error(context, source));
+                }
+                match generation {
+                    Ok(generation) => {
+                        drop(input);
+                        generation
+                    }
+                    Err(error) => {
+                        drop(roots);
+                        // The failed Value and any already-issued claim remain
+                        // in `input`; release them only after the roots.
+                        drop(input);
+                        return Err(callable_prepare_error(context, error));
+                    }
+                }
+            }
+            None => SharedValueGeneration::unbounded(value),
+        };
+        Ok(Self {
+            roots: roots.shared_handles(),
+            generation,
+        })
+    }
+
     /// Root an already-owned immutable generation without manufacturing a
     /// second Value header or copying any child payload. A finite caller
     /// supplies its exact operation authority for the new external root lease.
@@ -102,6 +174,35 @@ impl RetainedValueReadLease {
 
     pub fn shares_generation_with(&self, other: &Self) -> bool {
         self.generation.ptr_eq(&other.generation)
+    }
+}
+
+fn callable_prepare_error(
+    context: &RuntimeContext,
+    source: CallableGenerationPrepareError,
+) -> RuntimeError {
+    match source {
+        CallableGenerationPrepareError::Allocation(source)
+        | CallableGenerationPrepareError::CapturePromotion(
+            ExactArrayClaimPromotionError::Allocation(source),
+        ) => host_error(context, HostAllocationError::Numeric(source)),
+        CallableGenerationPrepareError::CapturePromotion(
+            source @ ExactArrayClaimPromotionError::UnsharedBacking,
+        ) => semantic_error_with_source(
+            "RunMat:Callable:RepeatableSelection",
+            "repeatable callable capture backing is not shared",
+            source,
+        ),
+        CallableGenerationPrepareError::NotCallable => crate::runtime_error::semantic_error(
+            "RunMat:Callable:RepeatableSelection",
+            "repeatable target is not a callable Value",
+        ),
+        CallableGenerationPrepareError::AlreadyConsumedOrReserved => {
+            crate::runtime_error::semantic_error(
+                "RunMat:Callable:RepeatableSelection",
+                "repeatable callable preparation state was already consumed",
+            )
+        }
     }
 }
 

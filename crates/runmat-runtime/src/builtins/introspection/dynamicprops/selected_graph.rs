@@ -67,7 +67,7 @@ pub(crate) fn checked_metadata_owner(
     }
     Ok(Some(SelectedMetadataOwner {
         receiver: receiver.clone(),
-        property: property.clone(),
+        property: property.as_str().to_owned(),
     }))
 }
 

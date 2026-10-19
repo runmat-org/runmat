@@ -9,8 +9,8 @@ pub(super) fn geometry_path_from_value(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(path) => Ok(path.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(path) => Ok(path.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 && array.shape.len() <= 2 => {
             Ok(array.data.iter().collect())
         }
@@ -71,7 +71,7 @@ pub(super) fn geometry_meshes_value(asset: &GeometryAsset) -> BuiltinResult<Valu
         .iter()
         .map(|surface| {
             let mut mesh = StructValue::new();
-            mesh.insert("mesh_id", Value::String(surface.mesh_id.clone()));
+            mesh.insert("mesh_id", Value::string(surface.mesh_id.clone()));
             mesh.insert("vertices", vertices_tensor(&surface.vertices)?);
             mesh.insert("triangles", triangles_tensor(&surface.triangles)?);
             mesh.insert("faces", triangles_tensor(&surface.triangles)?);
@@ -129,10 +129,10 @@ pub(super) fn region_mappings_value(asset: &GeometryAsset, mesh_id: &str) -> Bui
         .filter(|mapping| mapping.mesh_id == mesh_id)
         .map(|mapping| {
             let mut value = StructValue::new();
-            value.insert("region_id", Value::String(mapping.region_id.clone()));
+            value.insert("region_id", Value::string(mapping.region_id.clone()));
             value.insert(
                 "entity_kind",
-                Value::String(format!("{:?}", mapping.entity_kind).to_ascii_lowercase()),
+                Value::string(format!("{:?}", mapping.entity_kind).to_ascii_lowercase()),
             );
             let mut ranges = Vec::with_capacity(mapping.ranges.len() * 2);
             for col in 0..2 {
@@ -234,7 +234,7 @@ pub(super) fn serializable_to_object<T: Serialize>(
     if let Some(property) = hidden_json_property {
         object
             .properties
-            .insert(property.to_string(), Value::String(json.to_string()));
+            .insert(property.to_string(), Value::string(json.to_string()));
     }
     Ok(Value::Object(object))
 }

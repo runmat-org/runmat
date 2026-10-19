@@ -11,7 +11,7 @@ use dependencies::selected_constructor_dependencies;
 pub(in crate::session) async fn load_dynamic_function(
     runtime: runmat_runtime::context::RuntimeContext,
     name: String,
-    args: runmat_runtime::execution::RootedValues,
+    args: runmat_runtime::call::RootedFunctionArguments,
     requested_outputs: usize,
     phase: runmat_runtime::user_functions::DynamicFunctionLoadPhase,
     input_callsite: Option<runmat_runtime::callsite::CallsiteInfo>,
@@ -32,34 +32,23 @@ pub(in crate::session) async fn load_dynamic_function(
     #[cfg(not(target_arch = "wasm32"))]
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
         use runmat_runtime::user_functions::NativeResolutionScope;
-        return match args
-            .with_unbounded_values_async(|arguments| async {
-                match runtime.native_resolution_scope() {
-                    NativeResolutionScope::Selected(route)
-                    | NativeResolutionScope::SelectedOrdinary { route, .. } => {
-                        route
-                            .invoke(runtime.clone(), name, arguments, requested_outputs)
-                            .await
-                    }
-                    NativeResolutionScope::SelectedClosed => ControlFlow::Continue(arguments),
-                    NativeResolutionScope::Session => {
-                        mex_runtime
-                            .load_and_call(&name, arguments, requested_outputs, runtime)
-                            .await
-                    }
-                }
-            })
-            .await
-        {
-            Ok(attempt) => attempt,
-            Err(error) => ControlFlow::Break(Err(error)),
+        return match runtime.native_resolution_scope() {
+            NativeResolutionScope::Selected(route)
+            | NativeResolutionScope::SelectedOrdinary { route, .. } => {
+                route
+                    .invoke(runtime.clone(), name, args, requested_outputs)
+                    .await
+            }
+            NativeResolutionScope::SelectedClosed => ControlFlow::Continue(args),
+            NativeResolutionScope::Session => {
+                mex_runtime
+                    .load_and_call(&name, args, requested_outputs, runtime)
+                    .await
+            }
         };
     }
     if phase == runmat_runtime::user_functions::DynamicFunctionLoadPhase::BeforeSemantic {
-        return match args.with_unbounded_values(std::convert::identity) {
-            Ok(arguments) => ControlFlow::Continue(arguments),
-            Err(error) => ControlFlow::Break(Err(error)),
-        };
+        return ControlFlow::Continue(args);
     }
     #[cfg(not(target_arch = "wasm32"))]
     let ordinary_mex = match runtime.native_resolution_scope() {
@@ -105,12 +94,7 @@ pub(in crate::session) async fn load_dynamic_function(
     };
     let selected = match path_result {
         Ok(Some(selected)) => selected,
-        Ok(None) => {
-            return match args.with_unbounded_values(std::convert::identity) {
-                Ok(arguments) => ControlFlow::Continue(arguments),
-                Err(error) => ControlFlow::Break(Err(error)),
-            }
-        }
+        Ok(None) => return ControlFlow::Continue(args),
         Err(error) => {
             return ControlFlow::Break(Err(build_runtime_error(error)
                 .with_identifier("RunMat:FunctionResolution")
@@ -519,20 +503,21 @@ pub(in crate::session) async fn load_dynamic_function(
                                 runmat_vm::prepare_admitted_execution_metadata_for_class_batch(
                                     &selected_units, &owner.declaring_class,
                                 )?;
-                                runmat_runtime::dispatcher::call_bound_constructor_sequence_in_context(
+                                runmat_runtime::dispatcher::call_rooted_bound_constructor_sequence_in_context(
                                     &selected_runtime,
                                     owner,
                                     binding,
-                                    args.values(),
+                                    args,
                                     requested_outputs,
                                 )
                                 .await
                             } else {
-                                runmat_runtime::user_functions::try_call_bound_function_in_context(
+                                runmat_runtime::user_functions::try_call_rooted_bound_function_with_environment_in_context(
                                     &selected_runtime,
                                     binding,
-                                    args.values(),
+                                    args,
                                     requested_outputs,
+                                    None,
                                 )
                                 .await
                                 .ok_or_else(|| {

@@ -1,14 +1,18 @@
 //! Object save/load customization hooks.
 
 use crate::execution::{RootedValue, RootedValueLease, RootedValuesBuilder};
+use futures::future::LocalBoxFuture;
 use runmat_builtins::BuiltinErrorDescriptor;
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StructValue, Value};
+use std::ops::ControlFlow;
 
 mod assembly;
 mod mat_load;
-mod prepare;
 mod restore;
+#[cfg(test)]
+#[path = "object_serialization/pending_tests.rs"]
+mod pending_tests;
 pub(crate) use mat_load::{classify_mat_load_restoration, MatLoadRestoration};
 
 pub(crate) const SAVEOBJ_METHOD: runmat_types::StaticMethodName =
@@ -16,12 +20,6 @@ pub(crate) const SAVEOBJ_METHOD: runmat_types::StaticMethodName =
 pub(crate) const LOADOBJ_METHOD: runmat_types::StaticMethodName =
     runmat_types::StaticMethodName::new("loadobj");
 
-const SERIALIZED_CLASS_FIELD: &str = "__runmat_serialized_object_class__";
-const SERIALIZED_PAYLOAD_FIELD: &str = "__runmat_serialized_object_payload__";
-const SERIALIZED_KIND_FIELD: &str = "__runmat_serialized_object_kind__";
-const SERIALIZED_HAD_SAVEOBJ_FIELD: &str = "__runmat_serialized_object_had_saveobj__";
-const SERIALIZED_KIND_VALUE: &str = "value";
-const SERIALIZED_KIND_HANDLE: &str = "handle";
 const MAX_SERIALIZATION_DEPTH: usize = 32;
 
 pub use runmat_builtins::{
@@ -48,9 +46,8 @@ fn dispatch_registered_method<'a>(
     args: Vec<Value>,
     builtin: &'static str,
     selected_runtime: Option<&crate::context::RuntimeContext>,
-) -> std::pin::Pin<
-    Box<dyn std::future::Future<Output = crate::BuiltinResult<Option<RootedValue>>> + 'a>,
-> {
+    builtin_issuance: Option<crate::class_registry::BuiltinClassIssuance>,
+) -> LocalBoxFuture<'a, crate::BuiltinResult<ControlFlow<RootedValue, RootedValue>>> {
     // The callback's inputs must remain rooted even if the admitted future is
     // retained unpolled, cancelled, or dropped by its caller.
     let runtime = selected_runtime
@@ -73,6 +70,115 @@ fn dispatch_registered_method<'a>(
         crate::builtin::builtin_control_error,
         move |runtime| async move {
             let _args_root = args_root;
+            let mut arguments = match runtime.as_ref() {
+                Some(runtime) => crate::execution::RootedValues::in_context(args, runtime)?,
+                None => crate::execution::RootedValues::new(args)
+                    .map_err(|error| error.into_runtime_error())?,
+            };
+            if let Some(issuance) = builtin_issuance {
+                // A typed MAT class is an exact current registration, not a
+                // license to resolve a same-spelled callable later. Select
+                // the registered method after future admission, then invoke
+                // only its issued body or canonical builtin identity.
+                let current = match runtime.as_ref() {
+                    Some(runtime) => issuance.is_current_in_context(runtime),
+                    None => issuance.is_current_ordinary(),
+                };
+                if !current || issuance.class() != class_name {
+                    return Err(serialization_error(
+                        builtin,
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "registered class changed during object restoration",
+                    ));
+                }
+                let method = match runtime.as_ref() {
+                    Some(runtime) => {
+                        runtime
+                            .scope(async {
+                                crate::class_registry::lookup_bound_method(
+                                    class_name,
+                                    &method_name.owned(),
+                                )
+                            })
+                            .await
+                    }
+                    None => {
+                        crate::class_registry::lookup_bound_method(class_name, &method_name.owned())
+                    }
+                }
+                .ok_or_else(|| {
+                    serialization_error(
+                        builtin,
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        format!("registered {class_name}.{method_name} is no longer admitted"),
+                    )
+                })?;
+                let current = match runtime.as_ref() {
+                    Some(runtime) => issuance.is_current_in_context(runtime),
+                    None => issuance.is_current_ordinary(),
+                };
+                if !current {
+                    return Err(serialization_error(
+                        builtin,
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "registered class changed during object restoration",
+                    ));
+                }
+                if method.declaration.is_abstract {
+                    return Err(serialization_error(
+                        builtin,
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        format!("registered {class_name}.{method_name} is abstract"),
+                    ));
+                }
+                if let Some(binding) = method.bound_function {
+                    let call = crate::call::RootedFunctionArguments::ordinary(arguments);
+                    let result = match runtime.as_ref() {
+                        Some(runtime) => {
+                            crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
+                                runtime, binding, call, 1, None,
+                            )
+                            .await
+                        }
+                        None => crate::user_functions::try_call_rooted_bound_function(
+                            binding, call, 1,
+                        )
+                        .await,
+                    }
+                    .ok_or_else(|| {
+                        serialization_error(
+                            builtin,
+                            &SERIALIZATION_ERROR_DISPATCH,
+                            "issued loadobj body has no rooted invoker",
+                        )
+                    })??;
+                    return crate::call::arguments::project_rooted_legacy_builtin_value_abi(result)
+                        .map(ControlFlow::Break);
+                }
+                let runmat_types::CallableIdentity::Builtin(id) = method.callable else {
+                    return Err(serialization_error(
+                        builtin,
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "registered loadobj lacks an issued executable target",
+                    ));
+                };
+                let sequence = crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
+                    &id.0,
+                    arguments.values(),
+                    1,
+                    runtime.as_ref(),
+                )
+                .await?
+                .ok_or_else(|| {
+                    serialization_error(
+                        builtin,
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "issued loadobj builtin is unavailable",
+                    )
+                })?;
+                return crate::call::arguments::project_rooted_legacy_builtin_value_abi(sequence)
+                    .map(ControlFlow::Break);
+            }
             if let Some((method, owner)) =
                 crate::class_registry::lookup_method(class_name, &method_name.owned())
             {
@@ -88,54 +194,89 @@ fn dispatch_registered_method<'a>(
                     candidates.push(owner_member);
                 }
 
-                let mut undefined = None;
                 for candidate in candidates {
                     let (identity, fallback_policy) =
                         crate::callable_identity_for_handle_name(&candidate);
-                    match crate::dispatch_callable_with_policy_in_context(
-                        runtime.as_ref(),
+                    let request = crate::user_functions::CallableRequest::rooted_resolved(
                         identity,
                         fallback_policy,
-                        args.clone(),
+                        crate::call::RootedFunctionArguments::ordinary(arguments),
                         1,
                     )
-                    .await
-                    {
-                        Ok(value) => return Ok(Some(value)),
-                        Err(err) if crate::is_undefined_function_error(&err) => {
-                            undefined = Some(err)
+                    .with_selected_runtime(runtime.as_ref());
+                    match crate::user_functions::try_call_semantic_descriptor_owned(request).await {
+                        std::ops::ControlFlow::Break(result) => {
+                            return result
+                                .and_then(
+                                    crate::call::arguments::project_rooted_legacy_builtin_value_abi,
+                                )
+                                .map(ControlFlow::Break);
                         }
-                        Err(err) => return Err(err),
+                        std::ops::ControlFlow::Continue(returned) => {
+                            arguments = returned.try_into_ordinary().map_err(|_| {
+                                serialization_error(
+                                    builtin,
+                                    &SERIALIZATION_ERROR_DISPATCH,
+                                    "save/load callback declined without its original arguments",
+                                )
+                            })?;
+                        }
+                    }
+                    if runmat_builtins::builtin_name_is_known(&candidate) {
+                        if let Some(sequence) =
+                            crate::dispatcher::try_call_builtin_sequence_async_with_outputs(
+                                &candidate,
+                                arguments.values(),
+                                1,
+                                runtime.as_ref(),
+                            )
+                            .await?
+                        {
+                            return crate::call::arguments::project_rooted_legacy_builtin_value_abi(
+                                sequence,
+                            )
+                            .map(ControlFlow::Break);
+                        }
                     }
                 }
-                return Err(undefined.unwrap_or_else(|| {
-                    serialization_error(
-                        builtin,
-                        &SERIALIZATION_ERROR_DISPATCH,
-                        format!("{class_name}.{method_name} did not resolve to a callable"),
-                    )
-                }));
+                return Err(serialization_error(
+                    builtin,
+                    &SERIALIZATION_ERROR_DISPATCH,
+                    format!("{class_name}.{method_name} did not resolve to a callable"),
+                ));
             }
 
-            if args
+            if arguments
                 .first()
                 .is_some_and(|arg| matches!(arg, Value::Object(_) | Value::HandleObject(_)))
             {
-                match crate::dispatch_object_external_member_in_context(
-                    runtime.as_ref(),
-                    class_name.clone(),
-                    method_name.display_name(),
-                    args,
+                let request = crate::user_functions::CallableRequest::rooted_resolved(
+                    crate::class_member_identity(class_name, method_name.display_name()),
+                    runmat_types::CallableFallbackPolicy::ExternalBoundary,
+                    crate::call::RootedFunctionArguments::ordinary(arguments),
                     1,
                 )
-                .await
-                {
-                    Ok(value) => Ok(Some(value)),
-                    Err(err) if crate::is_undefined_function_error(&err) => Ok(None),
-                    Err(err) => Err(err),
+                .with_selected_runtime(runtime.as_ref());
+                match crate::user_functions::try_call_semantic_descriptor_owned(request).await {
+                    std::ops::ControlFlow::Break(result) => result
+                        .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+                        .map(ControlFlow::Break),
+                    std::ops::ControlFlow::Continue(returned) => {
+                        let original = returned.try_into_ordinary().map_err(|_| {
+                            serialization_error(
+                                builtin,
+                                &SERIALIZATION_ERROR_DISPATCH,
+                                "external callback declined without its original arguments",
+                            )
+                        })?;
+                        let mut values = original.try_into_values()?;
+                        root_value(values.next().expect("one callback argument"))
+                            .map(ControlFlow::Continue)
+                    }
                 }
             } else {
-                Ok(None)
+                let mut values = arguments.try_into_values()?;
+                root_value(values.next().expect("one callback argument")).map(ControlFlow::Continue)
             }
         },
     )
@@ -144,9 +285,9 @@ fn dispatch_registered_method<'a>(
 async fn call_saveobj_if_available(
     value: Value,
     runtime: Option<&crate::context::RuntimeContext>,
-) -> crate::BuiltinResult<Option<RootedValue>> {
+) -> crate::BuiltinResult<ControlFlow<RootedValue, RootedValue>> {
     let Some(class_name) = object_class_name(&value) else {
-        return Ok(None);
+        return root_value(value).map(ControlFlow::Continue);
     };
     dispatch_registered_method(
         &class_name,
@@ -154,14 +295,123 @@ async fn call_saveobj_if_available(
         vec![value],
         SAVEOBJ_METHOD.display_name(),
         runtime,
+        None,
     )
     .await
+}
+
+/// MAT's typed object node retains class/shape separately from this saved
+/// element. The returned root stays live while its payload is encoded.
+pub(crate) fn prepare_mat_object_element(
+    value: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> impl std::future::Future<Output = crate::BuiltinResult<RootedValue>> + '_ {
+    // A queued MAT conversion may outlive its caller before its first poll.
+    // Install the receiver's managed roots while constructing the request.
+    let input_root =
+        RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error());
+    async move {
+        let _input_root = input_root?;
+        if let Some(facts) = crate::object::protocol::selected_graph_receiver_facts(&value)? {
+            let method = facts.method(&SAVEOBJ_METHOD.owned());
+            if let Some(method) = method {
+                if method.is_abstract {
+                    return Err(serialization_error(
+                        SAVEOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "selected saveobj is abstract",
+                    ));
+                }
+                let binding = method.binding.clone().ok_or_else(|| {
+                    serialization_error(
+                        SAVEOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "selected saveobj has no admitted body",
+                    )
+                })?;
+                let selected = runtime
+                    .cloned()
+                    .ok_or_else(|| {
+                        serialization_error(
+                            SAVEOBJ_METHOD.display_name(),
+                            &SERIALIZATION_ERROR_DISPATCH,
+                            "selected saveobj requires its issuing runtime",
+                        )
+                    })?
+                    .with_selected_object_class(std::rc::Rc::clone(&facts))
+                    .with_selected_method_body(
+                        std::rc::Rc::clone(&facts),
+                        method.owner.clone(),
+                        binding.clone(),
+                    );
+                let descriptor = crate::call::descriptor::CallableDescriptor::bound(
+                    binding,
+                    vec![value],
+                    1,
+                    crate::call::descriptor::CallableCallKind::Direct,
+                );
+                return crate::call::descriptor::execute_callable_descriptor_in_context(
+                    &selected, descriptor,
+                )
+                .await
+                .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi);
+            }
+            return root_value(Value::Struct(into_object_properties_payload(value)?));
+        }
+        let class = object_class_name(&value).ok_or_else(|| {
+            serialization_error(
+                SAVEOBJ_METHOD.display_name(),
+                &SERIALIZATION_ERROR_ARGUMENT,
+                "MAT object element has no class identity",
+            )
+        })?;
+        let has_saveobj = match runtime {
+            Some(runtime) => {
+                runtime
+                    .scope(async {
+                        crate::class_registry::lookup_method(&class, &SAVEOBJ_METHOD.owned())
+                            .is_some()
+                    })
+                    .await
+            }
+            None => crate::class_registry::lookup_method(&class, &SAVEOBJ_METHOD.owned()).is_some(),
+        };
+        if has_saveobj {
+            return match call_saveobj_if_available(value, runtime).await? {
+                ControlFlow::Break(saved) => Ok(saved),
+                ControlFlow::Continue(_) => Err(serialization_error(
+                    SAVEOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_DISPATCH,
+                    format!("registered {class}.saveobj did not resolve"),
+                )),
+            };
+        }
+        // An external member can still supply saveobj without a registry entry.
+        // Its Decline path requires a property fallback at this output boundary.
+        match call_saveobj_if_available(value, runtime).await? {
+            ControlFlow::Break(saved) => Ok(saved),
+            ControlFlow::Continue(original) => original.try_map_owned(
+                |value| Ok(Value::Struct(into_object_properties_payload(value)?)),
+                |error| error.into_runtime_error(),
+            ),
+        }
+    }
+}
+
+fn into_object_properties_payload(value: Value) -> crate::BuiltinResult<StructValue> {
+    match value {
+        Value::Object(object) if !object.has_native_payload() => Ok(StructValue {
+            fields: object.properties.into_iter().collect(),
+        }),
+        other => object_properties_payload(&other),
+    }
 }
 
 async fn call_loadobj_if_available(
     class_name: &str,
     payload: Value,
     runtime: Option<&crate::context::RuntimeContext>,
+    builtin_issuance: Option<&crate::class_registry::BuiltinClassIssuance>,
 ) -> crate::BuiltinResult<Option<RootedValue>> {
     let identity = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
         serialization_error(
@@ -170,14 +420,304 @@ async fn call_loadobj_if_available(
             format!("invalid serialized class identity: {error}"),
         )
     })?;
-    dispatch_registered_method(
+    match dispatch_registered_method(
         &identity,
         LOADOBJ_METHOD,
         vec![payload],
         LOADOBJ_METHOD.display_name(),
         runtime,
+        builtin_issuance.cloned(),
     )
-    .await
+    .await?
+    {
+        ControlFlow::Break(restored) => Ok(Some(restored)),
+        ControlFlow::Continue(_) => Ok(None),
+    }
+}
+
+/// Restore one mxOBJECT_CLASS element only after the file's class spelling has
+/// been resolved against the selected current Runtime/project. The wire node
+/// itself never constructs or carries a selected receiver authority.
+pub(crate) async fn resolve_mat_object_class(
+    class_name: &str,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<(
+    runmat_types::ClassIdentity,
+    crate::context::CurrentClassProductResolution,
+)> {
+    let class = runmat_types::ClassIdentity::new(class_name).map_err(|error| {
+        serialization_error(
+            LOADOBJ_METHOD.display_name(),
+            &SERIALIZATION_ERROR_ARGUMENT,
+            format!("invalid serialized class identity: {error}"),
+        )
+    })?;
+    let product = match runtime {
+        Some(runtime) => runtime.resolve_current_object_class(&class).await?,
+        None => crate::class_registry::issue_builtin_class_ordinary(&class)
+            .map(crate::context::CurrentClassProductResolution::RegisteredBuiltin)
+            .ok_or_else(|| serialization_error(
+                LOADOBJ_METHOD.display_name(),
+                &SERIALIZATION_ERROR_DISPATCH,
+                format!("serialized class '{class}' requires a selected runtime for current-source admission"),
+            ))?,
+    };
+    Ok((class, product))
+}
+
+pub(crate) fn validate_mat_object_product_current(
+    product: &crate::context::CurrentClassProductResolution,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<()> {
+    if let crate::context::CurrentClassProductResolution::RegisteredBuiltin(issuance) = product {
+        let current = match runtime {
+            Some(runtime) => issuance.is_current_in_context(runtime),
+            None => issuance.is_current_ordinary(),
+        };
+        if !current {
+            return Err(serialization_error(
+                LOADOBJ_METHOD.display_name(),
+                &SERIALIZATION_ERROR_DISPATCH,
+                "registered class changed during object restoration",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn restore_mat_object_element(
+    class: &runmat_types::ClassIdentity,
+    product: &crate::context::CurrentClassProductResolution,
+    handle: bool,
+    payload: Value,
+    runtime: Option<&crate::context::RuntimeContext>,
+) -> crate::BuiltinResult<RootedValue> {
+    let payload = root_value(payload)?;
+    validate_mat_object_product_current(product, runtime)?;
+    if let crate::context::CurrentClassProductResolution::Selected(facts) = product {
+        if let Some(method) = facts.method(&LOADOBJ_METHOD.owned()) {
+            if method.is_abstract {
+                return Err(serialization_error(
+                    LOADOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_DISPATCH,
+                    format!("selected {class}.loadobj is abstract"),
+                ));
+            }
+            let binding = method.binding.clone().ok_or_else(|| {
+                serialization_error(
+                    LOADOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_DISPATCH,
+                    format!("selected {class}.loadobj has no admitted body"),
+                )
+            })?;
+            let selected = runtime
+                .cloned()
+                .ok_or_else(|| {
+                    serialization_error(
+                        LOADOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        "selected loadobj requires its issuing runtime",
+                    )
+                })?
+                .with_selected_object_class(std::rc::Rc::clone(facts))
+                .with_selected_method_body(
+                    std::rc::Rc::clone(facts),
+                    method.owner.clone(),
+                    binding.clone(),
+                );
+            return payload
+                .with_owned_async(|value| async move {
+                    let descriptor = crate::call::descriptor::CallableDescriptor::bound(
+                        binding,
+                        vec![value],
+                        1,
+                        crate::call::descriptor::CallableCallKind::Direct,
+                    );
+                    crate::call::descriptor::execute_callable_descriptor_in_context(
+                        &selected, descriptor,
+                    )
+                    .await
+                    .and_then(crate::call::arguments::project_rooted_legacy_builtin_value_abi)
+                })
+                .await;
+        }
+    }
+    let has_loadobj = matches!(
+        product,
+        crate::context::CurrentClassProductResolution::RegisteredBuiltin(_)
+    ) && match runtime {
+        Some(runtime) => {
+            runtime
+                .scope(async {
+                    crate::class_registry::lookup_method(class, &LOADOBJ_METHOD.owned()).is_some()
+                })
+                .await
+        }
+        None => crate::class_registry::lookup_method(class, &LOADOBJ_METHOD.owned()).is_some(),
+    };
+    if has_loadobj {
+        return payload
+            .with_owned_async(|value| {
+                call_loadobj_if_available(
+                    class.display_name(),
+                    value,
+                    runtime,
+                    match product {
+                        crate::context::CurrentClassProductResolution::RegisteredBuiltin(
+                            issuance,
+                        ) => Some(issuance),
+                        crate::context::CurrentClassProductResolution::Selected(_) => None,
+                    },
+                )
+            })
+            .await?
+            .ok_or_else(|| {
+                serialization_error(
+                    LOADOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_DISPATCH,
+                    format!("registered {class}.loadobj did not resolve"),
+                )
+            });
+    }
+    payload.try_map_owned(
+        |payload| {
+            let Value::Struct(fields) = payload else {
+                return Err(serialization_error(
+                    LOADOBJ_METHOD.display_name(),
+                    &SERIALIZATION_ERROR_ARGUMENT,
+                    "object without loadobj requires a saved property structure",
+                ));
+            };
+            let mut object = ObjectInstance::new(class.clone());
+            object.properties = fields.fields.into_iter().collect();
+            let object = Value::Object(object);
+            if handle {
+                let class_name = object_class_name(&object).expect("constructed object class");
+                let target = runmat_gc::gc_allocate(object).map_err(|error| {
+                    serialization_error(
+                        LOADOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_ARGUMENT,
+                        format!("failed to restore serialized handle object: {error}"),
+                    )
+                })?;
+                Ok(Value::HandleObject(runmat_value::HandleRef {
+                    class_name,
+                    target,
+                    valid: true,
+                }))
+            } else {
+                Ok(object)
+            }
+        },
+        |error| error.into_runtime_error(),
+    )
+}
+
+/// Rebind a decoded object's storage to the exact current product selected for
+/// this file load. Neither the wire class name nor a later ambient registry
+/// publication can confer receiver authority.
+pub(crate) fn reconcile_mat_object_product(
+    value: RootedValue,
+    class: &runmat_types::ClassIdentity,
+    product: &crate::context::CurrentClassProductResolution,
+    handle: bool,
+) -> crate::BuiltinResult<RootedValue> {
+    value.try_map_owned(
+        |value| match (value, handle) {
+            (Value::Object(mut object), false) if &object.class_name == class => {
+                match product {
+                    crate::context::CurrentClassProductResolution::Selected(facts) => {
+                        if let Some(existing) = object.selected_class() {
+                            if !std::rc::Rc::ptr_eq(existing, facts) {
+                                return Err(serialization_error(
+                                    LOADOBJ_METHOD.display_name(),
+                                    &SERIALIZATION_ERROR_DISPATCH,
+                                    "loadobj returned an object from a different selected product",
+                                ));
+                            }
+                        } else if !object.try_attach_selected_class(std::rc::Rc::clone(facts)) {
+                            return Err(serialization_error(
+                                LOADOBJ_METHOD.display_name(),
+                                &SERIALIZATION_ERROR_DISPATCH,
+                                "loadobj returned an object incompatible with its selected product",
+                            ));
+                        }
+                    }
+                    crate::context::CurrentClassProductResolution::RegisteredBuiltin(_) => {
+                        if object.selected_class().is_some() {
+                            return Err(serialization_error(
+                                LOADOBJ_METHOD.display_name(),
+                                &SERIALIZATION_ERROR_DISPATCH,
+                                "registered object carried unrelated selected authority",
+                            ));
+                        }
+                    }
+                }
+                Ok(Value::Object(object))
+            }
+            (Value::HandleObject(reference), true) if &reference.class_name == class => {
+                runmat_gc::gc_with_value_mut(&reference.target, |target| {
+                    let Value::Object(object) = target else {
+                        return Err(serialization_error(
+                            LOADOBJ_METHOD.display_name(),
+                            &SERIALIZATION_ERROR_DISPATCH,
+                            "loadobj returned a handle without an object target",
+                        ));
+                    };
+                    if &object.class_name != class {
+                        return Err(serialization_error(
+                            LOADOBJ_METHOD.display_name(),
+                            &SERIALIZATION_ERROR_DISPATCH,
+                            "loadobj returned a handle target of another class",
+                        ));
+                    }
+                    match product {
+                        crate::context::CurrentClassProductResolution::Selected(facts) => {
+                            if let Some(existing) = object.selected_class() {
+                                if !std::rc::Rc::ptr_eq(existing, facts) {
+                                    return Err(serialization_error(
+                                        LOADOBJ_METHOD.display_name(),
+                                        &SERIALIZATION_ERROR_DISPATCH,
+                                        "loadobj returned a handle from a different selected product",
+                                    ));
+                                }
+                            } else if !object.try_attach_selected_class(std::rc::Rc::clone(facts)) {
+                                return Err(serialization_error(
+                                    LOADOBJ_METHOD.display_name(),
+                                    &SERIALIZATION_ERROR_DISPATCH,
+                                    "loadobj returned a handle incompatible with its selected product",
+                                ));
+                            }
+                        }
+                        crate::context::CurrentClassProductResolution::RegisteredBuiltin(_) => {
+                            if object.selected_class().is_some() {
+                                return Err(serialization_error(
+                                    LOADOBJ_METHOD.display_name(),
+                                    &SERIALIZATION_ERROR_DISPATCH,
+                                    "registered handle carried unrelated selected authority",
+                                ));
+                            }
+                        }
+                    }
+                    Ok(())
+                })
+                .map_err(|error| {
+                    serialization_error(
+                        LOADOBJ_METHOD.display_name(),
+                        &SERIALIZATION_ERROR_DISPATCH,
+                        format!("cannot inspect restored handle target: {error}"),
+                    )
+                })??;
+                Ok(Value::HandleObject(reference))
+            }
+            _ => Err(serialization_error(
+                LOADOBJ_METHOD.display_name(),
+                &SERIALIZATION_ERROR_DISPATCH,
+                "loadobj result does not match the saved object class and kind",
+            )),
+        },
+        |error| error.into_runtime_error(),
+    )
 }
 
 fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue> {
@@ -233,104 +773,8 @@ fn object_properties_payload(value: &Value) -> crate::BuiltinResult<StructValue>
     }
 }
 
-fn ensure_no_native_payload(value: &Value) -> crate::BuiltinResult<()> {
-    let native = match value {
-        Value::Object(object) => object.has_native_payload(),
-        Value::HandleObject(handle) => runmat_gc::gc_with_value(
-            &handle.target,
-            |target| matches!(target, Value::Object(object) if object.has_native_payload()),
-        )
-        .map_err(|error| {
-            serialization_error(
-                SAVEOBJ_METHOD.display_name(),
-                &SERIALIZATION_ERROR_ARGUMENT,
-                format!("failed to read handle target: {error}"),
-            )
-        })?,
-        _ => false,
-    };
-    if native {
-        Err(serialization_error(
-            SAVEOBJ_METHOD.display_name(),
-            &SERIALIZATION_ERROR_ARGUMENT,
-            "GC-owned native object payloads require a typed serializer",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn serialized_object_envelope(
-    class_name: runmat_types::ClassIdentity,
-    kind: &'static str,
-    had_saveobj: bool,
-    payload: Value,
-) -> Value {
-    let mut st = StructValue::new();
-    st.insert(
-        SERIALIZED_CLASS_FIELD,
-        Value::String(class_name.display_name().to_owned()),
-    );
-    st.insert(SERIALIZED_KIND_FIELD, Value::String(kind.to_string()));
-    st.insert(SERIALIZED_HAD_SAVEOBJ_FIELD, Value::Bool(had_saveobj));
-    st.insert(SERIALIZED_PAYLOAD_FIELD, payload);
-    Value::Struct(st)
-}
-
-fn into_serialized_envelope(value: Value) -> Result<(String, String, bool, Value), Value> {
-    let Value::Struct(mut st) = value else {
-        return Err(value);
-    };
-    let Some(class_name) = st
-        .fields
-        .get(SERIALIZED_CLASS_FIELD)
-        .and_then(|value| String::try_from(value).ok())
-    else {
-        return Err(Value::Struct(st));
-    };
-    if !st.fields.contains_key(SERIALIZED_PAYLOAD_FIELD) {
-        return Err(Value::Struct(st));
-    }
-    let Some(kind) = st
-        .fields
-        .get(SERIALIZED_KIND_FIELD)
-        .and_then(|value| String::try_from(value).ok())
-    else {
-        return Err(Value::Struct(st));
-    };
-    let Some(had_saveobj) = st
-        .fields
-        .get(SERIALIZED_HAD_SAVEOBJ_FIELD)
-        .and_then(|value| {
-            if let Value::Bool(value) = value {
-                Some(*value)
-            } else {
-                None
-            }
-        })
-    else {
-        return Err(Value::Struct(st));
-    };
-    let payload = st
-        .fields
-        .shift_remove(SERIALIZED_PAYLOAD_FIELD)
-        .expect("validated serialized payload field");
-    Ok((class_name, kind, had_saveobj, payload))
-}
-
 fn root_value(value: Value) -> crate::BuiltinResult<RootedValue> {
     RootedValue::new(value).map_err(|error| error.into_runtime_error())
-}
-
-pub(crate) async fn prepare_value_for_mat_save(value: Value) -> crate::BuiltinResult<RootedValue> {
-    prepare_value_for_mat_save_in_context(value, None).await
-}
-
-pub(crate) async fn prepare_value_for_mat_save_in_context(
-    value: Value,
-    runtime: Option<&crate::context::RuntimeContext>,
-) -> crate::BuiltinResult<RootedValue> {
-    prepare::prepare_value_for_save_in_context(value, runtime).await
 }
 
 pub(crate) async fn restore_value_from_mat_load(value: Value) -> crate::BuiltinResult<RootedValue> {
@@ -354,10 +798,12 @@ pub async fn saveobj_builtin(value: Value) -> crate::BuiltinResult<RootedValue> 
         RootedValueLease::for_traced(&value).map_err(|error| error.into_runtime_error())?;
     match value {
         receiver @ (Value::Object(_) | Value::HandleObject(_)) => {
-            if let Some(saved) = call_saveobj_if_available(receiver.clone(), None).await? {
-                Ok(saved)
-            } else {
-                root_value(Value::Struct(object_properties_payload(&receiver)?))
+            match call_saveobj_if_available(receiver, None).await? {
+                ControlFlow::Break(saved) => Ok(saved),
+                ControlFlow::Continue(original) => original.try_map_owned(
+                    |value| Ok(Value::Struct(into_object_properties_payload(value)?)),
+                    |error| error.into_runtime_error(),
+                ),
             }
         }
         other => Err(serialization_error(
@@ -394,20 +840,6 @@ mod tests {
 
     use tempfile::tempdir;
 
-    #[test]
-    fn mat_save_rejects_native_object_payload_instead_of_erasing_it() {
-        let object = ObjectInstance::new("containers.Map").with_containers_map_payload(
-            runmat_value::ContainersMapStorage::new(
-                runmat_value::ContainersMapKeyType::Char,
-                runmat_value::ContainersMapValueType::Any,
-                false,
-            ),
-        );
-        let error = block_on(prepare_value_for_mat_save(Value::Object(object)))
-            .expect_err("native payload needs an explicit serializer");
-        assert!(error.message.contains("native object payloads"));
-    }
-
     fn structure(field: &str, value: Value) -> StructValue {
         let mut structure = StructValue::new();
         structure.insert(field, value);
@@ -443,11 +875,11 @@ mod tests {
     }
 
     #[test]
-    fn mat_object_recursion_preserves_empty_and_nd_structure_arrays() {
+    fn loadobj_preserves_empty_and_nd_structure_arrays() {
         let empty = StructArray::with_fields(vec!["payload".into()], Vec::new(), vec![0, 2, 3])
             .expect("empty structure array");
-        let saved = block_on(prepare_value_for_mat_save(Value::StructArray(empty)))
-            .expect("prepare empty array");
+        let saved =
+            block_on(loadobj_builtin(Value::StructArray(empty))).expect("restore empty array");
         let Value::StructArray(saved) = saved.value() else {
             panic!("expected typed empty structure array");
         };
@@ -462,10 +894,7 @@ mod tests {
             .collect();
         let array = StructArray::with_fields(vec!["payload".into()], elements, vec![2, 1, 2])
             .expect("N-D structure array");
-        let prepared =
-            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare");
-        let restored =
-            block_on(restore_value_from_mat_load(prepared.value().clone())).expect("restore");
+        let restored = block_on(loadobj_builtin(Value::StructArray(array))).expect("restore");
         let Value::StructArray(restored) = restored.value() else {
             panic!("expected typed N-D structure array");
         };
@@ -479,7 +908,7 @@ mod tests {
     }
 
     #[test]
-    fn mat_object_recursion_restores_nested_value_and_handle_objects() {
+    fn loadobj_preserves_nested_value_and_handle_objects() {
         let mut value_object = ObjectInstance::new("NestedValue".to_string());
         value_object
             .properties
@@ -505,10 +934,7 @@ mod tests {
             vec![2, 1],
         )
         .expect("structure array");
-        let prepared =
-            block_on(prepare_value_for_mat_save(Value::StructArray(array))).expect("prepare");
-        let restored =
-            block_on(restore_value_from_mat_load(prepared.value().clone())).expect("restore");
+        let restored = block_on(loadobj_builtin(Value::StructArray(array))).expect("restore");
         let Value::StructArray(restored) = restored.value() else {
             panic!("expected typed structure array");
         };
@@ -530,26 +956,7 @@ mod tests {
     }
 
     #[test]
-    fn mat_object_recursion_reports_nested_invalid_envelope_and_depth() {
-        let invalid = serialized_object_envelope(
-            "InvalidEnvelope".into(),
-            "unsupported",
-            false,
-            Value::Struct(StructValue::new()),
-        );
-        let array = StructArray::with_fields(
-            vec!["payload".into()],
-            vec![
-                structure("payload", invalid),
-                structure("payload", Value::Num(1.0)),
-            ],
-            vec![2, 1],
-        )
-        .expect("structure array");
-        let error = block_on(restore_value_from_mat_load(Value::StructArray(array)))
-            .expect_err("invalid nested envelope must fail");
-        assert_eq!(error.identifier(), SERIALIZATION_ERROR_ARGUMENT.identifier);
-
+    fn loadobj_reports_nested_depth() {
         let mut nested = Value::Num(1.0);
         for _ in 0..=MAX_SERIALIZATION_DEPTH {
             nested = Value::Struct(structure("next", nested));
@@ -563,7 +970,7 @@ mod tests {
             vec![2, 1],
         )
         .expect("structure array");
-        let error = block_on(prepare_value_for_mat_save(Value::StructArray(array)))
+        let error = block_on(loadobj_builtin(Value::StructArray(array)))
             .expect_err("nested depth must fail");
         assert_eq!(error.identifier(), SERIALIZATION_ERROR_RECURSION.identifier);
     }
@@ -640,29 +1047,49 @@ mod tests {
     }
 
     #[test]
-    fn loadobj_restores_serialized_envelope_through_registered_method() {
-        block_on(crate::register_test_classes_builtin()).expect("test classes");
-        let mut object = ObjectInstance::new("OverIdx".to_string());
-        object.properties.insert("k".to_string(), Value::Num(11.0));
-
-        let envelope =
-            block_on(prepare_value_for_mat_save(Value::Object(object))).expect("prepare");
-        let restored =
-            block_on(restore_value_from_mat_load(envelope.value().clone())).expect("restore");
-        let Value::Object(restored_object) = restored.value() else {
-            panic!("expected restored object");
-        };
-        assert_eq!(restored_object.class_name.display_name(), "OverIdx");
-        assert_eq!(restored_object.properties.get("k"), Some(&Value::Num(11.0)));
+    fn former_marker_fields_roundtrip_as_an_ordinary_mat_struct() {
+        let mut fields = StructValue::new();
+        fields.insert(
+            "__runmat_serialized_object_class__",
+            Value::string("NotAnObject"),
+        );
+        fields.insert("__runmat_serialized_object_kind__", Value::string("value"));
+        fields.insert(
+            "__runmat_serialized_object_had_saveobj__",
+            Value::Bool(true),
+        );
+        fields.insert("__runmat_serialized_object_payload__", Value::Num(7.0));
+        let expected = Value::Struct(fields);
         assert_eq!(
-            restored_object.properties.get("loaded_by"),
-            Some(&Value::String("OverIdx.loadobj".to_string()))
+            block_on(loadobj_builtin(expected.clone()))
+                .expect("direct loadobj preserves ordinary struct")
+                .value(),
+            &expected
+        );
+        let bytes = block_on(
+            crate::builtins::io::mat::save::encode_workspace_to_mat_bytes(&[(
+                "marker_fields".to_string(),
+                expected.clone(),
+            )]),
+        )
+        .expect("encode ordinary struct");
+        let entries = crate::builtins::io::mat::load::decode_workspace_from_mat_bytes(&bytes)
+            .expect("decode ordinary struct");
+        assert_eq!(
+            entries.value().0[0],
+            ("marker_fields".to_string(), expected)
         );
     }
 
     #[test]
     fn mat_roundtrip_calls_saveobj_and_loadobj() {
         block_on(crate::register_test_classes_builtin()).expect("test classes");
+        // Typed MAT restoration admits only an actual compile-time builtin
+        // issuance. The shared OverIdx registration is ordinary for other
+        // tests; this fixture explicitly issues its builtin method catalog.
+        let identity = runmat_types::StaticClassIdentity::new("OverIdx");
+        let class = crate::class_registry::get_class(&identity.owned()).expect("OverIdx class");
+        crate::class_registry::register_builtin_class(identity, class);
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("object_roundtrip.mat");
 
@@ -672,11 +1099,27 @@ mod tests {
             .properties
             .insert("nargs".to_string(), Value::Num(2.0));
 
+        let array_elements = [13.0, 22.0]
+            .into_iter()
+            .map(|number| {
+                let mut element = ObjectInstance::new("OverIdx");
+                element
+                    .properties
+                    .insert("k".to_owned(), Value::Num(number));
+                Value::Object(element)
+            })
+            .collect();
+        let array = runmat_value::ObjectArray::new("OverIdx", array_elements, vec![2, 1])
+            .expect("object array");
+        let empty =
+            runmat_value::ObjectArray::empty("OverIdx", vec![0, 2]).expect("empty object array");
+
         let bytes = block_on(
-            crate::builtins::io::mat::save::encode_workspace_to_mat_bytes(&[(
-                "obj".to_string(),
-                Value::Object(object),
-            )]),
+            crate::builtins::io::mat::save::encode_workspace_to_mat_bytes(&[
+                ("obj".to_string(), Value::Object(object)),
+                ("array".to_string(), Value::ObjectArray(array)),
+                ("empty".to_string(), Value::ObjectArray(empty)),
+            ]),
         )
         .expect("encode");
         std::fs::write(&path, bytes).expect("write mat file");
@@ -699,6 +1142,44 @@ mod tests {
             restored_object.properties.get("loaded_by"),
             Some(&Value::String("OverIdx.loadobj".to_string()))
         );
+        let loaded_array = entries
+            .value()
+            .0
+            .iter()
+            .find(|(name, _)| name == "array")
+            .map(|(_, value)| value)
+            .expect("array entry");
+        let Value::ObjectArray(loaded_array) = loaded_array else {
+            panic!("expected object array");
+        };
+        assert_eq!(loaded_array.shape(), &[2, 1]);
+        let keys: Vec<_> = loaded_array
+            .data()
+            .iter()
+            .map(|value| match value {
+                Value::Object(object) => {
+                    assert_eq!(
+                        object.properties.get("loaded_by"),
+                        Some(&Value::String("OverIdx.loadobj".to_string()))
+                    );
+                    object.properties.get("k").cloned()
+                }
+                _ => panic!("expected restored object element"),
+            })
+            .collect();
+        assert_eq!(keys, vec![Some(Value::Num(13.0)), Some(Value::Num(22.0))]);
+        let loaded_empty = entries
+            .value()
+            .0
+            .iter()
+            .find(|(name, _)| name == "empty")
+            .map(|(_, value)| value)
+            .expect("empty entry");
+        let Value::ObjectArray(loaded_empty) = loaded_empty else {
+            panic!("expected empty object array");
+        };
+        assert_eq!(loaded_empty.shape(), &[0, 2]);
+        assert_eq!(loaded_empty.class_name().display_name(), "OverIdx");
 
         let decoded = crate::builtins::io::mat::load::decode_workspace_from_mat_bytes(
             &std::fs::read(&path).unwrap(),

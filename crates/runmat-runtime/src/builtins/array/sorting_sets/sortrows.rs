@@ -552,7 +552,7 @@ fn value_shape(value: &Value) -> Vec<usize> {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(logical) => logical.shape.to_vec(),
         Value::ComplexTensor(tensor) => tensor.shape().to_vec(),
-        Value::CharArray(array) => array.shape.clone(),
+        Value::CharArray(array) => array.shape().to_vec(),
         Value::GpuTensor(handle) => handle.shape().to_vec(),
         _ => vec![1, 1],
     }
@@ -1443,8 +1443,15 @@ fn parse_single_column_i64(value: i64, num_cols: usize) -> crate::BuiltinResult<
 }
 
 fn parse_directions(value: &Value) -> crate::BuiltinResult<Option<Vec<SortDirection>>> {
+    use std::borrow::Cow;
     let strings = match value {
-        Value::StringArray(array) => Some(array.data.clone()),
+        Value::StringArray(array) => Some(
+            array
+                .data
+                .iter()
+                .map(|text| Cow::Borrowed(text.as_str()))
+                .collect::<Vec<_>>(),
+        ),
         Value::Cell(cell) => {
             let mut strings = Vec::with_capacity(cell.data.len());
             for value in &cell.data {
@@ -1454,11 +1461,11 @@ fn parse_directions(value: &Value) -> crate::BuiltinResult<Option<Vec<SortDirect
                         "sortrows: direction cell arrays must contain character vectors or strings",
                     ));
                 };
-                strings.push(direction);
+                strings.push(Cow::Owned(direction));
             }
             Some(strings)
         }
-        _ => tensor::value_to_string(value).map(|value| vec![value]),
+        _ => tensor::value_to_string(value).map(|value| vec![Cow::Owned(value)]),
     };
     let Some(strings) = strings else {
         return Ok(None);

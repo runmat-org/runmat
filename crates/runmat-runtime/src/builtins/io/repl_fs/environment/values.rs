@@ -37,7 +37,7 @@ impl EnvironmentValues {
             }
             Value::StringArray(array) => Ok(Self {
                 values: array.data.iter().map(|text| string_value(text)).collect(),
-                shape: Some(array.shape.clone()),
+                shape: Some(array.shape.as_slice().to_vec()),
             }),
             Value::Cell(array) => {
                 let mut values = Vec::with_capacity(array.data.len());
@@ -46,7 +46,7 @@ impl EnvironmentValues {
                 }
                 Ok(Self {
                     values,
-                    shape: Some(array.shape.clone()),
+                    shape: Some(array.shape.as_slice().to_vec()),
                 })
             }
             value => Self::decode_scalar(value)

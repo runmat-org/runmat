@@ -5,7 +5,7 @@ pub(super) fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectI
     let mut object = ObjectInstance::new(runmat_types::standard::CLASSIFICATION_TREE.to_string());
     object.properties.insert(
         "ResponseName".to_string(),
-        Value::String(spec.response_name),
+        Value::string(spec.response_name),
     );
     object.properties.insert(
         "PredictorNames".to_string(),
@@ -25,7 +25,7 @@ pub(super) fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectI
     );
     object.properties.insert(
         "ScoreTransform".to_string(),
-        Value::String("none".to_string()),
+        Value::string("none".to_string()),
     );
     object.properties.insert(
         "NumObservations".to_string(),
@@ -50,7 +50,7 @@ pub(super) fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectI
     params.insert("MinParent", Value::Num(spec.options.min_parent_size as f64));
     params.insert(
         "SplitCriterion",
-        Value::String(
+        Value::string(
             match spec.options.split_criterion {
                 SplitCriterion::Gdi => "gdi",
                 SplitCriterion::Deviance => "deviance",
@@ -63,7 +63,7 @@ pub(super) fn model_object(spec: FitSpec, fit: TreeFit) -> BuiltinResult<ObjectI
         .insert("ModelParameters".to_string(), Value::Struct(params));
     object.properties.insert(
         "__RunMatTreeClassKind".to_string(),
-        Value::String(
+        Value::string(
             match spec.class_kind {
                 LabelKind::Numeric => "numeric",
                 LabelKind::Integer(class) => integer_class_name(class),

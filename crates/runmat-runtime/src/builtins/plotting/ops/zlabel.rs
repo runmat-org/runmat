@@ -101,12 +101,9 @@ mod tests {
 
         let handle = zlabel_builtin(vec![
             ax,
-            Value::StringArray(StringArray {
-                data: vec!["Height".into(), "(m)".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                StringArray::new(vec!["Height".into(), "(m)".into()], vec![1, 2]).unwrap(),
+            ),
             Value::String("FontWeight".into()),
             Value::String("bold".into()),
         ])

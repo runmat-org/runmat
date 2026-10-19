@@ -69,13 +69,16 @@ pub(in crate::builtins::io::repl_fs::compat) fn ensure_class_registered() {
                 },
             );
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: MEMMAPFILE_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            MEMMAPFILE_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: MEMMAPFILE_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 

@@ -78,7 +78,9 @@ async fn named(runtime: Option<RuntimeContext>, args: &[Value]) -> BuiltinResult
         PreferenceNames::Array { names, shape } => {
             let defaults = match args.get(2) {
                 None => None,
-                Some(Value::Cell(cell)) if cell.shape == shape => Some(cell.data.clone()),
+                Some(Value::Cell(cell)) if cell.shape == shape => {
+                    Some(cell.data.iter().cloned().collect())
+                }
                 Some(_) => {
                     return Err(error(
                         "getpref",

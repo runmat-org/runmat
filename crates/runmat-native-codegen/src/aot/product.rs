@@ -4,12 +4,14 @@ use runmat_types::{ProgramFunctionId, ProgramSourceId};
 
 use crate::NativeTarget;
 
-pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 14;
+pub const NATIVE_OBJECT_SCHEMA_VERSION: u16 = 15;
 pub const AOT_PROGRAM_MANIFEST_SCHEMA_VERSION: u16 = 9;
 const MAX_AOT_PROGRAM_FUNCTIONS: usize = 100_000;
 const MAX_AOT_PROGRAM_MANIFEST_BYTES: usize = 64 * 1024 * 1024;
 pub const AOT_ENTRY_SYMBOL: &str = "runmat_aot_entry";
 pub const AOT_RUNTIME_MAIN_SYMBOL: &str = "runmat_aot_main";
+pub const AOT_RUNTIME_TEST_MAIN_SYMBOL: &str = "runmat_aot_test_main";
+pub const AOT_PAIRED_PRODUCT_SYMBOL: &str = "runmat_aot_paired_product";
 pub const AOT_SOURCE_SERVICE_FACTORY_SYMBOL: &str = "runmat_aot_source_evaluation_component_v2";
 pub const AOT_NATIVE_IR_SYMBOL: &str = "runmat_aot_native_ir";
 pub const AOT_PROGRAM_SYMBOL: &str = "runmat_aot_program";

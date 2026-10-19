@@ -220,7 +220,7 @@ async fn parse_numeric_response(line: &str) -> Result<RootedValue, RuntimeError>
     }
 
     // Fallback when no eval hook is installed (unit tests, native REPL).
-    let parsed = call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
+    let parsed = call_builtin_async("str2double", &[Value::string(trimmed.to_string())])
         .await
         .map_err(|err| {
             let message = err.message().to_string();

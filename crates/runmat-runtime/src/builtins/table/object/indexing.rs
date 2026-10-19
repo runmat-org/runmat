@@ -15,7 +15,7 @@ pub(in crate::builtins::table) fn table_member_get(
             .fields
             .get(DIMENSION_NAMES)
             .and_then(|value| match value {
-                Value::StringArray(array) => array.data.first().cloned(),
+                Value::StringArray(array) => array.data.first().map(ToString::to_string),
                 Value::Cell(cell) => cell
                     .data
                     .first()

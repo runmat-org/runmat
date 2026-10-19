@@ -359,15 +359,15 @@ fn update_object_properties(object: &mut ObjectInstance, snapshot: PanStateSnaps
     object
         .properties
         .entry("ButtonDownFilter".to_string())
-        .or_insert(Value::String(String::new()));
+        .or_insert(Value::string(String::new()));
     object
         .properties
         .entry("ActionPreCallback".to_string())
-        .or_insert(Value::String(String::new()));
+        .or_insert(Value::string(String::new()));
     object
         .properties
         .entry("ActionPostCallback".to_string())
-        .or_insert(Value::String(String::new()));
+        .or_insert(Value::string(String::new()));
     object.properties.insert(
         "FigureHandle".to_string(),
         Value::Num(snapshot.figure.as_u32() as f64),
@@ -432,9 +432,9 @@ fn pan_struct(snapshot: PanStateSnapshot) -> Value {
         Value::String(snapshot.mode.motion.as_str().into()),
     );
     st.insert("UIContextMenu", Value::Num(0.0));
-    st.insert("ButtonDownFilter", Value::String(String::new()));
-    st.insert("ActionPreCallback", Value::String(String::new()));
-    st.insert("ActionPostCallback", Value::String(String::new()));
+    st.insert("ButtonDownFilter", Value::string(String::new()));
+    st.insert("ActionPreCallback", Value::string(String::new()));
+    st.insert("ActionPostCallback", Value::string(String::new()));
     st.insert("FigureHandle", Value::Num(snapshot.figure.as_u32() as f64));
     Value::Struct(st)
 }
@@ -454,9 +454,9 @@ pub fn get_pan_object_property(
             if let Value::Struct(st) = &mut value {
                 for (name, default) in [
                     ("UIContextMenu", Value::Num(0.0)),
-                    ("ButtonDownFilter", Value::String(String::new())),
-                    ("ActionPreCallback", Value::String(String::new())),
-                    ("ActionPostCallback", Value::String(String::new())),
+                    ("ButtonDownFilter", Value::string(String::new())),
+                    ("ActionPreCallback", Value::string(String::new())),
+                    ("ActionPostCallback", Value::string(String::new())),
                 ] {
                     st.insert(name, object_property_or_default(handle, name, default)?);
                 }
@@ -474,7 +474,7 @@ pub fn get_pan_object_property(
             Some(PanProperty::ButtonDownFilter)
             | Some(PanProperty::ActionPreCallback)
             | Some(PanProperty::ActionPostCallback) => {
-                object_property_or_default(handle, name, Value::String(String::new()))?
+                object_property_or_default(handle, name, Value::string(String::new()))?
             }
             Some(PanProperty::FigureHandle) => Value::Num(snapshot.figure.as_u32() as f64),
             _ => return Err(invalid(format!("unsupported pan property '{name}'"))),

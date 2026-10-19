@@ -16,6 +16,7 @@ pub(in crate::execute) fn observed_state(probe: &Rc<Probe>) -> HostState {
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,
         id: ProgramFunctionId(0),
+        mir_body_digest: runmat_execution::Digest::sha256(b"fixture:native-observation"),
         source: ProgramSourceId(0),
         name: "observation".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,

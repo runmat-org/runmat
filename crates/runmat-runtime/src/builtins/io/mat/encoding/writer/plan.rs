@@ -159,7 +159,15 @@ fn plan_matrix<'a, 'b>(
             MatData::Struct {
                 field_names,
                 field_values,
+            }
+            | MatData::Object {
+                field_names,
+                field_values,
+                ..
             } => {
+                if let MatData::Object { class_name, .. } = &array.data {
+                    payload.add(tagged_length(class_name.len(), owner)?, owner)?;
+                }
                 let width = field_names
                     .iter()
                     .map(String::len)

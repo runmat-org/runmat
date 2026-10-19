@@ -7,7 +7,7 @@ pub(super) enum PartitionLabel {
     Number(u64),
     Integer(i128),
     Logical(bool),
-    Text(String),
+    Text(runmat_value::Utf8Text),
 }
 
 impl PartitionLabel {

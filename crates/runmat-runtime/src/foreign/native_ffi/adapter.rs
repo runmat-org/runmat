@@ -8,11 +8,34 @@ use std::sync::{Arc, Mutex};
 use runmat_builtins::{NativeFfiOperation, NativeLoadOption};
 use runmat_native_ffi::{
     artifact_identity, invoke_symbol_with_bindings, prepare_header_with_declarations_report,
-    prepare_native_interface, CallbackBinding, HeaderPreparation, InvocationValue,
-    NativeInterfaceArtifactManifest, NativeInterfacePreparation, NativeLibraryMetadata,
-    NativePointerResource, NativeScalar, NativeType, ParameterDirection, PointerBinding,
-    PointerOwnership, SymbolPrototype, NATIVE_FFI_METADATA_SCHEMA_VERSION,
+    prepare_native_interface, CallbackBinding, HeaderPreparation, InvocationArguments,
+    InvocationValue, NativeInterfaceArtifactManifest, NativeInterfacePreparation,
+    NativeLibraryMetadata, NativePointerResource, NativeScalar, NativeType, ParameterDirection,
+    PointerBinding, PointerOwnership, SymbolPrototype, NATIVE_FFI_METADATA_SCHEMA_VERSION,
 };
+
+impl InvocationArguments for crate::call::RootedFunctionArguments {
+    fn len(&self) -> usize {
+        crate::call::RootedFunctionArguments::len(self)
+    }
+    fn get(&self, index: usize) -> Option<&Value> {
+        crate::call::RootedFunctionArguments::get(self, index)
+    }
+}
+
+struct ArgumentWindow<'a, A: InvocationArguments + ?Sized> {
+    source: &'a A,
+    offset: usize,
+}
+
+impl<A: InvocationArguments + ?Sized> InvocationArguments for ArgumentWindow<'_, A> {
+    fn len(&self) -> usize {
+        self.source.len().saturating_sub(self.offset)
+    }
+    fn get(&self, index: usize) -> Option<&Value> {
+        self.source.get(self.offset.checked_add(index)?)
+    }
+}
 pub use runmat_native_ffi::{NATIVE_FFI_ADAPTER_ID, NATIVE_FFI_ADAPTER_VERSION};
 use runmat_process_host::shared_memory::SharedSnapshotParent;
 use runmat_process_host::{ContainedChildRetirement, ProcessGroupPlacement, ProcessSpawnEvidence};

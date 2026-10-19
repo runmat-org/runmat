@@ -40,6 +40,12 @@ pub(super) fn drop_in_context<F>(context: &RuntimeContext, future: Pin<Box<F>>) 
     drain_placement_feedback(context);
 }
 
+pub(super) fn drop_value_in_context<T>(context: &RuntimeContext, value: T) {
+    let _guard = RuntimeContextGuard::enter(context.clone());
+    drop(value);
+    drain_placement_feedback(context);
+}
+
 fn drain_placement_feedback(context: &RuntimeContext) {
     if let Some(placement) = context.service_ports().placement() {
         placement.drain_feedback();

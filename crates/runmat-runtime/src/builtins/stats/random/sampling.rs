@@ -1104,11 +1104,11 @@ fn sample_string_axis(
     indices: &[usize],
     _name: &str,
 ) -> BuiltinResult<Value> {
-    let shape = normalize_shape(array.shape.clone());
+    let shape = normalize_shape(array.shape().to_vec());
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
-    let mut out = vec![String::new(); out_len];
+    let mut out = vec![runmat_value::Utf8Text::default(); out_len];
     let pre: usize = shape[..axis].iter().product();
     let axis_len = shape[axis];
     let post: usize = shape[axis + 1..].iter().product();
@@ -1121,14 +1121,10 @@ fn sample_string_axis(
             }
         }
     }
-    let rows = *out_shape.first().unwrap_or(&1);
-    let cols = *out_shape.get(1).unwrap_or(&1);
-    Ok(Value::StringArray(StringArray {
-        data: out,
-        shape: out_shape,
-        rows,
-        cols,
-    }))
+    Ok(Value::StringArray(
+        StringArray::from_texts_unbounded(out, out_shape)
+            .map_err(|err| sampling_error(_name, format!("{_name}: {err}")))?,
+    ))
 }
 
 fn sample_char_axis(
@@ -1165,7 +1161,7 @@ fn sample_cell_axis(
     indices: &[usize],
     name: &str,
 ) -> BuiltinResult<Value> {
-    let shape = normalize_shape(array.shape.clone());
+    let shape = normalize_shape(array.shape().to_vec());
     let mut out_shape = shape.clone();
     out_shape[axis] = indices.len();
     let out_len = tensor::element_count(&out_shape);
@@ -1243,12 +1239,8 @@ fn sample_value_axis(
             name,
         ),
         Value::String(value) => sample_string_axis(
-            &StringArray {
-                data: vec![value],
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            },
+            &StringArray::from_texts_unbounded(vec![value], vec![1, 1])
+                .map_err(|err| sampling_error(name, format!("{name}: {err}")))?,
             axis,
             indices,
             name,
@@ -1267,9 +1259,9 @@ fn shape_of_sampled_value(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(t) => Ok(normalize_shape(t.shape().to_vec())),
         Value::LogicalArray(a) => Ok(normalize_shape(a.shape.to_vec())),
-        Value::StringArray(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::StringArray(a) => Ok(normalize_shape(a.shape().to_vec())),
         Value::CharArray(a) => Ok(vec![a.rows, a.cols]),
-        Value::Cell(a) => Ok(normalize_shape(a.shape.clone())),
+        Value::Cell(a) => Ok(normalize_shape(a.shape().to_vec())),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::String(_) => Ok(vec![1, 1]),
         other => Err(sampling_error(
             "datasample",

@@ -56,7 +56,7 @@ impl HeaderInspection {
                 };
                 OptionSlot {
                     index,
-                    spelling,
+                    spelling: spelling.map(std::borrow::Cow::into_owned),
                     identity,
                 }
             })

@@ -91,9 +91,9 @@ pub(super) fn shape(value: &Value) -> Vec<usize> {
         Value::LogicalArray(value) => value.shape.to_vec(),
         Value::SparseTensor(value) => vec![value.rows, value.cols],
         Value::GpuTensor(value) => value.shape().to_vec(),
-        Value::StringArray(value) => value.shape.clone(),
-        Value::CharArray(value) => value.shape.clone(),
-        Value::Cell(value) => value.shape.clone(),
+        Value::StringArray(value) => value.shape().to_vec(),
+        Value::CharArray(value) => value.shape().to_vec(),
+        Value::Cell(value) => value.shape().to_vec(),
         _ => vec![1, 1],
     }
 }

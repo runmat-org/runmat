@@ -2,6 +2,23 @@ use super::*;
 use runmat_builtins::{DeepLearningLayerKind, DeepLearningLayerOption};
 use std::collections::BTreeMap;
 
+pub(in crate::builtins::deep_learning) fn mutable_cell_values<'a>(
+    cell: &'a mut runmat_value::CellArray,
+    function: &'static str,
+) -> BuiltinResult<&'a mut [Value]> {
+    if !cell.data.is_unique() {
+        cell.data.make_unique_unbounded().map_err(|error| {
+            deep_learning_error(
+                function,
+                format!("{function}: layer collection requires an admitted replacement: {error}"),
+            )
+        })?;
+    }
+    cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+        deep_learning_error(function, format!("{function}: layer collection is shared"))
+    })
+}
+
 pub(in crate::builtins::deep_learning) mod options;
 
 pub(in crate::builtins) fn layer_object(
@@ -29,9 +46,9 @@ pub(in crate::builtins) fn layer_object(
     if let Some(value) = extra.remove(&DeepLearningLayerOption::Description) {
         description = scalar_text(&value, function)?;
     }
-    owned_properties.push(("Type".to_string(), Value::String(type_name.to_string())));
-    owned_properties.push(("Name".to_string(), Value::String(name)));
-    owned_properties.push(("Description".to_string(), Value::String(description)));
+    owned_properties.push(("Type".to_string(), Value::string(type_name.to_string())));
+    owned_properties.push(("Name".to_string(), Value::string(name)));
+    owned_properties.push(("Description".to_string(), Value::string(description)));
     for (key, value) in extra {
         owned_properties.push((key.canonical_name().to_string(), value));
     }
@@ -98,7 +115,12 @@ pub(in crate::builtins) fn layers_from_value(
 ) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Object(_) => Ok(vec![value]),
-        Value::Cell(cell) => Ok(cell.data),
+        Value::Cell(cell) => cell
+            .data
+            .try_into_owned()
+            .map_err(|_| deep_learning_error(function, format!("{function}: shared Layers require an admitted replacement")))?
+            .try_into_unbounded_vec()
+            .map_err(|_| deep_learning_error(function, format!("{function}: admitted Layers cannot become an unclaimed vector"))),
         Value::OutputList(values) => values
             .try_into_owned()
             .map_err(|_| {
@@ -131,7 +153,7 @@ pub(in crate::builtins) fn layer_names(
                     .properties
                     .get("Name")
                     .and_then(|value| match value {
-                        Value::String(s) if !s.is_empty() => Some(s.clone()),
+                        Value::String(s) if !s.is_empty() => Some(s.to_string()),
                         _ => None,
                     })
                     .unwrap_or_else(|| format!("layer_{}", idx + 1));

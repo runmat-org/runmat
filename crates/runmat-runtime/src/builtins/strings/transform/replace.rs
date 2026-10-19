@@ -219,7 +219,8 @@ async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<V
     let spec = ReplacementSpec::from_values(&old, &new)?;
 
     match text {
-        Value::String(s) => Ok(Value::String(replace_string_scalar(s, &spec))),
+        Value::String(s) if is_missing_string(s.as_str()) => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::string(replace_string_scalar(s.as_str(), &spec))),
         Value::StringArray(sa) => replace_string_array(sa, &spec),
         Value::CharArray(ca) => replace_char_array(ca, &spec),
         Value::Cell(cell) => replace_cell_array(cell, &spec),
@@ -227,31 +228,39 @@ async fn replace_builtin(text: Value, old: Value, new: Value) -> BuiltinResult<V
     }
 }
 
-fn replace_string_scalar(text: String, spec: &ReplacementSpec) -> String {
-    if is_missing_string(&text) {
-        text
+fn replace_string_scalar(text: &str, spec: &ReplacementSpec<'_>) -> String {
+    if is_missing_string(text) {
+        text.to_owned()
     } else {
-        spec.apply(&text)
+        spec.apply(text)
     }
 }
 
-fn replace_string_array(array: StringArray, spec: &ReplacementSpec) -> BuiltinResult<Value> {
+fn replace_string_array(array: StringArray, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let mut replaced = Vec::with_capacity(data.len());
-    for entry in data {
+    let input: Vec<runmat_value::Utf8Text> = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(shared) => shared.iter().cloned().collect(),
+    };
+    for entry in input {
         if is_missing_string(&entry) {
             replaced.push(entry);
         } else {
-            replaced.push(spec.apply(&entry));
+            replaced.push(runmat_value::Utf8Text::new(spec.apply(&entry)));
         }
     }
-    let result = StringArray::new(replaced, shape).map_err(|e| {
+    let result = StringArray::from_shared_storage(
+        runmat_value::ExactArrayStorage::shared_unbounded(replaced),
+        shape,
+    )
+    .map_err(|e| {
         replace_error_with_message(format!("{BUILTIN_NAME}: {e}"), &REPLACE_ERROR_INTERNAL)
     })?;
     Ok(Value::StringArray(result))
 }
 
-fn replace_char_array(array: CharArray, spec: &ReplacementSpec) -> BuiltinResult<Value> {
+fn replace_char_array(array: CharArray, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
     let CharArray {
         data,
         shape,
@@ -293,7 +302,7 @@ fn replace_char_array(array: CharArray, spec: &ReplacementSpec) -> BuiltinResult
         })
 }
 
-fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec) -> BuiltinResult<Value> {
+fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -310,11 +319,11 @@ fn replace_cell_array(cell: CellArray, spec: &ReplacementSpec) -> BuiltinResult<
     })
 }
 
-fn replace_cell_element(value: &Value, spec: &ReplacementSpec) -> BuiltinResult<Value> {
+fn replace_cell_element(value: &Value, spec: &ReplacementSpec<'_>) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(replace_string_scalar(text.clone(), spec))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(replace_string_scalar(
-            sa.data[0].clone(),
+        Value::String(text) => Ok(Value::string(replace_string_scalar(text.as_str(), spec))),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::string(replace_string_scalar(
+            sa.data[0].as_str(),
             spec,
         ))),
         Value::CharArray(ca) if ca.rows <= 1 => replace_char_array(ca.clone(), spec),
@@ -323,7 +332,7 @@ fn replace_cell_element(value: &Value, spec: &ReplacementSpec) -> BuiltinResult<
     }
 }
 
-fn extract_pattern_list(value: &Value) -> BuiltinResult<Vec<SearchPattern>> {
+fn extract_pattern_list(value: &Value) -> BuiltinResult<Vec<SearchPattern<'_>>> {
     if matches!(value, Value::Object(_)) {
         let regex = pattern_regex(value, BUILTIN_NAME).map_err(|err| {
             replace_error_with_message(err.message().to_string(), &REPLACE_ERROR_PATTERN_TYPE)
@@ -336,45 +345,51 @@ fn extract_pattern_list(value: &Value) -> BuiltinResult<Vec<SearchPattern>> {
         .map(|items| items.into_iter().map(SearchPattern::Literal).collect())
 }
 
-fn extract_replacement_list(value: &Value) -> BuiltinResult<Vec<String>> {
+fn extract_replacement_list(value: &Value) -> BuiltinResult<Vec<std::borrow::Cow<'_, str>>> {
     extract_text_list(value, &REPLACE_ERROR_REPLACEMENT_TYPE)
 }
 
-fn extract_text_list(
-    value: &Value,
+fn extract_text_list<'a>(
+    value: &'a Value,
     type_error: &'static BuiltinErrorDescriptor,
-) -> BuiltinResult<Vec<String>> {
+) -> BuiltinResult<Vec<std::borrow::Cow<'a, str>>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![std::borrow::Cow::Borrowed(text.as_str())]),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| std::borrow::Cow::Borrowed(text.as_str()))
+            .collect()),
         Value::CharArray(array) => {
-            let CharArray {
-                data, rows, cols, ..
-            } = array.clone();
-            if rows == 0 {
+            if array.rows == 0 {
                 Ok(Vec::new())
             } else {
-                let mut entries = Vec::with_capacity(rows);
-                for row in 0..rows {
-                    entries.push(char_row_to_string_slice(&data, cols, row));
+                let mut entries = Vec::with_capacity(array.rows);
+                for row in 0..array.rows {
+                    entries.push(std::borrow::Cow::Owned(char_row_to_string_slice(
+                        &array.data,
+                        array.cols,
+                        row,
+                    )));
                 }
                 Ok(entries)
             }
         }
         Value::Cell(cell) => {
-            let CellArray { data, .. } = cell.clone();
-            let mut entries = Vec::with_capacity(data.len());
-            for element in data {
-                match &element {
-                    Value::String(text) => entries.push(text.clone()),
+            let mut entries = Vec::with_capacity(cell.data.len());
+            for element in &cell.data {
+                match element {
+                    Value::String(text) => entries.push(std::borrow::Cow::Borrowed(text.as_str())),
                     Value::StringArray(sa) if sa.data.len() == 1 => {
-                        entries.push(sa.data[0].clone());
+                        entries.push(std::borrow::Cow::Borrowed(sa.data[0].as_str()));
                     }
                     Value::CharArray(ca) if ca.rows <= 1 => {
                         if ca.rows == 0 {
-                            entries.push(String::new());
+                            entries.push(std::borrow::Cow::Borrowed(""));
                         } else {
-                            entries.push(char_row_to_string_slice(&ca.data, ca.cols, 0));
+                            entries.push(std::borrow::Cow::Owned(char_row_to_string_slice(
+                                &ca.data, ca.cols, 0,
+                            )));
                         }
                     }
                     Value::CharArray(_) => {
@@ -391,17 +406,17 @@ fn extract_text_list(
     }
 }
 
-enum SearchPattern {
-    Literal(String),
+enum SearchPattern<'a> {
+    Literal(std::borrow::Cow<'a, str>),
     Regex(Regex),
 }
 
-struct ReplacementSpec {
-    pairs: Vec<(SearchPattern, String)>,
+struct ReplacementSpec<'a> {
+    pairs: Vec<(SearchPattern<'a>, std::borrow::Cow<'a, str>)>,
 }
 
-impl ReplacementSpec {
-    fn from_values(old: &Value, new: &Value) -> BuiltinResult<Self> {
+impl<'a> ReplacementSpec<'a> {
+    fn from_values(old: &'a Value, new: &'a Value) -> BuiltinResult<Self> {
         let patterns = extract_pattern_list(old)?;
         if patterns.is_empty() {
             return Err(replace_error(&REPLACE_ERROR_EMPTY_PATTERN));
@@ -438,11 +453,11 @@ impl ReplacementSpec {
                     if pattern == replacement {
                         continue;
                     }
-                    current = current.replace(pattern, replacement);
+                    current = current.replace(pattern.as_ref(), replacement.as_ref());
                 }
                 SearchPattern::Regex(pattern) => {
                     current = pattern
-                        .replace_all(&current, replacement.as_str())
+                        .replace_all(&current, replacement.as_ref())
                         .to_string();
                 }
             }

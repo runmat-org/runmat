@@ -336,8 +336,8 @@ pub(crate) fn shape_from_value(value: &Value, label: &str) -> Result<Vec<usize>,
         Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
-        Value::CharArray(ca) => Ok(ca.shape.clone()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
+        Value::CharArray(ca) => Ok(ca.shape().to_vec()),
+        Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::Num(_)
         | Value::Int(_)
         | Value::Bool(_)

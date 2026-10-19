@@ -15,7 +15,7 @@ pub(super) fn matfile_object(
 
 fn properties_struct(source: String, writable: bool) -> Value {
     let mut st = StructValue::new();
-    st.insert(SOURCE_FIELD, Value::String(source));
+    st.insert(SOURCE_FIELD, Value::string(source));
     st.insert(WRITABLE_FIELD, Value::Bool(writable));
     Value::Struct(st)
 }
@@ -187,9 +187,11 @@ pub(super) fn replace_or_append(entries: &mut Vec<(String, Value)>, field: Strin
 
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
-        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => Some(data[0].clone()),
+        Value::StringArray(StringArray { data, .. }) if data.len() == 1 => {
+            Some(data[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

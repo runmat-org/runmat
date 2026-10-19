@@ -114,7 +114,7 @@ pub(in crate::builtins::fea) fn string_vec_from_value(
             .iter()
             .map(|item| scalar_string(item, builtin, &ERROR_INPUT))
             .collect(),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array.data.iter().map(ToString::to_string).collect()),
         Value::String(_) | Value::CharArray(_) => {
             Ok(vec![scalar_string(value, builtin, &ERROR_INPUT)?])
         }

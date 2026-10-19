@@ -380,7 +380,7 @@ async fn load_scalar_member_with_context(
                     let values: Vec<Value> = mexn
                         .stack
                         .iter()
-                        .map(|s| Value::String(s.clone()))
+                        .map(|s| Value::string(s.clone()))
                         .collect();
                     let rows = values.len();
                     let cell = runmat_value::CellArray::new(values, rows, 1)

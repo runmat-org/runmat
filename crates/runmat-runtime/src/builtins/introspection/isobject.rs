@@ -90,7 +90,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             })),
         ];
 

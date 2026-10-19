@@ -1,9 +1,21 @@
 use super::super::*;
 use super::text::{ShapeCopy, TextCopy};
+use crate::context::host_allocation::{
+    HostAllocationError, HostAllocationPlan, HostAllocationPolicy, HostAllocationReceipt,
+};
+use crate::context::RuntimeContext;
+use runmat_value::{Utf8Text, Utf8TextExactCopy};
+use std::num::NonZeroUsize;
 
 pub(in crate::execution::value_codec::decode::machine) enum TextValueTask<'a> {
     String {
         text: TextCopy<'a>,
+        path: String,
+    },
+    ManagedString {
+        text: Option<Utf8TextExactCopy<'a>>,
+        receipt: HostAllocationReceipt,
+        runtime: &'a RuntimeContext,
         path: String,
     },
     Character {
@@ -22,11 +34,56 @@ pub(in crate::execution::value_codec::decode::machine) enum TextValueTask<'a> {
 }
 
 impl<'a> TextValueTask<'a> {
-    pub(super) fn string(source: &'a str, path: String) -> Self {
-        Self::String {
-            text: TextCopy::new(source),
-            path,
+    pub(super) fn string(
+        source: &'a str,
+        path: String,
+        runtime: Option<&'a RuntimeContext>,
+    ) -> Result<Self, ValueCodecError> {
+        let policy = HostAllocationReceipt::policy(runtime)
+            .map_err(|error| ValueCodecError::allocation(&path, error))?;
+        if policy == HostAllocationPolicy::Unbounded {
+            return Ok(Self::String {
+                text: TextCopy::new(source),
+                path,
+            });
         }
+        let runtime = runtime.expect("managed policy has a runtime");
+        let raw = Utf8Text::requested_bytes_for_capacity(source.len()).map_err(|error| {
+            ValueCodecError::allocation(&path, HostAllocationError::Numeric(error))
+        })?;
+        let raw = u64::try_from(raw)
+            .map_err(|_| ValueCodecError::allocation(&path, HostAllocationError::Overflow))?;
+        let retained =
+            HostAllocationPlan::retained_exact_output_bytes(raw, usize::from(!source.is_empty()))
+                .map_err(|error| ValueCodecError::allocation(&path, error))?;
+        let plan = HostAllocationPlan::new(0, retained)
+            .map_err(|error| ValueCodecError::allocation(&path, error))?;
+        let receipt = HostAllocationReceipt::admit(Some(runtime), plan)
+            .map_err(|error| ValueCodecError::allocation(&path, error))?
+            .ok_or_else(|| {
+                ValueCodecError::allocation(&path, HostAllocationError::StaleAuthority)
+            })?;
+        let permit = receipt
+            .output_permit(runtime)
+            .map_err(|error| ValueCodecError::allocation(&path, error))?;
+        let text = Utf8Text::try_begin_copy_exact(source, &permit).map_err(|error| {
+            ValueCodecError::allocation(
+                &path,
+                receipt
+                    .checkpoint(runtime)
+                    .err()
+                    .unwrap_or(HostAllocationError::Numeric(error)),
+            )
+        })?;
+        receipt
+            .checkpoint(runtime)
+            .map_err(|error| ValueCodecError::allocation(&path, error))?;
+        Ok(Self::ManagedString {
+            text: Some(text),
+            receipt,
+            runtime,
+            path,
+        })
     }
 
     pub(super) fn character(shape: &'a [u64], source: &'a [u32], path: String) -> Self {
@@ -59,7 +116,32 @@ impl<'a> TextValueTask<'a> {
                     return Ok((completed, None));
                 }
                 let text = std::mem::replace(text, TextCopy::new("")).finish();
-                Ok((completed, Some(Value::String(text))))
+                Ok((completed, Some(Value::string(text))))
+            }
+            Self::ManagedString {
+                text,
+                receipt,
+                runtime,
+                path,
+            } => {
+                let copy = text.as_mut().expect("active managed UTF-8 copy");
+                receipt
+                    .checkpoint(runtime)
+                    .map_err(|error| ValueCodecError::allocation(path, error))?;
+                let completed =
+                    copy.advance(NonZeroUsize::new(maximum_work).expect("decode work is nonzero"));
+                receipt
+                    .checkpoint(runtime)
+                    .map_err(|error| ValueCodecError::allocation(path, error))?;
+                if !copy.is_complete() {
+                    return Ok((completed.max(1), None));
+                }
+                let text = text
+                    .take()
+                    .expect("completed managed UTF-8 copy")
+                    .try_finish()
+                    .unwrap_or_else(|_| unreachable!("completed UTF-8 copy"));
+                Ok((completed.max(1), Some(Value::string(text))))
             }
             Self::Character {
                 shape,
@@ -84,19 +166,9 @@ impl<'a> TextValueTask<'a> {
                 }
                 let shape = std::mem::replace(shape, ShapeCopy::new(&[], String::new())).finish();
                 let chars = std::mem::take(chars);
-                if shape.is_empty() {
-                    let value = CharArray::new_with_shape(chars, shape)
-                        .map(Value::CharArray)
-                        .map_err(|error| ValueCodecError::invalid(path, error))?;
-                    return Ok((count.max(1), Some(value)));
-                }
-                let (rows, cols) = rows_cols(&shape);
-                let value = Value::CharArray(CharArray {
-                    data: chars,
-                    shape,
-                    rows,
-                    cols,
-                });
+                let value = CharArray::new_with_shape(chars, shape)
+                    .map(Value::CharArray)
+                    .map_err(|error| ValueCodecError::invalid(path, error))?;
                 Ok((count.max(1), Some(value)))
             }
             Self::StringArray {
@@ -104,7 +176,7 @@ impl<'a> TextValueTask<'a> {
                 source,
                 values,
                 current,
-                path: _,
+                path,
             } => {
                 if !shape.is_complete() {
                     let completed = shape.advance(maximum_work)?;
@@ -114,13 +186,10 @@ impl<'a> TextValueTask<'a> {
                     let shape =
                         std::mem::replace(shape, ShapeCopy::new(&[], String::new())).finish();
                     let values = std::mem::take(values);
-                    let (rows, cols) = rows_cols(&shape);
-                    let value = Value::StringArray(StringArray {
-                        data: values,
-                        shape,
-                        rows,
-                        cols,
-                    });
+                    let value = Value::StringArray(
+                        StringArray::new(values, shape)
+                            .map_err(|error| ValueCodecError::invalid(path, error))?,
+                    );
                     return Ok((1, Some(value)));
                 }
                 let copy = current.get_or_insert_with(|| TextCopy::new(&source[values.len()]));
@@ -136,16 +205,9 @@ impl<'a> TextValueTask<'a> {
     pub(super) fn path(&self) -> &str {
         match self {
             Self::String { path, .. }
+            | Self::ManagedString { path, .. }
             | Self::Character { path, .. }
             | Self::StringArray { path, .. } => path,
         }
-    }
-}
-
-fn rows_cols(shape: &[usize]) -> (usize, usize) {
-    match shape {
-        [] => (0, 0),
-        [length] => (1, *length),
-        [rows, columns, ..] => (*rows, *columns),
     }
 }

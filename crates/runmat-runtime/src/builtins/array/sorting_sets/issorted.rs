@@ -370,7 +370,7 @@ async fn issorted_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResul
         }
         other => {
             let input = normalize_host_input(other)?;
-            let args = IssortedArgs::parse(&rest, &input.shape())?;
+            let args = IssortedArgs::parse(&rest, input.shape())?;
             (input, args)
         }
     };
@@ -460,11 +460,11 @@ enum InputArray {
 }
 
 impl InputArray {
-    fn shape(&self) -> Vec<usize> {
+    fn shape(&self) -> &[usize] {
         match self {
-            InputArray::Real(t) => t.shape().to_vec(),
-            InputArray::Complex(t) => t.shape().to_vec(),
-            InputArray::String(sa) => sa.shape.clone(),
+            InputArray::Real(t) => t.shape(),
+            InputArray::Complex(t) => t.shape(),
+            InputArray::String(sa) => sa.shape.as_slice(),
         }
     }
 }
@@ -653,7 +653,7 @@ fn normalize_host_input(value: Value) -> crate::BuiltinResult<InputArray> {
         Value::StringArray(sa) => Ok(InputArray::String(sa)),
         Value::String(s) => {
             let array =
-                StringArray::new(vec![s], vec![1, 1])
+                StringArray::from_texts_unbounded(vec![s], vec![1, 1])
                     .map_err(|e| issorted_internal(format!("issorted: {e}")))?;
             Ok(InputArray::String(array))
         }

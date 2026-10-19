@@ -167,7 +167,7 @@ fn renderer_info() -> Value {
     st.insert("SupportsAlignVertexCenters", Value::Bool(true));
     st.insert("Software", Value::Bool(false));
     st.insert("MaxTextureSize", Value::Num(16384.0));
-    st.insert("Extensions", Value::String(String::new()));
+    st.insert("Extensions", Value::string(String::new()));
     Value::Struct(st)
 }
 

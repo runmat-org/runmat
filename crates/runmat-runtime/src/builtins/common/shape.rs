@@ -72,7 +72,7 @@ pub async fn value_dimensions(value: &Value) -> Result<Vec<usize>, RuntimeError>
         Value::LogicalArray(la) => normalize_shape(&la.shape),
         Value::StringArray(sa) => normalize_shape(&sa.shape),
         Value::SymbolicArray(sa) => normalize_shape(&sa.shape),
-        Value::CharArray(ca) => ca.shape.clone(),
+        Value::CharArray(ca) => ca.shape().to_vec(),
         Value::Cell(ca) => normalize_shape(&ca.shape),
         Value::StructArray(array) => normalize_shape(array.shape()),
         Value::ObjectArray(array) => normalize_shape(array.shape()),

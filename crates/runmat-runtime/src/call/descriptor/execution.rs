@@ -103,24 +103,67 @@ fn captured_resolved(
         Ok(arguments) => arguments,
         Err(error) => return Box::pin(async move { Err(error) }),
     };
-    // The unbound semantic/builtin/external port still requires a contiguous
-    // Value slice. Materialization is an explicit legacy boundary, denied
-    // before any effects when its physical backing is not finite-admitted.
-    let flattened = match arguments.materialize_legacy_contiguous(runtime) {
-        Ok(flattened) => flattened,
-        Err(error) => return Box::pin(async move { Err(error) }),
+    let policy = match crate::context::host_allocation::HostAllocationReceipt::policy(runtime) {
+        Ok(policy) => policy,
+        Err(source) => {
+            return Box::pin(async move {
+                Err(
+                    crate::context::host_allocation::host_allocation_runtime_error(
+                        runtime,
+                        "RunMat:Call:Arguments",
+                        "captured callable policy unavailable",
+                        source,
+                    ),
+                )
+            })
+        }
     };
+    if policy == crate::context::host_allocation::HostAllocationPolicy::Unbounded {
+        let flattened = match arguments.materialize_legacy_contiguous(runtime) {
+            Ok(flattened) => flattened,
+            Err(error) => return Box::pin(async move { Err(error) }),
+        };
+        return Box::pin(async move {
+            let _source_roots = arguments;
+            resolved_execution::execute(
+                runtime,
+                identity,
+                flattened,
+                requested_outputs,
+                metadata,
+                fallback_policy,
+            )
+            .await
+        });
+    }
     Box::pin(async move {
-        let _source_roots = arguments;
-        resolved_execution::execute(
-            runtime,
-            identity,
-            flattened,
-            requested_outputs,
-            metadata,
+        if let runmat_types::CallableIdentity::BoundFunction(function) = identity {
+            let Some(result) = crate::user_functions::try_call_rooted_semantic_function_in_context(
+                runtime,
+                function.0,
+                arguments,
+                requested_outputs,
+            )
+            .await
+            else {
+                return Err(function_unavailable_error(function.0, &metadata));
+            };
+            return result;
+        }
+        let request = crate::user_functions::CallableRequest::rooted_resolved(
+            identity.clone(),
             fallback_policy,
+            arguments,
+            requested_outputs,
         )
-        .await
+        .with_function_input_callsite(metadata.function_input_callsite.clone())
+        .with_selected_runtime(runtime);
+        match crate::user_functions::try_call_semantic_descriptor_owned(request).await {
+            std::ops::ControlFlow::Break(result) => result,
+            std::ops::ControlFlow::Continue(_) => {
+                Err(super::undefined_identity_error(&identity, &metadata))
+            }
+        }
     })
 }
 
@@ -166,6 +209,12 @@ pub(super) fn execute(
             fallback_policy,
         ),
         CallableTarget::FevalForward(value) => forwarded(runtime, value, args, requested_outputs),
+        CallableTarget::RetainedFevalForward(_) => Box::pin(async move {
+            Err(crate::runtime_error::semantic_error(
+                "RunMat:Callable:RepeatableOwner",
+                "retained forwarded target requires its repeatable root owner",
+            ))
+        }),
     };
     selected.map_ok(move |value| {
         if requested_outputs == 0 {
@@ -224,6 +273,12 @@ pub(super) fn try_execute(
         CallableTarget::FevalForward(value) => {
             try_forwarded(runtime, value, args, requested_outputs)
         }
+        CallableTarget::RetainedFevalForward(_) => Box::pin(async move {
+            Err(crate::runtime_error::semantic_error(
+                "RunMat:Callable:RepeatableOwner",
+                "retained forwarded target requires its repeatable root owner",
+            ))
+        }),
     };
     selected.map_ok(move |value| {
         value.map(|value| {

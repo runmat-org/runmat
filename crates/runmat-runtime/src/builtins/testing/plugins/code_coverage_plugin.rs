@@ -39,7 +39,7 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         match &args[index] {
             Value::String(folder) if !folder.trim().is_empty() => {
-                folders.push(folder.clone());
+                folders.push(folder.as_str().to_owned());
             }
             Value::CharArray(folder) => {
                 let folder = folder.row_string().ok_or_else(|| {
@@ -56,7 +56,7 @@ fn code_coverage_plugin_for_folder(args: Vec<Value>) -> BuiltinResult<Value> {
                         .data
                         .iter()
                         .filter(|folder| !folder.trim().is_empty())
-                        .cloned(),
+                        .map(|folder| folder.as_str().to_owned()),
                 );
             }
             _ => {

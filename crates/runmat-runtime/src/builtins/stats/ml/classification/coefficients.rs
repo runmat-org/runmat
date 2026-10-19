@@ -23,7 +23,7 @@ pub(super) fn coeff_value(model: &PreparedModel) -> BuiltinResult<Value> {
             let mut st = StructValue::new();
             st.insert(
                 "type",
-                Value::String(model.discriminant.property_name().to_string()),
+                Value::string(model.discriminant.property_name().to_string()),
             );
             st.insert("name1", labels_value(&model.classes, model.kind, &[row])?);
             st.insert("name2", labels_value(&model.classes, model.kind, &[col])?);

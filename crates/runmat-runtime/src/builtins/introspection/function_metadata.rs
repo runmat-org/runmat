@@ -24,9 +24,9 @@ impl FunctionHandleKind {
 
 fn metadata_struct(function: String, kind: FunctionHandleKind, file: String) -> Value {
     let mut info = StructValue::new();
-    info.insert("function", Value::String(function));
-    info.insert("type", Value::String(kind.as_str().to_string()));
-    info.insert("file", Value::String(file));
+    info.insert("function", Value::string(function));
+    info.insert("type", Value::string(kind.as_str().to_string()));
+    info.insert("file", Value::string(file));
     Value::Struct(info)
 }
 
@@ -49,7 +49,7 @@ pub(crate) fn dispatch_functions(handle: Value) -> crate::BuiltinResult<Value> {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
         | Value::MethodFunctionHandle(name) => Ok(metadata_struct(
-            name.into_name(),
+            name.into_name_unbounded(),
             FunctionHandleKind::Simple,
             String::new(),
         )),
@@ -176,7 +176,7 @@ mod tests {
                 binding: Some(runmat_value::BoundFunctionBinding::unavailable(1)),
                 source_role: runmat_types::FunctionSourceRole::Anonymous,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         )))
         .expect("functions succeeds");
@@ -280,7 +280,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Anonymous,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         )))
         .expect("anonymous metadata");
@@ -295,7 +295,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         )))
         .expect("unknown metadata");

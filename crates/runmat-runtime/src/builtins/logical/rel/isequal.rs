@@ -13,7 +13,6 @@ use runmat_value::{
 };
 use runmat_value::{IntValue, SparseTensor};
 
-use crate::builtins::common::gpu_helpers;
 use crate::builtins::common::shape::array_shapes_equal;
 use crate::{build_runtime_error, RuntimeError};
 
@@ -91,40 +90,19 @@ async fn gather_value(
     internal_error: &'static BuiltinErrorDescriptor,
 ) -> crate::BuiltinResult<Value> {
     match value {
-        Value::Cell(mut cell) => {
-            for item in &mut cell.data {
-                *item = Box::pin(gather_value(item.clone(), builtin_name, internal_error)).await?;
-            }
-            Ok(Value::Cell(cell))
-        }
-        Value::Struct(mut record) => {
-            for item in record.fields.values_mut() {
-                *item = Box::pin(gather_value(item.clone(), builtin_name, internal_error)).await?;
-            }
-            Ok(Value::Struct(record))
-        }
-        Value::StructArray(records) => {
-            let mapped = records
-                .try_map_values_async(|value| {
-                    Box::pin(gather_value(value, builtin_name, internal_error))
-                })
-                .await?;
-            Ok(Value::StructArray(mapped))
-        }
-        Value::GpuTensor(handle) => {
-            let owner = gpu_helpers::exact_provider_for_handle(&handle).ok_or_else(|| {
-                equality_error_with_detail(
-                    builtin_name,
-                    internal_error,
-                    "no acceleration provider owns the resident input",
-                )
-            })?;
-            gpu_helpers::download_value_preserving_residency_async(owner, &handle)
+        Value::Cell(_) | Value::Struct(_) | Value::GpuTensor(_) => {
+            crate::dispatcher::gather_if_needed_owned_async(value, None)
                 .await
-                .map_err(|err| {
-                    equality_error_with_detail(builtin_name, internal_error, err.to_string())
+                .map_err(|error| {
+                    equality_error_with_detail(builtin_name, internal_error, error.to_string())
                 })
         }
+        Value::StructArray(records) => records
+            .try_map_values_async(|value| {
+                Box::pin(gather_value(value, builtin_name, internal_error))
+            })
+            .await
+            .map(Value::StructArray),
         other => Ok(other),
     }
 }
@@ -228,7 +206,7 @@ impl RealNumericView<'_> {
             Self::Scalar(_) => vec![1, 1],
             Self::Tensor(value) => value.shape().to_vec(),
             Self::Logical(value) => value.shape.to_vec(),
-            Self::Char(value) => vec![value.rows, value.cols],
+            Self::Char(value) => value.shape.as_slice().to_vec(),
             Self::Sparse(value) => vec![value.rows, value.cols],
         }
     }

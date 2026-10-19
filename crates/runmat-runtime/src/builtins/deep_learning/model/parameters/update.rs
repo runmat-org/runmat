@@ -10,7 +10,11 @@ pub(in crate::builtins::deep_learning) struct ParameterUpdate {
     pub value: Tensor,
 }
 
-fn install(network: &mut ObjectInstance, replacements: Vec<(ParameterKey, Option<Value>)>) {
+fn install(
+    network: &mut ObjectInstance,
+    replacements: Vec<(ParameterKey, Option<Value>)>,
+    function: &'static str,
+) -> BuiltinResult<()> {
     let Value::Cell(layers) = network
         .properties
         .get_mut("Layers")
@@ -18,8 +22,10 @@ fn install(network: &mut ObjectInstance, replacements: Vec<(ParameterKey, Option
     else {
         unreachable!("parameter view admitted Layers cell")
     };
+    let layer_values =
+        crate::builtins::deep_learning::layer_helpers::mutable_cell_values(layers, function)?;
     for (key, value) in replacements {
-        let Value::Object(layer) = &mut layers.data[key.layer_index] else {
+        let Value::Object(layer) = &mut layer_values[key.layer_index] else {
             unreachable!("parameter view admitted layer object")
         };
         match value {
@@ -31,6 +37,7 @@ fn install(network: &mut ObjectInstance, replacements: Vec<(ParameterKey, Option
             }
         }
     }
+    Ok(())
 }
 
 /// Atomic selected-role publication for the native trainer. Full topology,
@@ -123,7 +130,7 @@ pub(in crate::builtins::deep_learning) fn apply_updates(
             format!("{function}: parameter update key differs from network Layers"),
         ));
     }
-    install(&mut network, replacements);
+    install(&mut network, replacements, function)?;
     network
         .properties
         .insert("Initialized".into(), Value::Bool(initialized));
@@ -205,7 +212,7 @@ pub(in crate::builtins) fn apply(
             Ok((parameter.key, replacement))
         })
         .collect::<BuiltinResult<Vec<_>>>()?;
-    install(&mut network, replacements);
+    install(&mut network, replacements, function)?;
     network
         .properties
         .insert("Initialized".into(), Value::Bool(initialized));

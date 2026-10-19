@@ -77,9 +77,9 @@ pub(super) async fn parse_animatedline_args(
                 } else {
                     value
                 };
-                style_tokens.push(Value::String(key.clone()));
+                style_tokens.push(Value::string(key.clone()));
                 style_tokens.push(value.clone());
-                property_pairs.push(Value::String(key));
+                property_pairs.push(Value::string(key));
                 property_pairs.push(value);
             }
         }

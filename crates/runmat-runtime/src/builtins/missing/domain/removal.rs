@@ -276,13 +276,16 @@ pub(super) fn remove_missing_string_array(
     let rows = array.rows();
     let cols = array.cols();
     remove_missing_column_major(
-        array.data,
+        match array.data.try_into_owned() {
+            Ok(values) => values.into_iter().collect(),
+            Err(shared) => shared.iter().cloned().collect(),
+        },
         rows,
         cols,
         options,
         |text| is_missing_text(text),
         |data, shape| {
-            StringArray::new(data, shape)
+            StringArray::from_texts_unbounded(data, shape)
                 .map(Value::StringArray)
                 .map_err(internal_error)
         },
@@ -325,7 +328,11 @@ pub(super) fn remove_missing_cell(
     if rows == 1 || cols == 1 {
         let mut out = Vec::new();
         let mut removed = Vec::with_capacity(cell.data.len());
-        for value in cell.data {
+        let data = match cell.data.try_into_owned() {
+            Ok(values) => values.into_iter().collect::<Vec<_>>(),
+            Err(shared) => shared.iter().cloned().collect::<Vec<_>>(),
+        };
+        for value in data {
             if any_missing(&value).unwrap_or(false) {
                 removed.push(1);
             } else {

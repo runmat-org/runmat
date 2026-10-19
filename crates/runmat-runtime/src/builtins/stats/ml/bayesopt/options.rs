@@ -146,7 +146,7 @@ impl BayesoptOptions {
         raw_options.insert("NumSeedPoints", Value::Num(num_seed_points as f64));
         raw_options.insert(
             "AcquisitionFunctionName",
-            Value::String(acquisition.public_name().to_string()),
+            Value::string(acquisition.public_name().to_string()),
         );
         raw_options.insert("ExplorationRatio", Value::Num(exploration_ratio));
         raw_options.insert("IsObjectiveDeterministic", Value::Bool(deterministic));

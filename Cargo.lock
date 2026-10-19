@@ -6794,7 +6794,9 @@ dependencies = [
  "runmat-package-cache",
  "runmat-python",
  "runmat-runtime",
+ "runmat-test",
  "runmat-types",
+ "same-file",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -6966,6 +6968,7 @@ dependencies = [
  "runmat-execution",
  "runmat-package",
  "runmat-process-host",
+ "runmat-test",
  "runmat-types",
  "serde",
  "serde_json",
@@ -7913,8 +7916,10 @@ name = "runmat-test-runner-native"
 version = "0.6.2"
 dependencies = [
  "log",
+ "runmat-aot",
  "runmat-core",
  "runmat-execution",
+ "runmat-execution-artifact",
  "runmat-package",
  "runmat-process-host",
  "runmat-test",

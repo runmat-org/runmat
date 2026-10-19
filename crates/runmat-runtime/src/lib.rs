@@ -735,7 +735,7 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
 pub(crate) async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
     match e {
         Value::MException(me) => Err(runtime_error::error_from_exception(me)),
-        Value::String(s) => Err(build_runtime_error(s).build()),
+        Value::String(s) => Err(build_runtime_error(s.as_str()).build()),
         other => Err(build_runtime_error(format!("RunMat:error: {other:?}")).build()),
     }
 }
@@ -812,7 +812,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::FunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                crate::user_functions::bound_function_handle(name.into_name(), function)
+                crate::user_functions::bound_function_handle(name.into_name_unbounded(), function)
             } else {
                 Value::FunctionHandle(name)
             }
@@ -823,7 +823,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
                     crate::user_functions::resolve_semantic_function_by_name(&name)
                 {
                     return crate::user_functions::bound_function_handle(
-                        name.into_name(),
+                        name.into_name_unbounded(),
                         function,
                     );
                 }
@@ -833,7 +833,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
         Value::MethodFunctionHandle(name) => {
             if let Some(function) = crate::user_functions::resolve_semantic_function_by_name(&name)
             {
-                crate::user_functions::bound_function_handle(name.into_name(), function)
+                crate::user_functions::bound_function_handle(name.into_name_unbounded(), function)
             } else {
                 Value::MethodFunctionHandle(name)
             }
@@ -862,7 +862,7 @@ pub(crate) fn canonicalize_callback_handle_for_semantic_resolution(callback: Val
 }
 
 pub(crate) async fn make_anon_builtin(params: String, body: String) -> crate::BuiltinResult<Value> {
-    Ok(Value::String(format!("@anon({params}) {body}")))
+    Ok(Value::string(format!("@anon({params}) {body}")))
 }
 
 pub async fn create_class_object(class_name: String) -> crate::BuiltinResult<Value> {
@@ -1819,7 +1819,7 @@ mod tests {
                 binding: Some(binding),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         ));
 
@@ -1978,7 +1978,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::Num(9.0)],
+                captures: vec![Value::Num(9.0)].into(),
             },
         ));
 
@@ -2004,7 +2004,7 @@ mod tests {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         ));
 
@@ -2671,7 +2671,7 @@ mod tests {
                         binding: None,
                         source_role: runmat_types::FunctionSourceRole::Unknown,
                         source_file: None,
-                        captures: Vec::new(),
+                        captures: Vec::new().into(),
                     }
                 ))
             )
@@ -3131,7 +3131,8 @@ mod tests {
                     base.clone(),
                     Value::String("deal".to_string()),
                     Value::Num(9.0),
-                ],
+                ]
+                .into(),
             },
         ));
         let result = block_on(feval_builtin(closure, vec![Value::Num(10.0)]))
@@ -3169,7 +3170,8 @@ mod tests {
                     base.clone(),
                     Value::String("  deal  ".to_string()),
                     Value::Num(9.0),
-                ],
+                ]
+                .into(),
             },
         ));
         let result = block_on(feval_builtin(closure, vec![Value::Num(10.0)]))
@@ -3201,7 +3203,8 @@ mod tests {
                 captures: vec![
                     Value::Object(runmat_value::ObjectInstance::new("Point".to_string())),
                     Value::Num(1.0),
-                ],
+                ]
+                .into(),
             },
         ));
         let err = block_on(feval_builtin(closure, Vec::new()))
@@ -3766,7 +3769,7 @@ mod tests {
                     binding: None,
                     source_role: runmat_types::FunctionSourceRole::Unknown,
                     source_file: None,
-                    captures: vec![Value::Num(9.0)],
+                    captures: vec![Value::Num(9.0)].into(),
                 },
             ));
             let listener = block_on(addlistener_builtin(target, "Changed".to_string(), callback))
@@ -4095,7 +4098,7 @@ mod tests {
                 binding: Some(runmat_value::BoundFunctionBinding::unavailable(9044)),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::Num(1.0)],
+                captures: vec![Value::Num(1.0)].into(),
             },
         ));
 

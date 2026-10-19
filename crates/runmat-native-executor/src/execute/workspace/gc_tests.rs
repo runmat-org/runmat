@@ -16,6 +16,7 @@ fn workspace_for_context(
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,
         id: ProgramFunctionId(0),
+        mir_body_digest: runmat_execution::Digest::sha256(b"fixture:native-gc-workspace"),
         source: ProgramSourceId(0),
         name: "gc_workspace".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,
@@ -142,6 +143,9 @@ fn stale_service_does_not_retain_the_canonical_projection_after_state_drop() {
             inherited_storage_bindings: Vec::new(),
             creates_lexical_environment: false,
             id: ProgramFunctionId(0),
+            mir_body_digest: runmat_execution::Digest::sha256(
+                b"fixture:native-gc-workspace-canonical",
+            ),
             source: ProgramSourceId(0),
             name: "gc_workspace".into(),
             source_role: runmat_types::FunctionSourceRole::Unknown,

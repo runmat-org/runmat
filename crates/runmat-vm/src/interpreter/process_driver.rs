@@ -479,7 +479,7 @@ impl ProcessDriverHandle {
         M: FnOnce() -> F,
     {
         let scope = scope.prepare_future::<F>()?;
-        self.enqueue_typed_in_context(context, 0, move || scope.try_scope_with(make_future))
+        self.enqueue_typed_in_context(context, 0, move || Ok(scope.defer_result(make_future)))
     }
 
     fn enqueue_typed_unbounded<T: 'static>(
@@ -544,7 +544,7 @@ impl ProcessDriverHandle {
         M: FnOnce() -> F,
     {
         let scope = scope.prepare_future::<F>()?;
-        self.enqueue_typed_in_context(context, 0, move || scope.try_scope_with(make_future))
+        self.enqueue_typed_in_context(context, 0, move || Ok(scope.defer_result(make_future)))
     }
 
     fn enqueue_typed_in_context<T, F, M>(

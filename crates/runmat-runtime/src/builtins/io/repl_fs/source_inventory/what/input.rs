@@ -20,8 +20,8 @@ pub(super) fn folder(args: &[Value]) -> BuiltinResult<PathBuf> {
 
 fn path(value: &Value) -> BuiltinResult<PathBuf> {
     let text = match value {
-        Value::String(text) => text.clone(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
+        Value::String(text) => text.as_str().to_owned(),
+        Value::StringArray(array) if array.data.len() == 1 => array.data[0].as_str().to_owned(),
         Value::CharArray(chars)
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>

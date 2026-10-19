@@ -93,19 +93,19 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
 fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Value> {
     let mut used = exclusions.into_iter().collect::<HashSet<_>>();
     match value {
-        Value::String(text) => Ok(Value::String(unique_name(&text, &mut used))),
+        Value::String(text) => Ok(Value::string(unique_name(&text, &mut used))),
         Value::StringArray(array) => {
             let StringArray { data, shape, .. } = array;
             let out = data
                 .iter()
-                .map(|text| unique_name(text, &mut used))
+                .map(|text| unique_name(text.as_str(), &mut used))
                 .collect::<Vec<_>>();
-            StringArray::new(out, shape)
+            StringArray::new(out, shape.to_vec())
                 .map(Value::StringArray)
                 .map_err(|err| error(&ERROR_INTERNAL, format!("genvarname: {err}")))
         }
         Value::CharArray(chars) if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) => {
-            let text = chars.data.iter().collect::<String>();
+            let text = chars.data.iter().copied().collect::<String>();
             Ok(Value::CharArray(CharArray::new_row(&unique_name(
                 &text, &mut used,
             ))))
@@ -115,7 +115,7 @@ fn genvarname_value(value: Value, exclusions: Vec<String>) -> BuiltinResult<Valu
             "genvarname: character array input must be a character vector; use a cell array for multiple names",
         )),
         Value::Cell(cell) => {
-            let shape = cell.shape.clone();
+            let shape = cell.shape().to_vec();
             let data = cell.into_column_major().map_err(|err| error(&ERROR_INTERNAL, err))?;
             let mut out = Vec::with_capacity(data.len());
             for value in &data {
@@ -143,12 +143,16 @@ enum TextListContext {
 
 fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(vec![chars.data.iter().collect::<String>()])
+            Ok(vec![chars.data.iter().copied().collect::<String>()])
         }
         Value::CharArray(_) => Err(error(
             &ERROR_INVALID_INPUT,
@@ -168,12 +172,12 @@ fn text_list(value: &Value, context: TextListContext) -> BuiltinResult<Vec<Strin
 
 fn text_scalar(value: &Value, context: TextListContext) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         Value::CharArray(chars)
             if chars.rows <= 1 && chars.shape.iter().skip(2).all(|dimension| *dimension == 1) =>
         {
-            Ok(chars.data.iter().collect())
+            Ok(chars.data.iter().copied().collect())
         }
         _ => {
             let message = match context {

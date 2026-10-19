@@ -51,12 +51,15 @@ pub(super) fn ensure_registered() {
             );
         }
 
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: DELAUNAY_TRI_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            DELAUNAY_TRI_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: DELAUNAY_TRI_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }

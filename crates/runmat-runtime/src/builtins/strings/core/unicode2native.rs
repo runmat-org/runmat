@@ -321,11 +321,13 @@ fn encode_utf32(text: &str, little_endian: bool, bom: bool) -> BuiltinResult<Vec
     Ok(bytes)
 }
 
-fn value_to_text_scalar(value: &Value) -> BuiltinResult<String> {
+fn value_to_text_scalar(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => Ok(char_row_or_empty(array)),
+        Value::CharArray(array) if array.rows <= 1 => {
+            Ok(std::borrow::Cow::Owned(char_row_or_empty(array)))
+        }
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: character input must be a row vector",
             &UNICODE2NATIVE_ERROR_INVALID_INPUT,
@@ -334,11 +336,13 @@ fn value_to_text_scalar(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn value_to_encoding_name(value: &Value) -> BuiltinResult<String> {
+fn value_to_encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
         Value::StringArray(array) => string_array_scalar(array),
-        Value::CharArray(array) if array.rows <= 1 => Ok(char_row_or_empty(array)),
+        Value::CharArray(array) if array.rows <= 1 => {
+            Ok(std::borrow::Cow::Owned(char_row_or_empty(array)))
+        }
         Value::CharArray(_) => Err(unicode2native_error_with_message(
             "unicode2native: encoding must be a character row vector",
             &UNICODE2NATIVE_ERROR_INVALID_ENCODING,
@@ -350,9 +354,9 @@ fn value_to_encoding_name(value: &Value) -> BuiltinResult<String> {
     }
 }
 
-fn string_array_scalar(array: &StringArray) -> BuiltinResult<String> {
+fn string_array_scalar(array: &StringArray) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     if array.data.len() == 1 {
-        Ok(array.data[0].clone())
+        Ok(std::borrow::Cow::Borrowed(array.data[0].as_str()))
     } else {
         Err(unicode2native_error_with_message(
             "unicode2native: string input must be scalar",

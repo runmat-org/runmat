@@ -30,6 +30,36 @@ pub struct RootedValues {
     _roots: RetainedValueRoots,
 }
 
+/// Consuming traversal of one rooted argument owner. The physical collection
+/// (and any exact claim) drops before its root lease, including partial
+/// iteration and early failure.
+#[derive(Debug)]
+pub struct RootedValuesIntoIter {
+    values: runmat_value::OutputListIntoIter,
+    _roots: RetainedValueRoots,
+}
+
+impl Iterator for RootedValuesIntoIter {
+    type Item = Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.values.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.values.size_hint()
+    }
+}
+
+impl DoubleEndedIterator for RootedValuesIntoIter {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.values.next_back()
+    }
+}
+
+impl ExactSizeIterator for RootedValuesIntoIter {}
+impl std::iter::FusedIterator for RootedValuesIntoIter {}
+
 /// A root-only lease for values already owned by a host result carrier. It
 /// traces managed identities without cloning tensor or device payloads.
 #[derive(Clone, Debug)]
@@ -288,6 +318,225 @@ impl RootedValuesBuilder {
 }
 
 impl RootedValues {
+    /// Prepend one already-owned metadata value while preserving every input
+    /// Value and the original exact collection claim until the replacement
+    /// collection is fully admitted. No payload is cloned.
+    pub fn prepend_in_context(
+        self,
+        prefix: Value,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        use crate::context::host_allocation::{
+            host_allocation_runtime_error, HostAllocationPlan, HostAllocationReceipt,
+        };
+
+        let width = self.len().checked_add(1).ok_or_else(|| {
+            crate::runtime_error::semantic_error(
+                "RunMat:Call:Arguments",
+                "prefixed argument width overflows",
+            )
+        })?;
+        let raw = OutputListStorage::requested_bytes(width).map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "prefixed argument layout overflow",
+                source.into(),
+            )
+        })?;
+        let raw = u64::try_from(raw).map_err(|_| {
+            crate::runtime_error::semantic_error(
+                "RunMat:Call:Arguments",
+                "prefixed argument layout overflows",
+            )
+        })?;
+        let retained =
+            HostAllocationPlan::retained_exact_output_bytes(raw, usize::from(width != 0)).map_err(
+                |source| {
+                    host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Call:Arguments",
+                        "prefixed argument admission failed",
+                        source,
+                    )
+                },
+            )?;
+        let receipt = HostAllocationReceipt::admit(
+            Some(runtime),
+            HostAllocationPlan::new(0, retained).map_err(|source| {
+                host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:Call:Arguments",
+                    "prefixed argument admission failed",
+                    source,
+                )
+            })?,
+        )
+        .map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "prefixed argument admission failed",
+                source,
+            )
+        })?;
+
+        if let Some(receipt) = receipt {
+            let permit = receipt.output_permit(runtime).map_err(|source| {
+                host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:Call:Arguments",
+                    "prefixed argument admission failed",
+                    source,
+                )
+            })?;
+            let mut prefix = Some(prefix);
+            let mut source = self.try_into_values()?;
+            let storage = OutputListStorage::try_initialize(width, &permit, |index| {
+                if index == 0 {
+                    Ok::<_, crate::RuntimeError>(prefix.take().expect("single prefix"))
+                } else {
+                    source.next().ok_or_else(|| {
+                        crate::runtime_error::semantic_error(
+                            "RunMat:Call:Arguments",
+                            "prefixed argument owner ended early",
+                        )
+                    })
+                }
+            })
+            .map_err(|error| match error {
+                runmat_value::OutputListInitializationError::Allocation(source) => {
+                    host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Call:Arguments",
+                        "prefixed argument allocation failed",
+                        source.into(),
+                    )
+                }
+                runmat_value::OutputListInitializationError::Element(source) => source,
+            })?;
+            receipt.checkpoint(runtime).map_err(|source| {
+                host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:Call:Arguments",
+                    "prefixed argument checkpoint failed",
+                    source,
+                )
+            })?;
+            Self::from_output_storage_in_context(storage, runtime)
+        } else {
+            self.with_unbounded_values(|mut values| {
+                values.insert(0, prefix);
+                Self::in_context(values, runtime)
+            })?
+        }
+    }
+
+    /// Remove routing metadata from the front while moving the remaining
+    /// Values into a newly admitted owner. Used only when a selected foreign
+    /// probe proves a pre-marshalling miss and returns the original payload.
+    pub fn remove_first_in_context(
+        self,
+        runtime: &crate::context::RuntimeContext,
+    ) -> Result<Self, crate::RuntimeError> {
+        use crate::context::host_allocation::{
+            host_allocation_runtime_error, HostAllocationPlan, HostAllocationReceipt,
+        };
+        if self.is_empty() {
+            return Err(crate::runtime_error::semantic_error(
+                "ForeignDeclineIdentity",
+                "qualified foreign decline lost its routing metadata",
+            ));
+        }
+        let width = self.len() - 1;
+        let raw = OutputListStorage::requested_bytes(width).map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "returned argument layout overflow",
+                source.into(),
+            )
+        })?;
+        let raw = u64::try_from(raw).map_err(|_| {
+            crate::runtime_error::semantic_error(
+                "RunMat:Call:Arguments",
+                "returned argument layout overflows",
+            )
+        })?;
+        let retained =
+            HostAllocationPlan::retained_exact_output_bytes(raw, usize::from(width != 0)).map_err(
+                |source| {
+                    host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Call:Arguments",
+                        "returned argument admission failed",
+                        source,
+                    )
+                },
+            )?;
+        let receipt = HostAllocationReceipt::admit(
+            Some(runtime),
+            HostAllocationPlan::new(0, retained).map_err(|source| {
+                host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:Call:Arguments",
+                    "returned argument admission failed",
+                    source,
+                )
+            })?,
+        )
+        .map_err(|source| {
+            host_allocation_runtime_error(
+                Some(runtime),
+                "RunMat:Call:Arguments",
+                "returned argument admission failed",
+                source,
+            )
+        })?;
+        let mut source = self.try_into_values()?;
+        let _routing_metadata = source.next().expect("nonempty rooted arguments");
+        if let Some(receipt) = receipt {
+            let permit = receipt.output_permit(runtime).map_err(|source| {
+                host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:Call:Arguments",
+                    "returned argument admission failed",
+                    source,
+                )
+            })?;
+            let storage = OutputListStorage::try_initialize(width, &permit, |_| {
+                source.next().ok_or_else(|| {
+                    crate::runtime_error::semantic_error(
+                        "RunMat:Call:Arguments",
+                        "returned argument owner ended early",
+                    )
+                })
+            })
+            .map_err(|error| match error {
+                runmat_value::OutputListInitializationError::Allocation(source) => {
+                    host_allocation_runtime_error(
+                        Some(runtime),
+                        "RunMat:Call:Arguments",
+                        "returned argument allocation failed",
+                        source.into(),
+                    )
+                }
+                runmat_value::OutputListInitializationError::Element(source) => source,
+            })?;
+            receipt.checkpoint(runtime).map_err(|source| {
+                host_allocation_runtime_error(
+                    Some(runtime),
+                    "RunMat:Call:Arguments",
+                    "returned argument checkpoint failed",
+                    source,
+                )
+            })?;
+            Self::from_output_storage_in_context(storage, runtime)
+        } else {
+            Self::in_context(source.collect(), runtime)
+        }
+    }
+
     /// Take ownership of an already-allocated argument vector and admit its
     /// external GC roots under the current operation without copying Values.
     /// This does not certify arbitrary preexisting payload/vector backing.
@@ -376,6 +625,22 @@ impl RootedValues {
 
     pub fn values(&self) -> &[Value] {
         self.values.as_slice()
+    }
+
+    /// Move every Value out of a unique collection while preserving both its
+    /// exact physical claim and GC roots through the last yielded member.
+    /// Shared aliases are rejected instead of cloning nested payloads.
+    pub fn try_into_values(self) -> Result<RootedValuesIntoIter, crate::RuntimeError> {
+        let Self { values, _roots } = self;
+        let values = values.try_into_owned().map_err(|_| {
+            crate::sequence::sequence_error_to_runtime(
+                runmat_value::ValueSequenceError::SharedOutputStorage,
+            )
+        })?;
+        Ok(RootedValuesIntoIter {
+            values: values.into_iter(),
+            _roots,
+        })
     }
 
     /// Transfer the original collection owner while the prior roots remain

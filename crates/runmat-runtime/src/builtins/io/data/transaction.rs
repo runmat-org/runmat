@@ -12,7 +12,7 @@ use crate::context::{host_effect::DatasetHandleOperation as Op, RuntimeContext};
 async fn data_tx_id_builtin(runtime: Option<RuntimeContext>, base: Value) -> BuiltinResult<Value> {
     let (owner, tx_id) = authority::resolve_transaction(runtime.as_ref(), &base)?;
     handle_admission::execute(runtime.as_ref(), &owner, Op::TransactionId, &[], async {
-        Ok(Value::String(tx_id))
+        Ok(Value::string(tx_id))
     })
     .await
 }
@@ -600,7 +600,7 @@ async fn data_tx_status_builtin(
                     TxnStatus::Committed => "committed",
                     TxnStatus::Aborted => "aborted",
                 };
-                Ok(Value::String(status.to_string()))
+                Ok(Value::string(status.to_string()))
             })
         },
     )

@@ -54,7 +54,7 @@ impl RuntimeMexHostServices {
         crate::call_builtin_async_with_outputs_in_context(
             &self.runtime,
             "eval",
-            &[Value::String(command)],
+            &[Value::string(command)],
             0,
         )
         .await

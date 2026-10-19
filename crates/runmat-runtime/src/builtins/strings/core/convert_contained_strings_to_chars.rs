@@ -26,10 +26,11 @@ fn convert_value(value: Value) -> BuiltinResult<Value> {
         Value::Cell(cell) => {
             let values = cell
                 .data
-                .into_iter()
+                .iter()
+                .cloned()
                 .map(convert_value)
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            crate::make_cell_with_shape(values, cell.shape).map_err(|message| {
+            crate::make_cell_with_shape(values, cell.shape().to_vec()).map_err(|message| {
                 crate::build_runtime_error(message)
                     .with_builtin(NAME)
                     .build()

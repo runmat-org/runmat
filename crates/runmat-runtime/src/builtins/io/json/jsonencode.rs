@@ -82,7 +82,7 @@ enum JsonValue {
     Null,
     Bool(bool),
     Number(JsonNumber),
-    String(String),
+    String(runmat_value::Utf8Text),
     Array(Vec<JsonValue>),
     Object(Vec<(String, JsonValue)>),
 }

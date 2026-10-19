@@ -281,10 +281,10 @@ impl ImportOptions {
         let mut object = ObjectInstance::new(VARIABLE_IMPORT_CLASS);
         object
             .properties
-            .insert("Name".into(), Value::String(variable.name.clone()));
+            .insert("Name".into(), Value::string(variable.name.clone()));
         object
             .properties
-            .insert("Type".into(), Value::String(variable.type_name.clone()));
+            .insert("Type".into(), Value::string(variable.type_name.clone()));
         for (key, value) in variable_fields(variable)?.fields {
             object.properties.insert(key, value);
         }
@@ -324,12 +324,12 @@ fn variable_fields(variable: &VariableImportOptions) -> BuiltinResult<StructValu
         );
     }
     if let Some(separator) = variable.decimal_separator {
-        fields.insert("DecimalSeparator", Value::String(separator.to_string()));
+        fields.insert("DecimalSeparator", Value::string(separator.to_string()));
     }
     if let Some(separator) = variable.thousands_separator {
         fields.insert(
             "ThousandsSeparator",
-            Value::String(separator.map_or_else(String::new, |value| value.to_string())),
+            Value::string(separator.map_or_else(String::new, |value| value.to_string())),
         );
     }
     if variable.empty_field_rule != EmptyFieldRule::Missing {
@@ -361,7 +361,7 @@ fn variable_fields(variable: &VariableImportOptions) -> BuiltinResult<StructValu
         fields.insert("FillValue", value.clone());
     }
     if let Some(format) = &variable.input_format {
-        fields.insert("InputFormat", Value::String(format.clone()));
+        fields.insert("InputFormat", Value::string(format.clone()));
     }
     Ok(fields)
 }

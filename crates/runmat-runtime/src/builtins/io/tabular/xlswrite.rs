@@ -248,11 +248,11 @@ fn message_value(err: Option<&RuntimeError>) -> Value {
     let mut message = StructValue::new();
     message.insert(
         "message",
-        Value::String(err.map(|e| e.message().to_string()).unwrap_or_default()),
+        Value::string(err.map(|e| e.message().to_string()).unwrap_or_default()),
     );
     message.insert(
         "identifier",
-        Value::String(
+        Value::string(
             err.and_then(RuntimeError::identifier)
                 .unwrap_or("")
                 .to_string(),

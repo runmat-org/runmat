@@ -10,7 +10,7 @@ use regex::{Captures, Regex, RegexBuilder};
 use runmat_builtins::REGEXPREP_DESCRIPTOR;
 use runmat_builtins::REGEXPREP_EXPLICIT_GPU_EXTENSION;
 use runmat_macros::runtime_builtin;
-use runmat_value::{CharArray, StringArray, Value};
+use runmat_value::{CharArray, StringArray, Utf8Text, Value};
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinGpuSpec, ConstantStrategy, GpuOpKind, ReductionNaN, ResidencyPolicy,
@@ -105,7 +105,7 @@ async fn regexprep_builtin(
 
     let mut results = Vec::with_capacity(subjects.entries.len());
     for (idx, original) in subjects.entries.iter().enumerate() {
-        let mut current = original.clone();
+        let mut current = original.as_str().to_owned();
         if let Some(sequence) = plan.get(idx) {
             for compiled in sequence {
                 current = compiled.apply(&current, &options);
@@ -285,7 +285,7 @@ enum InputKind {
 
 #[derive(Debug, Clone)]
 struct SubjectCollection {
-    entries: Vec<String>,
+    entries: Vec<Utf8Text>,
     rows: usize,
     cols: usize,
     kind: InputKind,
@@ -320,9 +320,9 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
         });
     }
     if array.rows == 1 {
-        let text: String = array.data.into_iter().collect();
+        let text: String = array.data.into_char_iter().collect();
         return Ok(SubjectCollection {
-            entries: vec![text],
+            entries: vec![Utf8Text::new(text)],
             rows: 1,
             cols: 1,
             kind: InputKind::CharScalar,
@@ -334,7 +334,7 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
         for col in 0..array.cols {
             line.push(array.data[row * array.cols + col]);
         }
-        entries.push(line);
+        entries.push(Utf8Text::new(line));
     }
     Ok(SubjectCollection {
         entries,
@@ -347,19 +347,20 @@ fn collect_char_array(array: CharArray) -> BuiltinResult<SubjectCollection> {
 fn collect_string_array(array: StringArray) -> BuiltinResult<SubjectCollection> {
     let rows = array.rows();
     let cols = array.cols();
-    let mut entries = Vec::with_capacity(array.data.len());
-    for col in 0..cols {
-        for row in 0..rows {
-            let idx = row + col * rows;
-            entries.push(array.data[idx].clone());
-        }
-    }
+    let entries = into_text_elements(array.data);
     Ok(SubjectCollection {
         entries,
         rows,
         cols,
         kind: InputKind::StringArray { rows, cols },
     })
+}
+
+fn into_text_elements(data: runmat_value::ExactArrayStorage<Utf8Text>) -> Vec<Utf8Text> {
+    match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(shared) => shared.iter().cloned().collect(),
+    }
 }
 
 async fn collect_cell_array(
@@ -391,9 +392,9 @@ async fn collect_cell_array(
 
 #[derive(Debug, Clone)]
 enum PatternCollection {
-    Scalar(String),
-    Sequence(Vec<String>),
-    Elementwise(Vec<String>),
+    Scalar(Utf8Text),
+    Sequence(Vec<Utf8Text>),
+    Elementwise(Vec<Utf8Text>),
 }
 
 impl PatternCollection {
@@ -416,8 +417,8 @@ impl PatternCollection {
 
 fn collect_pattern_char_array(array: CharArray) -> BuiltinResult<PatternCollection> {
     if array.rows <= 1 {
-        let text: String = array.data.into_iter().collect();
-        return Ok(PatternCollection::Scalar(text));
+        let text: String = array.data.into_char_iter().collect();
+        return Ok(PatternCollection::Scalar(Utf8Text::new(text)));
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
@@ -425,7 +426,7 @@ fn collect_pattern_char_array(array: CharArray) -> BuiltinResult<PatternCollecti
         for col in 0..array.cols {
             line.push(array.data[row * array.cols + col]);
         }
-        entries.push(line);
+        entries.push(Utf8Text::new(line));
     }
     Ok(PatternCollection::Sequence(entries))
 }
@@ -440,9 +441,11 @@ fn collect_pattern_string_array(
         return Ok(PatternCollection::Scalar(array.data[0].clone()));
     }
     if rows == subjects.rows && cols == subjects.cols {
-        return Ok(PatternCollection::Elementwise(array.data.clone()));
+        return Ok(PatternCollection::Elementwise(into_text_elements(
+            array.data,
+        )));
     }
-    Ok(PatternCollection::Sequence(array.data.clone()))
+    Ok(PatternCollection::Sequence(into_text_elements(array.data)))
 }
 
 async fn collect_pattern_cell(
@@ -470,9 +473,9 @@ async fn collect_pattern_cell(
 
 #[derive(Debug, Clone)]
 enum ReplacementCollection {
-    Scalar(String),
-    Sequence(Vec<String>),
-    Elementwise(Vec<String>),
+    Scalar(Utf8Text),
+    Sequence(Vec<Utf8Text>),
+    Elementwise(Vec<Utf8Text>),
 }
 
 impl ReplacementCollection {
@@ -495,8 +498,8 @@ impl ReplacementCollection {
 
 fn collect_replacement_char_array(array: CharArray) -> BuiltinResult<ReplacementCollection> {
     if array.rows <= 1 {
-        let text: String = array.data.into_iter().collect();
-        return Ok(ReplacementCollection::Scalar(text));
+        let text: String = array.data.into_char_iter().collect();
+        return Ok(ReplacementCollection::Scalar(Utf8Text::new(text)));
     }
     let mut entries = Vec::with_capacity(array.rows);
     for row in 0..array.rows {
@@ -504,7 +507,7 @@ fn collect_replacement_char_array(array: CharArray) -> BuiltinResult<Replacement
         for col in 0..array.cols {
             line.push(array.data[row * array.cols + col]);
         }
-        entries.push(line);
+        entries.push(Utf8Text::new(line));
     }
     Ok(ReplacementCollection::Sequence(entries))
 }
@@ -519,9 +522,13 @@ fn collect_replacement_string_array(
         return Ok(ReplacementCollection::Scalar(array.data[0].clone()));
     }
     if rows == subjects.rows && cols == subjects.cols {
-        return Ok(ReplacementCollection::Elementwise(array.data.clone()));
+        return Ok(ReplacementCollection::Elementwise(into_text_elements(
+            array.data,
+        )));
     }
-    Ok(ReplacementCollection::Sequence(array.data.clone()))
+    Ok(ReplacementCollection::Sequence(into_text_elements(
+        array.data,
+    )))
 }
 
 async fn collect_replacement_cell(
@@ -776,7 +783,7 @@ fn reconstruct_output(
             let array = strings_to_char_array(builtin, 1, &results)?;
             Ok(Value::CharArray(array))
         }
-        InputKind::StringScalar => Ok(Value::String(
+        InputKind::StringScalar => Ok(Value::string(
             results.into_iter().next().unwrap_or_default(),
         )),
         InputKind::CharMatrix { rows } => {
@@ -789,7 +796,7 @@ fn reconstruct_output(
             Ok(Value::StringArray(array))
         }
         InputKind::CellArray { rows, cols } => {
-            let values = results.into_iter().map(Value::String).collect();
+            let values = results.into_iter().map(Value::string).collect();
             make_cell(values, rows, cols)
                 .map_err(|err| runtime_error_for(format!("{builtin}: {err}")))
         }
@@ -942,11 +949,13 @@ fn to_title_case(text: &str) -> String {
     result
 }
 
-fn extract_string(value: &Value) -> Option<String> {
+fn extract_string(value: &Value) -> Option<Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(Utf8Text::new(ca.data.iter().copied().collect()))
+        }
         _ => None,
     }
 }

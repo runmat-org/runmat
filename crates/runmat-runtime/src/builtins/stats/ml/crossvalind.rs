@@ -544,9 +544,9 @@ fn char_row_labels(chars: &CharArray) -> Vec<Option<PartitionLabel>> {
     for row in 0..chars.rows {
         let mut label = String::with_capacity(chars.cols);
         for col in 0..chars.cols {
-            label.push(chars.data[row + col * chars.rows]);
+            label.push(chars.data[row * chars.cols + col]);
         }
-        labels.push(Some(PartitionLabel::Text(label.trim_end().to_string())));
+        labels.push(Some(PartitionLabel::Text(label.trim_end().into())));
     }
     labels
 }
@@ -617,11 +617,13 @@ fn scalar_number(value: &Value, label: &str) -> BuiltinResult<f64> {
     }
 }
 
-fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
+fn scalar_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
+        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(std::borrow::Cow::Borrowed(array.data[0].as_str()))
+        }
+        Value::CharArray(chars) => Ok(std::borrow::Cow::Owned(chars.data.iter().collect())),
         other => Err(invalid_argument(format!(
             "crossvalind: {label} must be a text scalar, got {other:?}"
         ))),

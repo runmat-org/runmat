@@ -881,7 +881,7 @@ fn is_simple_relative_filename(path: &str) -> bool {
 
 fn string_like_path(value: &Value) -> crate::BuiltinResult<Option<String>> {
     match value {
-        Value::String(s) => Ok(Some(s.clone())),
+        Value::String(s) => Ok(Some(s.as_str().to_owned())),
         Value::StringArray(array) => scalar_string_array(array).map(Some),
         Value::CharArray(chars) => scalar_char_array(chars).map(Some),
         _ => Ok(None),
@@ -890,7 +890,7 @@ fn string_like_path(value: &Value) -> crate::BuiltinResult<Option<String>> {
 
 fn scalar_string_array(array: &StringArray) -> crate::BuiltinResult<String> {
     if array.data.len() == 1 {
-        Ok(array.data[0].clone())
+        Ok(array.data[0].as_str().to_owned())
     } else {
         Err(imshow_error("imshow: filename must be a string scalar"))
     }

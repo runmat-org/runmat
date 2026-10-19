@@ -41,7 +41,7 @@ pub(in crate::builtins::fea) fn study_to_object(spec: AnalysisStudySpec) -> Buil
     if let Value::Object(ref mut object) = object {
         object
             .properties
-            .insert("id".to_string(), Value::String(spec.study_id));
+            .insert("id".to_string(), Value::String(spec.study_id.into()));
     }
     Ok(object)
 }
@@ -59,7 +59,7 @@ pub(in crate::builtins::fea) fn sweep_to_object(
     if let Value::Object(ref mut object) = object {
         object
             .properties
-            .insert("id".to_string(), Value::String(spec.sweep_id));
+            .insert("id".to_string(), Value::String(spec.sweep_id.into()));
     }
     Ok(object)
 }

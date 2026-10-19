@@ -185,6 +185,7 @@ pub(crate) struct CallState {
     pub semantic_name_candidates:
         Option<std::sync::Arc<crate::user_functions::SemanticNameCandidates>>,
     pub dynamic_loader: Option<std::rc::Rc<crate::user_functions::DynamicFunctionLoader>>,
+    pub current_class_product_resolver: Option<std::rc::Rc<super::CurrentClassProductResolver>>,
     pub native_name_observer: Option<std::rc::Rc<crate::user_functions::NativeNameObserver>>,
     pub dynamic_clearer: Option<std::rc::Rc<crate::user_functions::DynamicFunctionClearer>>,
     pub dynamic_refresher: Option<std::rc::Rc<crate::user_functions::DynamicFunctionRefresher>>,
@@ -209,6 +210,10 @@ impl std::fmt::Debug for CallState {
             .field("lexical_invoker", &self.lexical_invoker.is_some())
             .field("semantic_resolver", &self.semantic_resolver.is_some())
             .field("dynamic_loader", &self.dynamic_loader.is_some())
+            .field(
+                "current_class_product_resolver",
+                &self.current_class_product_resolver.is_some(),
+            )
             .field("dynamic_clearer", &self.dynamic_clearer.is_some())
             .field("dynamic_refresher", &self.dynamic_refresher.is_some())
             .field(

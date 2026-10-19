@@ -210,12 +210,7 @@ mod tests {
         figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
         figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![2.0, 3.0]).unwrap());
         let figure = crate::builtins::plotting::state::import_figure(figure);
-        let labels = StringArray {
-            data: vec!["A".into(), "B".into()],
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        };
+        let labels = StringArray::new(vec!["A".into(), "B".into()], vec![1, 2]).unwrap();
         let ax = Value::Num(crate::builtins::plotting::state::encode_axes_handle(
             figure, 0,
         ));

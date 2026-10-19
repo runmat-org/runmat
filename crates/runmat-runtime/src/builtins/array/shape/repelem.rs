@@ -10,22 +10,10 @@
 //! replication runs because there is no native provider hook today.
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
-use crate::builtins::common::spec::{
-    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
-    ReductionNaN, ResidencyPolicy, ShapeRequirements,
-};
 use crate::builtins::common::{gpu_helpers, tensor};
+use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
 use crate::{build_runtime_error, RuntimeError};
-use runmat_builtins::ResolveContext;
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor, BuiltinOutputMode,
-    BuiltinParamArity, BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, Type,
-};
-use runmat_builtins::{
-    BuiltinIntegerBackendRule, BuiltinIntegerCapabilityDescriptor, BuiltinIntegerComputationDomain,
-    BuiltinIntegerInputAvailability, BuiltinIntegerInputCapability, BuiltinIntegerOutputClassRule,
-    BuiltinIntegerOverflowRule, BuiltinIntegerOverloadKind, BuiltinIntegerScalarDoubleRule,
-};
+use runmat_builtins::*;
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, CharArray, ComplexTensor, IntValue, LogicalArray, NumericScalar, NumericStorage,
@@ -34,167 +22,7 @@ use runmat_value::{
 
 const BUILTIN_NAME: &str = "repelem";
 
-#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::repelem")]
-pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
-    name: "repelem",
-    op_kind: GpuOpKind::Custom("repelem"),
-    supported_precisions: &[],
-    broadcast: BroadcastSemantics::None,
-    provider_hooks: &[],
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
-    nan_mode: ReductionNaN::Include,
-    two_pass_threshold: None,
-    workgroup_size: None,
-    accepts_nan_mode: false,
-    notes: "repelem executes on the host today; GPU inputs are gathered before replication.",
-};
-
-#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::shape::repelem")]
-pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
-    name: "repelem",
-    shape: ShapeRequirements::Any,
-    constant_strategy: ConstantStrategy::InlineLiteral,
-    elementwise: None,
-    reduction: None,
-    emits_nan: false,
-    notes: "repelem produces a fresh array; fusion treats it as a residency boundary.",
-};
-
-const REPELEM_OUTPUT: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "B",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Array with element-wise replication applied.",
-}];
-
-const REPELEM_INPUTS_A_R: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "R",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Scalar or vector replication control argument.",
-    },
-];
-
-const REPELEM_INPUTS_A_RN: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "A",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "Input array.",
-    },
-    BuiltinParamDescriptor {
-        name: "R1_RN",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Per-dimension scalar/vector replication controls.",
-    },
-];
-
-const REPELEM_SIGNATURES: [BuiltinSignatureDescriptor; 2] = [
-    BuiltinSignatureDescriptor {
-        label: "B = repelem(A, R)",
-        inputs: &REPELEM_INPUTS_A_R,
-        outputs: &REPELEM_OUTPUT,
-    },
-    BuiltinSignatureDescriptor {
-        label: "B = repelem(A, R1, R2, ...)",
-        inputs: &REPELEM_INPUTS_A_RN,
-        outputs: &REPELEM_OUTPUT,
-    },
-];
-
-const REPELEM_ERROR_MISSING_FACTORS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.MISSING_FACTORS",
-    identifier: Some("RunMat:repelem:MissingReplicationFactors"),
-    when: "No replication arguments are provided.",
-    message: "repelem: replication factors must be specified",
-};
-
-const REPELEM_ERROR_INVALID_FACTORS: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.INVALID_FACTORS",
-    identifier: Some("RunMat:repelem:InvalidReplicationFactors"),
-    when: "Replication arguments are non-numeric, non-integer, or shape-incompatible.",
-    message: "repelem: invalid replication factors",
-};
-
-const REPELEM_ERROR_UNSUPPORTED_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.UNSUPPORTED_INPUT",
-    identifier: Some("RunMat:repelem:UnsupportedInput"),
-    when: "Input type is unsupported for repelem.",
-    message: "repelem: unsupported input type",
-};
-
-const REPELEM_ERROR_INTERNAL: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.REPELEM.INTERNAL",
-    identifier: Some("RunMat:repelem:Internal"),
-    when: "Internal allocation/indexing path fails.",
-    message: "repelem: internal operation failed",
-};
-
-const REPELEM_ERRORS: [BuiltinErrorDescriptor; 4] = [
-    REPELEM_ERROR_MISSING_FACTORS,
-    REPELEM_ERROR_INVALID_FACTORS,
-    REPELEM_ERROR_UNSUPPORTED_INPUT,
-    REPELEM_ERROR_INTERNAL,
-];
-
-pub const REPELEM_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &REPELEM_SIGNATURES,
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &REPELEM_ERRORS,
-};
-const REPELEM_INTEGER_DATA_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "A",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "The compatibility target documents all eight integer classes; authoritative elements are copied without arithmetic or floating conversion.",
-    }];
-const REPELEM_INTEGER_FACTOR_INPUTS: [BuiltinIntegerInputCapability; 1] =
-    [BuiltinIntegerInputCapability {
-        name: "R1,...,RN",
-        classes: &crate::builtins::common::integer_capability::ALL_INTEGER_CLASSES,
-        availability: BuiltinIntegerInputAvailability::Documented,
-        scalar_double: BuiltinIntegerScalarDoubleRule::Allowed,
-        notes: "Typed repetition controls are read exactly as nonnegative structural sizes.",
-    }];
-pub const REPELEM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2] = [
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = repelem(integer_A, R1,...,RN)",
-        inputs: &REPELEM_INTEGER_DATA_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::ExactInteger,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::FunctionSpecific,
-        notes: "Replication preserves native class, shape order, and exact wide values; resident inputs use owner-preserving host fallback when no provider hook exists.",
-    },
-    BuiltinIntegerCapabilityDescriptor {
-        form: "B = repelem(A, integer_R1,...,integer_RN)",
-        inputs: &REPELEM_INTEGER_FACTOR_INPUTS,
-        computation_domain: BuiltinIntegerComputationDomain::Structural,
-        output_class: BuiltinIntegerOutputClassRule::PreserveInput,
-        overflow: BuiltinIntegerOverflowRule::Error,
-        backend: BuiltinIntegerBackendRule::GatherFallback,
-        overload: BuiltinIntegerOverloadKind::StructuralParameter,
-        notes: "Replication counts never pass through binary64; checked size arithmetic rejects unrepresentable output geometry.",
-    },
-];
+mod managed;
 
 fn repelem_error(
     error: &'static BuiltinErrorDescriptor,
@@ -223,100 +51,108 @@ fn repelem_internal(message: impl Into<String>) -> RuntimeError {
     repelem_error(&REPELEM_ERROR_INTERNAL, message)
 }
 
-fn array_shape(ty: &Type) -> Option<&[Option<usize>]> {
-    match ty {
-        Type::Tensor { shape: Some(shape) } => Some(shape.as_slice()),
-        Type::Logical { shape: Some(shape) } => Some(shape.as_slice()),
-        _ => None,
+fn repelem_with_source(
+    descriptor: &'static BuiltinErrorDescriptor,
+    source: RuntimeError,
+) -> RuntimeError {
+    let mut builder = build_runtime_error(format!("repelem: {source}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_source(source);
+    if let Some(identifier) = descriptor.identifier {
+        builder = builder.with_identifier(identifier);
     }
-}
-
-/// Output shape for repelem given a known input shape and the number of
-/// replication arguments. Like `repmat`, exact dimensions are unknown unless
-/// the input is empty, so we encode rank only.
-fn repelem_output_shape(
-    input_shape: &[Option<usize>],
-    reps_len: usize,
-) -> Option<Vec<Option<usize>>> {
-    let input_rank = input_shape.len();
-    let rank = if reps_len == 1 {
-        if input_rank == 0 {
-            return None;
-        }
-        input_rank.max(2)
-    } else {
-        input_rank.max(reps_len.max(2))
-    };
-
-    let mut output = Vec::with_capacity(rank);
-    for axis in 0..rank {
-        if axis < input_rank && input_shape[axis] == Some(0) {
-            output.push(Some(0));
-        } else {
-            output.push(None);
-        }
-    }
-    Some(output)
-}
-
-fn repelem_reps_len(args: &[Type]) -> Option<usize> {
-    if args.len() < 2 {
-        return None;
-    }
-    if args.len() > 2 {
-        return Some(args.len() - 1);
-    }
-    // Single replication argument: scalar OR vector. Either way reps_len == 1
-    // for the output-rank purposes (we replicate along the vector's axis).
-    match &args[1] {
-        Type::Tensor { shape: Some(_) }
-        | Type::Logical { shape: Some(_) }
-        | Type::Num
-        | Type::Int
-        | Type::Bool => Some(1),
-        _ => None,
-    }
-}
-
-fn repelem_type(args: &[Type], _ctx: &ResolveContext) -> Type {
-    let input = match args.first() {
-        Some(value) => value,
-        None => return Type::Unknown,
-    };
-    let reps_len = repelem_reps_len(args);
-    let shape = array_shape(input)
-        .and_then(|shape| reps_len.and_then(|len| repelem_output_shape(shape, len)));
-    match input {
-        Type::Tensor { .. } => Type::Tensor { shape },
-        Type::Logical { .. } => Type::Logical { shape },
-        Type::Bool => Type::logical(),
-        Type::Num | Type::Int => Type::tensor(),
-        Type::Cell { element_type, .. } => Type::Cell {
-            element_type: element_type.clone(),
-            length: None,
-        },
-        Type::String => Type::cell_of(Type::String),
-        Type::Unknown => Type::Unknown,
-        _ => Type::Unknown,
-    }
+    builder.build()
 }
 
 #[runtime_builtin(
     name = "repelem",
-    category = "array/shape",
-    summary = "Replicate each element of an array along one or more dimensions.",
-    keywords = "repelem,replicate,kron,tile,array",
-    accel = "custom",
-    type_resolver(repelem_type),
-    descriptor(crate::builtins::array::shape::repelem::REPELEM_DESCRIPTOR),
-    integer_capabilities(crate::builtins::array::shape::repelem::REPELEM_INTEGER_CAPABILITIES),
+    binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::array::shape::repelem"
 )]
-async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+async fn repelem_builtin(
+    context: Option<crate::context::RuntimeContext>,
+    value: Value,
+    rest: Vec<Value>,
+) -> crate::BuiltinResult<Value> {
     if rest.is_empty() {
         return Err(repelem_missing_factors(
             REPELEM_ERROR_MISSING_FACTORS.message,
         ));
+    }
+    if !matches!(
+        &value,
+        Value::Tensor(_)
+            | Value::Num(_)
+            | Value::Int(_)
+            | Value::Bool(_)
+            | Value::LogicalArray(_)
+            | Value::Complex(_, _)
+            | Value::ComplexTensor(_)
+            | Value::String(_)
+            | Value::StringArray(_)
+            | Value::CharArray(_)
+            | Value::Cell(_)
+            | Value::Struct(_)
+            | Value::StructArray(_)
+            | Value::GpuTensor(_)
+    ) {
+        return Err(repelem_unsupported("repelem: unsupported input class"));
+    }
+    if rest.len() == 1 {
+        let shape = match &value {
+            Value::Tensor(tensor) => Some(tensor.shape()),
+            Value::ComplexTensor(tensor) => Some(tensor.shape()),
+            Value::LogicalArray(array) => Some(array.shape.as_slice()),
+            Value::StringArray(array) => Some(array.shape.as_slice()),
+            Value::Cell(array) => Some(array.shape.as_slice()),
+            Value::StructArray(array) => Some(array.shape()),
+            Value::GpuTensor(handle) => Some(handle.shape()),
+            _ => None,
+        };
+        if shape.is_some_and(|shape| shape.iter().filter(|&&extent| extent > 1).count() > 1) {
+            return Err(repelem_invalid_factors(
+                "repelem: one replication control requires vector input",
+            ));
+        }
+    }
+    for (index, control) in rest.iter().enumerate() {
+        if let Value::GpuTensor(handle) = control {
+            if runmat_accelerate_api::handle_storage(handle)
+                != runmat_accelerate_api::GpuTensorStorage::Real
+            {
+                return Err(repelem_invalid_factors(format!(
+                    "repelem: replication argument {} must be real",
+                    index + 1
+                )));
+            }
+            ensure_vector_shape(handle.shape(), index + 1)?;
+        }
+    }
+    if let Some(context) = context.as_ref() {
+        if HostAllocationReceipt::policy(Some(context))
+            .map_err(|cause| managed::admission(context, cause))?
+            == HostAllocationPolicy::Managed
+            && matches!(
+                &value,
+                Value::Tensor(_)
+                    | Value::CharArray(_)
+                    | Value::Num(_)
+                    | Value::Int(_)
+                    | Value::Bool(_)
+                    | Value::LogicalArray(_)
+                    | Value::Complex(_, _)
+                    | Value::ComplexTensor(_)
+            )
+            && rest
+                .iter()
+                .all(|control| !matches!(control, Value::GpuTensor(_)))
+        {
+            if let Value::CharArray(chars) = &value {
+                return managed::character(context, chars, &rest);
+            }
+            return managed::dense(context, &value, &rest);
+        }
     }
     let factors = parse_factor_args(&rest).await?;
     // Treat single-argument form as a vector shorthand (only valid when the
@@ -326,7 +162,7 @@ async fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult
     if let Value::GpuTensor(handle) = value {
         let gathered = gpu_helpers::gather_value_async(&Value::GpuTensor(handle.clone()))
             .await
-            .map_err(|error| repelem_internal(format!("repelem: {error}")))?;
+            .map_err(|error| repelem_with_source(&REPELEM_ERROR_INTERNAL, error))?;
         let output = repelem_host_value(gathered, &factors, single_arg)?;
         return gpu_helpers::restore_class_preserving_value(&handle, output, BUILTIN_NAME);
     }
@@ -370,7 +206,7 @@ fn repelem_host_value(
             Ok(complex_tensor_into_value(out))
         }
         Value::String(s) => {
-            let array = StringArray::new(vec![s], vec![1, 1])
+            let array = StringArray::from_texts_unbounded(vec![s], vec![1, 1])
                 .map_err(|e| repelem_internal(format!("repelem: {e}")))?;
             let out = repelem_string_array(&array, factors, single_arg)?;
             Ok(Value::StringArray(out))
@@ -427,7 +263,7 @@ async fn parse_single_factor(value: &Value, position: usize) -> crate::BuiltinRe
     if matches!(value, Value::GpuTensor(_)) {
         let gathered = gpu_helpers::gather_value_async(value)
             .await
-            .map_err(|e| repelem_invalid_factors(format!("repelem: {e}")))?;
+            .map_err(|error| repelem_with_source(&REPELEM_ERROR_INVALID_FACTORS, error))?;
         return parse_host_factor(&gathered, position);
     }
     parse_host_factor(value, position)
@@ -531,7 +367,7 @@ fn coerce_count(value: f64, position: usize) -> crate::BuiltinResult<usize> {
             "repelem: replication count at argument {position} must be non-negative"
         )));
     }
-    if rounded >= (usize::MAX as f64) + 1.0 {
+    if rounded >= (2.0_f64).powi(usize::BITS as i32) {
         return Err(repelem_invalid_factors(format!(
             "repelem: replication count at argument {position} exceeds the maximum supported size"
         )));
@@ -648,7 +484,8 @@ fn repelem_string_array(
     single_arg: bool,
 ) -> crate::BuiltinResult<StringArray> {
     let (data, shape) = repelem_column_major(&sa.data, &sa.shape, factors, single_arg)?;
-    StringArray::new(data, shape).map_err(|e| repelem_internal(format!("repelem: {e}")))
+    StringArray::from_texts_unbounded(data, shape)
+        .map_err(|e| repelem_internal(format!("repelem: {e}")))
 }
 
 fn repelem_char_array(
@@ -679,7 +516,7 @@ fn repelem_cell_row_major(
     let mut input_shape = if cell.shape.is_empty() {
         vec![cell.rows, cell.cols]
     } else {
-        cell.shape.clone()
+        cell.shape.to_vec()
     };
     while input_shape.len() < 2 {
         input_shape.push(1);
@@ -1011,52 +848,7 @@ pub(crate) mod tests {
     use runmat_value::{IntValue, IntegerComplexStorage, IntegerStorage, StructArray, StructValue};
 
     fn repelem_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-        block_on(super::repelem_builtin(value, rest))
-    }
-
-    #[test]
-    fn repelem_type_resolves_tensor_rank() {
-        let out = repelem_type(
-            &[
-                Type::Tensor {
-                    shape: Some(vec![Some(2), Some(3)]),
-                },
-                Type::Num,
-                Type::Num,
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Tensor {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
-    #[test]
-    fn repelem_type_preserves_logical_kind() {
-        let out = repelem_type(
-            &[
-                Type::Logical {
-                    shape: Some(vec![Some(2), Some(2)]),
-                },
-                Type::Num,
-            ],
-            &ResolveContext::new(Vec::new()),
-        );
-        assert_eq!(
-            out,
-            Type::Logical {
-                shape: Some(vec![None, None])
-            }
-        );
-    }
-
-    #[test]
-    fn repelem_type_maps_string_to_string_array_model() {
-        let out = repelem_type(&[Type::String, Type::Num], &ResolveContext::new(Vec::new()));
-        assert_eq!(out, Type::cell_of(Type::String));
+        block_on(super::repelem_builtin(None, value, rest))
     }
 
     #[test]

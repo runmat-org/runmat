@@ -370,7 +370,7 @@ async fn parquet_file_info_impl(path: &Path) -> BuiltinResult<Value> {
     let mut info = StructValue::new();
     info.insert(
         "Filename",
-        Value::String(path.to_string_lossy().to_string()),
+        Value::string(path.to_string_lossy().to_string()),
     );
     info.insert("FileSize", Value::Num(file_size));
     info.insert("NumRows", Value::Num(file_metadata.num_rows() as f64));
@@ -397,7 +397,7 @@ async fn parquet_file_info_impl(path: &Path) -> BuiltinResult<Value> {
     info.insert("Version", Value::Num(file_metadata.version() as f64));
     info.insert(
         "CreatedBy",
-        Value::String(file_metadata.created_by().unwrap_or("").to_string()),
+        Value::string(file_metadata.created_by().unwrap_or("").to_string()),
     );
     info.insert("RowGroups", parquet_row_group_info(metadata)?);
     info.insert(

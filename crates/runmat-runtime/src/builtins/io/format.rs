@@ -38,10 +38,10 @@ async fn format_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
             set_display_format(FormatMode::Short);
             return Ok(empty_value());
         }
-        [Value::String(s)] => s.clone(),
+        [Value::String(s)] => std::borrow::Cow::Borrowed(s.as_str()),
         [value @ Value::CharArray(_)] =>
-            crate::builtins::common::validation::value_text_scalar_string(value)
-                .ok_or_else(|| format_error_with(&FORMAT_ERROR_ARG_CONFIG, "format: unrecognized argument; expected a format name such as 'short' or 'long'"))?,
+            std::borrow::Cow::Owned(crate::builtins::common::validation::value_text_scalar_string(value)
+                .ok_or_else(|| format_error_with(&FORMAT_ERROR_ARG_CONFIG, "format: unrecognized argument; expected a format name such as 'short' or 'long'"))?),
         _ => {
             return Err(format_error_with(
                 &FORMAT_ERROR_ARG_CONFIG,

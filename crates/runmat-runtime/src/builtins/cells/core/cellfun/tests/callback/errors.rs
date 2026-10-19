@@ -27,7 +27,7 @@ fn error_handler_receives_callback_failure() {
         binding: Some(binding),
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
-        captures: vec![Value::Num(7.0)],
+        captures: vec![Value::Num(7.0)].into(),
     }));
     let result = call(
         Value::FunctionHandle("missing_cellfun_callback".into()),

@@ -352,8 +352,8 @@ pub(super) fn string_from_value(
     builtin: &'static str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::String(s) => Ok(s.to_string()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].to_string()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         _ => Err(map_error(context, builtin)),
     }

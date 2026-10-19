@@ -32,7 +32,7 @@ fn nested_resident_inputs_are_gated_before_provider_access() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![resident.clone()],
+            captures: vec![resident.clone()].into(),
         })),
         Value::output_list(vec![resident.clone()]),
     ];

@@ -121,11 +121,19 @@ fn sparse_input_densifies_implicit_zeros_without_losing_single_class() {
 
 #[test]
 fn table_and_character_inputs_map_elementwise() {
-    let chars = CharArray::new(vec!['A'], 1, 1).expect("character input");
+    let chars = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2])
+        .expect("character input");
     let Value::Tensor(output) = call(Value::CharArray(chars)).expect("character exp") else {
         panic!("expected tensor");
     };
-    assert_eq!(output.shape(), &[1, 1]);
+    assert_eq!(output.shape(), &[2, 2, 2]);
+    assert_eq!(
+        output.materialize_f64(),
+        "acbdegfh"
+            .chars()
+            .map(|character| (character as u32 as f64).exp())
+            .collect::<Vec<_>>()
+    );
 
     let table = crate::builtins::table::table_from_columns(
         vec!["Double".into(), "Single".into()],

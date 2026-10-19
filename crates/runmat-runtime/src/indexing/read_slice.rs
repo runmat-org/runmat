@@ -1065,7 +1065,8 @@ pub fn gather_string_slice(sa: &StringArray, plan: &IndexPlan) -> Result<Value, 
         })?;
         out.push(value);
     }
-    let out_sa = StringArray::new(out, plan.output_shape.clone()).map_err(map_slice_shape_error)?;
+    let out_sa = StringArray::from_texts_unbounded(out, plan.output_shape.clone())
+        .map_err(map_slice_shape_error)?;
     Ok(Value::StringArray(out_sa))
 }
 

@@ -173,8 +173,8 @@ pub(super) fn parse_float(value: f64) -> Result<usize, PathError> {
 
 fn parse_field_name(value: Value) -> Result<String, PathError> {
     match value {
-        Value::String(value) => Ok(value),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(value) => Ok(value.to_string()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].to_string()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
         _ => Err(error(
             PathErrorKind::FieldName,

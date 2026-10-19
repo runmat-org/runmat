@@ -15,7 +15,6 @@ use crate::context::host_effect::{
     HostEffectWorkload, MatEncodeMode, MatEncodeOutput, MatStructSelection,
 };
 
-use crate::builtins::introspection::object_serialization::prepare_value_for_mat_save_in_context;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use workspace_io::WorkspaceReadSet;
 
@@ -269,21 +268,11 @@ async fn encode_selected_entries(
     let mut mat_vars = Vec::with_capacity(entries.len());
     for (name, value) in entries {
         cooperation.completed(0).await?;
-        let runtime = cooperation.runtime();
-        let value = cooperation
-            .await_io(prepare_value_for_mat_save_in_context(value, runtime))
-            .await??;
-        workspace_read.retain_values(std::iter::once(value.value()))?;
+        workspace_read.retain_values(std::iter::once(&value))?;
         cooperation.completed(0).await?;
-        let array = value
-            .with_owned_async(|value| {
-                convert_value_with_cooperation(
-                    value,
-                    MatEncodingOwner::Save,
-                    Some(&mut *cooperation),
-                )
-            })
-            .await?;
+        let array =
+            convert_value_with_cooperation(value, MatEncodingOwner::Save, Some(&mut *cooperation))
+                .await?;
         mat_vars.push(MatVar { name, array });
         cooperation.completed(0).await?;
     }

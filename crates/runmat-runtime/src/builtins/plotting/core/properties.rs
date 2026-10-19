@@ -528,7 +528,7 @@ fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinRe
             st.insert("Parent", empty_handle_value());
             st.insert("ScreenSize", root_screen_size_value());
             st.insert("MonitorPositions", root_screen_size_value());
-            st.insert("Units", Value::String(root_units()));
+            st.insert("Units", Value::string(root_units()));
             st.insert(
                 "ShowHiddenHandles",
                 Value::String(on_off(root_show_hidden_handles()).into()),
@@ -545,11 +545,11 @@ fn get_root_property(property: Option<&str>, builtin: &'static str) -> BuiltinRe
         Some("parent") => Ok(empty_handle_value()),
         Some("screensize") => Ok(root_screen_size_value()),
         Some("monitorpositions") => Ok(root_screen_size_value()),
-        Some("units") => Ok(Value::String(root_units())),
+        Some("units") => Ok(Value::string(root_units())),
         Some("showhiddenhandles") => Ok(Value::String(on_off(root_show_hidden_handles()).into())),
         Some(default) if is_root_default_property(default) => Ok(root_default_property(default)
             .map(root_property_value_to_value)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported root property `{other}`"),
@@ -666,15 +666,10 @@ fn root_property_value_from_value(
         Value::Bool(value) => Ok(RootPropertyValue::Bool(*value)),
         Value::Num(value) => Ok(RootPropertyValue::Num(*value)),
         Value::Int(value) => Ok(RootPropertyValue::Num(value.to_f64())),
-        Value::String(value) => Ok(RootPropertyValue::String(value.clone())),
+        Value::String(value) => Ok(RootPropertyValue::String(value.as_str().to_owned())),
         Value::CharArray(value) => Ok(RootPropertyValue::String(value.data.iter().collect())),
         Value::Tensor(value) => Ok(RootPropertyValue::Tensor(value.clone())),
-        Value::StringArray(value) => Ok(RootPropertyValue::StringArray {
-            rows: value.rows,
-            cols: value.cols,
-            shape: value.shape.clone(),
-            data: value.data.clone(),
-        }),
+        Value::StringArray(value) => Ok(RootPropertyValue::StringArray(value.clone())),
         _ => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported root default property value"),
@@ -686,19 +681,9 @@ fn root_property_value_to_value(value: RootPropertyValue) -> Value {
     match value {
         RootPropertyValue::Bool(value) => Value::Bool(value),
         RootPropertyValue::Num(value) => Value::Num(value),
-        RootPropertyValue::String(value) => Value::String(value),
+        RootPropertyValue::String(value) => Value::string(value),
         RootPropertyValue::Tensor(value) => Value::Tensor(value),
-        RootPropertyValue::StringArray {
-            rows,
-            cols,
-            shape,
-            data,
-        } => Value::StringArray(StringArray {
-            rows,
-            cols,
-            shape,
-            data,
-        }),
+        RootPropertyValue::StringArray(value) => Value::StringArray(value),
     }
 }
 
@@ -762,16 +747,16 @@ fn get_text_property(
                 st.insert("FontSize", Value::Num(size as f64));
             }
             if let Some(weight) = style.font_weight {
-                st.insert("FontWeight", Value::String(weight));
+                st.insert("FontWeight", Value::string(weight));
             }
             if let Some(angle) = style.font_angle {
-                st.insert("FontAngle", Value::String(angle));
+                st.insert("FontAngle", Value::string(angle));
             }
             if let Some(interpreter) = style.interpreter {
-                st.insert("Interpreter", Value::String(interpreter));
+                st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(color) = style.color {
-                st.insert("Color", Value::String(color_to_short_name(color)));
+                st.insert("Color", Value::string(color_to_short_name(color)));
             }
             Ok(Value::Struct(st))
         }
@@ -786,20 +771,20 @@ fn get_text_property(
             .unwrap_or(Value::Num(f64::NAN))),
         Some("fontweight") => Ok(style
             .font_weight
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontangle") => Ok(style
             .font_angle
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("interpreter") => Ok(style
             .interpreter
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("color") => Ok(style
             .color
-            .map(|c| Value::String(color_to_short_name(c)))
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(|c| Value::string(color_to_short_name(c)))
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported text property `{other}`"),
@@ -844,7 +829,7 @@ fn get_ruler_property(
             st.insert("Axis", Value::String(axis_name.into()));
             st.insert(
                 "TickLabelFormat",
-                Value::String(tick_format_or_default(format)),
+                Value::string(tick_format_or_default(format)),
             );
             st.insert("TickLabelRotation", Value::Num(rotation.unwrap_or(0.0)));
             Ok(Value::Struct(st))
@@ -853,7 +838,7 @@ fn get_ruler_property(
         Some("parent") => Ok(parent),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("axis") => Ok(Value::String(axis_name.into())),
-        Some("ticklabelformat") => Ok(Value::String(tick_format_or_default(format))),
+        Some("ticklabelformat") => Ok(Value::string(tick_format_or_default(format))),
         Some("ticklabelrotation") => Ok(Value::Num(rotation.unwrap_or(0.0))),
         Some(other) => Err(plotting_error(
             builtin,
@@ -890,28 +875,28 @@ fn get_legend_property(
                 legend_labels_value(entries.iter().map(|e| e.label.clone()).collect()),
             );
             if let Some(location) = meta.legend_style.location {
-                st.insert("Location", Value::String(location));
+                st.insert("Location", Value::string(location));
             }
             if let Some(size) = meta.legend_style.font_size {
                 st.insert("FontSize", Value::Num(size as f64));
             }
             if let Some(weight) = meta.legend_style.font_weight {
-                st.insert("FontWeight", Value::String(weight));
+                st.insert("FontWeight", Value::string(weight));
             }
             if let Some(angle) = meta.legend_style.font_angle {
-                st.insert("FontAngle", Value::String(angle));
+                st.insert("FontAngle", Value::string(angle));
             }
             if let Some(interpreter) = meta.legend_style.interpreter {
-                st.insert("Interpreter", Value::String(interpreter));
+                st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(box_visible) = meta.legend_style.box_visible {
                 st.insert("Box", Value::Bool(box_visible));
             }
             if let Some(orientation) = meta.legend_style.orientation {
-                st.insert("Orientation", Value::String(orientation));
+                st.insert("Orientation", Value::string(orientation));
             }
             if let Some(color) = meta.legend_style.text_color {
-                st.insert("TextColor", Value::String(color_to_short_name(color)));
+                st.insert("TextColor", Value::string(color_to_short_name(color)));
             }
             Ok(Value::Struct(st))
         }
@@ -929,8 +914,8 @@ fn get_legend_property(
         Some("location") => Ok(meta
             .legend_style
             .location
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontsize") => Ok(meta
             .legend_style
             .font_size
@@ -939,18 +924,18 @@ fn get_legend_property(
         Some("fontweight") => Ok(meta
             .legend_style
             .font_weight
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontangle") => Ok(meta
             .legend_style
             .font_angle
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("interpreter") => Ok(meta
             .legend_style
             .interpreter
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("box") => Ok(meta
             .legend_style
             .box_visible
@@ -959,13 +944,13 @@ fn get_legend_property(
         Some("orientation") => Ok(meta
             .legend_style
             .orientation
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("textcolor") | Some("color") => Ok(meta
             .legend_style
             .text_color
-            .map(|c| Value::String(color_to_short_name(c)))
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(|c| Value::string(color_to_short_name(c)))
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported legend property `{other}`"),
@@ -1006,8 +991,8 @@ pub(crate) fn property_name_text(value: &Value, builtin: &'static str) -> Builti
         ));
     }
     let text = match value {
-        Value::String(text) => text.clone(),
-        Value::StringArray(strings) => strings.data[0].clone(),
+        Value::String(text) => text.as_str().to_owned(),
+        Value::StringArray(strings) => strings.data[0].as_str().to_owned(),
         Value::CharArray(chars) => chars.data.iter().collect(),
         _ => {
             return Err(plotting_error(
@@ -2056,23 +2041,23 @@ fn get_histogram_property(
             if let Some(data) = &hist.metadata.data {
                 st.insert("Data", Value::Tensor(data.clone()));
             }
-            st.insert("Normalization", Value::String(hist.normalization.clone()));
+            st.insert("Normalization", Value::string(hist.normalization.clone()));
             st.insert("NumBins", Value::Num(hist.raw_counts.len() as f64));
             st.insert("BinWidth", Value::Num(hist.metadata.bin_width));
             st.insert(
                 "BinLimits",
                 tensor_from_vec(vec![hist.metadata.bin_limits.0, hist.metadata.bin_limits.1]),
             );
-            st.insert("FaceColor", Value::String(hist.metadata.face_color.clone()));
+            st.insert("FaceColor", Value::string(hist.metadata.face_color.clone()));
             st.insert("FaceAlpha", Value::Num(hist.metadata.face_alpha));
-            st.insert("EdgeColor", Value::String(hist.metadata.edge_color.clone()));
+            st.insert("EdgeColor", Value::string(hist.metadata.edge_color.clone()));
             st.insert(
                 "DisplayStyle",
-                Value::String(hist.metadata.display_style.clone()),
+                Value::string(hist.metadata.display_style.clone()),
             );
             st.insert(
                 "DisplayName",
-                Value::String(hist.display_name.clone().unwrap_or_default()),
+                Value::string(hist.display_name.clone().unwrap_or_default()),
             );
             Ok(Value::Struct(st))
         }
@@ -2093,18 +2078,18 @@ fn get_histogram_property(
         Some("data") => Ok(Value::Tensor(hist.metadata.data.clone().unwrap_or_else(
             || Tensor::new(Vec::new(), vec![0, 0]).expect("valid empty tensor"),
         ))),
-        Some("normalization") => Ok(Value::String(hist.normalization.clone())),
+        Some("normalization") => Ok(Value::string(hist.normalization.clone())),
         Some("numbins") => Ok(Value::Num(hist.raw_counts.len() as f64)),
         Some("binwidth") => Ok(Value::Num(hist.metadata.bin_width)),
         Some("binlimits") => Ok(tensor_from_vec(vec![
             hist.metadata.bin_limits.0,
             hist.metadata.bin_limits.1,
         ])),
-        Some("facecolor") => Ok(Value::String(hist.metadata.face_color.clone())),
+        Some("facecolor") => Ok(Value::string(hist.metadata.face_color.clone())),
         Some("facealpha") => Ok(Value::Num(hist.metadata.face_alpha)),
-        Some("edgecolor") => Ok(Value::String(hist.metadata.edge_color.clone())),
-        Some("displaystyle") => Ok(Value::String(hist.metadata.display_style.clone())),
-        Some("displayname") => Ok(Value::String(hist.display_name.clone().unwrap_or_default())),
+        Some("edgecolor") => Ok(Value::string(hist.metadata.edge_color.clone())),
+        Some("displaystyle") => Ok(Value::string(hist.metadata.display_style.clone())),
+        Some("displayname") => Ok(Value::string(hist.display_name.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported histogram property `{other}`"),
@@ -2128,7 +2113,7 @@ fn get_histogram2_property(
             st.insert("XBinEdges", tensor_from_vec(hist.x_bin_edges.clone()));
             st.insert("YBinEdges", tensor_from_vec(hist.y_bin_edges.clone()));
             st.insert("NumBins", tensor_from_vec(histogram2_num_bins(hist)));
-            st.insert("Normalization", Value::String(hist.normalization.clone()));
+            st.insert("Normalization", Value::string(hist.normalization.clone()));
             st.insert(
                 "DisplayStyle",
                 Value::String(hist.display_style.as_str().into()),
@@ -2137,7 +2122,7 @@ fn get_histogram2_property(
             st.insert("FaceAlpha", Value::Num(hist.face_alpha));
             st.insert(
                 "DisplayName",
-                Value::String(hist.display_name.clone().unwrap_or_default()),
+                Value::string(hist.display_name.clone().unwrap_or_default()),
             );
             Ok(Value::Struct(st))
         }
@@ -2153,11 +2138,11 @@ fn get_histogram2_property(
         Some("xbinedges") => Ok(tensor_from_vec(hist.x_bin_edges.clone())),
         Some("ybinedges") => Ok(tensor_from_vec(hist.y_bin_edges.clone())),
         Some("numbins") => Ok(tensor_from_vec(histogram2_num_bins(hist))),
-        Some("normalization") => Ok(Value::String(hist.normalization.clone())),
+        Some("normalization") => Ok(Value::string(hist.normalization.clone())),
         Some("displaystyle") => Ok(Value::String(hist.display_style.as_str().into())),
         Some("showemptybins") => Ok(Value::Bool(hist.show_empty_bins)),
         Some("facealpha") => Ok(Value::Num(hist.face_alpha)),
-        Some("displayname") => Ok(Value::String(hist.display_name.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(hist.display_name.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported histogram2 property `{other}`"),
@@ -2192,7 +2177,7 @@ fn get_binscatter_property(
             st.insert("FaceAlpha", Value::Num(binscatter.face_alpha));
             st.insert(
                 "DisplayName",
-                Value::String(binscatter.display_name.clone().unwrap_or_default()),
+                Value::string(binscatter.display_name.clone().unwrap_or_default()),
             );
             Ok(Value::Struct(st))
         }
@@ -2212,7 +2197,7 @@ fn get_binscatter_property(
         Some("ylimits") => Ok(binscatter_y_limits(binscatter)),
         Some("showemptybins") => Ok(Value::Bool(binscatter.show_empty_bins)),
         Some("facealpha") => Ok(Value::Num(binscatter.face_alpha)),
-        Some("displayname") => Ok(Value::String(
+        Some("displayname") => Ok(Value::string(
             binscatter.display_name.clone().unwrap_or_default(),
         )),
         Some(other) => Err(plotting_error(
@@ -2647,22 +2632,22 @@ fn get_world_text_property(
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("text", handle.figure, handle.axes_index);
-            st.insert("String", Value::String(annotation.text.clone()));
+            st.insert("String", Value::string(annotation.text.clone()));
             st.insert(
                 "Position",
                 world_text_position_value(handle, annotation.position, builtin)?,
             );
             if let Some(weight) = annotation.style.font_weight.clone() {
-                st.insert("FontWeight", Value::String(weight));
+                st.insert("FontWeight", Value::string(weight));
             }
             if let Some(angle) = annotation.style.font_angle.clone() {
-                st.insert("FontAngle", Value::String(angle));
+                st.insert("FontAngle", Value::string(angle));
             }
             if let Some(interpreter) = annotation.style.interpreter.clone() {
-                st.insert("Interpreter", Value::String(interpreter));
+                st.insert("Interpreter", Value::string(interpreter));
             }
             if let Some(color) = annotation.style.color {
-                st.insert("Color", Value::String(color_to_short_name(color)));
+                st.insert("Color", Value::string(color_to_short_name(color)));
             }
             if let Some(font_size) = annotation.style.font_size {
                 st.insert("FontSize", Value::Num(font_size as f64));
@@ -2673,28 +2658,28 @@ fn get_world_text_property(
         Some("type") => Ok(Value::String("text".into())),
         Some("parent") => Ok(child_parent_handle(handle.figure, handle.axes_index)),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("string") => Ok(Value::String(annotation.text)),
+        Some("string") => Ok(Value::string(annotation.text)),
         Some("position") => world_text_position_value(handle, annotation.position, builtin),
         Some("fontweight") => Ok(annotation
             .style
             .font_weight
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontangle") => Ok(annotation
             .style
             .font_angle
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("interpreter") => Ok(annotation
             .style
             .interpreter
-            .map(Value::String)
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(Value::string)
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("color") => Ok(annotation
             .style
             .color
-            .map(|c| Value::String(color_to_short_name(c)))
-            .unwrap_or_else(|| Value::String(String::new()))),
+            .map(|c| Value::string(color_to_short_name(c)))
+            .unwrap_or_else(|| Value::string(String::new()))),
         Some("fontsize") => Ok(Value::Num(
             annotation.style.font_size.unwrap_or_default() as f64
         )),
@@ -2812,7 +2797,7 @@ fn line_property_with_data(
             let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
             st.insert("XData", numeric_plot_data_value(&x_data));
             st.insert("YData", numeric_plot_data_value(&y_data));
-            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("Color", Value::string(color_to_short_name(line.color)));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -2820,11 +2805,11 @@ fn line_property_with_data(
             );
             st.insert(
                 "DisplayName",
-                Value::String(line.label.clone().unwrap_or_default()),
+                Value::string(line.label.clone().unwrap_or_default()),
             );
             st.insert(
                 "HandleVisibility",
-                Value::String(line.handle_visibility.clone()),
+                Value::string(line.handle_visibility.clone()),
             );
             st.insert(
                 "Visible",
@@ -2859,11 +2844,11 @@ fn line_property_without_data(
         Some("type") => Value::String("line".into()),
         Some("parent") => child_parent_handle(line_handle.figure, line_handle.axes_index),
         Some("children") => handles_value(Vec::new()),
-        Some("color") => Value::String(color_to_short_name(line.color)),
+        Some("color") => Value::string(color_to_short_name(line.color)),
         Some("linewidth") => Value::Num(line.line_width as f64),
         Some("linestyle") => Value::String(line_style_name(line.line_style).into()),
-        Some("displayname") => Value::String(line.label.clone().unwrap_or_default()),
-        Some("handlevisibility") => Value::String(line.handle_visibility.clone()),
+        Some("displayname") => Value::string(line.label.clone().unwrap_or_default()),
+        Some("handlevisibility") => Value::string(line.handle_visibility.clone()),
         Some("visible") => Value::String(if line.visible { "on" } else { "off" }.into()),
         Some(name) => line_marker_property_value(&line.marker, name, builtin)?,
     };
@@ -2891,7 +2876,7 @@ fn get_animated_line_property(
                     );
                     st.insert("XData", numeric_plot_data_value(&x_data));
                     st.insert("YData", numeric_plot_data_value(&y_data));
-                    st.insert("Color", Value::String(color_to_short_name(line.color)));
+                    st.insert("Color", Value::string(color_to_short_name(line.color)));
                     st.insert("LineWidth", Value::Num(line.line_width as f64));
                     st.insert(
                         "LineStyle",
@@ -2899,7 +2884,7 @@ fn get_animated_line_property(
                     );
                     st.insert(
                         "DisplayName",
-                        Value::String(line.label.clone().unwrap_or_default()),
+                        Value::string(line.label.clone().unwrap_or_default()),
                     );
                     st.insert(
                         "Visible",
@@ -2921,10 +2906,10 @@ fn get_animated_line_property(
                 Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
                 Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
                 Some("zdata") => Ok(tensor_from_vec(Vec::new())),
-                Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+                Some("color") => Ok(Value::string(color_to_short_name(line.color))),
                 Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
                 Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-                Some("displayname") => Ok(Value::String(line.label.clone().unwrap_or_default())),
+                Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
                 Some("visible") => Ok(Value::String(
                     if line.visible { "on" } else { "off" }.into(),
                 )),
@@ -2946,7 +2931,7 @@ fn get_animated_line_property(
                     st.insert("XData", numeric_plot_data_value(&x_data));
                     st.insert("YData", numeric_plot_data_value(&y_data));
                     st.insert("ZData", numeric_plot_data_value(&z_data));
-                    st.insert("Color", Value::String(color_to_short_name(line.color)));
+                    st.insert("Color", Value::string(color_to_short_name(line.color)));
                     st.insert("LineWidth", Value::Num(line.line_width as f64));
                     st.insert(
                         "LineStyle",
@@ -2954,7 +2939,7 @@ fn get_animated_line_property(
                     );
                     st.insert(
                         "DisplayName",
-                        Value::String(line.label.clone().unwrap_or_default()),
+                        Value::string(line.label.clone().unwrap_or_default()),
                     );
                     st.insert(
                         "Visible",
@@ -2975,10 +2960,10 @@ fn get_animated_line_property(
                 Some("xdata") => Ok(numeric_plot_data_value(&x_data)),
                 Some("ydata") => Ok(numeric_plot_data_value(&y_data)),
                 Some("zdata") => Ok(numeric_plot_data_value(&z_data)),
-                Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+                Some("color") => Ok(Value::string(color_to_short_name(line.color))),
                 Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
                 Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-                Some("displayname") => Ok(Value::String(line.label.clone().unwrap_or_default())),
+                Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
                 Some("visible") => Ok(Value::String(
                     if line.visible { "on" } else { "off" }.into(),
                 )),
@@ -3038,7 +3023,7 @@ fn get_reference_line_property(
                 child_base_struct("constantline", line_handle.figure, line_handle.axes_index);
             st.insert("Value", Value::Num(line.value));
             st.insert("Orientation", Value::String(orientation.into()));
-            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("Color", Value::string(color_to_short_name(line.color)));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -3046,15 +3031,15 @@ fn get_reference_line_property(
             );
             st.insert(
                 "Label",
-                Value::String(line.label.clone().unwrap_or_default()),
+                Value::string(line.label.clone().unwrap_or_default()),
             );
             st.insert(
                 "LabelOrientation",
-                Value::String(line.label_orientation.clone()),
+                Value::string(line.label_orientation.clone()),
             );
             st.insert(
                 "DisplayName",
-                Value::String(line.display_name.clone().unwrap_or_default()),
+                Value::string(line.display_name.clone().unwrap_or_default()),
             );
             st.insert(
                 "Visible",
@@ -3070,12 +3055,12 @@ fn get_reference_line_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("value") => Ok(Value::Num(line.value)),
         Some("orientation") => Ok(Value::String(orientation.into())),
-        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("color") => Ok(Value::string(color_to_short_name(line.color))),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-        Some("label") => Ok(Value::String(line.label.clone().unwrap_or_default())),
-        Some("labelorientation") => Ok(Value::String(line.label_orientation.clone())),
-        Some("displayname") => Ok(Value::String(
+        Some("label") => Ok(Value::string(line.label.clone().unwrap_or_default())),
+        Some("labelorientation") => Ok(Value::string(line.label_orientation.clone())),
+        Some("displayname") => Ok(Value::string(
             line.display_name.as_deref().unwrap_or_default().to_owned(),
         )),
         Some("visible") => Ok(Value::String(
@@ -3117,10 +3102,10 @@ fn get_stairs_property(
                 child_base_struct("stairs", stairs_handle.figure, stairs_handle.axes_index);
             st.insert("XData", x_data.clone());
             st.insert("YData", y_data.clone());
-            st.insert("Color", Value::String(color_to_short_name(stairs.color)));
+            st.insert("Color", Value::string(color_to_short_name(stairs.color)));
             st.insert("LineWidth", Value::Num(stairs.line_width as f64));
             if let Some(label) = stairs.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
             Ok(Value::Struct(st))
         }
@@ -3132,9 +3117,9 @@ fn get_stairs_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("xdata") => Ok(x_data),
         Some("ydata") => Ok(y_data),
-        Some("color") => Ok(Value::String(color_to_short_name(stairs.color))),
+        Some("color") => Ok(Value::string(color_to_short_name(stairs.color))),
         Some("linewidth") => Ok(Value::Num(stairs.line_width as f64)),
-        Some("displayname") => Ok(Value::String(stairs.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(stairs.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported stairs property `{other}`"),
@@ -3191,15 +3176,15 @@ fn scatter_property_with_data(
             st.insert("SizeData", scatter_size_data_value(scatter));
             st.insert(
                 "MarkerFaceColor",
-                Value::String(color_to_short_name(scatter.color)),
+                Value::string(color_to_short_name(scatter.color)),
             );
             st.insert(
                 "MarkerEdgeColor",
-                Value::String(color_to_short_name(scatter.edge_color)),
+                Value::string(color_to_short_name(scatter.edge_color)),
             );
             st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
             Ok(Value::Struct(st))
         }
@@ -3239,10 +3224,10 @@ fn scatter_property_without_data(
         Some("rdata") => tensor_from_vec(scatter.r_data.clone().unwrap_or_default()),
         Some("marker") => Value::String(marker_style_name(scatter.marker_style).into()),
         Some("sizedata") => scatter_size_data_value(scatter),
-        Some("markerfacecolor") => Value::String(color_to_short_name(scatter.color)),
-        Some("markeredgecolor") => Value::String(color_to_short_name(scatter.edge_color)),
+        Some("markerfacecolor") => Value::string(color_to_short_name(scatter.color)),
+        Some("markeredgecolor") => Value::string(color_to_short_name(scatter.edge_color)),
         Some("linewidth") => Value::Num(scatter.edge_thickness as f64),
-        Some("displayname") => Value::String(scatter.label.clone().unwrap_or_default()),
+        Some("displayname") => Value::string(scatter.label.clone().unwrap_or_default()),
         Some(other) => {
             return Err(plotting_error(
                 builtin,
@@ -3269,10 +3254,10 @@ fn get_bar_property(
     match property.map(canonical_property_name).as_deref() {
         None => {
             let mut st = child_base_struct("bar", bar_handle.figure, bar_handle.axes_index);
-            st.insert("FaceColor", Value::String(color_to_short_name(bar.color)));
+            st.insert("FaceColor", Value::string(color_to_short_name(bar.color)));
             st.insert("BarWidth", Value::Num(bar.bar_width as f64));
             if let Some(label) = bar.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
             Ok(Value::Struct(st))
         }
@@ -3282,9 +3267,9 @@ fn get_bar_property(
             bar_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("facecolor") | Some("color") => Ok(Value::String(color_to_short_name(bar.color))),
+        Some("facecolor") | Some("color") => Ok(Value::string(color_to_short_name(bar.color))),
         Some("barwidth") => Ok(Value::Num(bar.bar_width as f64)),
-        Some("displayname") => Ok(Value::String(bar.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(bar.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported bar property `{other}`"),
@@ -3331,7 +3316,7 @@ fn get_surface_property(
             st.insert("Visible", Value::Bool(surface.visible));
             st.insert(
                 "DisplayName",
-                Value::String(surface.label.clone().unwrap_or_default()),
+                Value::string(surface.label.clone().unwrap_or_default()),
             );
             Ok(Value::Struct(st))
         }
@@ -3358,7 +3343,7 @@ fn get_surface_property(
             surface_lighting_name(surface.lighting_enabled).into(),
         )),
         Some("visible") => Ok(Value::Bool(surface.visible)),
-        Some("displayname") => Ok(Value::String(surface.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(surface.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported surface property `{other}`"),
@@ -3409,7 +3394,7 @@ fn get_function_surface_property(
             st.insert("Visible", Value::Bool(surface.visible));
             st.insert(
                 "DisplayName",
-                Value::String(surface.label.clone().unwrap_or_default()),
+                Value::string(surface.label.clone().unwrap_or_default()),
             );
             Ok(Value::Struct(st))
         }
@@ -3474,7 +3459,7 @@ fn get_function_surface_property(
             .map(tensor_from_matrix)
             .unwrap_or_else(|| tensor_from_vec(Vec::new()))),
         Some("facealpha") => Ok(Value::Num(surface.alpha as f64)),
-        Some("displayname") => Ok(Value::String(surface.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(surface.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported functionsurface property `{other}`"),
@@ -3580,7 +3565,7 @@ fn get_function_contour_property(
             st.insert("LineWidth", Value::Num(contour.line_width as f64));
             st.insert(
                 "DisplayName",
-                Value::String(contour.label.clone().unwrap_or_default()),
+                Value::string(contour.label.clone().unwrap_or_default()),
             );
             Ok(Value::Struct(st))
         }
@@ -3602,7 +3587,7 @@ fn get_function_contour_property(
         ])),
         Some("fill") => Ok(Value::Bool(function_contour.fill)),
         Some("linewidth") => Ok(Value::Num(contour.line_width as f64)),
-        Some("displayname") => Ok(Value::String(contour.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(contour.label.clone().unwrap_or_default())),
         Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
         Some(other) => Err(plotting_error(
             builtin,
@@ -3666,7 +3651,7 @@ fn get_patch_property(
             st.insert("LineWidth", Value::Num(patch.line_width() as f64));
             st.insert("Visible", Value::Bool(patch.is_visible()));
             if let Some(label) = patch.label() {
-                st.insert("DisplayName", Value::String(label.to_string()));
+                st.insert("DisplayName", Value::string(label.to_string()));
             }
             Ok(Value::Struct(st))
         }
@@ -3702,7 +3687,7 @@ fn get_patch_property(
         Some("facealpha") => Ok(Value::Num(patch.face_alpha() as f64)),
         Some("edgealpha") => Ok(Value::Num(patch.edge_alpha() as f64)),
         Some("linewidth") => Ok(Value::Num(patch.line_width() as f64)),
-        Some("displayname") => Ok(Value::String(patch.label().unwrap_or_default().to_string())),
+        Some("displayname") => Ok(Value::string(patch.label().unwrap_or_default().to_string())),
         Some("visible") => Ok(Value::Bool(patch.is_visible())),
         Some(other) => Err(plotting_error(
             builtin,
@@ -3779,7 +3764,7 @@ fn line3_property_with_data(
             st.insert("XData", numeric_plot_data_value(x_data));
             st.insert("YData", numeric_plot_data_value(y_data));
             st.insert("ZData", numeric_plot_data_value(z_data));
-            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("Color", Value::string(color_to_short_name(line.color)));
             st.insert("LineWidth", Value::Num(line.line_width as f64));
             st.insert(
                 "LineStyle",
@@ -3787,7 +3772,7 @@ fn line3_property_with_data(
             );
             st.insert(
                 "DisplayName",
-                Value::String(line.label.clone().unwrap_or_default()),
+                Value::string(line.label.clone().unwrap_or_default()),
             );
             st.insert(
                 "Visible",
@@ -3819,10 +3804,10 @@ fn line3_property_with_data(
             })?;
             Ok(numeric_plot_data_value(z))
         }
-        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("color") => Ok(Value::string(color_to_short_name(line.color))),
         Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
-        Some("displayname") => Ok(Value::String(line.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(line.label.clone().unwrap_or_default())),
         Some("visible") => Ok(Value::String(
             if line.visible { "on" } else { "off" }.into(),
         )),
@@ -3877,17 +3862,17 @@ fn get_scatter3_property(
             );
             st.insert(
                 "MarkerFaceColor",
-                Value::String(color_to_short_name(
+                Value::string(color_to_short_name(
                     scatter.colors.first().copied().unwrap_or_default(),
                 )),
             );
             st.insert(
                 "MarkerEdgeColor",
-                Value::String(color_to_short_name(scatter.edge_color)),
+                Value::string(color_to_short_name(scatter.edge_color)),
             );
             st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
             if let Some(label) = scatter.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
             Ok(Value::Struct(st))
         }
@@ -3906,12 +3891,12 @@ fn get_scatter3_property(
         Some("sizedata") => Ok(Value::Num(marker_diameter_px_to_area_points2(
             scatter.point_size,
         ))),
-        Some("markerfacecolor") => Ok(Value::String(color_to_short_name(
+        Some("markerfacecolor") => Ok(Value::string(color_to_short_name(
             scatter.colors.first().copied().unwrap_or_default(),
         ))),
-        Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
+        Some("markeredgecolor") => Ok(Value::string(color_to_short_name(scatter.edge_color))),
         Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
-        Some("displayname") => Ok(Value::String(scatter.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(scatter.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported scatter3 property `{other}`"),
@@ -3936,7 +3921,7 @@ fn get_pie_property(
         None => {
             let mut st = child_base_struct("pie", pie_handle.figure, pie_handle.axes_index);
             if let Some(label) = pie.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
             Ok(Value::Struct(st))
         }
@@ -3946,7 +3931,7 @@ fn get_pie_property(
             pie_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("displayname") => Ok(Value::String(pie.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(pie.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported pie property `{other}`"),
@@ -3973,7 +3958,7 @@ fn get_contour_property(
                 child_base_struct("contour", contour_handle.figure, contour_handle.axes_index);
             st.insert("ZData", Value::Num(contour.base_z as f64));
             if let Some(label) = contour.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
             Ok(Value::Struct(st))
         }
@@ -3984,7 +3969,7 @@ fn get_contour_property(
         )),
         Some("children") => Ok(handles_value(Vec::new())),
         Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
-        Some("displayname") => Ok(Value::String(contour.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(contour.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported contour property `{other}`"),
@@ -4009,7 +3994,7 @@ fn get_contour_fill_property(
         None => {
             let mut st = child_base_struct("contour", fill_handle.figure, fill_handle.axes_index);
             if let Some(label) = fill.label.clone() {
-                st.insert("DisplayName", Value::String(label));
+                st.insert("DisplayName", Value::string(label));
             }
             Ok(Value::Struct(st))
         }
@@ -4019,7 +4004,7 @@ fn get_contour_fill_property(
             fill_handle.axes_index,
         )),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("displayname") => Ok(Value::String(fill.label.clone().unwrap_or_default())),
+        Some("displayname") => Ok(Value::string(fill.label.clone().unwrap_or_default())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported contourf property `{other}`"),
@@ -4077,7 +4062,7 @@ fn get_stem_property(
                 "LineStyle",
                 Value::String(line_style_name(stem.line_style).into()),
             );
-            st.insert("Color", Value::String(color_to_short_name(stem.color)));
+            st.insert("Color", Value::string(color_to_short_name(stem.color)));
             if let Some(marker) = &stem.marker {
                 st.insert(
                     "Marker",
@@ -4086,11 +4071,11 @@ fn get_stem_property(
                 st.insert("MarkerSize", Value::Num(marker.size as f64));
                 st.insert(
                     "MarkerFaceColor",
-                    Value::String(color_to_short_name(marker.face_color)),
+                    Value::string(color_to_short_name(marker.face_color)),
                 );
                 st.insert(
                     "MarkerEdgeColor",
-                    Value::String(color_to_short_name(marker.edge_color)),
+                    Value::string(color_to_short_name(marker.edge_color)),
                 );
                 st.insert("Filled", Value::Bool(marker.filled));
             }
@@ -4108,8 +4093,8 @@ fn get_stem_property(
         Some("baseline") => Ok(Value::Bool(stem.baseline_visible)),
         Some("linewidth") => Ok(Value::Num(stem.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(stem.line_style).into())),
-        Some("color") => Ok(Value::String(color_to_short_name(stem.color))),
-        Some("marker") => Ok(Value::String(
+        Some("color") => Ok(Value::string(color_to_short_name(stem.color))),
+        Some("marker") => Ok(Value::string(
             stem.marker
                 .as_ref()
                 .map(|m| marker_style_name(m.kind).to_string())
@@ -4118,13 +4103,13 @@ fn get_stem_property(
         Some("markersize") => Ok(Value::Num(
             stem.marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
         )),
-        Some("markerfacecolor") => Ok(Value::String(
+        Some("markerfacecolor") => Ok(Value::string(
             stem.marker
                 .as_ref()
                 .map(|m| color_to_short_name(m.face_color))
                 .unwrap_or("none".into()),
         )),
-        Some("markeredgecolor") => Ok(Value::String(
+        Some("markeredgecolor") => Ok(Value::string(
             stem.marker
                 .as_ref()
                 .map(|m| color_to_short_name(m.edge_color))
@@ -4176,7 +4161,7 @@ fn get_errorbar_property(
                 "LineStyle",
                 Value::String(line_style_name(errorbar.line_style).into()),
             );
-            st.insert("Color", Value::String(color_to_short_name(errorbar.color)));
+            st.insert("Color", Value::string(color_to_short_name(errorbar.color)));
             st.insert("CapSize", Value::Num(errorbar.cap_size as f64));
             if let Some(marker) = &errorbar.marker {
                 st.insert(
@@ -4195,9 +4180,9 @@ fn get_errorbar_property(
         Some("children") => Ok(handles_value(Vec::new())),
         Some("linewidth") => Ok(Value::Num(errorbar.line_width as f64)),
         Some("linestyle") => Ok(Value::String(line_style_name(errorbar.line_style).into())),
-        Some("color") => Ok(Value::String(color_to_short_name(errorbar.color))),
+        Some("color") => Ok(Value::string(color_to_short_name(errorbar.color))),
         Some("capsize") => Ok(Value::Num(errorbar.cap_size as f64)),
-        Some("marker") => Ok(Value::String(
+        Some("marker") => Ok(Value::string(
             errorbar
                 .marker
                 .as_ref()
@@ -4251,7 +4236,7 @@ fn get_quiver_property(
                 )),
             );
             st.insert("Children", handles_value(Vec::new()));
-            st.insert("Color", Value::String(color_to_short_name(quiver.color)));
+            st.insert("Color", Value::string(color_to_short_name(quiver.color)));
             st.insert("LineWidth", Value::Num(quiver.line_width as f64));
             st.insert("AutoScaleFactor", Value::Num(quiver.scale as f64));
             st.insert("MaxHeadSize", Value::Num(quiver.head_size as f64));
@@ -4294,7 +4279,7 @@ fn get_quiver_property(
             quiver_handle.axes_index,
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("color") => Ok(Value::String(color_to_short_name(quiver.color))),
+        Some("color") => Ok(Value::string(color_to_short_name(quiver.color))),
         Some("linewidth") => Ok(Value::Num(quiver.line_width as f64)),
         Some("autoscalefactor") => Ok(Value::Num(quiver.scale as f64)),
         Some("maxheadsize") => Ok(Value::Num(quiver.head_size as f64)),
@@ -4385,7 +4370,7 @@ fn get_image_property(
             }
             st.insert(
                 "CDataMapping",
-                Value::String(image_handle.c_data_mapping.clone()),
+                Value::string(image_handle.c_data_mapping.clone()),
             );
             Ok(Value::Struct(st))
         }
@@ -4400,7 +4385,7 @@ fn get_image_property(
         Some("colordata") => Ok(Value::Tensor(image_handle.c_data.clone().unwrap_or_else(
             || Tensor::new(Vec::new(), vec![0, 0]).expect("valid empty tensor"),
         ))),
-        Some("cdatamapping") => Ok(Value::String(image_handle.c_data_mapping.clone())),
+        Some("cdatamapping") => Ok(Value::string(image_handle.c_data_mapping.clone())),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported image property `{other}`"),
@@ -4450,15 +4435,15 @@ fn get_heatmap_property(
             st.insert("Children", handles_value(Vec::new()));
             st.insert(
                 "Title",
-                Value::String(meta.title.clone().unwrap_or_default()),
+                Value::string(meta.title.clone().unwrap_or_default()),
             );
             st.insert(
                 "XLabel",
-                Value::String(meta.x_label.clone().unwrap_or_default()),
+                Value::string(meta.x_label.clone().unwrap_or_default()),
             );
             st.insert(
                 "YLabel",
-                Value::String(meta.y_label.clone().unwrap_or_default()),
+                Value::string(meta.y_label.clone().unwrap_or_default()),
             );
             st.insert(
                 "XDisplayLabels",
@@ -4480,7 +4465,7 @@ fn get_heatmap_property(
             );
             st.insert(
                 "Colormap",
-                Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
+                Value::string(format!("{:?}", meta.colormap).to_ascii_lowercase()),
             );
             st.insert(
                 "ColorLimits",
@@ -4500,16 +4485,16 @@ fn get_heatmap_property(
             heatmap_handle.axes_index,
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("title") => Ok(Value::String(meta.title.clone().unwrap_or_default())),
-        Some("xlabel") => Ok(Value::String(meta.x_label.clone().unwrap_or_default())),
-        Some("ylabel") => Ok(Value::String(meta.y_label.clone().unwrap_or_default())),
+        Some("title") => Ok(Value::string(meta.title.clone().unwrap_or_default())),
+        Some("xlabel") => Ok(Value::string(meta.x_label.clone().unwrap_or_default())),
+        Some("ylabel") => Ok(Value::string(meta.y_label.clone().unwrap_or_default())),
         Some("xdisplaylabels") => string_array_from_vec(heatmap_handle.x_labels.clone()),
         Some("ydisplaylabels") => string_array_from_vec(heatmap_handle.y_labels.clone()),
         Some("colordata") => Ok(Value::Tensor(heatmap_handle.color_data.clone())),
         Some("colorbarvisible") | Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
         Some("gridvisible") => Ok(Value::Bool(meta.grid_enabled)),
         Some("fontsize") => Ok(Value::Num(meta.axes_style.font_size.unwrap_or(10.0) as f64)),
-        Some("colormap") => Ok(Value::String(
+        Some("colormap") => Ok(Value::string(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
         )),
         Some("colorlimits") => Ok(heatmap_handle
@@ -4560,7 +4545,7 @@ fn get_area_property(
             st.insert("XData", tensor_from_vec(area.x.clone()));
             st.insert("YData", tensor_from_vec(area.y.clone()));
             st.insert("BaseValue", Value::Num(area.baseline));
-            st.insert("Color", Value::String(color_to_short_name(area.color)));
+            st.insert("Color", Value::string(color_to_short_name(area.color)));
             Ok(Value::Struct(st))
         }
         Some("type") => Ok(Value::String("area".into())),
@@ -4572,7 +4557,7 @@ fn get_area_property(
         Some("xdata") => Ok(tensor_from_vec(area.x.clone())),
         Some("ydata") => Ok(tensor_from_vec(area.y.clone())),
         Some("basevalue") => Ok(Value::Num(area.baseline)),
-        Some("color") => Ok(Value::String(color_to_short_name(area.color))),
+        Some("color") => Ok(Value::string(color_to_short_name(area.color))),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported area property `{other}`"),
@@ -7471,8 +7456,8 @@ fn tick_mode_value<T>(ticks: Option<&Vec<T>>) -> Value {
 
 fn tick_labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(s) => Ok(vec![s.clone()]),
-        Value::StringArray(strings) => Ok(strings.data.clone()),
+        Value::String(s) => Ok(vec![s.as_str().to_owned()]),
+        Value::StringArray(strings) => Ok(strings.data.iter().map(|s| s.as_str().to_owned()).collect()),
         Value::CharArray(chars) => Ok(char_array_rows(chars)),
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data.len());
@@ -7637,7 +7622,9 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
     let mut labels = Vec::new();
     for arg in args {
         match arg {
-            Value::StringArray(arr) => labels.extend(arr.data.iter().cloned()),
+            Value::StringArray(arr) => {
+                labels.extend(arr.data.iter().map(|s| s.as_str().to_owned()))
+            }
             Value::Cell(cell) => {
                 for row in 0..cell.rows {
                     for col in 0..cell.cols {
@@ -7671,27 +7658,23 @@ fn handle_scalar(value: &Value, builtin: &'static str) -> BuiltinResult<f64> {
 }
 
 fn legend_labels_value(labels: Vec<String>) -> Value {
-    Value::StringArray(StringArray {
-        rows: 1,
-        cols: labels.len().max(1),
-        shape: vec![1, labels.len().max(1)],
-        data: labels,
-    })
+    let count = labels.len();
+    Value::StringArray(
+        StringArray::new(labels, vec![1, count]).expect("legend label shape matches data"),
+    )
 }
 
 fn text_value(text: Option<String>) -> Value {
     match text {
         Some(text) if text.contains('\n') => {
             let lines: Vec<String> = text.split('\n').map(|s| s.to_string()).collect();
-            Value::StringArray(StringArray {
-                rows: 1,
-                cols: lines.len().max(1),
-                shape: vec![1, lines.len().max(1)],
-                data: lines,
-            })
+            let count = lines.len();
+            Value::StringArray(
+                StringArray::new(lines, vec![1, count]).expect("text line shape matches data"),
+            )
         }
-        Some(text) => Value::String(text),
-        None => Value::String(String::new()),
+        Some(text) => Value::string(text),
+        None => Value::string(String::new()),
     }
 }
 
@@ -7718,7 +7701,7 @@ pub(crate) fn label_strings_from_value(
     label_context: &str,
 ) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array.data.iter().map(|s| s.as_str().to_owned()).collect()),
         Value::Cell(cell) => cell
             .data
             .iter()
@@ -7732,7 +7715,7 @@ pub(crate) fn label_strings_from_value(
             })
             .collect(),
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::Tensor(tensor) => Ok((0..tensor.len())
             .map(|index| {
                 format_numeric_label(
@@ -8006,7 +7989,7 @@ fn axis_to_y_grid(axis: &[f64], x_len: usize) -> Vec<Vec<f64>> {
 fn surface_face_color_value(surface: &runmat_plot::plots::SurfacePlot) -> Value {
     match &surface.colormap {
         ColorMap::Custom(min, max) if (*min - *max).abs().max_element() < 1e-6 => {
-            Value::String(color_to_short_name(*min))
+            Value::string(color_to_short_name(*min))
         }
         _ => Value::String("flat".into()),
     }
@@ -8118,7 +8101,7 @@ fn patch_color_property(mode: runmat_plot::plots::PatchFaceColorMode, color: gla
         runmat_plot::plots::PatchFaceColorMode::None => Value::String("none".into()),
         runmat_plot::plots::PatchFaceColorMode::Flat => Value::String("flat".into()),
         runmat_plot::plots::PatchFaceColorMode::Interp => Value::String("interp".into()),
-        runmat_plot::plots::PatchFaceColorMode::Color => Value::String(color_to_short_name(color)),
+        runmat_plot::plots::PatchFaceColorMode::Color => Value::string(color_to_short_name(color)),
     }
 }
 
@@ -8128,7 +8111,7 @@ fn patch_edge_color_property(
 ) -> Value {
     match mode {
         runmat_plot::plots::PatchEdgeColorMode::None => Value::String("none".into()),
-        runmat_plot::plots::PatchEdgeColorMode::Color => Value::String(color_to_short_name(color)),
+        runmat_plot::plots::PatchEdgeColorMode::Color => Value::string(color_to_short_name(color)),
     }
 }
 
@@ -8144,11 +8127,11 @@ fn insert_line_marker_struct_props(
         st.insert("MarkerSize", Value::Num(marker.size as f64));
         st.insert(
             "MarkerFaceColor",
-            Value::String(color_to_short_name(marker.face_color)),
+            Value::string(color_to_short_name(marker.face_color)),
         );
         st.insert(
             "MarkerEdgeColor",
-            Value::String(color_to_short_name(marker.edge_color)),
+            Value::string(color_to_short_name(marker.edge_color)),
         );
         st.insert("Filled", Value::Bool(marker.filled));
     }
@@ -8160,7 +8143,7 @@ fn line_marker_property_value(
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
     match name {
-        "marker" => Ok(Value::String(
+        "marker" => Ok(Value::string(
             marker
                 .as_ref()
                 .map(|m| marker_style_name(m.kind).to_string())
@@ -8169,13 +8152,13 @@ fn line_marker_property_value(
         "markersize" => Ok(Value::Num(
             marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
         )),
-        "markerfacecolor" => Ok(Value::String(
+        "markerfacecolor" => Ok(Value::string(
             marker
                 .as_ref()
                 .map(|m| color_to_short_name(m.face_color))
                 .unwrap_or_else(|| "none".into()),
         )),
-        "markeredgecolor" => Ok(Value::String(
+        "markeredgecolor" => Ok(Value::string(
             marker
                 .as_ref()
                 .map(|m| color_to_short_name(m.edge_color))

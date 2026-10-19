@@ -16,7 +16,7 @@ pub(super) fn string(
     if data.len() == 1 {
         return Ok(Value::String(data.into_iter().next().expect("one string")));
     }
-    StringArray::new(data, extract::output_shape(sizes))
+    StringArray::from_texts_unbounded(data, extract::output_shape(sizes))
         .map(Value::StringArray)
         .map_err(internal)
 }

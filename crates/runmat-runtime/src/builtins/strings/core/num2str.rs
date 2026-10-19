@@ -353,11 +353,15 @@ fn validate_precision(value: i64) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn value_to_text(value: &Value) -> Option<String> {
+fn value_to_text(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data.len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        }
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(std::borrow::Cow::Owned(ca.data.iter().collect()))
+        }
         _ => None,
     }
 }

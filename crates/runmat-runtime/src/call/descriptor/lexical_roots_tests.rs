@@ -15,7 +15,7 @@ fn an_unpolled_descriptor_future_roots_its_nested_activation() {
             binding: Some(binding.clone()),
             source_role: runmat_types::FunctionSourceRole::Nested,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
             lexical_environment: Some(LexicalEnvironment::new(handle, None)),
         });
         let descriptor = CallableDescriptor {

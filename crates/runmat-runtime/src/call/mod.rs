@@ -10,4 +10,7 @@ pub mod function_abi;
 mod function_arguments;
 pub mod identity;
 pub mod lexical;
-pub use function_arguments::{CapturedValueLease, RootedFunctionArguments};
+pub use function_arguments::{
+    CapturedValueLease, RetainedCallableTarget, RootedArgumentValue, RootedFunctionArguments,
+    RootedFunctionArgumentsIntoIter,
+};

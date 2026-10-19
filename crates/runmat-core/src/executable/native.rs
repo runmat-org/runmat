@@ -4,12 +4,15 @@ use super::ExecutableUnit;
 
 #[path = "native/class_retention.rs"]
 mod class_retention;
+#[path = "native/test_procedure.rs"]
+mod test_procedure;
 
 /// Owned canonical frontend product used by both background JIT compilation
 /// and ahead-of-time object emission.
 ///
 /// Keeping this preparation in Core prevents either native product from
 /// rebuilding MIR, analysis facts, executable identity, or binding names.
+#[derive(Clone)]
 pub struct NativeCompilationInput {
     mir: runmat_mir::MirAssembly,
     analysis: runmat_mir::analysis::AnalysisStore,
@@ -35,6 +38,30 @@ pub struct AotObjectDataOptions {
 impl NativeCompilationInput {
     pub fn entrypoint(&self) -> runmat_types::ProgramFunctionId {
         self.entrypoint.compiled()
+    }
+
+    /// Make retained callable bodies eligible as native entry roots. This is
+    /// used by a paired test object after the exact test inventory has been
+    /// bound to the frozen MIR; it does not change the product's selected
+    /// executable identity or admit a name-based lookup.
+    pub fn with_additional_entrypoints(
+        mut self,
+        functions: &std::collections::BTreeSet<runmat_types::ProgramFunctionId>,
+    ) -> Result<Self, runmat_runtime::RuntimeError> {
+        for function in functions {
+            let ordinal = usize::try_from(function.0)
+                .map_err(|_| native_product_error("native entrypoint exceeds this host".into()))?;
+            let local = runmat_hir::FunctionId(ordinal);
+            if !self.mir.bodies.contains_key(&local) || !self.mir.functions.contains_key(&local) {
+                return Err(native_product_error(
+                    "additional native entrypoint is absent from retained frozen MIR".into(),
+                ));
+            }
+            self.mir.entrypoints.push(local);
+        }
+        self.mir.entrypoints.sort_unstable();
+        self.mir.entrypoints.dedup();
+        Ok(self)
     }
 
     pub fn lower(

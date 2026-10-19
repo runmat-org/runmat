@@ -169,12 +169,9 @@ mod tests {
     fn title_accepts_multiline_text_inputs() {
         let _guard = setup_plot_tests();
 
-        title_builtin(vec![Value::StringArray(StringArray {
-            data: vec!["Line 1".into(), "Line 2".into()],
-            shape: vec![1, 2],
-            rows: 1,
-            cols: 2,
-        })])
+        title_builtin(vec![Value::StringArray(
+            StringArray::new(vec!["Line 1".into(), "Line 2".into()], vec![1, 2]).unwrap(),
+        )])
         .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(

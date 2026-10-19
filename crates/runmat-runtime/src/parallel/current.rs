@@ -63,7 +63,7 @@ fn job_object(job_id: runmat_execution::JobId) -> Value {
 fn insert_text(object: &mut ObjectInstance, property: &str, value: impl std::fmt::Display) {
     object
         .properties
-        .insert(property.into(), Value::String(value.to_string()));
+        .insert(property.into(), Value::string(value.to_string()));
 }
 
 const fn backend_name(backend: PoolBackend) -> &'static str {

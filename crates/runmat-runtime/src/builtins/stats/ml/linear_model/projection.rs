@@ -12,7 +12,7 @@ pub(super) fn model_object(spec: FitSpec, fit: OlsFit) -> BuiltinResult<ObjectIn
     );
     object
         .properties
-        .insert("Formula".to_string(), Value::String(spec.model_formula));
+        .insert("Formula".to_string(), Value::string(spec.model_formula));
     object.properties.insert(
         "NumObservations".to_string(),
         Value::Num(fit.observations as f64),
@@ -61,7 +61,7 @@ pub(super) fn model_object(spec: FitSpec, fit: OlsFit) -> BuiltinResult<ObjectIn
     );
     object.properties.insert(
         "ResponseName".to_string(),
-        Value::String(spec.response_name),
+        Value::string(spec.response_name),
     );
     object.properties.insert(
         "NumPredictors".to_string(),

@@ -51,7 +51,7 @@ fn strict_scalar_text_accepts_rows_and_scalar_strings_without_numeric_coercion()
         Value::Num(3.0),
         Value::Int(IntValue::I64(3)),
         Value::Bool(true),
-        Value::String(String::new()),
+        Value::String(String::new().into()),
         Value::CharArray(CharArray::new(vec!['x', 'y'], 2, 1).unwrap()),
         Value::StringArray(StringArray::new(vec!["a".into(), "b".into()], vec![1, 2]).unwrap()),
     ] {
@@ -107,10 +107,11 @@ fn empty_output_names_keep_the_existing_container_contract() {
     // accepts empty text here; changing name validity belongs to a separate
     // public-contract review, not the no-coercion repair.
     assert_eq!(
-        output_names(Some(Value::String(String::new()))).unwrap(),
+        output_names(Some(Value::String(String::new().into()))).unwrap(),
         vec![String::new()]
     );
-    let cell = Value::Cell(CellArray::new(vec![Value::String(String::new())], 1, 1).unwrap());
+    let cell =
+        Value::Cell(CellArray::new(vec![Value::String(String::new().into())], 1, 1).unwrap());
     assert_eq!(output_names(Some(cell)).unwrap(), vec![String::new()]);
 }
 
@@ -174,7 +175,9 @@ fn invalid_python_controls_do_not_discover_or_start_an_interpreter() {
             ForeignCall {
                 adapter: PYTHON_ADAPTER_ID.into(),
                 symbol: symbol.into(),
-                arguments,
+                arguments: crate::call::RootedFunctionArguments::ordinary(
+                    crate::execution::RootedValues::new(arguments).unwrap(),
+                ),
                 requested_outputs: 1,
             },
         ))

@@ -94,7 +94,7 @@ fn vector_output_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     let shape = match value {
         Value::Tensor(value) => value.shape().to_vec(),
         Value::LogicalArray(value) => value.shape.to_vec(),
-        Value::StringArray(value) => value.shape.clone(),
+        Value::StringArray(value) => value.shape.to_vec(),
         Value::Cell(value) => vec![value.rows, value.cols],
         Value::GpuTensor(value) => value.shape().to_vec(),
         Value::Object(object) if object.is_class(runmat_types::standard::DATETIME) => {

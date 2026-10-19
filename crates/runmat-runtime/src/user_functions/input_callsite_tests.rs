@@ -176,7 +176,7 @@ fn scoped_name_binding_does_not_redirect_same_numbered_numeric_call() {
         binding: None,
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
-        captures: Vec::new(),
+        captures: Vec::new().into(),
     });
     let feval = futures::executor::block_on(crate::call_feval_sequence_async_with_outputs(
         Value::Closure(unbound_closure.clone()),

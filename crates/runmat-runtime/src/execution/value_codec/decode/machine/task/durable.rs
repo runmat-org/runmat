@@ -8,9 +8,9 @@ use std::num::NonZeroUsize;
 
 pub(in crate::execution::value_codec::decode::machine) struct PlainObjectTask<'a> {
     source: &'a DurablePlainObject,
-    children: TakenValues,
     class: TextCopy<'a>,
     object: Option<ObjectInstance>,
+    children: TakenValues,
     property: usize,
     property_name: Option<TextCopy<'a>>,
     dynamic: usize,
@@ -23,9 +23,9 @@ impl<'a> PlainObjectTask<'a> {
     pub(super) fn new(source: &'a DurablePlainObject, children: TakenValues, path: String) -> Self {
         Self {
             source,
-            children,
             class: TextCopy::new(source.class_identity.display_name()),
             object: None,
+            children,
             property: 0,
             property_name: None,
             dynamic: 0,
@@ -155,12 +155,12 @@ fn dynamic_property(
 
 pub(in crate::execution::value_codec::decode::machine) struct StructArrayTask<'a> {
     source: &'a DurableStructArray,
-    children: TakenValues,
     shape: ShapeCopy<'a>,
     names: Vec<String>,
     name: Option<TextCopy<'a>>,
     values: Vec<Value>,
     admission: Option<StructArrayAdmission>,
+    children: TakenValues,
     path: String,
 }
 
@@ -169,12 +169,12 @@ impl<'a> StructArrayTask<'a> {
         let capacity = children.remaining();
         Self {
             source,
-            children,
             shape: ShapeCopy::new(&source.shape, path.clone()),
             names: Vec::with_capacity(source.fields.len()),
             name: None,
             values: Vec::with_capacity(capacity),
             admission: None,
+            children,
             path,
         }
     }
@@ -242,12 +242,12 @@ impl<'a> StructArrayTask<'a> {
 }
 
 pub(in crate::execution::value_codec::decode::machine) struct ObjectArrayTask<'a> {
-    children: TakenValues,
     class: TextCopy<'a>,
     decoded_class: Option<runmat_types::ClassIdentity>,
     shape: ShapeCopy<'a>,
     objects: Vec<Value>,
     admission: Option<ObjectArrayAdmission>,
+    children: TakenValues,
     path: String,
 }
 
@@ -255,12 +255,12 @@ impl<'a> ObjectArrayTask<'a> {
     pub(super) fn new(source: &'a DurableObjectArray, children: TakenValues, path: String) -> Self {
         let capacity = children.remaining();
         Self {
-            children,
             class: TextCopy::new(source.class_identity.display_name()),
             decoded_class: None,
             shape: ShapeCopy::new(&source.shape, path.clone()),
             objects: Vec::with_capacity(capacity),
             admission: None,
+            children,
             path,
         }
     }

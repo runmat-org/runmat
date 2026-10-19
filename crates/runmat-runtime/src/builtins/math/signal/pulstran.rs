@@ -500,8 +500,10 @@ fn is_numeric_or_gpu(value: &Value) -> bool {
 
 fn text_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::CharArray(array) if array.rows == 1 => Some(array.data.iter().collect()),
         _ => None,
     }

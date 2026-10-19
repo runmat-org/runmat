@@ -401,7 +401,7 @@ pub(super) fn parse_nonnegative_integer(
 
 pub(super) fn value_as_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
         _ => None,
     }

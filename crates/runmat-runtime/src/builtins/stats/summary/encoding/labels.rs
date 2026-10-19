@@ -40,13 +40,17 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
             categories: None,
         }),
         Value::String(text) => Ok(LabelArray {
-            labels: vec![text_label(text)],
+            labels: vec![text_label(text.as_str().to_owned())],
             shape: vec![1, 1],
             kind: LabelKind::String,
             categories: None,
         }),
         Value::StringArray(array) => Ok(LabelArray {
-            labels: array.data.into_iter().map(text_label).collect(),
+            labels: array
+                .data
+                .iter()
+                .map(|text| text_label(text.as_str().to_owned()))
+                .collect(),
             shape: normalized_shape(&array.shape),
             kind: LabelKind::String,
             categories: None,
@@ -59,8 +63,8 @@ pub(super) fn labels_from_value(name: EncodingBuiltin, value: Value) -> BuiltinR
         }),
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
-                labels.push(text_label(scalar_text(&item, name, name.name())?));
+            for item in cell.data.iter() {
+                labels.push(text_label(scalar_text(item, name, name.name())?));
             }
             Ok(LabelArray {
                 labels,
@@ -116,7 +120,23 @@ pub(super) fn dummyvar_groups(value: Value) -> BuiltinResult<Vec<LabelArray>> {
         Value::Cell(cell) if cell.rows == 1 || cell.cols == 1 => {
             if cell.rows == 1 && cell.cols > 1 && cell.data.iter().any(is_grouping_container) {
                 let mut groups = Vec::with_capacity(cell.cols);
-                for value in cell.data {
+                let values = cell
+                    .data
+                    .try_into_owned()
+                    .map_err(|_| {
+                        invalid(
+                            EncodingBuiltin::Dummyvar,
+                            "dummyvar: shared grouping Cell requires admitted replacement",
+                        )
+                    })?
+                    .try_into_unbounded_vec()
+                    .map_err(|_| {
+                        invalid(
+                            EncodingBuiltin::Dummyvar,
+                            "dummyvar: admitted grouping Cell requires admitted output",
+                        )
+                    })?;
+                for value in values {
                     groups.push(labels_from_value(EncodingBuiltin::Dummyvar, value)?);
                 }
                 Ok(groups)
@@ -413,9 +433,9 @@ pub(super) fn scalar_text(
     context: &str,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars) => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         other => Err(invalid(
             builtin,
             format!("{context}: expected string scalar, got {other:?}"),

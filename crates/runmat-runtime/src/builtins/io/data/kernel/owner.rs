@@ -38,12 +38,12 @@ pub(in crate::builtins::io::data) async fn hydrate_dataset_descriptor_on(
     if !descriptor.dataset_id.is_empty() {
         obj.properties.insert(
             "__data_id".to_string(),
-            Value::String(descriptor.dataset_id),
+            Value::string(descriptor.dataset_id),
         );
     }
     obj.properties.insert(
         "__data_version".to_string(),
-        Value::String(format!(
+        Value::string(format!(
             "{}:{}",
             descriptor.updated_at, descriptor.txn_sequence
         )),

@@ -50,7 +50,7 @@ impl ObjectSubscript {
                     .map(ObjectIndexComponent::protocol_value)
                     .collect(),
             ),
-            ObjectIndexSelector::Member(name) => Ok(Value::String(name.0.clone())),
+            ObjectIndexSelector::Member(name) => Ok(Value::string(name.0.clone())),
         }
     }
 }
@@ -117,7 +117,7 @@ fn index_values(value: &Value) -> Result<ObjectIndexSelector, RuntimeError> {
 
 fn scalar_text(value: &Value) -> Result<String, RuntimeError> {
     match value {
-        Value::String(value) => Ok(value.clone()),
+        Value::String(value) => Ok(value.as_str().to_owned()),
         Value::CharArray(value) if value.rows == 1 => Ok(value.data.iter().collect()),
         _ => Err(invalid(
             "subscript type and member selectors must be scalar text",

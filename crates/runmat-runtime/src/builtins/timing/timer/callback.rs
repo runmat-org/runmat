@@ -71,14 +71,14 @@ async fn run_callback_with_error(
     }
     match callback {
         Value::String(text) if !text.trim().is_empty() => {
-            text_callback_request(runtime, handle, slot, text)?
+            text_callback_request(runtime, handle, slot, &text)?
                 .evaluate(runtime.clone())
                 .await?;
         }
         Value::CharArray(chars) if !chars.data.is_empty() => {
             let text: String = chars.data.iter().collect();
             if !text.trim().is_empty() {
-                text_callback_request(runtime, handle, slot, text)?
+                text_callback_request(runtime, handle, slot, &text)?
                     .evaluate(runtime.clone())
                     .await?;
             }
@@ -108,7 +108,7 @@ pub(super) fn text_callback_request(
     runtime: &RuntimeContext,
     handle: &HandleRef,
     callback: TimerCallback,
-    text: String,
+    text: &str,
 ) -> BuiltinResult<SessionSourceEvaluation> {
     let label: Arc<str> = Arc::from(format!(
         "<timer:{}:{}>",
@@ -155,7 +155,7 @@ fn timer_event(
     let mut event = StructValue::new();
     event.insert(
         "Type",
-        Value::String(callback.property().name().to_string()),
+        Value::string(callback.property().name().to_string()),
     );
     event.insert("Data", Value::Struct(data));
     Value::Struct(event)

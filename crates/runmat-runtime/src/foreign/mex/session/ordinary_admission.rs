@@ -10,7 +10,6 @@ use std::rc::Rc;
 
 use runmat_execution::Digest;
 use runmat_process_host::private_bytes::PrivateByteLease;
-use runmat_value::Value;
 
 use super::{artifact_catalog, runtime_error, MexNameSelection, MexRuntimeSession};
 use crate::builtins::common::path_search::{FileCandidate, FileCandidateOrigin};
@@ -141,7 +140,7 @@ impl MexRuntimeSession {
     pub async fn load_ordinary_admitted_and_call(
         self: &Rc<Self>,
         name: &str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
         source_owner: &SelectedProgramSourceOwner,
@@ -152,10 +151,6 @@ impl MexRuntimeSession {
                 "ordinary MEX invocation differs from its issued session source",
             )));
         }
-        let input_roots = match crate::execution::RootedValueLease::for_values(arguments.iter()) {
-            Ok(roots) => roots,
-            Err(error) => return ControlFlow::Break(Err(error.into_runtime_error())),
-        };
         if self.abandoned.get() || self.shutdown_in_progress.get() {
             return ControlFlow::Break(Err(runtime_error(
                 "MEX:Lifecycle",
@@ -195,7 +190,6 @@ impl MexRuntimeSession {
                 runtime,
                 source_owner,
                 selected,
-                input_roots,
             )
             .await
             .unwrap_or_else(|| {
@@ -210,12 +204,11 @@ impl MexRuntimeSession {
     async fn load_ordinary_selected_and_call(
         self: &Rc<Self>,
         name: &str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
         source_owner: &SelectedProgramSourceOwner,
         expected_selection: FileCandidate,
-        input_roots: crate::execution::RootedValueLease,
     ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         if !source_owner.is_bound_in(&runtime) {
             return Some(Err(runtime_error(
@@ -453,14 +446,8 @@ impl MexRuntimeSession {
         {
             artifact.callable_names.insert(name.to_owned());
         }
-        self.dispatch_admitted_path(
-            private_module,
-            arguments,
-            requested_outputs,
-            runtime,
-            input_roots,
-        )
-        .await
+        self.dispatch_admitted_path(private_module, arguments, requested_outputs, runtime)
+            .await
     }
 }
 

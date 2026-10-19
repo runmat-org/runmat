@@ -124,14 +124,23 @@ fn upload_mode_value(
         ),
         Value::Bool(logical) => upload_logical(&[u8::from(logical)], &[1, 1]),
         Value::LogicalArray(logical) => upload_logical(&logical.data, &logical.shape),
-        Value::Cell(cell) => {
-            let shape = cell.shape.clone();
-            let data = cell
-                .data
-                .into_iter()
-                .map(|entry| upload_mode_value(provider, entry, protected))
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            runmat_value::CellArray::new_with_shape(data, shape)
+        Value::Cell(mut cell) => {
+            if !cell.data.is_unique() {
+                cell.data
+                    .make_unique_unbounded()
+                    .map_err(|error| mode_internal_error(error.to_string()))?;
+            }
+            let slots = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+                mode_internal_error("shared admitted Cell output requires an admitted replacement")
+            })?;
+            for slot in slots {
+                *slot = upload_mode_value(
+                    provider,
+                    std::mem::replace(slot, Value::Num(0.0)),
+                    protected,
+                )?;
+            }
+            runmat_value::CellArray::from_shared_storage(cell.data, cell.shape)
                 .map(Value::Cell)
                 .map_err(mode_internal_error)
         }
@@ -269,11 +278,15 @@ fn mode_dimension_error(message: String, scalar: bool) -> RuntimeError {
     mode_error_with(&MODE_ERROR_INVALID_DIMENSION, detail)
 }
 
-fn value_as_str(value: &Value) -> Option<String> {
+fn value_as_str(value: &Value) -> Option<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data.len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        }
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(std::borrow::Cow::Owned(ca.data.iter().collect()))
+        }
         _ => None,
     }
 }

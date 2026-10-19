@@ -895,12 +895,9 @@ pub(crate) mod tests {
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),
             Value::String("LineStyleOrder".into()),
-            Value::StringArray(runmat_value::StringArray {
-                data: vec!["--".into(), ":".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                runmat_value::StringArray::new(vec!["--".into(), ":".into()], vec![1, 2]).unwrap(),
+            ),
         ];
         let (mut plans, order) = parse_series_specs(args).expect("parsed");
         assert!(plans.len() == 1);

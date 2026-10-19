@@ -147,7 +147,7 @@ async fn java_add_path_builtin(
             context.clone(),
             JavaOperation::AddClasspath,
             vec![
-                Value::String(entry),
+                Value::string(entry),
                 Value::String(position.wire_name().into()),
             ],
         )
@@ -170,7 +170,7 @@ async fn java_remove_path_builtin(
         invoke_java(
             context.clone(),
             JavaOperation::RemoveClasspath,
-            vec![Value::String(entry)],
+            vec![Value::string(entry)],
         )
         .await?;
     }
@@ -222,7 +222,7 @@ async fn java_class_path_builtin(
     }
     let entries = text_entries(arguments, "javaclasspath")?
         .into_iter()
-        .map(Value::String)
+        .map(Value::string)
         .collect();
     invoke_java(context, JavaOperation::SetClasspath, entries).await?;
     RootedValue::new(Value::output_list(Vec::new())).map_err(|error| error.into_runtime_error())

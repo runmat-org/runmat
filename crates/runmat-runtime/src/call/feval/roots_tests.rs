@@ -49,7 +49,7 @@ fn public_feval_future_roots_unpolled_and_pending_nested_inputs_until_drop() {
             binding: Some(binding),
             source_role: runmat_types::FunctionSourceRole::Nested,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
             lexical_environment: Some(LexicalEnvironment::new(activation_handle, None)),
         }));
         let arguments = [Value::HandleObject(HandleRef {
@@ -139,7 +139,7 @@ fn mapped_nested_closure_uses_explicit_runtime_without_ambient_or_foreign_ambien
                     binding: Some(binding),
                     source_role: runmat_types::FunctionSourceRole::Nested,
                     source_file: None,
-                    captures: Vec::new(),
+                    captures: Vec::new().into(),
                     lexical_environment: Some(LexicalEnvironment::new(activation.handle(), None)),
                 },
             )),

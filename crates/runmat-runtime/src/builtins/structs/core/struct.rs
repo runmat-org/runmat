@@ -120,7 +120,7 @@ fn build_from_pairs(args: Vec<Value>) -> BuiltinResult<Value> {
         }
         match field_value {
             Value::Cell(cell) => {
-                let shape = cell.shape.clone();
+                let shape = cell.shape.as_slice().to_vec();
                 if let Some(existing) = &target_shape {
                     if *existing != shape {
                         return Err(struct_error(&STRUCT_ERROR_CELL_SIZE_MISMATCH));
@@ -155,7 +155,7 @@ fn build_scalar_struct(entries: Vec<FieldEntry>) -> BuiltinResult<Value> {
                 fields.fields.insert(entry.name, value);
             }
             FieldValue::Cell(cell) => {
-                let shape = cell.shape.clone();
+                let shape = cell.shape.as_slice().to_vec();
                 return build_struct_array(
                     vec![FieldEntry {
                         name: entry.name,
@@ -229,10 +229,10 @@ fn empty_struct_array() -> BuiltinResult<Value> {
 
 fn parse_field_name(value: &Value) -> BuiltinResult<String> {
     let text = match value {
-        Value::String(s) => s.clone(),
+        Value::String(s) => s.to_string(),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
-                sa.data[0].clone()
+                sa.data[0].to_string()
             } else {
                 return Err(struct_error(&STRUCT_ERROR_FIELD_NAME_SCALAR));
             }

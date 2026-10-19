@@ -1,11 +1,11 @@
-use runmat_value::{IntValue, NumericStorage, StringArray, Tensor, Value};
+use runmat_value::{IntValue, NumericStorage, StringArray, Tensor, Utf8Text, Value};
 
 use crate::BuiltinResult;
 
 use super::error;
 
 pub(super) enum Labels {
-    Text(Vec<String>),
+    Text(Vec<Utf8Text>),
     Numeric(NumericStorage),
 }
 
@@ -67,7 +67,7 @@ impl Labels {
                             .unwrap_or_default()
                     })
                     .collect();
-                StringArray::new(data, shape)
+                StringArray::from_texts_unbounded(data, shape)
                     .map(Value::StringArray)
                     .map_err(error::internal)
             }
@@ -110,16 +110,20 @@ fn missing_numeric(labels: &NumericStorage, len: usize) -> NumericStorage {
     }
 }
 
-fn text_values(value: &Value) -> BuiltinResult<Vec<String>> {
+fn text_values(value: &Value) -> BuiltinResult<Vec<Utf8Text>> {
     match value {
         Value::String(value) => Ok(vec![value.clone()]),
-        Value::StringArray(value) => Ok(value.data.clone()),
-        Value::CharArray(_) => {
-            super::arguments::scalar_text(value, "replacement value").map(|text| vec![text])
-        }
+        Value::StringArray(value) => Ok(value.data.iter().cloned().collect()),
+        Value::CharArray(_) => super::arguments::scalar_text(value, "replacement value")
+            .map(|text| vec![text.into_owned().into()]),
         Value::Cell(value) => value
             .iter_column_major()
-            .map(|item| super::arguments::scalar_text(item, "text replacement cell"))
+            .map(|item| match item {
+                Value::String(text) => Ok(text.clone()),
+                Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+                _ => super::arguments::scalar_text(item, "text replacement cell")
+                    .map(|text| text.into_owned().into()),
+            })
             .collect(),
         other => Err(error::invalid(format!(
             "discretize: replacement values must be real numeric or text, got {other:?}"

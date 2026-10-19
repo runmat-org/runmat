@@ -92,10 +92,10 @@ pub(in crate::builtins::fea) fn create_results_object_from_args(
     };
     object
         .properties
-        .insert("run_id".to_string(), Value::String(run_id.clone()));
+        .insert("run_id".to_string(), Value::String(run_id.clone().into()));
     object.properties.insert(
         FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
-        Value::String(run_id),
+        Value::String(run_id.into()),
     );
     copy_study_context_property(&args[0], &mut object);
     Ok(Value::Object(object))

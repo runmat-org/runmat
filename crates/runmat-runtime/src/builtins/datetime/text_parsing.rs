@@ -1,6 +1,7 @@
 use super::capabilities::{DEFAULT_DATETIME_FORMAT, DEFAULT_DATE_FORMAT};
 use super::*;
 use runmat_value::CellArray;
+use std::borrow::Cow;
 
 pub(super) async fn validate_cell_text_input(
     value: &Value,
@@ -269,7 +270,7 @@ pub(super) async fn parse_cell_text_input(
     }
     Ok((
         serials,
-        cells.shape.clone(),
+        cells.shape().to_vec(),
         if has_time {
             DEFAULT_DATETIME_FORMAT
         } else {
@@ -321,11 +322,18 @@ pub(super) fn parse_legacy_component_text(
     input_format: Option<&str>,
     label: &str,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
-    let (texts, shape) = match value {
-        Value::String(text) => (vec![text], vec![1, 1]),
+    let (texts, shape): (Vec<Cow<'_, str>>, Vec<usize>) = match &value {
+        Value::String(text) => (vec![Cow::Borrowed(text.as_str())], vec![1, 1]),
         Value::StringArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
-            (array.data, shape)
+            (
+                array
+                    .data
+                    .iter()
+                    .map(|text| Cow::Borrowed(text.as_str()))
+                    .collect(),
+                shape,
+            )
         }
         Value::CharArray(array) => {
             let texts = (0..array.rows)
@@ -335,6 +343,7 @@ pub(super) fn parse_legacy_component_text(
                         .collect::<String>()
                         .trim_end()
                         .to_string()
+                        .into()
                 })
                 .collect();
             (texts, vec![array.rows, 1])
@@ -373,11 +382,18 @@ pub(super) fn parse_legacy_day_text(
     value: Value,
     input_format: Option<&str>,
 ) -> BuiltinResult<(Vec<f64>, Vec<usize>)> {
-    let (texts, shape) = match value {
-        Value::String(text) => (vec![text], vec![1, 1]),
+    let (texts, shape): (Vec<Cow<'_, str>>, Vec<usize>) = match &value {
+        Value::String(text) => (vec![Cow::Borrowed(text.as_str())], vec![1, 1]),
         Value::StringArray(array) => {
             let shape = tensor::default_shape_for(&array.shape, array.data.len());
-            (array.data, shape)
+            (
+                array
+                    .data
+                    .iter()
+                    .map(|text| Cow::Borrowed(text.as_str()))
+                    .collect(),
+                shape,
+            )
         }
         Value::CharArray(array) => {
             let mut texts = Vec::with_capacity(array.rows);
@@ -387,7 +403,8 @@ pub(super) fn parse_legacy_day_text(
                         .iter()
                         .collect::<String>()
                         .trim_end()
-                        .to_string(),
+                        .to_string()
+                        .into(),
                 );
             }
             (texts, vec![array.rows, 1])

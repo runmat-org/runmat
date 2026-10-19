@@ -101,7 +101,8 @@ async fn erase_builtin(text: Value, pattern: Value) -> BuiltinResult<Value> {
     let patterns = PatternList::from_value(&pattern)?;
 
     match text {
-        Value::String(s) => Ok(Value::String(erase_string_scalar(s, &patterns))),
+        Value::String(s) if is_missing_string(s.as_str()) => Ok(Value::String(s)),
+        Value::String(s) => Ok(Value::string(erase_string_scalar(s.as_str(), &patterns))),
         Value::StringArray(sa) => erase_string_array(sa, &patterns),
         Value::CharArray(ca) => erase_char_array(ca, &patterns),
         Value::Cell(cell) => erase_cell_array(cell, &patterns),
@@ -126,17 +127,17 @@ fn contains_numeric_or_resident(value: &Value) -> bool {
     }
 }
 
-struct PatternList {
-    entries: Vec<PatternEntry>,
+struct PatternList<'a> {
+    entries: Vec<PatternEntry<'a>>,
 }
 
-enum PatternEntry {
-    Literal(String),
+enum PatternEntry<'a> {
+    Literal(std::borrow::Cow<'a, str>),
     Regex(Regex),
 }
 
-impl PatternList {
-    fn from_value(value: &Value) -> BuiltinResult<Self> {
+impl<'a> PatternList<'a> {
+    fn from_value(value: &'a Value) -> BuiltinResult<Self> {
         let entries = match value {
             Value::Object(_) => vec![PatternEntry::Regex(
                 Regex::new(&pattern_regex(value, BUILTIN_NAME).map_err(|err| {
@@ -146,12 +147,13 @@ impl PatternList {
                     erase_error_with_message(err.to_string(), &ERASE_ERROR_PATTERN_TYPE)
                 })?,
             )],
-            Value::String(text) => vec![PatternEntry::Literal(text.clone())],
+            Value::String(text) => vec![PatternEntry::Literal(std::borrow::Cow::Borrowed(
+                text.as_str(),
+            ))],
             Value::StringArray(array) => array
                 .data
                 .iter()
-                .cloned()
-                .map(PatternEntry::Literal)
+                .map(|text| PatternEntry::Literal(std::borrow::Cow::Borrowed(text.as_str())))
                 .collect(),
             Value::CharArray(array) => {
                 if array.rows == 0 {
@@ -159,10 +161,8 @@ impl PatternList {
                 } else {
                     let mut list = Vec::with_capacity(array.rows);
                     for row in 0..array.rows {
-                        list.push(PatternEntry::Literal(char_row_to_string_slice(
-                            &array.data,
-                            array.cols,
-                            row,
+                        list.push(PatternEntry::Literal(std::borrow::Cow::Owned(
+                            char_row_to_string_slice(&array.data, array.cols, row),
                         )));
                     }
                     list
@@ -172,16 +172,20 @@ impl PatternList {
                 let mut list = Vec::with_capacity(cell.data.len());
                 for handle in &cell.data {
                     match &handle {
-                        Value::String(text) => list.push(PatternEntry::Literal(text.clone())),
+                        Value::String(text) => list.push(PatternEntry::Literal(
+                            std::borrow::Cow::Borrowed(text.as_str()),
+                        )),
                         Value::StringArray(sa) if sa.data.len() == 1 => {
-                            list.push(PatternEntry::Literal(sa.data[0].clone()));
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Borrowed(
+                                sa.data[0].as_str(),
+                            )));
                         }
                         Value::CharArray(ca) if ca.rows == 0 => {
-                            list.push(PatternEntry::Literal(String::new()));
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Borrowed("")));
                         }
                         Value::CharArray(ca) if ca.rows == 1 => {
-                            list.push(PatternEntry::Literal(char_row_to_string_slice(
-                                &ca.data, ca.cols, 0,
+                            list.push(PatternEntry::Literal(std::borrow::Cow::Owned(
+                                char_row_to_string_slice(&ca.data, ca.cols, 0),
                             )));
                         }
                         Value::CharArray(_) => return Err(erase_error(&ERASE_ERROR_CELL_ELEMENT)),
@@ -206,7 +210,7 @@ impl PatternList {
                     if pattern.is_empty() {
                         continue;
                     }
-                    current = current.replace(pattern, "");
+                    current = current.replace(pattern.as_ref(), "");
                 }
                 PatternEntry::Regex(pattern) => {
                     current = pattern.replace_all(&current, "").to_string();
@@ -220,32 +224,37 @@ impl PatternList {
     }
 }
 
-fn erase_string_scalar(text: String, patterns: &PatternList) -> String {
-    if is_missing_string(&text) {
-        text
+fn erase_string_scalar(text: &str, patterns: &PatternList<'_>) -> String {
+    if is_missing_string(text) {
+        text.to_owned()
     } else {
-        patterns.apply(&text)
+        patterns.apply(text)
     }
 }
 
-fn erase_string_array(array: StringArray, patterns: &PatternList) -> BuiltinResult<Value> {
+fn erase_string_array(array: StringArray, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
     let StringArray { data, shape, .. } = array;
     let mut erased = Vec::with_capacity(data.len());
-    for entry in data {
+    let input: Vec<runmat_value::Utf8Text> = match data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(shared) => shared.iter().cloned().collect(),
+    };
+    for entry in input {
         if is_missing_string(&entry) {
             erased.push(entry);
         } else {
-            erased.push(patterns.apply(&entry));
+            erased.push(runmat_value::Utf8Text::new(patterns.apply(&entry)));
         }
     }
-    StringArray::new(erased, shape)
-        .map(Value::StringArray)
-        .map_err(|e| {
-            erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL)
-        })
+    StringArray::from_shared_storage(
+        runmat_value::ExactArrayStorage::shared_unbounded(erased),
+        shape,
+    )
+    .map(Value::StringArray)
+    .map_err(|e| erase_error_with_message(format!("{BUILTIN_NAME}: {e}"), &ERASE_ERROR_INTERNAL))
 }
 
-fn erase_char_array(array: CharArray, patterns: &PatternList) -> BuiltinResult<Value> {
+fn erase_char_array(array: CharArray, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
     let CharArray {
         data,
         shape,
@@ -289,8 +298,8 @@ fn erase_char_array(array: CharArray, patterns: &PatternList) -> BuiltinResult<V
         })
 }
 
-fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> BuiltinResult<Value> {
-    let shape = cell.shape.clone();
+fn erase_cell_array(cell: CellArray, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
+    let shape = cell.shape().to_vec();
     let mut values = Vec::with_capacity(cell.data.len());
     for handle in &cell.data {
         values.push(erase_cell_element(handle, patterns)?);
@@ -300,11 +309,11 @@ fn erase_cell_array(cell: CellArray, patterns: &PatternList) -> BuiltinResult<Va
     })
 }
 
-fn erase_cell_element(value: &Value, patterns: &PatternList) -> BuiltinResult<Value> {
+fn erase_cell_element(value: &Value, patterns: &PatternList<'_>) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(erase_string_scalar(text.clone(), patterns))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(erase_string_scalar(
-            sa.data[0].clone(),
+        Value::String(text) => Ok(Value::string(erase_string_scalar(text.as_str(), patterns))),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::string(erase_string_scalar(
+            sa.data[0].as_str(),
             patterns,
         ))),
         Value::CharArray(ca) if ca.rows == 0 => Ok(Value::CharArray(ca.clone())),

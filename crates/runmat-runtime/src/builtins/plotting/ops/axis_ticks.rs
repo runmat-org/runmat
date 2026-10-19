@@ -260,7 +260,7 @@ fn tick_value(data: Vec<f64>) -> Value {
 
 fn value_as_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) => Some(chars.data.iter().collect()),
         _ => None,
     }

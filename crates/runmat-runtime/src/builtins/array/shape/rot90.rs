@@ -205,9 +205,13 @@ fn parse_rotation_value(value: &Value) -> crate::BuiltinResult<i64> {
 
 fn parse_direction(value: &Value) -> crate::BuiltinResult<Option<i64>> {
     let text = match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::String(s) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::StringArray(sa) if sa.data.len() == 1 => {
+            Some(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
+        }
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Some(std::borrow::Cow::Owned(ca.data.iter().collect::<String>()))
+        }
         _ => None,
     };
     if let Some(text) = text {
@@ -319,7 +323,7 @@ fn rot90_string_array(array: StringArray, steps: usize) -> crate::BuiltinResult<
         return Ok(array);
     }
     let (data, shape) = rot90_generic(&array.data, &array.shape, steps)?;
-    StringArray::new(data, shape)
+    StringArray::from_texts_unbounded(data, shape)
         .map_err(|e| rot90_error_with_message(format!("rot90: {e}"), &ROT90_ERROR_INTERNAL))
 }
 

@@ -276,7 +276,7 @@ pub(super) async fn duration_read_step(
             let field = scalar_text(&step.selector_value()?, "field selector")?;
             match field.as_str() {
                 FORMAT_FIELD => {
-                    crate::execution::RootedValue::new(Value::String(format_for_object(&object)))
+                    crate::execution::RootedValue::new(Value::string(format_for_object(&object)))
                         .map_err(|error| error.into_runtime_error())
                 }
                 _ => Err(duration_error(
@@ -349,7 +349,7 @@ pub(super) async fn duration_write_step(
                     validate_duration_format(&text)?;
                     object
                         .properties
-                        .insert(FORMAT_FIELD.to_string(), Value::String(text));
+                        .insert(FORMAT_FIELD.to_string(), Value::string(text));
                     Ok(Value::Object(object))
                 }
                 _ => Err(duration_error(

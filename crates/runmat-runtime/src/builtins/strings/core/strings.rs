@@ -188,7 +188,7 @@ async fn parse_arguments(args: Vec<Value>) -> BuiltinResult<ParsedStrings> {
 
 fn prototype_shape(value: &Value) -> BuiltinResult<Vec<usize>> {
     match value {
-        Value::StringArray(sa) => Ok(sa.shape.clone()),
+        Value::StringArray(sa) => Ok(sa.shape().to_vec()),
         _ => {
             shape_from_value(value, FN_NAME).map_err(|_| strings_error(&STRINGS_ERROR_INVALID_SIZE))
         }

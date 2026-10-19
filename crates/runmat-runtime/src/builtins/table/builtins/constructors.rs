@@ -762,7 +762,7 @@ pub(crate) async fn timerange_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
         .insert("End".to_string(), gathered[1].clone());
     object.properties.insert(
         "Inclusivity".to_string(),
-        Value::String(inclusivity.to_ascii_lowercase()),
+        Value::string(inclusivity.to_ascii_lowercase()),
     );
     Ok(Value::Object(object))
 }
@@ -800,7 +800,7 @@ pub(crate) async fn vartype_builtin(value: Value) -> BuiltinResult<Value> {
     let mut object = ObjectInstance::new(VARTYPE_CLASS.to_string());
     object
         .properties
-        .insert("Type".to_string(), Value::String(kind));
+        .insert("Type".to_string(), Value::string(kind));
     Ok(Value::Object(object))
 }
 
@@ -836,7 +836,7 @@ pub(crate) async fn rowfilter_builtin(args: Vec<Value>) -> BuiltinResult<Value> 
         "Predicate".to_string(),
         args.get(1)
             .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
+            .unwrap_or_else(|| Value::string(String::new())),
     );
     Ok(Value::Object(object))
 }
@@ -918,7 +918,7 @@ pub(crate) async fn array_datastore_builtin(args: Vec<Value>) -> BuiltinResult<V
     );
     object
         .properties
-        .insert("OutputType".to_string(), Value::String(output_type));
+        .insert("OutputType".to_string(), Value::string(output_type));
     Ok(Value::Object(object))
 }
 
@@ -967,7 +967,7 @@ pub(crate) async fn file_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Va
         ));
     }
 
-    let mut read_fcn = Value::String(String::new());
+    let mut read_fcn = Value::string(String::new());
     let mut file_extensions = Value::StringArray(StringArray::new(Vec::new(), vec![0, 1]).unwrap());
     let mut include_subfolders = Value::Bool(false);
     let mut read_mode = Value::from("file");
@@ -994,7 +994,7 @@ pub(crate) async fn file_datastore_builtin(args: Vec<Value>) -> BuiltinResult<Va
                     "fileDatastore: ReadMode must be 'file' or 'partialfile'",
                 ));
             }
-            read_mode = Value::String(mode);
+            read_mode = Value::string(mode);
         } else {
             return Err(invalid_argument(format!(
                 "fileDatastore: unsupported option '{name}'"
@@ -1066,7 +1066,7 @@ pub(crate) async fn parquet_datastore_builtin(args: Vec<Value>) -> BuiltinResult
                     {
                         return Err(invalid_argument("parquetDatastore: ReadSize must be 'file', 'rowgroup', or a positive double integer"));
                     }
-                    Value::String(text)
+                    Value::string(text)
                 }
                 _ => {
                     Value::Num(array_datastore_positive_double_integer(&value, "ReadSize")? as f64)

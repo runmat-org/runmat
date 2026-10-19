@@ -13,7 +13,9 @@ pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Option<Vec<String>>> 
             .data
             .iter()
             .enumerate()
-            .map(|(index, name)| nonempty(name.clone(), format!("string element {}", index + 1)))
+            .map(|(index, name)| {
+                nonempty(name.to_string(), format!("string element {}", index + 1))
+            })
             .collect::<crate::BuiltinResult<Vec<_>>>()
             .map(Some),
         Value::String(_) => scalar(value, "string input").map(|name| Some(vec![name])),

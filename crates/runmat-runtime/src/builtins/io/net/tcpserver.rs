@@ -445,11 +445,11 @@ fn build_tcpserver_object(
         .unwrap_or_else(|| format!("tcpserver:{server_address}:{server_port}"));
 
     st.fields
-        .insert("Type".to_string(), Value::String("tcpserver".to_string()));
-    st.fields.insert("Name".to_string(), Value::String(name));
+        .insert("Type".to_string(), Value::string("tcpserver".to_string()));
+    st.fields.insert("Name".to_string(), Value::string(name));
     st.fields.insert(
         "ServerAddress".to_string(),
-        Value::String(server_address.clone()),
+        Value::string(server_address.clone()),
     );
     st.fields
         .insert("ServerPort".to_string(), Value::Num(f64::from(server_port)));
@@ -457,12 +457,12 @@ fn build_tcpserver_object(
         .insert("Port".to_string(), Value::Num(f64::from(server_port)));
     st.fields.insert(
         "RequestedAddress".to_string(),
-        Value::String(requested_address.to_string()),
+        Value::string(requested_address.to_string()),
     );
     st.fields
         .insert("Connected".to_string(), Value::Bool(false));
     st.fields
-        .insert("ClientAddress".to_string(), Value::String(String::new()));
+        .insert("ClientAddress".to_string(), Value::string(String::new()));
     st.fields.insert(
         "ClientPort".to_string(),
         Value::Tensor(Tensor::new(Vec::new(), vec![0, 0]).expect("empty client port")),
@@ -475,7 +475,7 @@ fn build_tcpserver_object(
         .insert("BytesAvailableFcn".to_string(), default_user_data());
     st.fields.insert(
         "BytesAvailableFcnMode".to_string(),
-        Value::String("byte".to_string()),
+        Value::string("byte".to_string()),
     );
     st.fields.insert(
         "BytesAvailableFcnCount".to_string(),
@@ -485,7 +485,7 @@ fn build_tcpserver_object(
         .insert("ConnectionChangedFcn".to_string(), default_user_data());
     st.fields.insert(
         "ByteOrder".to_string(),
-        Value::String(options.byte_order.clone()),
+        Value::string(options.byte_order.clone()),
     );
     st.fields
         .insert("EnableBroadcast".to_string(), Value::Bool(false));

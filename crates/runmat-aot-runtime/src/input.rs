@@ -199,7 +199,7 @@ pub unsafe fn copy_process_arguments(
     Ok(arguments)
 }
 
-unsafe fn copy_bounded(
+pub(crate) unsafe fn copy_bounded(
     pointer: *const u8,
     length: u64,
     maximum: usize,

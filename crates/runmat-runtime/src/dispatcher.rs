@@ -19,11 +19,14 @@ pub use constructor::{
     call_portable_prepared_constructor_sequence_in_context,
     call_portable_prepared_constructor_sequence_with_argument_count_in_context,
     call_prepared_constructor_sequence_in_context,
-    call_prepared_constructor_sequence_with_argument_count_in_context, PreparedConstructorInvoke,
+    call_prepared_constructor_sequence_with_argument_count_in_context,
+    call_rooted_bound_constructor_sequence_in_context, PreparedConstructorInvoke,
 };
 use constructor::{ConstructorArguments, ConstructorInvocationTarget};
 #[path = "dispatcher/owned_gather.rs"]
 mod owned_gather;
+#[path = "dispatcher/cell_alias.rs"]
+mod cell_alias;
 #[path = "dispatcher/owned_gpu.rs"]
 mod owned_gpu;
 mod provenance;
@@ -237,7 +240,7 @@ fn gather_if_needed_async_impl<'a>(
                 for ptr in &ca.data {
                     gathered.push(gather_if_needed_async_impl(ptr).await?);
                 }
-                make_cell_with_shape(gathered, ca.shape.clone()).map_err(|err| {
+                make_cell_with_shape(gathered, ca.shape().to_vec()).map_err(|err| {
                     build_runtime_error(format!("gather: {err}"))
                         .with_identifier("RunMat:gather:CellShapeError")
                         .build()
@@ -305,10 +308,12 @@ fn gather_if_needed_async_impl<'a>(
                 {
                     return Ok(Value::Closure(closure.clone()));
                 }
-                let mut cloned = closure.clone().into_data();
-                for value in &mut cloned.captures {
-                    *value = gather_if_needed_async_impl(value).await?;
+                let mut captures = Vec::with_capacity(closure.captures.len());
+                for value in &closure.captures {
+                    captures.push(gather_if_needed_async_impl(value).await?);
                 }
+                let mut cloned = closure.clone().into_data();
+                cloned.captures = runmat_value::OutputListStorage::shared_unbounded(captures);
                 Ok(Value::Closure(runmat_value::Closure::from_data(cloned)))
             }
             Value::OutputList(_) => Err(crate::runtime_error::semantic_error(
@@ -682,9 +687,11 @@ fn distributed_literal_context(args: &[Value]) -> runmat_types::LiteralContext {
     runmat_types::LiteralContext::new(
         args.iter()
             .map(|value| match value {
-                Value::String(value) => runmat_types::LiteralValue::String(value.clone()),
+                Value::String(value) => {
+                    runmat_types::LiteralValue::String(value.as_str().to_owned())
+                }
                 Value::StringArray(value) if value.data.len() == 1 => {
-                    runmat_types::LiteralValue::String(value.data[0].clone())
+                    runmat_types::LiteralValue::String(value.data[0].as_str().to_owned())
                 }
                 Value::CharArray(value) if value.rows == 1 => {
                     runmat_types::LiteralValue::Character(value.data.iter().collect())
@@ -1085,7 +1092,7 @@ async fn try_call_registered_static_method(
     let adapted = method.implicit_class_argument.as_ref().map(|class| {
         let mut values = Vec::with_capacity(args.len() + 1);
         values.extend_from_slice(args);
-        values.push(Value::String(class.display_name().to_owned()));
+        values.push(Value::string(class.display_name().to_owned()));
         values
     });
     let args = adapted.as_deref().unwrap_or(args);
@@ -2095,7 +2102,7 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
+            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))].into(),
         }));
         assert!(value_contains_gpu(&value));
     }
@@ -2132,7 +2139,7 @@ mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))],
+            captures: vec![Value::GpuTensor(gpu_fixture(vec![1]))].into(),
         }));
         let err = futures::executor::block_on(gather_if_needed_async(&value))
             .expect_err("missing provider should fail closure-captured gather");

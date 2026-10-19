@@ -23,6 +23,7 @@ fn known_invalid_controls_reject_before_resident_download_and_keep_borrowed_inpu
         {
             let _matlab = crate::compatibility::push_runmat_extensions_enabled(false);
             let error = futures::executor::block_on(isstrprop_builtin(
+                None,
                 Value::GpuTensor(handle.clone()),
                 Value::String("unknown-category".into()),
                 vec![Value::String("not-an-option".into()), Value::Num(2.0)],
@@ -53,6 +54,7 @@ fn known_invalid_controls_reject_before_resident_download_and_keep_borrowed_inpu
             ),
         ] {
             let error = futures::executor::block_on(isstrprop_builtin(
+                None,
                 Value::GpuTensor(handle.clone()),
                 Value::String(category.into()),
                 rest,
@@ -72,6 +74,7 @@ fn known_invalid_controls_reject_before_resident_download_and_keep_borrowed_inpu
         }
 
         let result = futures::executor::block_on(isstrprop_builtin(
+            None,
             Value::GpuTensor(handle.clone()),
             Value::String("alpha".into()),
             Vec::new(),

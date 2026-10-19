@@ -184,7 +184,7 @@ fn snapshot_to_value(snapshot: GpuRandomSnapshot) -> BuiltinResult<Value> {
     let mut value = StructValue::new();
     value
         .fields
-        .insert("Type".to_owned(), Value::String("threefry".to_owned()));
+        .insert("Type".to_owned(), Value::string("threefry".to_owned()));
     value
         .fields
         .insert("Seed".to_owned(), Value::Num(snapshot.seed as f64));

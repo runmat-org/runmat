@@ -196,8 +196,10 @@ fn input_parser_error_with_detail(
 
 fn text_scalar(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(strings) if strings.data.len() == 1 => Ok(strings.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(strings) if strings.data.len() == 1 => {
+            Ok(strings.data[0].as_str().to_owned())
+        }
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         _ => Err(input_parser_error(builtin, &ERROR_PARAMETER_NAME)),
     }

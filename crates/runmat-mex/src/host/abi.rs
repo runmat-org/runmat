@@ -1802,13 +1802,13 @@ unsafe extern "C" fn take_error(host: *mut c_void) -> *mut MxArray {
     let diagnostic = error.clone();
     let mode = state.mx.mode();
     let identifier = value_to_mx_for_interface_in_context(
-        &runmat_value::Value::String(error.identifier.unwrap_or_default()),
+        &runmat_value::Value::string(error.identifier.unwrap_or_default()),
         mode,
         state.interface,
         None,
     );
     let message = value_to_mx_for_interface_in_context(
-        &runmat_value::Value::String(error.message),
+        &runmat_value::Value::string(error.message),
         mode,
         state.interface,
         None,

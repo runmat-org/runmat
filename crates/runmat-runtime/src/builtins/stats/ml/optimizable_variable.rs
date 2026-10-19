@@ -105,7 +105,7 @@ async fn optimizable_variable_builtin(
     let admitted_range = if !(matches!(&range, Value::GpuTensor(_))
         || host_options.type_deferred && matches!(&range, Value::String(_) | Value::CharArray(_)))
     {
-        let parsed = OptimizableRange::parse(range.clone(), host_options.var_type)?;
+        let parsed = OptimizableRange::parse(range, host_options.var_type)?;
         if !host_options.type_deferred {
             let var_type = host_options.var_type.unwrap_or(parsed.inferred_type());
             parsed.validate_for(var_type, host_options.transform.unwrap_or(Transform::None))?;
@@ -133,17 +133,17 @@ async fn optimizable_variable_builtin(
     let mut object = ObjectInstance::new(CLASS_IDENTITY);
     object
         .properties
-        .insert("Name".to_string(), Value::String(variable_name));
+        .insert("Name".to_string(), Value::string(variable_name));
     object
         .properties
-        .insert("Range".to_string(), range.value().clone());
+        .insert("Range".to_string(), range.into_value());
     object.properties.insert(
         "Type".to_string(),
-        Value::String(var_type.public_name().to_string()),
+        Value::string(var_type.public_name().to_string()),
     );
     object.properties.insert(
         "Transform".to_string(),
-        Value::String(options.transform.public_name().to_string()),
+        Value::string(options.transform.public_name().to_string()),
     );
     object
         .properties
@@ -155,10 +155,12 @@ fn parse_text_scalar(
     value: &Value,
     label: &str,
     descriptor: &'static BuiltinErrorDescriptor,
-) -> BuiltinResult<String> {
+) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) if chars.rows == 1 => char_row_to_string(chars, label, descriptor),
+        Value::CharArray(chars) if chars.rows == 1 => {
+            char_row_to_string(chars, label, descriptor).map(Into::into)
+        }
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         other => Err(error(
             format!("optimizableVariable: {label} must be a text scalar, got {other:?}"),

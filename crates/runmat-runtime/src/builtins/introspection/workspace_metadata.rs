@@ -57,7 +57,7 @@ impl WhosRecord {
     pub(super) fn into_value(self) -> BuiltinResult<Value> {
         let mut st = StructValue::new();
         st.fields
-            .insert("name".to_string(), Value::String(self.name));
+            .insert("name".to_string(), Value::string(self.name));
         st.fields
             .insert("size".to_string(), Value::Tensor(self.size));
         st.fields.insert(
@@ -65,7 +65,7 @@ impl WhosRecord {
             Value::Num(bytes_as_presentation_double(self.bytes)),
         );
         st.fields
-            .insert("class".to_string(), Value::String(self.class_name));
+            .insert("class".to_string(), Value::string(self.class_name));
         st.fields
             .insert("global".to_string(), Value::Bool(self.is_global));
         st.fields
@@ -73,7 +73,7 @@ impl WhosRecord {
         st.fields
             .insert("complex".to_string(), Value::Bool(self.is_complex));
         st.fields
-            .insert("nesting".to_string(), Value::String(self.nesting));
+            .insert("nesting".to_string(), Value::string(self.nesting));
         st.fields
             .insert("persistent".to_string(), Value::Bool(self.persistent));
         Ok(Value::Struct(st))

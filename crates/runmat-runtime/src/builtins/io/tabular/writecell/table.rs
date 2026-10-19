@@ -93,7 +93,7 @@ pub(super) fn cell_value_from_value(value: Value) -> BuiltinResult<CellValue> {
         Value::Num(n) => Ok(CellValue::Number(n)),
         Value::Int(i) => Ok(CellValue::Integer(i)),
         Value::Bool(b) => Ok(CellValue::Boolean(b)),
-        Value::String(s) => Ok(CellValue::Text(s)),
+        Value::String(s) => Ok(CellValue::Text(s.into_string_unbounded())),
         value @ (Value::CharArray(_) | Value::StringArray(_))
             if crate::builtins::common::validation::value_is_text_scalar(&value) =>
         {

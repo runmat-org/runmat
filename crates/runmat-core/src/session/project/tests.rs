@@ -38,7 +38,9 @@ fn project_foreign_integer(
             runmat_runtime::context::ForeignCall {
                 adapter: adapter.to_string(),
                 symbol: operation.into(),
-                arguments,
+                arguments: runmat_runtime::call::RootedFunctionArguments::ordinary(
+                    runmat_runtime::execution::RootedValues::new(arguments).unwrap(),
+                ),
                 requested_outputs: 1,
             },
         )))

@@ -17,7 +17,7 @@ impl MatLoadLeaf {
 
 pub(crate) fn classify_mat_load_restoration(value: Value) -> MatLoadRestoration {
     match &value {
-        // These can contain a serialized-object envelope or nested values.
+        // Aggregate values retain recursive depth and child-root checks.
         Value::Cell(_)
         | Value::Struct(_)
         | Value::StructArray(_)

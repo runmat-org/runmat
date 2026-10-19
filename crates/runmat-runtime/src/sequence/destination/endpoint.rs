@@ -179,7 +179,8 @@ pub(crate) async fn assign_cell_contents_with_context(
                         .collect::<Vec<_>>(),
                 )?
             };
-            crate::object::cell::assign_cell_value_multi(
+            crate::object::cell::assign_cell_value_multi_in_context(
+                context,
                 cell,
                 &positions,
                 &values,

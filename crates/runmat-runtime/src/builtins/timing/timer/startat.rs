@@ -98,7 +98,7 @@ pub(super) fn receiver_handles(
                 }
                 handles.push(handle.clone());
             }
-            Ok((handles, cell.shape.clone()))
+            Ok((handles, cell.shape.to_vec()))
         }
         Value::ObjectArray(array) if array.class_name().is(TIMER_CLASS) => {
             let mut handles = Vec::with_capacity(array.len());

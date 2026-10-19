@@ -6,7 +6,6 @@ use crate::call::descriptor::{
     CallableCallKind, CallableDescriptor, CallableMetadata, CallableTarget, RetainedClosureValue,
 };
 use crate::context::{RuntimeCallRequest, RuntimeContext};
-use crate::execution::RetainedValueReadLease;
 use crate::RuntimeError;
 use runmat_types::{CallableFallbackPolicy, CallableIdentity};
 use runmat_value::Value;
@@ -16,8 +15,22 @@ use runmat_value::Value;
 /// only the explicitly supplied suffix.
 pub fn foreign_callback_request(
     context: &RuntimeContext,
-    callback: &RetainedValueReadLease,
+    callback: &crate::call::RetainedCallableTarget,
     arguments: Vec<Value>,
+    requested_outputs: usize,
+) -> Result<RuntimeCallRequest, RuntimeError> {
+    let arguments = crate::execution::RootedValues::in_context(arguments, context)?;
+    foreign_callback_request_rooted(context, callback, arguments, requested_outputs)
+}
+
+/// Build a callback request by moving the original rooted argument collection
+/// into the selected descriptor. This is the canonical adapter boundary for
+/// decoded foreign callback arguments: nested payloads are never cloned merely
+/// to preserve their roots across the call service future.
+pub(crate) fn foreign_callback_request_rooted(
+    context: &RuntimeContext,
+    callback: &crate::call::RetainedCallableTarget,
+    arguments: crate::execution::RootedValues,
     requested_outputs: usize,
 ) -> Result<RuntimeCallRequest, RuntimeError> {
     use runmat_types::MethodId;
@@ -51,7 +64,7 @@ pub fn foreign_callback_request(
             })
         }
         Value::Closure(closure) => {
-            let retained = RetainedClosureValue::from_read_lease(callback)?;
+            let retained = RetainedClosureValue::from_callable_owner(callback)?;
             match &closure.binding {
                 Some(binding) => CallableTarget::BoundLexical {
                     binding: binding.clone(),
@@ -83,7 +96,8 @@ pub fn foreign_callback_request(
         _ => None,
     };
     let supplied_roots =
-        crate::execution::RootedValueLease::for_values_in_context(&arguments, context)?;
+        crate::execution::RootedValueLease::for_values_in_context(arguments.values(), context)?;
+    let arguments = arguments.try_into_values()?.collect();
     RuntimeCallRequest::new(
         CallableDescriptor {
             target,
@@ -248,12 +262,13 @@ mod tests {
                 binding: Some(binding.clone()),
                 source_role: runmat_types::FunctionSourceRole::Anonymous,
                 source_file: None,
-                captures: vec![Value::Num(3.0)],
+                captures: vec![Value::Num(3.0)].into(),
             },
         ));
         let runtime = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
         let callback = RetainedValueReadLease::prepare_owned(callback, &runtime).unwrap();
-        let request = foreign_callback_request(&runtime, &callback, vec![Value::Num(4.0)], 1)
+        let owner = crate::call::RetainedCallableTarget::Direct(callback.clone());
+        let request = foreign_callback_request(&runtime, &owner, vec![Value::Num(4.0)], 1)
             .expect("callback normalization");
         assert_eq!(request.descriptor().args, vec![Value::Num(4.0)]);
         let CallableTarget::BoundLexical {
@@ -265,7 +280,10 @@ mod tests {
         };
         assert_eq!(selected, &binding);
         assert_eq!(closure.as_closure().captures, vec![Value::Num(3.0)]);
-        assert!(closure.generation().ptr_eq(&callback.shared_generation()));
+        assert!(closure
+            .generation()
+            .expect("direct callback generation")
+            .ptr_eq(&callback.shared_generation()));
     }
 
     #[test]
@@ -280,9 +298,10 @@ mod tests {
                 &runtime,
             )
             .expect("retain callable");
+            let owner = crate::call::RetainedCallableTarget::Direct(callback);
             let request = foreign_callback_request(
                 &runtime,
-                &callback,
+                &owner,
                 vec![Value::HandleObject(runmat_value::HandleRef {
                     class_name: "CallbackInput".into(),
                     target: handle,

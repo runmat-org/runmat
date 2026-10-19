@@ -224,10 +224,10 @@ fn build_tcpclient_value(
 ) -> Value {
     let mut st = StructValue::new();
     st.fields
-        .insert("Type".to_string(), Value::String("tcpclient".to_string()));
+        .insert("Type".to_string(), Value::string("tcpclient".to_string()));
     st.fields.insert(
         "Address".to_string(),
-        Value::String(peer_addr.ip().to_string()),
+        Value::string(peer_addr.ip().to_string()),
     );
     st.fields.insert(
         "Port".to_string(),
@@ -235,7 +235,7 @@ fn build_tcpclient_value(
     );
     st.fields.insert(
         "ServerAddress".to_string(),
-        Value::String(local_addr.ip().to_string()),
+        Value::string(local_addr.ip().to_string()),
     );
     st.fields.insert(
         "ServerPort".to_string(),
@@ -243,7 +243,7 @@ fn build_tcpclient_value(
     );
     st.fields.insert("Connected".to_string(), Value::Bool(true));
     st.fields
-        .insert("Status".to_string(), Value::String("connected".to_string()));
+        .insert("Status".to_string(), Value::string("connected".to_string()));
     st.fields.insert(
         "NumBytesAvailable".to_string(),
         Value::Int(IntValue::I32(0)),
@@ -252,7 +252,7 @@ fn build_tcpclient_value(
         .insert("BytesAvailableFcn".to_string(), default_user_data());
     st.fields.insert(
         "BytesAvailableFcnMode".to_string(),
-        Value::String("byte".to_string()),
+        Value::string("byte".to_string()),
     );
     st.fields.insert(
         "BytesAvailableFcnCount".to_string(),

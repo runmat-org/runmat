@@ -8,12 +8,14 @@ use super::*;
 pub(in crate::builtins::deep_learning) fn install_annotated(
     network: &mut ObjectInstance,
     values: Vec<(ParameterKey, Value)>,
-) {
+) -> BuiltinResult<()> {
     let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
         unreachable!("parameter view admitted the canonical Layers cell")
     };
+    let layer_values =
+        crate::builtins::deep_learning::layer_helpers::mutable_cell_values(layers, "dlfeval")?;
     for (key, value) in values {
-        let Some(Value::Object(layer)) = layers.data.get_mut(key.layer_index) else {
+        let Some(Value::Object(layer)) = layer_values.get_mut(key.layer_index) else {
             unreachable!("parameter view admitted this layer index")
         };
         let slot = layer
@@ -22,4 +24,5 @@ pub(in crate::builtins::deep_learning) fn install_annotated(
             .expect("parameter view admitted this role");
         *slot = value;
     }
+    Ok(())
 }

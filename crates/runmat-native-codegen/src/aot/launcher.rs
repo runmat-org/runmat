@@ -8,6 +8,7 @@ use cranelift_module::{DataId, FuncId, Linkage, Module};
 use cranelift_object::ObjectModule;
 
 use crate::{NativeCodegenError, NativeCodegenResult};
+use runmat_execution_artifact::target_test::NativePairedProductRole;
 
 use super::AotBuiltinBinding;
 
@@ -148,6 +149,7 @@ pub(super) fn define(
     builtin_resolver: FuncId,
     source_service: bool,
     data: &BTreeMap<String, (DataId, u64)>,
+    paired_role: Option<NativePairedProductRole>,
 ) -> NativeCodegenResult<()> {
     let native_ir = required_data(data, super::AOT_NATIVE_IR_SYMBOL)?;
     let program = required_data(data, super::AOT_PROGRAM_SYMBOL)?;
@@ -156,6 +158,11 @@ pub(super) fn define(
     let mex_artifacts = required_data(data, super::AOT_MEX_ARTIFACTS_SYMBOL)?;
     let java_artifacts = required_data(data, super::AOT_JAVA_ARTIFACTS_SYMBOL)?;
     let python_artifacts = required_data(data, super::AOT_PYTHON_ARTIFACTS_SYMBOL)?;
+    let paired_header = if paired_role.is_some() {
+        Some(required_data(data, super::AOT_PAIRED_PRODUCT_SYMBOL)?)
+    } else {
+        None
+    };
     let pointer = module.isa().pointer_type();
     let source_service_factory = if source_service {
         let mut signature = module.make_signature();
@@ -196,10 +203,19 @@ pub(super) fn define(
         AbiParam::new(pointer),
         AbiParam::new(types::I64),
     ]);
+    if paired_role == Some(NativePairedProductRole::Test) {
+        runtime_signature
+            .params
+            .extend([AbiParam::new(pointer), AbiParam::new(types::I64)]);
+    }
     runtime_signature.returns.push(AbiParam::new(types::I32));
     let runtime = module
         .declare_function(
-            super::AOT_RUNTIME_MAIN_SYMBOL,
+            if paired_role == Some(NativePairedProductRole::Test) {
+                super::AOT_RUNTIME_TEST_MAIN_SYMBOL
+            } else {
+                super::AOT_RUNTIME_MAIN_SYMBOL
+            },
             Linkage::Import,
             &runtime_signature,
         )
@@ -229,6 +245,8 @@ pub(super) fn define(
     let mex_artifacts_data = module.declare_data_in_func(mex_artifacts.0, &mut context.func);
     let java_artifacts_data = module.declare_data_in_func(java_artifacts.0, &mut context.func);
     let python_artifacts_data = module.declare_data_in_func(python_artifacts.0, &mut context.func);
+    let paired_header_data =
+        paired_header.map(|header| module.declare_data_in_func(header.0, &mut context.func));
 
     let mut builder_context = FunctionBuilderContext::new();
     let mut builder = FunctionBuilder::new(&mut context.func, &mut builder_context);
@@ -257,30 +275,36 @@ pub(super) fn define(
     let mex_artifacts_len = length_constant(&mut builder, mex_artifacts.1)?;
     let java_artifacts_len = length_constant(&mut builder, java_artifacts.1)?;
     let python_artifacts_len = length_constant(&mut builder, python_artifacts.1)?;
-    let call = builder.ins().call(
-        runtime,
-        &[
-            argc,
-            argv,
-            resolver,
-            builtin_resolver,
-            source_service_factory,
-            native_ir_ptr,
-            native_ir_len,
-            program_ptr,
-            program_len,
-            resume_ptr,
-            resume_len,
-            native_interfaces_ptr,
-            native_interfaces_len,
-            mex_artifacts_ptr,
-            mex_artifacts_len,
-            java_artifacts_ptr,
-            java_artifacts_len,
-            python_artifacts_ptr,
-            python_artifacts_len,
-        ],
-    );
+    let mut arguments = vec![
+        argc,
+        argv,
+        resolver,
+        builtin_resolver,
+        source_service_factory,
+        native_ir_ptr,
+        native_ir_len,
+        program_ptr,
+        program_len,
+        resume_ptr,
+        resume_len,
+        native_interfaces_ptr,
+        native_interfaces_len,
+        mex_artifacts_ptr,
+        mex_artifacts_len,
+        java_artifacts_ptr,
+        java_artifacts_len,
+        python_artifacts_ptr,
+        python_artifacts_len,
+    ];
+    if paired_role == Some(NativePairedProductRole::Test) {
+        let header = paired_header.expect("test role has header");
+        let header_ptr = builder
+            .ins()
+            .symbol_value(pointer, paired_header_data.expect("test role has data"));
+        let header_len = length_constant(&mut builder, header.1)?;
+        arguments.extend([header_ptr, header_len]);
+    }
+    let call = builder.ins().call(runtime, &arguments);
     let status = builder.inst_results(call)[0];
     builder.ins().return_(&[status]);
     builder.seal_all_blocks();

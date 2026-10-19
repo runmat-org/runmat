@@ -9,11 +9,11 @@ pub(super) fn from_pairs(pairs: Vec<(String, String)>) -> Result<Value, String> 
     let count = pairs.len();
     let keys = pairs
         .iter()
-        .map(|(key, _)| Value::String(key.clone()))
+        .map(|(key, _)| Value::string(key.clone()))
         .collect();
     let values = pairs
         .into_iter()
-        .map(|(_, value)| Value::String(value))
+        .map(|(_, value)| Value::string(value))
         .collect();
     object
         .properties

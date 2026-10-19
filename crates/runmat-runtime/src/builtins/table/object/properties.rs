@@ -71,7 +71,7 @@ pub(in crate::builtins::table) fn default_properties_for_class(
             .expect("VariableDescriptions shape is valid"),
         ),
     );
-    props.insert(DESCRIPTION, Value::String(String::new()));
+    props.insert(DESCRIPTION, Value::string(String::new()));
     props.insert(USER_DATA, Value::Tensor(Tensor::zeros(vec![0, 0])));
     props
 }
@@ -179,10 +179,15 @@ pub(in crate::builtins::table) fn update_variable_metadata_names(
     for field in [VARIABLE_UNITS, VARIABLE_DESCRIPTIONS] {
         let existing = props.fields.get(field).cloned();
         let values = match existing {
-            Some(Value::StringArray(mut array)) => {
-                array.data.resize(names.len(), String::new());
-                array.data.truncate(names.len());
-                array.data
+            Some(Value::StringArray(array)) => {
+                let mut values = array
+                    .data
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>();
+                values.resize(names.len(), String::new());
+                values.truncate(names.len());
+                values
             }
             _ => vec![String::new(); names.len()],
         };

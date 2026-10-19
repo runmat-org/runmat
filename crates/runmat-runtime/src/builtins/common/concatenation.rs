@@ -55,6 +55,12 @@ fn numeric_matrix_columns(value: &Value) -> Option<usize> {
 /// then constructs a single-character array. The `error_prefix` is prepended to error
 /// messages (e.g., "cat" or "char concat").
 pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> BuiltinResult<CharArray> {
+    let ch = char_from_f64_code_point(value, error_prefix)?;
+    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+}
+
+/// The same code-point validation without allocating a character array.
+pub fn char_from_f64_code_point(value: f64, error_prefix: &str) -> BuiltinResult<char> {
     if !value.is_finite() || value.fract() != 0.0 {
         return Err(concat_error(format!(
             "{error_prefix}: expected integer code point"
@@ -66,9 +72,7 @@ pub fn char_array_from_f64_with_prefix(value: f64, error_prefix: &str) -> Builti
         )));
     }
     let code = value as u32;
-    let ch = char::from_u32(code)
-        .ok_or_else(|| concat_error(format!("{error_prefix}: invalid code point")))?;
-    CharArray::new(vec![ch], 1, 1).map_err(concat_error)
+    char::from_u32(code).ok_or_else(|| concat_error(format!("{error_prefix}: invalid code point")))
 }
 
 fn char_array_from_f64(value: f64) -> BuiltinResult<CharArray> {
@@ -592,7 +596,11 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::from_texts_unbounded(
+                        vec![s.clone()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
                     if rows.is_none() {
                         rows = Some(1);
                     } else if rows != Some(1) {
@@ -672,7 +680,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let rows = rows.unwrap_or(0);
-        let mut data: Vec<String> = Vec::with_capacity(rows * cols_total);
+        let mut data = Vec::with_capacity(rows * cols_total);
         for cacc in 0..cols_total {
             let _ = cacc;
         }
@@ -685,7 +693,7 @@ pub fn hcat_values(values: &[Value]) -> BuiltinResult<Value> {
                 }
             }
         }
-        let sa = runmat_value::StringArray::new(data, vec![rows, cols_total])
+        let sa = runmat_value::StringArray::from_texts_unbounded(data, vec![rows, cols_total])
             .map_err(|e| concat_error(format!("string hcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -878,7 +886,11 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
                     blocks.push(sa.clone());
                 }
                 Value::String(s) => {
-                    let sa = runmat_value::StringArray::new(vec![s.clone()], vec![1, 1]).unwrap();
+                    let sa = runmat_value::StringArray::from_texts_unbounded(
+                        vec![s.clone()],
+                        vec![1, 1],
+                    )
+                    .unwrap();
                     rows_total += 1;
                     if cols.is_none() {
                         cols = Some(1);
@@ -945,17 +957,17 @@ pub fn vcat_values(values: &[Value]) -> BuiltinResult<Value> {
             }
         }
         let cols = cols.unwrap_or(0);
-        let mut data: Vec<String> = Vec::with_capacity(rows_total * cols);
-        // Stack rows: copy columns for each block into data
-        for block in &blocks {
-            for c in 0..cols {
+        let mut data = Vec::with_capacity(rows_total * cols);
+        // Each output column contains that column from every stacked block.
+        for c in 0..cols {
+            for block in &blocks {
                 for r in 0..block.rows() {
                     let idx = r + c * block.rows();
                     data.push(block.data[idx].clone());
                 }
             }
         }
-        let sa = runmat_value::StringArray::new(data, vec![rows_total, cols])
+        let sa = runmat_value::StringArray::from_texts_unbounded(data, vec![rows_total, cols])
             .map_err(|e| concat_error(format!("string vcat: {e}")))?;
         return Ok(Value::StringArray(sa));
     }
@@ -1930,7 +1942,7 @@ mod tests {
         let maximum = Value::Int(runmat_value::IntValue::U64(u64::MAX));
 
         let Value::StringArray(horizontal) =
-            hcat_values(&[Value::String("id".to_string()), maximum.clone()]).expect("hcat")
+            hcat_values(&[Value::string("id".to_string()), maximum.clone()]).expect("hcat")
         else {
             panic!("expected string array");
         };
@@ -1938,11 +1950,40 @@ mod tests {
         assert_eq!(horizontal.data, vec!["id", "18446744073709551615"]);
 
         let Value::StringArray(vertical) =
-            vcat_values(&[Value::String("id".to_string()), maximum]).expect("vcat")
+            vcat_values(&[Value::string("id".to_string()), maximum]).expect("vcat")
         else {
             panic!("expected string array");
         };
         assert_eq!(vertical.shape, vec![2, 1]);
         assert_eq!(vertical.data, vec!["id", "18446744073709551615"]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn string_vertical_concatenation_stacks_each_column() {
+        let top = runmat_value::StringArray::new(
+            ["a", "b", "c", "d"].into_iter().map(String::from).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        let bottom = runmat_value::StringArray::new(
+            ["e", "f", "g", "h"].into_iter().map(String::from).collect(),
+            vec![2, 2],
+        )
+        .unwrap();
+        let Value::StringArray(output) =
+            vcat_values(&[Value::StringArray(top), Value::StringArray(bottom)]).unwrap()
+        else {
+            panic!("expected string array")
+        };
+        assert_eq!(output.shape.as_slice(), &[4, 2]);
+        assert_eq!(
+            output
+                .data
+                .iter()
+                .map(|text| text.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "e", "f", "c", "d", "g", "h"]
+        );
     }
 }

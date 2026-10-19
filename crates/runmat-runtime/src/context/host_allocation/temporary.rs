@@ -130,6 +130,7 @@ mod typed_element {
     impl Sealed for f64 {}
     impl Sealed for usize {}
     impl Sealed for u64 {}
+    impl Sealed for u8 {}
     impl Sealed for num_complex::Complex32 {}
     impl Sealed for num_complex::Complex64 {}
 }

@@ -119,15 +119,21 @@ pub(super) fn string_array_labels(array: StringArray) -> BuiltinResult<Partition
             "cvpartition: stratification variable must be a vector",
         ));
     }
+    let n = array.data.len();
+    let labels = match array.data.try_into_owned() {
+        Ok(values) => values
+            .into_iter()
+            .map(|text| Some(PartitionLabel::Text(text)))
+            .collect(),
+        Err(values) => values
+            .iter()
+            .cloned()
+            .map(|text| Some(PartitionLabel::Text(text)))
+            .collect(),
+    };
     Ok(PartitionInput {
-        n: array.data.len(),
-        labels: Some(
-            array
-                .data
-                .into_iter()
-                .map(|text| Some(PartitionLabel::Text(text)))
-                .collect(),
-        ),
+        n,
+        labels: Some(labels),
     })
 }
 
@@ -136,9 +142,9 @@ pub(super) fn char_row_labels(chars: runmat_value::CharArray) -> Vec<Option<Part
     for row in 0..chars.rows {
         let mut label = String::with_capacity(chars.cols);
         for col in 0..chars.cols {
-            label.push(chars.data[row + col * chars.rows]);
+            label.push(chars.data[row * chars.cols + col]);
         }
-        labels.push(Some(PartitionLabel::Text(label)));
+        labels.push(Some(PartitionLabel::Text(label.into())));
     }
     labels
 }

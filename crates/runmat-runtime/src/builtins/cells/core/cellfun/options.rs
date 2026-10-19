@@ -83,9 +83,9 @@ fn invalid_uniform_output() -> crate::RuntimeError {
 
 pub(super) fn extract_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
+        Value::String(value) => Some(value.to_string()),
         Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].to_string()),
         _ => None,
     }
 }

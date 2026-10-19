@@ -634,8 +634,12 @@ pub(in crate::builtins::strings::text_analytics) fn word_encoding_from_object(
             ),
         ));
     }
-    let vocabulary = match object.properties.get("Vocabulary") {
-        Some(Value::StringArray(array)) => array.data.clone(),
+    let vocabulary: Vec<String> = match object.properties.get("Vocabulary") {
+        Some(Value::StringArray(array)) => array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect(),
         other => {
             return Err(encoding_error(
                 fn_name,
@@ -680,13 +684,16 @@ fn ensure_word_encoding_class_registered() {
         for name in ["NumWords", "Vocabulary"] {
             properties.insert(name.into(), property_def(name));
         }
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: WORD_ENCODING_CLASS.into(),
-            parent: None,
-            properties,
-            methods: HashMap::new(),
-        });
+        crate::class_registry::register_builtin_class(
+            WORD_ENCODING_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: WORD_ENCODING_CLASS.into(),
+                parent: None,
+                properties,
+                methods: HashMap::new(),
+            },
+        );
     });
 }
 
@@ -930,12 +937,12 @@ struct WordInput {
 fn word_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<WordInput> {
     match value {
         Value::String(text) => Ok(WordInput {
-            words: vec![text.clone()],
+            words: vec![text.as_str().to_owned()],
             shape: vec![1, 1],
         }),
         Value::StringArray(array) => Ok(WordInput {
-            words: array.data.clone(),
-            shape: array.shape.clone(),
+            words: array.data.iter().map(|text| text.as_str().to_owned()).collect(),
+            shape: array.shape.to_vec(),
         }),
         Value::CharArray(array) if array.rows <= 1 => Ok(WordInput {
             words: vec![char_row_to_string(array)],
@@ -966,7 +973,7 @@ fn word_input_from_value(value: &Value, fn_name: &str) -> BuiltinResult<WordInpu
                 .collect::<BuiltinResult<Vec<_>>>()?;
             Ok(WordInput {
                 words,
-                shape: cell.shape.clone(),
+                shape: cell.shape.to_vec(),
             })
         }
         other => Err(encoding_error(

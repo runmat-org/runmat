@@ -186,12 +186,7 @@ fn fitlm_matrix_rejects_table_only_options_and_bad_varnames() {
         vec![
             y,
             Value::from("VarNames"),
-            Value::StringArray(StringArray {
-                data: vec!["only_x".into()],
-                shape: vec![1, 1],
-                rows: 1,
-                cols: 1,
-            }),
+            Value::StringArray(StringArray::new(vec!["only_x".into()], vec![1, 1]).unwrap()),
         ],
     ))
     .unwrap_err();

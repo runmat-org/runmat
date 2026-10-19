@@ -1,5 +1,6 @@
 //! Two-sample test execution, statistics, output geometry, and typed boundaries.
 use super::*;
+use std::borrow::Cow;
 
 #[derive(Clone, Copy, Debug)]
 pub(super) struct Options {
@@ -123,11 +124,13 @@ pub(super) fn ensure_exact_ttest2_integer_scalar(value: &Value, role: &str) -> B
     }
 }
 
-pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(array.data.iter().collect())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Cow::Borrowed(array.data[0].as_str()))
+        }
         Value::Cell(cell) if cell.data.len() == 1 => scalar_text(&cell.data[0], context),
         other => Err(invalid_argument(format!(
             "ttest2: {context} must be a string scalar, got {other:?}"

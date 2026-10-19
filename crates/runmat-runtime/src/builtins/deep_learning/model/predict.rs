@@ -157,10 +157,10 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
             } else if observations == ObservationsIn::Columns {
                 value
                     .properties
-                    .insert("Format".into(), Value::String(column_format.clone()));
+                    .insert("Format".into(), Value::string(column_format.clone()));
                 value
                     .properties
-                    .insert("Labels".into(), Value::String(column_format));
+                    .insert("Labels".into(), Value::string(column_format));
             }
             Ok(Value::Object(value))
         }
@@ -174,8 +174,8 @@ fn prepare_input(input: Value, observations: ObservationsIn) -> BuiltinResult<Va
                 "dlarray",
                 vec![
                     ("Data", data),
-                    ("Format", Value::String(format.clone())),
-                    ("Labels", Value::String(format)),
+                    ("Format", Value::string(format.clone())),
+                    ("Labels", Value::string(format)),
                 ],
             ))
         }

@@ -134,7 +134,7 @@ pub(super) fn recipients_from_value(value: &Value) -> BuiltinResult<Vec<String>>
             .data
             .iter()
             .filter(|value| !value.trim().is_empty())
-            .cloned()
+            .map(|value| value.as_str().to_owned())
             .collect()),
         Value::Cell(cell) => {
             let mut out = Vec::new();

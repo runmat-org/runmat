@@ -37,7 +37,7 @@ fn bound_callback_uses_semantic_identity() {
         binding: Some(binding),
         source_role: runmat_types::FunctionSourceRole::Unknown,
         source_file: None,
-        captures: vec![Value::Num(10.0)],
+        captures: vec![Value::Num(10.0)].into(),
     }));
     let result = futures::executor::block_on(runtime.scope(super::cellfun_builtin(
         callback,

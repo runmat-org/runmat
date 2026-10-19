@@ -56,19 +56,19 @@ fn render(
             st.insert("Parent", Value::Num(f64::NAN));
             st.insert(
                 "Name",
-                Value::String(figure.name.clone().unwrap_or_default()),
+                Value::string(figure.name.clone().unwrap_or_default()),
             );
             st.insert("NumberTitle", Value::Bool(figure.number_title));
             st.insert("Visible", Value::Bool(figure.visible));
             st.insert("Position", figure_position_value(figure.position));
             st.insert(
                 "Color",
-                Value::String(color_to_short_name(figure.background_color)),
+                Value::string(color_to_short_name(figure.background_color)),
             );
-            st.insert("Tag", Value::String(tag));
+            st.insert("Tag", Value::string(tag));
             if let Some(waitbar) = waitbar {
                 st.insert("WaitbarProgress", Value::Num(waitbar.progress));
-                st.insert("WaitbarMessage", Value::String(waitbar.message));
+                st.insert("WaitbarMessage", Value::string(waitbar.message));
             }
             st.insert("SGTitle", Value::Num(sg_title_handle));
             Ok(Value::Struct(st))
@@ -84,18 +84,18 @@ fn render(
             children
         })),
         Some("parent") => Ok(Value::Num(f64::NAN)),
-        Some("name") => Ok(Value::String(figure.name.clone().unwrap_or_default())),
+        Some("name") => Ok(Value::string(figure.name.clone().unwrap_or_default())),
         Some("numbertitle") => Ok(Value::Bool(figure.number_title)),
         Some("visible") => Ok(Value::Bool(figure.visible)),
         Some("position") => Ok(figure_position_value(figure.position)),
-        Some("color") => Ok(Value::String(color_to_short_name(figure.background_color))),
+        Some("color") => Ok(Value::string(color_to_short_name(figure.background_color))),
         Some("waitbarprogress") => Ok(Value::Num(
             waitbar.map(|state| state.progress).unwrap_or(f64::NAN),
         )),
-        Some("waitbarmessage") => Ok(Value::String(
+        Some("waitbarmessage") => Ok(Value::string(
             waitbar.map(|state| state.message).unwrap_or_default(),
         )),
-        Some("tag") => Ok(Value::String(tag)),
+        Some("tag") => Ok(Value::string(tag)),
         Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
         Some(other) => Err(plotting_error(
             builtin,

@@ -520,9 +520,9 @@ pub(in crate::builtins::table) fn value_shape_or_column(
 ) -> BuiltinResult<Vec<usize>> {
     match value {
         Value::Tensor(tensor) => Ok(tensor.shape().to_vec()),
-        Value::StringArray(array) => Ok(array.shape.clone()),
+        Value::StringArray(array) => Ok(array.shape().to_vec()),
         Value::LogicalArray(array) => Ok(array.shape.to_vec()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
+        Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::CharArray(array) => Ok(vec![array.rows, 1]),
         _ => Ok(vec![1, 1]),
     }
@@ -938,7 +938,7 @@ pub(crate) fn categorical_levels_for_observations(
 
 pub(crate) fn categorical_categories(object: &ObjectInstance) -> BuiltinResult<Vec<String>> {
     match object.properties.get("Categories") {
-        Some(Value::StringArray(array)) => Ok(array.data.clone()),
+        Some(Value::StringArray(array)) => Ok(array.data.iter().map(ToString::to_string).collect()),
         _ => Err(invalid_variable("categorical: missing Categories property")),
     }
 }
@@ -961,7 +961,7 @@ fn categorical_is_ordinal(object: &ObjectInstance) -> bool {
     matches!(object.properties.get("Ordinal"), Some(Value::Bool(true)))
 }
 
-fn category_label_for_code(code: f64, categories: &[String]) -> Option<&str> {
+fn category_label_for_code<S: AsRef<str>>(code: f64, categories: &[S]) -> Option<&str> {
     if !code.is_finite() || code < 1.0 {
         return None;
     }
@@ -969,20 +969,23 @@ fn category_label_for_code(code: f64, categories: &[String]) -> Option<&str> {
     if (idx as f64 - code).abs() > f64::EPSILON {
         return None;
     }
-    categories.get(idx - 1).map(String::as_str)
+    categories.get(idx - 1).map(AsRef::as_ref)
 }
 
-fn category_label_for_integer_code<'a>(
+fn category_label_for_integer_code<'a, S: AsRef<str>>(
     code: &runmat_value::IntValue,
-    categories: &'a [String],
+    categories: &'a [S],
 ) -> Option<&'a str> {
     code.try_to_usize()
         .and_then(|index| index.checked_sub(1))
         .and_then(|index| categories.get(index))
-        .map(String::as_str)
+        .map(AsRef::as_ref)
 }
 
-fn category_label_ref_for_numeric_code(code: NumericScalar, categories: &[String]) -> Option<&str> {
+fn category_label_ref_for_numeric_code<S: AsRef<str>>(
+    code: NumericScalar,
+    categories: &[S],
+) -> Option<&str> {
     match code {
         NumericScalar::F64(code) => category_label_for_code(code, categories),
         NumericScalar::F32(code) => category_label_for_code(f64::from(code), categories),

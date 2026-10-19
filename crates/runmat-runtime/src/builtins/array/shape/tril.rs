@@ -269,16 +269,13 @@ fn tril_logical_array(
     Ok(array)
 }
 
-fn tril_char_array(mut array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
-    for row in 0..array.rows {
-        for col in 0..array.cols {
-            triangular_checkpoint(row.saturating_mul(array.cols).saturating_add(col))?;
-            if (row as i128) < col as i128 - offset as i128 {
-                array.data[row * array.cols + col] = '\0';
-            }
-        }
-    }
-    Ok(array)
+fn tril_char_array(array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
+    super::triangular_character::mask(
+        crate::context::legacy::active().as_ref(),
+        array,
+        offset,
+        super::triangular_character::Triangle::Lower,
+    )
 }
 
 fn tril_complex_tensor(
@@ -649,6 +646,22 @@ pub(crate) mod tests {
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
         assert_eq!(result.data, vec!['a', '\0', 'c', 'd']);
+
+        let pages = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).unwrap();
+        let original = pages.clone();
+        let masked = tril_char_array(pages, 0).unwrap();
+        assert_eq!(masked.shape.as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            masked.data.as_slice(),
+            &['a', '\0', 'c', 'd', 'e', '\0', 'g', 'h']
+        );
+        assert_eq!(
+            original.data.as_slice(),
+            &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+        );
+        let pointer = masked.data.as_ptr();
+        let reused = tril_char_array(masked, isize::MAX).unwrap();
+        assert_eq!(reused.data.as_ptr(), pointer);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

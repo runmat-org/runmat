@@ -425,7 +425,7 @@ impl MexRuntimeSession {
     pub fn load_and_call<'a>(
         self: &'a Rc<Self>,
         name: &'a str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> impl std::future::Future<Output = crate::user_functions::DynamicFunctionLoadAttempt> + 'a
@@ -444,7 +444,7 @@ impl MexRuntimeSession {
     pub fn load_installed_and_call<'a>(
         self: &'a Rc<Self>,
         name: &'a str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> impl std::future::Future<Output = crate::user_functions::DynamicFunctionLoadAttempt> + 'a
@@ -461,15 +461,11 @@ impl MexRuntimeSession {
     async fn load_with_resolution(
         self: &Rc<Self>,
         name: &str,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
         resolution: MexResolutionScope,
     ) -> crate::user_functions::DynamicFunctionLoadAttempt {
-        let input_roots = match crate::execution::RootedValueLease::for_values(arguments.iter()) {
-            Ok(roots) => roots,
-            Err(error) => return ControlFlow::Break(Err(error.into_runtime_error())),
-        };
         if self.abandoned.get() || self.shutdown_in_progress.get() {
             return ControlFlow::Break(Err(runtime_error(
                 "MEX:Lifecycle",
@@ -504,30 +500,23 @@ impl MexRuntimeSession {
             .await
             .unwrap_or(path);
         ControlFlow::Break(
-            self.dispatch_admitted_path(
-                canonical,
-                arguments,
-                requested_outputs,
-                runtime,
-                input_roots,
-            )
-            .await
-            .unwrap_or_else(|| {
-                Err(runtime_error(
-                    "MEX:SelectionChanged",
-                    "selected MEX target retired during invocation",
-                ))
-            }),
+            self.dispatch_admitted_path(canonical, arguments, requested_outputs, runtime)
+                .await
+                .unwrap_or_else(|| {
+                    Err(runtime_error(
+                        "MEX:SelectionChanged",
+                        "selected MEX target retired during invocation",
+                    ))
+                }),
         )
     }
 
     async fn dispatch_admitted_path(
         self: &Rc<Self>,
         canonical: PathBuf,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
-        input_roots: crate::execution::RootedValueLease,
     ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
         let Some(tasks) = runtime.service_ports().local_tasks().cloned() else {
             return Some(Err(runtime_error(
@@ -549,7 +538,6 @@ impl MexRuntimeSession {
             move |task_runtime| {
                 let scoped_runtime = task_runtime.clone();
                 Box::pin(scoped_runtime.scope(async move {
-                    let _input_roots = input_roots;
                     let result = if task_runtime.is_cancelled() {
                         Some(Err(runtime_error(
                             "Cancelled",
@@ -599,7 +587,7 @@ impl MexRuntimeSession {
     async fn load_selected_and_call(
         &self,
         canonical: PathBuf,
-        arguments: Vec<Value>,
+        arguments: crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         runtime: RuntimeContext,
     ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
@@ -691,7 +679,7 @@ impl MexRuntimeSession {
         };
         let values = registration.context();
         let mut inputs = Vec::with_capacity(arguments.len());
-        for argument in &arguments {
+        for argument in arguments.iter() {
             let argument = match crate::gather_if_needed_async(argument).await {
                 Ok(argument) => argument,
                 Err(error) => return Some(Err(error)),
@@ -1246,7 +1234,7 @@ impl MexRuntimeSession {
     async fn invoke_isolated(
         &self,
         path: &Path,
-        arguments: &[Value],
+        arguments: &crate::call::RootedFunctionArguments,
         requested_outputs: usize,
         api: Option<MexApi>,
         tier: MexBinaryTier,
@@ -1762,7 +1750,7 @@ mod tests {
         let missing =
             futures::executor::block_on(Rc::new(MexRuntimeSession::new()).load_installed_and_call(
                 "module_not_installed_in_this_owner",
-                vec![Value::String(text)],
+                vec![Value::String(text.into())],
                 0,
                 available,
             ));

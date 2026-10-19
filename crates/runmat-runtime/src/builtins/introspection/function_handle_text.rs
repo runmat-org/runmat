@@ -179,9 +179,9 @@ pub(crate) fn dispatch_func2str(value: Value) -> crate::BuiltinResult<Value> {
     match value {
         Value::FunctionHandle(name)
         | Value::ExternalFunctionHandle(name)
-        | Value::MethodFunctionHandle(name) => Ok(Value::String(name.into_name())),
-        Value::BoundFunctionHandle(handle) => Ok(Value::String(handle.into_data().name)),
-        Value::Closure(closure) => Ok(Value::String(closure.into_data().function_name)),
+        | Value::MethodFunctionHandle(name) => Ok(Value::string(name.into_name_unbounded())),
+        Value::BoundFunctionHandle(handle) => Ok(Value::string(handle.into_data().name)),
+        Value::Closure(closure) => Ok(Value::string(closure.into_data().function_name)),
         other => Err(crate::runtime_descriptor_error_with_detail(
             "func2str",
             &FUNC2STR_ERROR_HANDLE_TYPE_INVALID,

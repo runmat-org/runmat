@@ -336,7 +336,7 @@ fn update_object_properties(object: &mut ObjectInstance, snapshot: DataCursorSta
     );
     object.properties.insert(
         "DisplayStyle".into(),
-        Value::String(snapshot.mode.display_style),
+        Value::string(snapshot.mode.display_style),
     );
     object
         .properties
@@ -396,7 +396,7 @@ fn cursor_struct(snapshot: DataCursorStateSnapshot) -> Value {
             .into(),
         ),
     );
-    st.insert("DisplayStyle", Value::String(snapshot.mode.display_style));
+    st.insert("DisplayStyle", Value::string(snapshot.mode.display_style));
     st.insert("UpdateFcn", empty_update_fcn());
     st.insert("Interpreter", Value::String("tex".into()));
     st.insert("Figure", Value::Num(snapshot.figure.as_u32() as f64));
@@ -435,7 +435,7 @@ pub fn get_data_cursor_object_property(
                 }
                 .into(),
             ),
-            Some(DataCursorProperty::DisplayStyle) => Value::String(snapshot.mode.display_style),
+            Some(DataCursorProperty::DisplayStyle) => Value::string(snapshot.mode.display_style),
             Some(DataCursorProperty::UpdateFcn) => {
                 object_property_or_default(handle, "UpdateFcn", empty_update_fcn())?
             }

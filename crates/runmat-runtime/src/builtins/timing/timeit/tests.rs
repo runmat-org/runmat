@@ -563,7 +563,7 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         })),
         None,
     )
@@ -576,7 +576,7 @@ fn timeit_name_only_closure_prefers_semantic_resolver_identity() {
             binding: Some(runmat_value::BoundFunctionBinding::unavailable(89)),
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }))
     );
 }
@@ -590,7 +590,7 @@ fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         })),
         None,
     )
@@ -603,7 +603,7 @@ fn timeit_name_only_closure_without_resolver_keeps_name_shaped_identity() {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![Value::Num(9.0)],
+            captures: vec![Value::Num(9.0)].into(),
         }))
     );
 }

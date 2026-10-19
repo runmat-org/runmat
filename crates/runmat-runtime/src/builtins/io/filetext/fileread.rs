@@ -145,17 +145,19 @@ fn is_encoding_keyword(value: &Value) -> BuiltinResult<bool> {
     Ok(text.eq_ignore_ascii_case("encoding"))
 }
 
-fn encoding_name(value: &Value) -> BuiltinResult<String> {
+fn encoding_name(value: &Value) -> BuiltinResult<std::borrow::Cow<'_, str>> {
     match value {
-        Value::String(s) => Ok(s.clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
+        Value::String(s) => Ok(std::borrow::Cow::Borrowed(s.as_str())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            Ok(std::borrow::Cow::Owned(ca.data.iter().collect()))
+        }
         Value::CharArray(_) => Err(fileread_error_with_detail(
             &FILEREAD_ERROR_INVALID_OPTION,
             "encoding name must be a 1-by-N character vector",
         )),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
-                Ok(sa.data[0].clone())
+                Ok(std::borrow::Cow::Borrowed(sa.data[0].as_str()))
             } else {
                 Err(fileread_error_with_detail(
                     &FILEREAD_ERROR_INVALID_OPTION,

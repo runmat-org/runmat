@@ -32,6 +32,29 @@ pub(super) fn validate_environment(
             "terminate expects the PythonEnvironment returned by pyenv",
         ));
     };
+    validate_environment_object(handles, host_identity, environment)
+}
+
+pub(super) fn validate_rooted_environment(
+    handles: &ForeignHandleRegistry,
+    host_identity: &str,
+    arguments: &crate::call::RootedFunctionArguments,
+) -> Result<(), RuntimeError> {
+    let Some(Value::Object(environment)) =
+        (arguments.len() == 1).then(|| arguments.first()).flatten()
+    else {
+        return Err(invalid_call(
+            "terminate expects the PythonEnvironment returned by pyenv",
+        ));
+    };
+    validate_environment_object(handles, host_identity, environment)
+}
+
+fn validate_environment_object(
+    handles: &ForeignHandleRegistry,
+    host_identity: &str,
+    environment: &runmat_value::ObjectInstance,
+) -> Result<(), RuntimeError> {
     if !environment.is_class(PYTHON_ENVIRONMENT_CLASS) {
         return Err(invalid_call(
             "terminate expects the PythonEnvironment returned by pyenv",
@@ -72,7 +95,7 @@ fn python_status_object(
     let mut environment = ObjectInstance::new(PYTHON_ENVIRONMENT_CLASS.owned());
     environment.properties.insert(
         "Version".into(),
-        Value::String(
+        Value::string(
             installation
                 .as_ref()
                 .map(|value| value.version.to_string())
@@ -81,7 +104,7 @@ fn python_status_object(
     );
     environment.properties.insert(
         "Executable".into(),
-        Value::String(
+        Value::string(
             installation
                 .as_ref()
                 .map(|value| value.executable.display().to_string())
@@ -90,7 +113,7 @@ fn python_status_object(
     );
     environment.properties.insert(
         "Library".into(),
-        Value::String(
+        Value::string(
             installation
                 .as_ref()
                 .map(|value| value.library.display().to_string())
@@ -99,7 +122,7 @@ fn python_status_object(
     );
     environment.properties.insert(
         "Home".into(),
-        Value::String(
+        Value::string(
             installation
                 .as_ref()
                 .map(|value| value.home.display().to_string())

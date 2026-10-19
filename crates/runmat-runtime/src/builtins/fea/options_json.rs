@@ -152,19 +152,18 @@ pub(in crate::builtins::fea) fn value_to_json(
         Value::Num(n) => json_number(builtin, *n),
         Value::Int(i) => Ok(int_value_to_json(i)),
         Value::Bool(b) => Ok(serde_json::Value::Bool(*b)),
-        Value::String(s) => Ok(serde_json::Value::String(s.clone())),
+        Value::String(s) => Ok(serde_json::Value::String(s.to_string())),
         Value::CharArray(chars) if chars.rows == 1 => {
             Ok(serde_json::Value::String(chars.data.iter().collect()))
         }
         Value::StringArray(array) if array.data.len() == 1 => {
-            Ok(serde_json::Value::String(array.data[0].clone()))
+            Ok(serde_json::Value::String(array.data[0].to_string()))
         }
         Value::StringArray(array) => Ok(serde_json::Value::Array(
             array
                 .data
                 .iter()
-                .cloned()
-                .map(serde_json::Value::String)
+                .map(|text| serde_json::Value::String(text.to_string()))
                 .collect(),
         )),
         Value::Tensor(tensor) if tensor_utils::is_scalar_tensor(tensor) => numeric_scalar_to_json(

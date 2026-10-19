@@ -194,12 +194,12 @@ async fn extract_file_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let kind = FileKind::from_path(&path);
     validate_options_for_kind(kind, &options)?;
     let bytes = read_file(&path).await?;
-    let text = match kind {
+    let output = match kind {
         FileKind::Html => {
             let html = decode_bytes(&bytes, options.encoding.as_deref())?;
             let method = options.extraction_method.unwrap_or(ExtractionMethod::Tree);
-            match extract_html_text_value(Value::String(html), method)? {
-                Value::String(text) => text,
+            match extract_html_text_value(Value::string(html), method)? {
+                value @ Value::String(_) => value,
                 other => {
                     return Err(extract_error(
                         &ERROR_INVALID_INPUT,
@@ -208,11 +208,11 @@ async fn extract_file_text_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
                 }
             }
         }
-        FileKind::Docx => extract_docx_text(&bytes)?,
+        FileKind::Docx => Value::string(extract_docx_text(&bytes)?),
         FileKind::Pdf => unreachable!("PDF files are rejected before file IO"),
-        FileKind::PlainText => decode_bytes(&bytes, options.encoding.as_deref())?,
+        FileKind::PlainText => Value::string(decode_bytes(&bytes, options.encoding.as_deref())?),
     };
-    Ok(Value::String(text))
+    Ok(output)
 }
 
 fn preflight_args(args: &[Value]) -> BuiltinResult<()> {

@@ -164,6 +164,7 @@ fn triu_value_is_paged(value: &Value) -> bool {
         Value::Tensor(value) => value.shape().len() > 2,
         Value::LogicalArray(value) => value.shape.len() > 2,
         Value::ComplexTensor(value) => value.shape().len() > 2,
+        Value::CharArray(value) => value.shape().len() > 2,
         Value::GpuTensor(value) => value.shape().len() > 2,
         _ => false,
     }
@@ -284,16 +285,13 @@ fn triu_logical_array(
     Ok(array)
 }
 
-fn triu_char_array(mut array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
-    for row in 0..array.rows {
-        for col in 0..array.cols {
-            triangular_checkpoint(row.saturating_mul(array.cols).saturating_add(col))?;
-            if (row as i128) > col as i128 - offset as i128 {
-                array.data[row * array.cols + col] = '\0';
-            }
-        }
-    }
-    Ok(array)
+fn triu_char_array(array: CharArray, offset: isize) -> crate::BuiltinResult<CharArray> {
+    super::triangular_character::mask(
+        crate::context::legacy::active().as_ref(),
+        array,
+        offset,
+        super::triangular_character::Triangle::Upper,
+    )
 }
 
 fn triu_complex_tensor(
@@ -610,15 +608,41 @@ pub(crate) mod tests {
         assert_eq!(result.rows, 2);
         assert_eq!(result.cols, 2);
         assert_eq!(result.data, vec!['a', 'b', '\0', 'd']);
+
+        let pages = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).unwrap();
+        let original = pages.clone();
+        let masked = triu_char_array(pages, 0).unwrap();
+        assert_eq!(masked.shape.as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            masked.data.as_slice(),
+            &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']
+        );
+        assert_eq!(
+            original.data.as_slice(),
+            &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']
+        );
+        let pointer = masked.data.as_ptr();
+        let reused = triu_char_array(masked, isize::MIN).unwrap();
+        assert_eq!(reused.data.as_ptr(), pointer);
+        let mut invalid = original;
+        invalid.rows = 0;
+        assert!(triu_char_array(invalid, 0).is_err());
     }
 
     #[test]
     fn triu_paged_arrays_are_an_explicit_language_extension() {
         let tensor =
             Tensor::new((1..=8).map(f64::from).collect(), vec![2, 2, 2]).expect("paged tensor");
+        let chars = CharArray::new_with_shape("abcdefgh".chars().collect(), vec![2, 2, 2]).unwrap();
         let _strict = crate::compatibility::push_runmat_extensions_enabled(false);
         let error = triu_builtin(Value::Tensor(tensor.clone()), Vec::new())
             .expect_err("paged input must gate");
+        assert_eq!(
+            error.identifier(),
+            Some("RunMat:compatibility:TriuPagedInputExtension")
+        );
+        let error = triu_builtin(Value::CharArray(chars.clone()), Vec::new())
+            .expect_err("paged character input must gate");
         assert_eq!(
             error.identifier(),
             Some("RunMat:compatibility:TriuPagedInputExtension")
@@ -634,6 +658,16 @@ pub(crate) mod tests {
         assert_eq!(
             output.materialize_f64(),
             vec![1.0, 0.0, 3.0, 4.0, 5.0, 0.0, 7.0, 8.0]
+        );
+        let Value::CharArray(output) =
+            triu_builtin(Value::CharArray(chars), Vec::new()).expect("paged character extension")
+        else {
+            panic!("expected character output")
+        };
+        assert_eq!(output.shape.as_slice(), &[2, 2, 2]);
+        assert_eq!(
+            output.data.as_slice(),
+            &['a', 'b', '\0', 'd', 'e', 'f', '\0', 'h']
         );
     }
 

@@ -122,36 +122,21 @@ pub(crate) async fn invoke(
         .keys()
         .map(|function| program_function(*function))
         .collect::<Result<BTreeSet<_>, _>>()?;
-    let capture_bindings = unit
-        .mir()
-        .functions
-        .iter()
-        .map(|(function, metadata)| {
-            Ok((
-                program_function(*function)?,
-                metadata
-                    .captures
-                    .iter()
-                    .map(|capture| capture.binding)
-                    .collect::<Vec<_>>(),
-            ))
-        })
-        .collect::<Result<BTreeMap<_, _>, runmat_runtime::RuntimeError>>()?;
-
     let previous_invoker = user_functions::current_semantic_function_invoker();
     let nested_executor = Rc::clone(&published.executor);
     let nested_runtime = runtime.native_invocation_context().0;
-    let semantic_capture_bindings = Arc::new(capture_bindings.clone());
     let semantic_native_functions = native_functions.clone();
     let semantic_unit = unit.clone();
     let semantic_registry = Rc::clone(&registry);
     let semantic_dynamic_admission = dynamic_admission.clone();
     let invoker = user_functions::install_local_semantic_function_invoker(Rc::new(
         move |selected, function, arguments, requested_outputs| {
-            let arguments = arguments.to_vec();
-            let argument_roots =
-                runmat_runtime::execution::RootedValueLease::for_values(arguments.iter())
-                    .map_err(|error| error.into_runtime_error());
+            let lexical_environment = arguments.callable().and_then(|callable| {
+                let Value::Closure(closure) = callable.value() else {
+                    return None;
+                };
+                closure.lexical_environment.clone()
+            });
             let previous_invoker = previous_invoker.clone();
             let executor = Rc::clone(&nested_executor);
             let same_owner = selected
@@ -170,7 +155,6 @@ pub(crate) async fn invoke(
             } else {
                 nested_runtime.clone()
             };
-            let capture_bindings = Arc::clone(&semantic_capture_bindings);
             let unit = semantic_unit.clone();
             let registry = Rc::clone(&semantic_registry);
             let dynamic_admission = semantic_dynamic_admission.clone();
@@ -189,7 +173,6 @@ pub(crate) async fn invoke(
                 .map(ProgramFunctionId)
                 .is_ok_and(|function| semantic_native_functions.contains(&function));
             Box::pin(async move {
-                let _argument_roots = argument_roots?;
                 if !same_owner {
                     return Err(super::error::stage(
                         "NativeCallbackOwner",
@@ -207,37 +190,30 @@ pub(crate) async fn invoke(
                         &execution_sources,
                     )?;
                     let function = program_function(runmat_hir::FunctionId(function))?;
-                    native_semantic::invoke(
+                    native_semantic::invoke_rooted(
                         &unit,
-                        super::deopt::DeoptimizationRequest {
-                            executor,
+                        executor,
+                        native_semantic::RootedInvocation {
                             function,
-                            captures: Vec::new(),
-                            lexical_environment: None,
                             arguments,
                             requested_outputs,
                             runtime,
+                            lexical_environment,
                             dynamic_admission,
-                            osr: None,
-                            workspace: None,
                         },
-                        capture_bindings
-                            .get(&function)
-                            .map(Vec::as_slice)
-                            .unwrap_or(&[]),
                     )
                     .await
                 } else if registry.get(runmat_hir::FunctionId(function)).is_some() {
                     // A retained session closure need not belong to this
                     // unit's native MIR. Its registry definition remains
                     // authoritative; arguments still include its captures.
-                    invoke_vm_with_admission(
+                    invoke_vm_with_rooted_admission(
                         function,
-                        &arguments,
+                        arguments,
                         requested_outputs,
                         &registry,
                         runtime,
-                        None,
+                        lexical_environment,
                         dynamic_admission,
                     )
                     .await
@@ -246,7 +222,7 @@ pub(crate) async fn invoke(
                         .scope(previous_invoker(
                             Some(runtime.clone()),
                             function,
-                            &arguments,
+                            arguments,
                             requested_outputs,
                         ))
                         .await

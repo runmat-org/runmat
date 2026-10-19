@@ -15,7 +15,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, LogicalArray, NumericDType, NumericStorage,
-    StringArray, Tensor, Value,
+    StringArray, Tensor, Utf8Text, Value,
 };
 
 use super::{
@@ -435,19 +435,19 @@ fn ismember_host(
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
             ismember_string(astring, bstring, opts.rows)
         }
@@ -949,16 +949,16 @@ fn ismember_string_elements(
     a: StringArray,
     b: StringArray,
 ) -> crate::BuiltinResult<IsMemberEvaluation> {
-    let mut map: HashMap<String, usize> = HashMap::new();
+    let mut map: HashMap<&str, usize> = HashMap::new();
     for (idx, value) in b.data.iter().enumerate() {
-        map.entry(value.clone()).or_insert(idx + 1);
+        map.entry(value.as_str()).or_insert(idx + 1);
     }
 
     let mut mask_data = Vec::<u8>::with_capacity(a.data.len());
     let mut loc_data = Vec::<f64>::with_capacity(a.data.len());
 
     for value in &a.data {
-        if let Some(&pos) = map.get(value) {
+        if let Some(&pos) = map.get(value.as_str()) {
             mask_data.push(1);
             loc_data.push(pos as f64);
         } else {
@@ -967,9 +967,9 @@ fn ismember_string_elements(
         }
     }
 
-    let logical = LogicalArray::new(mask_data, a.shape.clone())
+    let logical = LogicalArray::new(mask_data, a.shape.to_vec())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
-    let loc_tensor = Tensor::new(loc_data, a.shape.clone())
+    let loc_tensor = Tensor::new(loc_data, a.shape.to_vec())
         .map_err(|e| ismember_internal_error(format!("ismember: {e}")))?;
     Ok(IsMemberEvaluation::new(logical, loc_tensor))
 }
@@ -996,7 +996,7 @@ fn ismember_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx].clone());
+            row_values.push(&b.data[idx]);
         }
         let key = RowStringKey(row_values);
         map.entry(key).or_insert(r + 1);
@@ -1009,7 +1009,7 @@ fn ismember_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx].clone());
+            row_values.push(&a.data[idx]);
         }
         let key = RowStringKey(row_values);
         if let Some(&pos) = map.get(&key) {
@@ -1076,7 +1076,7 @@ impl RowCharKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a Utf8Text>);
 
 #[derive(Debug, Clone)]
 pub struct IsMemberEvaluation {

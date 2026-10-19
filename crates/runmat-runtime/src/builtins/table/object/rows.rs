@@ -185,7 +185,7 @@ pub(crate) fn select_rows(value: &Value, rows: &[usize]) -> BuiltinResult<Value>
                     })?);
                 }
             }
-            StringArray::new(data, vec![rows.len(), cols])
+            StringArray::from_texts_unbounded(data, vec![rows.len(), cols])
                 .map(Value::StringArray)
                 .map_err(invalid_variable)
         }

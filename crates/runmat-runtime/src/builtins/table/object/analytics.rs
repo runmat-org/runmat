@@ -121,9 +121,17 @@ pub(in crate::builtins::table) fn compare_table_cells(
                 .unwrap_or(Ordering::Greater))
         }
         Value::StringArray(array) => {
-            let av = array.data.get(a).cloned().unwrap_or_default();
-            let bv = array.data.get(b).cloned().unwrap_or_default();
-            Ok(av.cmp(&bv))
+            let av = array
+                .data
+                .get(a)
+                .map(|text| text.as_str())
+                .unwrap_or_default();
+            let bv = array
+                .data
+                .get(b)
+                .map(|text| text.as_str())
+                .unwrap_or_default();
+            Ok(av.cmp(bv))
         }
         Value::LogicalArray(array) => {
             let av = *array.data.get(a).unwrap_or(&0);
@@ -244,7 +252,7 @@ pub(in crate::builtins::table) fn cell_group_atom(value: &Value, row: usize) -> 
         Value::StringArray(array) => array
             .data
             .get(row)
-            .cloned()
+            .map(ToString::to_string)
             .map(text_group_atom)
             .unwrap_or(GroupAtom::Missing),
         Value::LogicalArray(array) => array
@@ -616,7 +624,11 @@ pub(in crate::builtins::table) fn cell_key_string(value: &Value, row: usize) -> 
                 .map(format_key_number)
                 .unwrap_or_default()
         }
-        Value::StringArray(array) => array.data.get(row).cloned().unwrap_or_default(),
+        Value::StringArray(array) => array
+            .data
+            .get(row)
+            .map(ToString::to_string)
+            .unwrap_or_default(),
         Value::LogicalArray(array) => array
             .data
             .get(row)

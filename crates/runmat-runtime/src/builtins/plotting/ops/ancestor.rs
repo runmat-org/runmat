@@ -345,8 +345,10 @@ fn scalar_handle(value: &Value) -> Option<f64> {
 fn text_scalar(value: &Value) -> Option<String> {
     match value {
         Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(strings) if strings.data.len() == 1 => strings.data.first().cloned(),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(strings) if strings.data.len() == 1 => {
+            strings.data.first().map(|text| text.as_str().to_owned())
+        }
         _ => None,
     }
 }

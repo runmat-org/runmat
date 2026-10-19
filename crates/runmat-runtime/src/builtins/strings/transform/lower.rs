@@ -1,5 +1,7 @@
 //! MATLAB-compatible `lower` builtin with GPU-aware semantics for RunMat.
 
+use crate::context::host_allocation::HostAllocationError;
+use crate::context::RuntimeContext;
 use runmat_builtins::{
     BuiltinErrorDescriptor, LOWER_ERROR_CELL_ELEMENT, LOWER_ERROR_INTERNAL,
     LOWER_ERROR_INVALID_INPUT, LOWER_STRING_CELL_EXTENSION,
@@ -13,7 +15,8 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::strings::common::{
-    cell_has_valid_string_scalar, char_row_to_string_slice, lowercase_preserving_missing,
+    cell_has_valid_string_scalar, char_row_to_string_slice, transform_scalar_case,
+    transform_string_array_case, TextCase,
 };
 #[cfg(test)]
 use crate::builtins::strings::type_resolvers::text_preserve_type;
@@ -70,10 +73,11 @@ fn lower_error(error: &'static BuiltinErrorDescriptor) -> RuntimeError {
 
 #[runtime_builtin(
     name = "lower",
+    context = true,
     binding_variant = "default",
     builtin_path = "crate::builtins::strings::transform::lower"
 )]
-async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
+async fn lower_builtin(runtime: Option<RuntimeContext>, value: Value) -> BuiltinResult<Value> {
     if crate::dispatcher::value_contains_gpu(&value) {
         return Err(lower_error(&LOWER_ERROR_INVALID_INPUT));
     }
@@ -85,24 +89,37 @@ async fn lower_builtin(value: Value) -> BuiltinResult<Value> {
     }
     let gathered = gather_if_needed_async(&value).await.map_err(map_flow)?;
     match gathered {
-        Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text))),
-        Value::StringArray(array) => lower_string_array(array),
+        Value::String(text) => {
+            transform_scalar_case(runtime.as_ref(), text, TextCase::Lower, lower_admission)
+                .map(Value::String)
+        }
+        Value::StringArray(array) => lower_string_array(runtime.as_ref(), array),
         Value::CharArray(array) => lower_char_array(array),
-        Value::Cell(cell) => lower_cell_array(cell),
+        Value::Cell(cell) => lower_cell_array(runtime.as_ref(), cell),
         _ => Err(lower_error(&LOWER_ERROR_INVALID_INPUT)),
     }
 }
 
-fn lower_string_array(array: StringArray) -> BuiltinResult<Value> {
-    let StringArray { data, shape, .. } = array;
-    let lowered = data
-        .into_iter()
-        .map(lowercase_preserving_missing)
-        .collect::<Vec<_>>();
-    let lowered_array = StringArray::new(lowered, shape).map_err(|e| {
-        lower_error_with_message(format!("{BUILTIN_NAME}: {e}"), &LOWER_ERROR_INTERNAL)
-    })?;
-    Ok(Value::StringArray(lowered_array))
+fn lower_string_array(
+    runtime: Option<&RuntimeContext>,
+    array: StringArray,
+) -> BuiltinResult<Value> {
+    transform_string_array_case(runtime, array, TextCase::Lower, lower_admission, |detail| {
+        lower_error_with_message(format!("{BUILTIN_NAME}: {detail}"), &LOWER_ERROR_INTERNAL)
+    })
+    .map(Value::StringArray)
+}
+
+fn lower_admission(runtime: &RuntimeContext, cause: HostAllocationError) -> RuntimeError {
+    build_runtime_error(format!("lower: host allocation: {cause}"))
+        .with_builtin(BUILTIN_NAME)
+        .with_identifier(format!(
+            "{}:{}",
+            runtime.error_namespace(),
+            cause.runtime_identifier_suffix()
+        ))
+        .with_source(cause)
+        .build()
 }
 
 fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
@@ -146,7 +163,7 @@ fn lower_char_array(array: CharArray) -> BuiltinResult<Value> {
         })
 }
 
-fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
+fn lower_cell_array(runtime: Option<&RuntimeContext>, cell: CellArray) -> BuiltinResult<Value> {
     let CellArray {
         data, rows, cols, ..
     } = cell;
@@ -154,7 +171,7 @@ fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     for row in 0..rows {
         for col in 0..cols {
             let idx = row * cols + col;
-            let lowered = lower_cell_element(&data[idx])?;
+            let lowered = lower_cell_element(runtime, &data[idx])?;
             lowered_values.push(lowered);
         }
     }
@@ -163,12 +180,19 @@ fn lower_cell_array(cell: CellArray) -> BuiltinResult<Value> {
     })
 }
 
-fn lower_cell_element(value: &Value) -> BuiltinResult<Value> {
+fn lower_cell_element(runtime: Option<&RuntimeContext>, value: &Value) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => Ok(Value::String(lowercase_preserving_missing(text.clone()))),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(Value::String(
-            lowercase_preserving_missing(sa.data[0].clone()),
-        )),
+        Value::String(text) => {
+            transform_scalar_case(runtime, text.clone(), TextCase::Lower, lower_admission)
+                .map(Value::String)
+        }
+        Value::StringArray(sa) if sa.data.len() == 1 => transform_scalar_case(
+            runtime,
+            sa.data[0].clone(),
+            TextCase::Lower,
+            lower_admission,
+        )
+        .map(Value::String),
         Value::CharArray(ca) if ca.rows <= 1 => lower_char_array(ca.clone()),
         Value::CharArray(_) => Err(lower_error(&LOWER_ERROR_CELL_ELEMENT)),
         _ => Err(lower_error(&LOWER_ERROR_CELL_ELEMENT)),
@@ -181,7 +205,7 @@ pub(crate) mod tests {
     use runmat_builtins::{ResolveContext, Type};
 
     fn run_lower(value: Value) -> BuiltinResult<Value> {
-        futures::executor::block_on(lower_builtin(value))
+        futures::executor::block_on(lower_builtin(None, value))
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -209,13 +233,11 @@ pub(crate) mod tests {
             Value::StringArray(sa) => {
                 assert_eq!(sa.shape, vec![2, 2]);
                 assert_eq!(
-                    sa.data,
-                    vec![
-                        String::from("gpu"),
-                        String::from("accel"),
-                        String::from("<missing>"),
-                        String::from("mixed")
-                    ]
+                    sa.data()
+                        .iter()
+                        .map(|text| text.as_str())
+                        .collect::<Vec<_>>(),
+                    vec!["gpu", "accel", "<missing>", "mixed"]
                 );
             }
             other => panic!("expected string array, got {other:?}"),

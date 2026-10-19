@@ -15,7 +15,7 @@ async fn data_array_name_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     handle_admission::execute(runtime.as_ref(), &owner, Op::ArrayName, &[], async {
-        Ok(Value::String(name))
+        Ok(Value::string(name))
     })
     .await
 }
@@ -32,7 +32,7 @@ async fn data_array_dtype_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     metadata(runtime.as_ref(), &owner, &name, Op::ArrayDType, |meta| {
-        Ok(Value::String(meta.dtype.clone()))
+        Ok(Value::string(meta.dtype.clone()))
     })
     .await
 }
@@ -116,7 +116,7 @@ async fn data_array_codec_builtin(
 ) -> BuiltinResult<Value> {
     let (owner, name) = authority::resolve_array(runtime.as_ref(), &base)?;
     metadata(runtime.as_ref(), &owner, &name, Op::ArrayCodec, |meta| {
-        Ok(Value::String(meta.codec.clone()))
+        Ok(Value::string(meta.codec.clone()))
     })
     .await
 }

@@ -12,6 +12,11 @@ use runmat_value::{IntegerComplexStorage, NumericScalar, NumericStorage};
 use crate::build_runtime_error;
 
 mod residency_cleanup;
+mod managed_download;
+pub use managed_download::{
+    adopt_settled_native_download, download_exact_native, quote_exact_native_download,
+    ExactDownloadFailure, ExactDownloadPhase, ExactNativeDownloadQuote,
+};
 pub(crate) mod complex_transfer;
 pub use complex_transfer::native_complex_upload_workspace;
 pub(crate) use residency_cleanup::clear_input_residency;

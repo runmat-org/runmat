@@ -4,7 +4,7 @@ impl NativeFfiAdapter {
     pub(super) fn call(
         &self,
         context: RuntimeContext,
-        arguments: &[Value],
+        arguments: &(impl InvocationArguments + ?Sized),
         requested_outputs: usize,
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         if arguments.len() < 2 {
@@ -37,15 +37,17 @@ impl NativeFfiAdapter {
                 "native call provides {declared_outputs} outputs, but {requested_outputs} were requested"
             )));
         }
-        let call_arguments = arguments[2..].to_vec();
-        let _argument_roots = crate::execution::RootedValueLease::for_values(call_arguments.iter())
-            .map_err(|error| error.into_runtime_error())?;
+        let call_arguments = ArgumentWindow {
+            source: arguments,
+            offset: 2,
+        };
 
         let mut pointer_entries = Vec::new();
         let mut callback_entries = Vec::new();
-        for (index, (parameter, value)) in
-            prototype.parameters.iter().zip(&call_arguments).enumerate()
-        {
+        for (index, parameter) in prototype.parameters.iter().enumerate() {
+            let value = call_arguments
+                .get(index)
+                .expect("validated native argument count");
             match (&parameter.ty, value) {
                 (NativeType::Pointer { .. }, Value::Foreign(reference)) => {
                     self.handles.resolve(reference, ForeignCapability::Invoke)?;
@@ -64,7 +66,7 @@ impl NativeFfiAdapter {
                     pointer_entries.push((index, value.clone(), pointer));
                 }
                 (NativeType::Callback { .. }, value) if is_callable(value) => {
-                    callback_entries.push((index, value.clone()));
+                    callback_entries.push((index, value));
                 }
                 _ => {}
             }
@@ -75,12 +77,12 @@ impl NativeFfiAdapter {
             .iter()
             .map(|(_, callable)| {
                 let context = context.clone();
-                let callable = callable.clone();
+                let callable = *callable;
                 let callback_router = self.callback_router.clone();
                 let callback_results = Rc::clone(&callback_results);
                 Box::new(move |callback_arguments: &[Value]| {
                     let rooted = if let (Some(router), Some(callback_id)) =
-                        (callback_router.as_ref(), isolated_callback_id(&callable))
+                        (callback_router.as_ref(), isolated_callback_id(callable))
                     {
                         router.dispatch(callback_id, callback_arguments)?
                     } else {
@@ -103,7 +105,7 @@ impl NativeFfiAdapter {
                     // before invocation ends; keep its producer lease alive.
                     callback_results.borrow_mut().push(rooted);
                     Ok(value)
-                }) as Box<dyn runmat_native_ffi::CallbackDispatch>
+                }) as Box<dyn runmat_native_ffi::CallbackDispatch + '_>
             })
             .collect::<Vec<_>>();
         let callback_bindings = callback_entries

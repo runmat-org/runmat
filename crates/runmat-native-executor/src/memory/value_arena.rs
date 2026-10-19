@@ -516,7 +516,7 @@ mod tests {
             return;
         }
         runmat_gc::gc_test_context(|| {
-            let rooted = runmat_gc::gc_allocate_rooted(Value::String("live".to_string()))
+            let rooted = runmat_gc::gc_allocate_rooted(Value::String("live".to_string().into()))
                 .expect("allocate rooted test value");
             let handle = rooted.handle();
             let mut arena = ValueArena::new().expect("activate arena roots");
@@ -536,7 +536,7 @@ mod tests {
 
             runmat_gc::gc_collect_major().expect("collect with live arena root");
             let value = runmat_gc::gc_clone_value(&handle).expect("rooted value remains live");
-            assert_eq!(value, Value::String("live".to_string()));
+            assert_eq!(value, Value::String("live".to_string().into()));
 
             drop(arena);
             runmat_gc::gc_collect_major().expect("collect after arena teardown");

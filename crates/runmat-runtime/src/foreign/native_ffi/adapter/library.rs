@@ -9,33 +9,36 @@ struct PreparedLibraryReadError {
 }
 
 impl NativeFfiAdapter {
-    pub(super) fn load(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn load(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         self.load_legacy(arguments)
-            .map(|report| Value::String(report.alias))
+            .map(|report| Value::string(report.alias))
     }
 
     pub(super) fn load_report(
         &self,
-        arguments: &[Value],
+        arguments: &(impl InvocationArguments + ?Sized),
     ) -> Result<runmat_value::ValueSequence, RuntimeError> {
         let report = self.load_legacy(arguments)?;
         let count = report.notfound.len();
         let notfound = CellArray::new(
-            report.notfound.into_iter().map(Value::String).collect(),
+            report.notfound.into_iter().map(Value::string).collect(),
             1,
             count,
         )
         .map_err(invalid_call)?;
         runmat_value::ValueSequence::comma_separated(vec![
             Value::Cell(notfound),
-            Value::String(report.warnings),
+            Value::string(report.warnings),
         ])
         .map_err(crate::sequence::sequence_error_to_runtime)
     }
 
     pub(super) fn load_legacy(
         &self,
-        arguments: &[Value],
+        arguments: &(impl InvocationArguments + ?Sized),
     ) -> Result<LegacyLoadReport, RuntimeError> {
         if arguments.len() < 2 {
             return Err(invalid_call(
@@ -72,7 +75,10 @@ impl NativeFfiAdapter {
         })
     }
 
-    pub(super) fn load_prepared(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn load_prepared(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if !(2..=3).contains(&arguments.len()) {
             return Err(invalid_call(
                 "prepared native FFI load expects a library path, manifest path, and optional alias",
@@ -210,7 +216,10 @@ impl NativeFfiAdapter {
         ))
     }
 
-    pub(super) fn unload(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn unload(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.len() != 1 {
             return Err(invalid_call("native FFI unload expects one library alias"));
         }
@@ -224,7 +233,10 @@ impl NativeFfiAdapter {
         Ok(Value::Bool(true))
     }
 
-    pub(super) fn is_loaded(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn is_loaded(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.len() != 1 {
             return Err(invalid_call(
                 "native FFI is_loaded expects one library alias",
@@ -236,7 +248,10 @@ impl NativeFfiAdapter {
         ))
     }
 
-    pub(super) fn functions(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn functions(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if !(1..=2).contains(&arguments.len()) {
             return Err(invalid_call(
                 "native FFI functions expects a library alias and optional -full flag",
@@ -257,7 +272,7 @@ impl NativeFfiAdapter {
             .symbols
             .iter()
             .map(|symbol| {
-                Value::String(if full {
+                Value::string(if full {
                     legacy_signature(symbol)
                 } else {
                     symbol.name.clone()
@@ -277,7 +292,10 @@ impl NativeFfiAdapter {
             .ok_or_else(|| invalid_call(format!("native library alias `{alias}` is not loaded")))
     }
 
-    pub(super) fn build_interface(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn build_interface(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.is_empty() || arguments.len().is_multiple_of(2) {
             return Err(invalid_call(
                 "clibgen.buildInterface expects a header followed by name-value pairs",
@@ -287,22 +305,22 @@ impl NativeFfiAdapter {
         let mut library = None;
         let mut alias = None;
         let mut includes = Vec::new();
-        for pair in arguments[1..].chunks_exact(2) {
-            let name = String::try_from(&pair[0])
+        for index in (1..arguments.len()).step_by(2) {
+            let name = String::try_from(arguments.get(index).expect("validated option pair"))
                 .map_err(|_| invalid_call("buildInterface option names must be text"))?;
             match name.to_ascii_lowercase().as_str() {
                 "libraries" => {
-                    library = Some(String::try_from(&pair[1]).map_err(|_| {
+                    library = Some(String::try_from(arguments.get(index + 1).expect("validated option pair")).map_err(|_| {
                         invalid_call("buildInterface Libraries must name one shared library")
                     })?);
                 }
                 "interfacename" => {
-                    alias = Some(String::try_from(&pair[1]).map_err(|_| {
+                    alias = Some(String::try_from(arguments.get(index + 1).expect("validated option pair")).map_err(|_| {
                         invalid_call("buildInterface InterfaceName must be text")
                     })?);
                 }
                 "includepath" | "includedirectories" => {
-                    includes.push(PathBuf::from(String::try_from(&pair[1]).map_err(|_| {
+                    includes.push(PathBuf::from(String::try_from(arguments.get(index + 1).expect("validated option pair")).map_err(|_| {
                         invalid_call("buildInterface include path must be text")
                     })?));
                 }
@@ -341,21 +359,26 @@ impl NativeFfiAdapter {
 /// The legacy adapter also accepts positional include directories. A trailer
 /// is treated as named options only when every name is an admitted preparation
 /// option; unknown or odd trailers retain the positional interpretation.
-fn parse_load_trailer(arguments: &[Value]) -> Result<(Vec<PathBuf>, Vec<PathBuf>), RuntimeError> {
+fn parse_load_trailer(
+    arguments: &(impl InvocationArguments + ?Sized),
+) -> Result<(Vec<PathBuf>, Vec<PathBuf>), RuntimeError> {
     // The adapter admits a library and header without an explicit alias.
-    let options = arguments.get(3..).unwrap_or_default();
-    let named = (!options.is_empty() && options.len().is_multiple_of(2))
+    let count = arguments.len().saturating_sub(3);
+    let named = (count != 0 && count.is_multiple_of(2))
         .then(|| {
-            options
-                .chunks_exact(2)
-                .map(|pair| {
-                    let name = String::try_from(&pair[0]).ok()?;
+            (3..arguments.len())
+                .step_by(2)
+                .map(|index| {
+                    let name = String::try_from(arguments.get(index)?).ok()?;
                     let kind = NativeLoadOption::parse(&name)?;
-                    matches!(
+                    if matches!(
                         kind,
                         NativeLoadOption::IncludePath | NativeLoadOption::AddHeader
-                    )
-                    .then_some((kind, name, &pair[1]))
+                    ) {
+                        Some((kind, name, arguments.get(index + 1)?))
+                    } else {
+                        None
+                    }
                 })
                 .collect::<Option<Vec<_>>>()
         })
@@ -377,10 +400,8 @@ fn parse_load_trailer(arguments: &[Value]) -> Result<(Vec<PathBuf>, Vec<PathBuf>
         }
         Ok((includes, headers))
     } else {
-        let includes = options
-            .iter()
-            .enumerate()
-            .map(|(index, _)| string_argument(arguments, index + 3, "load").map(PathBuf::from))
+        let includes = (3..arguments.len())
+            .map(|index| string_argument(arguments, index, "load").map(PathBuf::from))
             .collect::<Result<Vec<_>, _>>()?;
         Ok((includes, Vec::new()))
     }

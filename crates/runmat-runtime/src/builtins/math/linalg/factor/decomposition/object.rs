@@ -8,7 +8,7 @@ pub(super) fn spec_to_object(spec: &DecompositionSpec) -> BuiltinResult<ObjectIn
         .insert(MATRIX_FIELD.to_string(), spec.matrix.clone());
     object.properties.insert(
         TYPE_FIELD.to_string(),
-        Value::String(decomposition_type_name(spec.decomp_type).to_string()),
+        Value::string(decomposition_type_name(spec.decomp_type).to_string()),
     );
     object.properties.insert(
         MATRIX_SIZE_FIELD.to_string(),
@@ -20,7 +20,7 @@ pub(super) fn spec_to_object(spec: &DecompositionSpec) -> BuiltinResult<ObjectIn
     );
     object.properties.insert(
         DATATYPE_FIELD.to_string(),
-        Value::String(matrix_datatype(&spec.matrix).to_string()),
+        Value::string(matrix_datatype(&spec.matrix).to_string()),
     );
     object.properties.insert(
         IS_CONJUGATE_TRANSPOSED_FIELD.to_string(),

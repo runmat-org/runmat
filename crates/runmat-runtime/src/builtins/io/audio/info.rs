@@ -175,11 +175,11 @@ impl AudioMetadata {
         let mut out = StructValue::new();
         out.insert(
             "Filename",
-            Value::String(path.to_string_lossy().into_owned()),
+            Value::string(path.to_string_lossy().into_owned()),
         );
         out.insert(
             "CompressionMethod",
-            Value::String(self.compression_method.clone()),
+            Value::string(self.compression_method.clone()),
         );
         out.insert("NumChannels", Value::Num(self.num_channels as f64));
         out.insert("SampleRate", Value::Num(self.sample_rate));
@@ -191,7 +191,7 @@ impl AudioMetadata {
         );
         out.insert("BitRate", Value::Num(self.bit_rate.unwrap_or(f64::NAN)));
         out.insert("FileSize", Value::Num(file_size));
-        out.insert("Format", Value::String(self.format.to_string()));
+        out.insert("Format", Value::string(self.format.to_string()));
         out
     }
 }

@@ -105,14 +105,14 @@ pub(super) async fn readline_builtin(
 
 fn value_from_bytes(bytes: Vec<u8>) -> Value {
     if bytes.is_empty() {
-        return Value::String(String::new());
+        return Value::string(String::new());
     }
     match String::from_utf8(bytes) {
-        Ok(text) => Value::String(text),
+        Ok(text) => Value::string(text),
         Err(err) => {
             let lossy = err.into_bytes();
             let mapped: String = lossy.into_iter().map(|b| b as char).collect();
-            Value::String(mapped)
+            Value::string(mapped)
         }
     }
 }

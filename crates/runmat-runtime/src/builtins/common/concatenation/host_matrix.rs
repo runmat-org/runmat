@@ -36,6 +36,10 @@ fn platform_can_run_inline(rows: &[Vec<Value>]) -> bool {
     let canonical = *CANONICAL_NATIVE_BINDINGS.get_or_init(|| {
         for (name, matches) in [
             (
+                "cat",
+                cat::is_canonical_host_binding as fn(crate::builtin::RuntimeBuiltinBinding) -> bool,
+            ),
+            (
                 "horzcat",
                 horzcat::is_canonical_host_binding
                     as fn(crate::builtin::RuntimeBuiltinBinding) -> bool,
@@ -51,7 +55,7 @@ fn platform_can_run_inline(rows: &[Vec<Value>]) -> bool {
                 return false;
             }
         }
-        cat::has_selected_host_legacy_implementation()
+        true
     });
     if !canonical {
         return false;

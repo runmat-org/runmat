@@ -42,7 +42,7 @@ pub(super) async fn datetime_read_step(
             };
             let field = scalar_text(&payload, "field selector")?;
             match field.as_str() {
-                FORMAT_FIELD => RootedValue::new(Value::String(format_for_object(&object)))
+                FORMAT_FIELD => RootedValue::new(Value::string(format_for_object(&object)))
                     .map_err(|error| error.into_runtime_error()),
                 _ => Err(datetime_error(format!(
                     "datetime.subsref: unsupported datetime property '{field}'"
@@ -101,7 +101,7 @@ pub(super) async fn datetime_write_step(
                     let text = scalar_text(&rhs, "Format value")?;
                     object
                         .properties
-                        .insert(FORMAT_FIELD.to_string(), Value::String(text));
+                        .insert(FORMAT_FIELD.to_string(), Value::string(text));
                     Ok(Value::Object(object))
                 }
                 _ => Err(datetime_error(format!(

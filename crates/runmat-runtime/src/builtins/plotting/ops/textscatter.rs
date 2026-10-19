@@ -614,8 +614,12 @@ fn validate_finite_data(
 
 fn labels_from_value(value: &Value, builtin: &'static str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(vec![chars.data.iter().collect()]),
         Value::CharArray(chars) => {
             let mut labels = Vec::with_capacity(chars.rows);
@@ -932,7 +936,7 @@ pub(crate) fn get_textscatter_property(
         Some("visible") => Ok(Value::String(
             if state.visible { "on" } else { "off" }.into(),
         )),
-        Some("displayname") | Some("tag") => Ok(Value::String(String::new())),
+        Some("displayname") | Some("tag") => Ok(Value::string(String::new())),
         Some(other) => Err(textscatter_error(
             builtin,
             format!("unsupported TextScatter property `{other}`"),

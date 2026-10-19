@@ -1006,23 +1006,23 @@ pub(crate) fn get_wordcloud_property(
             st.insert("Children", empty_handles());
             st.insert("WordData", string_array_value(state.word_data.clone())?);
             st.insert("SizeData", vector_value(state.size_data.clone())?);
-            st.insert("WordVariable", Value::String(state.word_variable.clone()));
-            st.insert("SizeVariable", Value::String(state.size_variable.clone()));
+            st.insert("WordVariable", Value::string(state.word_variable.clone()));
+            st.insert("SizeVariable", Value::string(state.size_variable.clone()));
             st.insert(
                 "MaxDisplayWords",
                 Value::Num(state.max_display_words as f64),
             );
             st.insert("Color", color_value(&state.color)?);
             st.insert("HighlightColor", single_color_value(state.highlight_color)?);
-            st.insert("Shape", Value::String(state.shape.clone()));
+            st.insert("Shape", Value::string(state.shape.clone()));
             st.insert("LayoutNum", Value::Num(state.layout_num as f64));
             st.insert("SizePower", Value::Num(state.size_power));
-            st.insert("Title", Value::String(state.title.clone()));
+            st.insert("Title", Value::string(state.title.clone()));
             st.insert(
                 "TitleFontName",
-                Value::String(state.title_font_name.clone()),
+                Value::string(state.title_font_name.clone()),
             );
-            st.insert("FontName", Value::String(state.font_name.clone()));
+            st.insert("FontName", Value::string(state.font_name.clone()));
             st.insert(
                 "Visible",
                 Value::String(if state.visible { "on" } else { "off" }.into()),
@@ -1031,14 +1031,14 @@ pub(crate) fn get_wordcloud_property(
                 "Box",
                 Value::String(if state.box_visible { "on" } else { "off" }.into()),
             );
-            st.insert("Units", Value::String(state.units.clone()));
+            st.insert("Units", Value::string(state.units.clone()));
             st.insert("Position", vector_value(state.position.to_vec())?);
             st.insert(
                 "HandleVisibility",
-                Value::String(state.handle_visibility.clone()),
+                Value::string(state.handle_visibility.clone()),
             );
-            st.insert("DisplayName", Value::String(state.display_name.clone()));
-            st.insert("Tag", Value::String(state.tag.clone()));
+            st.insert("DisplayName", Value::string(state.display_name.clone()));
+            st.insert("Tag", Value::string(state.tag.clone()));
             st.insert("SourceTable", Value::Struct(StructValue::new()));
             Ok(Value::Struct(st))
         }
@@ -1047,28 +1047,28 @@ pub(crate) fn get_wordcloud_property(
         Some("children") => Ok(empty_handles()),
         Some("worddata") => string_array_value(state.word_data.clone()),
         Some("sizedata") => vector_value(state.size_data.clone()),
-        Some("wordvariable") => Ok(Value::String(state.word_variable.clone())),
-        Some("sizevariable") => Ok(Value::String(state.size_variable.clone())),
+        Some("wordvariable") => Ok(Value::string(state.word_variable.clone())),
+        Some("sizevariable") => Ok(Value::string(state.size_variable.clone())),
         Some("maxdisplaywords") => Ok(Value::Num(state.max_display_words as f64)),
         Some("color") => color_value(&state.color),
         Some("highlightcolor") => single_color_value(state.highlight_color),
-        Some("shape") => Ok(Value::String(state.shape.clone())),
+        Some("shape") => Ok(Value::string(state.shape.clone())),
         Some("layoutnum") => Ok(Value::Num(state.layout_num as f64)),
         Some("sizepower") => Ok(Value::Num(state.size_power)),
-        Some("title") => Ok(Value::String(state.title.clone())),
-        Some("titlefontname") => Ok(Value::String(state.title_font_name.clone())),
-        Some("fontname") => Ok(Value::String(state.font_name.clone())),
+        Some("title") => Ok(Value::string(state.title.clone())),
+        Some("titlefontname") => Ok(Value::string(state.title_font_name.clone())),
+        Some("fontname") => Ok(Value::string(state.font_name.clone())),
         Some("visible") => Ok(Value::String(
             if state.visible { "on" } else { "off" }.into(),
         )),
         Some("box") => Ok(Value::String(
             if state.box_visible { "on" } else { "off" }.into(),
         )),
-        Some("units") => Ok(Value::String(state.units.clone())),
+        Some("units") => Ok(Value::string(state.units.clone())),
         Some("position") => vector_value(state.position.to_vec()),
-        Some("handlevisibility") => Ok(Value::String(state.handle_visibility.clone())),
-        Some("displayname") => Ok(Value::String(state.display_name.clone())),
-        Some("tag") => Ok(Value::String(state.tag.clone())),
+        Some("handlevisibility") => Ok(Value::string(state.handle_visibility.clone())),
+        Some("displayname") => Ok(Value::string(state.display_name.clone())),
+        Some("tag") => Ok(Value::string(state.tag.clone())),
         Some("sourcetable") => Ok(Value::Struct(StructValue::new())),
         Some(other) => Err(wordcloud_error(format!(
             "unsupported WordCloudChart property `{other}`"
@@ -1443,8 +1443,12 @@ fn validate_sizes(sizes: &[f64]) -> BuiltinResult<()> {
 
 fn words_from_word_vector(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::CharArray(array) if array.rows <= 1 => Ok(vec![if array.rows == 0 {
             String::new()
         } else {

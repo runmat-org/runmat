@@ -1202,10 +1202,12 @@ impl SortArgs {
                         }
                         let raw = &rest[i];
                         let value = match raw {
-                            Value::String(s) => s.clone(),
-                            Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
+                            Value::String(s) => std::borrow::Cow::Borrowed(s.as_str()),
+                            Value::StringArray(sa) if sa.data.len() == 1 => {
+                                std::borrow::Cow::Borrowed(sa.data[0].as_str())
+                            }
                             Value::CharArray(ca) if ca.rows == 1 => {
-                                ca.data.iter().copied().collect()
+                                std::borrow::Cow::Owned(ca.data.iter().copied().collect::<String>())
                             }
                             _ => {
                                 return Err(sort_error(

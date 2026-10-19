@@ -197,7 +197,7 @@ pub(crate) fn resolve_matfile(
             "matfile receiver authority does not belong to this registry",
         ));
     }
-    let expected_source = Value::String(record.public_path.clone());
+    let expected_source = Value::string(record.public_path.clone());
     let Some(Value::Struct(properties)) = object.properties.get(PROPERTIES_FIELD) else {
         return Err(matfile_error(
             "matfile receiver presentation is missing Properties",

@@ -23,11 +23,12 @@ pub(in crate::builtins::fea) fn field_to_object(
     let mut object = ObjectInstance::new(FEA_FIELD_CLASS.to_string());
     object.properties.insert(
         "field_id".to_string(),
-        Value::String(field.field_id.clone()),
+        Value::String(field.field_id.clone().into()),
     );
-    object
-        .properties
-        .insert("id".to_string(), Value::String(field.field_id.clone()));
+    object.properties.insert(
+        "id".to_string(),
+        Value::String(field.field_id.clone().into()),
+    );
     object.properties.insert(
         "shape".to_string(),
         usize_slice_tensor(&field.shape, 1, field.shape.len())?,
@@ -37,30 +38,34 @@ pub(in crate::builtins::fea) fn field_to_object(
         .insert("values".to_string(), field_values_value(field)?);
     object.properties.insert(
         "unit".to_string(),
-        Value::String(descriptor.unit.clone().unwrap_or_default()),
+        Value::String(descriptor.unit.clone().unwrap_or_default().into()),
     );
     object.properties.insert(
         "location".to_string(),
-        Value::String(format!("{:?}", descriptor.location).to_ascii_lowercase()),
+        Value::String(
+            format!("{:?}", descriptor.location)
+                .to_ascii_lowercase()
+                .into(),
+        ),
     );
     object.properties.insert(
         "kind".to_string(),
-        Value::String(format!("{:?}", descriptor.kind).to_ascii_lowercase()),
+        Value::String(format!("{:?}", descriptor.kind).to_ascii_lowercase().into()),
     );
     object.properties.insert(
         "family".to_string(),
-        Value::String(descriptor.family.clone()),
+        Value::String(descriptor.family.clone().into()),
     );
     object.properties.insert(
         "quantity".to_string(),
-        Value::String(descriptor.quantity.clone()),
+        Value::String(descriptor.quantity.clone().into()),
     );
     object.properties.insert(
         "topology_id".to_string(),
         descriptor
             .topology_id
             .as_ref()
-            .map(|value| Value::String(value.clone()))
+            .map(|value| Value::String(value.clone().into()))
             .unwrap_or_else(empty_double_value),
     );
     object.properties.insert(
@@ -68,7 +73,7 @@ pub(in crate::builtins::fea) fn field_to_object(
         descriptor
             .element_kind
             .as_ref()
-            .map(|value| Value::String(value.clone()))
+            .map(|value| Value::String(value.clone().into()))
             .unwrap_or_else(empty_double_value),
     );
     object.properties.insert(
@@ -92,7 +97,11 @@ pub(in crate::builtins::fea) fn field_to_object(
     );
     object.properties.insert(
         "storage".to_string(),
-        Value::String(format!("{:?}", descriptor.storage).to_ascii_lowercase()),
+        Value::String(
+            format!("{:?}", descriptor.storage)
+                .to_ascii_lowercase()
+                .into(),
+        ),
     );
     object.properties.insert(
         "descriptor".to_string(),
@@ -107,9 +116,10 @@ pub(in crate::builtins::fea) fn field_to_object(
     let json = serde_json::to_string(field).map_err(|err| {
         builtin_error_with_source(FIELD_NAME, &ERROR_INTERNAL, err.to_string(), err)
     })?;
-    object
-        .properties
-        .insert(FEA_PAYLOAD_JSON_PROPERTY.to_string(), Value::String(json));
+    object.properties.insert(
+        FEA_PAYLOAD_JSON_PROPERTY.to_string(),
+        Value::String(json.into()),
+    );
     Ok(object)
 }
 

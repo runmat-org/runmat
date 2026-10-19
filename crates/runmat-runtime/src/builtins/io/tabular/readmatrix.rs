@@ -106,7 +106,7 @@ pub(crate) async fn readmatrix_builtin(
         }
         if let (Some(runtime), Value::String(raw)) = (runtime.as_ref(), &path) {
             let provider = runmat_filesystem::current_provider();
-            let borrowed = Path::new(raw);
+            let borrowed = Path::new(raw.as_str());
             if rest.is_empty()
                 && provider.path_namespace().is_absolute(borrowed)
                 && crate::output_count::current_output_count().is_none_or(|count| count == 1)
@@ -562,9 +562,11 @@ async fn parse_treat_as_missing(value: &Value) -> BuiltinResult<Vec<String>> {
     let mut stack = vec![value.clone()];
     while let Some(value) = stack.pop() {
         match value {
-            Value::String(s) => out.push(s),
-            Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect()),
-            Value::StringArray(sa) => out.extend(sa.data),
+            Value::String(s) => out.push(s.into_string_unbounded()),
+            Value::CharArray(ca) if ca.rows == 1 => out.push(ca.data.iter().collect::<String>()),
+            Value::StringArray(sa) => {
+                out.extend(sa.data.iter().map(|text| text.as_str().to_owned()))
+            }
             Value::Num(n) => out.push(format_numeric_token(n)),
             Value::Int(i) => out.push(i.decimal_string()),
             Value::Tensor(t) => {

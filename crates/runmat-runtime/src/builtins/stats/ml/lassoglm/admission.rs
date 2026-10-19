@@ -50,7 +50,7 @@ pub(super) fn admit_options(rest: Vec<Value>) -> BuiltinResult<Vec<OptionInput>>
         }
         admitted.push(OptionInput {
             option,
-            name,
+            name: name.into_owned(),
             value,
         });
     }

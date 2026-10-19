@@ -575,7 +575,8 @@ async fn execute_brace_operation(
                         match rhs_kind {
                             runmat_value::ValueSequenceKind::CommaSeparated
                                 if rhs_values.len() == 1 => {
-                                runmat_runtime::object::cell::assign_cell_value(
+                                runmat_runtime::object::cell::assign_cell_value_in_context(
+                                    Some(runtime),
                                     ca,
                                     &indices,
                                     rhs_values.pop().unwrap_or(Value::Num(0.0)),
@@ -590,7 +591,8 @@ async fn execute_brace_operation(
                                     "Cell brace assignment target count does not match source value count",
                                 ))
                             }
-                            runmat_value::ValueSequenceKind::Single => runmat_runtime::object::cell::assign_cell_value(
+                            runmat_value::ValueSequenceKind::Single => runmat_runtime::object::cell::assign_cell_value_in_context(
+                                Some(runtime),
                                 ca,
                                 &indices,
                                 rhs_values.pop().unwrap_or(Value::Num(0.0)),
@@ -606,7 +608,8 @@ async fn execute_brace_operation(
                                 raw_indices,
                             )?;
                         match rhs_kind {
-                            runmat_value::ValueSequenceKind::CommaSeparated => runmat_runtime::object::cell::assign_cell_value_multi(
+                            runmat_value::ValueSequenceKind::CommaSeparated => runmat_runtime::object::cell::assign_cell_value_multi_in_context(
+                                Some(runtime),
                                 ca,
                                 &positions,
                                 &rhs_values,
@@ -614,7 +617,8 @@ async fn execute_brace_operation(
                                     runmat_gc::gc_record_write(oldv, newv);
                                 },
                             )?,
-                            runmat_value::ValueSequenceKind::Single if positions.len() == 1 => runmat_runtime::object::cell::assign_cell_value(
+                            runmat_value::ValueSequenceKind::Single if positions.len() == 1 => runmat_runtime::object::cell::assign_cell_value_in_context(
+                                Some(runtime),
                                 ca,
                                 &positions,
                                 rhs_values.pop().unwrap_or(Value::Num(0.0)),

@@ -1,5 +1,6 @@
 //! Value-role, compatibility, output-count, and provider-boundary admission.
 use super::*;
+use std::borrow::Cow;
 pub(super) fn is_kstest_typed_integer(value: &Value) -> bool {
     matches!(value, Value::Int(_))
         || matches!(value, Value::Tensor(tensor) if tensor.integer_storage().is_some())
@@ -158,11 +159,16 @@ pub(super) async fn kstest_gather(value: Value) -> BuiltinResult<Value> {
         owner
     })
 }
-pub(super) fn kstest_scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
+pub(super) fn kstest_scalar_text<'a>(
+    value: &'a Value,
+    context: &str,
+) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::CharArray(array) if array.rows == 1 => Ok(Cow::Owned(array.data.iter().collect())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Cow::Borrowed(array.data[0].as_str()))
+        }
         Value::Cell(cell) if cell.data.len() == 1 => kstest_scalar_text(&cell.data[0], context),
         other => Err(kstest_invalid_argument(format!(
             "kstest: {context} must be a string scalar, got {other:?}"

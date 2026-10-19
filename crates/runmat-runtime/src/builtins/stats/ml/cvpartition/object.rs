@@ -19,7 +19,7 @@ pub(super) fn partition_object(spec: PartitionSpec) -> BuiltinResult<ObjectInsta
     );
     object.properties.insert(
         "Type".to_string(),
-        Value::String(spec.kind.property_name().to_string()),
+        Value::string(spec.kind.property_name().to_string()),
     );
     object
         .properties

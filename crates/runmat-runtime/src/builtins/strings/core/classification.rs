@@ -6,7 +6,8 @@ use runmat_builtins::CharacterPropertyCategory;
 use runmat_value::{IntValue, NumericScalar, Value};
 
 use crate::builtins::common::tensor as tensor_utils;
-use crate::builtins::strings::core::compat::{compat_error, logical_value, scalar_text};
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
+use crate::builtins::strings::core::compat::{compat_error, logical_value};
 use crate::{make_cell_with_shape, BuiltinResult};
 
 static UNICODE_DECIMAL_RE: Lazy<Regex> =
@@ -22,21 +23,24 @@ pub(crate) fn classify_text_value(
     fn_name: &str,
     pred: impl Fn(char) -> bool + Copy,
 ) -> BuiltinResult<Value> {
+    classify_text_ref(&value, fn_name, pred)
+}
+
+fn classify_text_ref(
+    value: &Value,
+    fn_name: &str,
+    pred: impl Fn(char) -> bool + Copy,
+) -> BuiltinResult<Value> {
     match value {
-        Value::String(text) => {
-            let data = text
-                .chars()
-                .map(|ch| u8::from(pred(ch)))
-                .collect::<Vec<_>>();
-            logical_value(data, vec![1, text.chars().count()], fn_name)
-        }
+        Value::String(text) => classify_string(text.as_str(), fn_name, pred),
         Value::StringArray(array) => {
             let values = array
                 .data
-                .into_iter()
-                .map(|text| classify_text_value(Value::String(text), fn_name, pred))
+                .iter()
+                .map(|text| classify_string(text.as_str(), fn_name, pred))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            make_cell_with_shape(values, array.shape).map_err(|e| compat_error(fn_name, e))
+            make_cell_with_shape(values, array.shape().to_vec())
+                .map_err(|e| compat_error(fn_name, e))
         }
         Value::CharArray(array) => {
             let data = array
@@ -49,16 +53,29 @@ pub(crate) fn classify_text_value(
         Value::Cell(cell) => {
             let values = cell
                 .data
-                .into_iter()
-                .map(|value| classify_text_value(value, fn_name, pred))
+                .iter()
+                .map(|value| classify_text_ref(value, fn_name, pred))
                 .collect::<BuiltinResult<Vec<_>>>()?;
-            make_cell_with_shape(values, cell.shape).map_err(|e| compat_error(fn_name, e))
+            make_cell_with_shape(values, cell.shape().to_vec())
+                .map_err(|e| compat_error(fn_name, e))
         }
         other => Err(compat_error(
             fn_name,
             format!("{fn_name}: expected text input, got {other:?}"),
         )),
     }
+}
+
+pub(crate) fn classify_string(
+    text: &str,
+    fn_name: &str,
+    pred: impl Fn(char) -> bool + Copy,
+) -> BuiltinResult<Value> {
+    let data = text
+        .chars()
+        .map(|ch| u8::from(pred(ch)))
+        .collect::<Vec<_>>();
+    logical_value(data, vec![1, text.chars().count()], fn_name)
 }
 
 pub(crate) fn classify_text_or_numeric_value(
@@ -101,7 +118,10 @@ pub(crate) fn classify_text_or_numeric_value(
     }
 }
 
-pub(crate) fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
+pub(crate) fn parse_force_cell_output(
+    runtime: Option<&crate::context::RuntimeContext>,
+    rest: &[Value],
+) -> BuiltinResult<bool> {
     if rest.is_empty() {
         return Ok(false);
     }
@@ -111,11 +131,14 @@ pub(crate) fn parse_force_cell_output(rest: &[Value]) -> BuiltinResult<bool> {
             "isstrprop: expected the optional 'ForceCellOutput', tf name-value pair",
         ));
     }
-    let option = scalar_text(&rest[0], "isstrprop")?;
-    if !option.eq_ignore_ascii_case("forcecelloutput") {
+    let option = scalar_text_input(&rest[0], runtime, |runtime, cause| {
+        text_input_admission("isstrprop", runtime, cause)
+    })?
+    .ok_or_else(|| compat_error("isstrprop", "isstrprop: expected a text option"))?;
+    if !option.as_str().eq_ignore_ascii_case("forcecelloutput") {
         return Err(compat_error(
             "isstrprop",
-            format!("isstrprop: unsupported option '{option}'"),
+            format!("isstrprop: unsupported option '{}'", option.as_str()),
         ));
     }
     let flag = match &rest[1] {

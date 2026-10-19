@@ -168,7 +168,7 @@ enum InputKind {
 
 #[derive(Debug, Clone)]
 struct SubjectCollection {
-    entries: Vec<String>,
+    entries: Vec<runmat_value::Utf8Text>,
     rows: usize,
     cols: usize,
     kind: InputKind,
@@ -226,9 +226,9 @@ fn collect_char_array(
         });
     }
     if array.rows == 1 {
-        let text: String = array.data.into_iter().collect();
+        let text: String = array.data.into_char_iter().collect();
         return Ok(SubjectCollection {
-            entries: vec![text],
+            entries: vec![runmat_value::Utf8Text::new(text)],
             rows: 1,
             cols: 1,
             kind: InputKind::CharScalar,
@@ -241,7 +241,7 @@ fn collect_char_array(
         for c in 0..array.cols {
             line.push(array.data[r * array.cols + c]);
         }
-        entries.push(line);
+        entries.push(runmat_value::Utf8Text::new(line));
     }
     Ok(SubjectCollection {
         entries,
@@ -271,13 +271,10 @@ fn collect_string_array(
             force_cell_output,
         });
     }
-    let mut entries = Vec::with_capacity(total);
-    for row in 0..rows {
-        for col in 0..cols {
-            let idx = row + col * rows;
-            entries.push(array.data[idx].clone());
-        }
-    }
+    let entries = match array.data.try_into_owned() {
+        Ok(values) => values.into_iter().collect(),
+        Err(shared) => shared.iter().cloned().collect(),
+    };
     Ok(SubjectCollection {
         entries,
         rows,
@@ -319,11 +316,13 @@ async fn collect_cell_array(
     })
 }
 
-fn extract_string(value: &Value) -> Option<String> {
+fn extract_string(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(runmat_value::Utf8Text::new(
+            ca.data.iter().copied().collect(),
+        )),
         _ => None,
     }
 }
@@ -491,13 +490,13 @@ impl RegexpEvaluation {
                 let value = data
                     .matches
                     .first()
-                    .map(|m| Value::String(m.matched.clone()))
-                    .unwrap_or_else(|| Value::String(String::new()));
+                    .map(|m| Value::string(m.matched.clone()))
+                    .unwrap_or_else(|| Value::string(String::new()));
                 return Ok(value);
             }
             let mut elements = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
-                elements.push(Value::String(m.matched.clone()));
+                elements.push(Value::string(m.matched.clone()));
             }
             return self.make_cell_value(elements, 1, data.matches.len());
         }
@@ -507,13 +506,13 @@ impl RegexpEvaluation {
                 let value = data
                     .matches
                     .first()
-                    .map(|m| Value::String(m.matched.clone()))
-                    .unwrap_or_else(|| Value::String(String::new()));
+                    .map(|m| Value::string(m.matched.clone()))
+                    .unwrap_or_else(|| Value::string(String::new()));
                 return Ok(value);
             }
             let mut elements = Vec::with_capacity(data.matches.len());
             for m in &data.matches {
-                elements.push(Value::String(m.matched.clone()));
+                elements.push(Value::string(m.matched.clone()));
             }
             self.make_cell_value(elements, 1, data.matches.len())
         })
@@ -532,7 +531,7 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 let mut tokens = Vec::with_capacity(m.tokens.len());
                 for token in &m.tokens {
-                    tokens.push(Value::String(token.text.clone().unwrap_or_default()));
+                    tokens.push(Value::string(token.text.clone().unwrap_or_default()));
                 }
                 per_match.push(self.make_cell_value(tokens, 1, m.tokens.len())?);
             }
@@ -550,7 +549,7 @@ impl RegexpEvaluation {
             for m in &data.matches {
                 let mut tokens = Vec::with_capacity(m.tokens.len());
                 for token in &m.tokens {
-                    tokens.push(Value::String(token.text.clone().unwrap_or_default()));
+                    tokens.push(Value::string(token.text.clone().unwrap_or_default()));
                 }
                 per_match.push(self.make_cell_value(tokens, 1, m.tokens.len())?);
             }
@@ -634,7 +633,7 @@ impl RegexpEvaluation {
                 .unwrap_or_else(Vec::new);
             let mut values = Vec::with_capacity(splits.len());
             for part in &splits {
-                values.push(Value::String(part.clone()));
+                values.push(Value::string(part.clone()));
             }
             let len = splits.len();
             return self.make_cell_value(values, 1, len);
@@ -643,7 +642,7 @@ impl RegexpEvaluation {
             let splits = data.splits.as_ref().cloned().unwrap_or_else(Vec::new);
             let mut values = Vec::with_capacity(splits.len());
             for part in &splits {
-                values.push(Value::String(part.clone()));
+                values.push(Value::string(part.clone()));
             }
             let len = splits.len();
             self.make_cell_value(values, 1, len)
@@ -663,7 +662,7 @@ impl RegexpEvaluation {
                 let value = if idx < self.data.len() {
                     build(&self.data[idx])?
                 } else {
-                    Value::String(String::new())
+                    Value::string(String::new())
                 };
                 values.push(value);
             }
@@ -796,7 +795,7 @@ fn vector_to_value(builtin: &'static str, values: &[f64]) -> BuiltinResult<Value
 fn tokens_to_cell(builtin: &'static str, tokens: &[TokenComponent]) -> BuiltinResult<Value> {
     let mut values = Vec::with_capacity(tokens.len());
     for token in tokens {
-        values.push(Value::String(token.text.clone().unwrap_or_default()));
+        values.push(Value::string(token.text.clone().unwrap_or_default()));
     }
     make_cell(values, 1, tokens.len())
         .map_err(|err| runtime_error_for(builtin, format!("{builtin}: {err}")))
@@ -827,7 +826,7 @@ fn names_struct(names: &[String], match_data: Option<&MatchComponents>) -> Value
             Some(m) => m.named.get(name).cloned().unwrap_or_default(),
             None => String::new(),
         };
-        st.fields.insert(name.clone(), Value::String(value));
+        st.fields.insert(name.clone(), Value::string(value));
     }
     Value::Struct(st)
 }

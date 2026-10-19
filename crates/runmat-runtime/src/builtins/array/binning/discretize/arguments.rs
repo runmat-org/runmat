@@ -1,4 +1,5 @@
 use runmat_value::Value;
+use std::borrow::Cow;
 
 use crate::{builtins::common::gpu_helpers, BuiltinResult};
 
@@ -58,12 +59,12 @@ async fn gather_one(value: &Value, protected: &[&Value]) -> BuiltinResult<Value>
         .map_err(error::transfer)
 }
 
-pub(super) fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text<'a>(value: &'a Value, context: &str) -> BuiltinResult<Cow<'a, str>> {
     validate_scalar_text(value, context)?;
     match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::StringArray(value) => Ok(value.data[0].clone()),
-        Value::CharArray(value) => Ok(value.data.iter().collect()),
+        Value::String(value) => Ok(Cow::Borrowed(value.as_str())),
+        Value::StringArray(value) => Ok(Cow::Borrowed(value.data[0].as_str())),
+        Value::CharArray(value) => Ok(Cow::Owned(value.data.iter().collect())),
         other => Err(error::invalid(format!(
             "discretize: {context} must be text, got {other:?}"
         ))),

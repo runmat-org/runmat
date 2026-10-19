@@ -4,6 +4,114 @@ use runmat_accelerate_api::{
 };
 
 #[test]
+fn managed_shared_cell_provenance_admits_outer_and_text_without_copying_numeric_payload() {
+    use crate::context::host_effect::ManagedHostEffectLedger;
+    use crate::context::{
+        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+        RuntimeServicePorts,
+    };
+    use runmat_value::{CellArray, IntegerStorage, SparseTensor, Tensor};
+    use std::rc::Rc;
+
+    struct Parallel(ManagedHostEffectLedger);
+    impl RuntimeParallelService for Parallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+
+    let ledger = ManagedHostEffectLedger::new(65_536);
+    let context = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(Parallel(ledger.clone()))),
+        );
+    let _scope = context.enter();
+    let owner = TestAllocationOwner::new();
+    let allocation = owner
+        .allocate_zeroed(vec![1, 1], NumericElementType::F64, GpuTensorStorage::Real)
+        .unwrap();
+    let tensor = Tensor::new(vec![9.0], vec![1, 1]).unwrap();
+    let numeric_ptr = tensor.as_f64_slice().unwrap().as_ptr();
+    let sparse = SparseTensor::new_integer(
+        1,
+        1,
+        vec![0, 1],
+        vec![0],
+        IntegerStorage::U64(vec![u64::MAX]),
+    )
+    .unwrap();
+    let sparse_indices = sparse.row_indices.as_ptr();
+    let sparse_values = match sparse.numeric_host_buffer().unwrap().integer_storage() {
+        Some(IntegerStorage::U64(values)) => values.as_ptr(),
+        _ => panic!("uint64 sparse storage"),
+    };
+    let source = Value::Cell(
+        CellArray::new_with_shape(
+            vec![
+                Value::string("owned text"),
+                Value::Tensor(tensor),
+                Value::Cell(
+                    CellArray::new(vec![Value::GpuTensor(allocation.handle.clone())], 1, 1)
+                        .unwrap(),
+                ),
+                Value::SparseTensor(sparse),
+            ],
+            vec![1, 4, 1],
+        )
+        .unwrap(),
+    );
+    let mut projected = source.clone();
+    provenance::project(&mut projected, true).unwrap();
+    let Value::Cell(cell) = &projected else {
+        panic!("projected Cell");
+    };
+    assert!(cell.data.is_exact());
+    assert!(cell.shape.is_admitted());
+    assert!(matches!(&cell.data[0], Value::String(text) if text.has_retained_claim()));
+    assert!(
+        matches!(&cell.data[1], Value::Tensor(value) if value.as_f64_slice().unwrap().as_ptr() == numeric_ptr)
+    );
+    assert!(matches!(&cell.data[2], Value::Cell(nested) if nested.data.is_exact()));
+    let Value::SparseTensor(sparse) = &cell.data[3] else {
+        panic!("shared sparse child");
+    };
+    assert_eq!(sparse.row_indices.as_ptr(), sparse_indices);
+    assert!(matches!(
+        sparse.numeric_host_buffer().unwrap().integer_storage(),
+        Some(IntegerStorage::U64(values)) if values.as_ptr() == sparse_values
+    ));
+    assert_eq!(
+        sparse.numeric_host_buffer().unwrap().value_at(0),
+        Some(runmat_value::NumericScalar::U64(u64::MAX))
+    );
+    try_visit_gpu_handles(&projected, &mut |handle| {
+        assert_eq!(
+            handle.view().provenance(),
+            Some(GpuHandleProvenance::Explicit)
+        );
+    })
+    .unwrap();
+    try_visit_gpu_handles(&source, &mut |handle| {
+        assert_eq!(handle.view().provenance(), None);
+    })
+    .unwrap();
+    assert!(ledger.snapshot().live_claimed_bytes > 0);
+    drop(projected);
+    assert_eq!(ledger.snapshot().live_claimed_bytes, 0);
+}
+
+#[test]
 fn owned_object_array_projection_preserves_class_shape_and_source_aliases() {
     let owner = TestAllocationOwner::new();
     let allocation = owner

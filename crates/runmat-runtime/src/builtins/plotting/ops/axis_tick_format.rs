@@ -44,7 +44,7 @@ pub fn axis_tick_format_builtin(
             for target in prepared_targets(runtime, target) {
                 set_format(builtin, axis, &target.resolve(builtin)?, format.clone())?;
             }
-            Ok(Value::String(format))
+            Ok(Value::string(format))
         }
         _ => Err(plotting_error(
             builtin,
@@ -142,7 +142,7 @@ fn query_format(
     let (x, y) =
         axis_tick_formats_snapshot_for_axes_for_property(target.authority(), handle, index)
             .map_err(|err| plotting_error_with_source(builtin, format!("{builtin}: {err}"), err))?;
-    Ok(Value::String(
+    Ok(Value::string(
         match axis {
             TickAxis::X => x,
             TickAxis::Y => y,

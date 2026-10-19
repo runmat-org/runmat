@@ -530,7 +530,7 @@ async fn decimal_items_from_value(
             .collect()),
         Value::CharArray(chars) => Ok(chars
             .data
-            .into_iter()
+            .into_char_iter()
             .map(|ch| DecimalItem::Unsigned(u128::from(ch as u32)))
             .collect()),
         Value::GpuTensor(handle) => {
@@ -740,7 +740,7 @@ fn parse_min_digits(value: &Value, builtin: &'static str) -> BuiltinResult<usize
 
 #[derive(Debug)]
 struct ParsedTextItems {
-    items: Vec<String>,
+    items: runmat_value::ExactArrayStorage<runmat_value::Utf8Text>,
     shape: Vec<usize>,
     preserve_shape: bool,
     column: bool,
@@ -753,23 +753,23 @@ fn text_items_from_value(value: Value, builtin: &'static str) -> BuiltinResult<P
             for row in 0..chars.rows {
                 let start = row * chars.cols;
                 let end = start + chars.cols;
-                items.push(chars.data[start..end].iter().collect::<String>());
+                items.push(chars.data[start..end].iter().collect::<String>().into());
             }
             Ok(ParsedTextItems {
-                items,
+                items: runmat_value::ExactArrayStorage::unbounded(items),
                 shape: vec![chars.rows, 1],
                 preserve_shape: false,
                 column: true,
             })
         }
         Value::String(text) => Ok(ParsedTextItems {
-            items: vec![text],
+            items: runmat_value::ExactArrayStorage::unbounded(vec![text]),
             shape: vec![1, 1],
             preserve_shape: true,
             column: false,
         }),
         Value::StringArray(array) => {
-            let shape = array.shape.clone();
+            let shape = array.shape.to_vec();
             Ok(ParsedTextItems {
                 items: array.data,
                 shape,
@@ -787,8 +787,8 @@ fn text_items_from_value(value: Value, builtin: &'static str) -> BuiltinResult<P
 
 fn text_items_from_cell(cell: CellArray, builtin: &'static str) -> BuiltinResult<ParsedTextItems> {
     let mut items = Vec::with_capacity(cell.data.len());
-    for value in cell.data {
-        let Some(text) = value_as_string(&value) else {
+    for value in &cell.data {
+        let Some(text) = value_as_string(value) else {
             return Err(conversion_error(
                 builtin,
                 format!("{builtin}: cell array elements must be text"),
@@ -798,7 +798,7 @@ fn text_items_from_cell(cell: CellArray, builtin: &'static str) -> BuiltinResult
     }
     Ok(ParsedTextItems {
         shape: vec![items.len(), 1],
-        items,
+        items: runmat_value::ExactArrayStorage::unbounded(items),
         preserve_shape: false,
         column: true,
     })
@@ -1429,11 +1429,11 @@ fn parse_required_order(value: &Value, operation: DigitConversion) -> BuiltinRes
     })
 }
 
-fn value_as_string(value: &Value) -> Option<String> {
+fn value_as_string(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(s) => Some(s.clone()),
         Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
-        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
+        Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect::<String>().into()),
         _ => None,
     }
 }

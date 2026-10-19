@@ -6,14 +6,13 @@
 use runmat_types::FunctionId;
 use runmat_value::{NumericDType, Value};
 
-use crate::call::descriptor::{CallableDescriptor, CallableTarget, FunctionNameResolver};
+use crate::call::descriptor::{FunctionNameResolver, RepeatableCallable};
 use crate::context::host_allocation::{
-    HostAllocationError, HostAllocationPolicy, HostAllocationReceipt,
+    HostAllocationError, HostAllocationPlan, HostAllocationReceipt,
 };
 use crate::context::RuntimeContext;
-use crate::execution::RetainedValueReadLease;
-use crate::execution::{RootedValue, RootedValueSequence};
-use crate::runtime_error::{semantic_error, semantic_error_with_source};
+use crate::execution::{RootedValueSequence, RootedValues};
+use crate::runtime_error::semantic_error;
 use crate::RuntimeError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -71,14 +70,12 @@ impl VectorContract {
     }
 }
 
-/// A selected callable for repeated, unbounded vector applications. Closure
-/// captures have one shared physical owner and one external root lease for the
-/// entire solve; selecting the target is never repeated between iterations.
-/// Managed metadata/argument admission is deliberately not implied by this
-/// owner and is rejected before descriptor construction.
+/// A selected callable for repeated vector applications. The callable and its
+/// capture graph have one retained owner for the entire solve; each input uses
+/// a separately admitted one-element argument carrier so callbacks retain the
+/// input's existing physical claim instead of a solver-wide worst-case charge.
 pub(in crate::builtins::math::linalg) struct RepeatedCallableVector {
-    descriptor: CallableDescriptor,
-    _closure_roots: Option<RetainedValueReadLease>,
+    selected: RepeatableCallable,
     contract: VectorContract,
 }
 
@@ -88,15 +85,6 @@ impl RepeatedCallableVector {
         target: Value,
         contract: VectorContract,
     ) -> Result<Self, RuntimeError> {
-        let policy = HostAllocationReceipt::policy(Some(runtime))
-            .map_err(|error| admission(runtime, error))?;
-        if policy == HostAllocationPolicy::Managed {
-            return Err(semantic_error_with_source(
-                "RunMat:CallableLinearOperator:DescriptorUnavailable",
-                "repeatable callable metadata requires an admitted descriptor owner",
-                CallableDescriptorAdmissionError::ManagedMetadata,
-            ));
-        }
         if !matches!(
             target,
             Value::FunctionHandle(_)
@@ -107,23 +95,9 @@ impl RepeatedCallableVector {
         ) {
             return Err(invalid("operator must be a function handle or closure"));
         }
-        let rooted = RootedValue::new(target)
-            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
-        rooted.with_owned(|target| {
-            let descriptor =
-                CallableDescriptor::from_feval_value(target, Vec::new(), 1, &SemanticResolver);
-            let closure_roots = match &descriptor.target {
-                CallableTarget::BoundLexical { closure, .. }
-                | CallableTarget::CapturedResolved { closure, .. } => {
-                    Some(closure.retain_for_call(Some(runtime))?)
-                }
-                _ => None,
-            };
-            Ok(Self {
-                descriptor,
-                _closure_roots: closure_roots,
-                contract,
-            })
+        Ok(Self {
+            selected: RepeatableCallable::select(runtime, target, &SemanticResolver)?,
+            contract,
         })
     }
 
@@ -133,28 +107,49 @@ impl RepeatedCallableVector {
         input: Value,
     ) -> Result<RootedValueSequence, RuntimeError> {
         self.contract.check(&input)?;
-        let rooted = RootedValue::new(input)
-            .map_err(crate::execution::ExecutionServiceError::into_runtime_error)?;
-        let target = self.descriptor.target.clone();
-        let metadata = self.descriptor.metadata.clone();
-        let output = rooted
-            .with_owned_async(|input| async move {
-                let descriptor = CallableDescriptor {
-                    target,
-                    args: vec![input],
-                    requested_outputs: 1,
-                    metadata,
-                };
-                crate::call::descriptor::execute_callable_descriptor_in_context(runtime, descriptor)
-                    .await
-            })
-            .await?;
+        let arguments = root_argument(runtime, input)?;
+        let output = self.selected.invoke_rooted(runtime, arguments, 1).await?;
         let [value] = output.value().as_slice() else {
             return Err(invalid("operator callback must return exactly one value"));
         };
         self.contract.check(value)?;
         Ok(output)
     }
+}
+
+fn root_argument(runtime: &RuntimeContext, input: Value) -> Result<RootedValues, RuntimeError> {
+    use runmat_value::OutputListStorage;
+
+    let raw = OutputListStorage::requested_bytes(1)
+        .map_err(HostAllocationError::Numeric)
+        .and_then(|bytes| u64::try_from(bytes).map_err(|_| HostAllocationError::Overflow))
+        .map_err(|error| admission(runtime, error))?;
+    let retained = HostAllocationPlan::retained_exact_output_bytes(raw, 1)
+        .map_err(|error| admission(runtime, error))?;
+    let plan = HostAllocationPlan::new(0, retained).map_err(|error| admission(runtime, error))?;
+    let Some(receipt) = HostAllocationReceipt::admit(Some(runtime), plan)
+        .map_err(|error| admission(runtime, error))?
+    else {
+        return RootedValues::new(vec![input])
+            .map_err(crate::execution::ExecutionServiceError::into_runtime_error);
+    };
+    let permit = receipt
+        .output_permit(runtime)
+        .map_err(|error| admission(runtime, error))?;
+    let mut input = Some(input);
+    let storage = OutputListStorage::try_initialize(1, &permit, |_| {
+        Ok::<_, std::convert::Infallible>(input.take().expect("one argument"))
+    })
+    .map_err(|error| match error {
+        runmat_value::OutputListInitializationError::Allocation(error) => {
+            admission(runtime, HostAllocationError::Numeric(error))
+        }
+        runmat_value::OutputListInitializationError::Element(never) => match never {},
+    })?;
+    receipt
+        .checkpoint(runtime)
+        .map_err(|error| admission(runtime, error))?;
+    RootedValues::from_output_storage_in_context(storage, runtime)
 }
 
 struct SemanticResolver;
@@ -176,20 +171,3 @@ fn admission(runtime: &RuntimeContext, error: HostAllocationError) -> RuntimeErr
         error,
     )
 }
-
-#[derive(Debug)]
-enum CallableDescriptorAdmissionError {
-    ManagedMetadata,
-}
-
-impl std::fmt::Display for CallableDescriptorAdmissionError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::ManagedMetadata => {
-                formatter.write_str("callable descriptor backing is not admitted")
-            }
-        }
-    }
-}
-
-impl std::error::Error for CallableDescriptorAdmissionError {}

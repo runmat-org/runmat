@@ -540,9 +540,9 @@ fn restored_special_mode_enabled(
 
 fn value_to_string(context: &str, value: &Value) -> crate::BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.to_string()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].to_string()),
         Value::CharArray(_) => Err(warning_default_error(format!(
             "{context}: expected scalar char array"
         ))),

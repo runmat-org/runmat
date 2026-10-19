@@ -7,6 +7,7 @@ use runmat_types::{CapabilitySet, EffectSet, ProgramFunctionId, RegionContract};
 
 pub(super) fn lower_function(
     function: ProgramFunctionId,
+    mir_body_digest: runmat_execution::Digest,
     input: &super::assembly::NativeLoweringInput<'_>,
     metadata: &runmat_mir::MirFunctionMetadata,
     retained_callable_parent: Option<runmat_hir::FunctionId>,
@@ -410,6 +411,7 @@ pub(super) fn lower_function(
         })?;
     Ok(NativeFunction {
         id: function,
+        mir_body_digest,
         source: metadata.source,
         name: metadata.name.0.clone(),
         source_role: metadata.source_role,

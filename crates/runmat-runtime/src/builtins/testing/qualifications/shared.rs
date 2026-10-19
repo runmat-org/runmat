@@ -280,7 +280,7 @@ fn logical_scalar(value: &Value) -> Option<bool> {
 
 fn diagnostic_message(values: &[Value]) -> Option<String> {
     values.first().and_then(|value| match value {
-        Value::String(message) => Some(message.clone()),
+        Value::String(message) => Some(message.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows <= 1 => Some(chars.data.iter().collect::<String>()),
         Value::Object(ObjectInstance {
             class_name,
@@ -292,7 +292,7 @@ fn diagnostic_message(values: &[Value]) -> Option<String> {
         ) =>
         {
             properties.get("Message").and_then(|value| match value {
-                Value::String(message) => Some(message.clone()),
+                Value::String(message) => Some(message.as_str().to_owned()),
                 _ => None,
             })
         }

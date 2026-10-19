@@ -462,19 +462,10 @@ async fn parse_soc_constraints(value: Value, n: usize) -> BuiltinResult<Vec<SocC
     }
     match value {
         Value::Struct(st) => parse_single_soc(st, n).await.map(|constraint| vec![constraint]),
-        Value::Cell(cell) => {
-            let mut out = Vec::with_capacity(cell.data.len());
-            for value in cell.data {
-                let Value::Struct(st) = value else {
-                    return Err(coneprog_error(
-                        &ERROR_INVALID_INPUT,
-                        "coneprog: socConstraints cell entries must be secondordercone structs",
-                    ));
-                };
-                out.push(parse_single_soc(st, n).await?);
-            }
-            Ok(out)
-        }
+        Value::Cell(cell) => match cell.data.try_into_owned() {
+            Ok(values) => parse_soc_cell_values(values.into_iter(), n).await,
+            Err(shared) => parse_soc_cell_values(shared.iter().cloned(), n).await,
+        },
         Value::OutputList(values) => {
             let mut out = Vec::with_capacity(values.len());
             let values = values.try_into_owned().map_err(|_| {
@@ -498,6 +489,23 @@ async fn parse_soc_constraints(value: Value, n: usize) -> BuiltinResult<Vec<SocC
             format!("coneprog: socConstraints must be a secondordercone struct or cell array, got {other:?}"),
         )),
     }
+}
+
+async fn parse_soc_cell_values(
+    values: impl Iterator<Item = Value>,
+    n: usize,
+) -> BuiltinResult<Vec<SocConstraint>> {
+    let mut out = Vec::with_capacity(values.size_hint().0);
+    for value in values {
+        let Value::Struct(st) = value else {
+            return Err(coneprog_error(
+                &ERROR_INVALID_INPUT,
+                "coneprog: socConstraints cell entries must be secondordercone structs",
+            ));
+        };
+        out.push(parse_single_soc(st, n).await?);
+    }
+    Ok(out)
 }
 
 async fn parse_single_soc(st: StructValue, n: usize) -> BuiltinResult<SocConstraint> {

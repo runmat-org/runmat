@@ -197,7 +197,7 @@ fn default_value(default: &FunctionArgDefaultValue) -> Value {
         FunctionArgDefaultValue::Number(value) => Value::Num(*value),
         FunctionArgDefaultValue::Integer(value) => Value::Int(IntValue::from(value)),
         FunctionArgDefaultValue::Bool(value) => Value::Bool(*value),
-        FunctionArgDefaultValue::String(value) => Value::String(value.clone()),
+        FunctionArgDefaultValue::String(value) => Value::string(value.clone()),
         FunctionArgDefaultValue::EmptyArray => Value::Tensor(
             Tensor::new(Vec::new(), vec![0, 0]).expect("empty default tensor is always valid"),
         ),

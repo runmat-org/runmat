@@ -94,7 +94,7 @@ pub fn duration_display_text(value: &Value) -> BuiltinResult<Option<String>> {
         return Ok(None);
     };
     if array.data.len() == 1 {
-        return Ok(Some(array.data[0].clone()));
+        return Ok(Some(array.data[0].as_str().to_owned()));
     }
 
     let rows = array.rows;
@@ -155,7 +155,7 @@ pub fn duration_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
     let Some(array) = duration_string_array(value)? else {
         return Ok(None);
     };
-    let width = array.data.iter().map(String::len).max().unwrap_or(0);
+    let width = array.data.iter().map(|text| text.len()).max().unwrap_or(0);
     let rows = array.data.len();
     let mut data = vec![' '; rows * width];
     for (row, text) in array.data.iter().enumerate() {

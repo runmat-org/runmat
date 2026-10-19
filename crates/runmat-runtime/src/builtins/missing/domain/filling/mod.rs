@@ -8,10 +8,13 @@ use runmat_builtins::{FillMissingMethodKind, FillMissingOptionKind};
 
 pub(super) mod numeric;
 mod lines;
+mod managed_text;
 mod runs;
 mod text;
 use lines::FillLines;
 
+use crate::context::host_allocation::{HostAllocationPolicy, HostAllocationReceipt};
+use crate::context::RuntimeContext;
 use numeric::{
     fill_linear_numeric, fill_nearest_numeric, fill_neighbor_numeric, fill_summary_numeric,
     Neighbor, Summary,
@@ -36,7 +39,7 @@ pub(super) struct FillOptions {
 }
 
 impl FillOptions {
-    pub(super) fn parse(args: &[Value]) -> BuiltinResult<Self> {
+    pub(super) fn parse(mut args: Vec<Value>) -> BuiltinResult<Self> {
         if args.is_empty() {
             return Err(invalid_argument("fillmissing: method is required"));
         }
@@ -50,13 +53,12 @@ impl FillOptions {
         })?;
         let method = match method_kind {
             FillMissingMethodKind::Constant => {
-                let fill = args
-                    .get(idx)
-                    .ok_or_else(|| {
-                        invalid_argument("fillmissing: constant method needs a fill value")
-                    })?
-                    .clone();
-                idx += 1;
+                if idx >= args.len() {
+                    return Err(invalid_argument(
+                        "fillmissing: constant method needs a fill value",
+                    ));
+                }
+                let fill = args.remove(idx);
                 FillMethod::Constant(fill)
             }
             FillMissingMethodKind::Previous => FillMethod::Previous,
@@ -177,6 +179,7 @@ impl FillOptions {
 }
 
 pub(super) fn fill_missing_value(
+    runtime: Option<&RuntimeContext>,
     value: Value,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
@@ -189,8 +192,10 @@ pub(super) fn fill_missing_value(
                     .map_err(internal_error)?;
             Ok((Value::LogicalArray(array), mask))
         }
-        Value::StringArray(array) => fill_missing_string_array(array, options),
-        Value::Object(object) if is_tabular_object(&object) => fill_missing_table(object, options),
+        Value::StringArray(array) => fill_missing_string_array(runtime, array, options),
+        Value::Object(object) if is_tabular_object(&object) => {
+            fill_missing_table(runtime, object, options)
+        }
         Value::Cell(cell) => fill_missing_cell(cell, options),
         Value::ComplexTensor(_) => Err(unsupported_type(
             "fillmissing: complex arrays are not supported yet",
@@ -217,6 +222,7 @@ pub(super) fn fill_missing_value(
 }
 
 pub(super) fn fill_missing_table(
+    runtime: Option<&RuntimeContext>,
     mut object: ObjectInstance,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
@@ -232,7 +238,7 @@ pub(super) fn fill_missing_table(
             .get(name)
             .ok_or_else(|| internal_error(format!("table missing variable {name}")))?
             .clone();
-        let (filled, mask) = fill_missing_value(value, options)?;
+        let (filled, mask) = fill_missing_value(runtime, value, options)?;
         let row_mask = logical_array_mask_for_rows(&mask, height)?;
         for row in 0..height {
             if row_mask.get(row).copied().unwrap_or(0) != 0 {
@@ -292,11 +298,23 @@ pub(super) fn fill_missing_tensor(
 }
 
 pub(super) fn fill_missing_string_array(
+    runtime: Option<&RuntimeContext>,
     array: StringArray,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
     let lines = FillLines::new(&array.shape, options.dim)?;
-    let mut data = array.data.clone();
+    if let Some(runtime) = runtime {
+        if HostAllocationReceipt::policy(Some(runtime))
+            .map_err(|cause| super::errors::allocation_error(runtime, "fillmissing", cause))?
+            == HostAllocationPolicy::Managed
+        {
+            return managed_text::fill_missing_string_array(runtime, array, options, &lines);
+        }
+    }
+    let mut data = match array.data.try_into_owned() {
+        Ok(values) => values.into_iter().collect::<Vec<_>>(),
+        Err(shared) => shared.iter().cloned().collect::<Vec<_>>(),
+    };
     let mut mask: Vec<u8> = data
         .iter()
         .map(|text| u8::from(is_missing_text(text)))
@@ -307,7 +325,7 @@ pub(super) fn fill_missing_string_array(
                 .ok_or_else(|| invalid_argument("fillmissing: string constant must be text"))?;
             for (idx, text) in data.iter_mut().enumerate() {
                 if mask[idx] != 0 {
-                    *text = fill.clone();
+                    *text = fill.clone().into();
                 }
             }
         }
@@ -326,8 +344,11 @@ pub(super) fn fill_missing_string_array(
         }
     }
     Ok((
-        Value::StringArray(StringArray::new(data, array.shape.clone()).map_err(internal_error)?),
-        LogicalArray::new(mask, array.shape).map_err(internal_error)?,
+        Value::StringArray(
+            StringArray::from_texts_unbounded(data, array.shape.as_slice().to_vec())
+                .map_err(internal_error)?,
+        ),
+        LogicalArray::new(mask, array.shape.as_slice().to_vec()).map_err(internal_error)?,
     ))
 }
 
@@ -335,7 +356,10 @@ pub(super) fn fill_missing_cell(
     cell: CellArray,
     options: &FillOptions,
 ) -> BuiltinResult<(Value, LogicalArray)> {
-    let mut data = cell.data.clone();
+    let mut data = match cell.data.try_into_owned() {
+        Ok(values) => values.into_iter().collect::<Vec<_>>(),
+        Err(shared) => shared.iter().cloned().collect::<Vec<_>>(),
+    };
     let mut mask = Vec::with_capacity(data.len());
     for item in &data {
         mask.push(u8::from(any_missing(item)?));

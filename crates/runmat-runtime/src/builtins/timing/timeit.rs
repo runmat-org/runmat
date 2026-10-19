@@ -214,7 +214,7 @@ fn prepare_callable(
 
     fn canonicalize_text_handle(handle: String) -> Value {
         let name = handle.strip_prefix('@').unwrap_or(handle.as_str());
-        handle_for_name(name).unwrap_or(Value::String(handle))
+        handle_for_name(name).unwrap_or(Value::string(handle))
     }
 
     match func {
@@ -253,7 +253,7 @@ fn prepare_callable(
             let normalized = normalize_name(&name)?;
             Ok(TimeitCallable {
                 handle: handle_for_name(&normalized)
-                    .unwrap_or_else(|| Value::String(format!("@{normalized}"))),
+                    .unwrap_or_else(|| Value::string(format!("@{normalized}"))),
                 num_outputs,
             })
         }

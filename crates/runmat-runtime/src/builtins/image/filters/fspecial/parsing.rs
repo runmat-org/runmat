@@ -208,8 +208,8 @@ pub(super) fn parse_unsharp_alpha(arg: Option<&Value>) -> BuiltinResult<f64> {
 
 fn value_to_string(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
         _ => None,
     }

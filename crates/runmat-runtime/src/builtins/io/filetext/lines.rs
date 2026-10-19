@@ -3,6 +3,7 @@
 mod options;
 use options::{parse_empty_line_rule, parse_newline};
 
+use std::borrow::Cow;
 use std::path::PathBuf;
 
 use runmat_filesystem as vfs;
@@ -27,13 +28,15 @@ pub use runmat_builtins::{
     WRITELINES_INTEGER_AUDIT,
 };
 
-fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
+fn scalar_text<'a>(value: &'a Value, name: &str, arg: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
-            Ok(array.data.iter().collect())
+            Ok(Cow::Owned(array.data.iter().collect()))
         }
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Cow::Borrowed(array.data[0].as_str()))
+        }
         _ => Err(line_error(
             name,
             format!("{name}: {arg} must be a string scalar or character vector"),
@@ -132,21 +135,27 @@ async fn writelines_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     Ok(Value::Num(output.len() as f64))
 }
 
-fn lines_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
+fn lines_from_value(value: &Value) -> BuiltinResult<Vec<Cow<'_, str>>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(vec![Cow::Borrowed(text.as_str())]),
         Value::CharArray(array) if array.rows == 1 && effective_rank(&array.shape) <= 2 => {
-            Ok(vec![array.data.iter().collect()])
+            Ok(vec![Cow::Owned(array.data.iter().collect())])
         }
         Value::CharArray(array) if effective_rank(&array.shape) <= 2 => {
             let mut lines = Vec::with_capacity(array.rows);
             for row in 0..array.rows {
                 let start = row * array.cols;
-                lines.push(array.data[start..start + array.cols].iter().collect());
+                lines.push(Cow::Owned(
+                    array.data[start..start + array.cols].iter().collect(),
+                ));
             }
             Ok(lines)
         }
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| Cow::Borrowed(text.as_str()))
+            .collect()),
         Value::Cell(array) => cell_lines(array),
         _ => Err(line_error(
             "writelines",
@@ -155,10 +164,10 @@ fn lines_from_value(value: &Value) -> BuiltinResult<Vec<String>> {
     }
 }
 
-fn cell_lines(array: &CellArray) -> BuiltinResult<Vec<String>> {
+fn cell_lines(array: &CellArray) -> BuiltinResult<Vec<Cow<'_, str>>> {
     let mut out = Vec::with_capacity(array.data.len());
-    for value in crate::object::cell::expand_all_cell_values(array)? {
-        out.push(scalar_text(&value, "writelines", "cell element")?);
+    for value in array.iter_column_major() {
+        out.push(scalar_text(value, "writelines", "cell element")?);
     }
     Ok(out)
 }

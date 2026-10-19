@@ -706,8 +706,8 @@ fn shape_from_value(value: &Value) -> Result<Vec<usize>, String> {
         Value::ComplexTensor(t) => Ok(t.shape().to_vec()),
         Value::LogicalArray(l) => Ok(l.shape.to_vec()),
         Value::GpuTensor(h) => Ok(h.shape().to_vec()),
-        Value::CharArray(ca) => Ok(ca.shape.clone()),
-        Value::Cell(cell) => Ok(cell.shape.clone()),
+        Value::CharArray(ca) => Ok(ca.shape().to_vec()),
+        Value::Cell(cell) => Ok(cell.shape().to_vec()),
         Value::Num(_) | Value::Int(_) | Value::Bool(_) | Value::Complex(_, _) => Ok(vec![1, 1]),
         other => Err(format!("eye: unsupported prototype {other:?}")),
     }

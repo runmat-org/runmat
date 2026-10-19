@@ -351,8 +351,10 @@ fn has_nonempty_problem_field(problem: &StructValue, name: &str) -> bool {
 
 fn string_scalar(label: &str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::StringArray(values) if values.data.len() == 1 => Ok(values.data[0].clone()),
+        Value::String(value) => Ok(value.as_str().to_owned()),
+        Value::StringArray(values) if values.data.len() == 1 => {
+            Ok(values.data[0].as_str().to_owned())
+        }
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         other => Err(lsq_error_with_detail(
             &LSQNONLIN_ERROR_INVALID_ARGUMENT,

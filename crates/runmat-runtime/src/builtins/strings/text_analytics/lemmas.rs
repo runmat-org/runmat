@@ -1,14 +1,9 @@
 //! Lemma detail helpers for Text Analytics tokenized documents.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 
-use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
     text_analytics_error, tokenized_document_language, DocumentTokenType, TOKENIZED_DOCUMENT_CLASS,
@@ -19,99 +14,18 @@ use crate::{gather_if_needed_async, BuiltinResult};
 pub(in crate::builtins::strings::text_analytics) const LEMMA_DETAILS_PROPERTY: &str =
     "LemmaDetails";
 
-const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "updatedDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated tokenized document object.",
-}];
-
-const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const IN_DOCUMENTS_DISCARD: [BuiltinParamDescriptor; 3] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "Name",
-        ty: BuiltinParamType::StringScalar,
-        arity: BuiltinParamArity::Required,
-        default: Some("DiscardKnownValues"),
-        description: "DiscardKnownValues option name.",
-    },
-    BuiltinParamDescriptor {
-        name: "tf",
-        ty: BuiltinParamType::LogicalArray,
-        arity: BuiltinParamArity::Required,
-        default: Some("false"),
-        description: "Whether to recompute existing lemma details.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS.ADD_LEMMA_DETAILS.INVALID_INPUT",
-    identifier: Some("RunMat:addLemmaDetails:InvalidInput"),
-    when: "Input is not a supported tokenizedDocument object or option form.",
-    message: "addLemmaDetails: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const ADD_LEMMA_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "updatedDocuments = addLemmaDetails(documents)",
-            inputs: &IN_DOCUMENTS,
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "updatedDocuments = addLemmaDetails(documents,'DiscardKnownValues',tf)",
-            inputs: &IN_DOCUMENTS_DISCARD,
-            outputs: &OUT_DOCUMENTS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const ADD_LEMMA_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "addLemmaDetails accepts a tokenizedDocument and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores text lemma metadata.",
-    };
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 #[runtime_builtin(
     name = "addLemmaDetails",
-    category = "strings/text_analytics",
-    summary = "Add lemma details to tokenizedDocument objects.",
-    keywords = "addLemmaDetails,text analytics,tokenizedDocument,lemma,lemmatize",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(crate::builtins::strings::text_analytics::lemmas::ADD_LEMMA_DETAILS_DESCRIPTOR),
-    integer_audit(
-        crate::builtins::strings::text_analytics::lemmas::ADD_LEMMA_DETAILS_INTEGER_AUDIT
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::lemmas"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::lemmas",
+    context = true
 )]
-async fn add_lemma_details_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
+async fn add_lemma_details_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<Value> {
     let gathered = gather_args(args).await?;
-    let (documents, options) = parse_args(gathered)?;
+    let (documents, options) = parse_args(runtime.as_ref(), gathered)?;
     let mut object = tokenized_document_object(documents)?;
     let documents = documents_from_object(&object, "addLemmaDetails")?;
     let stored = lemma_details_from_object(&object, "addLemmaDetails")?;
@@ -176,7 +90,10 @@ impl LemmaLanguage {
     }
 }
 
-fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, AddLemmaOptions)> {
+fn parse_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, AddLemmaOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
             "addLemmaDetails",
@@ -192,14 +109,18 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, AddLemmaOptions)> {
     let mut options = AddLemmaOptions::default();
     let mut idx = 1usize;
     while idx < args.len() {
-        let name = scalar_text(&args[idx], "addLemmaDetails")
-            .map_err(|err| text_analytics_error("addLemmaDetails", err.to_string()))?;
-        if name.eq_ignore_ascii_case("DiscardKnownValues") {
+        let name = scalar_text_input(&args[idx], runtime, |runtime, cause| {
+            text_input_admission("addLemmaDetails", runtime, cause)
+        })?
+        .ok_or_else(|| {
+            text_analytics_error("addLemmaDetails", "addLemmaDetails: expected text option")
+        })?;
+        if name.as_str().eq_ignore_ascii_case("DiscardKnownValues") {
             options.discard_known_values = logical_scalar(&args[idx + 1])?;
         } else {
             return Err(text_analytics_error(
                 "addLemmaDetails",
-                format!("addLemmaDetails: unsupported option '{name}'"),
+                format!("addLemmaDetails: unsupported option '{}'", name.as_str()),
             ));
         }
         idx += 2;
@@ -333,7 +254,13 @@ pub(in crate::builtins::strings::text_analytics) fn lemma_details_from_object(
                 format!("{fn_name}: tokenizedDocument object has invalid LemmaDetails entry shape"),
             ));
         }
-        out.push(array.data.clone());
+        out.push(
+            array
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        );
     }
     Ok(Some(out))
 }
@@ -364,7 +291,7 @@ mod tests {
     }
 
     fn run_add_lemma(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_lemma_details_builtin(args))
+        futures::executor::block_on(add_lemma_details_builtin(None, args))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {

@@ -59,8 +59,8 @@ fn preflight(value: &Value) -> crate::BuiltinResult<()> {
 
 async fn decode_text(value: Value) -> crate::BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text),
-        Value::StringArray(array) => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.into_string_unbounded()),
+        Value::StringArray(array) => Ok(array.data[0].as_str().to_owned()),
         Value::CharArray(chars) => Ok(chars.data.iter().collect()),
         Value::Tensor(tensor) => numeric_text(&tensor),
         value @ Value::GpuTensor(_) => {

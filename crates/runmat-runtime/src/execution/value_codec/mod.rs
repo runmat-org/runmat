@@ -11,7 +11,7 @@ pub(crate) use decode::decode_inline_value_rooted;
 pub use decode::{
     decode_durable_values_cooperatively, decode_inline_value, decode_inline_value_owned,
     decode_inline_value_owned_with_limits, decode_inline_values_cooperatively,
-    CooperativeValueCodecError,
+    decode_inline_values_cooperatively_in_context, CooperativeValueCodecError,
 };
 pub use durable::{decode_durable_value, encode_durable_value, validate_durable_preparation};
 pub use encode::{encode_inline_value, encode_inline_value_in_context};
@@ -511,7 +511,7 @@ mod tests {
                 binding: Some(runmat_value::BoundFunctionBinding::portable(7, origin(7))),
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::Num(2.0)],
+                captures: vec![Value::Num(2.0)].into(),
             },
         ));
         assert_eq!(
@@ -535,7 +535,7 @@ mod tests {
                 binding: Some(runmat_value::BoundFunctionBinding::portable(9, origin(9))),
                 source_role: runmat_types::FunctionSourceRole::Anonymous,
                 source_file: Some("/origin/worker.m".into()),
-                captures: Vec::new(),
+                captures: Vec::new().into(),
             },
         ));
         assert_eq!(

@@ -51,21 +51,19 @@ async fn fitclinear_observations_in_columns_and_text_classnames() {
     let model = fitclinear_builtin(
         tensor(vec![0.0, 1.0, 2.0, 3.0], vec![1, 4]),
         vec![
-            Value::StringArray(StringArray {
-                data: vec!["low".into(), "low".into(), "high".into(), "high".into()],
-                shape: vec![4, 1],
-                rows: 4,
-                cols: 1,
-            }),
+            Value::StringArray(
+                StringArray::new(
+                    vec!["low".into(), "low".into(), "high".into(), "high".into()],
+                    vec![4, 1],
+                )
+                .unwrap(),
+            ),
             Value::String("ObservationsIn".into()),
             Value::String("columns".into()),
             Value::String("ClassNames".into()),
-            Value::StringArray(StringArray {
-                data: vec!["low".into(), "high".into()],
-                shape: vec![2, 1],
-                rows: 2,
-                cols: 1,
-            }),
+            Value::StringArray(
+                StringArray::new(vec!["low".into(), "high".into()], vec![2, 1]).unwrap(),
+            ),
         ],
     )
     .await

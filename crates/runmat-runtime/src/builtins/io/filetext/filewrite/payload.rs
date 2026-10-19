@@ -57,7 +57,7 @@ fn extract_payload(data: &Value) -> BuiltinResult<Payload> {
 
 fn char_array_to_text(ca: &CharArray) -> Vec<char> {
     if ca.rows <= 1 {
-        return ca.data.clone();
+        return ca.data.as_slice().to_vec();
     }
     let mut out = Vec::with_capacity(ca.rows * (ca.cols + 1));
     for row in 0..ca.rows {

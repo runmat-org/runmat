@@ -567,29 +567,29 @@ fn build_tcpclient_object(
         .unwrap_or_else(|| format!("tcpclient:{requested_host}:{remote_port}"));
 
     st.fields
-        .insert("Type".to_string(), Value::String("tcpclient".to_string()));
-    st.fields.insert("Name".to_string(), Value::String(name));
+        .insert("Type".to_string(), Value::string("tcpclient".to_string()));
+    st.fields.insert("Name".to_string(), Value::string(name));
     st.fields
-        .insert("Address".to_string(), Value::String(remote_addr.clone()));
+        .insert("Address".to_string(), Value::string(remote_addr.clone()));
     st.fields
         .insert("Port".to_string(), Value::Num(f64::from(remote_port)));
     st.fields.insert(
         "ServerAddress".to_string(),
-        Value::String(remote_addr.clone()),
+        Value::string(remote_addr.clone()),
     );
     st.fields
         .insert("ServerPort".to_string(), Value::Num(f64::from(remote_port)));
     st.fields
-        .insert("LocalAddress".to_string(), Value::String(local_address));
+        .insert("LocalAddress".to_string(), Value::string(local_address));
     st.fields
         .insert("LocalPort".to_string(), Value::Num(f64::from(local_port)));
     st.fields.insert(
         "RequestedAddress".to_string(),
-        Value::String(requested_host.to_string()),
+        Value::string(requested_host.to_string()),
     );
     st.fields.insert("Connected".to_string(), Value::Bool(true));
     st.fields
-        .insert("Status".to_string(), Value::String("connected".to_string()));
+        .insert("Status".to_string(), Value::string("connected".to_string()));
     st.fields.insert(
         "NumBytesAvailable".to_string(),
         Value::Int(IntValue::I32(0)),
@@ -598,7 +598,7 @@ fn build_tcpclient_object(
         .insert("BytesAvailableFcn".to_string(), default_user_data());
     st.fields.insert(
         "BytesAvailableFcnMode".to_string(),
-        Value::String("byte".to_string()),
+        Value::string("byte".to_string()),
     );
     st.fields.insert(
         "BytesAvailableFcnCount".to_string(),
@@ -606,7 +606,7 @@ fn build_tcpclient_object(
     );
     st.fields.insert(
         "ByteOrder".to_string(),
-        Value::String(options.byte_order.clone()),
+        Value::string(options.byte_order.clone()),
     );
     st.fields
         .insert("Timeout".to_string(), Value::Num(options.timeout));

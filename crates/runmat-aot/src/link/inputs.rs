@@ -11,7 +11,7 @@ use crate::{archive::RuntimeArchive, AotError, AotResult};
 
 /// Explicit external bytes for a non-hermetic HostedDeclared input. Neither
 /// an ambient path nor a matching pack declaration synthesizes these bytes.
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct HostedNativeBuildTrees<'a> {
     pub toolchain: Option<HostedNativeTree<'a>>,
     pub sysroot: Option<HostedNativeTree<'a>>,

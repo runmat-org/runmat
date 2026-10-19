@@ -127,9 +127,9 @@ pub(super) fn label_strings(
             }
             Ok(Some(labels))
         }
-        Value::String(text) => Ok(Some(vec![text.clone()])),
+        Value::String(text) => Ok(Some(vec![text.to_string()])),
         Value::CharArray(chars) if chars.rows == 1 => Ok(Some(vec![chars.data.iter().collect()])),
-        Value::StringArray(array) => Ok(Some(array.data.clone())),
+        Value::StringArray(array) => Ok(Some(array.data.iter().map(ToString::to_string).collect())),
         Value::Cell(cell) => cell
             .data
             .iter()
@@ -158,7 +158,7 @@ pub(super) fn label_strings(
                     )
                 })?;
                 let index = categorical_index(code, categories.data.len(), function)?;
-                labels.push(categories.data[index].clone());
+                labels.push(categories.data[index].to_string());
             }
             Ok(Some(labels))
         }

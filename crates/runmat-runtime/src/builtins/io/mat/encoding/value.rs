@@ -29,7 +29,13 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
     owner: MatEncodingOwner,
     mut cooperation: Option<&'a mut MatCodecCooperation<'b>>,
 ) -> LocalBoxFuture<'a, BuiltinResult<MatArray>> {
+    // The codec future owns the input Value across suspension. Lease managed
+    // descendants before returning it, including if the caller queues or
+    // drops the future without ever polling it.
+    let input_root = crate::execution::RootedValueLease::for_traced(&value)
+        .map_err(|error| error.into_runtime_error());
     Box::pin(async move {
+        let _input_root = input_root?;
         completed(&mut cooperation, 0).await?;
         match value {
             Value::Num(n) => Ok(MatArray {
@@ -157,7 +163,7 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                 let dims = if ca.shape.len() == 2 && ca.rows == 1 {
                     vec![1, data.len()]
                 } else {
-                    ca.shape.clone()
+                    ca.shape.as_slice().to_vec()
                 };
                 Ok(MatArray {
                     class: MatClass::Char,
@@ -281,6 +287,86 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
                     },
                 })
             }
+            Value::Object(object) => {
+                let class_name = object.class_name.display_name().to_owned();
+                let saved = prepare_object_element(Value::Object(object), &mut cooperation).await?;
+                let payload = saved
+                    .with_owned_async(|value| {
+                        convert_value_with_cooperation(value, owner, cooperation.as_deref_mut())
+                    })
+                    .await?;
+                Ok(MatArray {
+                    class: MatClass::Object,
+                    dims: vec![1, 1],
+                    data: MatData::Object {
+                        class_name,
+                        field_names: vec![
+                            "__runmat_saved_kind".to_owned(),
+                            "__runmat_saved_payload".to_owned(),
+                        ],
+                        field_values: vec![object_kind(false), payload],
+                    },
+                })
+            }
+            Value::HandleObject(handle) => {
+                let class_name = handle.class_name.display_name().to_owned();
+                let saved =
+                    prepare_object_element(Value::HandleObject(handle), &mut cooperation).await?;
+                let payload = saved
+                    .with_owned_async(|value| {
+                        convert_value_with_cooperation(value, owner, cooperation.as_deref_mut())
+                    })
+                    .await?;
+                Ok(MatArray {
+                    class: MatClass::Object,
+                    dims: vec![1, 1],
+                    data: MatData::Object {
+                        class_name,
+                        field_names: vec![
+                            "__runmat_saved_kind".to_owned(),
+                            "__runmat_saved_payload".to_owned(),
+                        ],
+                        field_values: vec![object_kind(true), payload],
+                    },
+                })
+            }
+            Value::ObjectArray(array) => {
+                let class_name = array.class_name().display_name().to_owned();
+                let dims = canonical_dims(array.shape());
+                let data = array.into_data();
+                let mut kinds = Vec::with_capacity(data.len());
+                let mut payloads = Vec::with_capacity(data.len());
+                for element in data {
+                    completed(&mut cooperation, 1).await?;
+                    let is_handle = matches!(element, Value::HandleObject(_));
+                    kinds.push(object_kind(is_handle));
+                    let saved = prepare_object_element(element, &mut cooperation).await?;
+                    payloads.push(
+                        saved
+                            .with_owned_async(|value| {
+                                convert_value_with_cooperation(
+                                    value,
+                                    owner,
+                                    cooperation.as_deref_mut(),
+                                )
+                            })
+                            .await?,
+                    );
+                }
+                kinds.extend(payloads);
+                Ok(MatArray {
+                    class: MatClass::Object,
+                    dims,
+                    data: MatData::Object {
+                        class_name,
+                        field_names: vec![
+                            "__runmat_saved_kind".to_owned(),
+                            "__runmat_saved_payload".to_owned(),
+                        ],
+                        field_values: kinds,
+                    },
+                })
+            }
             Value::GpuTensor(handle) => {
                 let gathered =
                     gather_with_cooperation(&Value::GpuTensor(handle), &mut cooperation).await?;
@@ -293,4 +379,38 @@ pub(in crate::builtins::io::mat) fn convert_value_with_cooperation<'a, 'b>(
             )),
         }
     })
+}
+
+fn object_kind(handle: bool) -> MatArray {
+    MatArray {
+        class: MatClass::Logical,
+        dims: vec![1, 1],
+        data: MatData::Logical {
+            data: vec![u8::from(handle)],
+        },
+    }
+}
+
+async fn prepare_object_element(
+    element: Value,
+    cooperation: &mut Option<&mut MatCodecCooperation<'_>>,
+) -> BuiltinResult<crate::execution::RootedValue> {
+    match cooperation.as_deref_mut() {
+        Some(cooperation) => {
+            let runtime = cooperation.runtime();
+            cooperation
+                .await_io(
+                    crate::builtins::introspection::object_serialization::prepare_mat_object_element(
+                        element, runtime,
+                    ),
+                )
+                .await?
+        }
+        None => {
+            crate::builtins::introspection::object_serialization::prepare_mat_object_element(
+                element, None,
+            )
+            .await
+        }
+    }
 }

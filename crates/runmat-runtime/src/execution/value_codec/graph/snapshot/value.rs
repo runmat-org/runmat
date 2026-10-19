@@ -14,7 +14,7 @@ impl<'a> Encoder<'a> {
         let binding = match &input {
             Input::BoundTarget(binding) => Some(*binding),
             Input::SelectedAnchor(binding) => Some(binding),
-            Input::Borrowed(_) | Input::Owned(_) => None,
+            Input::Borrowed(_) | Input::Owned(_) | Input::SharedCellChild(_) => None,
         };
         if let Some(binding) = binding {
             let origin = binding

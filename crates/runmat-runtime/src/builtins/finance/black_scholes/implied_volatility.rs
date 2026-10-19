@@ -165,7 +165,7 @@ impl ClassInput {
             }),
             Value::StringArray(array) => {
                 let text_shape = string_array_shape(&array);
-                Self::from_texts(array.data, text_shape, shape, len)
+                Self::from_texts(array.data.as_slice(), text_shape, shape, len)
             }
             Value::CharArray(chars) => {
                 if chars.rows == 1 {
@@ -175,7 +175,7 @@ impl ClassInput {
                     })
                 } else {
                     let texts = char_rows(chars);
-                    Self::from_texts(texts, vec![len, 1], shape, len)
+                    Self::from_texts(&texts, vec![len, 1], shape, len)
                 }
             }
             Value::Cell(cell) => Self::from_cell(cell, shape, len),
@@ -194,7 +194,9 @@ impl ClassInput {
                 is_scalar: true,
             });
         }
-        if cell.shape != shape && tensor_shape(&cell.shape, cell.rows, cell.cols) != shape {
+        if cell.shape.as_slice() != shape
+            && tensor_shape(&cell.shape, cell.rows, cell.cols) != shape
+        {
             return Err(error(
                 BLSIMPV,
                 "blsimpv: Class cell dimensions must match nonscalar inputs",
@@ -219,15 +221,15 @@ impl ClassInput {
         })
     }
 
-    fn from_texts(
-        texts: Vec<String>,
+    fn from_texts<T: AsRef<str>>(
+        texts: &[T],
         text_shape: Vec<usize>,
         shape: &[usize],
         len: usize,
     ) -> BuiltinResult<Self> {
         if texts.len() == 1 {
             return Ok(Self {
-                values: vec![parse_class_text(&texts[0])?],
+                values: vec![parse_class_text(texts[0].as_ref())?],
                 is_scalar: true,
             });
         }
@@ -240,7 +242,7 @@ impl ClassInput {
         }
         let values = texts
             .iter()
-            .map(|text| parse_class_text(text))
+            .map(|text| parse_class_text(text.as_ref()))
             .collect::<BuiltinResult<Vec<_>>>()?;
         Ok(Self {
             values,

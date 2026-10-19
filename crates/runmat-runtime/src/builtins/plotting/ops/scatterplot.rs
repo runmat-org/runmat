@@ -78,7 +78,7 @@ pub async fn scatterplot_builtin(x: Value, rest: Vec<Value>) -> BuiltinResult<f6
     let (x_value, y_value, limits) = extract_scatter_values(x, options.n, options.offset).await?;
     let marker = options
         .marker
-        .unwrap_or_else(|| Value::String(DEFAULT_MARKER.to_string()));
+        .unwrap_or_else(|| Value::string(DEFAULT_MARKER.to_string()));
 
     if let Some(figure) = options.figure {
         select_figure(figure);

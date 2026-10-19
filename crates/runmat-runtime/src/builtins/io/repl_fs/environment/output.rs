@@ -46,7 +46,7 @@ fn cell_text_output(
         .zip(kinds)
         .map(|(value, kind)| match kind {
             CellNameKind::Character => Value::CharArray(CharArray::new_row(&value)),
-            CellNameKind::String => Value::String(value),
+            CellNameKind::String => Value::string(value),
         })
         .collect();
     CellArray::from_column_major(data, shape.to_vec()).map(Value::Cell)

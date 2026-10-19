@@ -233,9 +233,13 @@ pub(super) fn parse_request(
 
 fn extract_name_list(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::CharArray(array) => Ok(char_array_rows_as_strings(array)),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         Value::Cell(array) => array
             .data
             .iter()
@@ -249,11 +253,13 @@ fn extract_name_list(value: &Value, owner: WorkspaceQueryOwner) -> BuiltinResult
 
 fn value_to_string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 => {
             char_array_rows_as_strings(array).into_iter().next()
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

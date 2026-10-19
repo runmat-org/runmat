@@ -10,6 +10,7 @@ mod materialized;
 pub mod object;
 pub mod program;
 pub mod target_pack;
+pub mod target_test;
 
 pub use bundle::{
     BuildResourceDeclaration, BundleCallable, BundleCodeClosure, BundleManifest,

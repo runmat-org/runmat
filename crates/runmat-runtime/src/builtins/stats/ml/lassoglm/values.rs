@@ -54,11 +54,16 @@ pub(super) fn ensure_exact_integer_tensor(value: &Tensor, label: &str) -> Builti
     Ok(())
 }
 
-pub(super) fn scalar_text(value: &Value, label: &str) -> BuiltinResult<String> {
+pub(super) fn scalar_text<'a>(
+    value: &'a Value,
+    label: &str,
+) -> BuiltinResult<std::borrow::Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::CharArray(chars) => Ok(chars.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(std::borrow::Cow::Borrowed(text.as_str())),
+        Value::CharArray(chars) => Ok(std::borrow::Cow::Owned(chars.data.iter().collect())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(std::borrow::Cow::Borrowed(array.data[0].as_str()))
+        }
         other => Err(invalid(format!(
             "lassoglm: {label} must be a string scalar, got {other:?}"
         ))),
@@ -272,13 +277,13 @@ pub(super) fn parse_cv(value: &Value) -> BuiltinResult<CvSpec> {
 
 pub(super) fn string_list(value: &Value, label: &str) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(vec![text.as_str().to_owned()]),
         Value::CharArray(chars) => Ok(vec![chars.data.iter().collect()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
+        Value::StringArray(array) => Ok(array.data.iter().map(|text| text.as_str().to_owned()).collect()),
         Value::Cell(cell) => cell
             .data
             .iter()
-            .map(|item| scalar_text(item, label))
+            .map(|item| scalar_text(item, label).map(std::borrow::Cow::into_owned))
             .collect(),
         other => Err(invalid(format!(
             "lassoglm: {label} must be a string array or cell array of character vectors, got {other:?}"

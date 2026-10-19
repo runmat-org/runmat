@@ -19,7 +19,7 @@ pub fn test_case_object(name: impl Into<String>, function_based: bool) -> Value 
     });
     object
         .properties
-        .insert("Name".into(), Value::String(name.into()));
+        .insert("Name".into(), Value::string(name.into()));
     Value::Object(object)
 }
 
@@ -27,10 +27,10 @@ pub fn test_suite_object(test: &TestDescriptor) -> Value {
     let mut object = ObjectInstance::new(TEST_SUITE_CLASS);
     object
         .properties
-        .insert("Name".into(), Value::String(test.display_name.clone()));
+        .insert("Name".into(), Value::string(test.display_name.clone()));
     object.properties.insert(
         "ProcedureName".into(),
-        Value::String(
+        Value::string(
             test.procedure
                 .display_name
                 .rsplit('/')
@@ -41,7 +41,7 @@ pub fn test_suite_object(test: &TestDescriptor) -> Value {
     );
     object.properties.insert(
         "TestFile".into(),
-        Value::String(test.procedure.source.relative_path.clone()),
+        Value::string(test.procedure.source.relative_path.clone()),
     );
     object.properties.insert(
         "Tags".into(),
@@ -61,7 +61,7 @@ pub fn test_result_object(name: impl Into<String>, result: &TestResult) -> Value
     let mut object = ObjectInstance::new(TEST_RESULT_CLASS);
     object
         .properties
-        .insert("Name".into(), Value::String(name.into()));
+        .insert("Name".into(), Value::string(name.into()));
     object
         .properties
         .insert("Passed".into(), Value::Bool(result.state.is_success()));
@@ -76,7 +76,7 @@ pub fn test_result_object(name: impl Into<String>, result: &TestResult) -> Value
         .insert("Flaky".into(), Value::Bool(result.flaky));
     object.properties.insert(
         "Details".into(),
-        Value::String(
+        Value::string(
             result
                 .attempts
                 .last()
@@ -95,7 +95,7 @@ pub fn fixture_object(fixture: &FixtureDescriptor) -> Value {
     let mut object = ObjectInstance::new("matlab.unittest.fixtures.Fixture");
     object
         .properties
-        .insert("Name".into(), Value::String(fixture.display_name.clone()));
+        .insert("Name".into(), Value::string(fixture.display_name.clone()));
     object.properties.insert(
         "__runmat_fixture_id".into(),
         Value::String(fixture.id.as_str().into()),
@@ -107,11 +107,11 @@ pub fn diagnostic_object(diagnostic: &Diagnostic) -> Value {
     let mut object = ObjectInstance::new("matlab.unittest.diagnostics.Diagnostic");
     object.properties.insert(
         "Identifier".into(),
-        Value::String(diagnostic.identifier.clone()),
+        Value::string(diagnostic.identifier.clone()),
     );
     object
         .properties
-        .insert("Message".into(), Value::String(diagnostic.message.clone()));
+        .insert("Message".into(), Value::string(diagnostic.message.clone()));
     Value::Object(object)
 }
 

@@ -176,7 +176,7 @@ pub(super) fn coerce_single_integer_string_argument(
         return Ok(args);
     };
     let converted = match value {
-        Value::Int(value) => Value::String(integer_codes_to_string([value])?),
+        Value::Int(value) => Value::string(integer_codes_to_string([value])?),
         Value::Tensor(tensor) if tensor.integer_storage().is_some() => {
             let storage = tensor.integer_storage().expect("checked integer storage");
             let values = (0..storage.len()).map(|index| {
@@ -184,7 +184,7 @@ pub(super) fn coerce_single_integer_string_argument(
                     .value_at(index)
                     .expect("index within integer format storage")
             });
-            Value::String(integer_codes_to_string(values)?)
+            Value::string(integer_codes_to_string(values)?)
         }
         other => other,
     };
@@ -218,7 +218,7 @@ pub(super) fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, St
         Value::StringArray(sa) if sa.data.len() == 1 => Ok(Some(Value::String(sa.data[0].clone()))),
         Value::CharArray(ca) if char_format_row_shape(ca) => {
             let s: String = ca.data.iter().collect();
-            Ok(Some(Value::String(s)))
+            Ok(Some(Value::string(s)))
         }
         Value::CharArray(_) => {
             Err("fprintf: formatSpec must be a character row vector or string scalar".to_string())
@@ -229,7 +229,7 @@ pub(super) fn coerce_to_format_string(value: &Value) -> Result<Option<Value>, St
             // as a valid format string.
             if tensor::tensor_element_len(t) >= 2 {
                 match try_tensor_char_row_as_string(value) {
-                    Some(Ok(s)) => Ok(Some(Value::String(s))),
+                    Some(Ok(s)) => Ok(Some(Value::string(s))),
                     Some(Err(e)) => Err(e),
                     None => Ok(None),
                 }

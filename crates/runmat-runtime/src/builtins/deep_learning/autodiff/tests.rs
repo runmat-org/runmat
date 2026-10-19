@@ -324,6 +324,29 @@ fn annotation_and_gradient_preserve_typed_struct_array_shape_and_schema() {
 }
 
 #[test]
+fn cell_annotation_reuses_unique_backing_and_keeps_shared_inert_aliases() {
+    let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
+    let input = CellArray::new_with_shape(vec![Value::Num(9.0), dlarray(2.0)], vec![1, 2, 1])
+        .expect("cell input");
+    let original = input.data().as_ptr();
+    let Value::Cell(annotated) = annotate_tree(Value::Cell(input)).expect("annotated cell") else {
+        panic!("expected cell");
+    };
+    assert_eq!(annotated.data().as_ptr(), original);
+    assert_eq!(annotated.shape(), &[1, 2, 1]);
+    assert_eq!(dlarray_node_id(&annotated.data()[1]), Some(0));
+
+    let inert = CellArray::new(vec![Value::Num(3.0)], 1, 1).expect("inert cell");
+    let alias = inert.clone();
+    let pointer = inert.data().as_ptr();
+    let Value::Cell(unchanged) = annotate_tree(Value::Cell(inert)).expect("inert alias") else {
+        panic!("expected cell");
+    };
+    assert_eq!(unchanged.data().as_ptr(), pointer);
+    assert_eq!(alias.data().as_ptr(), pointer);
+}
+
+#[test]
 fn repeated_target_gradients_share_cached_copy_on_write_allocation() {
     let _activation = TapeActivation::enter(Rc::new(RefCell::new(Tape::new())));
     let target = annotate_dlarray_value(wrapped(Value::Tensor(

@@ -29,7 +29,7 @@ pub(super) use runmat_builtins::MnrfitOption as OptionName;
 use runmat_value::Value;
 
 pub(super) struct OptionSlot {
-    spelling: Option<String>,
+    spelling: Option<runmat_value::Utf8Text>,
     identity: Option<OptionName>,
 }
 

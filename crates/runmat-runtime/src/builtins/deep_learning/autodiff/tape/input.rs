@@ -37,22 +37,55 @@ pub(in crate::builtins::deep_learning) fn annotate_tree(value: Value) -> Builtin
         Value::Object(object) => Ok(Value::Object(object)),
         Value::Struct(mut st) => {
             for value in st.fields.values_mut() {
-                *value = annotate_tree(value.clone())?;
+                annotate_slot(value)?;
             }
             Ok(Value::Struct(st))
         }
-        Value::StructArray(array) => array.try_map_values(annotate_tree).map(Value::StructArray),
-        Value::Cell(cell) => {
-            let data = cell
-                .data
-                .into_iter()
-                .map(annotate_tree)
-                .collect::<BuiltinResult<Vec<_>>>()?;
-            CellArray::new_with_shape(data, cell.shape)
-                .map(Value::Cell)
-                .map_err(|err| deep_learning_error("dlfeval", err))
+        Value::StructArray(mut array) => {
+            array.try_for_each_indexed_value_mut(|_, _, value| annotate_slot(value))?;
+            Ok(Value::StructArray(array))
+        }
+        Value::Cell(mut cell) => {
+            if let Some(values) = cell.try_data_mut_unique() {
+                for value in values {
+                    annotate_slot(value)?;
+                }
+            } else if cell.data().iter().any(requires_annotation) {
+                return Err(deep_learning_error(
+                    "dlfeval",
+                    "dlfeval: shared Cell tape input requires an admitted replacement",
+                ));
+            }
+            Ok(Value::Cell(cell))
         }
         other => Ok(other),
+    }
+}
+
+/// A unique aggregate is private to this owned transformation. Temporarily
+/// emptying one slot moves its child into the recursive annotator without a
+/// Value-tree clone; an error drops the aggregate rather than publishing it.
+fn annotate_slot(slot: &mut Value) -> BuiltinResult<()> {
+    let child = std::mem::replace(slot, Value::Num(0.0));
+    *slot = annotate_tree(child)?;
+    Ok(())
+}
+
+/// Only skip a shared Cell replacement when no descendant can acquire a new
+/// tape node. This walk neither clones children nor changes the source owner.
+fn requires_annotation(value: &Value) -> bool {
+    match value {
+        Value::Object(object) if object.class_name == DLARRAY_CLASS => {
+            dlarray_object_node_id(object).is_none()
+        }
+        Value::Object(object) => {
+            model::is_deep_learning_network_object(object)
+                || crate::builtins::table::is_tabular_object(object)
+        }
+        Value::Struct(st) => st.fields.values().any(requires_annotation),
+        Value::StructArray(array) => array.any_value(requires_annotation),
+        Value::Cell(cell) => cell.data().iter().any(requires_annotation),
+        _ => false,
     }
 }
 

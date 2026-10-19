@@ -233,6 +233,57 @@ pub async fn call_bound_constructor_sequence_in_context(
         .await
 }
 
+/// Rooted counterpart used by dynamic source selection. The constructor
+/// policy sees only the logical arity; the exact selected body retains the
+/// segmented callable/capture owners until its terminal invocation.
+pub async fn call_rooted_bound_constructor_sequence_in_context(
+    context: &crate::context::RuntimeContext,
+    owner: runmat_types::ClassMethodOwner,
+    binding: runmat_value::BoundFunctionBinding,
+    arguments: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+) -> Result<crate::execution::RootedValueSequence, RuntimeError> {
+    if !binding.authority.admits_local(&context.session_lease()) {
+        return Err(
+            build_runtime_error("bound constructor belongs to another or ended session")
+                .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
+                .build(),
+        );
+    }
+    let argument_count = arguments.len();
+    let selected = context.clone();
+    let invoke: PreparedConstructorInvoke = Box::new(move |runtime| {
+        Box::pin(async move {
+            crate::user_functions::try_call_rooted_bound_function_with_environment_in_context(
+                &runtime,
+                binding,
+                arguments,
+                requested_outputs,
+                None,
+            )
+            .await
+            .ok_or_else(|| {
+                build_runtime_error("selected runtime has no exact bound invoker")
+                    .with_identifier("RunMat:BoundFunction:UnavailableInvoker")
+                    .build()
+            })?
+        })
+    });
+    selected
+        .clone()
+        .scope(async move {
+            call_admitted_prepared_constructor_sequence_in_context(
+                &selected,
+                owner,
+                ConstructorArguments::PreparedCount(argument_count),
+                requested_outputs,
+                invoke,
+            )
+            .await
+        })
+        .await
+}
+
 #[cfg(test)]
 #[path = "constructor/tests.rs"]
 mod tests;

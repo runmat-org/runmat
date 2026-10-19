@@ -1,14 +1,9 @@
 //! Part-of-speech detail helpers for Text Analytics tokenized documents.
 
-use runmat_builtins::{
-    BuiltinCompletionPolicy, BuiltinDescriptor, BuiltinErrorDescriptor,
-    BuiltinIntegerAuditDescriptor, BuiltinIntegerAuditKind, BuiltinOutputMode, BuiltinParamArity,
-    BuiltinParamDescriptor, BuiltinParamType, BuiltinSignatureDescriptor, ResolveContext, Type,
-};
 use runmat_macros::runtime_builtin;
 use runmat_value::{CellArray, ObjectInstance, StringArray, Value};
 
-use crate::builtins::strings::core::compat::scalar_text;
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
 use crate::builtins::strings::text_analytics::details::add_sentence_details_builtin;
 use crate::builtins::strings::text_analytics::documents::{
     document_token_type_with_options, documents_from_object, options_from_document_object,
@@ -20,96 +15,18 @@ use crate::{gather_if_needed_async, BuiltinResult};
 pub(in crate::builtins::strings::text_analytics) const POS_DETAILS_PROPERTY: &str =
     "PartOfSpeechDetails";
 
-const OUT_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "updatedDocuments",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "Updated tokenized document object.",
-}];
-
-const IN_DOCUMENTS: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
-    name: "documents",
-    ty: BuiltinParamType::Any,
-    arity: BuiltinParamArity::Required,
-    default: None,
-    description: "tokenizedDocument object.",
-}];
-
-const IN_DOCUMENTS_REST: [BuiltinParamDescriptor; 2] = [
-    BuiltinParamDescriptor {
-        name: "documents",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Required,
-        default: None,
-        description: "tokenizedDocument object.",
-    },
-    BuiltinParamDescriptor {
-        name: "NameValue",
-        ty: BuiltinParamType::Any,
-        arity: BuiltinParamArity::Variadic,
-        default: None,
-        description: "Name-value options: RetokenizeMethod, Abbreviations, DiscardKnownValues.",
-    },
-];
-
-const ERROR_INVALID_INPUT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
-    code: "RM.TEXT_ANALYTICS.ADD_PART_OF_SPEECH_DETAILS.INVALID_INPUT",
-    identifier: Some("RunMat:addPartOfSpeechDetails:InvalidInput"),
-    when: "Input is not a supported tokenizedDocument object or option form.",
-    message: "addPartOfSpeechDetails: invalid input",
-};
-
-const ERRORS: [BuiltinErrorDescriptor; 1] = [ERROR_INVALID_INPUT];
-
-pub const ADD_PART_OF_SPEECH_DETAILS_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
-    signatures: &[
-        BuiltinSignatureDescriptor {
-            label: "updatedDocuments = addPartOfSpeechDetails(documents)",
-            inputs: &IN_DOCUMENTS,
-            outputs: &OUT_DOCUMENTS,
-        },
-        BuiltinSignatureDescriptor {
-            label: "updatedDocuments = addPartOfSpeechDetails(documents,Name,Value)",
-            inputs: &IN_DOCUMENTS_REST,
-            outputs: &OUT_DOCUMENTS,
-        },
-    ],
-    output_mode: BuiltinOutputMode::Fixed,
-    completion_policy: BuiltinCompletionPolicy::Public,
-    errors: &ERRORS,
-};
-const ADD_PART_OF_SPEECH_DETAILS_INTEGER_AUDIT: BuiltinIntegerAuditDescriptor =
-    BuiltinIntegerAuditDescriptor {
-        kind: BuiltinIntegerAuditKind::NotApplicable,
-        canonical_builtin: None,
-        notes: "addPartOfSpeechDetails accepts a tokenizedDocument, text options, and a logical DiscardKnownValues control; integer arrays are neither document data nor valid option values, and the returned tokenizedDocument stores categorical part-of-speech tags.",
-    };
-
-fn any_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::Unknown
-}
-
 #[runtime_builtin(
     name = "addPartOfSpeechDetails",
-    category = "strings/text_analytics",
-    summary = "Add part-of-speech details to tokenizedDocument objects.",
-    keywords = "addPartOfSpeechDetails,text analytics,tokenizedDocument,part of speech,pos",
-    accel = "sink",
-    type_resolver(any_type),
-    descriptor(
-        crate::builtins::strings::text_analytics::pos::ADD_PART_OF_SPEECH_DETAILS_DESCRIPTOR
-    ),
-    integer_audit(
-        crate::builtins::strings::text_analytics::pos::ADD_PART_OF_SPEECH_DETAILS_INTEGER_AUDIT
-    ),
-    builtin_path = "crate::builtins::strings::text_analytics::pos"
+    binding_variant = "default",
+    builtin_path = "crate::builtins::strings::text_analytics::pos",
+    context = true
 )]
 pub(in crate::builtins::strings::text_analytics) async fn add_part_of_speech_details_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
     args: Vec<Value>,
 ) -> BuiltinResult<Value> {
     let gathered = gather_args(args).await?;
-    let (documents, options) = parse_args(gathered)?;
+    let (documents, options) = parse_args(runtime.as_ref(), gathered)?;
     let mut object = tokenized_document_object(documents)?;
     let language = PosLanguage::from_document(&tokenized_document_language(&object))?;
 
@@ -130,7 +47,7 @@ pub(in crate::builtins::strings::text_analytics) async fn add_part_of_speech_det
     }
 
     if !object.properties.contains_key("SentenceNumbers") {
-        object = add_sentence_details_for_pos(object, &options).await?;
+        object = add_sentence_details_for_pos(runtime.as_ref(), object, &options).await?;
     }
 
     let documents = documents_from_object(&object, "addPartOfSpeechDetails")?;
@@ -194,13 +111,18 @@ enum RetokenizeMethod {
 
 impl RetokenizeMethod {
     fn parse(value: &str) -> BuiltinResult<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "part-of-speech" | "partofspeech" => Ok(Self::PartOfSpeech),
-            "none" => Ok(Self::None),
-            other => Err(text_analytics_error(
+        let value = value.trim();
+        if value.eq_ignore_ascii_case("part-of-speech")
+            || value.eq_ignore_ascii_case("partofspeech")
+        {
+            Ok(Self::PartOfSpeech)
+        } else if value.eq_ignore_ascii_case("none") {
+            Ok(Self::None)
+        } else {
+            Err(text_analytics_error(
                 "addPartOfSpeechDetails",
-                format!("addPartOfSpeechDetails: unsupported RetokenizeMethod '{other}'"),
-            )),
+                format!("addPartOfSpeechDetails: unsupported RetokenizeMethod '{value}'"),
+            ))
         }
     }
 }
@@ -235,7 +157,10 @@ impl PosLanguage {
     }
 }
 
-fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, AddPosOptions)> {
+fn parse_args(
+    runtime: Option<&crate::context::RuntimeContext>,
+    args: Vec<Value>,
+) -> BuiltinResult<(Value, AddPosOptions)> {
     if args.is_empty() {
         return Err(text_analytics_error(
             "addPartOfSpeechDetails",
@@ -251,20 +176,37 @@ fn parse_args(args: Vec<Value>) -> BuiltinResult<(Value, AddPosOptions)> {
     let mut options = AddPosOptions::default();
     let mut idx = 1usize;
     while idx < args.len() {
-        let name = scalar_text(&args[idx], "addPartOfSpeechDetails")
-            .map_err(|err| text_analytics_error("addPartOfSpeechDetails", err.to_string()))?;
-        if name.eq_ignore_ascii_case("DiscardKnownValues") {
+        let name = scalar_text_input(&args[idx], runtime, |runtime, cause| {
+            text_input_admission("addPartOfSpeechDetails", runtime, cause)
+        })?
+        .ok_or_else(|| {
+            text_analytics_error(
+                "addPartOfSpeechDetails",
+                "addPartOfSpeechDetails: expected text option",
+            )
+        })?;
+        if name.as_str().eq_ignore_ascii_case("DiscardKnownValues") {
             options.discard_known_values = logical_scalar(&args[idx + 1])?;
-        } else if name.eq_ignore_ascii_case("RetokenizeMethod") {
-            let value = scalar_text(&args[idx + 1], "addPartOfSpeechDetails")
-                .map_err(|err| text_analytics_error("addPartOfSpeechDetails", err.to_string()))?;
-            options.retokenize_method = RetokenizeMethod::parse(&value)?;
-        } else if name.eq_ignore_ascii_case("Abbreviations") {
+        } else if name.as_str().eq_ignore_ascii_case("RetokenizeMethod") {
+            let value = scalar_text_input(&args[idx + 1], runtime, |runtime, cause| {
+                text_input_admission("addPartOfSpeechDetails", runtime, cause)
+            })?
+            .ok_or_else(|| {
+                text_analytics_error(
+                    "addPartOfSpeechDetails",
+                    "addPartOfSpeechDetails: expected text method",
+                )
+            })?;
+            options.retokenize_method = RetokenizeMethod::parse(value.as_str())?;
+        } else if name.as_str().eq_ignore_ascii_case("Abbreviations") {
             options.abbreviations = Some(args[idx + 1].clone());
         } else {
             return Err(text_analytics_error(
                 "addPartOfSpeechDetails",
-                format!("addPartOfSpeechDetails: unsupported option '{name}'"),
+                format!(
+                    "addPartOfSpeechDetails: unsupported option '{}'",
+                    name.as_str()
+                ),
             ));
         }
         idx += 2;
@@ -304,15 +246,16 @@ fn clear_token_aligned_details(object: &mut ObjectInstance) {
 }
 
 async fn add_sentence_details_for_pos(
+    runtime: Option<&crate::context::RuntimeContext>,
     object: ObjectInstance,
     options: &AddPosOptions,
 ) -> BuiltinResult<ObjectInstance> {
     let mut args = vec![Value::Object(object)];
     if let Some(abbreviations) = &options.abbreviations {
-        args.push(Value::String("Abbreviations".to_string()));
+        args.push(Value::string("Abbreviations".to_string()));
         args.push(abbreviations.clone());
     }
-    let Value::Object(object) = add_sentence_details_builtin(args).await? else {
+    let Value::Object(object) = add_sentence_details_builtin(runtime.cloned(), args).await? else {
         return Err(text_analytics_error(
             "addPartOfSpeechDetails",
             "addPartOfSpeechDetails: addSentenceDetails did not return tokenizedDocument",
@@ -847,7 +790,13 @@ pub(in crate::builtins::strings::text_analytics) fn part_of_speech_details_from_
                 ),
             ));
         }
-        out.push(array.data.clone());
+        out.push(
+            array
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
+        );
     }
     Ok(Some(out))
 }
@@ -878,7 +827,7 @@ mod tests {
     }
 
     fn run_add_pos(args: Vec<Value>) -> BuiltinResult<Value> {
-        futures::executor::block_on(add_part_of_speech_details_builtin(args))
+        futures::executor::block_on(add_part_of_speech_details_builtin(None, args))
     }
 
     fn run_token_details(value: Value) -> BuiltinResult<Value> {

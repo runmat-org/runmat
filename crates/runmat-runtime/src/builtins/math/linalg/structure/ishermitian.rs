@@ -298,8 +298,8 @@ fn parse_optional_args(args: &[Value]) -> BuiltinResult<(HermitianMode, f64)> {
 
 fn parse_mode_flag(value: &Value) -> BuiltinResult<Option<HermitianMode>> {
     let text = match value {
-        Value::String(s) => Some(s.clone()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(sa.data[0].as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Some(ca.data.iter().collect()),
         _ => None,
     };

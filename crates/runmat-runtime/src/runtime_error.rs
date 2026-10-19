@@ -9,6 +9,12 @@ mod provider_sources;
 mod cleanup;
 pub use cleanup::complete_with_cleanup;
 
+/// An evaluated assertion condition failed. The originating builtin attaches
+/// this cause independently of its user-selected diagnostic identifier.
+#[derive(Debug, Clone, Copy, thiserror::Error)]
+#[error("assertion condition failed")]
+pub struct RuntimeAssertionFailure;
+
 /// Attach an owning provider failure without erasing a nested language error.
 /// Provider failures are not implicit gather-and-retry requests.
 pub fn with_provider_execution_source(

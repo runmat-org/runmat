@@ -165,13 +165,16 @@ pub fn ensure_tf_class_registered() {
             );
         }
 
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: TF_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            TF_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: TF_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -889,11 +892,17 @@ pub fn preflight_model_operand(value: &Value, builtin: &'static str) -> BuiltinR
     }
 }
 
-pub fn scalar_text(value: &Value, context: &str, builtin: &'static str) -> BuiltinResult<String> {
+pub fn scalar_text(
+    value: &Value,
+    context: &str,
+    builtin: &'static str,
+) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            Ok(array.data.iter().collect::<String>().into())
+        }
         other => Err(control_error(
             builtin,
             invalid_argument_identifier(builtin),

@@ -1,4 +1,4 @@
-use runmat_value::{CellArray, Value};
+use runmat_value::{CellArray, RetainedArrayValue, Value};
 
 use super::{categorical, numeric, observations, temporal, text, VariableResult};
 use crate::builtins::common::grouping_keys::KeyAtom;
@@ -6,9 +6,15 @@ use crate::builtins::common::grouping_keys::KeyAtom;
 #[derive(Clone)]
 pub(crate) struct GroupColumn {
     pub(crate) name: String,
-    pub(crate) value: Value,
+    value: ColumnValue,
     pub(crate) rows: usize,
     atoms: Vec<KeyAtom>,
+}
+
+#[derive(Clone)]
+enum ColumnValue {
+    Owned(Value),
+    Retained(RetainedArrayValue),
 }
 
 impl GroupColumn {
@@ -17,10 +23,28 @@ impl GroupColumn {
         let atoms = observations::atoms(&value, rows)?;
         Ok(Self {
             name: name.into(),
-            value,
+            value: ColumnValue::Owned(value),
             rows,
             atoms,
         })
+    }
+
+    pub(super) fn retained(name: &str, value: RetainedArrayValue) -> VariableResult<Self> {
+        let rows = observations::validate_and_count(value.value())?;
+        let atoms = observations::atoms(value.value(), rows)?;
+        Ok(Self {
+            name: name.into(),
+            value: ColumnValue::Retained(value),
+            rows,
+            atoms,
+        })
+    }
+
+    pub(crate) fn value(&self) -> &Value {
+        match &self.value {
+            ColumnValue::Owned(value) => value,
+            ColumnValue::Retained(value) => value.value(),
+        }
     }
 
     pub(crate) fn atom(&self, row: usize) -> VariableResult<&KeyAtom> {
@@ -42,7 +66,7 @@ impl GroupColumn {
             ));
         }
         self.atoms = observations::atoms(&value, rows)?;
-        self.value = value;
+        self.value = ColumnValue::Owned(value);
         Ok(())
     }
 }
@@ -73,12 +97,29 @@ pub(crate) fn columns_from_value(
         Value::StringArray(value) => text::string_columns(base_name, value, split_matrices),
         Value::Cell(value) if is_group_vector_list(&value) => {
             let mut columns = Vec::with_capacity(value.data.len());
-            for (index, value) in value.data.into_iter().enumerate() {
-                columns.extend(columns_from_value(
-                    &format!("{base_name}{}", index + 1),
-                    value,
-                    false,
-                )?);
+            match value.into_owned_data() {
+                Ok(values) => {
+                    for (index, value) in values.into_iter().enumerate() {
+                        columns.extend(columns_from_value(
+                            &format!("{base_name}{}", index + 1),
+                            value,
+                            false,
+                        )?);
+                    }
+                }
+                Err(cell) => {
+                    for index in 0..cell.data.len() {
+                        let value = cell
+                            .data
+                            .retain_value_at(index)
+                            .map_err(|error| error.to_string())?;
+                        columns.extend(super::retained::columns(
+                            &format!("{base_name}{}", index + 1),
+                            value,
+                            false,
+                        )?);
+                    }
+                }
             }
             Ok(columns)
         }
@@ -93,7 +134,7 @@ pub(crate) fn columns_from_value(
     }
 }
 
-fn is_group_vector_list(value: &CellArray) -> bool {
+pub(super) fn is_group_vector_list(value: &CellArray) -> bool {
     !value.data.is_empty()
         && value.data.iter().all(|value| {
             matches!(

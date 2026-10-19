@@ -100,7 +100,7 @@ pub(super) fn parse_extrap_method(keyword: MethodKeyword) -> BuiltinResult<Extra
 
 pub(super) fn text_from_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
         _ => None,
     }

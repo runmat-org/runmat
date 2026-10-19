@@ -139,9 +139,11 @@ fn validate_components(
 
 fn text_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
+        Value::String(value) => Some(value.as_str().to_owned()),
         Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        Value::StringArray(value) if value.data.len() == 1 => {
+            Some(value.data[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

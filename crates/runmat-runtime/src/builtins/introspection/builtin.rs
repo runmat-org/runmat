@@ -60,7 +60,7 @@ async fn dispatch_builtin_subsref(
         Err(err) if err.identifier() == Some("RunMat:getfield:ObjectProperty") => {
             crate::call_builtin_async_with_outputs(
                 "call_method",
-                &[rest[0].clone(), Value::String(field)],
+                &[rest[0].clone(), Value::string(field)],
                 requested_outputs,
             )
             .await
@@ -83,7 +83,7 @@ async fn dispatch_builtin_subsasgn(
     let field = builtin_member_field_name(&subs, "subsasgn")?;
     crate::call_builtin_async_with_outputs(
         "setfield",
-        &[rest[0].clone(), Value::String(field), rest[2].clone()],
+        &[rest[0].clone(), Value::string(field), rest[2].clone()],
         requested_outputs,
     )
     .await

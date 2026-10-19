@@ -201,7 +201,7 @@ pub(crate) mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: vec![],
+            captures: vec![].into(),
         }));
         assert_eq!(class_name_for_value(&closure), "function_handle");
 

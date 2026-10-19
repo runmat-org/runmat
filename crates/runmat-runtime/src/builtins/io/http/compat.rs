@@ -62,9 +62,9 @@ async fn gather_args(name: &str, args: &[Value]) -> BuiltinResult<Vec<Value>> {
 
 fn scalar_text(value: &Value, name: &str, arg: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         _ => Err(compat_error(
             name,
             format!("{name}: {arg} must be a string scalar or character vector"),
@@ -98,13 +98,15 @@ async fn urlencode_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
 
 fn url_text_input(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(array)
             if array.rows == 1 && array.shape.iter().skip(2).all(|extent| *extent == 1) =>
         {
             Some(array.data.iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

@@ -5,11 +5,11 @@ pub(super) fn distribution_object(fit: &FittedDistribution) -> BuiltinResult<Obj
         ObjectInstance::new(runmat_types::standard::PROBABILITY_DISTRIBUTION.to_string());
     object.properties.insert(
         "DistributionName".to_string(),
-        Value::String(fit.kind.canonical_name().to_string()),
+        Value::string(fit.kind.canonical_name().to_string()),
     );
     object.properties.insert(
         "DistName".to_string(),
-        Value::String(fit.kind.canonical_name().to_string()),
+        Value::string(fit.kind.canonical_name().to_string()),
     );
     object.properties.insert(
         "ParameterNames".to_string(),
@@ -99,7 +99,7 @@ pub(super) fn string_property(
     name: &str,
 ) -> BuiltinResult<String> {
     match object.properties.get(name) {
-        Some(Value::String(value)) => Ok(value.clone()),
+        Some(Value::String(value)) => Ok(value.as_str().to_owned()),
         Some(Value::CharArray(chars)) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         _ => Err(invalid_for(
             builtin,

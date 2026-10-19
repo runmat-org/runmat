@@ -300,6 +300,7 @@ fn local_state_with(
         inherited_storage_bindings: Vec::new(),
         creates_lexical_environment: false,
         id: ProgramFunctionId(0),
+        mir_body_digest: runmat_execution::Digest::sha256(b"fixture:native-omitted-input"),
         source: ProgramSourceId(0),
         name: "omitted_input".into(),
         source_role: runmat_types::FunctionSourceRole::Unknown,

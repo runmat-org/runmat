@@ -85,7 +85,7 @@ impl ObjectIndexComponent {
     pub fn protocol_value(&self) -> Value {
         match self {
             Self::Value(value) => value.clone(),
-            Self::Colon => Value::String(OBJECT_SELECTOR_COLON.to_string()),
+            Self::Colon => Value::string(OBJECT_SELECTOR_COLON.to_string()),
         }
     }
 }

@@ -113,6 +113,15 @@ impl NativeAssembly {
                 "Native IR entrypoints must exist and contain the selected compiled entrypoint",
             ));
         }
+        if functions
+            .get(&self.selected_entrypoint)
+            .is_none_or(|function| function.mir_body_digest != self.selected_entrypoint_body)
+        {
+            return Err(NativeCodegenError::new(
+                "native.ir.entrypoint_body",
+                "selected entrypoint body differs from its Native IR function identity",
+            ));
+        }
         for function in &self.functions {
             verify_function(
                 function,

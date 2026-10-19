@@ -60,7 +60,7 @@ fn partition_arguments(arguments: Vec<Value>) -> BuiltinResult<(Vec<CellArray>, 
 fn common_shape(cells: &[CellArray]) -> BuiltinResult<Vec<usize>> {
     let shape = cells
         .first()
-        .map(|cell| cell.shape.clone())
+        .map(|cell| cell.shape.as_slice().to_vec())
         .unwrap_or_default();
     if let Some(index) = cells.iter().position(|cell| cell.shape != shape) {
         return Err(error::invalid(format!(

@@ -9,6 +9,16 @@ pub(super) fn evaluate(
 ) -> crate::BuiltinResult<Value> {
     match query {
         Query::Scalar(name) => Ok(Value::Bool(contains(fields, &name))),
+        Query::Strings(array) => {
+            let values = array
+                .data
+                .iter()
+                .map(|name| u8::from(contains(fields, name)))
+                .collect();
+            LogicalArray::new(values, array.shape.as_slice().to_vec())
+                .map(Value::LogicalArray)
+                .map_err(|error| super::error::internal(format!("isfield: {error}")))
+        }
         Query::Collection { names, shape } => {
             let values = names
                 .iter()

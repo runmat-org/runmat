@@ -1,4 +1,5 @@
 use super::*;
+use std::borrow::Cow;
 
 pub(super) fn finite_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>> {
     let data = match value {
@@ -27,11 +28,13 @@ pub(super) fn finite_vector(value: Value, label: &str) -> BuiltinResult<Vec<f64>
     Ok(data)
 }
 
-pub(super) fn value_to_text(value: &Value, label: &str) -> BuiltinResult<String> {
+pub(super) fn value_to_text<'a>(value: &'a Value, label: &str) -> BuiltinResult<Cow<'a, str>> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
+        Value::String(text) => Ok(Cow::Borrowed(text.as_str())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Cow::Borrowed(array.data[0].as_str()))
+        }
+        Value::CharArray(chars) if chars.rows == 1 => Ok(Cow::Owned(chars.data.iter().collect())),
         other => Err(bayesopt_error(
             format!("bayesopt: {label} must be a text scalar, got {other:?}"),
             &ERROR_INVALID_ARGUMENT,

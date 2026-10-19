@@ -149,8 +149,8 @@ impl LossPayload {
                 "dlarray",
                 vec![
                     ("Data", Value::Num(loss)),
-                    ("Format", Value::String(String::new())),
-                    ("Labels", Value::String(String::new())),
+                    ("Format", Value::string(String::new())),
+                    ("Labels", Value::string(String::new())),
                 ],
             ))
         } else {
@@ -176,8 +176,8 @@ impl LossPayload {
                 "dlarray",
                 vec![
                     ("Data", tensor),
-                    ("Format", Value::String(format.clone())),
-                    ("Labels", Value::String(format)),
+                    ("Format", Value::string(format.clone())),
+                    ("Labels", Value::string(format)),
                 ],
             ))
         } else {

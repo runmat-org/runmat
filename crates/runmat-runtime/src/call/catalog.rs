@@ -63,8 +63,10 @@ fn callable_name(callable: &Value) -> Option<String> {
     let text = match callable {
         Value::FunctionHandle(name) | Value::ExternalFunctionHandle(name) => name.name().to_owned(),
         Value::Closure(closure) if closure.binding.is_none() => closure.function_name.clone(),
-        Value::String(text) => text.clone(),
-        Value::StringArray(array) if array.data.len() == 1 => array.data.first()?.clone(),
+        Value::String(text) => text.as_str().to_owned(),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            array.data.first()?.as_str().to_owned()
+        }
         Value::CharArray(array) if array.rows == 1 => array.data.iter().collect(),
         Value::MethodFunctionHandle(_) | Value::BoundFunctionHandle(_) | Value::Closure(_) => {
             return None

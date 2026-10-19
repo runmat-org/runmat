@@ -17,7 +17,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CellArray, ComplexTensor, HandleRef, IntValue, LogicalArray, NumericScalar, ObjectInstance,
-    SparseTensor, StringArray, StructValue, Tensor, Value,
+    OutputListStorage, SharedShape, SparseTensor, StringArray, StructValue, Tensor, Value,
 };
 
 use crate::{
@@ -45,7 +45,7 @@ pub(crate) static MEMOIZE_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new((
 
 #[derive(Debug, Clone)]
 struct MemoizedCacheEntry {
-    inputs: Vec<Value>,
+    inputs: OutputListStorage,
     nargout: usize,
     output: Value,
     hit_count: usize,
@@ -440,13 +440,16 @@ fn ensure_memoized_function_class_registered() {
         );
     }
 
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        events: Default::default(),
-        name: MEMOIZED_FUNCTION_CLASS.into(),
-        parent: Some(runmat_types::standard::HANDLE.into()),
-        properties,
-        methods,
-    });
+    crate::class_registry::register_builtin_class(
+        MEMOIZED_FUNCTION_CLASS,
+        crate::class_registry::RuntimeClass {
+            events: Default::default(),
+            name: MEMOIZED_FUNCTION_CLASS.into(),
+            parent: Some(runmat_types::standard::HANDLE.into()),
+            properties,
+            methods,
+        },
+    );
 }
 
 fn canonicalize_memoized_function(function: Value) -> BuiltinResult<Value> {
@@ -678,7 +681,7 @@ fn take_cache_hit(
 
 fn store_cache_miss(
     handle: &HandleRef,
-    args: Vec<Value>,
+    args: OutputListStorage,
     requested_outputs: usize,
     output: Value,
     cache_size: usize,
@@ -737,7 +740,7 @@ fn memoized_member(handle: &HandleRef, payload: Value) -> BuiltinResult<Value> {
 
 fn member_name(value: Value) -> BuiltinResult<String> {
     match value {
-        Value::String(name) => Ok(name),
+        Value::String(name) => Ok(name.as_str().to_owned()),
         Value::CharArray(chars) => Ok(chars.data.iter().collect()),
         other => Err(memoize_error(
             &MEMOIZE_ERROR_INVALID_INDEX,
@@ -770,8 +773,11 @@ fn stats_for_handle(handle: &HandleRef) -> BuiltinResult<Value> {
         let mut hit_count = Vec::with_capacity(entries.len());
         for entry in &entries {
             input_cells.push(Value::Cell(
-                CellArray::new(entry.inputs.clone(), 1, entry.inputs.len())
-                    .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
+                CellArray::from_shared_storage(
+                    entry.inputs.clone(),
+                    SharedShape::new_unmanaged(vec![1, entry.inputs.len()]),
+                )
+                .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
             ));
             nargout.push(entry.nargout as f64);
             output_cells.push(Value::Cell(output_value_to_cell(
@@ -887,8 +893,11 @@ fn encode_cache_entry(entry: MemoizedCacheEntry) -> BuiltinResult<Value> {
     fields.insert(
         "Inputs",
         Value::Cell(
-            CellArray::new(entry.inputs, 1, input_len)
-                .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
+            CellArray::from_shared_storage(
+                entry.inputs,
+                SharedShape::new_unmanaged(vec![1, input_len]),
+            )
+            .map_err(|err| memoize_error(&MEMOIZE_ERROR_GC, format!("memoize: {err}")))?,
         ),
     );
     fields.insert("Nargout", Value::Num(entry.nargout as f64));

@@ -19,7 +19,7 @@ use runmat_builtins::{
 use runmat_macros::runtime_builtin;
 use runmat_value::{
     CharArray, ComplexStorage, ComplexTensor, IntValue, IntegerStorage, NumericDType,
-    NumericStorage, StringArray, Tensor, Value,
+    NumericStorage, StringArray, Tensor, Utf8Text, Value,
 };
 
 use super::{
@@ -511,19 +511,19 @@ fn union_host(a: Value, b: Value, opts: &UnionOptions) -> crate::BuiltinResult<U
             union_string(astring, bstring, opts)
         }
         (Value::StringArray(astring), Value::String(b)) => {
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::StringArray(bstring)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
         (Value::String(a), Value::String(b)) => {
-            let astring = StringArray::new(vec![a], vec![1, 1])
+            let astring = StringArray::from_texts_unbounded(vec![a], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
-            let bstring = StringArray::new(vec![b], vec![1, 1])
+            let bstring = StringArray::from_texts_unbounded(vec![b], vec![1, 1])
                 .map_err(|e| union_internal_error(format!("union: {e}")))?;
             union_string(astring, bstring, opts)
         }
@@ -1215,16 +1215,16 @@ fn union_string_elements(
     opts: &UnionOptions,
 ) -> crate::BuiltinResult<UnionEvaluation> {
     let mut entries = Vec::<StringUnionEntry>::new();
-    let mut map: HashMap<String, usize> = HashMap::new();
+    let mut map: HashMap<&str, usize> = HashMap::new();
     let mut order_counter = 0usize;
 
     for (idx, value) in a.data.iter().enumerate() {
-        match map.entry(value.clone()) {
+        match map.entry(value.as_str()) {
             Entry::Occupied(_) => {}
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
                 entries.push(StringUnionEntry {
-                    value: value.clone(),
+                    value,
                     a_index: Some(idx),
                     b_index: None,
                     order_rank: order_counter,
@@ -1236,7 +1236,7 @@ fn union_string_elements(
     }
 
     for (idx, value) in b.data.iter().enumerate() {
-        match map.entry(value.clone()) {
+        match map.entry(value.as_str()) {
             Entry::Occupied(occ) => {
                 let entry = &mut entries[*occ.get()];
                 if entry.a_index.is_none() && entry.b_index.is_none() {
@@ -1246,7 +1246,7 @@ fn union_string_elements(
             Entry::Vacant(v) => {
                 let entry_idx = entries.len();
                 entries.push(StringUnionEntry {
-                    value: value.clone(),
+                    value,
                     a_index: None,
                     b_index: Some(idx),
                     order_rank: order_counter,
@@ -1288,7 +1288,7 @@ fn union_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_a;
-            row_values.push(a.data[idx].clone());
+            row_values.push(&a.data[idx]);
         }
         let key = RowStringKey(row_values.clone());
         match map.entry(key) {
@@ -1311,7 +1311,7 @@ fn union_string_rows(
         let mut row_values = Vec::with_capacity(cols);
         for c in 0..cols {
             let idx = r + c * rows_b;
-            row_values.push(b.data[idx].clone());
+            row_values.push(&b.data[idx]);
         }
         let key = RowStringKey(row_values.clone());
         match map.entry(key) {
@@ -1469,16 +1469,16 @@ struct CharRowUnionEntry {
 }
 
 #[derive(Debug)]
-struct StringUnionEntry {
-    value: String,
+struct StringUnionEntry<'a> {
+    value: &'a Utf8Text,
     a_index: Option<usize>,
     b_index: Option<usize>,
     order_rank: usize,
 }
 
 #[derive(Debug)]
-struct StringRowUnionEntry {
-    row_data: Vec<String>,
+struct StringRowUnionEntry<'a> {
+    row_data: Vec<&'a Utf8Text>,
     a_row: Option<usize>,
     b_row: Option<usize>,
     order_rank: usize,
@@ -1518,7 +1518,7 @@ impl RowCharKey {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct RowStringKey(Vec<String>);
+struct RowStringKey<'a>(Vec<&'a Utf8Text>);
 
 fn assemble_floating_union<T: SetFloat>(
     entries: Vec<FloatingUnionEntry<T>>,
@@ -1909,7 +1909,7 @@ fn assemble_string_union(
     let mut order: Vec<usize> = (0..entries.len()).collect();
     match opts.order {
         UnionOrder::Sorted => {
-            order.sort_by(|&lhs, &rhs| entries[lhs].value.cmp(&entries[rhs].value));
+            order.sort_by(|&lhs, &rhs| entries[lhs].value.cmp(entries[rhs].value));
         }
         UnionOrder::Stable => {
             order.sort_by_key(|&idx| entries[idx].order_rank);
@@ -1929,7 +1929,7 @@ fn assemble_string_union(
         }
     }
 
-    let value_array = StringArray::new(values, vec![order.len(), 1])
+    let value_array = StringArray::from_texts_unbounded(values, vec![order.len(), 1])
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
@@ -1963,7 +1963,7 @@ fn assemble_string_row_union(
     }
 
     let unique_rows = order.len();
-    let mut values = vec![String::new(); unique_rows * cols];
+    let mut values = vec![Utf8Text::default(); unique_rows * cols];
     let mut ia = Vec::new();
     let mut ib = Vec::new();
 
@@ -1980,7 +1980,7 @@ fn assemble_string_row_union(
         }
     }
 
-    let value_array = StringArray::new(values, vec![unique_rows, cols])
+    let value_array = StringArray::from_texts_unbounded(values, vec![unique_rows, cols])
         .map_err(|e| union_internal_error(format!("union: {e}")))?;
     let ia_len = ia.len();
     let ib_len = ib.len();
@@ -2051,7 +2051,7 @@ fn compare_char_rows(a: &[char], b: &[char]) -> Ordering {
     Ordering::Equal
 }
 
-fn compare_string_rows(a: &[String], b: &[String]) -> Ordering {
+fn compare_string_rows(a: &[&Utf8Text], b: &[&Utf8Text]) -> Ordering {
     for (lhs, rhs) in a.iter().zip(b.iter()) {
         let ord = lhs.cmp(rhs);
         if ord != Ordering::Equal {

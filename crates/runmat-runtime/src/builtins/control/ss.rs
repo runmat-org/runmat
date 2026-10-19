@@ -108,13 +108,16 @@ fn ensure_ss_class_registered() {
 
         let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
             HashMap::new();
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: SS_CLASS.into(),
-            parent: None,
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            SS_CLASS,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: SS_CLASS.into(),
+                parent: None,
+                properties,
+                methods,
+            },
+        );
     });
 }
 
@@ -364,11 +367,13 @@ fn parse_sample_time(value: &Value) -> BuiltinResult<f64> {
     Ok(sample_time)
 }
 
-fn scalar_text(value: &Value, context: &str) -> BuiltinResult<String> {
+fn scalar_text(value: &Value, context: &str) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            Ok(array.data.iter().collect::<String>().into())
+        }
         other => Err(ss_error_with_detail(
             &SS_ERROR_INVALID_OPTION,
             format!("{context} must be a string scalar or character vector, got {other:?}"),

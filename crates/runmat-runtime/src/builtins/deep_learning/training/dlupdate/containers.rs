@@ -207,7 +207,7 @@ pub(super) async fn dlupdate_cell(
     for data in outputs {
         let data = data.finish().map_err(|error| error.into_runtime_error())?;
         let result = data.with_unbounded_values(|data| {
-            let value = CellArray::new_with_shape(data, reference.shape.clone())
+            let value = CellArray::new_with_shape(data, reference.shape.as_slice().to_vec())
                 .map(Value::Cell)
                 .map_err(|err| deep_learning_error("dlupdate", err))?;
             RootedValue::new(value).map_err(|error| error.into_runtime_error())

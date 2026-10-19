@@ -117,9 +117,9 @@ fn ismethod_builtin(receiver: Value, method_designator: Value) -> crate::Builtin
 
 fn parse_method_name(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::StringArray(sa) if sa.rows == 1 && sa.cols == 1 && !sa.data.is_empty() => {
-            Ok(sa.data[0].clone())
+            Ok(sa.data[0].as_str().to_owned())
         }
         Value::CharArray(ca) if ca.rows <= 1 => Ok(ca.data.iter().collect::<String>()),
         _ => Err(ismethod_error(&ISMETHOD_ERROR_NAME_INVALID)),

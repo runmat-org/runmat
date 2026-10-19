@@ -28,6 +28,44 @@ pub async fn merge_slice(
     iteration: &Value,
     offset_value: Option<&Value>,
 ) -> Result<Value, RuntimeError> {
+    merge_slice_with_context(
+        None,
+        destination,
+        worker_value,
+        access,
+        iteration,
+        offset_value,
+    )
+    .await
+}
+
+pub async fn merge_slice_in_context(
+    context: &crate::context::RuntimeContext,
+    destination: Value,
+    worker_value: &Value,
+    access: runmat_types::ParallelSliceAccess,
+    iteration: &Value,
+    offset_value: Option<&Value>,
+) -> Result<Value, RuntimeError> {
+    merge_slice_with_context(
+        Some(context),
+        destination,
+        worker_value,
+        access,
+        iteration,
+        offset_value,
+    )
+    .await
+}
+
+async fn merge_slice_with_context(
+    context: Option<&crate::context::RuntimeContext>,
+    destination: Value,
+    worker_value: &Value,
+    access: runmat_types::ParallelSliceAccess,
+    iteration: &Value,
+    offset_value: Option<&Value>,
+) -> Result<Value, RuntimeError> {
     if !same_assembly_family(&destination, worker_value) {
         return Err(semantic_error(
             "ParallelSliceType",
@@ -67,7 +105,7 @@ pub async fn merge_slice(
     };
     let plan = build_index_plan(&selectors, selector_dimensions, &shape)?;
     let slice = read_with_plan(worker_value, &plan)?;
-    assign_with_plan(destination, &plan, &slice).await
+    assign_with_plan(context, destination, &plan, &slice).await
 }
 
 async fn resolved_slice_index(
@@ -149,7 +187,7 @@ pub(crate) fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(value) => Some(value.shape().to_vec()),
         Value::SparseTensor(value) => Some(value.shape()),
         Value::LogicalArray(value) => Some(value.shape.to_vec()),
-        Value::Cell(value) => Some(value.shape.clone()),
+        Value::Cell(value) => Some(value.shape().to_vec()),
         _ => None,
     }
 }
@@ -180,6 +218,7 @@ pub(crate) fn read_with_plan(value: &Value, plan: &IndexPlan) -> Result<Value, R
 }
 
 pub(crate) async fn assign_with_plan(
+    context: Option<&crate::context::RuntimeContext>,
     destination: Value,
     plan: &IndexPlan,
     source: &Value,
@@ -193,7 +232,7 @@ pub(crate) async fn assign_with_plan(
             write_slice::assign_sparse_with_plan(value, plan, source).await
         }
         Value::LogicalArray(value) => assign_logical_with_plan(value, plan, source),
-        Value::Cell(value) => assign_cell_with_plan(value, plan, source),
+        Value::Cell(value) => assign_cell_with_plan(context, value, plan, source),
         _ => Err(semantic_error(
             "ParallelSliceType",
             "sliced output does not support deterministic host writes",
@@ -265,6 +304,7 @@ fn read_cell_with_plan(value: &CellArray, plan: &IndexPlan) -> Result<Value, Run
 }
 
 fn assign_cell_with_plan(
+    _context: Option<&crate::context::RuntimeContext>,
     mut destination: CellArray,
     plan: &IndexPlan,
     source: &Value,
@@ -282,15 +322,32 @@ fn assign_cell_with_plan(
             "cell sliced output has an incompatible shape",
         ));
     }
+    if !destination.data.is_exact() {
+        destination.data.make_unique_unbounded().map_err(|error| {
+            semantic_error(
+                "ParallelSliceOwner",
+                format!("cell slice owner unavailable: {error}"),
+            )
+        })?;
+    }
     for (index, value) in plan.indices.iter().zip(source) {
         let storage_index =
             cell_storage_index(*index as usize, &destination.shape).ok_or_else(|| {
                 semantic_error("ParallelSliceShape", "cell slice index is out of bounds")
             })?;
-        let Some(destination) = destination.data.get_mut(storage_index) else {
+        if storage_index >= destination.data.len() {
             return Err(semantic_error(
                 "ParallelSliceShape",
                 "cell slice index is out of bounds",
+            ));
+        }
+        let Some(destination) = destination
+            .try_data_mut_unique()
+            .and_then(|data| data.get_mut(storage_index))
+        else {
+            return Err(semantic_error(
+                "ParallelSliceOwner",
+                "shared exact cell slice requires a preadmitted replacement owner",
             ));
         };
         *destination = value;

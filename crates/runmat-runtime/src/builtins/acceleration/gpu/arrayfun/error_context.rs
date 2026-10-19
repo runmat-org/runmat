@@ -4,9 +4,9 @@ pub(super) fn make_error_struct(raw_error: &str, linear_index: usize) -> Value {
     let (identifier, message) = split_error_message(raw_error);
     let mut st = runmat_value::StructValue::new();
     st.fields
-        .insert("identifier".to_string(), Value::String(identifier));
+        .insert("identifier".to_string(), Value::string(identifier));
     st.fields
-        .insert("message".to_string(), Value::String(message));
+        .insert("message".to_string(), Value::string(message));
     st.fields
         .insert("index".to_string(), Value::Num((linear_index + 1) as f64));
     Value::Struct(st)

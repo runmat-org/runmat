@@ -147,7 +147,9 @@ fn missing_qualified_target_leaves_callback_unregistered() {
             ForeignCall {
                 adapter: JAVA_ADAPTER_ID.into(),
                 symbol: "invoke_qualified".into(),
-                arguments,
+                arguments: crate::call::RootedFunctionArguments::ordinary(
+                    crate::execution::RootedValues::new(arguments).unwrap(),
+                ),
                 requested_outputs: 1,
             },
         ));
@@ -155,7 +157,7 @@ fn missing_qualified_target_leaves_callback_unregistered() {
             Err(call) => call,
             Ok(_) => panic!("missing class must decline before callback marshalling"),
         };
-        assert_eq!(call.arguments.as_ptr(), original_backing);
+        assert_eq!(call.arguments.supplied().as_ptr(), original_backing);
         assert_eq!(call.arguments.len(), 2);
         assert!(adapter.callbacks.borrow().is_empty());
     });

@@ -14,7 +14,7 @@ pub(super) fn apply_hgload_overrides(
                     get_properties(PlotHandle::Figure(*handle), Some(name), HGLOAD)
                 {
                     old.insert(name.clone(), previous);
-                    set_args.push(Value::String(name.clone()));
+                    set_args.push(Value::string(name.clone()));
                     set_args.push(value.clone());
                 }
             }
@@ -45,9 +45,9 @@ pub(super) fn handles_value(handles: &[FigureHandle]) -> Value {
 
 pub(super) fn scalar_string(value: &Value, builtin: &'static str) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
         Value::CharArray(_) => Err(persistence_error(
             &ERROR_INVALID_ARGUMENT,
             builtin,

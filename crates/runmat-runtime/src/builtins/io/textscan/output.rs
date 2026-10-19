@@ -134,7 +134,7 @@ async fn cell_string_column(
     let rows = values.len();
     let mut cells = Vec::with_capacity(rows);
     for value in values {
-        cells.push(Value::String(value));
+        cells.push(Value::string(value));
         if cells.len() % 4096 == 0 {
             cooperation.completed(4096).await?;
         }

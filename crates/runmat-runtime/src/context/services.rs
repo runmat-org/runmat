@@ -1112,11 +1112,11 @@ pub trait RuntimeNativeService {
     fn supports(&self, capability: NativeCapability) -> bool;
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ForeignCall {
     pub adapter: String,
     pub symbol: String,
-    pub arguments: Vec<Value>,
+    pub arguments: crate::call::RootedFunctionArguments,
     pub requested_outputs: usize,
 }
 
@@ -1673,21 +1673,6 @@ impl RuntimeServicePorts {
     pub fn timing(&self) -> &Rc<dyn RuntimeTimingService> {
         &self.timing
     }
-    /// A staged effect may finish only under the same installed owners that
-    /// reserved the scan and supplied the original placement revision.
-    pub(crate) fn same_host_effect_owners(&self, other: &Self) -> bool {
-        fn same<T: ?Sized>(left: Option<&Rc<T>>, right: Option<&Rc<T>>) -> bool {
-            match (left, right) {
-                (Some(left), Some(right)) => Rc::ptr_eq(left, right),
-                (None, None) => true,
-                _ => false,
-            }
-        }
-        same(self.placement(), other.placement())
-            && same(self.host_effect_resources(), other.host_effect_resources())
-            && same(self.parallel(), other.parallel())
-    }
-
     port_accessors!(
         with_call,
         call,

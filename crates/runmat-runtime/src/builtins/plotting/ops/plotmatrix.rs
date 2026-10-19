@@ -393,7 +393,7 @@ async fn render_plotmatrix(parsed: ParsedPlotMatrix) -> BuiltinResult<PlotMatrix
                     Value::Tensor(parsed.y.columns[col].clone()),
                 ];
                 if let Some(style) = &parsed.style {
-                    rest.push(Value::String(style.clone()));
+                    rest.push(Value::string(style.clone()));
                 }
                 let handle = scatter_builtin(rest.remove(0), rest.remove(0), rest)
                     .await

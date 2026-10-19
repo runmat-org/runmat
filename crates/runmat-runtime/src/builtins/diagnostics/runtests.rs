@@ -385,10 +385,12 @@ fn is_option_name(value: &Value) -> bool {
     )
 }
 
-fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
+fn value_to_string_scalar(value: &Value) -> BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
-        Value::CharArray(array) if array.rows == 1 => Ok(array.data.iter().collect()),
+        Value::CharArray(array) if array.rows == 1 => {
+            Ok(array.data.iter().collect::<String>().into())
+        }
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,
@@ -399,10 +401,16 @@ fn value_to_string_scalar(value: &Value) -> BuiltinResult<String> {
 
 fn value_to_strings(value: &Value) -> BuiltinResult<Vec<String>> {
     match value {
-        Value::String(text) => Ok(vec![text.clone()]),
+        Value::String(text) => Ok(vec![text.to_string()]),
         Value::CharArray(array) if array.rows == 1 => Ok(vec![array.data.iter().collect()]),
-        Value::StringArray(array) => Ok(array.data.clone()),
-        Value::Cell(cell) => cell.data.iter().map(value_to_string_scalar).collect(),
+        Value::StringArray(array) => Ok(array.data.iter().map(ToString::to_string).collect()),
+        Value::Cell(cell) => cell
+            .data
+            .iter()
+            .map(|value| {
+                value_to_string_scalar(value).map(runmat_value::Utf8Text::into_string_unbounded)
+            })
+            .collect(),
         other => Err(runtests_error_detail(
             &RUNTESTS_ERROR_INVALID_INPUT,
             format!("expected a string, string array, or cell array of strings, got {other:?}"),

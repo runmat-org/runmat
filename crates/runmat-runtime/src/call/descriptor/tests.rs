@@ -89,7 +89,7 @@ fn absent_named_callable_is_a_producer_classified_language_failure() {
     let error = futures::executor::block_on(forward_named_fallback(
         Some(&runtime),
         "__runmat_missing_input_callable__".into(),
-        Vec::new(),
+        crate::execution::RootedValues::new(Vec::new()).expect("empty rooted arguments"),
         1,
         None,
         Some(source.source_ref()),

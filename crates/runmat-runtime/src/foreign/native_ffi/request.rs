@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
-use runmat_native_ffi::{NativeScalar, NativeType};
-use runmat_value::Value;
+use runmat_native_ffi::{InvocationArguments, NativeScalar, NativeType};
 
 use super::super::{foreign_error, ForeignErrorKind};
 use crate::RuntimeError;
 
-pub(super) fn string_argument(
-    arguments: &[Value],
+pub(super) fn string_argument<A: InvocationArguments + ?Sized>(
+    arguments: &A,
     index: usize,
     operation: &str,
 ) -> Result<String, RuntimeError> {
@@ -25,8 +24,8 @@ pub(super) fn string_argument(
     })
 }
 
-pub(super) fn optional_string_argument(
-    arguments: &[Value],
+pub(super) fn optional_string_argument<A: InvocationArguments + ?Sized>(
+    arguments: &A,
     index: usize,
     operation: &str,
 ) -> Result<Option<String>, RuntimeError> {

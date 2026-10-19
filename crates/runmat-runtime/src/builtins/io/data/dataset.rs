@@ -71,7 +71,7 @@ async fn dataset_arrays_builtin(
         let values: Vec<Value> = manifest
             .arrays
             .keys()
-            .map(|k| Value::String(k.clone()))
+            .map(|k| Value::string(k.clone()))
             .collect();
         make_cell(values.clone(), 1, values.len()).map_err(data_error)
     })
@@ -341,7 +341,7 @@ async fn dataset_snapshot_builtin(
             let dst = snapshots.join(format!("{}.manifest.json", sanitize_label(&label_text)));
             let mut budget = runtime.as_ref().map(RuntimeContext::cpu_cooperation);
             copy_file_on(owner.filesystem.as_ref(), &src, &dst, &mut budget).await?;
-            Ok(Value::String(dst.to_string_lossy().to_string()))
+            Ok(Value::string(dst.to_string_lossy().to_string()))
         },
     )
     .await

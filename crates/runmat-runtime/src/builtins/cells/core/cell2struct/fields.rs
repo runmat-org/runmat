@@ -2,8 +2,8 @@ use runmat_value::{CharArray, Value};
 
 pub(super) fn parse(value: &Value) -> crate::BuiltinResult<Vec<String>> {
     let names = match value {
-        Value::String(text) => vec![text.clone()],
-        Value::StringArray(array) => array.data.clone(),
+        Value::String(text) => vec![text.to_string()],
+        Value::StringArray(array) => array.data.iter().map(ToString::to_string).collect(),
         Value::CharArray(chars) if chars.rows == 1 => vec![chars.data.iter().collect()],
         Value::CharArray(chars) => character_rows(chars),
         Value::Cell(cell) => cell

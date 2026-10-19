@@ -15,6 +15,7 @@ use crate::{NativeExecutorError, NativeExecutorResult};
 use super::{semantic_error, shape_error, value_shape, MaterializedSelectors};
 
 pub(super) async fn assign_paren_owned(
+    runtime: &runmat_runtime::context::RuntimeContext,
     base: Value,
     selectors: MaterializedSelectors,
     rhs: Value,
@@ -33,7 +34,7 @@ pub(super) async fn assign_paren_owned(
     }
     let plan = plan_for_assignment(&base, &selectors, !delete).await?;
     if host_assignment_eligible(&base, &rhs) {
-        return assign_host_with_plan(base, &plan, rhs, delete);
+        return assign_host_with_plan(Some(runtime), base, &plan, rhs, delete);
     }
     let updated = match base {
         value @ (Value::Num(_) | Value::Int(_)) => {
@@ -95,8 +96,12 @@ pub(super) async fn assign_paren_owned(
                 .iter()
                 .map(|index| *index as usize + 1)
                 .collect::<Vec<_>>();
-            runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
-                value, &indices, &rhs, delete,
+            runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy_in_context(
+                Some(runtime),
+                value,
+                &indices,
+                &rhs,
+                delete,
             )
             .map_err(NativeExecutorError::from)
         }
@@ -165,6 +170,7 @@ pub(super) fn plan_for_assignment_host(
 }
 
 pub(super) fn assign_host_with_plan(
+    runtime: Option<&runmat_runtime::context::RuntimeContext>,
     base: Value,
     plan: &IndexPlan,
     rhs: Value,
@@ -205,8 +211,8 @@ pub(super) fn assign_host_with_plan(
                 .iter()
                 .map(|index| *index as usize + 1)
                 .collect::<Vec<_>>();
-            runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
-                value, &indices, &rhs, delete,
+            runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy_in_context(
+                runtime, value, &indices, &rhs, delete,
             )
             .map_err(NativeExecutorError::from)
         }

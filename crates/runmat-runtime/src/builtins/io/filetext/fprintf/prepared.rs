@@ -4,15 +4,16 @@ use super::admission::{
 use super::target::{match_stream_label, parse_fid, target_from_fid, OutputTarget, SpecialStream};
 use super::*;
 use runmat_builtins::{FPRINTF_ERROR_INVALID_INPUT, FPRINTF_STREAM_LABEL_EXTENSION};
+use runmat_value::Utf8Text;
 
 pub(super) struct PreparedFprintfCall {
     pub(super) target: OutputTarget,
-    pub(super) format: String,
+    pub(super) format: Utf8Text,
     pub(super) data_args: Vec<Value>,
 }
 
 enum FormatPlan {
-    Host { index: usize, text: String },
+    Host { index: usize, text: Utf8Text },
     Resident { index: usize },
 }
 

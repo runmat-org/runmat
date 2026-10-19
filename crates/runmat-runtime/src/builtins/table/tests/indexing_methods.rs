@@ -81,6 +81,7 @@ fn dictionary_methods_compare_wide_keys_and_keep_original_value() {
     .expect("lookup");
     assert_eq!(selected, Value::Int(IntValue::U64(u64::MAX)));
     let updated = block_on(dictionary_subsasgn(
+        None,
         dictionary.clone(),
         key(large_key.clone()),
         Value::Int(IntValue::U64(3)),
@@ -110,7 +111,13 @@ fn method_receivers_reject_wrong_class_and_invalid_path() {
         Value::Num(2.0)
     ))
     .is_err());
-    assert!(block_on(dictionary_subsasgn(wrong, valid_path, Value::Num(2.0))).is_err());
+    assert!(block_on(dictionary_subsasgn(
+        None,
+        wrong,
+        valid_path,
+        Value::Num(2.0)
+    ))
+    .is_err());
 
     let dictionary = block_on(dictionary_builtin(vec![])).expect("empty dictionary");
     assert!(block_on(dictionary_subsref(dictionary, Value::Num(1.0))).is_err());

@@ -266,13 +266,13 @@ fn has_extension(path: &Path, expected: &str) -> bool {
 
 fn string_arg(value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(s) => Ok(s.clone()),
+        Value::String(s) => Ok(s.as_str().to_owned()),
         Value::CharArray(ca) if ca.rows == 1 => Ok(ca.data.iter().collect()),
         Value::CharArray(_) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
             "character vector arguments must be 1-by-N",
         )),
-        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].clone()),
+        Value::StringArray(sa) if sa.data.len() == 1 => Ok(sa.data[0].as_str().to_owned()),
         Value::StringArray(_) => Err(print_error_with_detail(
             &PRINT_ERROR_INVALID_INPUT,
             "string array arguments must be scalar",

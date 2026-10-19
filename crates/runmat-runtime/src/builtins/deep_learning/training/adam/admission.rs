@@ -116,14 +116,14 @@ impl NumericPayload {
                                 .properties
                                 .get("Format")
                                 .cloned()
-                                .unwrap_or_else(|| Value::String(String::new())),
+                                .unwrap_or_else(|| Value::string(String::new())),
                         ),
                         labels: Box::new(
                             object
                                 .properties
                                 .get("Labels")
                                 .cloned()
-                                .unwrap_or_else(|| Value::String(String::new())),
+                                .unwrap_or_else(|| Value::string(String::new())),
                         ),
                     },
                 }

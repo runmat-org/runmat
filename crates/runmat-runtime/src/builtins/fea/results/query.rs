@@ -120,7 +120,7 @@ pub(in crate::builtins::fea) fn run_id_from_object(object: &ObjectInstance) -> O
         .or_else(|| object.properties.get("run_id"))
         .or_else(|| object.properties.get("runId"))
         .and_then(|value| match value {
-            Value::String(run_id) => Some(run_id.clone()),
+            Value::String(run_id) => Some(run_id.to_string()),
             _ => None,
         })
 }
@@ -160,15 +160,15 @@ pub(in crate::builtins::fea) fn run_study_result_to_object(
     )?;
     object.properties.insert(
         FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
-        Value::String(envelope.data.run_id.clone()),
+        Value::String(envelope.data.run_id.clone().into()),
     );
     object.properties.insert(
         "run_id".to_string(),
-        Value::String(envelope.data.run_id.clone()),
+        Value::String(envelope.data.run_id.clone().into()),
     );
     object.properties.insert(
         "runId".to_string(),
-        Value::String(envelope.data.run_id.clone()),
+        Value::String(envelope.data.run_id.clone().into()),
     );
     insert_study_context(&mut object, spec)?;
     Ok(Value::Object(object))
@@ -183,7 +183,7 @@ pub(in crate::builtins::fea) fn insert_study_context(
     })?;
     object.properties.insert(
         FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
-        Value::String(json),
+        Value::String(json.into()),
     );
     Ok(())
 }
@@ -195,7 +195,7 @@ pub(in crate::builtins::fea) fn copy_study_context_property(
     if let Some(json) = study_context_json_from_value(source) {
         target.properties.insert(
             FEA_STUDY_CONTEXT_JSON_PROPERTY.to_string(),
-            Value::String(json),
+            Value::String(json.into()),
         );
     }
 }
@@ -207,16 +207,16 @@ pub(in crate::builtins::fea) fn copy_run_id_context_property(
     if let Some(run_id) = run_id_context_from_value(source) {
         target.properties.insert(
             FEA_RUN_ID_CONTEXT_PROPERTY.to_string(),
-            Value::String(run_id.clone()),
+            Value::String(run_id.clone().into()),
         );
         target
             .properties
             .entry("run_id".to_string())
-            .or_insert(Value::String(run_id.clone()));
+            .or_insert(Value::String(run_id.clone().into()));
         target
             .properties
             .entry("runId".to_string())
-            .or_insert(Value::String(run_id));
+            .or_insert(Value::String(run_id.into()));
     }
 }
 
@@ -226,14 +226,14 @@ pub(in crate::builtins::fea) fn study_context_json_from_value(value: &Value) -> 
     };
     if object.class_name == FEA_STUDY_CLASS {
         if let Some(Value::String(json)) = object.properties.get(FEA_STUDY_SPEC_JSON_PROPERTY) {
-            return Some(json.clone());
+            return Some(json.to_string());
         }
     }
     object
         .properties
         .get(FEA_STUDY_CONTEXT_JSON_PROPERTY)
         .and_then(|value| match value {
-            Value::String(json) => Some(json.clone()),
+            Value::String(json) => Some(json.to_string()),
             _ => None,
         })
 }

@@ -99,10 +99,10 @@ fn extract_text(value: Value) -> BuiltinResult<String> {
             }
             Ok(array.data.into_iter().collect::<String>())
         }
-        Value::String(s) => Ok(s),
+        Value::String(s) => Ok(s.into_string_unbounded()),
         Value::StringArray(sa) => {
             if sa.data.len() == 1 {
-                Ok(sa.data[0].clone())
+                Ok(sa.data[0].as_str().to_owned())
             } else {
                 Err(jsondecode_error(&JSONDECODE_ERROR_INPUT_TYPE))
             }

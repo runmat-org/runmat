@@ -4,19 +4,19 @@ pub(in crate::builtins::deep_learning) fn dlarray_format_and_labels(
     value: &Value,
 ) -> (Value, Value) {
     let Value::Object(object) = value else {
-        return (Value::String(String::new()), Value::String(String::new()));
+        return (Value::string(String::new()), Value::string(String::new()));
     };
     (
         object
             .properties
             .get("Format")
             .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
+            .unwrap_or_else(|| Value::string(String::new())),
         object
             .properties
             .get("Labels")
             .cloned()
-            .unwrap_or_else(|| Value::String(String::new())),
+            .unwrap_or_else(|| Value::string(String::new())),
     )
 }
 

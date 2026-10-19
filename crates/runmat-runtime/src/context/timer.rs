@@ -254,7 +254,8 @@ mod tests {
                             valid: true,
                         }),
                         Value::GpuTensor(resident.clone()),
-                    ],
+                    ]
+                    .into(),
                 })),
             );
             let timer = runmat_gc::gc_allocate_rooted(Value::Object(object)).expect("timer object");

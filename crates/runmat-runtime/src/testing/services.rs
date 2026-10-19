@@ -3,13 +3,15 @@ use std::future::Future;
 use std::pin::Pin;
 use std::rc::Rc;
 
-use runmat_value::Value;
+use runmat_value::{OutputListStorage, Value};
 
 use crate::context::RuntimeContext;
+use crate::execution::{rooted_continuation, RootedValue, RootedValueLease};
 use crate::BuiltinResult;
 
 pub type RunSuiteFuture = Pin<Box<dyn Future<Output = BuiltinResult<Value>>>>;
-pub type RunSuiteService = dyn Fn(Option<RuntimeContext>, Value, Vec<Value>) -> RunSuiteFuture;
+pub type RunSuiteService =
+    dyn Fn(Option<RuntimeContext>, Value, OutputListStorage) -> RunSuiteFuture;
 pub type RunTestsService = dyn Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture;
 pub type DiscoverTestsService = dyn Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture;
 
@@ -34,7 +36,7 @@ impl std::fmt::Debug for RuntimeTestServices {
 
 impl RuntimeTestServices {
     pub fn new(
-        run_suite: impl Fn(Option<RuntimeContext>, Value, Vec<Value>) -> RunSuiteFuture + 'static,
+        run_suite: impl Fn(Option<RuntimeContext>, Value, OutputListStorage) -> RunSuiteFuture + 'static,
         run_tests: impl Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture + 'static,
         discover_tests: impl Fn(Option<RuntimeContext>, Vec<Value>) -> RunSuiteFuture + 'static,
     ) -> Self {
@@ -93,9 +95,31 @@ fn current_test_services() -> Option<(RuntimeTestServices, Option<RuntimeContext
     })
 }
 
-pub async fn run_test_suite(suite: Value, plugins: Vec<Value>) -> BuiltinResult<Value> {
-    let service = current_test_services();
-    let Some((service, caller)) = service else {
+/// The service future owns suite and plugin backing. Field order retires it
+/// before unregistering the input GC roots on completion or cancellation.
+struct SuiteServiceOwner {
+    future: RunSuiteFuture,
+    _inputs_root: RootedValueLease,
+}
+
+/// If continuation admission fails before the service is constructed, retire
+/// the input values and their backing before unregistering their GC roots.
+struct SuiteInputs {
+    suite: Value,
+    plugins: OutputListStorage,
+    root: RootedValueLease,
+}
+
+pub(crate) fn run_test_suite_in_context(
+    runtime: Option<RuntimeContext>,
+    suite: Value,
+    plugins: OutputListStorage,
+) -> BuiltinResult<rooted_continuation::RuntimeContinuationFuture<'static, RootedValue>> {
+    let service = match runtime.as_ref() {
+        Some(runtime) => runtime.state().test_services.borrow().last().cloned(),
+        None => TEST_SERVICES_STACK.with(|stack| stack.borrow().last().cloned()),
+    };
+    let Some(service) = service else {
         return Err(crate::build_runtime_error(
             "TestRunner.run requires an active Core test executor",
         )
@@ -103,7 +127,45 @@ pub async fn run_test_suite(suite: Value, plugins: Vec<Value>) -> BuiltinResult<
         .with_builtin("matlab.unittest.TestRunner.run")
         .build());
     };
-    (service.run_suite)(caller, suite, plugins).await
+    let root = match runtime.as_ref() {
+        Some(runtime) => RootedValueLease::for_value_slices_in_context(
+            &[std::slice::from_ref(&suite), plugins.as_slice()],
+            runtime,
+        )?,
+        None => RootedValueLease::for_values(std::iter::once(&suite).chain(plugins.iter()))
+            .map_err(|error| error.into_runtime_error())?,
+    };
+    let inputs = SuiteInputs {
+        suite,
+        plugins,
+        root,
+    };
+    Ok(rooted_continuation::admit_rooted_future_with(
+        runtime,
+        "matlab.unittest.TestRunner.run",
+        crate::builtin::builtin_control_error,
+        move |caller| {
+            let SuiteInputs {
+                suite,
+                plugins,
+                root,
+            } = inputs;
+            let owner = SuiteServiceOwner {
+                future: (service.run_suite)(caller, suite, plugins),
+                _inputs_root: root,
+            };
+            async move {
+                // Capture the complete owner, not just its future field: Rust
+                // 2021 disjoint capture would otherwise drop the input lease
+                // before this continuation is first polled.
+                let mut owner = owner;
+                let value = owner.future.as_mut().await?;
+                let rooted = RootedValue::new(value).map_err(|error| error.into_runtime_error())?;
+                drop(owner);
+                Ok(rooted)
+            }
+        },
+    ))
 }
 
 pub async fn run_tests(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -159,9 +221,41 @@ mod tests {
         ));
         let suite = Value::String("suite".into());
         assert_eq!(
-            futures::executor::block_on(run_test_suite(suite.clone(), Vec::new())).unwrap(),
-            suite
+            futures::executor::block_on(
+                run_test_suite_in_context(
+                    None,
+                    suite.clone(),
+                    OutputListStorage::unbounded(Vec::new()),
+                )
+                .unwrap()
+            )
+            .unwrap()
+            .value(),
+            &suite
         );
+
+        runmat_gc::gc_test_context(|| {
+            let input = runmat_gc::gc_allocate_rooted(Value::Num(17.0)).unwrap();
+            let target = input.handle();
+            let queued = run_test_suite_in_context(
+                None,
+                Value::HandleObject(runmat_value::HandleRef {
+                    class_name: "QueuedSuite".into(),
+                    target,
+                    valid: true,
+                }),
+                OutputListStorage::empty(),
+            )
+            .unwrap();
+            drop(input);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_with_value(&target, |_| ()).is_ok());
+            // The service has never been polled: its captured Value is not
+            // itself a GC root. The admitted request must own that lease.
+            drop(queued);
+            runmat_gc::gc_collect_major().unwrap();
+            assert!(runmat_gc::gc_with_value(&target, |_| ()).is_err());
+        });
     }
 
     #[cfg(not(target_arch = "wasm32"))]

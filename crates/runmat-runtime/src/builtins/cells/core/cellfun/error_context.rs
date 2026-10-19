@@ -14,10 +14,10 @@ pub(super) fn value(
     let mut context = StructValue::new();
     context
         .fields
-        .insert("identifier".into(), Value::String(identifier));
+        .insert("identifier".into(), Value::string(identifier));
     context
         .fields
-        .insert("message".into(), Value::String(message));
+        .insert("message".into(), Value::string(message));
     context
         .fields
         .insert("index".into(), Value::Num((linear_index + 1) as f64));

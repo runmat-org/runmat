@@ -89,13 +89,14 @@ pub(super) async fn invoke_java(
             .require_foreign(symbol)
             .map_err(|error| error.into_runtime_error())?
             .clone();
+        let arguments = crate::execution::RootedValues::in_context(arguments, &context)?;
         let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
                     adapter: super::JAVA_ADAPTER.into(),
                     symbol: symbol.into(),
-                    arguments,
+                    arguments: crate::call::RootedFunctionArguments::ordinary(arguments),
                     requested_outputs: output_count,
                 },
             ))
@@ -130,9 +131,9 @@ pub(super) fn text_entries(arguments: Vec<Value>, builtin: &str) -> BuiltinResul
     for value in arguments {
         match value {
             Value::Cell(cell) => {
-                for value in cell.data {
+                for value in cell.data.iter() {
                     entries.push(
-                        value_text_scalar_string(&value)
+                        value_text_scalar_string(value)
                             .filter(|text| !text.trim().is_empty())
                             .ok_or_else(|| {
                                 invalid_call(format!("{builtin} entries must be non-empty text"))

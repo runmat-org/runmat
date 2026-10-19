@@ -36,7 +36,7 @@ pub(in crate::builtins::fea) async fn resolve_document_input(
                 object_json_property(builtin, &object, FEA_SWEEP_SPEC_JSON_PROPERTY, &ERROR_INPUT)?;
             Ok(FeaResolvedDocument::Sweep(spec))
         }
-        Value::String(path) => load_fea_document_from_path_async(&PathBuf::from(path))
+        Value::String(path) => load_fea_document_from_path_async(&PathBuf::from(path.as_str()))
             .await
             .map_err(|err| builtin_error(builtin, &ERROR_LOAD, err)),
         Value::CharArray(chars) if chars.rows == 1 => {

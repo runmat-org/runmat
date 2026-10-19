@@ -91,7 +91,9 @@ async fn assert_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         ConditionOutcome::Pass => Ok(Value::Num(0.0)),
         ConditionOutcome::Fail => {
             let payload = failure_payload(&rest).await?;
-            Err(assert_flow(&payload.identifier, payload.message))
+            let mut error = assert_flow(&payload.identifier, payload.message);
+            error.source = Some(Box::new(crate::runtime_error::RuntimeAssertionFailure));
+            Err(error)
         }
     }
 }
@@ -383,6 +385,7 @@ fn message_from_value(value: &Value) -> crate::BuiltinResult<String> {
         value,
         "assert: message text must be a string scalar or character vector.",
     )
+    .map(runmat_value::Utf8Text::into_string_unbounded)
 }
 
 fn format_message(template: &str, args: &[Value]) -> crate::BuiltinResult<String> {
@@ -404,12 +407,15 @@ fn normalize_identifier(raw: &str) -> String {
     }
 }
 
-fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResult<String> {
+fn string_scalar_from_value(
+    value: &Value,
+    context: &str,
+) -> crate::BuiltinResult<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
         Value::CharArray(char_array) if char_array.rows == 1 => {
-            Ok(char_array.data.iter().collect::<String>())
+            Ok(char_array.data.iter().collect::<String>().into())
         }
         _ => Err(assert_error_with_message(
             context,
@@ -418,12 +424,12 @@ fn string_scalar_from_value(value: &Value, context: &str) -> crate::BuiltinResul
     }
 }
 
-fn string_scalar_opt(value: &Value) -> Option<String> {
+fn string_scalar_opt(value: &Value) -> Option<runmat_value::Utf8Text> {
     match value {
         Value::String(text) => Some(text.clone()),
         Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
         Value::CharArray(char_array) if char_array.rows == 1 => {
-            Some(char_array.data.iter().collect())
+            Some(char_array.data.iter().collect::<String>().into())
         }
         _ => None,
     }
@@ -503,6 +509,8 @@ pub(crate) mod tests {
             assert_builtin(vec![Value::Tensor(tensor)]).expect_err("assert should fail"),
         );
         assert_eq!(err.identifier(), Some(assert_default_identifier()));
+        assert!(std::error::Error::source(&err)
+            .is_some_and(|cause| cause.is::<crate::runtime_error::RuntimeAssertionFailure>()));
     }
 
     #[test]

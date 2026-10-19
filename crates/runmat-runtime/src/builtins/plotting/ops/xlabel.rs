@@ -182,12 +182,9 @@ mod tests {
 
         let xhandle = xlabel_builtin(vec![
             ax.clone(),
-            Value::StringArray(StringArray {
-                data: vec!["Time".into(), "(s)".into()],
-                shape: vec![1, 2],
-                rows: 1,
-                cols: 2,
-            }),
+            Value::StringArray(
+                StringArray::new(vec!["Time".into(), "(s)".into()], vec![1, 2]).unwrap(),
+            ),
             Value::String("FontWeight".into()),
             Value::String("bold".into()),
         ])

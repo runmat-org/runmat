@@ -189,12 +189,7 @@ impl Expr {
                     .is_some_and(|actual| values_match(prop, &actual, expected)),
                 Expr::Regex(prop, regexes) => property_value_async(handle, prop)
                     .await?
-                    .map(value_texts)
-                    .is_some_and(|texts| {
-                        texts
-                            .iter()
-                            .any(|text| regexes.iter().any(|regex| regex.is_match(text)))
-                    }),
+                    .is_some_and(|actual| value_matches_regex(&actual, regexes)),
                 Expr::Not(expr) => !expr.matches(handle).await?,
                 Expr::And(left, right) => {
                     left.matches(handle).await? && right.matches(handle).await?
@@ -304,7 +299,11 @@ fn regexes_from_value(value: &Value) -> crate::BuiltinResult<Vec<Regex>> {
                     })
                 })
                 .collect::<crate::BuiltinResult<Vec<_>>>()?,
-            Value::StringArray(strings) => strings.data.clone(),
+            Value::StringArray(strings) => strings
+                .data
+                .iter()
+                .map(|text| text.as_str().to_owned())
+                .collect(),
             _ => vec![text_scalar(value)
                 .ok_or_else(|| invalid_argument("-regexp pattern must be text"))?],
         };
@@ -584,21 +583,27 @@ fn on_off_bool(value: &Value) -> Option<bool> {
     }
 }
 
-fn value_texts(value: Value) -> Vec<String> {
+fn value_matches_regex(value: &Value, regexes: &[Regex]) -> bool {
+    let matches = |text: &str| regexes.iter().any(|regex| regex.is_match(text));
     match value {
-        Value::String(text) => vec![text],
-        Value::CharArray(chars) => vec![chars.data.into_iter().collect()],
-        Value::StringArray(strings) => strings.data,
-        Value::Cell(cell) => cell.data.into_iter().flat_map(value_texts).collect(),
-        _ => Vec::new(),
+        Value::String(text) => matches(text.as_str()),
+        Value::CharArray(chars) => matches(&chars.data.iter().collect::<String>()),
+        Value::StringArray(strings) => strings.data.iter().any(|text| matches(text.as_str())),
+        Value::Cell(cell) => cell
+            .data()
+            .iter()
+            .any(|child| value_matches_regex(child, regexes)),
+        _ => false,
     }
 }
 
 fn single_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        Value::StringArray(strings) if strings.data.len() == 1 => strings.data.first().cloned(),
+        Value::StringArray(strings) if strings.data.len() == 1 => {
+            strings.data.first().map(|text| text.as_str().to_owned())
+        }
         _ => None,
     }
 }

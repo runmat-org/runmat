@@ -357,7 +357,8 @@ pub(crate) fn permute_string_array(
 ) -> crate::BuiltinResult<StringArray> {
     let StringArray { data, shape, .. } = sa;
     let (out, new_shape) = permute_generic(builtin, &data, &shape, order)?;
-    StringArray::new(out, new_shape).map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
+    StringArray::from_texts_unbounded(out, new_shape)
+        .map_err(|e| permute_error(builtin, format!("{builtin}: {e}")))
 }
 
 pub(crate) fn permute_char_array(

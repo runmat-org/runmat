@@ -456,7 +456,7 @@ fn snapshot_to_value(snapshot: RngSnapshot) -> BuiltinResult<Value> {
         };
     struct_value.fields.insert(
         "Type".to_string(),
-        Value::String(snapshot.algorithm().as_str().to_string()),
+        Value::string(snapshot.algorithm().as_str().to_string()),
     );
     struct_value.fields.insert("Seed".to_string(), seed_value);
     let tensor = match &snapshot.state {

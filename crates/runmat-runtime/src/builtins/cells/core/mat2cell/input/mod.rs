@@ -29,7 +29,7 @@ impl Input {
             Value::Tensor(value) => Storage::Numeric(value),
             Value::ComplexTensor(value) => Storage::Complex(value),
             Value::LogicalArray(value) => Storage::Logical(value),
-            Value::String(value) => Storage::String(StringArray::new(vec![value], vec![1, 1]).map_err(internal)?),
+            Value::String(value) => Storage::String(StringArray::from_texts_unbounded(vec![value], vec![1, 1]).map_err(internal)?),
             Value::StringArray(value) => Storage::String(value),
             Value::CharArray(value) => Storage::Character(value),
             Value::Complex(real, imaginary) => Storage::Complex(ComplexTensor::new(vec![(real, imaginary)], vec![1, 1]).map_err(internal)?),
@@ -66,7 +66,7 @@ fn source_shape(storage: &Storage) -> Vec<usize> {
         Storage::Complex(value) => value.shape().to_vec(),
         Storage::Logical(value) => value.shape.to_vec(),
         Storage::String(value) if value.shape.is_empty() => vec![1, value.rows()],
-        Storage::String(value) => value.shape.clone(),
+        Storage::String(value) => value.shape.as_slice().to_vec(),
         Storage::Character(value) => vec![value.rows, value.cols],
     };
     match shape.len() {

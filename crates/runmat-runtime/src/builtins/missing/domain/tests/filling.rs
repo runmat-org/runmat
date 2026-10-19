@@ -24,9 +24,9 @@ fn logical_nd_input_preserves_carrier_and_returns_shape_matched_mask() {
             &runmat_builtins::FILLMISSING_CATALOG_ENTRY,
             &request,
         );
-        let options = FillOptions::parse(&[method]).unwrap();
+        let options = FillOptions::parse(vec![method]).unwrap();
         let (output, mask) =
-            super::super::filling::fill_missing_value(input.clone(), &options).unwrap();
+            super::super::filling::fill_missing_value(None, input.clone(), &options).unwrap();
         assert_eq!(output, input);
         assert_eq!(mask.shape, shape);
         assert!(mask.data.iter().all(|value| *value == 0));
@@ -47,9 +47,9 @@ fn logical_nd_input_preserves_carrier_and_returns_shape_matched_mask() {
 fn empty_nd_string_input_preserves_shape_and_mask_geometry() {
     let shape = vec![2, 0, 3];
     let input = Value::StringArray(StringArray::new(vec![], shape.clone()).unwrap());
-    let options = FillOptions::parse(&[Value::from("previous")]).unwrap();
+    let options = FillOptions::parse(vec![Value::from("previous")]).unwrap();
     let (output, mask) =
-        super::super::filling::fill_missing_value(input.clone(), &options).unwrap();
+        super::super::filling::fill_missing_value(None, input.clone(), &options).unwrap();
     assert_eq!(output, input);
     assert_eq!(mask.shape, shape);
     assert!(mask.is_empty());
@@ -77,8 +77,8 @@ fn scalar_mask_catalog_storage_matches_live_runtime_fact() {
     };
     let inferred =
         runmat_builtins::infer_catalog_call(&runmat_builtins::FILLMISSING_CATALOG_ENTRY, &request);
-    let options = FillOptions::parse(&[method, replacement]).unwrap();
-    let (_, mask) = super::super::filling::fill_missing_value(input, &options).unwrap();
+    let options = FillOptions::parse(vec![method, replacement]).unwrap();
+    let (_, mask) = super::super::filling::fill_missing_value(None, input, &options).unwrap();
     let live = crate::value_fact::value_fact(&Value::LogicalArray(mask));
     assert_eq!(inferred.outputs[1].kind, live.kind);
     assert_eq!(inferred.outputs[1].storage, live.storage);
@@ -166,7 +166,7 @@ fn fillmissing_typed_integer_tensor_preserves_storage_and_reports_no_missing() {
     let expected = IntegerStorage::I32(vec![10, 20, 30]);
     let input = Tensor::new_integer(expected.clone(), vec![3, 1]).expect("integer tensor");
 
-    let options = FillOptions::parse(&[Value::from("constant"), Value::Num(0.0)]).unwrap();
+    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(0.0)]).unwrap();
     let result = fill_missing_tensor(input, &options).unwrap();
 
     match result {
@@ -244,8 +244,8 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
             shape.clone(),
         )
         .unwrap();
-        let options = FillOptions::parse(&[Value::from(method), Value::Num(3.0)]).unwrap();
-        let (output, mask) = fill_missing_string_array(input, &options).unwrap();
+        let options = FillOptions::parse(vec![Value::from(method), Value::Num(3.0)]).unwrap();
+        let (output, mask) = fill_missing_string_array(None, input, &options).unwrap();
         let Value::StringArray(output) = output else {
             panic!("expected string array")
         };
@@ -257,11 +257,98 @@ fn fillmissing_text_neighbors_preserve_nd_lines_and_mask_shape() {
         assert_eq!(mask.shape, shape);
         assert_eq!(mask.data, vec![0, 0, 1, 1, 0, 0]);
     }
+
+    use crate::context::host_effect::ManagedHostEffectLedger;
+    use crate::context::{
+        ParallelCapability, RuntimeContext, RuntimeParallelResources, RuntimeParallelService,
+        RuntimeServicePorts,
+    };
+    use std::rc::Rc;
+    struct ManagedParallel(ManagedHostEffectLedger);
+    impl RuntimeParallelService for ManagedParallel {
+        fn supports(&self, _: ParallelCapability) -> bool {
+            false
+        }
+        fn placement_resources(&self) -> RuntimeParallelResources {
+            let snapshot = self.0.snapshot();
+            RuntimeParallelResources {
+                memory_available_bytes: Some(snapshot.free_bytes()),
+                epoch: snapshot.epoch,
+                ..RuntimeParallelResources::default()
+            }
+        }
+        fn managed_host_effect_ledger(&self) -> Option<ManagedHostEffectLedger> {
+            Some(self.0.clone())
+        }
+    }
+    let ledger = ManagedHostEffectLedger::new(1 << 20);
+    let context = RuntimeContext::new(Rc::new(crate::execution::RuntimeExecutionService::new()))
+        .with_service_ports(
+            RuntimeServicePorts::default().with_parallel(Rc::new(ManagedParallel(ledger.clone()))),
+        );
+    let input = StringArray::new(
+        vec![
+            "a".into(),
+            "b".into(),
+            MISSING_TEXT.into(),
+            MISSING_TEXT.into(),
+            "c".into(),
+            "d".into(),
+        ],
+        shape.clone(),
+    )
+    .unwrap();
+    let options = FillOptions::parse(vec![Value::from("nearest"), Value::Num(3.0)]).unwrap();
+    let (output, mask) = fill_missing_string_array(Some(&context), input, &options).unwrap();
+    let Value::StringArray(output) = output else {
+        panic!("expected string array")
+    };
+    assert_eq!(
+        output
+            .data
+            .iter()
+            .map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b", "a", "b", "c", "d"]
+    );
+    assert!(output.data.iter().all(|value| value.has_retained_claim()));
+    assert_eq!(mask.data, vec![0, 0, 1, 1, 0, 0]);
+    assert!(ledger.snapshot().live_reserved_bytes > 0);
+    let unique_outer = output.data.as_slice().as_ptr();
+    let indicator = super::super::standardize::indicator_set(&Value::from("a")).unwrap();
+    let Value::StringArray(unique) = super::super::standardize::standardize_missing_value(
+        Some(&context),
+        Value::StringArray(output),
+        &indicator,
+    )
+    .unwrap() else {
+        panic!("expected standardized array")
+    };
+    assert_eq!(unique.data.as_slice().as_ptr(), unique_outer);
+    assert_eq!(unique.data[0].as_str(), MISSING_TEXT);
+    let alias = unique.clone();
+    let shared_outer = unique.data.as_slice().as_ptr();
+    let indicator = super::super::standardize::indicator_set(&Value::from("b")).unwrap();
+    let Value::StringArray(replaced) = super::super::standardize::standardize_missing_value(
+        Some(&context),
+        Value::StringArray(unique),
+        &indicator,
+    )
+    .unwrap() else {
+        panic!("expected shared replacement")
+    };
+    assert_ne!(replaced.data.as_slice().as_ptr(), shared_outer);
+    assert_eq!(alias.data[1].as_str(), "b");
+    assert_eq!(replaced.data[1].as_str(), MISSING_TEXT);
+    drop(replaced);
+    drop(alias);
+    drop(mask);
+    assert_eq!(ledger.snapshot().live_reserved_bytes, 0);
 }
 
 #[test]
 fn fillmissing_nearest_uses_original_neighbors_and_previous_on_ties() {
-    let options = FillOptions::parse(&[Value::from("nearest")]).unwrap();
+    let options = FillOptions::parse(vec![Value::from("nearest")]).unwrap();
     for shape in [vec![7, 1], vec![1, 7]] {
         let input = Tensor::new(
             vec![f64::NAN, 1.0, f64::NAN, f64::NAN, f64::NAN, 5.0, f64::NAN],
@@ -292,7 +379,7 @@ fn fillmissing_nearest_uses_original_neighbors_and_previous_on_ties() {
 
 #[test]
 fn fillmissing_integer_noop_preserves_nd_and_empty_mask_shapes() {
-    let options = FillOptions::parse(&[Value::from("constant"), Value::Num(0.0)]).unwrap();
+    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(0.0)]).unwrap();
     for shape in [vec![2, 1, 2], vec![1, 1, 4], vec![2, 0, 3]] {
         let count = shape.iter().product();
         let storage = IntegerStorage::U64(vec![u64::MAX; count]);
@@ -312,7 +399,7 @@ fn fillmissing_integer_noop_preserves_nd_and_empty_mask_shapes() {
 fn fillmissing_constant_preserves_nd_values_and_mask_shape() {
     let shape = vec![2, 1, 2];
     let input = Tensor::new(vec![1.0, f64::NAN, f64::NAN, 4.0], shape.clone()).unwrap();
-    let options = FillOptions::parse(&[Value::from("constant"), Value::Num(7.0)]).unwrap();
+    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(7.0)]).unwrap();
     let (output, mask) = fill_missing_tensor(input, &options).unwrap();
     let Value::Tensor(output) = output else {
         panic!("floating input must retain its tensor carrier");
@@ -364,7 +451,7 @@ fn fillmissing_numeric_methods_traverse_each_matrix_and_nd_line_independently() 
                 expected.extend([base, base + delta, base + 2.0]);
                 expected_mask.extend([0, 1, 0]);
             }
-            let options = FillOptions::parse(&[Value::from(method)]).unwrap();
+            let options = FillOptions::parse(vec![Value::from(method)]).unwrap();
             let (output, mask) =
                 fill_missing_tensor(Tensor::new(input, shape.clone()).unwrap(), &options).unwrap();
             let Value::Tensor(output) = output else {
@@ -375,7 +462,7 @@ fn fillmissing_numeric_methods_traverse_each_matrix_and_nd_line_independently() 
             assert_eq!(mask.shape, shape);
             assert_eq!(mask.data, expected_mask);
         }
-        let options = FillOptions::parse(&[Value::from(method), Value::Num(3.0)]).unwrap();
+        let options = FillOptions::parse(vec![Value::from(method), Value::Num(3.0)]).unwrap();
         let shape = vec![2, 2, 3];
         let input = vec![
             1.0,
@@ -494,14 +581,16 @@ fn fillmissing_rejects_complex_and_sparse_arrays_instead_of_aggregate_replacemen
     let complex = Value::ComplexTensor(
         runmat_value::ComplexTensor::new(vec![(f64::NAN, 0.0)], vec![1, 1]).unwrap(),
     );
-    let options = FillOptions::parse(&[Value::from("constant"), Value::Num(0.0)]).unwrap();
-    let error = fill_missing_value(complex, &options).expect_err("complex arrays are unsupported");
+    let options = FillOptions::parse(vec![Value::from("constant"), Value::Num(0.0)]).unwrap();
+    let error =
+        fill_missing_value(None, complex, &options).expect_err("complex arrays are unsupported");
     assert!(error.message().contains("complex arrays are not supported"));
 
     let sparse = Value::SparseTensor(
         runmat_value::SparseTensor::new(2, 1, vec![0, 1], vec![0], vec![f64::NAN]).unwrap(),
     );
-    let error = fill_missing_value(sparse, &options).expect_err("sparse arrays are unsupported");
+    let error =
+        fill_missing_value(None, sparse, &options).expect_err("sparse arrays are unsupported");
     assert!(error.message().contains("sparse arrays are not supported"));
 }
 

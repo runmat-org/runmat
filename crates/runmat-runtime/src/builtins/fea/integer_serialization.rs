@@ -141,7 +141,14 @@ pub(in crate::builtins::fea) fn promote_named_integer_fields(
             })?;
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
-            for (target, child) in cell.data.iter_mut().zip(items) {
+            let values = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA integer promotion requires a unique cell backing",
+                )
+            })?;
+            for (target, child) in values.iter_mut().zip(items) {
                 promote_named_integer_fields(
                     builtin,
                     error,
@@ -351,7 +358,14 @@ pub(in crate::builtins::fea) fn promote_json_integer_kinds(
             }
         }
         (Value::Cell(cell), serde_json::Value::Array(items)) => {
-            for (target, child) in cell.data.iter_mut().zip(items) {
+            let values = cell.data.try_as_mut_slice_unique().ok_or_else(|| {
+                builtin_error(
+                    builtin,
+                    error,
+                    "FEA integer promotion requires a unique cell backing",
+                )
+            })?;
+            for (target, child) in values.iter_mut().zip(items) {
                 promote_json_integer_kinds(builtin, error, target, child)?;
             }
         }
@@ -444,7 +458,7 @@ pub(in crate::builtins::fea) fn serializable_to_object_value<T: Serialize>(
     if let Some(property) = hidden_json_property {
         object
             .properties
-            .insert(property.to_string(), Value::String(json.to_string()));
+            .insert(property.to_string(), Value::String(json.to_string().into()));
     }
     Ok(object)
 }

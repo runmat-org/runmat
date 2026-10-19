@@ -77,18 +77,21 @@ impl RunMatSession {
             #[cfg(not(target_arch = "wasm32"))]
             mex_runtime: std::rc::Rc::clone(&self.mex_runtime),
         };
+        let class_environment = dynamic_environment.clone();
+        let class_resolver: std::rc::Rc<runmat_runtime::context::CurrentClassProductResolver> =
+            std::rc::Rc::new(move |runtime, class| {
+                Box::pin(super::dynamic::resolve_current_class_product(
+                    runtime,
+                    class,
+                    class_environment.clone(),
+                ))
+            });
+        self.runtime_context
+            .set_current_class_product_resolver(Some(class_resolver));
         let loader: std::rc::Rc<runmat_runtime::user_functions::DynamicFunctionLoader> =
             std::rc::Rc::new(
                 move |runtime, name, args, requested_outputs, phase, input_callsite| {
                     let environment = dynamic_environment.clone();
-                    let args = match runmat_runtime::execution::RootedValues::new(args) {
-                        Ok(args) => args,
-                        Err(error) => {
-                            return Box::pin(async move {
-                                std::ops::ControlFlow::Break(Err(error.into_runtime_error()))
-                            });
-                        }
-                    };
                     Box::pin(super::dynamic::load_dynamic_function(
                         runtime,
                         name,

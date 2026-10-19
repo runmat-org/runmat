@@ -130,7 +130,7 @@ fn render(
             st.insert("Type", Value::String("axes".into()));
             st.insert("Parent", Value::Num(handle.as_u32() as f64));
             st.insert("Position", figure_position_value(meta.position));
-            st.insert("Units", Value::String(meta.units.clone()));
+            st.insert("Units", Value::string(meta.units.clone()));
             st.insert(
                 "Children",
                 handles_value(vec![
@@ -180,12 +180,12 @@ fn render(
             );
             st.insert(
                 "DataAspectRatioMode",
-                Value::String(meta.data_aspect_ratio_mode.clone()),
+                Value::string(meta.data_aspect_ratio_mode.clone()),
             );
             st.insert("Colorbar", Value::Bool(meta.colorbar_enabled));
             st.insert(
                 "Colormap",
-                Value::String(format!("{:?}", meta.colormap).to_ascii_lowercase()),
+                Value::string(format!("{:?}", meta.colormap).to_ascii_lowercase()),
             );
             st.insert("ColorLimits", displayed_color()?);
             st.insert("XLim", displayed_axis(AxisLimitAxis::X)?);
@@ -236,11 +236,11 @@ fn render(
             );
             st.insert(
                 "XTickLabelFormat",
-                Value::String(tick_format_or_default(meta.x_tick_format.as_deref())),
+                Value::string(tick_format_or_default(meta.x_tick_format.as_deref())),
             );
             st.insert(
                 "YTickLabelFormat",
-                Value::String(tick_format_or_default(meta.y_tick_format.as_deref())),
+                Value::string(tick_format_or_default(meta.y_tick_format.as_deref())),
             );
             st.insert(
                 "XTickLabelRotation",
@@ -263,7 +263,7 @@ fn render(
                 "YScale",
                 Value::String(if meta.y_log { "log" } else { "linear" }.into()),
             );
-            st.insert("YAxisLocation", Value::String(meta.y_axis_location.clone()));
+            st.insert("YAxisLocation", Value::string(meta.y_axis_location.clone()));
             st.insert("YDir", Value::String(meta.y_direction.as_str().into()));
             Ok(Value::Struct(st))
         }
@@ -320,9 +320,9 @@ fn render(
         Some("box") => Ok(Value::Bool(meta.box_enabled)),
         Some("axisequal") => Ok(Value::Bool(meta.axis_equal)),
         Some("dataaspectratio") => Ok(tensor_from_vec(meta.data_aspect_ratio.to_vec())),
-        Some("dataaspectratiomode") => Ok(Value::String(meta.data_aspect_ratio_mode.clone())),
+        Some("dataaspectratiomode") => Ok(Value::string(meta.data_aspect_ratio_mode.clone())),
         Some("colorbar") => Ok(Value::Bool(meta.colorbar_enabled)),
-        Some("colormap") => Ok(Value::String(
+        Some("colormap") => Ok(Value::string(
             format!("{:?}", meta.colormap).to_ascii_lowercase(),
         )),
         Some("colorlimits") => displayed_color(),
@@ -354,10 +354,10 @@ fn render(
         ))),
         Some("xticklabelmode") => Ok(tick_mode_value(meta.x_tick_labels.as_ref())),
         Some("yticklabelmode") => Ok(tick_mode_value(meta.y_tick_labels.as_ref())),
-        Some("xticklabelformat") => Ok(Value::String(tick_format_or_default(
+        Some("xticklabelformat") => Ok(Value::string(tick_format_or_default(
             meta.x_tick_format.as_deref(),
         ))),
-        Some("yticklabelformat") => Ok(Value::String(tick_format_or_default(
+        Some("yticklabelformat") => Ok(Value::string(tick_format_or_default(
             meta.y_tick_format.as_deref(),
         ))),
         Some("xticklabelrotation") => Ok(Value::Num(meta.x_tick_label_rotation.unwrap_or(0.0))),
@@ -370,12 +370,12 @@ fn render(
         Some("yscale") => Ok(Value::String(
             if meta.y_log { "log" } else { "linear" }.into(),
         )),
-        Some("yaxislocation") => Ok(Value::String(meta.y_axis_location)),
+        Some("yaxislocation") => Ok(Value::string(meta.y_axis_location)),
         Some("ydir") => Ok(Value::String(meta.y_direction.as_str().into())),
         Some("type") => Ok(Value::String("axes".into())),
         Some("parent") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("position") => Ok(figure_position_value(meta.position)),
-        Some("units") => Ok(Value::String(meta.units)),
+        Some("units") => Ok(Value::string(meta.units)),
         Some("legendvisible") => Ok(Value::Bool(meta.legend_enabled)),
         Some("children") => Ok(handles_value(vec![
             super::super::state::encode_plot_object_handle(

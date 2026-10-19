@@ -43,7 +43,7 @@ fn string_array(array: &StringArray) -> crate::BuiltinResult<Vec<String>> {
         .enumerate()
         .map(|(index, name)| {
             require_nonempty(
-                name.clone(),
+                name.to_string(),
                 Some(format!("string array element {}", index + 1)),
             )
         })

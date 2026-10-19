@@ -281,7 +281,7 @@ pub(in crate::builtins::io::data) fn attrs_to_struct(
 
 pub(in crate::builtins::io::data) fn value_to_json(value: &Value) -> serde_json::Value {
     match value {
-        Value::String(s) => serde_json::Value::String(s.clone()),
+        Value::String(s) => serde_json::Value::String(s.as_str().to_owned()),
         Value::CharArray(chars) => serde_json::Value::String(chars.data.iter().collect::<String>()),
         Value::Num(n) => serde_json::json!(n),
         Value::Int(i) => int_value_to_json(i),
@@ -302,11 +302,11 @@ pub(in crate::builtins::io::data) fn json_to_value(value: &serde_json::Value) ->
                 Value::Num(n.as_f64().unwrap_or_default())
             }
         }
-        serde_json::Value::String(s) => Value::String(s.clone()),
+        serde_json::Value::String(s) => Value::string(s.clone()),
         serde_json::Value::Array(arr) => {
             let vals = arr.iter().map(json_to_value).collect::<Vec<_>>();
             crate::make_cell(vals.clone(), 1, vals.len())
-                .unwrap_or_else(|_| Value::String("<invalid-array>".to_string()))
+                .unwrap_or_else(|_| Value::string("<invalid-array>".to_string()))
         }
         serde_json::Value::Object(map) => {
             let mut s = StructValue::new();
@@ -315,6 +315,6 @@ pub(in crate::builtins::io::data) fn json_to_value(value: &serde_json::Value) ->
             }
             Value::Struct(s)
         }
-        serde_json::Value::Null => Value::String("".to_string()),
+        serde_json::Value::Null => Value::string("".to_string()),
     }
 }

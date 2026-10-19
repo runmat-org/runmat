@@ -46,8 +46,8 @@ pub fn load_member(
                 .and_then(|snapshot| pool_property(snapshot, property)),
         ),
         Value::Job(handle) => Some(match property.to_ascii_lowercase().as_str() {
-            "id" => Ok(Value::String(handle.id.to_string())),
-            "runid" => Ok(Value::String(handle.run_id.to_string())),
+            "id" => Ok(Value::string(handle.id.to_string())),
+            "runid" => Ok(Value::string(handle.run_id.to_string())),
             "numoutputarguments" => Ok(Value::Num(f64::from(handle.outputs.requested_outputs))),
             _ => Err(unknown_property("job", property)),
         }),
@@ -62,7 +62,7 @@ fn execution_property(
     property: &str,
 ) -> Result<Value, RuntimeError> {
     match property.to_ascii_lowercase().as_str() {
-        "id" => Ok(Value::String(id)),
+        "id" => Ok(Value::string(id)),
         "state" => Ok(Value::String(state_name(snapshot.state).into())),
         "numoutputarguments" => Ok(Value::Num(f64::from(snapshot.outputs.requested_outputs))),
         "read" => Ok(Value::Bool(snapshot.read)),
@@ -72,16 +72,16 @@ fn execution_property(
 
 fn pool_property(snapshot: PoolSnapshot, property: &str) -> Result<Value, RuntimeError> {
     match property.to_ascii_lowercase().as_str() {
-        "id" => Ok(Value::String(snapshot.handle.id.to_string())),
+        "id" => Ok(Value::string(snapshot.handle.id.to_string())),
         "numworkers" => Ok(Value::Num(f64::from(snapshot.workers))),
         "connected" => Ok(Value::Bool(matches!(
             snapshot.state,
             runmat_execution::PoolState::Ready | runmat_execution::PoolState::Resizing
         ))),
-        "state" => Ok(Value::String(
+        "state" => Ok(Value::string(
             format!("{:?}", snapshot.state).to_ascii_lowercase(),
         )),
-        "backend" => Ok(Value::String(
+        "backend" => Ok(Value::string(
             format!("{:?}", snapshot.backend).to_ascii_lowercase(),
         )),
         _ => Err(unknown_property("pool", property)),

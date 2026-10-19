@@ -23,11 +23,11 @@ pub(super) fn spec_to_object(spec: InterpolantSpec) -> BuiltinResult<ObjectInsta
         .insert(VALUES.to_string(), Value::Tensor(spec.values));
     object.properties.insert(
         METHOD.to_string(),
-        Value::String(interp_method_name(spec.method).to_string()),
+        Value::string(interp_method_name(spec.method).to_string()),
     );
     object.properties.insert(
         EXTRAPOLATION_METHOD.to_string(),
-        Value::String(extrap_method_name(spec.extrapolation).to_string()),
+        Value::string(extrap_method_name(spec.extrapolation).to_string()),
     );
     Ok(object)
 }
@@ -48,7 +48,6 @@ pub(super) fn object_to_spec(value: &Value) -> BuiltinResult<InterpolantSpec> {
             )?;
             cell.data
                 .iter()
-                .cloned()
                 .map(|value| numeric_vector(value, GRID_VECTORS))
                 .collect::<BuiltinResult<Vec<_>>>()?
         }
@@ -110,7 +109,10 @@ pub(super) fn gridded_member(obj: Value, payload: Value) -> BuiltinResult<Value>
 
 pub(super) fn payload_to_args(payload: Value) -> BuiltinResult<Vec<Value>> {
     match payload {
-        Value::Cell(cell) => Ok(cell.data),
+        Value::Cell(cell) => match cell.data.try_into_owned() {
+            Ok(values) => Ok(values.into_iter().collect()),
+            Err(shared) => Ok(shared.iter().cloned().collect()),
+        },
         other => Err(invalid(format!(
             "indexing payload must be a cell array, got {other:?}"
         ))),

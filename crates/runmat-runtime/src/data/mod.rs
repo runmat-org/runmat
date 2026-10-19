@@ -1944,14 +1944,14 @@ pub fn dataset_object(path: &str, manifest: &DataManifest, authority: ForeignRef
     let mut obj = ObjectInstance::new(runmat_builtins::DATASET_CLASS.owned())
         .with_dataset_authority(authority);
     obj.properties
-        .insert("__data_path".to_string(), Value::String(path.to_string()));
+        .insert("__data_path".to_string(), Value::string(path.to_string()));
     obj.properties.insert(
         "__data_id".to_string(),
-        Value::String(manifest.dataset_id.clone()),
+        Value::string(manifest.dataset_id.clone()),
     );
     obj.properties.insert(
         "__data_version".to_string(),
-        Value::String(manifest_version_token(manifest)),
+        Value::string(manifest_version_token(manifest)),
     );
     Value::Object(obj)
 }
@@ -1981,11 +1981,11 @@ pub fn array_object(dataset_path: &str, array_name: &str, authority: ForeignRef)
         .with_dataset_authority(authority);
     obj.properties.insert(
         "__data_path".to_string(),
-        Value::String(dataset_path.to_string()),
+        Value::string(dataset_path.to_string()),
     );
     obj.properties.insert(
         "__array_name".to_string(),
-        Value::String(array_name.to_string()),
+        Value::string(array_name.to_string()),
     );
     Value::Object(obj)
 }
@@ -1995,10 +1995,10 @@ pub fn transaction_object(dataset_path: &str, tx_id: &str, authority: ForeignRef
         .with_dataset_authority(authority);
     obj.properties.insert(
         "__data_path".to_string(),
-        Value::String(dataset_path.to_string()),
+        Value::string(dataset_path.to_string()),
     );
     obj.properties
-        .insert("__tx_id".to_string(), Value::String(tx_id.to_string()));
+        .insert("__tx_id".to_string(), Value::string(tx_id.to_string()));
     Value::Object(obj)
 }
 

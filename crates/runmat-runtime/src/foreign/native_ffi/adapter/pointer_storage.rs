@@ -1,7 +1,10 @@
 use super::*;
 
 impl NativeFfiAdapter {
-    pub(super) fn pointer(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn pointer(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if arguments.len() > 2 {
             return Err(invalid_call(
                 "native FFI pointer expects an optional pointer type and initial value",
@@ -110,7 +113,10 @@ impl NativeFfiAdapter {
         Ok(Value::Foreign(reference))
     }
 
-    pub(super) fn structure(&self, arguments: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn structure(
+        &self,
+        arguments: &(impl InvocationArguments + ?Sized),
+    ) -> Result<Value, RuntimeError> {
         if !(1..=2).contains(&arguments.len()) {
             return Err(invalid_call(
                 "native FFI structure expects a declared structure type and optional value",

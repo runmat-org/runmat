@@ -228,8 +228,10 @@ fn logical_tabulate(name: &str, data: Vec<u8>) -> BuiltinResult<Value> {
 
 pub(super) fn label_for_value(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         Value::CharArray(chars) if chars.rows == 1 => Some(chars.data.iter().collect()),
         Value::Num(num) => Some(num.to_string()),
         Value::Int(int) => Some(int.decimal_string()),
@@ -272,10 +274,12 @@ fn tabulate_value(name: &str, value: Value) -> BuiltinResult<Value> {
         Value::Num(_) | Value::Bool(_) => tensor::value_into_tensor_for(name, value)
             .map_err(|err| descriptive_error(name, format!("{name}: {err}")))
             .and_then(|tensor| numeric_tabulate(name, tensor)),
-        Value::String(text) => string_tabulate(name, [text]),
-        Value::StringArray(array) => string_tabulate(name, array.data),
+        Value::String(text) => string_tabulate(name, [text.as_str().to_owned()]),
+        Value::StringArray(array) => {
+            string_tabulate(name, array.data.iter().map(|text| text.as_str().to_owned()))
+        }
         Value::CharArray(chars) if chars.rows == 1 => {
-            string_tabulate(name, chars.data.into_iter().map(|ch| ch.to_string()))
+            string_tabulate(name, chars.data.into_char_iter().map(|ch| ch.to_string()))
         }
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data.len());

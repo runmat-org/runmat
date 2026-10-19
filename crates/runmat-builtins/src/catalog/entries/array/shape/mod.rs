@@ -20,7 +20,12 @@ mod kron;
 mod tril;
 mod triu;
 mod shiftdim;
+mod cat;
+mod blkdiag;
+mod repelem;
 
+pub use self::blkdiag::*;
+pub use self::cat::*;
 pub use self::circshift::*;
 pub use self::concatenation::*;
 pub use self::diag::*;
@@ -30,6 +35,7 @@ pub use self::flipud::*;
 pub use self::ipermute::*;
 pub use self::kron::*;
 pub use self::permute::*;
+pub use self::repelem::*;
 pub use self::repmat::*;
 pub use self::reshape::*;
 pub use self::rot90::*;
@@ -60,4 +66,7 @@ pub(super) fn extend_entries(values: &mut Vec<&'static crate::BuiltinCatalogEntr
     values.extend(tril::ENTRIES.iter().copied());
     values.extend(triu::ENTRIES.iter().copied());
     values.extend(shiftdim::ENTRIES.iter().copied());
+    values.extend(cat::ENTRIES.iter().copied());
+    values.extend(blkdiag::ENTRIES.iter().copied());
+    values.extend(repelem::ENTRIES.iter().copied());
 }

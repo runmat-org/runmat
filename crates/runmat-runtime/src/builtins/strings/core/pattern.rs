@@ -4,15 +4,20 @@ use runmat_builtins::{PATTERN_DESCRIPTOR, PATTERN_ERROR_TOO_MANY_OUTPUTS};
 use runmat_macros::runtime_builtin;
 use runmat_value::Value;
 
-use crate::builtins::strings::core::compat::{compat_error, pattern_object, scalar_text};
+use crate::builtins::strings::common::{scalar_text_input, text_input_admission};
+use crate::builtins::strings::core::compat::{compat_error, pattern_object};
 use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "pattern",
     binding_variant = "default",
+    context = true,
     builtin_path = "crate::builtins::strings::core::pattern"
 )]
-pub(crate) async fn pattern_builtin(text: Value) -> BuiltinResult<Value> {
+pub(crate) async fn pattern_builtin(
+    runtime: Option<crate::context::RuntimeContext>,
+    text: Value,
+) -> BuiltinResult<Value> {
     crate::output_count::validate_fixed_outputs(
         &PATTERN_DESCRIPTOR,
         &PATTERN_ERROR_TOO_MANY_OUTPUTS,
@@ -24,7 +29,9 @@ pub(crate) async fn pattern_builtin(text: Value) -> BuiltinResult<Value> {
             "pattern: expected a host text scalar",
         ));
     }
-    Ok(pattern_object(&regex::escape(&scalar_text(
-        &text, "pattern",
-    )?)))
+    let text = scalar_text_input(&text, runtime.as_ref(), |runtime, cause| {
+        text_input_admission("pattern", runtime, cause)
+    })?
+    .ok_or_else(|| compat_error("pattern", "pattern: expected a text scalar"))?;
+    Ok(pattern_object(&regex::escape(text.as_str())))
 }

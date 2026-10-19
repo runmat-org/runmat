@@ -2,6 +2,8 @@ use super::*;
 use crate::builtins::common::integer_conversion::IntegerClassExt;
 use runmat_value::{IntValue, IntegerStorage, NumericScalar};
 
+mod owned;
+
 pub(in crate::builtins::table) fn dictionary_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
     let (mut keys, mut values, keys_are_cells, values_are_cells) = match args.as_slice() {
         [] => (Vec::new(), Vec::new(), false, false),
@@ -139,71 +141,29 @@ pub(in crate::builtins::table) fn dictionary_lookup(
     dictionary_lookup_output(out, query_shape)
 }
 
+#[cfg(test)]
 pub(in crate::builtins::table) fn dictionary_assign(
-    mut object: ObjectInstance,
+    object: ObjectInstance,
     payload: &Value,
     rhs: Value,
 ) -> BuiltinResult<Value> {
-    let (query_keys, query_shape) = dictionary_selector_values(payload)?;
-    let mut keys = dictionary_cells(&object, "Keys")?.clone();
-    let mut values = dictionary_cells(&object, "Values")?.clone();
-    let query_keys = convert_queries_to_key_class(&keys, query_keys)?;
-    if option_value_is_empty(&rhs) {
-        for query in query_keys {
-            if let Some(index) = keys
-                .data
-                .iter()
-                .position(|key| dictionary_keys_equal(key, &query))
-            {
-                keys.data.remove(index);
-                values.data.remove(index);
-            }
-        }
-    } else {
-        let mut rhs_values = value_elements(&rhs)?;
-        if rhs_values.len() == 1 && query_keys.len() != 1 {
-            rhs_values.resize(query_keys.len(), rhs_values[0].clone());
-        } else if rhs_values.len() != query_keys.len() {
-            return Err(invalid_index(
-                "dictionary: assignment keys and values must have the same size unless values is scalar",
-            ));
-        } else if rhs_values.len() > 1 && dictionary_element_shape(&rhs) != query_shape {
-            return Err(invalid_index(
-                "dictionary: non-scalar assignment values must have the same size as the keys",
-            ));
-        }
-        normalize_to_existing_class(&values.data, &mut rhs_values)?;
-        for (query, value) in query_keys.into_iter().zip(rhs_values) {
-            if let Some(index) = keys
-                .data
-                .iter()
-                .position(|key| dictionary_keys_equal(key, &query))
-            {
-                values.data[index] = value;
-            } else {
-                keys.data.push(query);
-                values.data.push(value);
-            }
-        }
-    }
-    keys.cols = keys.data.len();
-    keys.rows = usize::from(!keys.data.is_empty());
-    values.cols = values.data.len();
-    values.rows = usize::from(!values.data.is_empty());
-    object
-        .properties
-        .insert("Keys".to_string(), Value::Cell(keys));
-    object
-        .properties
-        .insert("Values".to_string(), Value::Cell(values));
-    Ok(Value::Object(object))
+    owned::assign(None, object, payload, rhs)
+}
+
+pub(in crate::builtins::table) fn dictionary_assign_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    object: ObjectInstance,
+    payload: &Value,
+    rhs: Value,
+) -> BuiltinResult<Value> {
+    owned::assign(runtime, object, payload, rhs)
 }
 
 fn dictionary_element_shape(value: &Value) -> Vec<usize> {
     match value {
         Value::Tensor(tensor) => tensor.shape().to_vec(),
         Value::LogicalArray(array) => array.shape.to_vec(),
-        Value::StringArray(array) => array.shape.clone(),
+        Value::StringArray(array) => array.shape.as_slice().to_vec(),
         Value::Cell(array) => vec![array.rows, array.cols],
         Value::CharArray(array) => vec![array.rows, 1],
         _ => vec![1, 1],
@@ -253,10 +213,13 @@ fn normalize_to_existing_class(existing: &[Value], values: &mut [Value]) -> Buil
         }
         Value::String(_) => {
             for value in values {
+                if matches!(value, Value::String(_)) {
+                    continue;
+                }
                 *value = match value {
-                    Value::String(value) => Value::String(value.clone()),
+                    Value::String(_) => unreachable!("preserved existing string above"),
                     Value::CharArray(array) if array.rows == 1 => {
-                        Value::String(array.data.iter().collect())
+                        Value::string(array.data.iter().collect::<String>())
                     }
                     other => {
                         return Err(invalid_argument(format!(
@@ -355,7 +318,7 @@ fn dictionary_lookup_output(mut values: Vec<Value>, shape: Vec<usize>) -> Builti
                     _ => unreachable!("validated string dictionary values"),
                 })
                 .collect();
-            StringArray::new(data, shape)
+            StringArray::from_texts_unbounded(data, shape)
                 .map(Value::StringArray)
                 .map_err(invalid_variable)
         }
@@ -400,7 +363,7 @@ pub(in crate::builtins::table) fn dictionary_keys_equal(left: &Value, right: &Va
         (Value::String(a), Value::CharArray(b)) | (Value::CharArray(b), Value::String(a))
             if b.rows == 1 =>
         {
-            b.data.iter().collect::<String>() == *a
+            a.chars().eq(b.data.iter().copied())
         }
         (Value::Num(a), Value::Num(b)) => a == b,
         (Value::Int(a), Value::Int(b)) => a == b,
@@ -411,7 +374,7 @@ pub(in crate::builtins::table) fn dictionary_keys_equal(left: &Value, right: &Va
 
 pub(in crate::builtins::table) fn value_elements(value: &Value) -> BuiltinResult<Vec<Value>> {
     match value {
-        Value::Cell(cell) => Ok(cell.data.clone()),
+        Value::Cell(cell) => Ok(cell.data.iter().cloned().collect()),
         Value::StringArray(array) => Ok(array.data.iter().cloned().map(Value::String).collect()),
         Value::Tensor(tensor) => Ok((0..tensor.len())
             .map(|index| {
@@ -427,7 +390,7 @@ pub(in crate::builtins::table) fn value_elements(value: &Value) -> BuiltinResult
             .iter()
             .map(|flag| Value::Bool(*flag != 0))
             .collect()),
-        Value::CharArray(array) => Ok(char_rows(array).into_iter().map(Value::String).collect()),
+        Value::CharArray(array) => Ok(char_rows(array).into_iter().map(Value::string).collect()),
         other => Ok(vec![other.clone()]),
     }
 }

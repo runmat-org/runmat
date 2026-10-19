@@ -148,7 +148,7 @@ pub(crate) mod tests {
 
     fn char_value_to_string(value: Value) -> String {
         match value {
-            Value::CharArray(ca) => ca.data.into_iter().collect(),
+            Value::CharArray(ca) => ca.data.into_char_iter().collect(),
             other => panic!("expected char output, got {other:?}"),
         }
     }

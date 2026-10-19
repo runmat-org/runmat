@@ -186,8 +186,8 @@ pub(super) async fn dispatch(
                     let selected: Vec<usize> =
                         plan.indices.iter().map(|idx| (*idx as usize) + 1).collect();
                     stack.try_push(
-                        runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy(
-                            ca, &selected, &rhs, delete,
+                        runmat_runtime::object::cell::assign_cell_paren_linear_indices_with_policy_in_context(
+                            Some(runtime), ca, &selected, &rhs, delete,
                         )?,
                     )?;
                 }

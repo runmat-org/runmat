@@ -168,8 +168,30 @@ pub(super) fn grow_string_array(
 ) -> Result<(), RuntimeError> {
     let target_len = checked_shape_len(shape)?;
     if value.data.len() < target_len {
-        value.data.resize(target_len, String::new());
-        value.shape = shape.to_vec();
+        if value.data.is_exact() || value.shape.is_admitted() {
+            return Err(semantic_error(
+                "StringGrowthOwner",
+                "exact string growth requires a newly admitted collection and shape",
+            ));
+        }
+        value.data.make_unique_unbounded().map_err(|error| {
+            semantic_error(
+                "StringGrowthOwner",
+                format!("string growth owner unavailable: {error}"),
+            )
+        })?;
+        while value.data.len() < target_len {
+            value
+                .data
+                .try_push_unbounded(runmat_value::Utf8Text::default())
+                .map_err(|_| {
+                    semantic_error(
+                        "StringGrowthOwner",
+                        "string growth lost its unique ordinary owner",
+                    )
+                })?;
+        }
+        value.shape = shape.to_vec().into();
     }
     Ok(())
 }

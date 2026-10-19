@@ -30,6 +30,10 @@ mod sealed {
     pub trait Sealed {}
     impl<T: runmat_gc::Trace> Sealed for super::super::RootedResult<T> {}
     impl Sealed for Option<super::RootedValue> {}
+    impl<A: super::RootedCompletion, B: super::RootedCompletion> Sealed
+        for std::ops::ControlFlow<A, B>
+    {
+    }
     // VM stack mutations keep their Values in the instruction owner's rooted
     // stack; the continuation itself returns no unrooted Value.
     impl Sealed for () {}
@@ -39,6 +43,7 @@ mod sealed {
 pub(crate) trait RootedCompletion: sealed::Sealed {}
 impl<T: Trace> RootedCompletion for super::RootedResult<T> {}
 impl RootedCompletion for Option<RootedValue> {}
+impl<A: RootedCompletion, B: RootedCompletion> RootedCompletion for std::ops::ControlFlow<A, B> {}
 impl RootedCompletion for () {}
 
 pub(crate) type ContextualControlErrorMapper<E = RuntimeError> =

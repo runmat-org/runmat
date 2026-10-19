@@ -177,15 +177,24 @@ pub(crate) fn value_to_mx_for_interface_in_context(
         }
         Value::String(value) if interface == MxBoundaryInterface::CxxData => {
             record_host_copy(HostCopyReason::CharacterEncoding, value.len());
-            MxArray::string(vec![value.clone()], vec![1, 1]).map_err(MxConversionError::new)
+            MxArray::string(vec![value.as_str().to_owned()], vec![1, 1])
+                .map_err(MxConversionError::new)
         }
         Value::String(value) => string_to_mx(value),
         Value::StringArray(value) if interface == MxBoundaryInterface::CxxData => {
             record_host_copy(
                 HostCopyReason::CharacterEncoding,
-                value.data.iter().map(String::len).sum(),
+                value.data.iter().map(|text| text.len()).sum(),
             );
-            MxArray::string(value.data.clone(), value.shape.clone()).map_err(MxConversionError::new)
+            MxArray::string(
+                value
+                    .data
+                    .iter()
+                    .map(|text| text.as_str().to_owned())
+                    .collect(),
+                value.shape.to_vec(),
+            )
+            .map_err(MxConversionError::new)
         }
         Value::CharArray(value) => char_to_mx(value),
         Value::Tensor(value) => {
@@ -292,7 +301,7 @@ pub(crate) fn value_from_mx_in_context(
                 values.iter().map(String::len).sum(),
             );
             if values.len() == 1 {
-                Ok(Value::String(values[0].clone()))
+                Ok(Value::string(values[0].clone()))
             } else {
                 runmat_value::StringArray::new(values.clone(), value.shape().to_vec())
                     .map(Value::StringArray)
@@ -476,16 +485,15 @@ fn cell_to_mx(
     interface: MxBoundaryInterface,
     context: Option<&MxValueContext>,
 ) -> Result<MxArray, MxConversionError> {
-    let column_major = value.to_column_major();
-    let values = column_major
-        .iter()
+    let values = value
+        .iter_column_major()
         .map(|value| {
             value_to_mx_for_interface_in_context(value, mode, interface, context)
                 .map(Box::new)
                 .map(Some)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    MxArray::cell(values, value.shape.clone()).map_err(MxConversionError::new)
+    MxArray::cell(values, value.shape().to_vec()).map_err(MxConversionError::new)
 }
 
 fn struct_array_to_mx(

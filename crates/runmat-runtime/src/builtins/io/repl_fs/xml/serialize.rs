@@ -10,7 +10,7 @@ pub(super) async fn serialize_xml_value(
     match value {
         Value::String(text) => {
             cooperation.completed(text.len()).await?;
-            Ok(text.clone())
+            Ok(text.as_str().to_owned())
         }
         Value::StringArray(_) | Value::CharArray(_) => {
             let text = scalar_text(value, "xmlwrite", "document")?;

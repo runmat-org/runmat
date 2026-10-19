@@ -7,7 +7,7 @@ pub(super) fn cells(array: CellArray, dimensions: &[usize]) -> crate::BuiltinRes
     // Unlike scalar numeric arrays, an authoritative cell shape of [] has no
     // elements to partition. Explicit dimensions still use normal rank admission.
     if array.shape.is_empty() && dimensions.is_empty() {
-        return CellArray::new_with_shape(array.data, array.shape)
+        return CellArray::from_shared_storage(array.data, array.shape)
             .map(Value::Cell)
             .map_err(error::internal);
     }

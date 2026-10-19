@@ -111,7 +111,7 @@ fn initializer_closure_captures_keep_their_resident_lease_without_invocation() {
                 binding: None,
                 source_role: runmat_types::FunctionSourceRole::Unknown,
                 source_file: None,
-                captures: vec![Value::GpuTensor(source.clone())],
+                captures: vec![Value::GpuTensor(source.clone())].into(),
             },
         ));
         provider.reset_telemetry();

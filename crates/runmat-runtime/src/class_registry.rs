@@ -155,12 +155,14 @@ pub(crate) struct RuntimeClassState {
     static_values: HashMap<(ClassIdentity, String), Value>,
     enumerations: HashMap<ClassIdentity, HashSet<String>>,
     registrations: HashSet<StaticClassIdentity>,
+    builtin_issuances: HashMap<ClassIdentity, u64>,
 }
 
 impl Default for RuntimeClassState {
     fn default() -> Self {
         let classes = primitive_class_registry();
         let method_bindings = bind_class_methods(&classes, ClassRegistryRevision::Current(1));
+        let builtin_issuances = classes.keys().cloned().map(|class| (class, 1)).collect();
         Self {
             generation: 1,
             classes,
@@ -170,6 +172,7 @@ impl Default for RuntimeClassState {
             static_values: HashMap::new(),
             enumerations: HashMap::new(),
             registrations: HashSet::new(),
+            builtin_issuances,
         }
     }
 }
@@ -350,6 +353,20 @@ pub fn register_class(def: RuntimeClass) {
     register_class_with_modifiers(def, false, false);
 }
 
+/// Publish a runtime-owned class from a compile-time class identity. An
+/// ordinary/source re-registration of the same class invalidates this marker.
+pub fn register_builtin_class(identity: StaticClassIdentity, def: RuntimeClass) {
+    assert!(
+        def.name.is(identity),
+        "builtin class registration identity mismatch"
+    );
+    let class = def.name.clone();
+    register_class(def);
+    with_state_mut(|state| {
+        state.builtin_issuances.insert(class, state.generation);
+    });
+}
+
 pub fn register_class_with_sealed(def: RuntimeClass, is_sealed: bool) {
     register_class_with_modifiers(def, is_sealed, false);
 }
@@ -358,6 +375,7 @@ pub fn register_class_with_modifiers(def: RuntimeClass, is_sealed: bool, is_abst
     retained::note_default_roots(&def);
     let class_name = def.name.clone();
     with_state_mut(|state| {
+        state.builtin_issuances.remove(&class_name);
         state.generation = state.generation.wrapping_add(1).max(1);
         let bindings =
             bind_methods_for_class(&def, ClassRegistryRevision::Current(state.generation))
@@ -458,6 +476,95 @@ pub fn registered_constructor_identity(name: &str) -> Option<ClassIdentity> {
     let selected = selected_projection();
     with_state(|state| effective_class(state, selected.as_deref(), &identity).is_some())
         .then_some(identity)
+}
+
+/// A class installed through a compile-time builtin registration, rather
+/// than a source declaration discovered by a name-keyed registry lookup.
+#[derive(Clone, Debug)]
+pub struct BuiltinClassIssuance {
+    class: ClassIdentity,
+    revision: u64,
+    session: Option<crate::context::RuntimeContextLocalId>,
+}
+
+impl BuiltinClassIssuance {
+    pub fn class(&self) -> &ClassIdentity {
+        &self.class
+    }
+
+    pub fn is_current_in_context(&self, runtime: &crate::context::RuntimeContext) -> bool {
+        if self.session != Some(runtime.local_identity())
+            || runtime
+                .selected_class_projection()
+                .is_some_and(|selected| selected.classes.contains_key(&self.class))
+        {
+            return false;
+        }
+        let state = runtime.state().classes.borrow();
+        state.classes.contains_key(&self.class)
+            && state.builtin_issuances.get(&self.class) == Some(&self.revision)
+    }
+
+    pub fn is_current_ordinary(&self) -> bool {
+        if let Some(runtime) = crate::context::legacy::active() {
+            return self.is_current_in_context(&runtime);
+        }
+        if self.session.is_none() {
+            return FALLBACK_STATE.with(|state| {
+                let state = state.borrow();
+                state.classes.contains_key(&self.class)
+                    && state.builtin_issuances.get(&self.class) == Some(&self.revision)
+            });
+        }
+        false
+    }
+}
+
+pub fn issue_builtin_class_in_context(
+    runtime: &crate::context::RuntimeContext,
+    class: &ClassIdentity,
+) -> Option<BuiltinClassIssuance> {
+    if runtime
+        .selected_class_projection()
+        .is_some_and(|selected| selected.classes.contains_key(class))
+    {
+        return None;
+    }
+    let state = runtime.state().classes.borrow();
+    let revision = *state.builtin_issuances.get(class)?;
+    state
+        .classes
+        .contains_key(class)
+        .then(|| BuiltinClassIssuance {
+            class: class.clone(),
+            revision,
+            session: Some(runtime.local_identity()),
+        })
+}
+
+pub fn issue_builtin_class_ordinary(class: &ClassIdentity) -> Option<BuiltinClassIssuance> {
+    if let Some(runtime) = crate::context::legacy::active() {
+        return issue_builtin_class_in_context(&runtime, class);
+    }
+    FALLBACK_STATE.with(|state| {
+        let state = state.borrow();
+        let revision = *state.builtin_issuances.get(class)?;
+        state
+            .classes
+            .contains_key(class)
+            .then(|| BuiltinClassIssuance {
+                class: class.clone(),
+                revision,
+                session: None,
+            })
+    })
+}
+
+pub fn is_registered_builtin_class(class: &ClassIdentity) -> bool {
+    crate::context::legacy::active().map_or_else(
+        || issue_builtin_class_ordinary(class).is_some(),
+        |runtime| issue_builtin_class_in_context(&runtime, class).is_some(),
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -882,6 +989,47 @@ mod tests {
         };
         class.methods.insert(declaration.name.clone(), declaration);
         class
+    }
+
+    #[test]
+    fn builtin_class_issuance_is_session_owned_and_replacement_revokes_it() {
+        use crate::context::{RuntimeContext, RuntimeContextGuard};
+        use crate::execution::RuntimeExecutionService;
+        use std::rc::Rc;
+
+        const CLASS: StaticClassIdentity = StaticClassIdentity::new("ClassProductBuiltinFixture");
+        let class = CLASS.owned();
+        let first = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        let second = RuntimeContext::new(Rc::new(RuntimeExecutionService::new()));
+        {
+            let _scope = RuntimeContextGuard::enter(first.clone());
+            register_builtin_class(CLASS, empty_class(class.clone(), None));
+            let issued = issue_builtin_class_in_context(&first, &class).expect("issued builtin");
+            assert!(issued.is_current_in_context(&first));
+            assert!(!issued.is_current_in_context(&second));
+
+            register_class(empty_class(class.clone(), None));
+            assert!(!issued.is_current_in_context(&first));
+            register_builtin_class(CLASS, empty_class(class.clone(), None));
+            let replacement = issue_builtin_class_in_context(&first, &class).expect("reissued");
+            assert!(replacement.is_current_in_context(&first));
+            assert!(!issued.is_current_in_context(&first));
+            let shadow = prepare_selected_class_projection(vec![CheckedClassRegistration {
+                class: empty_class(class.clone(), None),
+                method_bindings: HashMap::new(),
+                is_sealed: false,
+                is_abstract: false,
+                enumerations: Vec::new(),
+            }])
+            .expect("selected shadow");
+            let selected = first.clone().with_selected_class_projection(shadow);
+            assert!(!replacement.is_current_in_context(&selected));
+            assert!(issue_builtin_class_in_context(&selected, &class).is_none());
+            register_checked_class(empty_class(class.clone(), None), false, false, Vec::new())
+                .expect("checked replacement");
+            assert!(!replacement.is_current_in_context(&first));
+        }
+        assert!(issue_builtin_class_in_context(&second, &class).is_none());
     }
 
     #[test]

@@ -6,6 +6,7 @@ use runmat_builtins::{
     STRJOIN_ROWWISE_EXTENSION,
 };
 use runmat_value::{CharArray, StringArray, Value};
+use std::borrow::Cow;
 
 #[runmat_macros::runtime_builtin(
     name = "strjoin",
@@ -25,7 +26,7 @@ pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Va
     let delimiter = rest
         .into_iter()
         .next()
-        .unwrap_or_else(|| Value::String(" ".into()));
+        .unwrap_or_else(|| Value::string(" "));
     // Preserve the established RunMat two-argument behavior, including column
     // vectors and char rows. Strict mode uses MATLAB vector semantics instead.
     if explicit
@@ -39,7 +40,7 @@ pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Va
             Value::Int(integer) => Some(integer.decimal_string()),
             Value::Num(number) => Some(number.to_string()),
             Value::Bool(logical) => Some(logical.to_string()),
-            _ => text_scalar(&delimiter),
+            _ => text_scalar(&delimiter).map(Cow::into_owned),
         };
         if let Some(delimiter) = legacy_delimiter {
             crate::compatibility::ensure_builtin_extension_enabled(
@@ -49,18 +50,24 @@ pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Va
             return rowwise(input, &delimiter);
         }
     }
-    let (items, character_output) = match input {
-        Value::String(text) => (vec![text], false),
-        Value::StringArray(array) if vector(&array.shape) => (array.data, false),
+    let (items, character_output) = match &input {
+        Value::String(text) => (vec![Cow::Borrowed(text.as_str())], false),
+        Value::StringArray(array) if vector(&array.shape) => (
+            array
+                .data
+                .iter()
+                .map(|text| Cow::Borrowed(text.as_str()))
+                .collect(),
+            false,
+        ),
         Value::Cell(cell) if vector(&cell.shape) => {
             let items = cell
-                .into_column_major()
-                .map_err(|_| error(&STRJOIN_ERROR_INVALID_INPUT))?
-                .into_iter()
+                .data
+                .iter()
                 .map(|item| match item {
-                    Value::CharArray(chars) => {
-                        char_text(&chars).ok_or_else(|| error(&STRJOIN_ERROR_INVALID_INPUT))
-                    }
+                    Value::CharArray(chars) => char_text(chars)
+                        .map(Cow::Owned)
+                        .ok_or_else(|| error(&STRJOIN_ERROR_INVALID_INPUT)),
                     _ => Err(error(&STRJOIN_ERROR_INVALID_INPUT)),
                 })
                 .collect::<BuiltinResult<Vec<_>>>()?;
@@ -68,18 +75,18 @@ pub async fn strjoin_builtin(input: Value, rest: Vec<Value>) -> BuiltinResult<Va
         }
         _ => return Err(error(&STRJOIN_ERROR_INVALID_INPUT)),
     };
-    let delimiters = delimiters(delimiter, items.len().saturating_sub(1))?;
+    let delimiters = delimiters(&delimiter, items.len().saturating_sub(1))?;
     let mut joined = String::new();
-    for (index, item) in items.into_iter().enumerate() {
+    for (index, item) in items.iter().enumerate() {
         if index > 0 {
             joined.push_str(&delimiters[index - 1]);
         }
-        joined.push_str(&item);
+        joined.push_str(item);
     }
     Ok(if character_output {
         Value::CharArray(CharArray::new_row(&joined))
     } else {
-        Value::String(joined)
+        Value::string(joined)
     })
 }
 
@@ -98,27 +105,32 @@ fn vector(shape: &[usize]) -> bool {
         && (shape.contains(&0) || shape.iter().filter(|dimension| **dimension > 1).count() <= 1)
 }
 fn char_text(chars: &CharArray) -> Option<String> {
-    (chars.rows <= 1 && matrix(&chars.shape)).then(|| chars.data.iter().collect())
+    (chars.rows <= 1 && matrix(&chars.shape)).then(|| chars.data.iter().copied().collect())
 }
-fn text_scalar(value: &Value) -> Option<String> {
+fn text_scalar(value: &Value) -> Option<Cow<'_, str>> {
     match value {
-        Value::String(text) => Some(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
-        Value::CharArray(chars) => char_text(chars),
+        Value::String(text) => Some(Cow::Borrowed(text.as_str())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(Cow::Borrowed(array.data[0].as_str()))
+        }
+        Value::CharArray(chars) => char_text(chars).map(Cow::Owned),
         _ => None,
     }
 }
-fn delimiters(value: Value, count: usize) -> BuiltinResult<Vec<String>> {
-    if let Some(text) = text_scalar(&value) {
+fn delimiters(value: &Value, count: usize) -> BuiltinResult<Vec<Cow<'_, str>>> {
+    if let Some(text) = text_scalar(value) {
         return Ok(vec![text; count]);
     }
     let items = match value {
-        Value::StringArray(array) if vector(&array.shape) => array.data,
+        Value::StringArray(array) if vector(&array.shape) => array
+            .data
+            .iter()
+            .map(|text| Cow::Borrowed(text.as_str()))
+            .collect(),
         Value::Cell(cell) if vector(&cell.shape) => cell
-            .into_column_major()
-            .map_err(|_| error(&STRJOIN_ERROR_INVALID_DELIMITER))?
-            .into_iter()
-            .map(|item| text_scalar(&item).ok_or_else(|| error(&STRJOIN_ERROR_INVALID_DELIMITER)))
+            .data
+            .iter()
+            .map(|item| text_scalar(item).ok_or_else(|| error(&STRJOIN_ERROR_INVALID_DELIMITER)))
             .collect::<BuiltinResult<Vec<_>>>()?,
         _ => return Err(error(&STRJOIN_ERROR_INVALID_DELIMITER)),
     };
@@ -129,13 +141,14 @@ fn delimiters(value: Value, count: usize) -> BuiltinResult<Vec<String>> {
 }
 fn rowwise(value: Value, delimiter: &str) -> BuiltinResult<Value> {
     let array = match value {
-        Value::String(text) => StringArray::new(vec![text], vec![1, 1]),
+        Value::String(text) => StringArray::from_texts_unbounded(vec![text], vec![1, 1]),
         Value::StringArray(array) if matrix(&array.shape) => Ok(array),
         Value::CharArray(chars) if matrix(&chars.shape) => {
             let rows = (0..chars.rows)
                 .map(|row| {
                     chars.data[row * chars.cols..(row + 1) * chars.cols]
                         .iter()
+                        .copied()
                         .collect()
                 })
                 .collect();

@@ -123,7 +123,8 @@ fn squeeze_string_array(strings: StringArray) -> crate::BuiltinResult<StringArra
     if shape == strings.shape {
         return Ok(strings);
     }
-    StringArray::new(strings.data, shape).map_err(|e| squeeze_error(format!("squeeze: {e}")))
+    StringArray::from_shared_storage(strings.data, shape.into())
+        .map_err(|e| squeeze_error(format!("squeeze: {e}")))
 }
 
 fn squeeze_char_array(chars: CharArray) -> crate::BuiltinResult<CharArray> {

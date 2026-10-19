@@ -227,19 +227,22 @@ fn ensure_class_registered() {
 
         let methods: HashMap<runmat_types::MethodName, crate::class_registry::RuntimeMethod> =
             HashMap::new();
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            events: Default::default(),
-            name: CLASS_IDENTITY.into(),
-            parent: Some(runmat_types::standard::HANDLE.into()),
-            properties,
-            methods,
-        });
+        crate::class_registry::register_builtin_class(
+            CLASS_IDENTITY,
+            crate::class_registry::RuntimeClass {
+                events: Default::default(),
+                name: CLASS_IDENTITY.into(),
+                parent: Some(runmat_types::standard::HANDLE.into()),
+                properties,
+                methods,
+            },
+        );
     });
 }
 
 fn scalar_text(value: &Value, name: &str) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
         Value::CharArray(chars) => char_array_text(chars, name),
         Value::StringArray(array) => string_array_text(array, name),
         _ => Err(error(
@@ -266,7 +269,7 @@ fn string_array_text(array: &StringArray, name: &str) -> BuiltinResult<String> {
             format!("{name} must be a scalar string"),
         ));
     }
-    Ok(array.data[0].clone())
+    Ok(array.data[0].as_str().to_owned())
 }
 
 #[runtime_builtin(
@@ -303,11 +306,11 @@ pub fn data_tip_text_row_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     let mut object = ObjectInstance::new(CLASS_IDENTITY);
     object
         .properties
-        .insert("Label".to_string(), Value::String(label));
+        .insert("Label".to_string(), Value::string(label));
     object.properties.insert("Value".to_string(), value);
     object
         .properties
-        .insert("Format".to_string(), Value::String(format));
+        .insert("Format".to_string(), Value::string(format));
     let target = runmat_gc::gc_allocate(Value::Object(object)).map_err(|err| {
         error(
             &DATA_TIP_ERROR_INTERNAL,

@@ -48,7 +48,7 @@ pub(crate) mod tests {
             binding: None,
             source_role: runmat_types::FunctionSourceRole::Unknown,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
         }));
         let class_ref = Value::ClassRef("pkg.Type".into());
         let exception = Value::MException(MException::new(

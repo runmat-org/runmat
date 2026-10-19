@@ -87,14 +87,16 @@ pub(crate) fn default_filters() -> Vec<OpenFileDialogFilter> {
 
 pub(crate) fn try_scalar_text(value: &Value) -> Option<String> {
     match value {
-        Value::String(text) => Some(text.clone()),
+        Value::String(text) => Some(text.as_str().to_owned()),
         Value::CharArray(chars)
             if chars.rows == 1
                 && crate::builtins::common::shape::effective_rank(&chars.shape) <= 2 =>
         {
             Some(chars.data.iter().collect())
         }
-        Value::StringArray(array) if array.data.len() == 1 => Some(array.data[0].clone()),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Some(array.data[0].as_str().to_owned())
+        }
         _ => None,
     }
 }

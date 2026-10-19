@@ -45,7 +45,7 @@ const LOAD_SIGNATURES: [BuiltinSignatureDescriptor; 1] = [BuiltinSignatureDescri
 pub const SERIALIZATION_ERROR_ARGUMENT: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
     code: "RM.OBJECT_SERIALIZATION.INVALID_ARGUMENT",
     identifier: Some("RunMat:ObjectSerialization:InvalidArgument"),
-    when: "The input is not an object or serialized object envelope.",
+    when: "The input is outside the supported object or payload forms.",
     message: "object serialization: invalid argument",
 };
 pub const SERIALIZATION_ERROR_DISPATCH: BuiltinErrorDescriptor = BuiltinErrorDescriptor {
@@ -157,7 +157,7 @@ const SAVE_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     ], example_exemption: None,
     faqs: &[
         BuiltinDocumentationFaq { question: "Does `save` call `saveobj` automatically?", answer: "Yes. Before MAT-file encoding, RunMat walks selected values and applies registered `saveobj` methods for object and handle-object values." },
-        BuiltinDocumentationFaq { question: "What is saved when no class-specific method exists?", answer: "RunMat writes the current runtime property map in an internal object envelope so `load` can reconstruct an object with the same class name and stored properties." },
+        BuiltinDocumentationFaq { question: "What is saved when no class-specific method exists?", answer: "RunMat writes a typed Level-5 object record carrying the class name and a struct of stored properties, so `load` can reconstruct the object." },
         BuiltinDocumentationFaq { question: "Are handle identities preserved?", answer: "No. Current support serializes the referenced object's properties. It does not preserve handle identity, listener state, or aliasing relationships across save/load." },
     ],
     links: &[BuiltinDocumentationLink { label: "loadobj", target: BuiltinDocumentationLinkTarget::Documentation("./loadobj") }, BuiltinDocumentationLink { label: "save", target: BuiltinDocumentationLinkTarget::Documentation("./save") }, BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Documentation("./load") }], media: &[],
@@ -166,15 +166,15 @@ const SAVE_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
 const LOAD_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
     authority: BuiltinDocumentationAuthority::Catalog, title: Some("loadobj"), slug: Some("loadobj"),
     summary: "Restore an object payload produced during MAT-file loading.",
-    description: "`loadobj(a)` restores an object from a serialized object envelope. The `load` builtin calls this path automatically for objects saved by RunMat. When the saved class registers a static `loadobj` method, RunMat dispatches to it with the saved payload.",
+    description: "`loadobj(a)` accepts an object or structure payload. During MAT-file loading, typed Level-5 object records are restored separately: a registered static `Class.loadobj` method receives the saved payload when available.",
     keywords: &["loadobj", "saveobj", "object serialization", "mat", "classdef"], related: &["saveobj", "load"],
     sections: &[
         BuiltinDocumentationSection { heading: "Behavior", paragraphs: &[
             "The public signature is `b = loadobj(a)`.",
-            "RunMat recognizes object envelopes written by `save` and restores their payloads recursively.",
+            "`load` recognizes typed Level-5 object records written by `save`. Ordinary structs are never treated as object records because of their field names.",
             "If the saved class registers `Class.loadobj`, that method receives the restored payload and its return value becomes the loaded variable.",
             "If no registered `loadobj` method exists and the payload is a scalar struct, RunMat reconstructs an object with the saved class name and payload fields as properties.",
-            "In RunMat mode, plain non-envelope scalar and cell inputs pass through recursive restoration unchanged; MATLAB-compatible modes reject this undocumented convenience through the `loadobj-plain-payload-passthrough` compatibility gate.",
+            "In RunMat mode, plain scalar and cell inputs pass through recursive restoration unchanged; MATLAB-compatible modes reject this undocumented convenience through the `loadobj-plain-payload-passthrough` compatibility gate.",
             "All eight integer classes nested in object or structure payloads retain their exact values, shape, signedness, and width through recursive restoration and class-specific `loadobj` dispatch.",
             "Recursion is bounded and reports `RunMat:ObjectSerialization:RecursionLimit` for cyclic or excessively nested payloads.",
         ] },
@@ -190,9 +190,9 @@ const LOAD_DOCUMENTATION: BuiltinDocumentation = BuiltinDocumentation {
         BuiltinExample { id: "nested-integer", title: "Retain exact nested integer payloads", program: "payload = struct('x', uint64(7)); restored = loadobj(payload);", display_output: None, compatibility: BuiltinExampleCompatibility::Matlab, harness: BuiltinExampleHarness::Portable, fixture: BuiltinExampleFixture::None, requirements: BuiltinExampleRequirements::NONE, verification: BuiltinExampleVerification::Assertions { source: "assert(isa(restored.x,'uint64')); assert(restored.x == uint64(7));" } },
     ], example_exemption: None,
     faqs: &[
-        BuiltinDocumentationFaq { question: "Does `load` call `loadobj` automatically?", answer: "Yes for object envelopes written by RunMat. `load` restores nested object payloads and calls registered static `Class.loadobj` methods when available." },
+        BuiltinDocumentationFaq { question: "Does `load` call `loadobj` automatically?", answer: "Yes for typed Level-5 object records written by RunMat. `load` restores nested payloads and calls registered static `Class.loadobj` methods when available." },
         BuiltinDocumentationFaq { question: "What happens without a class-specific `loadobj` method?", answer: "RunMat reconstructs a value object with the saved class name and property struct fields. If the saved payload was not a struct, the payload itself is returned." },
-        BuiltinDocumentationFaq { question: "Does this support arbitrary MATLAB object MAT-files?", answer: "No. This support covers RunMat's own Level-5 object envelope and runtime object model. MATLAB v7.3/HDF5 class storage, object arrays, listener state, and handle alias preservation remain unsupported." },
+        BuiltinDocumentationFaq { question: "Does this support arbitrary MATLAB object MAT-files?", answer: "No. This support covers RunMat's typed Level-5 object records and runtime object model. MATLAB v7.3/HDF5 class storage, listener state, and handle alias preservation remain unsupported." },
     ],
     links: &[BuiltinDocumentationLink { label: "saveobj", target: BuiltinDocumentationLinkTarget::Builtin("saveobj") }, BuiltinDocumentationLink { label: "load", target: BuiltinDocumentationLinkTarget::Builtin("load") }], media: &[],
     evidence: BuiltinDocumentationEvidence { implementation: &[SOURCE], verification: VERIFICATION, notes: &[] }, introduced: None, status: Some(BuiltinDocumentationStatus::Partial),

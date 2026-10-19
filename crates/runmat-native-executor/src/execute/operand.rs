@@ -234,7 +234,8 @@ pub(super) fn evaluate_rvalue(
                 .iter()
                 .map(|segment| segment.0.as_str())
                 .collect::<Vec<_>>()
-                .join("."),
+                .join(".")
+                .into(),
         ))]),
         MirRvalue::Colon => Ok(vec![state.arena.insert(Value::Num(0.0))]),
         MirRvalue::End => {
@@ -459,7 +460,7 @@ pub(super) fn evaluate_operand(
                 MirConstant::String(text) if text.is_character_row() => {
                     Value::CharArray(runmat_value::CharArray::new_row(&text.runtime_text()))
                 }
-                MirConstant::String(text) => Value::String(text.runtime_text()),
+                MirConstant::String(text) => Value::String(text.runtime_text().into()),
                 MirConstant::Symbol(symbol) => {
                     runmat_runtime::builtin::builtin_constant_value(&symbol.0).ok_or_else(|| {
                         NativeExecutorError::Host(format!("unknown MIR constant {}", symbol.0))

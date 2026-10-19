@@ -9,6 +9,7 @@ pub(crate) mod fliplr;
 pub(crate) mod flipud;
 mod error;
 mod gpu_reshape;
+mod triangular_character;
 #[cfg(test)]
 mod structural_provider_tests;
 pub(crate) mod horzcat;

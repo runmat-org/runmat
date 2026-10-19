@@ -137,6 +137,7 @@ mod tests {
             inherited_storage_bindings: Vec::new(),
             creates_lexical_environment: false,
             id: ProgramFunctionId(4),
+            mir_body_digest: runmat_execution::Digest::sha256(b"fixture:native-capture-arguments"),
             source: ProgramSourceId(0),
             name: "nested".into(),
             source_role: runmat_types::FunctionSourceRole::Unknown,

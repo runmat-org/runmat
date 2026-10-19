@@ -94,7 +94,7 @@ fn groupsummary_array(
     method_or_bins: Value,
     rest: Vec<Value>,
 ) -> BuiltinResult<Value> {
-    let data = groupsummary_array_columns(data, "input array")?;
+    let data = groupsummary_array_columns(&data, "input array")?;
     let groups = groupsummary_group_columns(groupvars)?;
     let rows = data.first().map(value_row_count).transpose()?.unwrap_or(0);
     for value in &groups {
@@ -127,14 +127,14 @@ fn groupsummary_array(
     groupsummary_array_outputs(result, &group_names)
 }
 
-fn groupsummary_array_columns(value: Value, role: &str) -> BuiltinResult<Vec<Value>> {
+fn groupsummary_array_columns(value: &Value, role: &str) -> BuiltinResult<Vec<Value>> {
     match value {
         Value::Tensor(tensor) => (0..tensor.cols())
-            .map(|column| groupsummary_tensor_column(&tensor, column).map(Value::Tensor))
+            .map(|column| groupsummary_tensor_column(tensor, column).map(Value::Tensor))
             .collect(),
         Value::Cell(cell) => {
             let mut columns = Vec::new();
-            for value in cell.data {
+            for value in cell.data.iter() {
                 let mut nested = groupsummary_array_columns(value, role)?;
                 columns.append(&mut nested);
             }
@@ -152,7 +152,7 @@ fn groupsummary_array_columns(value: Value, role: &str) -> BuiltinResult<Vec<Val
 }
 
 fn groupsummary_group_columns(value: Value) -> BuiltinResult<Vec<Value>> {
-    groupsummary_array_columns(value, "groupvars")
+    groupsummary_array_columns(&value, "groupvars")
 }
 
 fn groupsummary_tensor_column(tensor: &Tensor, column: usize) -> BuiltinResult<Tensor> {
@@ -336,9 +336,9 @@ fn value_is_native_integer(value: &Value) -> bool {
 
 fn option_name(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
+        Value::String(value) => Some(value.to_string()),
         Value::CharArray(value) if value.rows == 1 => Some(value.data.iter().collect()),
-        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].clone()),
+        Value::StringArray(value) if value.data.len() == 1 => Some(value.data[0].to_string()),
         _ => None,
     }
 }
@@ -836,13 +836,13 @@ fn groupsummary_finalize_bins(
         .data
         .iter()
         .enumerate()
-        .map(|(row, label)| (label.clone(), row))
+        .map(|(row, label)| (label.as_str(), row))
         .collect::<BTreeMap<_, _>>();
     let mut desired = labels
         .iter()
         .enumerate()
         .map(|(index, label)| (format!("{index:08}|{label}"), label.clone()))
-        .filter(|(internal, _)| include_empty || existing.contains_key(internal))
+        .filter(|(internal, _)| include_empty || existing.contains_key(internal.as_str()))
         .collect::<Vec<_>>();
     if existing.contains_key("<missing>") {
         desired.push(("<missing>".to_string(), "<missing>".to_string()));
@@ -871,7 +871,7 @@ fn groupsummary_finalize_bins(
         if tensor.integer_storage().is_some()
             && desired
                 .iter()
-                .any(|(internal, _)| !existing.contains_key(internal))
+                .any(|(internal, _)| !existing.contains_key(internal.as_str()))
         {
             return Err(invalid_argument(
                 "groupsummary: empty binned groups for integer-class min/max are not implemented because the public fill class is unresolved",
@@ -880,7 +880,7 @@ fn groupsummary_finalize_bins(
         if tensor.integer_storage().is_some() {
             let rows = desired
                 .iter()
-                .filter_map(|(internal, _)| existing.get(internal).copied())
+                .filter_map(|(internal, _)| existing.get(internal.as_str()).copied())
                 .collect::<Vec<_>>();
             output.push(select_rows(value, &rows)?);
         } else {
@@ -888,7 +888,7 @@ fn groupsummary_finalize_bins(
                 .iter()
                 .map(|(internal, _)| {
                     existing
-                        .get(internal)
+                        .get(internal.as_str())
                         .map(|row| tensor.materialize_f64()[*row])
                         .unwrap_or_else(|| if name == "GroupCount" { 0.0 } else { f64::NAN })
                 })

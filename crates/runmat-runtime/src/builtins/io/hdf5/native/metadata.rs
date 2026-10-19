@@ -8,9 +8,9 @@ pub(super) fn group_info(
 ) -> BuiltinResult<StructValue> {
     let mut info = StructValue::new();
     if let Some(path) = filename {
-        info.insert("Filename", Value::String(path.display().to_string()));
+        info.insert("Filename", Value::string(path.display().to_string()));
     }
-    info.insert("Name", Value::String(name.to_string()));
+    info.insert("Name", Value::string(name.to_string()));
     info.insert("Attributes", attributes_info(builtin, group)?);
 
     let mut groups = Vec::new();
@@ -58,12 +58,12 @@ pub(super) fn dataset_info(
             )
         })?;
     let mut info = StructValue::new();
-    info.insert("Name", Value::String(name.to_string()));
-    info.insert("Datatype", Value::String(type_name(&dtype)));
-    info.insert("Class", Value::String(matlab_class_for_type(&dtype)));
+    info.insert("Name", Value::string(name.to_string()));
+    info.insert("Datatype", Value::string(type_name(&dtype)));
+    info.insert("Class", Value::string(matlab_class_for_type(&dtype)));
     info.insert(
         "Dataspace",
-        Value::String(if shape.is_empty() { "scalar" } else { "simple" }.to_string()),
+        Value::string(if shape.is_empty() { "scalar" } else { "simple" }.to_string()),
     );
     info.insert("Size", shape_value(shape)?);
     info.insert("Attributes", attributes_info(builtin, ds)?);
@@ -107,9 +107,9 @@ pub(super) fn attribute_info(
             )
         })?;
     let mut info = StructValue::new();
-    info.insert("Name", Value::String(name.to_string()));
-    info.insert("Datatype", Value::String(type_name(&dtype)));
-    info.insert("Class", Value::String(matlab_class_for_type(&dtype)));
+    info.insert("Name", Value::string(name.to_string()));
+    info.insert("Datatype", Value::string(type_name(&dtype)));
+    info.insert("Class", Value::string(matlab_class_for_type(&dtype)));
     info.insert("Size", shape_value(attr.shape())?);
     Ok(info)
 }

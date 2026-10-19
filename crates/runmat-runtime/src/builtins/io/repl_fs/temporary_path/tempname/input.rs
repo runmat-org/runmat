@@ -11,14 +11,14 @@ const IDENTITY: &str = "tempname";
 
 pub(super) fn folder(value: &Value) -> crate::BuiltinResult<PathBuf> {
     let text = match value {
-        Value::String(text) => text.clone(),
+        Value::String(text) => text.as_str().to_owned(),
         Value::CharArray(array)
             if array.rows == 1
                 && crate::builtins::common::shape::effective_rank(&array.shape) <= 2 =>
         {
-            array.data.iter().collect()
+            array.data.iter().collect::<String>()
         }
-        Value::StringArray(array) if array.data.len() == 1 => array.data[0].clone(),
+        Value::StringArray(array) if array.data.len() == 1 => array.data[0].as_str().to_owned(),
         _ => return Err(error::builtin(IDENTITY, &TEMPNAME_ERROR_FOLDER_TYPE)),
     };
     if text.is_empty() {

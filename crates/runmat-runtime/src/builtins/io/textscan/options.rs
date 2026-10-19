@@ -233,7 +233,11 @@ fn string_list(value: &Value, context: &str) -> BuiltinResult<Vec<String>> {
             }
             Ok(out)
         }
-        Value::StringArray(sa) => Ok(sa.data.clone()),
+        Value::StringArray(sa) => Ok(sa
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
         _ => Ok(vec![string_scalar(value, context)?]),
     }
 }

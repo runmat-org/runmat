@@ -5,8 +5,8 @@ use std::rc::Rc;
 
 pub(in crate::execution::value_codec::decode::machine) struct CellTask<'a> {
     shape: super::text::ShapeCopy<'a>,
-    children: TakenValues,
     values: Vec<Value>,
+    children: TakenValues,
     path: String,
 }
 
@@ -15,8 +15,8 @@ impl<'a> CellTask<'a> {
         let capacity = children.remaining();
         Self {
             shape: super::text::ShapeCopy::new(shape, path.clone()),
-            children,
             values: Vec::with_capacity(capacity),
+            children,
             path,
         }
     }
@@ -40,18 +40,8 @@ impl<'a> CellTask<'a> {
             super::text::ShapeCopy::new(&[], String::new()),
         )
         .finish();
-        if shape.is_empty() {
-            let cell = CellArray::new_with_shape(std::mem::take(&mut self.values), shape)
-                .map_err(|error| ValueCodecError::invalid(&self.path, error))?;
-            return Ok((1, Some(Value::Cell(cell))));
-        }
-        let (rows, cols) = rows_cols(&shape);
-        let cell = CellArray {
-            data: std::mem::take(&mut self.values),
-            shape,
-            rows,
-            cols,
-        };
+        let cell = CellArray::new_with_shape(std::mem::take(&mut self.values), shape)
+            .map_err(|error| ValueCodecError::invalid(&self.path, error))?;
         Ok((1, Some(Value::Cell(cell))))
     }
 
@@ -62,10 +52,10 @@ impl<'a> CellTask<'a> {
 
 pub(in crate::execution::value_codec::decode::machine) struct StructTask<'a> {
     fields: &'a [StructField],
-    children: TakenValues,
     index: usize,
     name: Option<TextCopy<'a>>,
     output: StructValue,
+    children: TakenValues,
     _path: String,
 }
 
@@ -73,10 +63,10 @@ impl<'a> StructTask<'a> {
     pub(super) fn new(fields: &'a [StructField], children: TakenValues, path: String) -> Self {
         Self {
             fields,
-            children,
             index: 0,
             name: None,
             output: StructValue::with_capacity(fields.len()),
+            children,
             _path: path,
         }
     }
@@ -110,12 +100,12 @@ impl<'a> StructTask<'a> {
 pub(in crate::execution::value_codec::decode::machine) struct CallableTask<'a> {
     source: &'a CallableValue,
     source_resolver: Option<Rc<crate::user_functions::ExecutionSourceResolver>>,
-    captures: TakenValues,
     name: TextCopy<'a>,
     decoded_name: Option<String>,
     source_file: Option<TextCopy<'a>>,
     decoded_source_file: Option<String>,
     decoded_captures: Vec<Value>,
+    captures: TakenValues,
     path: String,
 }
 
@@ -130,12 +120,12 @@ impl<'a> CallableTask<'a> {
         Self {
             source,
             source_resolver,
-            captures,
             name: TextCopy::new(&source.qualified_name),
             decoded_name: None,
             source_file: source.source_file.as_deref().map(TextCopy::new),
             decoded_source_file: None,
             decoded_captures: Vec::with_capacity(capacity),
+            captures,
             path,
         }
     }
@@ -200,7 +190,7 @@ impl<'a> CallableTask<'a> {
                 binding,
                 source_role: self.source.source_role,
                 source_file: source_file.map(String::into_boxed_str),
-                captures,
+                captures: captures.into(),
             }))
         } else {
             match self.source.owner {
@@ -229,10 +219,10 @@ impl<'a> CallableTask<'a> {
 
 pub(in crate::execution::value_codec::decode::machine) struct ImmutableTask<'a> {
     source: &'a RegisteredData,
-    children: TakenValues,
     index: usize,
     field_name: Option<TextCopy<'a>>,
     object: Option<ObjectInstance>,
+    children: TakenValues,
     path: String,
 }
 
@@ -245,7 +235,6 @@ impl<'a> ImmutableTask<'a> {
     ) -> Self {
         Self {
             source,
-            children,
             index: 0,
             field_name: None,
             object: Some({
@@ -253,6 +242,7 @@ impl<'a> ImmutableTask<'a> {
                 object.properties.reserve(source.fields.len());
                 object
             }),
+            children,
             path,
         }
     }
@@ -300,12 +290,4 @@ impl<'a> ImmutableTask<'a> {
 
 fn empty_taken_values() -> TakenValues {
     DecodeMachine::empty_taken_values()
-}
-
-fn rows_cols(shape: &[usize]) -> (usize, usize) {
-    match shape {
-        [] => (0, 0),
-        [length] => (1, *length),
-        [rows, columns, ..] => (*rows, *columns),
-    }
 }

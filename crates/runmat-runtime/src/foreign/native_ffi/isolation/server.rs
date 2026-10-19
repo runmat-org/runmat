@@ -188,7 +188,7 @@ async fn invoke(
         .finish()
         .map_err(|error| wire_error("RunMat:NativeFFI:ValueDecode", error.to_string()))?;
     let value = supervisor
-        .participate_foreground(arguments.with_unbounded_values_async(|arguments| async {
+        .participate_foreground(async {
             let value = context
                 .clone()
                 .scope(adapter.invoke(
@@ -196,7 +196,7 @@ async fn invoke(
                     ForeignCall {
                         adapter: runmat_native_ffi::NATIVE_FFI_ADAPTER_ID.into(),
                         symbol: request.operation,
-                        arguments,
+                        arguments: crate::call::RootedFunctionArguments::ordinary(arguments),
                         requested_outputs: request.requested_outputs as usize,
                     },
                 ))
@@ -205,9 +205,8 @@ async fn invoke(
             lifecycle.service_safepoint(context)?;
             lifecycle.drain_gracefully(context).await?;
             Ok(value)
-        }))
+        })
         .await
-        .map_err(runtime_wire_error)?
         .map_err(runtime_wire_error)?
         .map_err(runtime_wire_error)?;
     value.with_owned_sequence(|value| encode_host_outputs(value, snapshots, resources))

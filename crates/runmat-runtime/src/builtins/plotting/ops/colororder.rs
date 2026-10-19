@@ -200,7 +200,7 @@ fn colors_from_cell(cell: &CellArray) -> BuiltinResult<Vec<Vec4>> {
     colors_from_strings(&strings)
 }
 
-fn colors_from_strings(strings: &[String]) -> BuiltinResult<Vec<Vec4>> {
+fn colors_from_strings<S: AsRef<str>>(strings: &[S]) -> BuiltinResult<Vec<Vec4>> {
     if strings.is_empty() {
         return Err(colororder_err(
             "color array must contain at least one color",
@@ -208,7 +208,7 @@ fn colors_from_strings(strings: &[String]) -> BuiltinResult<Vec<Vec4>> {
     }
     let mut colors = Vec::with_capacity(strings.len());
     for text in strings {
-        let trimmed = text.trim();
+        let trimmed = text.as_ref().trim();
         if let Some(color) = color_from_name_or_token(trimmed) {
             colors.push(color);
         } else {

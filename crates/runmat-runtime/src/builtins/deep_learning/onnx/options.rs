@@ -139,7 +139,7 @@ pub(in crate::builtins::deep_learning) fn integer_scalar(
 fn single_name(value: &Value, label: &str) -> BuiltinResult<String> {
     let values = match value {
         Value::String(_) | Value::CharArray(_) => vec![scalar_text(value, EXPORT_ONNX)?],
-        Value::StringArray(array) => array.data.clone(),
+        Value::StringArray(array) => array.data.iter().map(ToString::to_string).collect(),
         Value::Cell(cell) => {
             let mut names = Vec::with_capacity(cell.data.len());
             for item in &cell.data {

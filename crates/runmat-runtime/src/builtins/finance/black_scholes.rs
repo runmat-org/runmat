@@ -459,8 +459,8 @@ fn is_empty_value(value: &Value) -> bool {
 
 fn text_scalar(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::String(text) => Ok(text.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(text) => Ok(text.as_str().to_owned()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].as_str().to_owned()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         _ => Err(error(
             builtin,

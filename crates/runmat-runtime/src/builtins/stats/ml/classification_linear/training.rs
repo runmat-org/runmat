@@ -25,11 +25,11 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
         .insert("Lambda".to_string(), row_tensor(lambdas.clone())?);
     object.properties.insert(
         "Learner".to_string(),
-        Value::String(spec.options.learner.as_str().to_string()),
+        Value::string(spec.options.learner.as_str().to_string()),
     );
     object.properties.insert(
         "Regularization".to_string(),
-        Value::String(spec.options.regularization.as_str().to_string()),
+        Value::string(spec.options.regularization.as_str().to_string()),
     );
     object.properties.insert(
         "Solver".to_string(),
@@ -37,23 +37,24 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
     );
     object.properties.insert(
         "ScoreTransform".to_string(),
-        Value::String(score_transform(spec).as_str().to_string()),
+        Value::string(score_transform(spec).as_str().to_string()),
     );
     object
         .properties
         .insert("FitBias".to_string(), Value::Bool(spec.options.fit_bias));
     object.properties.insert(
         "ResponseName".to_string(),
-        Value::String(spec.response_name.clone()),
+        Value::string(spec.response_name.clone()),
     );
     object.properties.insert(
         "PredictorNames".to_string(),
-        Value::StringArray(StringArray {
-            data: spec.predictor_names.clone(),
-            shape: vec![1, spec.predictor_names.len()],
-            rows: 1,
-            cols: spec.predictor_names.len(),
-        }),
+        Value::StringArray(
+            StringArray::new(
+                spec.predictor_names.clone(),
+                vec![1, spec.predictor_names.len()],
+            )
+            .map_err(fitclinear_internal)?,
+        ),
     );
     object.properties.insert(
         "ClassNames".to_string(),
@@ -71,16 +72,16 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
         .insert("NumPredictors".to_string(), Value::Num(predictors as f64));
     object.properties.insert(
         "__RunMatLinearClassKind".to_string(),
-        Value::String(label_kind_name(spec.class_kind).to_string()),
+        Value::string(label_kind_name(spec.class_kind).to_string()),
     );
     let mut parameters = StructValue::new();
     parameters.insert(
         "Learner",
-        Value::String(spec.options.learner.as_str().to_string()),
+        Value::string(spec.options.learner.as_str().to_string()),
     );
     parameters.insert(
         "Regularization",
-        Value::String(spec.options.regularization.as_str().to_string()),
+        Value::string(spec.options.regularization.as_str().to_string()),
     );
     parameters.insert(
         "Solver",
@@ -88,7 +89,7 @@ pub(super) fn fit_models(spec: &FitSpec) -> BuiltinResult<FitResult> {
     );
     parameters.insert(
         "ObservationsIn",
-        Value::String(spec.options.observations_in.as_str().to_string()),
+        Value::string(spec.options.observations_in.as_str().to_string()),
     );
     parameters.insert("FitBias", Value::Bool(spec.options.fit_bias));
     parameters.insert(

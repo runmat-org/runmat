@@ -5,10 +5,33 @@ use super::entrypoints::{
     shortestpath_builtin, successors_builtin, toposort_builtin, treelayout_builtin,
 };
 use super::parsing::{node_index_from_f64, numeric_vector};
-use super::{GRAPH_CLASS, NUM_NODES_PROPERTY};
+use super::{DIGRAPH_CLASS, GRAPH_CLASS, NUM_NODES_PROPERTY};
 use crate::builtins::table::{table_from_columns, table_replace_variables_like, table_variables};
 use futures::executor::block_on;
 use runmat_value::{IntegerStorage, LogicalArray, ObjectInstance, StringArray, Tensor, Value};
+
+#[test]
+fn graph_classes_register_in_each_runtime_context() {
+    let first = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+    let second = crate::context::RuntimeContext::new(std::rc::Rc::new(
+        crate::execution::RuntimeExecutionService::new(),
+    ));
+
+    for runtime in [&first, &second] {
+        let _selected = runtime.enter();
+        block_on(graph_builtin(Vec::new())).expect("graph constructor");
+        block_on(digraph_builtin(Vec::new())).expect("digraph constructor");
+        for identity in [GRAPH_CLASS, DIGRAPH_CLASS] {
+            assert!(
+                crate::class_registry::issue_builtin_class_in_context(runtime, &identity.into())
+                    .is_some(),
+                "{identity} must be registered in the selected runtime"
+            );
+        }
+    }
+}
 
 fn numeric(data: Vec<f64>, rows: usize, cols: usize) -> Value {
     Value::Tensor(Tensor::new(data, vec![rows, cols]).expect("tensor"))

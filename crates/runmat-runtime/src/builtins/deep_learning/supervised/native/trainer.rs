@@ -109,8 +109,11 @@ async fn initialized_network(
             let Some(Value::Cell(layers)) = network.properties.get_mut("Layers") else {
                 return Err(fail(function, "network is missing Layers"));
             };
+            let layer_values = crate::builtins::deep_learning::layer_helpers::mutable_cell_values(
+                layers, function,
+            )?;
             let _initialized_roots =
-                model::initialise_layers_in_runtime(runtime, &mut layers.data, function).await?;
+                model::initialise_layers_in_runtime(runtime, layer_values, function).await?;
             model::state::initialize_missing(&mut network, function)?;
             let roots = crate::execution::RootedValueLease::for_traced(&network)
                 .map_err(|error| error.into_runtime_error())?;

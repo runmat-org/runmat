@@ -624,8 +624,10 @@ fn parse_request(args: &[Value]) -> BuiltinResult<EigRequest> {
 
 fn option_text(value: &Value) -> BuiltinResult<Option<String>> {
     match value {
-        Value::String(text) => Ok(Some(text.clone())),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(Some(array.data[0].clone())),
+        Value::String(text) => Ok(Some(text.as_str().to_owned())),
+        Value::StringArray(array) if array.data.len() == 1 => {
+            Ok(Some(array.data[0].as_str().to_owned()))
+        }
         Value::StringArray(_) => Err(eig_invalid_argument(
             "eig: option arguments must be character vectors or string scalars",
         )),

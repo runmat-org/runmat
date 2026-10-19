@@ -315,7 +315,7 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
     if rank <= 2 {
         let rows = sa.rows;
         let cols = sa.cols;
-        let mut out = vec![String::new(); sa.data.len()];
+        let mut out = vec![runmat_value::Utf8Text::default(); sa.data.len()];
         for r in 0..rows {
             for c in 0..cols {
                 let src = r + c * rows;
@@ -326,7 +326,7 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
             }
         }
         let new_shape = if rank >= 2 {
-            let mut shape = sa.shape.clone();
+            let mut shape = sa.shape.as_slice().to_vec();
             if shape.len() >= 2 {
                 shape.swap(0, 1);
             }
@@ -334,7 +334,8 @@ fn ctranspose_string_array(sa: StringArray) -> BuiltinResult<StringArray> {
         } else {
             vec![cols, rows]
         };
-        StringArray::new(out, new_shape).map_err(|e| internal_error(format!("{NAME}: {e}")))
+        StringArray::from_texts_unbounded(out, new_shape)
+            .map_err(|e| internal_error(format!("{NAME}: {e}")))
     } else {
         let order = ctranspose_order(rank);
         permute_string_array(NAME, sa, &order)

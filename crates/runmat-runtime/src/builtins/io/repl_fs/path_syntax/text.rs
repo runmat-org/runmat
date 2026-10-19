@@ -24,11 +24,18 @@ impl TextContainer {
         error: &'static runmat_builtins::BuiltinErrorDescriptor,
     ) -> BuiltinResult<Self> {
         match value {
-            Value::String(text) => Ok(Self::scalar(TextRepresentation::String, text.clone())),
+            Value::String(text) => Ok(Self::scalar(
+                TextRepresentation::String,
+                text.as_str().to_owned(),
+            )),
             Value::StringArray(array) => Ok(Self {
                 representation: TextRepresentation::StringArray,
-                values: array.data.clone(),
-                shape: array.shape.clone(),
+                values: array
+                    .data
+                    .iter()
+                    .map(|text| text.as_str().to_owned())
+                    .collect(),
+                shape: array.shape.as_slice().to_vec(),
             }),
             Value::CharArray(array)
                 if array.rows == 1
@@ -70,7 +77,7 @@ impl TextContainer {
         Ok(Self {
             representation: TextRepresentation::Cell,
             values,
-            shape: array.shape.clone(),
+            shape: array.shape.as_slice().to_vec(),
         })
     }
 
@@ -98,7 +105,7 @@ pub(super) fn output(
             values.first().map_or("", String::as_str),
         ))),
         TextRepresentation::String if values.len() == 1 => {
-            Ok(Value::String(values.into_iter().next().unwrap_or_default()))
+            Ok(Value::string(values.into_iter().next().unwrap_or_default()))
         }
         TextRepresentation::String | TextRepresentation::StringArray => {
             StringArray::new(values, shape.to_vec())

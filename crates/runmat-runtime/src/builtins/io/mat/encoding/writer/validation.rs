@@ -109,6 +109,24 @@ pub(super) async fn validate_matrix(
                 return Err(invalid(owner, "struct MAT fields do not match its shape"));
             }
         }
+        MatData::Object {
+            class_name,
+            field_names,
+            field_values,
+        } => {
+            if array.class != MatClass::Object
+                || class_name.is_empty()
+                || class_name.as_bytes().contains(&0)
+                || count.checked_mul(field_names.len()) != Some(field_values.len())
+            {
+                return Err(invalid(
+                    owner,
+                    "object MAT fields do not match its class or shape",
+                ));
+            }
+            u32::try_from(class_name.len())
+                .map_err(|_| invalid(owner, "object MAT class name exceeds uint32 length"))?;
+        }
         MatData::Sparse {
             rows,
             cols,

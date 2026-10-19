@@ -48,13 +48,14 @@ async fn invoke_native(
             .require_foreign(operation.symbol())
             .map_err(|error| error.into_runtime_error())?
             .clone();
+        let arguments = crate::execution::RootedValues::in_context(arguments, &context)?;
         let sequence = context
             .scope(service.invoke(
                 context.clone(),
                 crate::context::ForeignCall {
                     adapter: "native-ffi".into(),
                     symbol: operation.symbol().into(),
-                    arguments,
+                    arguments: crate::call::RootedFunctionArguments::ordinary(arguments),
                     requested_outputs,
                 },
             ))
@@ -96,7 +97,7 @@ async fn loadlibrary_builtin(
             )
         })?;
         let header = std::path::PathBuf::from(library).with_extension("h");
-        arguments.push(Value::String(header.display().to_string()));
+        arguments.push(Value::String(header.display().to_string().into()));
     }
     text_argument(&arguments[1], "loadlibrary header")?;
     let mut alias = None;
@@ -112,25 +113,35 @@ async fn loadlibrary_builtin(
                 .map_err(|_| invalid_builtin_call("loadlibrary option names must be text"))?;
             match NativeLoadOption::parse(&name) {
                 Some(NativeLoadOption::Alias) => {
-                    alias = Some(Value::String(String::try_from(&pair[1]).map_err(|_| {
-                        invalid_builtin_call("loadlibrary alias must be text")
-                    })?));
+                    alias = Some(Value::String(
+                        String::try_from(&pair[1])
+                            .map_err(|_| invalid_builtin_call("loadlibrary alias must be text"))?
+                            .into(),
+                    ));
                 }
                 Some(NativeLoadOption::IncludePath) => {
                     preparation_options.push(Value::String(
                         NativeLoadOption::IncludePath.canonical_name().into(),
                     ));
-                    preparation_options.push(Value::String(String::try_from(&pair[1]).map_err(
-                        |_| invalid_builtin_call("loadlibrary include path must be text"),
-                    )?));
+                    preparation_options.push(Value::String(
+                        String::try_from(&pair[1])
+                            .map_err(|_| {
+                                invalid_builtin_call("loadlibrary include path must be text")
+                            })?
+                            .into(),
+                    ));
                 }
                 Some(NativeLoadOption::AddHeader) => {
                     preparation_options.push(Value::String(
                         NativeLoadOption::AddHeader.canonical_name().into(),
                     ));
-                    preparation_options.push(Value::String(String::try_from(&pair[1]).map_err(
-                        |_| invalid_builtin_call("loadlibrary additional header must be text"),
-                    )?));
+                    preparation_options.push(Value::String(
+                        String::try_from(&pair[1])
+                            .map_err(|_| {
+                                invalid_builtin_call("loadlibrary additional header must be text")
+                            })?
+                            .into(),
+                    ));
                 }
                 None => {
                     return Err(invalid_builtin_call(format!(
@@ -152,7 +163,7 @@ async fn loadlibrary_builtin(
             .and_then(|stem| stem.to_str())
             .ok_or_else(|| invalid_builtin_call("loadlibrary path has no valid file name"))?
             .to_string();
-        arguments.push(Value::String(alias));
+        arguments.push(Value::String(alias.into()));
     }
     arguments.extend(preparation_options);
     let report = invoke_native(context, NativeFfiOperation::LoadReport, arguments, 2).await?;

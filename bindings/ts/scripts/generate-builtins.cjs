@@ -18,7 +18,7 @@ function ensureDir(dirPath) {
 function readBuiltinDocuments() {
   const encoded = execFileSync(
     "cargo",
-    ["run", "--quiet", "-p", "runmat-builtins", "--bin", "export_builtin_documentation", "--", "--transition"],
+    ["run", "--locked", "--quiet", "-p", "runmat-builtins", "--bin", "export_builtin_documentation", "--", "--transition"],
     { cwd: repoRoot, encoding: "utf8", maxBuffer: 128 * 1024 * 1024 }
   );
   const exportPayload = JSON.parse(encoded);

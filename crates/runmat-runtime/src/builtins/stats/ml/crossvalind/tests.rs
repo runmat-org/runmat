@@ -204,6 +204,16 @@ fn classes_keep_adjacent_wide_integer_labels_distinct() {
     assert_eq!(labels[1], labels[3]);
     assert_ne!(labels[0], labels[1]);
     assert_eq!(grouped_indices(&labels).len(), 2);
+
+    let character_classes =
+        Value::CharArray(CharArray::new(vec!['a', '1', 'b', '2'], 2, 2).unwrap());
+    assert_eq!(
+        classes_from_value(&character_classes, 2).unwrap(),
+        vec![
+            Some(PartitionLabel::Text("a1".into())),
+            Some(PartitionLabel::Text("b2".into())),
+        ],
+    );
 }
 
 #[test]

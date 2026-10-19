@@ -209,7 +209,7 @@ fn decode_statset(field: MnrfitStatsetField, value: Value) -> BuiltinResult<Opti
 
 enum BoolOrText {
     Bool(bool),
-    Text(String),
+    Text(runmat_value::Utf8Text),
 }
 
 fn text_or_logical(value: &Value, label: &str) -> BuiltinResult<BoolOrText> {

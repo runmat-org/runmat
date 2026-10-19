@@ -2,7 +2,6 @@ use runmat_types::MemberAccess;
 
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, VecDeque};
-use std::sync::OnceLock;
 
 use runmat_builtins::{
     BuiltinErrorDescriptor, DIGRAPH_CLASS, GRAPH_CLASS, GRAPH_ERROR_INTERNAL,

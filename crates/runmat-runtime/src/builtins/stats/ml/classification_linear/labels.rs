@@ -41,19 +41,22 @@ pub(super) fn labels_from_value(value: Value, name: &str) -> BuiltinResult<Label
             kind: LabelKind::Text,
         }),
         Value::CharArray(array) => Ok(LabelVector {
-            labels: char_rows(&array).into_iter().map(ClassLabel::Text).collect(),
+            labels: char_rows(&array).into_iter().map(|text| ClassLabel::Text(text.into())).collect(),
             kind: LabelKind::Text,
         }),
         Value::StringArray(array) => Ok(LabelVector {
-            labels: array.data.into_iter().map(ClassLabel::Text).collect(),
+            labels: match array.data.try_into_owned() {
+                Ok(values) => values.into_iter().map(ClassLabel::Text).collect(),
+                Err(values) => values.iter().cloned().map(ClassLabel::Text).collect(),
+            },
             kind: LabelKind::Text,
         }),
         Value::Cell(cell) => {
             let mut labels = Vec::with_capacity(cell.data.len());
-            for item in cell.data {
-                labels.push(ClassLabel::Text(scalar_text(&item).ok_or_else(|| {
+            for item in cell.data.iter() {
+                labels.push(ClassLabel::Text(scalar_text(item).ok_or_else(|| {
                     predict_invalid(format!("predict: {name} cell entries must be text"))
-                })?));
+                })?.into()));
             }
             Ok(LabelVector {
                 labels,
@@ -317,18 +320,19 @@ pub(super) fn predicted_labels_value(
                 .map_err(|err| predict_internal(format!("predict: {err}")))?,
             ))
         }
-        LabelKind::Text => Ok(Value::StringArray(StringArray {
-            data: indices
-                .iter()
-                .map(|idx| match labels.get(*idx) {
-                    Some(ClassLabel::Text(value)) => value.clone(),
-                    _ => String::new(),
-                })
-                .collect(),
-            shape,
-            rows,
-            cols,
-        })),
+        LabelKind::Text => Ok(Value::StringArray(
+            StringArray::from_texts_unbounded(
+                indices
+                    .iter()
+                    .map(|idx| match labels.get(*idx) {
+                        Some(ClassLabel::Text(value)) => value.clone(),
+                        _ => Utf8Text::default(),
+                    })
+                    .collect(),
+                shape,
+            )
+            .map_err(predict_internal)?,
+        )),
         LabelKind::Logical => Ok(Value::LogicalArray(
             LogicalArray::new(
                 indices
@@ -371,8 +375,12 @@ pub(super) fn string_array_property(
     name: &str,
 ) -> BuiltinResult<Vec<String>> {
     match object.properties.get(name) {
-        Some(Value::StringArray(array)) => Ok(array.data.clone()),
-        Some(Value::String(text)) => Ok(vec![text.clone()]),
+        Some(Value::StringArray(array)) => Ok(array
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect()),
+        Some(Value::String(text)) => Ok(vec![text.as_str().to_owned()]),
         _ => Err(predict_invalid(format!("predict: model is missing {name}"))),
     }
 }

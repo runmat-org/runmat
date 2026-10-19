@@ -70,8 +70,8 @@ pub(in crate::builtins::fea) fn scalar_string(
     error: &'static BuiltinErrorDescriptor,
 ) -> BuiltinResult<String> {
     match value {
-        Value::String(value) => Ok(value.clone()),
-        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].clone()),
+        Value::String(value) => Ok(value.to_string()),
+        Value::StringArray(array) if array.data.len() == 1 => Ok(array.data[0].to_string()),
         Value::CharArray(chars) if chars.rows == 1 => Ok(chars.data.iter().collect()),
         _ => Err(builtin_error(
             builtin,

@@ -1,14 +1,38 @@
 use super::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CallableRequest {
     identity: CallableIdentity,
     bound: Option<runmat_value::BoundFunctionBinding>,
     fallback_policy: CallableFallbackPolicy,
-    args: Vec<Value>,
+    args: CallableRequestArguments,
     requested_outputs: usize,
     function_input_callsite: Option<crate::callsite::CallsiteInfo>,
     selected_runtime: Option<crate::context::RuntimeContext>,
+}
+
+#[derive(Debug)]
+enum CallableRequestArguments {
+    Owned(Vec<Value>),
+    Rooted(crate::call::RootedFunctionArguments),
+}
+
+impl CallableRequestArguments {
+    fn into_rooted(
+        self,
+        runtime: Option<&crate::context::RuntimeContext>,
+    ) -> Result<crate::call::RootedFunctionArguments, RuntimeError> {
+        match self {
+            Self::Rooted(arguments) => Ok(arguments),
+            Self::Owned(arguments) => match runtime {
+                Some(runtime) => crate::execution::RootedValues::in_context(arguments, runtime)
+                    .map(crate::call::RootedFunctionArguments::ordinary),
+                None => crate::execution::RootedValues::new(arguments)
+                    .map(crate::call::RootedFunctionArguments::ordinary)
+                    .map_err(|error| error.into_runtime_error()),
+            },
+        }
+    }
 }
 
 impl CallableRequest {
@@ -17,7 +41,7 @@ impl CallableRequest {
             identity: CallableIdentity::BoundFunction(runmat_types::FunctionId(function)),
             bound: None,
             fallback_policy: CallableFallbackPolicy::None,
-            args,
+            args: CallableRequestArguments::Owned(args),
             requested_outputs,
             function_input_callsite: None,
             selected_runtime: None,
@@ -33,7 +57,7 @@ impl CallableRequest {
             identity: CallableIdentity::BoundFunction(runmat_types::FunctionId(binding.function)),
             bound: Some(binding),
             fallback_policy: CallableFallbackPolicy::None,
-            args,
+            args: CallableRequestArguments::Owned(args),
             requested_outputs,
             function_input_callsite: None,
             selected_runtime: None,
@@ -50,7 +74,24 @@ impl CallableRequest {
             identity,
             bound: None,
             fallback_policy,
-            args,
+            args: CallableRequestArguments::Owned(args),
+            requested_outputs,
+            function_input_callsite: None,
+            selected_runtime: None,
+        }
+    }
+
+    pub(crate) fn rooted_resolved(
+        identity: CallableIdentity,
+        fallback_policy: CallableFallbackPolicy,
+        args: crate::call::RootedFunctionArguments,
+        requested_outputs: usize,
+    ) -> Self {
+        Self {
+            identity,
+            bound: None,
+            fallback_policy,
+            args: CallableRequestArguments::Rooted(args),
             requested_outputs,
             function_input_callsite: None,
             selected_runtime: None,
@@ -91,9 +132,31 @@ pub async fn try_call_semantic_function_in_context(
     args: &[Value],
     requested_outputs: usize,
 ) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    let arguments = match runtime {
+        Some(runtime) => crate::execution::RootedValues::in_context(args.to_vec(), runtime),
+        None => crate::execution::RootedValues::new(args.to_vec())
+            .map_err(|error| error.into_runtime_error()),
+    };
+    let arguments = match arguments {
+        Ok(arguments) => crate::call::RootedFunctionArguments::ordinary(arguments),
+        Err(error) => return Some(Err(error)),
+    };
+    try_call_rooted_semantic_function_in_context(runtime, function, arguments, requested_outputs)
+        .await
+}
+
+/// Invoke the canonical numeric semantic port with its original segmented
+/// argument owners. Captured closure Values remain borrowed from the retained
+/// callable generation; no compatibility Vec is manufactured.
+pub async fn try_call_rooted_semantic_function_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    function: usize,
+    arguments: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
     let invoker = current_semantic_function_invoker();
     let invoker = invoker?;
-    Some(invoker(runtime.cloned(), function, args, requested_outputs).await)
+    Some(invoker(runtime.cloned(), function, arguments, requested_outputs).await)
 }
 
 pub async fn try_call_bound_function(
@@ -328,6 +391,19 @@ pub async fn try_call_external_function_in_context(
     Some(invoker(runtime.cloned(), call).await)
 }
 
+pub(crate) async fn try_call_external_function_owned_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    call: ExternalFunctionCall,
+) -> std::ops::ControlFlow<
+    Result<crate::execution::RootedValueSequence, RuntimeError>,
+    ExternalFunctionCall,
+> {
+    let Some(invoker) = current_external_function_invoker() else {
+        return std::ops::ControlFlow::Continue(call);
+    };
+    std::ops::ControlFlow::Break(invoker(runtime.cloned(), call).await)
+}
+
 pub async fn try_call_lexical_function(
     call: crate::call::lexical::LexicalCall,
 ) -> Option<Result<crate::call::lexical::RootedLexicalCallResult, RuntimeError>> {
@@ -402,6 +478,69 @@ fn selected_scoped_name_target(name: &str, function: usize) -> Option<ScopedSema
         .filter(|target| target.function().0 == function)
 }
 
+pub(crate) type RootedSemanticAttempt = std::ops::ControlFlow<
+    Result<crate::execution::RootedValueSequence, RuntimeError>,
+    crate::call::RootedFunctionArguments,
+>;
+
+/// Attempt one already-rooted segmented semantic selection. Absence of an
+/// invoker returns the exact argument owner; a selected body is terminal.
+pub(crate) async fn try_call_rooted_semantic_name_in_context(
+    runtime: Option<&crate::context::RuntimeContext>,
+    name: &str,
+    arguments: crate::call::RootedFunctionArguments,
+    requested_outputs: usize,
+) -> RootedSemanticAttempt {
+    let Some(function) = resolve_semantic_function_by_name(name) else {
+        return std::ops::ControlFlow::Continue(arguments);
+    };
+    match selected_scoped_name_target(name, function) {
+        Some(ScopedSemanticNameTarget::Retained(binding)) => {
+            let selected_native = matches!(
+                &binding.authority,
+                runmat_value::BoundFunctionAuthority::SelectedNative { .. }
+            );
+            if !selected_native && current_bound_function_invoker().is_none() {
+                return std::ops::ControlFlow::Continue(arguments);
+            }
+            let result = match runtime {
+                Some(runtime) => {
+                    try_call_rooted_bound_function_with_environment_in_context(
+                        runtime,
+                        binding,
+                        arguments,
+                        requested_outputs,
+                        None,
+                    )
+                    .await
+                }
+                None => try_call_rooted_bound_function(binding, arguments, requested_outputs).await,
+            };
+            std::ops::ControlFlow::Break(result.unwrap_or_else(|| {
+                Err(crate::runtime_error::semantic_error(
+                    "UnavailableBoundFunction",
+                    "selected semantic function has no rooted invoker",
+                ))
+            }))
+        }
+        Some(ScopedSemanticNameTarget::Published(_)) | None => {
+            if current_semantic_function_invoker().is_none() {
+                return std::ops::ControlFlow::Continue(arguments);
+            }
+            std::ops::ControlFlow::Break(
+                try_call_rooted_semantic_function_in_context(
+                    runtime,
+                    function,
+                    arguments,
+                    requested_outputs,
+                )
+                .await
+                .expect("semantic invoker was checked before rooted dispatch"),
+            )
+        }
+    }
+}
+
 pub fn resolve_semantic_function_by_name(name: &str) -> Option<usize> {
     let resolver = current_semantic_function_resolver()?;
     resolver(name)
@@ -409,7 +548,7 @@ pub fn resolve_semantic_function_by_name(name: &str) -> Option<usize> {
 
 pub async fn try_load_and_call_dynamic_function(
     name: String,
-    args: Vec<Value>,
+    args: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
     phase: DynamicFunctionLoadPhase,
     input_callsite: Option<crate::callsite::CallsiteInfo>,
@@ -443,10 +582,13 @@ pub async fn select_observed_source_binding_in_context(
     let Some(loader) = loader else {
         return Ok(None);
     };
+    let arguments = crate::call::RootedFunctionArguments::ordinary(
+        crate::execution::RootedValues::in_context(Vec::new(), &runtime)?,
+    );
     let result = loader(
         runtime,
         name,
-        Vec::new(),
+        arguments,
         1,
         DynamicFunctionLoadPhase::Handle {
             class: None,
@@ -511,60 +653,86 @@ fn refresh_execution_error(
     source.into_runtime_error()
 }
 
-pub async fn try_call_semantic_descriptor(
+pub(crate) async fn try_call_semantic_descriptor_owned(
     request: CallableRequest,
-) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+) -> super::CallableAttempt {
     let CallableRequest {
         identity,
         bound,
         fallback_policy,
-        mut args,
+        args,
         requested_outputs,
         function_input_callsite,
         selected_runtime,
     } = request;
+    let mut args = match args.into_rooted(selected_runtime.as_ref()) {
+        Ok(arguments) => arguments,
+        Err(error) => return std::ops::ControlFlow::Break(Err(error)),
+    };
     if let CallableIdentity::BoundFunction(function) = identity {
         if let Some(binding) = bound {
-            if let Some(context) = selected_runtime.as_ref() {
-                return flatten_callsite_result(
-                    crate::callsite::with_function_input_callsite(
-                        function_input_callsite,
-                        try_call_bound_function_with_environment_in_context(
+            let available = matches!(
+                &binding.authority,
+                runmat_value::BoundFunctionAuthority::SelectedNative { .. }
+            ) || current_bound_function_invoker().is_some();
+            if !available {
+                return std::ops::ControlFlow::Continue(args);
+            }
+            let selected = async {
+                match selected_runtime.as_ref() {
+                    Some(context) => {
+                        try_call_rooted_bound_function_with_environment_in_context(
                             context,
                             binding,
-                            &args,
+                            args,
                             requested_outputs,
                             None,
-                        ),
-                    )
+                        )
+                        .await
+                    }
+                    None => try_call_rooted_bound_function(binding, args, requested_outputs).await,
+                }
+            };
+            let result = flatten_callsite_result(
+                crate::callsite::with_function_input_callsite(function_input_callsite, selected)
                     .await,
-                );
-            }
-            return flatten_callsite_result(
-                crate::callsite::with_function_input_callsite(
-                    function_input_callsite,
-                    try_call_bound_function(binding, &args, requested_outputs),
-                )
-                .await,
-            );
-        }
-        return flatten_callsite_result(
-            crate::callsite::with_function_input_callsite(
-                function_input_callsite,
-                try_call_semantic_function_in_context(
-                    selected_runtime.as_ref(),
-                    function.0,
-                    &args,
-                    requested_outputs,
-                ),
             )
-            .await,
-        );
+            .unwrap_or_else(|| {
+                Err(crate::runtime_error::semantic_error(
+                    "UnavailableBoundFunction",
+                    "selected bound function has no rooted invoker",
+                ))
+            });
+            return std::ops::ControlFlow::Break(result);
+        }
+        if current_semantic_function_invoker().is_none() {
+            return std::ops::ControlFlow::Continue(args);
+        }
+        let result = crate::callsite::with_function_input_callsite(
+            function_input_callsite,
+            try_call_rooted_semantic_function_in_context(
+                selected_runtime.as_ref(),
+                function.0,
+                args,
+                requested_outputs,
+            ),
+        )
+        .await
+        .unwrap_or_else(|error| Some(Err(error)))
+        .unwrap_or_else(|| {
+            Err(crate::runtime_error::semantic_error(
+                "UnavailableFunction",
+                "selected semantic function has no rooted invoker",
+            ))
+        });
+        return std::ops::ControlFlow::Break(result);
     }
     if !fallback_policy.allows_semantic_name_resolution_for(&identity) {
-        return None;
+        return std::ops::ControlFlow::Continue(args);
     }
-    let name = fallback_policy.resolution_name_for(&identity)?;
+    let Some(name) = fallback_policy.resolution_name_for(&identity) else {
+        return std::ops::ControlFlow::Continue(args);
+    };
     if matches!(identity, CallableIdentity::ExternalName(_)) {
         if let Some(context) = crate::context::legacy::active() {
             args = match crate::foreign::try_invoke_clibgen(
@@ -575,7 +743,9 @@ pub async fn try_call_semantic_descriptor(
             )
             .await
             {
-                crate::foreign::ForeignAttempt::Break(result) => return Some(result),
+                crate::foreign::ForeignAttempt::Break(result) => {
+                    return std::ops::ControlFlow::Break(result)
+                }
                 crate::foreign::ForeignAttempt::Continue(args) => args,
             };
             args = match crate::foreign::try_invoke_clib(
@@ -586,13 +756,17 @@ pub async fn try_call_semantic_descriptor(
             )
             .await
             {
-                crate::foreign::ForeignAttempt::Break(result) => return Some(result),
+                crate::foreign::ForeignAttempt::Break(result) => {
+                    return std::ops::ControlFlow::Break(result)
+                }
                 crate::foreign::ForeignAttempt::Continue(args) => args,
             };
             args = match crate::foreign::try_invoke_python(context, &name, args, requested_outputs)
                 .await
             {
-                crate::foreign::ForeignAttempt::Break(result) => return Some(result),
+                crate::foreign::ForeignAttempt::Break(result) => {
+                    return std::ops::ControlFlow::Break(result)
+                }
                 crate::foreign::ForeignAttempt::Continue(args) => args,
             };
         }
@@ -642,7 +816,7 @@ pub async fn try_call_semantic_descriptor(
             if resolve_semantic_function_by_name(declared).is_none()
                 && resolve_semantic_function_by_name(&owner_qualified).is_none()
             {
-                if let std::ops::ControlFlow::Break(result) = try_load_and_call_dynamic_function(
+                match try_load_and_call_dynamic_function(
                     name,
                     args,
                     requested_outputs,
@@ -651,13 +825,16 @@ pub async fn try_call_semantic_descriptor(
                 )
                 .await
                 {
-                    return Some(result);
+                    std::ops::ControlFlow::Break(result) => {
+                        return std::ops::ControlFlow::Break(result)
+                    }
+                    std::ops::ControlFlow::Continue(returned) => args = returned,
                 }
             }
         }
         // Constructor fallback never enters generic semantic-name or MEX
         // dispatch, which could select an unrelated callable by spelling.
-        return None;
+        return std::ops::ControlFlow::Continue(args);
     }
     if matches!(
         identity,
@@ -667,47 +844,23 @@ pub async fn try_call_semantic_descriptor(
     ) {
         // A private source selected by the active caller is already an exact
         // semantic target. Public names retain the loader's MEX-first order.
-        if let Some(target) = resolve_semantic_function_by_name(&name)
+        if resolve_semantic_function_by_name(&name)
             .and_then(|function| selected_scoped_name_target(&name, function))
+            .is_some()
         {
-            let selected = async {
-                match target {
-                    ScopedSemanticNameTarget::Published(function) => {
-                        try_call_semantic_function_in_context(
-                            selected_runtime.as_ref(),
-                            function.0,
-                            &args,
-                            requested_outputs,
-                        )
-                        .await
-                    }
-                    ScopedSemanticNameTarget::Retained(binding) => {
-                        match selected_runtime.as_ref() {
-                            Some(runtime) => {
-                                try_call_bound_function_in_context(
-                                    runtime,
-                                    binding,
-                                    &args,
-                                    requested_outputs,
-                                )
-                                .await
-                            }
-                            None => {
-                                try_call_bound_function(binding, &args, requested_outputs).await
-                            }
-                        }
-                    }
+            args = match try_call_rooted_semantic_name_in_context(
+                selected_runtime.as_ref(),
+                &name,
+                args,
+                requested_outputs,
+            )
+            .await
+            {
+                std::ops::ControlFlow::Break(result) => {
+                    return std::ops::ControlFlow::Break(result)
                 }
+                std::ops::ControlFlow::Continue(args) => args,
             };
-            if let Some(result) = flatten_callsite_result(
-                crate::callsite::with_function_input_callsite(
-                    function_input_callsite.clone(),
-                    selected,
-                )
-                .await,
-            ) {
-                return Some(result);
-            }
         }
         args = match try_load_and_call_dynamic_function(
             name.clone(),
@@ -718,27 +871,21 @@ pub async fn try_call_semantic_descriptor(
         )
         .await
         {
-            std::ops::ControlFlow::Break(result) => return Some(result),
+            std::ops::ControlFlow::Break(result) => return std::ops::ControlFlow::Break(result),
             std::ops::ControlFlow::Continue(args) => args,
         };
     }
-    if let Some(function) = resolve_semantic_function_by_name(&name) {
-        if let Some(result) = flatten_callsite_result(
-            crate::callsite::with_function_input_callsite(
-                function_input_callsite.clone(),
-                try_call_selected_semantic_name_in_context(
-                    selected_runtime.as_ref(),
-                    &name,
-                    function,
-                    &args,
-                    requested_outputs,
-                ),
-            )
-            .await,
-        ) {
-            return Some(result);
-        }
-    }
+    args = match try_call_rooted_semantic_name_in_context(
+        selected_runtime.as_ref(),
+        &name,
+        args,
+        requested_outputs,
+    )
+    .await
+    {
+        std::ops::ControlFlow::Break(result) => return std::ops::ControlFlow::Break(result),
+        std::ops::ControlFlow::Continue(args) => args,
+    };
     if matches!(
         identity,
         CallableIdentity::DynamicName(_)
@@ -754,7 +901,7 @@ pub async fn try_call_semantic_descriptor(
         )
         .await
         {
-            std::ops::ControlFlow::Break(result) => return Some(result),
+            std::ops::ControlFlow::Break(result) => return std::ops::ControlFlow::Break(result),
             std::ops::ControlFlow::Continue(args) => args,
         };
     }
@@ -763,14 +910,26 @@ pub async fn try_call_semantic_descriptor(
         CallableIdentity::ExternalName(_) | CallableIdentity::Imported(_)
     ) {
         if let Some(context) = crate::context::legacy::active() {
-            if let crate::foreign::ForeignAttempt::Break(result) =
-                crate::foreign::try_invoke_java(context, &name, args, requested_outputs).await
+            args = match crate::foreign::try_invoke_java(context, &name, args, requested_outputs)
+                .await
             {
-                return Some(result);
-            }
+                crate::foreign::ForeignAttempt::Break(result) => {
+                    return std::ops::ControlFlow::Break(result)
+                }
+                crate::foreign::ForeignAttempt::Continue(returned) => returned,
+            };
         }
     }
-    None
+    std::ops::ControlFlow::Continue(args)
+}
+
+pub async fn try_call_semantic_descriptor(
+    request: CallableRequest,
+) -> Option<Result<crate::execution::RootedValueSequence, RuntimeError>> {
+    match try_call_semantic_descriptor_owned(request).await {
+        std::ops::ControlFlow::Break(result) => Some(result),
+        std::ops::ControlFlow::Continue(_) => None,
+    }
 }
 
 fn flatten_callsite_result<T>(

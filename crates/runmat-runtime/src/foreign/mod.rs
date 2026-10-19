@@ -49,7 +49,7 @@ pub use telemetry::*;
 /// `Break` stops resolution with the selected operation's result.
 pub type ForeignAttempt = std::ops::ControlFlow<
     Result<crate::execution::RootedValueSequence, crate::RuntimeError>,
-    Vec<runmat_value::Value>,
+    crate::call::RootedFunctionArguments,
 >;
 
 pub(crate) fn single_output_sequence(
@@ -82,7 +82,7 @@ pub async fn load_foreign_member(
         "get_member",
         vec![
             runmat_value::Value::Foreign(reference),
-            runmat_value::Value::String(member),
+            runmat_value::Value::String(member.into()),
         ],
     )
     .await
@@ -101,7 +101,7 @@ pub async fn store_foreign_member(
         "set_member",
         vec![
             runmat_value::Value::Foreign(reference),
-            runmat_value::Value::String(member),
+            runmat_value::Value::String(member.into()),
             value,
         ],
     )
@@ -141,20 +141,19 @@ pub async fn assign_foreign_resource_index(
 pub async fn invoke_foreign_method(
     reference: runmat_value::ForeignRef,
     method: String,
-    arguments: Vec<runmat_value::Value>,
+    arguments: crate::execution::RootedValues,
     requested_outputs: usize,
 ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
-    let mut call_arguments = Vec::with_capacity(arguments.len() + 2);
-    call_arguments.push(runmat_value::Value::Foreign(reference.clone()));
-    call_arguments.push(runmat_value::Value::String(method));
-    call_arguments.extend(arguments);
-    invoke_foreign(
-        reference,
-        "invoke_member",
-        call_arguments,
-        requested_outputs,
-    )
-    .await
+    let context = crate::context::legacy::active().ok_or_else(|| {
+        foreign_error(
+            ForeignErrorKind::HostUnavailable,
+            "foreign member access has no active runtime context",
+        )
+    })?;
+    let arguments = crate::call::RootedFunctionArguments::ordinary(arguments)
+        .prepend_routing_in_context(runmat_value::Value::String(method.into()), &context)?
+        .prepend_routing_in_context(runmat_value::Value::Foreign(reference.clone()), &context)?;
+    invoke_foreign_rooted(reference, "invoke_member", arguments, requested_outputs).await
 }
 
 async fn invoke_foreign_member(
@@ -170,6 +169,24 @@ async fn invoke_foreign(
     reference: runmat_value::ForeignRef,
     operation: &str,
     arguments: Vec<runmat_value::Value>,
+    requested_outputs: usize,
+) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
+    let context = crate::context::legacy::active().ok_or_else(|| {
+        foreign_error(
+            ForeignErrorKind::HostUnavailable,
+            "foreign member access has no active runtime context",
+        )
+    })?;
+    let arguments = crate::call::RootedFunctionArguments::ordinary(
+        crate::execution::RootedValues::in_context(arguments, &context)?,
+    );
+    invoke_foreign_rooted(reference, operation, arguments, requested_outputs).await
+}
+
+async fn invoke_foreign_rooted(
+    reference: runmat_value::ForeignRef,
+    operation: &str,
+    arguments: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
 ) -> Result<crate::execution::RootedValueSequence, crate::RuntimeError> {
     let context = crate::context::legacy::active().ok_or_else(|| {
@@ -219,7 +236,7 @@ fn require_foreign_single(
 pub async fn try_invoke_clib(
     context: crate::context::RuntimeContext,
     name: &str,
-    arguments: Vec<runmat_value::Value>,
+    arguments: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
 ) -> ForeignAttempt {
     let segments = name.split('.').collect::<Vec<_>>();
@@ -241,10 +258,21 @@ pub async fn try_invoke_clib(
             ),
         )));
     };
-    let mut call_arguments = Vec::with_capacity(arguments.len() + 2);
-    call_arguments.push(runmat_value::Value::String(segments[1].into()));
-    call_arguments.push(runmat_value::Value::String(segments[2..].join(".")));
-    call_arguments.extend(arguments);
+    let call_arguments = arguments
+        .prepend_routing_in_context(
+            runmat_value::Value::String(segments[2..].join(".").into()),
+            &context,
+        )
+        .and_then(|arguments| {
+            arguments.prepend_routing_in_context(
+                runmat_value::Value::String(segments[1].into()),
+                &context,
+            )
+        });
+    let call_arguments = match call_arguments {
+        Ok(arguments) => arguments,
+        Err(error) => return ForeignAttempt::Break(Err(error)),
+    };
     ForeignAttempt::Break(
         context
             .scope(service.invoke(
@@ -265,7 +293,7 @@ pub async fn try_invoke_clib(
 pub async fn try_invoke_clibgen(
     context: crate::context::RuntimeContext,
     name: &str,
-    arguments: Vec<runmat_value::Value>,
+    arguments: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
 ) -> ForeignAttempt {
     if name != "clibgen.buildInterface" {
@@ -299,7 +327,7 @@ pub async fn try_invoke_clibgen(
 pub async fn try_invoke_java(
     context: crate::context::RuntimeContext,
     name: &str,
-    arguments: Vec<runmat_value::Value>,
+    arguments: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
 ) -> ForeignAttempt {
     if !is_java_qualified_candidate(name) {
@@ -322,7 +350,13 @@ pub async fn try_invoke_java(
                 crate::context::ForeignCall {
                     adapter: "java".into(),
                     symbol: "has_classpath".into(),
-                    arguments: Vec::new(),
+                    arguments: match crate::execution::RootedValues::in_context(
+                        Vec::new(),
+                        &context,
+                    ) {
+                        Ok(arguments) => crate::call::RootedFunctionArguments::ordinary(arguments),
+                        Err(error) => return ForeignAttempt::Break(Err(error)),
+                    },
                     requested_outputs: 1,
                 },
             ))
@@ -334,8 +368,12 @@ pub async fn try_invoke_java(
             return ForeignAttempt::Continue(arguments);
         }
     }
-    let mut call_arguments = arguments;
-    call_arguments.insert(0, runmat_value::Value::String(name.into()));
+    let call_arguments = match arguments
+        .prepend_routing_in_context(runmat_value::Value::String(name.into()), &context)
+    {
+        Ok(arguments) => arguments,
+        Err(error) => return ForeignAttempt::Break(Err(error)),
+    };
     let result = context
         .scope(service.invoke(
             context.clone(),
@@ -349,16 +387,10 @@ pub async fn try_invoke_java(
         .await;
     match result.into_owner_return() {
         Ok(result) => ForeignAttempt::Break(result),
-        Err(mut call) => {
-            if call.arguments.is_empty() {
-                return ForeignAttempt::Break(Err(crate::runtime_error::semantic_error(
-                    "ForeignDeclineIdentity",
-                    "qualified Java decline lost its selected name argument",
-                )));
-            }
-            let _qualified_name = call.arguments.remove(0);
-            ForeignAttempt::Continue(call.arguments)
-        }
+        Err(call) => match call.arguments.remove_first_routing_in_context(&context) {
+            Ok(arguments) => ForeignAttempt::Continue(arguments),
+            Err(error) => ForeignAttempt::Break(Err(error)),
+        },
     }
 }
 
@@ -367,7 +399,7 @@ pub async fn try_invoke_java(
 pub async fn try_invoke_python(
     context: crate::context::RuntimeContext,
     name: &str,
-    arguments: Vec<runmat_value::Value>,
+    arguments: crate::call::RootedFunctionArguments,
     requested_outputs: usize,
 ) -> ForeignAttempt {
     if !name.starts_with("py.") || name.len() <= 3 {
@@ -379,9 +411,12 @@ pub async fn try_invoke_python(
             format!("Python call `{name}` is unavailable on this host"),
         )));
     };
-    let mut call_arguments = Vec::with_capacity(arguments.len() + 1);
-    call_arguments.push(runmat_value::Value::String(name.into()));
-    call_arguments.extend(arguments);
+    let call_arguments = match arguments
+        .prepend_routing_in_context(runmat_value::Value::String(name.into()), &context)
+    {
+        Ok(arguments) => arguments,
+        Err(error) => return ForeignAttempt::Break(Err(error)),
+    };
     ForeignAttempt::Break(
         context
             .scope(service.invoke(

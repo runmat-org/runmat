@@ -124,11 +124,11 @@ fn build_table_fit_spec(
     if arguments.option_start == 1 {
         if let Some(text) = scalar_text(&rest[0]) {
             if text.contains('~') {
-                formula = Some(text);
+                formula = Some(text.into_owned());
             } else if is_known_model_spec(&text) {
                 model_spec = parse_model_spec_text(&text, variable_names.len() - 1)?;
             } else {
-                response_arg = Some(text);
+                response_arg = Some(text.into_owned());
             }
         } else {
             model_spec = parse_model_spec(&rest[0], variable_names.len() - 1)?;

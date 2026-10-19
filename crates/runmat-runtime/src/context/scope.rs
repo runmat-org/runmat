@@ -12,6 +12,9 @@ use std::task::{Context, Poll};
 
 #[path = "scope/future_owner.rs"]
 mod future_owner;
+#[path = "scope/deferred_future.rs"]
+mod deferred_future;
+pub use deferred_future::DeferredRuntimeFuture;
 
 runmat_thread_local! {
     static ACTIVE_CONTEXTS: RefCell<Vec<RuntimeContext>> = const { RefCell::new(Vec::new()) };
@@ -234,8 +237,10 @@ impl PreparedRuntimeScope {
                 scope_allocation_error(&self.context, "poll future authority changed", source)
             })?;
         }
+        let cancellation = self.context.cancellation();
         Ok(PreparedRuntimeFutureScope {
             context: self.context,
+            cancellation,
             receipt,
             scratch,
             _future: std::marker::PhantomData,
@@ -246,27 +251,62 @@ impl PreparedRuntimeScope {
 /// Exact preparation for one concrete scoped future allocation.
 pub struct PreparedRuntimeFutureScope<F> {
     context: RuntimeContext,
+    cancellation: runmat_execution::cancellation::CancellationToken,
     receipt: Option<HostAllocationReceipt>,
     scratch: Option<std::sync::Arc<super::host_effect::ManagedHostEffectStageReservation>>,
     _future: std::marker::PhantomData<fn() -> F>,
 }
 
 impl<F: Future> PreparedRuntimeFutureScope<F> {
+    /// Retain the admitted future factory until a queue polls it from its
+    /// outer driver frame. Projection capture and concrete `F` admission have
+    /// already completed; this only defers materializing the potentially
+    /// large generated future value on the caller's active stack.
+    pub fn defer_result<M, T>(self, make_future: M) -> DeferredRuntimeFuture<F, M, T>
+    where
+        F: Future<Output = Result<T, RuntimeError>>,
+        M: FnOnce() -> F,
+    {
+        DeferredRuntimeFuture::new(self, make_future)
+    }
+
     pub fn try_scope_with(
         self,
         make_future: impl FnOnce() -> F,
     ) -> Result<ContextFuture<F>, RuntimeError> {
         let Self {
             context,
+            cancellation,
             receipt,
             scratch,
             _future: _,
         } = self;
+        let mut make_future = Some(make_future);
+        if let Err(source) =
+            checkpoint_unbounded_factory(&context, &cancellation, receipt.is_none())
+        {
+            future_owner::drop_value_in_context(
+                &context,
+                make_future.take().expect("poll future factory"),
+            );
+            return Err(source);
+        }
         let future = if let Some(receipt) = &receipt {
-            receipt.checkpoint(&context).map_err(|source| {
-                scope_allocation_error(&context, "poll future authority changed", source)
-            })?;
-            let allocated = future_owner::try_pin_in_context(&context, make_future);
+            if let Err(source) = receipt.checkpoint(&context) {
+                future_owner::drop_value_in_context(
+                    &context,
+                    make_future.take().expect("poll future factory"),
+                );
+                return Err(scope_allocation_error(
+                    &context,
+                    "poll future authority changed",
+                    source,
+                ));
+            }
+            let allocated = future_owner::try_pin_in_context(
+                &context,
+                make_future.take().expect("poll future factory"),
+            );
             if let Err(source) = receipt.checkpoint(&context) {
                 if let Ok(future) = allocated {
                     future_owner::drop_in_context(&context, future);
@@ -285,10 +325,57 @@ impl<F: Future> PreparedRuntimeFutureScope<F> {
                 )
             })?
         } else {
-            future_owner::pin_in_context(&context, make_future)
+            let future = future_owner::pin_in_context(
+                &context,
+                make_future.take().expect("poll future factory"),
+            );
+            if let Err(source) = checkpoint_unbounded_factory(&context, &cancellation, true) {
+                future_owner::drop_in_context(&context, future);
+                return Err(source);
+            }
+            future
         };
         Ok(ContextFuture::from_prepared(context, future, scratch))
     }
+
+    pub(super) fn drop_unconstructed<M>(self, make_future: M) {
+        let Self {
+            context,
+            cancellation,
+            receipt,
+            scratch,
+            _future: _,
+        } = self;
+        future_owner::drop_value_in_context(
+            &context,
+            (make_future, cancellation, receipt, scratch),
+        );
+    }
+}
+
+fn checkpoint_unbounded_factory(
+    context: &RuntimeContext,
+    cancellation: &runmat_execution::cancellation::CancellationToken,
+    unbounded: bool,
+) -> Result<(), RuntimeError> {
+    if !unbounded {
+        return Ok(());
+    }
+    if !cancellation.same_generation(&context.cancellation()) {
+        return Err(scope_allocation_error(
+            context,
+            "poll future authority changed",
+            HostAllocationError::StaleAuthority,
+        ));
+    }
+    if cancellation.is_cancelled() {
+        return Err(scope_allocation_error(
+            context,
+            "poll future construction was cancelled",
+            HostAllocationError::Cancelled,
+        ));
+    }
+    Ok(())
 }
 
 impl RuntimeContext {

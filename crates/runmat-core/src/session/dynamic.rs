@@ -31,6 +31,10 @@ use completion::finish_dynamic_invocation;
 #[path = "dynamic/constructor.rs"]
 mod constructor;
 
+#[path = "dynamic/current_class_product.rs"]
+mod current_class_product;
+pub(super) use current_class_product::resolve as resolve_current_class_product;
+
 #[path = "dynamic/loader.rs"]
 mod loader;
 pub(super) use loader::{load_dynamic_function, DynamicFunctionEnvironment};

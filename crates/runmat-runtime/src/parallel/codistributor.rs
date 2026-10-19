@@ -571,7 +571,7 @@ fn exact_scalar(value: u64) -> Value {
 
 fn string_scalar(value: &Value) -> Option<String> {
     match value {
-        Value::String(value) => Some(value.clone()),
+        Value::String(value) => Some(value.as_str().to_owned()),
         Value::CharArray(value) => value.row_string(),
         _ => None,
     }

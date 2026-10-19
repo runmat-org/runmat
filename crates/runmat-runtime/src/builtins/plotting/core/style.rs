@@ -742,7 +742,11 @@ fn parse_line_style_order_value(
     value: &Value,
 ) -> BuiltinResult<Vec<LineStyle>> {
     let strings = match value {
-        Value::StringArray(arr) => arr.data.clone(),
+        Value::StringArray(arr) => arr
+            .data
+            .iter()
+            .map(|text| text.as_str().to_owned())
+            .collect(),
         Value::Cell(cell) => collect_cell_strings(cell, opts)?,
         _ => {
             if let Some(text) = value_as_string(value) {
@@ -948,7 +952,7 @@ pub(crate) fn parse_handle_visibility(
 pub fn value_as_string(value: &Value) -> Option<String> {
     match value {
         Value::CharArray(chars) => Some(chars.data.iter().collect()),
-        Value::String(s) => Some(s.clone()),
+        Value::String(s) => Some(s.as_str().to_owned()),
         _ => None,
     }
 }

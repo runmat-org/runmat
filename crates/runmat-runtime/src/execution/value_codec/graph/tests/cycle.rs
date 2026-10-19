@@ -15,7 +15,7 @@ fn closure_activation_cycle_and_argument_alias_round_trip_under_one_rooted_batch
             binding: Some(BoundFunctionBinding::portable(2, origin(2))),
             source_role: FunctionSourceRole::Nested,
             source_file: None,
-            captures: Vec::new(),
+            captures: Vec::new().into(),
             lexical_environment: Some(environment.clone()),
         }));
         crate::call::lexical::write_owned_binding(&environment, BindingId(7), closure.clone())

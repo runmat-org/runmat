@@ -365,6 +365,10 @@ mod reader;
 pub use reader::decode_workspace_from_mat_bytes;
 #[cfg(test)]
 pub(crate) use reader::read_mat_file;
+#[cfg(test)]
+pub(crate) use reader::restore_typed_mat_array_for_test;
+#[cfg(test)]
+pub(crate) use reader::restore_typed_mat_entry_for_test;
 pub(crate) use reader::{
     read_mat_file_for_builtin, read_mat_file_for_builtin_on_with_resource_liveness,
     read_mat_file_on_with_resource_liveness,
@@ -373,6 +377,7 @@ pub(crate) use reader::{
 mod decoder;
 #[cfg(test)]
 use decoder::mat_array_to_value;
+#[cfg(test)]
 use decoder::read_mat_reader;
 
 #[cfg(test)]

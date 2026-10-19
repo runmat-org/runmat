@@ -14,7 +14,9 @@ impl MappedCallable {
             Value::StringArray(value) if value.data.len() == 1 => Self::parse_text(&value.data[0]),
             Value::StringArray(_) => Err(CallableParseError::StringNameMustBeScalar),
             Value::FunctionHandle(name) => Self::parse_text(&name),
-            Value::ExternalFunctionHandle(name) => Ok(Self::resolve_name(name.into_name())),
+            Value::ExternalFunctionHandle(name) => {
+                Ok(Self::resolve_name(name.into_name_unbounded()))
+            }
             Value::BoundFunctionHandle(handle) => {
                 let data = handle.into_data();
                 Ok(Self::Closure(
