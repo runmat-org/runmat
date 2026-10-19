@@ -238,6 +238,7 @@ pub(super) const STEP_FIELDS: &[&str] = &[
     "procedure",
     "solution_space",
     "settings",
+    "excitation_case_selection",
     "independent_domain",
     "activations",
     "state_inputs",

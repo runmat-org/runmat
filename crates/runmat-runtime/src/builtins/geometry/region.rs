@@ -307,8 +307,12 @@ mod tests {
             Vec::new(),
         ))
         .expect("fixture geometry should load");
-        let mut asset = geometry_asset_from_value_with_builtin(&value, GEOMETRY_REGION_NAME)
-            .expect("fixture asset should decode");
+        let mut asset = geometry_asset_from_value_with_error(
+            &value,
+            GEOMETRY_REGION_NAME,
+            &GEOMETRY_REGION_ERROR_INPUT,
+        )
+        .expect("fixture asset should decode");
         asset.geometry_id = "fixture".into();
         asset.revision = 7;
         asset.regions = vec![

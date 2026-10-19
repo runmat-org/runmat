@@ -1622,7 +1622,7 @@ fn fea_step_result_selects_one_procedure_step_by_authored_id() {
     let runmat_value::Value::Object(object) = &selected else {
         panic!("expected a fea.StepRunResult object");
     };
-    assert_eq!(object.class_name, "fea.StepRunResult");
+    assert_eq!(object.class_name.display_name(), "fea.StepRunResult");
     assert_eq!(
         object.properties.get("run_id"),
         Some(&runmat_value::Value::String(step.run_id.clone()))
@@ -2763,7 +2763,9 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
     let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let cancelled = Arc::new(AtomicBool::new(true));
-    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(cancelled)));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(
+        runmat_execution::CancellationToken::from_shared(cancelled),
+    ));
     let model = sample_model();
 
     let err = analysis_run_linear_static_with_options(
@@ -2786,7 +2788,9 @@ fn analysis_run_linear_static_cancellation_maps_normalized_error() {
 fn analysis_run_linear_static_cancellation_after_preparation_stops_assembly() {
     let _guard = analysis_test_guard();
     let cancelled = Arc::new(AtomicBool::new(false));
-    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(runmat_execution::CancellationToken::from_shared(Arc::clone(&cancelled))));
+    let _interrupt_guard = crate::interrupt::replace_interrupt(Some(
+        runmat_execution::CancellationToken::from_shared(Arc::clone(&cancelled)),
+    ));
     let cancellation_on_assembly = Arc::clone(&cancelled);
     let _progress_guard = replace_fea_progress_handler(Some(Arc::new(move |event| {
         if event.phase == FeaProgressPhase::ModelAssembly

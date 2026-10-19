@@ -256,10 +256,10 @@ macro_rules! define_simple_constraint {
         $builtin_path:literal, $build:expr
     ) => {
         #[runtime_builtin(
-            name = $builtin_name,
-            binding_variant = "default",
-            builtin_path = $builtin_path
-        )]
+                    name = $builtin_name,
+                    binding_variant = "default",
+                    builtin_path = $builtin_path
+                )]
         pub async fn $function(id: String, region: Value) -> BuiltinResult<Value> {
             fixed_outputs(&runmat_builtins::$descriptor, $builtin_name)?;
             let (id, geometry_id, geometry_revision, target) =
@@ -282,10 +282,10 @@ macro_rules! define_quantity_constraint {
         $builtin_path:literal, $value_class:expr, $value_field:literal, $build:expr
     ) => {
         #[runtime_builtin(
-            name = $builtin_name,
-            binding_variant = "default",
-            builtin_path = $builtin_path
-        )]
+                    name = $builtin_name,
+                    binding_variant = "default",
+                    builtin_path = $builtin_path
+                )]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
             fixed_outputs(&runmat_builtins::$descriptor, $builtin_name)?;
             let (id, geometry_id, geometry_revision, target) =
@@ -374,9 +374,10 @@ mod tests {
             "solid base\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid base\n",
         )
         .unwrap();
-        let asset = block_on(geometry_load_builtin(vec![Value::String(
-            path.to_string_lossy().to_string(),
-        )]))
+        let asset = block_on(geometry_load_builtin(
+            Value::String(path.to_string_lossy().to_string()),
+            Vec::new(),
+        ))
         .expect("geometry should load");
         let decoded = geometry_asset_from_value_with_builtin(&asset, STRUCTURAL_FIXED_NAME)
             .expect("asset should decode");
@@ -779,8 +780,9 @@ mod tests {
             (FEA_ACOUSTIC_CONSTRAINT_CLASS, "prescribedPressure"),
             (FEA_FLUID_CONSTRAINT_CLASS, "movingWall"),
         ] {
-            let (definition, _) = crate::class_registry::lookup_method(class_name, method)
-                .expect("typed class method should be registered");
+            let (definition, _) =
+                crate::builtins::fea::test_support::lookup_method(class_name, method)
+                    .expect("typed class method should be registered");
             assert!(definition.is_static);
         }
     }
@@ -923,8 +925,9 @@ mod tests {
             ("fea.CoordinateFrame", "cartesian"),
             ("fea.ReferencePoint", "fromCoordinates"),
         ] {
-            let (definition, _) = crate::class_registry::lookup_method(class_name, method)
-                .unwrap_or_else(|| panic!("{class_name}.{method} should be registered"));
+            let (definition, _) =
+                crate::builtins::fea::test_support::lookup_method(class_name, method)
+                    .unwrap_or_else(|| panic!("{class_name}.{method} should be registered"));
             assert!(definition.is_static);
         }
     }
@@ -998,18 +1001,22 @@ mod tests {
         assert!(support::motion::structural_motions_from_value("test", &duplicate).is_err());
 
         ensure_fea_classes_registered();
-        assert!(
-            crate::class_registry::lookup_method("fea.StructuralMotion", "acceleration").is_some()
-        );
-        assert!(crate::class_registry::lookup_method(
+        assert!(crate::builtins::fea::test_support::lookup_method(
+            "fea.StructuralMotion",
+            "acceleration"
+        )
+        .is_some());
+        assert!(crate::builtins::fea::test_support::lookup_method(
             "fea.StructuralConstraint",
             "prescribedMotion"
         )
         .is_some());
         for removed in ["baseDisplacement", "baseVelocity", "baseAcceleration"] {
-            assert!(
-                crate::class_registry::lookup_method("fea.StructuralExcitation", removed).is_none()
-            );
+            assert!(crate::builtins::fea::test_support::lookup_method(
+                "fea.StructuralExcitation",
+                removed
+            )
+            .is_none());
         }
     }
 

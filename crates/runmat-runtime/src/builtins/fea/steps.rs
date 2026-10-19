@@ -89,10 +89,10 @@ pub(super) fn require_step_class(
 macro_rules! step_builtin {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $build:expr) => {
         #[runtime_builtin(
-                    name = $name,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::steps"
-                )]
+                            name = $name,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::steps"
+                        )]
         pub async fn $function(id: Value) -> BuiltinResult<Value> {
             crate::builtins::fea::constraints::fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let id = scalar_string(&id, $name, &ERROR_INPUT)?;
@@ -417,11 +417,16 @@ mod tests {
             (FEA_CONJUGATE_HEAT_TRANSFER_STEP_CLASS, "steadyState"),
             (FEA_FLUID_STRUCTURE_STEP_CLASS, "transient"),
         ] {
-            let (registered, owner) = crate::class_registry::lookup_method(class_name, method)
-                .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
-            assert_eq!(owner, class_name);
+            let (registered, owner) =
+                crate::builtins::fea::test_support::lookup_method(class_name, method)
+                    .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
+            assert_eq!(owner.display_name(), class_name);
             assert!(registered.is_static);
         }
-        assert!(crate::class_registry::lookup_method(FEA_THERMAL_STEP_CLASS, "static").is_none());
+        assert!(crate::builtins::fea::test_support::lookup_method(
+            FEA_THERMAL_STEP_CLASS,
+            "static"
+        )
+        .is_none());
     }
 }

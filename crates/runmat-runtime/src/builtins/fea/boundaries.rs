@@ -110,10 +110,10 @@ fn bound_boundary(
 macro_rules! region_boundary {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $operator:expr) => {
         #[runtime_builtin(
-                    name = $name,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::boundaries"
-                )]
+                            name = $name,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::boundaries"
+                        )]
         pub async fn $function(id: String, region: Value) -> BuiltinResult<Value> {
             fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             bound_boundary($name, $class, id, &region, $operator)
@@ -124,10 +124,10 @@ macro_rules! region_boundary {
 macro_rules! scalar_boundary {
     ($function:ident, $descriptor:ident, $name:literal, $class:expr, $quantity_class:expr, $field:literal, $build:expr) => {
         #[runtime_builtin(
-                    name = $name,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::boundaries"
-                )]
+                            name = $name,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::boundaries"
+                        )]
         pub async fn $function(id: String, region: Value, value: Value) -> BuiltinResult<Value> {
             fixed_outputs(&runmat_builtins::$descriptor, $name)?;
             let value = quantity_scalar($name, &value, $quantity_class, $field)?;
@@ -342,7 +342,9 @@ mod tests {
         ];
 
         for (value, class_name) in boundaries {
-            assert!(matches!(&value, Value::Object(object) if object.class_name == class_name));
+            assert!(
+                matches!(&value, Value::Object(object) if object.class_name.display_name() == class_name)
+            );
             let boundary = decode(&value, class_name);
             let geometry = geometry_asset_from_value_with_builtin(&asset, "fea.boundary.test")
                 .expect("geometry should decode");
@@ -438,12 +440,13 @@ mod tests {
             (FEA_ACOUSTIC_BOUNDARY_CLASS, "impedance"),
             (FEA_FLUID_BOUNDARY_CLASS, "outletPressure"),
         ] {
-            let (registered, owner) = crate::class_registry::lookup_method(class_name, method)
-                .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
-            assert_eq!(owner, class_name);
+            let (registered, owner) =
+                crate::builtins::fea::test_support::lookup_method(class_name, method)
+                    .unwrap_or_else(|| panic!("missing {class_name}.{method}"));
+            assert_eq!(owner.display_name(), class_name);
             assert!(registered.is_static);
         }
-        assert!(crate::class_registry::lookup_method(
+        assert!(crate::builtins::fea::test_support::lookup_method(
             FEA_FLUID_BOUNDARY_CLASS,
             "prescribedVelocity"
         )

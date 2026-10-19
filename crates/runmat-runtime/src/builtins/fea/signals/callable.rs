@@ -12,10 +12,10 @@ macro_rules! callable_signal_builtin {
         $function:ident, $builtin:literal, $class:expr, $shape:expr, $variant:path $(,)?
     ) => {
         #[runtime_builtin(
-                    name = $builtin,
-                    binding_variant = "default",
-                    builtin_path = "crate::builtins::fea::signals::callable"
-                )]
+                            name = $builtin,
+                            binding_variant = "default",
+                            builtin_path = "crate::builtins::fea::signals::callable"
+                        )]
         pub async fn $function(args: Vec<Value>) -> BuiltinResult<Value> {
             callable_signal($builtin, $class, $shape, $variant, args)
         }
@@ -435,13 +435,13 @@ mod tests {
             Value::Int(IntValue::U64(3)),
         ))
         .unwrap();
-        let callable = Value::Closure(Closure {
-            function_name: "anonymous#7".into(),
-            bound_function: Some(7),
-            captures: vec![Value::Tensor(
+        let (callable, _catalog) = crate::builtins::fea::test_support::portable_closure_fixture(
+            "anonymous#7",
+            7,
+            vec![Value::Tensor(
                 Tensor::new_2d(vec![1.0, 2.0, 3.0], 3, 1).unwrap(),
             )],
-        });
+        );
         let arguments = Value::Cell(
             CellArray::new(
                 vec![
@@ -511,11 +511,17 @@ mod tests {
         .is_err());
         assert!(block_on(acceleration(vec![
             Value::String("base".into()),
-            Value::Closure(Closure {
-                function_name: "loads.pulse".into(),
-                bound_function: Some(8),
-                captures: vec![Value::ClassRef("mutable.SessionObject".into())],
-            }),
+            Value::Closure(Closure::new(
+                "loads.pulse".into(),
+                Some(crate::user_functions::test_support::exact_portable_binding(
+                    8,
+                    "fea.callable.fixture",
+                )),
+                runmat_types::FunctionSourceRole::Anonymous,
+                None,
+                vec![Value::ClassRef("mutable.SessionObject".into())],
+                None,
+            )),
             domain,
             sampling,
         ]))

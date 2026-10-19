@@ -957,7 +957,7 @@ mod tests {
         let Some(Value::Tensor(coordinates)) = object.properties.get("meters") else {
             panic!("expected coordinate tensor")
         };
-        assert_eq!(coordinates.shape, vec![1, 3]);
+        assert_eq!(coordinates.shape(), vec![1, 3]);
         assert_eq!(coordinates.materialize_f64(), vec![1.0, 2.0, 3.0]);
     }
 }

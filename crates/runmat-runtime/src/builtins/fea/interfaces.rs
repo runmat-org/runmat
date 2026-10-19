@@ -399,7 +399,9 @@ mod tests {
         ];
 
         for (value, class_name) in values {
-            assert!(matches!(&value, Value::Object(object) if object.class_name == class_name));
+            assert!(
+                matches!(&value, Value::Object(object) if object.class_name.display_name() == class_name)
+            );
             let interface: GeometryBoundInterface =
                 object_payload("fea.typed-interface.test", &value, class_name).unwrap();
             interface

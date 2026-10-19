@@ -518,6 +518,6 @@ mod tests {
             &[tetrahedron_mesh_value()],
         ))
         .expect("standard mesh should dispatch meshing.Mesh");
-        assert!(matches!(handle, Value::Num(value) if value > 0.0));
+        assert!(matches!(*handle, Value::Num(value) if value > 0.0));
     }
 }

@@ -287,7 +287,7 @@ mod tests {
         else {
             panic!("real page must be a tensor")
         };
-        assert_eq!(real.shape, vec![2, 1]);
+        assert_eq!(real.shape(), vec![2, 1]);
         assert_eq!(real.materialize_f64(), vec![1.0, 2.0]);
 
         let Value::ComplexTensor(complex) = page_values_to_value(
@@ -297,7 +297,7 @@ mod tests {
         .expect("complex page") else {
             panic!("complex page must be a complex tensor")
         };
-        assert_eq!(complex.shape, vec![2, 1]);
+        assert_eq!(complex.shape(), vec![2, 1]);
         assert_eq!(complex.materialize_f64(), vec![(1.0, -2.0), (3.0, 4.0)]);
     }
 

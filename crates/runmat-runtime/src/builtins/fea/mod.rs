@@ -781,7 +781,6 @@ fn study_context_value(value: &Value) -> Option<Value> {
     object.properties.get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
 }
 
-
 fn run_id_context_from_value(value: &Value) -> Option<String> {
     let Value::Object(object) = value else {
         return None;
@@ -1156,19 +1155,18 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
                 .expect("validated scalar tensor storage"),
         ),
         // A `1xN` row is the typed-object form of a JSON vector.
-        Value::Tensor(tensor) if tensor.shape().len() == 2 && tensor.shape()[0] == 1 => {
-            (0..tensor.shape()[1])
-                .map(|index| {
-                    numeric_scalar_to_json(
-                        builtin,
-                        tensor
-                            .numeric_value_at(index)
-                            .expect("validated row tensor storage"),
-                    )
-                })
-                .collect::<BuiltinResult<Vec<_>>>()
-                .map(serde_json::Value::Array)
-        }
+        Value::Tensor(tensor) if tensor.shape().len() == 2 && tensor.shape()[0] == 1 => (0..tensor
+            .shape()[1])
+            .map(|index| {
+                numeric_scalar_to_json(
+                    builtin,
+                    tensor
+                        .numeric_value_at(index)
+                        .expect("validated row tensor storage"),
+                )
+            })
+            .collect::<BuiltinResult<Vec<_>>>()
+            .map(serde_json::Value::Array),
         Value::Tensor(tensor) => nested_array_to_json(builtin, &tensor.shape(), |index| {
             numeric_scalar_to_json(
                 builtin,
@@ -1397,7 +1395,6 @@ fn exact_bool_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
         )),
     }
 }
-
 
 fn usize_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<usize> {
     if let Some(int) = tensor_utils::scalar_integer_value(value) {
@@ -1846,11 +1843,58 @@ fn value_from_json_preserving_integer_kinds(
     error: &'static BuiltinErrorDescriptor,
     json: &serde_json::Value,
 ) -> BuiltinResult<Value> {
-    let mut converted = value_from_json(json)
+    let mut converted = typed_value_from_json(json)
         .map_err(|err| builtin_error_with_source(builtin, error, err.message().to_string(), err))?;
     promote_json_scalar_kinds(builtin, error, &mut converted, json)?;
     orient_json_vectors_as_rows(builtin, error, &mut converted)?;
     Ok(converted)
+}
+
+/// Typed FEA payloads keep every JSON array of objects as a cell, element for
+/// element. `jsondecode` instead folds such arrays into struct arrays (and a
+/// one-element array into a scalar struct), which would lose the array when
+/// the object is decoded again by `value_to_json`.
+fn typed_value_from_json(json: &serde_json::Value) -> BuiltinResult<Value> {
+    fn holds_object(json: &serde_json::Value) -> bool {
+        match json {
+            serde_json::Value::Object(_) => true,
+            serde_json::Value::Array(items) => items.iter().any(holds_object),
+            _ => false,
+        }
+    }
+    match json {
+        serde_json::Value::Object(map) => {
+            let mut structure = runmat_value::StructValue::new();
+            for (name, child) in map {
+                structure.insert(name.clone(), typed_value_from_json(child)?);
+            }
+            Ok(Value::Struct(structure))
+        }
+        serde_json::Value::Array(items) if items.iter().any(holds_object) => {
+            let elements = items
+                .iter()
+                .map(typed_value_from_json)
+                .collect::<BuiltinResult<Vec<_>>>()?;
+            let (rows, columns) = if items.iter().all(serde_json::Value::is_object) {
+                (elements.len(), 1)
+            } else {
+                (1, elements.len())
+            };
+            runmat_value::CellArray::new(elements, rows, columns)
+                .map(Value::Cell)
+                .map_err(|message| build_runtime_error(message).build())
+        }
+        // A single nested row (`[[a, b, c]]`) would decode to a `1xN` tensor,
+        // which re-encodes as the flat vector `[a, b, c]`; keep its nesting.
+        serde_json::Value::Array(items)
+            if items.len() == 1 && matches!(items[0], serde_json::Value::Array(_)) =>
+        {
+            runmat_value::CellArray::new(vec![typed_value_from_json(&items[0])?], 1, 1)
+                .map(Value::Cell)
+                .map_err(|message| build_runtime_error(message).build())
+        }
+        other => value_from_json(other),
+    }
 }
 
 /// JSON arrays decode to rank-1 tensors, which report `1xN` from `size` but
@@ -1872,8 +1916,9 @@ fn orient_json_vectors_as_rows(
         }
         Value::StringArray(array) if array.shape.len() == 1 && array.shape[0] >= 2 => {
             let columns = array.shape[0];
-            *array = runmat_value::StringArray::new(std::mem::take(&mut array.data), vec![1, columns])
-                .map_err(|message| builtin_error(builtin, error, message))?;
+            *array =
+                runmat_value::StringArray::new(std::mem::take(&mut array.data), vec![1, columns])
+                    .map_err(|message| builtin_error(builtin, error, message))?;
         }
         Value::Struct(structure) => {
             for child in structure.fields.values_mut() {
@@ -2221,7 +2266,7 @@ mod tests {
     use runmat_analysis_fea::ComputeBackend;
     use runmat_meshing_core::CanonicalMeshingContract;
     use runmat_types::MemberAccess;
-    use runmat_value::{CellArray, Closure};
+    use runmat_value::CellArray;
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
     const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
@@ -2397,7 +2442,7 @@ mod tests {
         let Some(Value::Tensor(matrix)) = object.properties.get("matrix") else {
             panic!("exact integer matrix");
         };
-        assert_eq!(matrix.shape, vec![2, 2]);
+        assert_eq!(matrix.shape(), vec![2, 2]);
         assert_eq!(
             matrix
                 .integer_storage()
@@ -2628,21 +2673,43 @@ mod tests {
         }
 
         for class_name in [FEA_VALIDATION_CLASS, FEA_PLAN_CLASS, FEA_RUN_RESULT_CLASS] {
-            assert!(crate::class_registry::lookup_property(class_name, "sweep_id").is_none());
+            assert!(
+                crate::builtins::fea::test_support::lookup_property(class_name, "sweep_id")
+                    .is_none()
+            );
         }
-        assert!(crate::class_registry::lookup_method(FEA_RUN_RESULT_CLASS, "results").is_some());
-        assert!(crate::class_registry::lookup_method(FEA_RUN_RESULT_CLASS, "step").is_some());
-        assert!(crate::class_registry::lookup_property(FEA_RUN_RESULT_CLASS, "steps").is_some());
-        assert!(crate::class_registry::lookup_property(FEA_RUN_RESULT_CLASS, "run_id").is_none());
         assert!(
-            crate::class_registry::lookup_property(FEA_STEP_RUN_RESULT_CLASS, "run_id").is_some()
+            crate::builtins::fea::test_support::lookup_method(FEA_RUN_RESULT_CLASS, "results")
+                .is_some()
         );
         assert!(
-            crate::class_registry::lookup_method(FEA_STEP_RUN_RESULT_CLASS, "results").is_some()
+            crate::builtins::fea::test_support::lookup_method(FEA_RUN_RESULT_CLASS, "step")
+                .is_some()
         );
         assert!(
-            crate::class_registry::lookup_method(FEA_SWEEP_RUN_RESULT_CLASS, "results").is_none()
+            crate::builtins::fea::test_support::lookup_property(FEA_RUN_RESULT_CLASS, "steps")
+                .is_some()
         );
+        assert!(crate::builtins::fea::test_support::lookup_property(
+            FEA_RUN_RESULT_CLASS,
+            "run_id"
+        )
+        .is_none());
+        assert!(crate::builtins::fea::test_support::lookup_property(
+            FEA_STEP_RUN_RESULT_CLASS,
+            "run_id"
+        )
+        .is_some());
+        assert!(crate::builtins::fea::test_support::lookup_method(
+            FEA_STEP_RUN_RESULT_CLASS,
+            "results"
+        )
+        .is_some());
+        assert!(crate::builtins::fea::test_support::lookup_method(
+            FEA_SWEEP_RUN_RESULT_CLASS,
+            "results"
+        )
+        .is_none());
     }
 
     #[test]
@@ -2676,7 +2743,19 @@ mod tests {
             value_to_json("fea.test", &Value::Tensor(tensor))
                 .expect("tensor json")
                 .to_string(),
-            "[[42,18446744073709551615]]"
+            "[42,18446744073709551615]"
+        );
+
+        let column = Tensor::new_integer(
+            runmat_value::IntegerStorage::U64(vec![42, u64::MAX]),
+            vec![2, 1],
+        )
+        .expect("column tensor");
+        assert_eq!(
+            value_to_json("fea.test", &Value::Tensor(column))
+                .expect("column tensor json")
+                .to_string(),
+            "[[42],[18446744073709551615]]"
         );
     }
 
@@ -2836,24 +2915,26 @@ mod tests {
     #[test]
     fn fea_domain_classes_expose_only_their_own_constructors() {
         ensure_fea_classes_registered();
-        assert!(crate::class_registry::lookup_method(
+        assert!(crate::builtins::fea::test_support::lookup_method(
             FEA_THERMAL_DOMAIN_CLASS,
             "atReferenceTemperature"
         )
         .is_some());
-        assert!(crate::class_registry::lookup_method(
+        assert!(crate::builtins::fea::test_support::lookup_method(
             FEA_THERMOMECHANICAL_DOMAIN_CLASS,
             "atReferenceTemperature"
         )
         .is_some());
-        assert!(crate::class_registry::lookup_method(
+        assert!(crate::builtins::fea::test_support::lookup_method(
             FEA_THERMOMECHANICAL_DOMAIN_CLASS,
             "atFrequency"
         )
         .is_none());
-        assert!(
-            crate::class_registry::lookup_method(FEA_FLUID_DOMAIN_CLASS, "newtonian").is_some()
-        );
+        assert!(crate::builtins::fea::test_support::lookup_method(
+            FEA_FLUID_DOMAIN_CLASS,
+            "newtonian"
+        )
+        .is_some());
         assert!(runmat_builtins::builtin_function_by_name("fea.domain").is_none());
     }
 
@@ -2929,7 +3010,10 @@ mod tests {
         let Value::Object(object) = &selector else {
             panic!("expected structural field selector object");
         };
-        assert_eq!(object.class_name, field_selectors::STRUCTURAL_FIELD_CLASS);
+        assert_eq!(
+            object.class_name.display_name(),
+            field_selectors::STRUCTURAL_FIELD_CLASS
+        );
         assert_eq!(
             field_selectors::from_value("test", &selector).unwrap(),
             field_selectors::FieldSelector::Structural(
@@ -3017,13 +3101,18 @@ mod tests {
 
     #[test]
     fn fea_numeric_constructors_reject_resident_fields_without_provider_access() {
+        let owner = runmat_accelerate_api::test_support::TestAllocationOwner::new();
         let resident = || {
-            Value::GpuTensor(runmat_accelerate_api::GpuTensorHandle {
-                shape: vec![1, 1],
-                device_id: u32::MAX,
-                buffer_id: u64::MAX - 1,
-                descriptor: Default::default(),
-            })
+            Value::GpuTensor(
+                owner
+                    .allocate_numeric(runmat_accelerate_api::HostNumericTensorOwned {
+                        data: runmat_accelerate_api::HostNumericDataOwned::F64(vec![1.0]),
+                        shape: vec![1, 1],
+                        storage: runmat_accelerate_api::GpuTensorStorage::Real,
+                    })
+                    .expect("resident fixture allocation")
+                    .handle,
+            )
         };
         let cases = [
             block_on(frequency_builtin(resident())),
@@ -3262,7 +3351,8 @@ mod tests {
         );
         for property in ["mass_density_kg_per_m3", "elasticity", "provenance"] {
             assert!(
-                crate::class_registry::lookup_property(FEA_MATERIAL_CLASS, property).is_some(),
+                crate::builtins::fea::test_support::lookup_property(FEA_MATERIAL_CLASS, property)
+                    .is_some(),
                 "fea.Material must expose {property}"
             );
         }
@@ -3327,7 +3417,8 @@ mod tests {
         );
         for property in ["sequence_id", "steps", "operation_sequence"] {
             assert!(
-                crate::class_registry::lookup_property(FEA_PLAN_CLASS, property).is_some(),
+                crate::builtins::fea::test_support::lookup_property(FEA_PLAN_CLASS, property)
+                    .is_some(),
                 "fea.Plan must expose {property}"
             );
         }
@@ -3599,13 +3690,11 @@ mod tests {
             Value::Int(IntValue::U64(3)),
         ))
         .unwrap();
+        let (force_callable, _catalog) =
+            test_support::portable_closure_fixture("loads.force", 41, vec![Value::Num(2.0)]);
         let generated_force = block_on(signals::callable::force(vec![
             Value::String("generated_force".into()),
-            Value::Closure(Closure {
-                function_name: "loads.force".into(),
-                bound_function: Some(41),
-                captures: vec![Value::Num(2.0)],
-            }),
+            force_callable,
             signal_domain,
             signal_sampling,
         ]))
@@ -3684,12 +3773,12 @@ mod tests {
         ]))
         .expect("study should build");
         assert_object_class(&study, FEA_STUDY_CLASS);
-        let (binding_property, owner) = crate::class_registry::lookup_property(
+        let (binding_property, owner) = crate::builtins::fea::test_support::lookup_property(
             FEA_STUDY_CLASS,
             signals::bindings::FROZEN_GENERATORS_PROPERTY,
         )
         .expect("study frozen-generator property should be registered");
-        assert_eq!(owner, FEA_STUDY_CLASS);
+        assert_eq!(owner.display_name(), FEA_STUDY_CLASS);
         assert_eq!(binding_property.get_access, MemberAccess::Private);
         let encoded_study = crate::execution::value_codec::encode_inline_value(&study)
             .expect("study with a frozen generator should be portable");
@@ -3745,7 +3834,7 @@ mod tests {
         let Value::Object(results_object) = results.clone() else {
             panic!("expected results object");
         };
-        assert_eq!(results_object.class_name, FEA_RESULTS_CLASS);
+        assert_eq!(results_object.class_name.display_name(), FEA_RESULTS_CLASS);
         assert_eq!(
             results_object.properties.get("run_id"),
             Some(&Value::String(run_id.clone()))
@@ -3762,7 +3851,7 @@ mod tests {
         let Value::Object(field_object) = &field else {
             panic!("expected field object");
         };
-        assert_eq!(field_object.class_name, FEA_FIELD_CLASS);
+        assert_eq!(field_object.class_name.display_name(), FEA_FIELD_CLASS);
         assert_eq!(
             field_object.properties.get("field_id"),
             Some(&Value::String("structural.von_mises".to_string()))
@@ -3802,7 +3891,7 @@ mod tests {
             field_object.properties.get("materialized"),
             Some(&Value::Bool(true))
         );
-        assert_eq!(values.shape, vec![1]);
+        assert_eq!(values.shape(), vec![1]);
         assert_eq!(values.materialize_f64(), vec![42.0]);
         assert!(field_object
             .properties
@@ -3821,9 +3910,9 @@ mod tests {
         let Value::Object(page) = page else {
             panic!("expected field page object")
         };
-        assert_eq!(page.class_name, FEA_FIELD_PAGE_CLASS);
+        assert_eq!(page.class_name.display_name(), FEA_FIELD_PAGE_CLASS);
         assert_eq!(
-            crate::class_registry::lookup_method(FEA_FIELD_CLASS, "page")
+            crate::builtins::fea::test_support::lookup_method(FEA_FIELD_CLASS, "page")
                 .expect("fea.Field.page method")
                 .0
                 .function_name,
@@ -3845,7 +3934,7 @@ mod tests {
         let Some(Value::Tensor(values)) = page.properties.get("values") else {
             panic!("expected real field page values")
         };
-        assert_eq!(values.shape, vec![1, 1]);
+        assert_eq!(values.shape(), vec![1, 1]);
         assert_eq!(values.materialize_f64(), vec![42.0]);
         let page = Value::Object(page);
         let encoded = crate::execution::value_codec::encode_inline_value(&page)
@@ -3874,7 +3963,7 @@ mod tests {
             ],
         ))
         .expect("run mesh should create a figure");
-        assert!(matches!(mesh_handle, Value::Num(handle) if handle >= 1.0));
+        assert!(matches!(*mesh_handle, Value::Num(handle) if handle >= 1.0));
 
         let results = block_on(fea_results_builtin(vec![run_value])).expect("results should load");
         let field = block_on(fea_field_builtin(vec![
@@ -3884,7 +3973,7 @@ mod tests {
         .expect("field should resolve");
         let field_handle = block_on(crate::call_builtin_async("plot", &[field]))
             .expect("field plot should create a figure");
-        assert!(matches!(field_handle, Value::Num(handle) if handle >= 1.0));
+        assert!(matches!(*field_handle, Value::Num(handle) if handle >= 1.0));
     }
 
     #[test]
@@ -4315,7 +4404,7 @@ mod tests {
         let Value::Object(object) = value else {
             panic!("expected object value");
         };
-        assert_eq!(object.class_name, expected);
+        assert_eq!(object.class_name.display_name(), expected);
         assert!(!object.properties.is_empty());
         assert!(object
             .properties

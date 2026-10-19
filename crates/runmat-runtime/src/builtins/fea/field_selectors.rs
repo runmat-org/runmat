@@ -233,7 +233,7 @@ mod tests {
         let Value::Object(object) = &selector else {
             panic!("expected authored output field selector object");
         };
-        assert_eq!(object.class_name, OUTPUT_FIELD_CLASS);
+        assert_eq!(object.class_name.display_name(), OUTPUT_FIELD_CLASS);
         assert_eq!(
             from_value("test", &selector).unwrap().field_id(),
             "peak_stress"

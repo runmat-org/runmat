@@ -951,9 +951,10 @@ mod tests {
             "solid triangle\nfacet normal 0 0 1\nouter loop\nvertex 0 0 0\nvertex 1 0 0\nvertex 0 1 0\nendloop\nendfacet\nendsolid triangle\n",
         )
         .expect("write geometry fixture");
-        let geometry = crate::builtins::geometry::geometry_load_builtin(vec![Value::String(
-            path.to_string_lossy().into_owned(),
-        )])
+        let geometry = crate::builtins::geometry::geometry_load_builtin(
+            Value::String(path.to_string_lossy().into_owned()),
+            Vec::new(),
+        )
         .await
         .expect("load geometry fixture");
         let model_value = super::super::modeling::create_model_object_from_args(vec![
