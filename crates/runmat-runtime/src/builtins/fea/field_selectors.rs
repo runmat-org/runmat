@@ -307,7 +307,7 @@ pub(super) fn from_value(builtin: &'static str, value: &Value) -> BuiltinResult<
             "field selector must be a typed FEA field selector",
         ));
     };
-    match object.class_name.as_str() {
+    match object.class_name.display_name() {
         STRUCTURAL_FIELD_CLASS => from_typed_value(builtin, STRUCTURAL_FIELD_CLASS, value)
             .map(FieldSelector::Structural),
         RESPONSE_SPECTRUM_FIELD_CLASS => {

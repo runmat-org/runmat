@@ -2,9 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Once;
 
 use super::super::*;
-use super::{register_runtime_class, static_method};
 use crate::builtins::fea::values::{quantity_scalar, DISPLACEMENT_CLASS, ROTATION_CLASS};
+use crate::class_registry::declaration::{immutable_properties, method, register_value_class};
+use crate::class_registry::RuntimeMethod;
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
+use runmat_types::MethodName;
 
 const STRUCTURAL_DOF_CLASS: &str = "fea.StructuralDof";
 const STRUCTURAL_DOF_VALUE_CLASS: &str = "fea.StructuralDofValue";
@@ -68,7 +70,7 @@ macro_rules! dof_builtin {
                 )]
         pub async fn $function() -> BuiltinResult<Value> {
             ensure_dof_classes_registered();
-            let mut object = ObjectInstance::new($class.into());
+            let mut object = ObjectInstance::new($class);
             object
                 .properties
                 .insert("axis".into(), Value::Int(IntValue::U8($axis)));
@@ -192,7 +194,7 @@ pub(crate) fn structural_dof_values_from_value(
                 "DOF value is missing its dimensioned value",
             )
         })?;
-        match object.class_name.as_str() {
+        match object.class_name.display_name() {
             TRANSLATION_VALUE_CLASS => translations.push(TranslationDofValue {
                 dof: translation_dof_from_value(builtin, dof)?,
                 value: PrescribedValue::Constant(Displacement::new(quantity_scalar(
@@ -244,7 +246,7 @@ pub(crate) fn structural_dof_values_from_value(
 
 fn dof_value_object(class_name: &str, dof: Value, value: Value) -> BuiltinResult<Value> {
     ensure_dof_classes_registered();
-    let mut object = ObjectInstance::new(class_name.into());
+    let mut object = ObjectInstance::new(class_name);
     object.properties.insert("dof".into(), dof);
     object.properties.insert("value".into(), value);
     Ok(Value::Object(object))
@@ -284,7 +286,7 @@ fn dof_axis(builtin: &'static str, value: &Value, class_name: &str) -> BuiltinRe
             format!("expected {class_name}"),
         ));
     };
-    if object.class_name != class_name {
+    if object.class_name.display_name() != class_name {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -304,7 +306,9 @@ fn dof_axis(builtin: &'static str, value: &Value, class_name: &str) -> BuiltinRe
 pub(super) fn ensure_dof_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(STRUCTURAL_DOF_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            STRUCTURAL_DOF_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for schema in [
             ImmutableValueClassSchema {
@@ -346,36 +350,46 @@ pub(super) fn ensure_dof_classes_registered() {
         }
     });
     RUNTIME_CLASSES.ensure(|| {
-        register_runtime_class(STRUCTURAL_DOF_CLASS, &[], dof_methods());
-        register_runtime_class(STRUCTURAL_DOF_VALUE_CLASS, &[], dof_value_methods());
-        register_runtime_class(TRANSLATION_DOF_CLASS, AXIS_FIELDS, HashMap::new());
-        register_runtime_class(ROTATION_DOF_CLASS, AXIS_FIELDS, HashMap::new());
-        register_runtime_class(TRANSLATION_VALUE_CLASS, DOF_VALUE_FIELDS, HashMap::new());
-        register_runtime_class(ROTATION_VALUE_CLASS, DOF_VALUE_FIELDS, HashMap::new());
+        register_value_class(STRUCTURAL_DOF_CLASS, HashMap::new(), dof_methods());
+        register_value_class(
+            STRUCTURAL_DOF_VALUE_CLASS,
+            HashMap::new(),
+            dof_value_methods(),
+        );
+        register_value_class(
+            TRANSLATION_DOF_CLASS,
+            immutable_properties(AXIS_FIELDS),
+            HashMap::new(),
+        );
+        register_value_class(
+            ROTATION_DOF_CLASS,
+            immutable_properties(AXIS_FIELDS),
+            HashMap::new(),
+        );
+        register_value_class(
+            TRANSLATION_VALUE_CLASS,
+            immutable_properties(DOF_VALUE_FIELDS),
+            HashMap::new(),
+        );
+        register_value_class(
+            ROTATION_VALUE_CLASS,
+            immutable_properties(DOF_VALUE_FIELDS),
+            HashMap::new(),
+        );
     });
 }
 
-fn dof_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+fn dof_methods() -> HashMap<MethodName, RuntimeMethod> {
     ["ux", "uy", "uz", "rx", "ry", "rz"]
         .into_iter()
-        .map(|name| {
-            (
-                name.into(),
-                static_method(name, &format!("fea.StructuralDof.{name}")),
-            )
-        })
+        .map(|name| method(name, &format!("fea.StructuralDof.{name}"), true))
         .collect()
 }
 
-fn dof_value_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
+fn dof_value_methods() -> HashMap<MethodName, RuntimeMethod> {
     ["translation", "rotation"]
         .into_iter()
-        .map(|name| {
-            (
-                name.into(),
-                static_method(name, &format!("fea.StructuralDofValue.{name}")),
-            )
-        })
+        .map(|name| method(name, &format!("fea.StructuralDofValue.{name}"), true))
         .collect()
 }
 
@@ -403,7 +417,7 @@ fn validate_dof_value_object(
     value_class: &str,
 ) -> Result<(), String> {
     let nested_class = |name: &str| match object.properties.get(name) {
-        Some(Value::Object(value)) => Some(value.class_name.as_str()),
+        Some(Value::Object(value)) => Some(value.class_name.display_name()),
         _ => None,
     };
     if nested_class("dof") != Some(dof_class) || nested_class("value") != Some(value_class) {

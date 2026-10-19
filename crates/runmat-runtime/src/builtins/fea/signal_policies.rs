@@ -1,7 +1,9 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use runmat_analysis_core::{
     SignalExtrapolation, SignalInterpolation, SignalPointContinuity, SignalSampleApproach,
 };
@@ -246,7 +248,9 @@ pub(super) fn point_continuity_from_value(
 pub(super) fn ensure_signal_policy_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(INTERPOLATION_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            INTERPOLATION_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for (class_name, type_identity, fields) in [
             (
@@ -286,82 +290,41 @@ pub(super) fn ensure_signal_policy_classes_registered() {
         }
     });
     RUNTIME_CLASSES.ensure(|| {
-        register_policy_class(
+        register_value_class(
             POINT_CONTINUITY_CLASS,
-            POINT_CONTINUITY_FIELDS,
-            &[
+            immutable_properties(POINT_CONTINUITY_FIELDS),
+            static_methods([
                 ("left", "fea.SignalPointContinuity.left"),
                 ("right", "fea.SignalPointContinuity.right"),
-            ],
+            ]),
         );
-        register_policy_class(
+        register_value_class(
             INTERPOLATION_CLASS,
-            INTERPOLATION_FIELDS,
-            &[
+            immutable_properties(INTERPOLATION_FIELDS),
+            static_methods([
                 ("leftEndpoint", "fea.SignalInterpolation.leftEndpoint"),
                 ("rightEndpoint", "fea.SignalInterpolation.rightEndpoint"),
                 ("linear", "fea.SignalInterpolation.linear"),
-            ],
+            ]),
         );
-        register_policy_class(
+        register_value_class(
             SAMPLE_APPROACH_CLASS,
-            SAMPLE_APPROACH_FIELDS,
-            &[
+            immutable_properties(SAMPLE_APPROACH_FIELDS),
+            static_methods([
                 ("at", "fea.SignalSampleApproach.at"),
                 ("leftLimit", "fea.SignalSampleApproach.leftLimit"),
                 ("rightLimit", "fea.SignalSampleApproach.rightLimit"),
-            ],
+            ]),
         );
-        register_policy_class(
+        register_value_class(
             EXTRAPOLATION_CLASS,
-            EXTRAPOLATION_FIELDS,
-            &[
+            immutable_properties(EXTRAPOLATION_FIELDS),
+            static_methods([
                 ("reject", "fea.SignalExtrapolation.reject"),
                 ("holdEndpoint", "fea.SignalExtrapolation.holdEndpoint"),
                 ("zero", "fea.SignalExtrapolation.zero"),
-            ],
+            ]),
         );
-    });
-}
-
-fn register_policy_class(class_name: &str, fields: &[&str], methods: &[(&str, &str)]) {
-    crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-        name: class_name.into(),
-        parent: None,
-        properties: fields
-            .iter()
-            .map(|field| {
-                (
-                    (*field).into(),
-                    crate::class_registry::RuntimeProperty {
-                        name: (*field).into(),
-                        is_static: false,
-                        is_constant: true,
-                        is_dependent: false,
-                        get_access: MemberAccess::Public,
-                        set_access: MemberAccess::Private,
-                        default_value: None,
-                    },
-                )
-            })
-            .collect(),
-        methods: methods
-            .iter()
-            .map(|(name, builtin)| {
-                (
-                    (*name).into(),
-                    crate::class_registry::RuntimeMethod {
-                        name: (*name).into(),
-                        is_static: true,
-                        is_abstract: false,
-                        is_sealed: false,
-                        access: MemberAccess::Public,
-                        function_name: (*builtin).into(),
-                        implicit_class_argument: None,
-                    },
-                )
-            })
-            .collect::<HashMap<_, _>>(),
     });
 }
 

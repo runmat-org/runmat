@@ -1093,27 +1093,39 @@ fn constraint_vec_from_value(
     values
         .into_iter()
         .map(|value| match value {
-            Value::Object(object) if object.class_name == FEA_STRUCTURAL_CONSTRAINT_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_STRUCTURAL_CONSTRAINT_CLASS =>
+            {
                 object_payload(builtin, value, FEA_STRUCTURAL_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundStructural)
             }
-            Value::Object(object) if object.class_name == FEA_THERMAL_CONSTRAINT_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_THERMAL_CONSTRAINT_CLASS =>
+            {
                 object_payload(builtin, value, FEA_THERMAL_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundThermal)
             }
-            Value::Object(object) if object.class_name == FEA_ELECTRICAL_CONSTRAINT_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_ELECTRICAL_CONSTRAINT_CLASS =>
+            {
                 object_payload(builtin, value, FEA_ELECTRICAL_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundElectrical)
             }
-            Value::Object(object) if object.class_name == FEA_MAGNETIC_CONSTRAINT_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_MAGNETIC_CONSTRAINT_CLASS =>
+            {
                 object_payload(builtin, value, FEA_MAGNETIC_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundMagnetic)
             }
-            Value::Object(object) if object.class_name == FEA_ACOUSTIC_CONSTRAINT_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_ACOUSTIC_CONSTRAINT_CLASS =>
+            {
                 object_payload(builtin, value, FEA_ACOUSTIC_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundAcoustic)
             }
-            Value::Object(object) if object.class_name == FEA_FLUID_CONSTRAINT_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_FLUID_CONSTRAINT_CLASS =>
+            {
                 object_payload(builtin, value, FEA_FLUID_CONSTRAINT_CLASS)
                     .map(BoundConstraintPayload::BoundFluid)
             }
@@ -1145,19 +1157,29 @@ fn boundary_vec_from_value(
     values
         .into_iter()
         .map(|value| match value {
-            Value::Object(object) if object.class_name == FEA_STRUCTURAL_BOUNDARY_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_STRUCTURAL_BOUNDARY_CLASS =>
+            {
                 bound_boundary_payload(builtin, value, FEA_STRUCTURAL_BOUNDARY_CLASS)
             }
-            Value::Object(object) if object.class_name == FEA_THERMAL_BOUNDARY_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_THERMAL_BOUNDARY_CLASS =>
+            {
                 bound_boundary_payload(builtin, value, FEA_THERMAL_BOUNDARY_CLASS)
             }
-            Value::Object(object) if object.class_name == FEA_MAGNETIC_BOUNDARY_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_MAGNETIC_BOUNDARY_CLASS =>
+            {
                 bound_boundary_payload(builtin, value, FEA_MAGNETIC_BOUNDARY_CLASS)
             }
-            Value::Object(object) if object.class_name == FEA_ACOUSTIC_BOUNDARY_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_ACOUSTIC_BOUNDARY_CLASS =>
+            {
                 bound_boundary_payload(builtin, value, FEA_ACOUSTIC_BOUNDARY_CLASS)
             }
-            Value::Object(object) if object.class_name == FEA_FLUID_BOUNDARY_CLASS => {
+            Value::Object(object)
+                if object.class_name.display_name() == FEA_FLUID_BOUNDARY_CLASS =>
+            {
                 bound_boundary_payload(builtin, value, FEA_FLUID_BOUNDARY_CLASS)
             }
             Value::Object(object) => Err(builtin_error(
@@ -1229,7 +1251,7 @@ pub(super) fn step_vec_from_value(
             let Value::Object(object) = value else {
                 unreachable!("step inputs were classified above")
             };
-            let class_name = match object.class_name.as_str() {
+            let class_name = match object.class_name.display_name() {
                 FEA_STRUCTURAL_STEP_CLASS => FEA_STRUCTURAL_STEP_CLASS,
                 FEA_THERMAL_STEP_CLASS => FEA_THERMAL_STEP_CLASS,
                 FEA_ELECTROMAGNETIC_STEP_CLASS => FEA_ELECTROMAGNETIC_STEP_CLASS,
@@ -1275,7 +1297,7 @@ pub(super) fn domain_vec_from_value(
             let Value::Object(object) = value else {
                 unreachable!("domain inputs were classified above")
             };
-            match object.class_name.as_str() {
+            match object.class_name.display_name() {
                 FEA_THERMAL_DOMAIN_CLASS => {
                     object_payload(builtin, value, FEA_THERMAL_DOMAIN_CLASS)
                         .map(DomainPayload::Thermal)
@@ -1340,7 +1362,7 @@ fn interface_vec_from_value(
             let Value::Object(object) = value else {
                 unreachable!("interface inputs were classified above")
             };
-            let class_name = match object.class_name.as_str() {
+            let class_name = match object.class_name.display_name() {
                 FEA_CONTACT_INTERFACE_CLASS => FEA_CONTACT_INTERFACE_CLASS,
                 FEA_FLUID_STRUCTURE_INTERFACE_CLASS => FEA_FLUID_STRUCTURE_INTERFACE_CLASS,
                 FEA_CONJUGATE_HEAT_TRANSFER_INTERFACE_CLASS => {

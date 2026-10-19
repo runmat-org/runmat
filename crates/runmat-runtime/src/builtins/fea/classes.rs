@@ -48,7 +48,7 @@ pub(super) const FEA_TRENDS_CLASS: &str = "fea.Trends";
 pub(super) const FEA_STUDY_CONTEXT_PROPERTY: &str = "study";
 
 pub(super) static FEA_CLASSES_REGISTERED: crate::class_registry::ClassRegistration =
-    crate::class_registry::ClassRegistration::new(FEA_STUDY_CLASS);
+    crate::class_registry::ClassRegistration::new(StaticClassIdentity::new(FEA_STUDY_CLASS));
 
 pub(super) const STUDY_FIELDS: &[&str] = &[
     "study_id",
@@ -356,44 +356,24 @@ pub(crate) fn ensure_fea_classes_registered() {
                 super::field_selectors::OUTPUT_FIELD_CLASS => output_field_methods(),
                 _ => HashMap::new(),
             };
-            crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-                name: class_name.to_string(),
-                parent: None,
-                properties: immutable_runtime_properties(fields),
-                methods,
-            });
-        }
-    });
-}
-
-fn immutable_runtime_properties(
-    fields: &[&str],
-) -> HashMap<String, crate::class_registry::RuntimeProperty> {
-    fields
-        .iter()
-        .map(|name| {
-            (
-                (*name).to_string(),
-                crate::class_registry::RuntimeProperty {
-                    name: (*name).to_string(),
-                    is_static: false,
-                    is_constant: true,
-                    is_dependent: false,
-                    get_access: if matches!(
-                        *name,
+            let properties = fields
+                .iter()
+                .map(|field| {
+                    let get_access = if matches!(
+                        *field,
                         super::signals::bindings::FROZEN_GENERATORS_PROPERTY
                             | super::signals::bindings::FROZEN_STUDY_GENERATORS_PROPERTY
                     ) {
                         MemberAccess::Private
                     } else {
                         MemberAccess::Public
-                    },
-                    set_access: MemberAccess::Private,
-                    default_value: None,
-                },
-            )
-        })
-        .collect()
+                    };
+                    immutable_property(field, get_access)
+                })
+                .collect();
+            register_value_class(class_name, properties, methods);
+        }
+    });
 }
 
 fn validate_fea_object(object: &ObjectInstance) -> Result<(), String> {
@@ -512,8 +492,8 @@ fn validate_bound_interface_object(object: &ObjectInstance) -> Result<(), String
     Ok(())
 }
 
-fn structural_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn structural_constraint_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("fixed", "fea.StructuralConstraint.fixed"),
         ("prescribed", "fea.StructuralConstraint.prescribed"),
         (
@@ -536,8 +516,8 @@ fn structural_constraint_methods() -> HashMap<String, crate::class_registry::Run
     ])
 }
 
-fn thermal_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn thermal_constraint_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("prescribed", "fea.ThermalConstraint.prescribed"),
         ("tie", "fea.ThermalConstraint.tie"),
         ("periodic", "fea.ThermalConstraint.periodic"),
@@ -545,8 +525,8 @@ fn thermal_constraint_methods() -> HashMap<String, crate::class_registry::Runtim
     ])
 }
 
-fn electrical_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn electrical_constraint_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         (
             "prescribedPotential",
             "fea.ElectricalConstraint.prescribedPotential",
@@ -568,8 +548,8 @@ fn electrical_constraint_methods() -> HashMap<String, crate::class_registry::Run
     ])
 }
 
-fn magnetic_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn magnetic_constraint_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         (
             "prescribedVectorPotential",
             "fea.MagneticConstraint.prescribedVectorPotential",
@@ -587,8 +567,8 @@ fn magnetic_constraint_methods() -> HashMap<String, crate::class_registry::Runti
     ])
 }
 
-fn acoustic_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn acoustic_constraint_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         (
             "prescribedPressure",
             "fea.AcousticConstraint.prescribedPressure",
@@ -601,8 +581,8 @@ fn acoustic_constraint_methods() -> HashMap<String, crate::class_registry::Runti
     ])
 }
 
-fn fluid_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn fluid_constraint_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         (
             "prescribedVelocity",
             "fea.FluidConstraint.prescribedVelocity",
@@ -616,47 +596,46 @@ fn fluid_constraint_methods() -> HashMap<String, crate::class_registry::RuntimeM
     ])
 }
 
-fn structural_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("pressure", "fea.StructuralBoundary.pressure")])
+fn structural_boundary_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("pressure", "fea.StructuralBoundary.pressure")])
 }
 
-fn thermal_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn thermal_boundary_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("heatFlux", "fea.ThermalBoundary.heatFlux"),
         ("convection", "fea.ThermalBoundary.convection"),
     ])
 }
 
-fn magnetic_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("insulation", "fea.MagneticBoundary.insulation")])
+fn magnetic_boundary_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("insulation", "fea.MagneticBoundary.insulation")])
 }
 
-fn acoustic_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn acoustic_boundary_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("rigidWall", "fea.AcousticBoundary.rigidWall"),
         ("radiation", "fea.AcousticBoundary.radiation"),
         ("impedance", "fea.AcousticBoundary.impedance"),
     ])
 }
 
-fn fluid_boundary_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("outletPressure", "fea.FluidBoundary.outletPressure")])
+fn fluid_boundary_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("outletPressure", "fea.FluidBoundary.outletPressure")])
 }
 
-fn contact_interface_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn contact_interface_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("frictionless", "fea.ContactInterface.frictionless"),
         ("coulomb", "fea.ContactInterface.coulomb"),
     ])
 }
 
-fn fluid_structure_interface_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("noSlip", "fea.FluidStructureInterface.noSlip")])
+fn fluid_structure_interface_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("noSlip", "fea.FluidStructureInterface.noSlip")])
 }
 
-fn conjugate_heat_transfer_interface_methods(
-) -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn conjugate_heat_transfer_interface_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("perfect", "fea.ConjugateHeatTransferInterface.perfect"),
         (
             "conductance",
@@ -669,8 +648,8 @@ fn conjugate_heat_transfer_interface_methods(
     ])
 }
 
-fn structural_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn structural_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("static", "fea.StructuralStep.static"),
         ("modal", "fea.StructuralStep.modal"),
         ("harmonic", "fea.StructuralStep.harmonic"),
@@ -679,78 +658,78 @@ fn structural_step_methods() -> HashMap<String, crate::class_registry::RuntimeMe
     ])
 }
 
-fn thermal_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("transient", "fea.ThermalStep.transient")])
+fn thermal_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("transient", "fea.ThermalStep.transient")])
 }
 
-fn electromagnetic_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("harmonic", "fea.ElectromagneticStep.harmonic")])
+fn electromagnetic_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("harmonic", "fea.ElectromagneticStep.harmonic")])
 }
 
-fn acoustic_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("harmonic", "fea.AcousticStep.harmonic")])
+fn acoustic_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("harmonic", "fea.AcousticStep.harmonic")])
 }
 
-fn fluid_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn fluid_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("steadyState", "fea.FluidStep.steadyState"),
         ("transient", "fea.FluidStep.transient"),
     ])
 }
 
-fn thermomechanical_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("transient", "fea.ThermoMechanicalStep.transient")])
+fn thermomechanical_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("transient", "fea.ThermoMechanicalStep.transient")])
 }
 
-fn electrothermal_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn electrothermal_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("transient", "fea.ElectroThermalStep.transient"),
         ("nonlinear", "fea.ElectroThermalStep.nonlinear"),
     ])
 }
 
-fn conjugate_heat_transfer_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn conjugate_heat_transfer_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("steadyState", "fea.ConjugateHeatTransferStep.steadyState"),
         ("transient", "fea.ConjugateHeatTransferStep.transient"),
     ])
 }
 
-fn fluid_structure_step_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("transient", "fea.FluidStructureStep.transient")])
+fn fluid_structure_step_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("transient", "fea.FluidStructureStep.transient")])
 }
 
-fn thermomechanical_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[(
+fn thermomechanical_domain_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([(
         "atReferenceTemperature",
         "fea.ThermoMechanicalDomain.atReferenceTemperature",
     )])
 }
 
-fn thermal_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[(
+fn thermal_domain_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([(
         "atReferenceTemperature",
         "fea.ThermalDomain.atReferenceTemperature",
     )])
 }
 
-fn electrothermal_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[(
+fn electrothermal_domain_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([(
         "atReferenceTemperature",
         "fea.ElectroThermalDomain.atReferenceTemperature",
     )])
 }
 
-fn electromagnetic_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("atFrequency", "fea.ElectromagneticDomain.atFrequency")])
+fn electromagnetic_domain_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("atFrequency", "fea.ElectromagneticDomain.atFrequency")])
 }
 
-fn fluid_domain_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("newtonian", "fea.FluidDomain.newtonian")])
+fn fluid_domain_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("newtonian", "fea.FluidDomain.newtonian")])
 }
 
-fn structural_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn structural_field_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("displacement", "fea.StructuralField.displacement"),
         ("rotation", "fea.StructuralField.rotation"),
         ("vonMises", "fea.StructuralField.vonMises"),
@@ -804,12 +783,12 @@ fn structural_field_methods() -> HashMap<String, crate::class_registry::RuntimeM
     ])
 }
 
-fn output_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[("named", "fea.OutputField.named")])
+fn output_field_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([("named", "fea.OutputField.named")])
 }
 
-fn response_spectrum_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn response_spectrum_field_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         (
             "relativeDisplacement",
             "fea.ResponseSpectrumField.relativeDisplacement",
@@ -856,31 +835,11 @@ fn response_spectrum_field_methods() -> HashMap<String, crate::class_registry::R
     ])
 }
 
-fn random_response_field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    static_methods(&[
+fn random_response_field_methods() -> HashMap<MethodName, RuntimeMethod> {
+    static_methods([
         ("rms", "fea.RandomResponseField.rms"),
         ("variance", "fea.RandomResponseField.variance"),
     ])
-}
-
-fn static_methods(names: &[(&str, &str)]) -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    names
-        .iter()
-        .map(|(name, function_name)| {
-            (
-                (*name).to_string(),
-                crate::class_registry::RuntimeMethod {
-                    name: (*name).to_string(),
-                    is_static: true,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: (*function_name).to_string(),
-                    implicit_class_argument: None,
-                },
-            )
-        })
-        .collect()
 }
 
 fn fea_class_schemas() -> [FeaClassSchema; 50] {
@@ -1293,7 +1252,11 @@ fn fea_class_schemas() -> [FeaClassSchema; 50] {
 use std::collections::HashMap;
 use std::sync::Once;
 
-use runmat_types::MemberAccess;
+use crate::class_registry::declaration::{
+    immutable_property, register_value_class, static_methods,
+};
+use crate::class_registry::RuntimeMethod;
+use runmat_types::{MemberAccess, MethodName, StaticClassIdentity};
 use runmat_value::{IntValue, ObjectInstance, Value};
 
 use super::{

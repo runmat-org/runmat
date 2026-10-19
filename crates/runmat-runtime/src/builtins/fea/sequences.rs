@@ -5,7 +5,6 @@ use runmat_analysis_core::{
     SequenceBranch, SequenceBranchId, SequenceDependency, StateId, StateInput, StateOutput,
     StateSource, StateTransition, TransitionId,
 };
-use runmat_types::MemberAccess;
 
 use super::*;
 use crate::builtins::fea::study_policies::sequence as policy;
@@ -13,6 +12,7 @@ use crate::builtins::fea::study_values::{
     from_typed_value, nonempty_id, object_or_cell, register_immutable_class, to_typed_value,
     VALUE_FIELD,
 };
+use crate::class_registry::declaration::{register_value_class, static_methods};
 
 pub(super) const INDEPENDENT_DOMAIN_CLASS: &str = "fea.IndependentDomain";
 pub(super) const RESTART_POLICY_CLASS: &str = "fea.RestartPolicy";
@@ -988,7 +988,7 @@ pub async fn configure_step(args: Vec<Value>) -> BuiltinResult<Value> {
             "step must be a typed FEA procedure step",
         ));
     };
-    let class_name = match object.class_name.as_str() {
+    let class_name = match object.class_name.display_name() {
         FEA_STRUCTURAL_STEP_CLASS => FEA_STRUCTURAL_STEP_CLASS,
         FEA_THERMAL_STEP_CLASS => FEA_THERMAL_STEP_CLASS,
         FEA_ELECTROMAGNETIC_STEP_CLASS => FEA_ELECTROMAGNETIC_STEP_CLASS,
@@ -1108,23 +1108,11 @@ pub(super) fn ensure_sequence_classes_registered() {
             SEQUENCE_FIELDS,
             &[("new", "fea.AnalysisSequence.new")],
         );
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: PROCEDURE_STEP_CLASS.into(),
-            parent: None,
-            properties: HashMap::new(),
-            methods: HashMap::from([(
-                "configure".into(),
-                crate::class_registry::RuntimeMethod {
-                    name: "configure".into(),
-                    is_static: true,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: "fea.ProcedureStep.configure".into(),
-                    implicit_class_argument: None,
-                },
-            )]),
-        });
+        register_value_class(
+            PROCEDURE_STEP_CLASS,
+            HashMap::new(),
+            static_methods([("configure", "fea.ProcedureStep.configure")]),
+        );
     });
 }
 

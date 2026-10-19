@@ -5,7 +5,7 @@ use runmat_analysis_core::{
     GeneratorArgument, GeneratorCallable, GeneratorDomain, GeneratorEffectPolicy, SignalGenerator,
     SignalSamplingPolicy,
 };
-use runmat_execution::value::{CallableValue, InlineValue, ValuePayload};
+use runmat_execution::value::{CallableOwner, CallableValue, InlineValue, ValuePayload};
 
 const CALLABLE_INPUTS: [BuiltinParamDescriptor; 5] = [
     required(
@@ -387,25 +387,14 @@ fn bound_function_id(
     builtin: &'static str,
     callable: &CallableValue,
 ) -> BuiltinResult<runmat_types::ProgramFunctionId> {
-    let function = callable
-        .owner_identity
-        .strip_prefix("bound:")
-        .ok_or_else(|| {
-            builtin_error(
-                builtin,
-                &ERROR_INPUT,
-                "signal callable is not semantically bound",
-            )
-        })?
-        .parse::<u32>()
-        .map_err(|_| {
-            builtin_error(
-                builtin,
-                &ERROR_INPUT,
-                "signal callable has an invalid function identity",
-            )
-        })?;
-    Ok(runmat_types::ProgramFunctionId(function))
+    let CallableOwner::Bound(origin) = callable.owner else {
+        return Err(builtin_error(
+            builtin,
+            &ERROR_INPUT,
+            "signal callable is not semantically bound",
+        ));
+    };
+    Ok(origin.function)
 }
 
 fn portable_bound_callable(builtin: &'static str, value: &Value) -> BuiltinResult<CallableValue> {
@@ -428,7 +417,7 @@ fn portable_bound_callable(builtin: &'static str, value: &Value) -> BuiltinResul
     callable
         .validate_identity()
         .map_err(|error| builtin_error(builtin, &ERROR_INPUT, error.to_string()))?;
-    if !callable.owner_identity.starts_with("bound:") {
+    if !matches!(callable.owner, CallableOwner::Bound(_)) {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -607,7 +596,10 @@ mod tests {
         );
         let binding = runtime.frozen_generator.as_ref().unwrap();
         assert_eq!(binding.callable.captures.len(), 1);
-        assert_eq!(binding.callable.owner_identity, "bound:7");
+        assert!(matches!(
+            binding.callable.owner,
+            CallableOwner::Bound(origin) if origin.function == runmat_types::ProgramFunctionId(7)
+        ));
 
         let encoded = crate::execution::value_codec::encode_inline_value(&signal).unwrap();
         let decoded = crate::execution::value_codec::decode_inline_value(&encoded).unwrap();

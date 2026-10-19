@@ -29,7 +29,7 @@ use runmat_builtins::{
 };
 use runmat_geometry_core::GeometryAsset;
 use runmat_macros::runtime_builtin;
-use runmat_types::MemberAccess;
+use runmat_types::MethodName;
 use runmat_value::{IntValue, IntegerStorage, NumericScalar, ObjectInstance, Tensor, Value};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,7 @@ use crate::analysis::{
 use crate::builtins::common::{json::int_value_to_json, tensor as tensor_utils};
 use crate::builtins::geometry::{GEOMETRY_ASSET_CLASS, GEOMETRY_ASSET_JSON_PROPERTY};
 use crate::builtins::io::json::jsondecode::value_from_json;
+use crate::class_registry::{declaration::instance_methods, RuntimeMethod};
 use crate::operations::{OperationContext, OperationEnvelope, OperationErrorEnvelope};
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
@@ -936,12 +937,12 @@ async fn resolve_document_input(
     builtin: &'static str,
 ) -> BuiltinResult<RuntimeResolvedDocument> {
     match input {
-        Value::Object(ref object) if object.class_name == FEA_STUDY_CLASS => {
+        Value::Object(ref object) if object.class_name.display_name() == FEA_STUDY_CLASS => {
             modeling::study_from_value_with_generators(builtin, &input)
                 .map(Box::new)
                 .map(RuntimeResolvedDocument::Study)
         }
-        Value::Object(ref object) if object.class_name == FEA_SWEEP_CLASS => {
+        Value::Object(ref object) if object.class_name.display_name() == FEA_SWEEP_CLASS => {
             modeling::sweep_from_value_with_generators(builtin, &input)
                 .map(RuntimeResolvedDocument::Sweep)
         }
@@ -967,7 +968,7 @@ fn create_results_object_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
         ));
     }
     if let Value::Object(object) = &args[0] {
-        if object.class_name == FEA_RESULTS_CLASS && args.len() == 1 {
+        if object.class_name.display_name() == FEA_RESULTS_CLASS && args.len() == 1 {
             return Ok(args[0].clone());
         }
     }
@@ -1183,7 +1184,7 @@ fn object_payload<T: DeserializeOwned>(
             format!("expected {expected_class} object"),
         ));
     };
-    if object.class_name != expected_class {
+    if object.class_name.display_name() != expected_class {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -1263,7 +1264,7 @@ fn results_query_from_args(args: &[Value]) -> BuiltinResult<AnalysisResultsQuery
 
 fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<String> {
     match value {
-        Value::Object(object) if object.class_name == FEA_RUN_RESULT_CLASS => {
+        Value::Object(object) if object.class_name.display_name() == FEA_RUN_RESULT_CLASS => {
             let aggregate: crate::analysis::AnalysisStudyRunData =
                 object_payload(builtin, value, FEA_RUN_RESULT_CLASS)?;
             match aggregate.steps.as_slice() {
@@ -1280,7 +1281,7 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
                 )),
             }
         }
-        Value::Object(object) if object.class_name == FEA_STEP_RUN_RESULT_CLASS => {
+        Value::Object(object) if object.class_name.display_name() == FEA_STEP_RUN_RESULT_CLASS => {
             run_id_from_object(object).ok_or_else(|| {
                 builtin_error(
                     builtin,
@@ -1289,7 +1290,7 @@ fn run_id_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<Stri
                 )
             })
         }
-        Value::Object(object) if object.class_name == FEA_SWEEP_RUN_RESULT_CLASS => {
+        Value::Object(object) if object.class_name.display_name() == FEA_SWEEP_RUN_RESULT_CLASS => {
             Err(builtin_error(
                 builtin,
                 &ERROR_INPUT,
@@ -1322,7 +1323,7 @@ fn results_data_from_value(
     value: &Value,
 ) -> BuiltinResult<crate::analysis::AnalysisResultsData> {
     match value {
-        Value::Object(object) if object.class_name == FEA_RESULTS_CLASS => {
+        Value::Object(object) if object.class_name.display_name() == FEA_RESULTS_CLASS => {
             object_payload(builtin, value, FEA_RESULTS_CLASS)
         }
         _ => {
@@ -1403,7 +1404,7 @@ fn study_context_value(value: &Value) -> Option<Value> {
     let Value::Object(object) = value else {
         return None;
     };
-    if object.class_name == FEA_STUDY_CLASS {
+    if object.class_name.display_name() == FEA_STUDY_CLASS {
         return Some(value.clone());
     }
     object.properties.get(FEA_STUDY_CONTEXT_PROPERTY).cloned()
@@ -1790,13 +1791,13 @@ fn value_to_json(builtin: &'static str, value: &Value) -> BuiltinResult<serde_js
         Value::LogicalArray(array) => nested_array_to_json(builtin, &array.shape, |index| {
             Ok(serde_json::Value::Bool(array.data[index] != 0))
         }),
-        Value::Tensor(tensor) if tensor.shape == [1, 1] => numeric_scalar_to_json(
+        Value::Tensor(tensor) if tensor.shape() == [1, 1] => numeric_scalar_to_json(
             builtin,
             tensor
                 .numeric_value_at(0)
                 .expect("validated scalar tensor storage"),
         ),
-        Value::Tensor(tensor) => nested_array_to_json(builtin, &tensor.shape, |index| {
+        Value::Tensor(tensor) => nested_array_to_json(builtin, &tensor.shape(), |index| {
             numeric_scalar_to_json(
                 builtin,
                 tensor
@@ -2093,7 +2094,7 @@ fn usize_vec_from_value(builtin: &'static str, value: &Value) -> BuiltinResult<V
     match value {
         Value::Tensor(tensor) => {
             if tensor
-                .shape
+                .shape()
                 .iter()
                 .filter(|&&dimension| dimension > 1)
                 .count()
@@ -2503,8 +2504,8 @@ fn promote_json_scalar_kinds(
             ));
         }
         (Value::Tensor(tensor), serde_json::Value::Array(_)) => {
-            if let Some(storage) = exact_json_integer_array(json, &tensor.shape) {
-                *tensor = Tensor::new_integer(storage, tensor.shape.clone())
+            if let Some(storage) = exact_json_integer_array(json, &tensor.shape()) {
+                *tensor = Tensor::new_integer(storage, tensor.shared_shape())
                     .map_err(|message| builtin_error(builtin, error, message))?;
             }
         }
@@ -2708,121 +2709,41 @@ fn parse_scalar_enum_for_builtin<T: DeserializeOwned>(
     )
 }
 
-fn workflow_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [
+fn workflow_methods() -> HashMap<MethodName, RuntimeMethod> {
+    instance_methods([
         ("validate", VALIDATE_NAME),
         ("plan", PLAN_NAME),
         ("run", RUN_NAME),
-    ]
-    .into_iter()
-    .map(|(name, function_name)| {
-        (
-            name.to_string(),
-            crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
-                is_static: false,
-                is_abstract: false,
-                is_sealed: false,
-                access: MemberAccess::Public,
-                function_name: function_name.to_string(),
-                implicit_class_argument: None,
-            },
-        )
-    })
-    .collect()
+    ])
 }
 
-fn run_result_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [
+fn run_result_methods() -> HashMap<MethodName, RuntimeMethod> {
+    instance_methods([
         ("step", "fea.stepResult"),
         ("results", RESULTS_NAME),
         ("field", FIELD_NAME),
         ("mesh", MESH_METHOD_BUILTIN_NAME),
-    ]
-    .into_iter()
-    .map(|(name, function_name)| {
-        (
-            name.to_string(),
-            crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
-                is_static: false,
-                is_abstract: false,
-                is_sealed: false,
-                access: MemberAccess::Public,
-                function_name: function_name.to_string(),
-                implicit_class_argument: None,
-            },
-        )
-    })
-    .collect()
+    ])
 }
 
-fn step_run_result_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [
+fn step_run_result_methods() -> HashMap<MethodName, RuntimeMethod> {
+    instance_methods([
         ("results", RESULTS_NAME),
         ("field", FIELD_NAME),
         ("mesh", MESH_METHOD_BUILTIN_NAME),
-    ]
-    .into_iter()
-    .map(|(name, function_name)| {
-        (
-            name.to_string(),
-            crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
-                is_static: false,
-                is_abstract: false,
-                is_sealed: false,
-                access: MemberAccess::Public,
-                function_name: function_name.to_string(),
-                implicit_class_argument: None,
-            },
-        )
-    })
-    .collect()
+    ])
 }
 
-fn results_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [("field", FIELD_NAME), ("mesh", MESH_METHOD_BUILTIN_NAME)]
-        .into_iter()
-        .map(|(name, function_name)| {
-            (
-                name.to_string(),
-                crate::class_registry::RuntimeMethod {
-                    name: name.to_string(),
-                    is_static: false,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: function_name.to_string(),
-                    implicit_class_argument: None,
-                },
-            )
-        })
-        .collect()
+fn results_methods() -> HashMap<MethodName, RuntimeMethod> {
+    instance_methods([("field", FIELD_NAME), ("mesh", MESH_METHOD_BUILTIN_NAME)])
 }
 
-fn field_methods() -> HashMap<String, crate::class_registry::RuntimeMethod> {
-    [
+fn field_methods() -> HashMap<MethodName, RuntimeMethod> {
+    instance_methods([
         ("page", FIELD_PAGE_NAME),
         ("plot", PLOT_METHOD_BUILTIN_NAME),
         ("mesh", MESH_METHOD_BUILTIN_NAME),
-    ]
-    .into_iter()
-    .map(|(name, function_name)| {
-        (
-            name.to_string(),
-            crate::class_registry::RuntimeMethod {
-                name: name.to_string(),
-                is_static: false,
-                is_abstract: false,
-                is_sealed: false,
-                access: MemberAccess::Public,
-                function_name: function_name.to_string(),
-                implicit_class_argument: None,
-            },
-        )
-    })
-    .collect()
+    ])
 }
 
 fn operation_error(
@@ -2891,6 +2812,7 @@ mod tests {
     use futures::executor::block_on;
     use runmat_analysis_fea::ComputeBackend;
     use runmat_meshing_core::CanonicalMeshingContract;
+    use runmat_types::MemberAccess;
     use runmat_value::{CellArray, Closure};
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";

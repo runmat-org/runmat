@@ -1,7 +1,9 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::*;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use runmat_analysis_core::{ResponseSpectrum, ResponseSpectrumId};
 
 pub(super) const RESPONSE_SPECTRUM_CLASS: &str = "fea.ResponseSpectrum";
@@ -221,7 +223,9 @@ pub(super) fn response_spectrum_vec_from_value(
 pub(super) fn ensure_response_spectrum_class_registered() {
     static PORTABLE_SCHEMA: Once = Once::new();
     static RUNTIME_CLASS: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(RESPONSE_SPECTRUM_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            RESPONSE_SPECTRUM_CLASS,
+        ));
     PORTABLE_SCHEMA.call_once(|| {
         crate::execution::value_codec::register_immutable_value_class(
             crate::execution::value_codec::ImmutableValueClassSchema {
@@ -236,39 +240,11 @@ pub(super) fn ensure_response_spectrum_class_registered() {
         .unwrap_or_else(|error| panic!("failed to register {RESPONSE_SPECTRUM_CLASS}: {error}"));
     });
     RUNTIME_CLASS.ensure(|| {
-        crate::class_registry::register_class(crate::class_registry::RuntimeClass {
-            name: RESPONSE_SPECTRUM_CLASS.into(),
-            parent: None,
-            properties: FIELDS
-                .iter()
-                .map(|name| {
-                    (
-                        (*name).into(),
-                        crate::class_registry::RuntimeProperty {
-                            name: (*name).into(),
-                            is_static: false,
-                            is_constant: true,
-                            is_dependent: false,
-                            get_access: MemberAccess::Public,
-                            set_access: MemberAccess::Private,
-                            default_value: None,
-                        },
-                    )
-                })
-                .collect(),
-            methods: HashMap::from([(
-                "new".into(),
-                crate::class_registry::RuntimeMethod {
-                    name: "new".into(),
-                    is_static: true,
-                    is_abstract: false,
-                    is_sealed: false,
-                    access: MemberAccess::Public,
-                    function_name: BUILTIN.into(),
-                    implicit_class_argument: None,
-                },
-            )]),
-        });
+        register_value_class(
+            RESPONSE_SPECTRUM_CLASS,
+            immutable_properties(FIELDS),
+            static_methods([("new", BUILTIN)]),
+        );
     });
 }
 

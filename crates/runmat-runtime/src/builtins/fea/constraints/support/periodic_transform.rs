@@ -2,10 +2,13 @@ use std::collections::HashMap;
 use std::sync::Once;
 
 use super::super::*;
-use super::{direction_from_value, register_runtime_class, static_method};
+use super::direction_from_value;
 use crate::builtins::fea::values::{
     position_meters, quantity_scalar, translation_meters, POSITION_CLASS, ROTATION_CLASS,
     TRANSLATION_CLASS,
+};
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
 };
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
@@ -94,9 +97,7 @@ pub(super) const ROTATION_DESCRIPTOR: BuiltinDescriptor = BuiltinDescriptor {
 )]
 pub async fn periodic_transform_identity_builtin() -> BuiltinResult<Value> {
     ensure_periodic_transform_classes_registered();
-    Ok(Value::Object(ObjectInstance::new(
-        IDENTITY_TRANSFORM_CLASS.into(),
-    )))
+    Ok(Value::Object(ObjectInstance::new(IDENTITY_TRANSFORM_CLASS)))
 }
 
 #[runtime_builtin(
@@ -165,7 +166,7 @@ pub(crate) fn periodic_transform_from_value(
             )
         })
     };
-    match object.class_name.as_str() {
+    match object.class_name.display_name() {
         IDENTITY_TRANSFORM_CLASS => Ok(PeriodicTransform::Identity),
         TRANSLATION_TRANSFORM_CLASS => Ok(PeriodicTransform::Translation(Translation::new(
             translation_meters(builtin, property("translation")?)?,
@@ -196,7 +197,7 @@ fn transform_object<const N: usize>(
     properties: [(&str, Value); N],
 ) -> BuiltinResult<Value> {
     ensure_periodic_transform_classes_registered();
-    let mut object = ObjectInstance::new(class_name.into());
+    let mut object = ObjectInstance::new(class_name);
     for (name, value) in properties {
         object.properties.insert(name.into(), value);
     }
@@ -206,7 +207,9 @@ fn transform_object<const N: usize>(
 pub(super) fn ensure_periodic_transform_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(PERIODIC_TRANSFORM_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            PERIODIC_TRANSFORM_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         for schema in [
             ImmutableValueClassSchema {
@@ -239,24 +242,29 @@ pub(super) fn ensure_periodic_transform_classes_registered() {
         }
     });
     RUNTIME_CLASSES.ensure(|| {
-        register_runtime_class(IDENTITY_TRANSFORM_CLASS, EMPTY_FIELDS, HashMap::new());
-        register_runtime_class(
-            TRANSLATION_TRANSFORM_CLASS,
-            TRANSLATION_FIELDS,
+        register_value_class(
+            IDENTITY_TRANSFORM_CLASS,
+            immutable_properties(EMPTY_FIELDS),
             HashMap::new(),
         );
-        register_runtime_class(ROTATION_TRANSFORM_CLASS, ROTATION_FIELDS, HashMap::new());
-        register_runtime_class(
+        register_value_class(
+            TRANSLATION_TRANSFORM_CLASS,
+            immutable_properties(TRANSLATION_FIELDS),
+            HashMap::new(),
+        );
+        register_value_class(
+            ROTATION_TRANSFORM_CLASS,
+            immutable_properties(ROTATION_FIELDS),
+            HashMap::new(),
+        );
+        register_value_class(
             PERIODIC_TRANSFORM_CLASS,
-            EMPTY_FIELDS,
-            [
+            immutable_properties(EMPTY_FIELDS),
+            static_methods([
                 ("identity", "fea.PeriodicTransform.identity"),
                 ("translation", "fea.PeriodicTransform.translation"),
                 ("rotation", "fea.PeriodicTransform.rotation"),
-            ]
-            .into_iter()
-            .map(|(name, function)| (name.into(), static_method(name, function)))
-            .collect(),
+            ]),
         );
     });
 }
@@ -287,7 +295,7 @@ fn validate_nested_classes(
     for (field, class_name) in expected {
         if !matches!(
             object.properties.get(*field),
-            Some(Value::Object(value)) if value.class_name == *class_name
+            Some(Value::Object(value)) if value.class_name.display_name() == *class_name
         ) {
             return Err(format!(
                 "{}.{} must be a typed {class_name}",

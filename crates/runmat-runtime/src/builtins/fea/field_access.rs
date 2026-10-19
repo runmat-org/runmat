@@ -28,7 +28,7 @@ pub(super) fn create_page_from_args(args: Vec<Value>) -> BuiltinResult<Value> {
             "fea.fieldPage requires an fea.Field",
         ));
     };
-    if field.class_name != FEA_FIELD_CLASS {
+    if field.class_name.display_name() != FEA_FIELD_CLASS {
         return Err(builtin_error(
             FIELD_PAGE_NAME,
             &ERROR_INPUT,
@@ -81,7 +81,7 @@ pub(super) fn selection_from_field_object(
     let field_id = required_nonempty_string_for_builtin(builtin, field, "field_id")?;
     let sample = match field.properties.get("sample") {
         Some(value @ Value::Object(sample))
-            if sample.class_name == super::values::FREQUENCY_CLASS =>
+            if sample.class_name.display_name() == super::values::FREQUENCY_CLASS =>
         {
             let hertz = super::values::quantity_scalar(
                 builtin,

@@ -2,8 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Once;
 
 use super::super::*;
-use super::{dof::translation_dof_from_value, register_runtime_class, static_method};
+use super::dof::translation_dof_from_value;
 use crate::builtins::fea::values::{quantity_scalar, DISPLACEMENT_CLASS, VELOCITY_CLASS};
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 use runmat_analysis_core::{
     AccelerationSignalId, CoordinateFrame, Displacement, PhysicalQuantityKind, SignalDomainKind,
@@ -151,7 +154,9 @@ pub(crate) fn structural_motions_from_value(
 pub(super) fn ensure_motion_classes_registered() {
     static PORTABLE_SCHEMAS: Once = Once::new();
     static RUNTIME_CLASSES: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(MOTION_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            MOTION_CLASS,
+        ));
     PORTABLE_SCHEMAS.call_once(|| {
         register_immutable_value_class(ImmutableValueClassSchema {
             class_name: TRANSLATION_MOTION_CLASS,
@@ -164,14 +169,15 @@ pub(super) fn ensure_motion_classes_registered() {
         .unwrap_or_else(|error| panic!("failed to register structural motion class: {error}"));
     });
     RUNTIME_CLASSES.ensure(|| {
-        register_runtime_class(
+        register_value_class(
             MOTION_CLASS,
-            &[],
-            HashMap::from([(
-                "acceleration".into(),
-                static_method("acceleration", "fea.StructuralMotion.acceleration"),
-            )]),
+            HashMap::new(),
+            static_methods([("acceleration", "fea.StructuralMotion.acceleration")]),
         );
-        register_runtime_class(TRANSLATION_MOTION_CLASS, MOTION_FIELDS, HashMap::new());
+        register_value_class(
+            TRANSLATION_MOTION_CLASS,
+            immutable_properties(MOTION_FIELDS),
+            HashMap::new(),
+        );
     });
 }

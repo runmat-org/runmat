@@ -1,9 +1,10 @@
-use std::collections::HashMap;
 use std::sync::Once;
 
 use super::super::*;
-use super::{register_runtime_class, static_method};
 use crate::builtins::fea::values::finite_numeric_vector3;
+use crate::class_registry::declaration::{
+    immutable_properties, register_value_class, static_methods,
+};
 use crate::execution::value_codec::{register_immutable_value_class, ImmutableValueClassSchema};
 
 const DIRECTION_CLASS: &str = "fea.Direction";
@@ -85,7 +86,7 @@ pub(crate) fn direction_from_value(
             format!("expected {DIRECTION_CLASS}"),
         ));
     };
-    if object.class_name != DIRECTION_CLASS {
+    if object.class_name.display_name() != DIRECTION_CLASS {
         return Err(builtin_error(
             builtin,
             &ERROR_INPUT,
@@ -111,7 +112,7 @@ fn direction_to_value(components: [f64; 3]) -> BuiltinResult<Value> {
             format!("failed to store direction: {error}"),
         )
     })?;
-    let mut object = ObjectInstance::new(DIRECTION_CLASS.into());
+    let mut object = ObjectInstance::new(DIRECTION_CLASS);
     object
         .properties
         .insert("components".into(), Value::Tensor(tensor));
@@ -121,7 +122,9 @@ fn direction_to_value(components: [f64; 3]) -> BuiltinResult<Value> {
 pub(super) fn ensure_direction_class_registered() {
     static PORTABLE_SCHEMA: Once = Once::new();
     static RUNTIME_CLASS: crate::class_registry::ClassRegistration =
-        crate::class_registry::ClassRegistration::new(DIRECTION_CLASS);
+        crate::class_registry::ClassRegistration::new(runmat_types::StaticClassIdentity::new(
+            DIRECTION_CLASS,
+        ));
     PORTABLE_SCHEMA.call_once(|| {
         register_immutable_value_class(ImmutableValueClassSchema {
             class_name: DIRECTION_CLASS,
@@ -134,13 +137,10 @@ pub(super) fn ensure_direction_class_registered() {
         .unwrap_or_else(|error| panic!("failed to register typed direction class: {error}"));
     });
     RUNTIME_CLASS.ensure(|| {
-        register_runtime_class(
+        register_value_class(
             DIRECTION_CLASS,
-            DIRECTION_FIELDS,
-            HashMap::from([(
-                "vector".into(),
-                static_method("vector", "fea.Direction.vector"),
-            )]),
+            immutable_properties(DIRECTION_FIELDS),
+            static_methods([("vector", "fea.Direction.vector")]),
         );
     });
 }
