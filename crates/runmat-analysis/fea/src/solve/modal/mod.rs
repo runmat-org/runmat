@@ -13,6 +13,7 @@ use crate::{
     ComputeBackend,
 };
 
+mod capacity;
 mod diagnostics;
 mod math;
 pub(crate) mod subspace;
@@ -184,6 +185,10 @@ pub(crate) fn solve_modal_system_reusing(
             }
         }
     };
+    // Inverse stiffness applications use the same dimension-scaled PCG policy
+    // as structural solves. A fixed 64-step cap can abandon a valid modal
+    // problem immediately when ILU falls back to Jacobi.
+    let inverse_iteration_limit = crate::solve::linear::iteration_limit(&reduced_operator, 64);
     let accelerator_requested = backend == ComputeBackend::Gpu;
     let mut solver_backend = LinearAlgebraBackendKind::CpuReference;
     let mut solver_host_sync_count = 0u32;
@@ -192,6 +197,11 @@ pub(crate) fn solve_modal_system_reusing(
 
     let unconstrained: Vec<usize> = (0..reduced_operator.dof_count()).collect();
     let target_mode_count = requested_mode_count.min(unconstrained.len());
+    let maximum_subspace_dimension =
+        match convergence.admitted_subspace_dimension(unconstrained.len(), target_mode_count) {
+            Ok(capacity) => capacity,
+            Err(error) => return capacity::failure(error, unconstrained.len()),
+        };
 
     let mut modes: Vec<ModalCandidate> = Vec::with_capacity(target_mode_count.saturating_add(4));
     let mut boundary_probe_count = 0usize;
@@ -199,7 +209,10 @@ pub(crate) fn solve_modal_system_reusing(
     let mut boundary_probe_frequency_hz = None;
     let mut accelerator_admission_fallback = None;
     let prepared_accelerator_system = if accelerator_requested {
-        let prepared = prepare_accelerator_linear_system(prepared.clone(), 64);
+        let prepared = prepare_accelerator_linear_system(
+            prepared.clone(),
+            crate::solve::linear::accelerator_iteration_limit(&reduced_operator, 64),
+        );
         match prepared {
             Ok(prepared) => Some(prepared),
             Err(error) if error.permits_cpu_fallback() => {
@@ -290,7 +303,7 @@ pub(crate) fn solve_modal_system_reusing(
     let mut accelerator_evidence = Vec::new();
     let mut subspace_dimension = target_mode_count
         .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
-        .min(unconstrained.len());
+        .min(maximum_subspace_dimension);
     let mut subspace_iteration_count = 0usize;
     let mut subspace_maximum_residual = f64::INFINITY;
     let mut subspace_converged = false;
@@ -309,8 +322,8 @@ pub(crate) fn solve_modal_system_reusing(
                     &reduced_operator,
                     rhs,
                     SpdCgSolveOptions {
-                        max_iters: 64,
-                        tol: 1.0e-8,
+                        max_iters: inverse_iteration_limit,
+                        tol: crate::solve::linear::DEFAULT_RELATIVE_TOLERANCE,
                         prepared_accelerator_system: prepared_accelerator_system.as_ref(),
                         cpu_preconditioner: cpu_preconditioner.as_deref(),
                         initial_guess,
@@ -367,13 +380,13 @@ pub(crate) fn solve_modal_system_reusing(
             complete_boundary_eigenspace = true;
             break;
         }
-        if exhausted {
+        if exhausted || subspace_dimension == maximum_subspace_dimension {
             modes = candidates;
             break;
         }
         subspace_dimension = subspace_dimension
             .saturating_add(MODAL_BOUNDARY_PROBE_WIDTH)
-            .min(unconstrained.len());
+            .min(maximum_subspace_dimension);
     }
 
     modes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -424,6 +437,19 @@ pub(crate) fn solve_modal_system_reusing(
         ),
     });
 
+    if !complete_boundary_eigenspace
+        && subspace_dimension == maximum_subspace_dimension
+        && maximum_subspace_dimension < unconstrained.len()
+    {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_MODAL_SUBSPACE_CAPACITY".into(),
+            severity: FeaDiagnosticSeverity::Error,
+            message: format!(
+                "modal truncation boundary remains unproven at admitted subspace capacity: requested={target_mode_count} capacity={maximum_subspace_dimension} available={}",
+                unconstrained.len(),
+            ),
+        });
+    }
     push_modal_quality_diagnostics(
         &mut diagnostics,
         &summary.operator,

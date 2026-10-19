@@ -88,6 +88,7 @@ impl RemoteMeshingHost {
 pub(super) struct RemoteProgramContext {
     pub project: Option<Arc<crate::materialized_project::MaterializedProject>>,
     pub environment: Vec<(String, String)>,
+    pub resources: runmat_execution::resource::ResourceRequest,
 }
 
 pub(super) async fn execute(
@@ -102,6 +103,7 @@ pub(super) async fn execute(
     let RemoteProgramContext {
         project,
         environment,
+        resources,
     } = context;
     #[cfg(all(test, feature = "occt-native"))]
     if let Some(held) = meshing_host.as_ref().and_then(|host| host.held_attempt) {
@@ -142,11 +144,12 @@ pub(super) async fn execute(
         drop(progress_sender);
         return tokio::task::spawn_blocking(move || {
             let _guard = install_analysis_cancellation(attempt_id, &cancellation);
-            crate::execute_analysis_program_request(
+            crate::execute_reserved_analysis_program_request(
                 &program,
                 &mut objects,
                 &crate::NativeAnalysisKernel,
                 crate::NativeAnalysisHostLimits::default(),
+                &resources,
             )
         })
         .await
@@ -215,6 +218,7 @@ pub(super) async fn execute(
             .map(crate::materialized_project::MaterializedProject::handoff),
         Some(&environment),
         Some(cancellation.flag()),
+        Some(&resources),
     )
     .await
 }
@@ -223,11 +227,10 @@ fn install_analysis_cancellation(
     attempt_id: AttemptId,
     cancellation: &AttemptCancellation,
 ) -> runmat_analysis_fea::FeaProgressContextGuard {
-    runmat_analysis_fea::replace_fea_progress_context(runmat_analysis_fea::FeaProgressContext {
-        handler: None,
-        cancellation: runmat_analysis_fea::FeaCancellationToken::from_shared(cancellation.flag()),
-        attempt_id: Some(attempt_id),
-    })
+    crate::analysis_progress::install(
+        runmat_analysis_fea::FeaCancellationToken::from_shared(cancellation.flag()),
+        Some(attempt_id),
+    )
 }
 
 pub(super) fn report(

@@ -48,7 +48,19 @@ impl NonlinearLoadWork {
     }
 
     pub(crate) fn validate(self, options: &NonlinearSolveOptions) -> Result<(), FeaRunError> {
-        let limits = super::super::NonlinearWorkLimits::derive(options)?;
+        self.validate_with_contact(options, false)
+    }
+
+    pub(super) fn validate_with_contact(
+        self,
+        options: &NonlinearSolveOptions,
+        contact: bool,
+    ) -> Result<(), FeaRunError> {
+        let limits = if contact {
+            super::super::NonlinearWorkLimits::derive_contact(options)?
+        } else {
+            super::super::NonlinearWorkLimits::derive(options)?
+        };
         if self.accepted_increments > limits.accepted
             || self.rejected_increments > limits.rejected
             || self.newton_iterations > limits.iterations
@@ -223,7 +235,21 @@ impl NonlinearLoadContinuation {
                 ))
             }
         }
-        self.work.validate(options)
+        if let Some(contact) = self.accepted_state.contact_configuration() {
+            if contact.ordinal()
+                != u64::try_from(self.work.accepted_increments).map_err(|_| {
+                    FeaRunError::InvalidModel("contact accepted ordinal overflow".into())
+                })?
+            {
+                return Err(FeaRunError::InvalidModel(
+                    "contact point/controller accepted ordinals differ".into(),
+                ));
+            }
+        }
+        self.work.validate_with_contact(
+            options,
+            self.accepted_state.contact_configuration().is_some(),
+        )
     }
 }
 

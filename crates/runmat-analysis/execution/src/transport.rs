@@ -97,32 +97,47 @@ impl PreparedAnalysisProgram {
     }
 }
 
-pub fn prepare_analysis_program(
+/// Shared immutable input binding for preparation, admission and cold accuracy import.
+/// It compares borrowed descriptors only; payload authentication belongs to the object owner.
+pub(crate) fn validate_prepared_analysis_inputs(
     host: &AnalysisHostWorkload,
-    program_revision: ProgramRevision,
     inputs: &[PreparedAnalysisObjects],
-) -> AnalysisBridgeResult<PreparedAnalysisProgram> {
+) -> AnalysisBridgeResult<()> {
     host.validate()?;
     if inputs.len() != host.workload.inputs.len() {
         return Err(AnalysisBridgeError::Invalid(
             "analysis object count differs from the workload input contract".into(),
         ));
     }
+    if inputs
+        .iter()
+        .zip(&host.workload.inputs)
+        .any(|(prepared, contract)| {
+            prepared.manifest.kind != contract.kind
+                || prepared.manifest.logical_identity != contract.logical_identity
+                || prepared.manifest.payload_digest != contract.payload_digest
+                || prepared.root.digest != contract.manifest_digest
+                || prepared.root.encoded_length != contract.manifest_encoded_length
+        })
+    {
+        return Err(AnalysisBridgeError::Identity(
+            "analysis object closure differs from the workload input contract",
+        ));
+    }
+    Ok(())
+}
+
+pub fn prepare_analysis_program(
+    host: &AnalysisHostWorkload,
+    program_revision: ProgramRevision,
+    inputs: &[PreparedAnalysisObjects],
+) -> AnalysisBridgeResult<PreparedAnalysisProgram> {
+    validate_prepared_analysis_inputs(host, inputs)?;
 
     let mut roots = Vec::with_capacity(inputs.len());
     let mut inventory = BTreeMap::<ValueId, ProgramExecutionObject>::new();
     let mut logical_inventory = BTreeMap::<runmat_execution::Digest, LogicalObject>::new();
     for (prepared, contract) in inputs.iter().zip(&host.workload.inputs) {
-        if prepared.manifest.kind != contract.kind
-            || prepared.manifest.logical_identity != contract.logical_identity
-            || prepared.manifest.payload_digest != contract.payload_digest
-            || prepared.root.digest != contract.manifest_digest
-            || prepared.root.encoded_length != contract.manifest_encoded_length
-        {
-            return Err(AnalysisBridgeError::Identity(
-                "analysis object closure differs from the workload input contract",
-            ));
-        }
         let references = prepared.references(&host.artifact_access, contract.reference_kind)?;
         let root = references
             .first()

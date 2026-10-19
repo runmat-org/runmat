@@ -1,8 +1,9 @@
-use std::collections::BTreeMap;
+use crate::topology::storage::SortedValues;
+use std::borrow::Cow;
 
 use runmat_analysis_core::{AnalysisModel, StructuralElementKind};
 use runmat_execution::Digest;
-use runmat_meshing_core::{ElementOrder, SolverMeshArtifact, StableDigest};
+use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use crate::{
     physics::structural::topology::{
@@ -31,7 +32,7 @@ pub(crate) struct ObservationElement {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ObservationTopology {
+pub(crate) struct ObservationTopology<'a> {
     pub identity: Option<CanonicalStructuralTopologyIdentity>,
     topology_digest: Digest,
     pub nodes: Vec<ObservationNode>,
@@ -43,29 +44,40 @@ pub(crate) struct ObservationTopology {
     pub face_boundary_sources: Vec<Option<usize>>,
     pub beam_elements: Vec<ObservationElement>,
     pub shell_elements: Vec<ObservationElement>,
-    pub solid_projection: Option<AnalysisProjection>,
+    pub solid_projection: Option<Cow<'a, AnalysisProjection>>,
     pub sampling: Option<SampledVolumeFieldTopology>,
     integration_points_by_parent: Vec<Vec<usize>>,
-    node_selectors: BTreeMap<u64, Vec<usize>>,
+    node_selectors: SortedValues<u64, Vec<usize>>,
 }
 
+pub(super) mod resources;
 mod sampled;
 #[cfg(test)]
 mod tests;
 
-impl ObservationTopology {
+impl<'a> ObservationTopology<'a> {
     pub(super) fn set_finite_volume_digest(&mut self, digest: Digest) {
         self.topology_digest = digest;
     }
-    pub fn from_projection(projection: &AnalysisProjection) -> Self {
-        let node_selectors = projection
-            .nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (node.node_id, vec![index]))
-            .collect();
-        let volume_integration_points = integration_point_elements(projection);
-        Self {
+    pub fn from_projection(projection: &'a AnalysisProjection) -> Result<Self, ObservationError> {
+        Self::from_solid_projection(Cow::Borrowed(projection))
+    }
+
+    fn from_solid_projection(
+        projection: Cow<'a, AnalysisProjection>,
+    ) -> Result<Self, ObservationError> {
+        let node_selectors = SortedValues::derive_grouped(
+            projection
+                .nodes
+                .iter()
+                .enumerate()
+                .map(|(index, node)| (node.node_id, index)),
+            projection.nodes.len(),
+        )
+        .map_err(storage_error)?;
+        let volume_integration_points = integration_point_elements(&projection)?;
+        let integration_points_by_parent = structural_integration_indices(&projection)?;
+        Ok(Self {
             identity: Some(CanonicalStructuralTopologyIdentity::Solid {
                 mesh_digest: projection.mesh_digest,
             }),
@@ -94,11 +106,11 @@ impl ObservationTopology {
             face_boundary_sources: Vec::new(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
-            solid_projection: Some(projection.clone()),
+            solid_projection: Some(projection),
             sampling: None,
-            integration_points_by_parent: structural_integration_indices(projection),
+            integration_points_by_parent,
             node_selectors,
-        }
+        })
     }
 
     pub(crate) fn entity_counts(&self) -> RecoveredFieldEntityCounts {
@@ -126,13 +138,15 @@ impl ObservationTopology {
             .transpose()
             .map_err(|error| ObservationError::Invalid(error.to_string()))?;
         if !has_explicit {
-            let mut topology = projection.as_ref().map(Self::from_projection).ok_or(
-                ObservationError::Unsupported(
+            let mut topology = projection
+                .map(|projection| Self::from_solid_projection(Cow::Owned(projection)))
+                .transpose()?
+                .ok_or(ObservationError::Unsupported(
                     "structural observations require solid or explicit topology",
-                ),
-            )?;
+                ))?;
             let identity = CanonicalStructuralTopologyIdentity::Solid {
-                mesh_digest: projection
+                mesh_digest: topology
+                    .solid_projection
                     .as_ref()
                     .ok_or(ObservationError::Unsupported(
                         "structural observations require solid topology",
@@ -166,23 +180,23 @@ impl ObservationTopology {
                 ))
             }
         };
-        let mut node_selectors = BTreeMap::<u64, Vec<usize>>::new();
-        if let Some(projection) = &projection {
-            for (index, node) in projection.nodes.iter().enumerate() {
-                node_selectors.entry(node.node_id).or_default().push(index);
-            }
-        }
-        for (explicit_index, node) in structural.nodes.iter().enumerate() {
-            let canonical_index = node_space.explicit_node_indices[explicit_index];
-            node_selectors
-                .entry(u64::from(node.node_id))
-                .or_default()
-                .push(canonical_index);
-        }
-        for indices in node_selectors.values_mut() {
-            indices.sort_unstable();
-            indices.dedup();
-        }
+        let solid_count = projection.as_ref().map_or(0, |p| p.nodes.len());
+        let count = solid_count
+            .checked_add(structural.nodes.len())
+            .ok_or(ObservationError::Limit("observation node aliases"))?;
+        let solid = projection.iter().flat_map(|p| {
+            p.nodes
+                .iter()
+                .enumerate()
+                .map(|(i, node)| (node.node_id, i))
+        });
+        let explicit = structural
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (u64::from(node.node_id), node_space.explicit_node_indices[i]));
+        let node_selectors =
+            SortedValues::derive_grouped(solid.chain(explicit), count).map_err(storage_error)?;
         let mut topology = Self {
             identity: Some(node_space.identity),
             topology_digest: node_space.identity.discretization_digest(),
@@ -211,6 +225,7 @@ impl ObservationTopology {
             volume_integration_points: projection
                 .as_ref()
                 .map(integration_point_elements)
+                .transpose()?
                 .unwrap_or_default(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
@@ -222,8 +237,9 @@ impl ObservationTopology {
             integration_points_by_parent: projection
                 .as_ref()
                 .map(structural_integration_indices)
+                .transpose()?
                 .unwrap_or_default(),
-            solid_projection: projection,
+            solid_projection: projection.map(Cow::Owned),
             node_selectors,
         };
         for element in &structural.elements {
@@ -349,68 +365,68 @@ impl ObservationTopology {
     }
 }
 
-fn structural_integration_indices(projection: &AnalysisProjection) -> Vec<Vec<usize>> {
+fn structural_integration_indices(
+    projection: &AnalysisProjection,
+) -> Result<Vec<Vec<usize>>, ObservationError> {
     let points = TETRAHEDRON_FOUR_POINT_RULE.len();
-    (0..projection.elements.len())
-        .map(|parent| (parent * points..(parent + 1) * points).collect())
-        .collect()
+    let mut parents =
+        crate::topology::storage::reserve(projection.elements.len()).map_err(storage_error)?;
+    for parent in 0..projection.elements.len() {
+        let start = parent
+            .checked_mul(points)
+            .ok_or(ObservationError::Limit("integration-point count"))?;
+        let mut indices = crate::topology::storage::reserve(points).map_err(storage_error)?;
+        indices.extend(start..start + points);
+        parents.push(indices);
+    }
+    Ok(parents)
 }
 
-fn integration_point_elements(projection: &AnalysisProjection) -> Vec<ObservationElement> {
-    projection
+fn integration_point_elements(
+    projection: &AnalysisProjection,
+) -> Result<Vec<ObservationElement>, ObservationError> {
+    let count = projection
         .elements
-        .iter()
-        .flat_map(|element| {
-            let coordinates = element
-                .node_indices
-                .iter()
-                .map(|index| projection.nodes[*index].coordinates_m)
-                .collect::<Vec<_>>();
-            TETRAHEDRON_FOUR_POINT_RULE.into_iter().enumerate().map(
-                move |(ordinal, barycentric)| {
-                    let shape = recovery_shape_values(element.order, barycentric);
-                    let position_m = std::array::from_fn(|axis| {
-                        shape
-                            .iter()
-                            .zip(&coordinates)
-                            .map(|(shape, node)| shape * node[axis])
-                            .sum()
-                    });
-                    ObservationElement {
-                        identity: integration_point_identity(element.stable_identity, ordinal),
-                        region_id: element.region_id.source_topology_id.clone(),
-                        centroid_m: position_m,
-                    }
-                },
-            )
-        })
-        .collect()
-}
-
-fn recovery_shape_values(order: ElementOrder, barycentric: [f64; 4]) -> Vec<f64> {
-    match order {
-        ElementOrder::Tet4 => barycentric.to_vec(),
-        ElementOrder::Tet10 => {
-            let mut values = vec![0.0; 10];
-            for node in 0..4 {
-                values[node] = barycentric[node] * (2.0 * barycentric[node] - 1.0);
+        .len()
+        .checked_mul(TETRAHEDRON_FOUR_POINT_RULE.len())
+        .ok_or(ObservationError::Limit("integration-point count"))?;
+    let mut points = crate::topology::storage::reserve(count).map_err(storage_error)?;
+    for element in &projection.elements {
+        crate::topology::storage::check_cancelled().map_err(storage_error)?;
+        for (ordinal, barycentric) in TETRAHEDRON_FOUR_POINT_RULE.into_iter().enumerate() {
+            let (shape, _) = crate::topology::quadrature::volume_shape(element.order, barycentric);
+            let mut position_m = [0.0; 3];
+            for (value, index) in shape.iter().zip(&element.node_indices) {
+                let node = projection
+                    .nodes
+                    .get(*index)
+                    .ok_or(ObservationError::Identity(
+                        "observation element references an absent projection node",
+                    ))?;
+                for (position, coordinate) in position_m.iter_mut().zip(node.coordinates_m) {
+                    *position += value * coordinate;
+                }
             }
-            for (edge, [left, right]) in [[0, 1], [1, 2], [2, 0], [0, 3], [1, 3], [2, 3]]
-                .into_iter()
-                .enumerate()
-            {
-                values[4 + edge] = 4.0 * barycentric[left] * barycentric[right];
-            }
-            values
+            points.push(ObservationElement {
+                identity: integration_point_identity(element.stable_identity, ordinal),
+                region_id: element.region_id.source_topology_id.clone(),
+                centroid_m: position_m,
+            });
         }
     }
+    Ok(points)
 }
 
 fn integration_point_identity(element: StableDigest, ordinal: usize) -> StableDigest {
-    let mut bytes = b"runmat.fea.structural.integration-point\0".to_vec();
-    bytes.extend_from_slice(element.bytes());
-    bytes.extend_from_slice(&(ordinal as u64).to_le_bytes());
-    StableDigest::from_bytes(*Digest::sha256(bytes).bytes())
+    let ordinal = (ordinal as u64).to_le_bytes();
+    StableDigest::from_bytes(
+        *Digest::sha256_parts([
+            b"runmat.fea.structural.integration-point\0".as_slice(),
+            element.bytes().as_slice(),
+            ordinal.as_slice(),
+        ])
+        .bytes(),
+    )
 }
 
 fn centroid(indices: &[usize], nodes: &[ObservationNode]) -> Result<[f64; 3], ObservationError> {
@@ -430,4 +446,8 @@ fn centroid(indices: &[usize], nodes: &[ObservationNode]) -> Result<[f64; 3], Ob
         ));
     }
     Ok(sum.map(|value| value / count))
+}
+
+fn storage_error(error: crate::topology::storage::TopologyStorageError) -> ObservationError {
+    ObservationError::Topology(error.into())
 }

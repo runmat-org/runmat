@@ -38,7 +38,7 @@ pub(crate) use sample::{
     expect_scalar, expect_vector3, expect_vector3_or_direction, initial_signal_sample_point,
     sample_prescribed_heat_flux, sample_prescribed_potential, sample_prescribed_pressure,
     sample_prescribed_temperature, sample_prescribed_velocity, sample_signal, time_breakpoints,
-    ExcitationSamplePoint,
+    time_breakpoints_profiled, ExcitationSamplePoint,
 };
 pub(crate) use time_grid::{ProcedureTimeGrid, ProcedureTimeSchedule, TimeScheduleError};
 

@@ -246,3 +246,50 @@ fn point_set_bootstrap_handles_low_identity_and_extreme_range() {
         DelaunayPointSetErrorKind::ResourceLimit
     );
 }
+
+#[test]
+fn admitted_cpu_counts_preserve_complete_point_set_and_independent_validation() {
+    let mut state = 31_u64;
+    let mut points = point_set();
+    for index in 0..192_u32 {
+        let mut random = || {
+            state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (state >> 32) as f64 / u32::MAX as f64
+        };
+        points.push(DelaunayVolumeNode::explicit(
+            StableDigest::from_bytes(
+                <sha2::Sha256 as sha2::Digest>::digest(index.to_be_bytes()).into(),
+            ),
+            [4. * random() - 1., 4. * random() - 1., 4. * random() - 1.],
+        ));
+    }
+    let mut reference = None;
+    for threads in [1, 2, 4] {
+        let start = std::time::Instant::now();
+        let mesh = runmat_cpu_execution::with_cpu_pool(threads, || {
+            build_delaunay_volume_point_set(
+                points.clone(),
+                DelaunayPointSetOptions::default(),
+                &NeverCancelled,
+            )
+        })
+        .unwrap()
+        .unwrap();
+        validate_delaunay_volume_topology(
+            &mesh,
+            DelaunayInsertionOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap();
+        if let Some(expected) = &reference {
+            assert_eq!(&mesh, expected);
+        } else {
+            reference = Some(mesh);
+        }
+        eprintln!(
+            "CPU_POINT_SET threads={threads} nodes={} wall_seconds={:.6}",
+            points.len(),
+            start.elapsed().as_secs_f64()
+        );
+    }
+}

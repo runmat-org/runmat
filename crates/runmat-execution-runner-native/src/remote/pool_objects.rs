@@ -144,6 +144,44 @@ impl RemoteObjectCatalog {
         }
     }
 
+    /// Enforce the caller's limit in the filesystem reader before materializing.
+    /// Keep catalog authorization locked through the read, as for ordinary reads.
+    pub(super) fn get_by_digest_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.get_by_digest_admitted(digest, maximum_bytes, &mut |_| Ok(()))
+    }
+    pub(super) fn get_by_digest_admitted(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> runmat_execution_artifact::ArtifactResult<()>,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        use runmat_execution_artifact::ArtifactError;
+        if maximum_bytes == 0 {
+            return Err(ArtifactError::Limit(
+                "remote read has no byte allowance".into(),
+            ));
+        }
+        let state = self.state.lock().expect("remote object catalog poisoned");
+        match state
+            .objects
+            .values()
+            .find(|reference| reference.logical_digest == digest)
+        {
+            Some(reference) if reference.encoded_length > maximum_bytes => Err(
+                ArtifactError::Limit("remote object exceeds admitted read bound".into()),
+            ),
+            Some(_) => {
+                self.store
+                    .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+            }
+            None => Ok(None),
+        }
+    }
+
     pub(super) fn contains(&self, reference: &ValueRef) -> NativeExecutionResult<bool> {
         let state = self.state.lock().expect("remote object catalog poisoned");
         match state.objects.get(&reference.id) {
@@ -408,135 +446,4 @@ fn protocol(error: impl std::fmt::Display) -> NativeExecutionError {
 }
 
 #[cfg(test)]
-mod tests {
-    use runmat_execution::value::ValueRefKind;
-
-    use super::*;
-
-    #[test]
-    fn pending_owners_release_independently_and_future_drop_cleans_uncommitted_objects() {
-        let catalog = RemoteObjectCatalog::new().unwrap();
-        let reference = reference("run", b"pending", b"pending");
-        let first = catalog
-            .reserve_results(&[reference.clone(), reference.clone()])
-            .unwrap();
-        let second = catalog
-            .reserve_results(std::slice::from_ref(&reference))
-            .unwrap();
-        store(&catalog.store, &reference, b"pending").unwrap();
-        insert(
-            &mut catalog.state.lock().unwrap().objects,
-            reference.clone(),
-        )
-        .unwrap();
-        assert_eq!(
-            catalog.state.lock().unwrap().pending_results[&reference.id].1,
-            2
-        );
-        catalog.discard_results(std::slice::from_ref(&reference));
-        drop(first);
-        assert!(catalog.contains(&reference).unwrap());
-        // Dropping a suspended/abandoned task drops its owned lease without an
-        // async cleanup operation or a scheduler callback.
-        let abandoned = async move {
-            let _lease = second;
-            std::future::pending::<()>().await;
-        };
-        drop(abandoned);
-        assert!(catalog.state.lock().unwrap().pending_results.is_empty());
-        assert!(!catalog.contains(&reference).unwrap());
-    }
-
-    #[test]
-    fn pending_identity_and_capacity_are_reserved_atomically_before_download() {
-        let catalog = RemoteObjectCatalog::new().unwrap();
-        let reference = reference("run", b"reserved", b"reserved");
-        let lease = catalog
-            .reserve_results(std::slice::from_ref(&reference))
-            .unwrap();
-        let mut foreign = reference.clone();
-        foreign.logical_digest = Digest::sha256(b"foreign");
-        let unrelated = self::reference("run", b"unrelated", b"unrelated");
-        assert!(catalog
-            .reserve_results(&[unrelated.clone(), foreign])
-            .is_err());
-        assert_eq!(catalog.state.lock().unwrap().pending_results.len(), 1);
-        assert_eq!(
-            catalog.state.lock().unwrap().pending_results[&reference.id].1,
-            1
-        );
-        drop(lease);
-        let mut oversized = reference.clone();
-        oversized.encoded_length =
-            runmat_execution_artifact::MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES;
-        let full = catalog.reserve_results(&[oversized]).unwrap();
-        assert!(catalog
-            .reserve_results(std::slice::from_ref(&unrelated))
-            .is_err());
-        assert!(catalog
-            .register(unrelated, Arc::from(&b"unrelated"[..]), "run")
-            .is_err());
-        assert_eq!(catalog.state.lock().unwrap().pending_results.len(), 1);
-        drop(full);
-        assert!(catalog.state.lock().unwrap().pending_results.is_empty());
-    }
-
-    #[test]
-    fn stale_results_are_discarded_without_evicting_inputs_or_commits() {
-        let catalog = RemoteObjectCatalog::new().unwrap();
-        let input_bytes = Arc::<[u8]>::from(&b"registered input"[..]);
-        let input = reference("run", input_bytes.as_ref(), b"input");
-        catalog
-            .register(input.clone(), Arc::clone(&input_bytes), "run")
-            .unwrap();
-        assert!(catalog.contains(&input).unwrap());
-        let mut driver_alias = input.clone();
-        driver_alias.kind = ValueRefKind::DriverObject;
-        catalog
-            .register(driver_alias.clone(), Arc::clone(&input_bytes), "run")
-            .unwrap();
-        assert!(catalog.contains(&driver_alias).unwrap());
-        let mut conflicting_input = input.clone();
-        conflicting_input.encoded_length += 1;
-        assert!(catalog.contains(&conflicting_input).is_err());
-
-        let stale_bytes = Arc::<[u8]>::from(&b"stale result"[..]);
-        let stale = reference("run", stale_bytes.as_ref(), b"stale");
-        let committed_bytes = Arc::<[u8]>::from(&b"committed result"[..]);
-        let committed = reference("run", committed_bytes.as_ref(), b"committed");
-        store(&catalog.store, &stale, stale_bytes.as_ref()).unwrap();
-        store(&catalog.store, &committed, committed_bytes.as_ref()).unwrap();
-        {
-            let mut state = catalog.state.lock().unwrap();
-            insert(&mut state.objects, stale.clone()).unwrap();
-            insert(&mut state.objects, committed.clone()).unwrap();
-        }
-        catalog
-            .commit_results(std::slice::from_ref(&committed))
-            .unwrap();
-        catalog.discard_results(&[stale.clone(), input.clone(), committed.clone()]);
-
-        assert!(catalog.get(&stale).unwrap().is_none());
-        assert!(!catalog.contains(&stale).unwrap());
-        assert!(catalog.get(&input).unwrap().is_some());
-        assert_eq!(
-            catalog.get(&committed).unwrap().unwrap().as_ref(),
-            committed_bytes.as_ref()
-        );
-    }
-
-    fn reference(scope: &str, bytes: &[u8], identity: &[u8]) -> ValueRef {
-        ValueRef {
-            schema_version: runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1,
-            id: ValueId::derive(&[b"remote-object-test", identity]),
-            logical_digest: Digest::sha256(bytes),
-            encoded_length: bytes.len() as u64,
-            media_type: "application/vnd.runmat.test-object".into(),
-            value_schema: "runmat.test-object.v1".into(),
-            encryption_context: Digest::sha256(b"remote-object-test-context"),
-            kind: ValueRefKind::ResultObject,
-            authorization_scope: scope.into(),
-            resident_fence: None,
-        }
-    }
-}
+mod tests;

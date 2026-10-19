@@ -10,7 +10,6 @@ pub(super) fn shape(
     request: &FieldRecoveryRequest,
     definitions: Vec<RecoveredFieldDefinition>,
 ) -> Result<(Vec<u64>, ByteCount), ResourcePlanningError> {
-    let invalid = |e: &dyn std::fmt::Display| ResourcePlanningError::Invalid(e.to_string());
     let counts = request
         .plan
         .requirements
@@ -20,6 +19,14 @@ pub(super) fn shape(
                 .map_err(|_| ResourcePlanningError::Overflow("native field entities"))
         })
         .collect::<Result<Vec<_>, _>>()?;
+    shape_with_counts(request, definitions, counts)
+}
+pub(super) fn shape_with_counts(
+    request: &FieldRecoveryRequest,
+    definitions: Vec<RecoveredFieldDefinition>,
+    counts: Vec<usize>,
+) -> Result<(Vec<u64>, ByteCount), ResourcePlanningError> {
+    let invalid = |e: &dyn std::fmt::Display| ResourcePlanningError::Invalid(e.to_string());
     let catalog =
         RecoveredFieldArtifactManifest::profile_final_shape(request, &definitions, &counts)
             .map_err(|e| invalid(&e))?;

@@ -55,6 +55,15 @@ impl FilesystemObjectStore {
     }
 
     fn read_required_bounded(&self, digest: Digest, maximum_bytes: u64) -> ArtifactResult<Vec<u8>> {
+        self.read_required_admitted(digest, maximum_bytes, &mut |_| Ok(()))
+    }
+
+    fn read_required_admitted(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Vec<u8>> {
         let bound = maximum_bytes.min(self.max_object_bytes);
         if bound == 0 {
             return Err(ArtifactError::Limit(
@@ -71,6 +80,7 @@ impl FilesystemObjectStore {
         let capacity = usize::try_from(length).map_err(|_| {
             ArtifactError::Limit("filesystem object length does not fit this host".into())
         })?;
+        admit(length)?;
         let mut bytes = vec![0; capacity];
         file.read_exact(&mut bytes)?;
         // File growth never grows the admitted buffer. Inspect at most one stack byte.
@@ -85,6 +95,20 @@ impl FilesystemObjectStore {
 }
 
 impl CacheImport for FilesystemObjectStore {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        match self.read_required_admitted(digest, maximum_bytes, admit) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(ArtifactError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
     fn read_verified_bounded(
         &self,
         digest: Digest,

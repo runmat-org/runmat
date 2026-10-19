@@ -453,9 +453,6 @@ fn render_ribbons(surfaces: Vec<SurfacePlot>) -> BuiltinResult<Value> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Ribbon Plot",
-            x_label: "X",
-            y_label: "Ribbon",
             axis_equal: false,
             ..Default::default()
         },
@@ -747,7 +744,7 @@ mod tests {
         );
         assert_eq!(
             get_builtin(vec![Value::Num(handle), Value::String("FaceColor".into())]).unwrap(),
-            Value::String("r".into())
+            Value::Tensor(Tensor::new(vec![1.0, 0.0, 0.0], vec![1, 3]).unwrap())
         );
         assert_eq!(
             get_builtin(vec![Value::Num(handle), Value::String("EdgeColor".into())]).unwrap(),

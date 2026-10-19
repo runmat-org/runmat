@@ -379,7 +379,9 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let integer_color_data = color_data.integer_storage().is_some();
     let public_color_limit_value = integer_public_color_limit_value(&color_data);
     let public_color_limits = integer_public_color_limits(&color_data);
-    let render_data = normalize_integer_color_data(&color_data);
+    // MATLAB draws the first row of a heatmap at the top; the y axis runs upward, so the
+    // rows are drawn in reverse order (and their labels with them).
+    let render_data = flip_rows(&normalize_integer_color_data(&color_data));
     let x_axis = AxisSource::Host(default_axis(cols));
     let y_axis = AxisSource::Host(default_axis(rows));
     let color_limits = if integer_color_data {
@@ -401,7 +403,16 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .with_flatten_z(true)
         .with_image_mode(true)
         .with_colormap(ColorMap::Parula)
-        .with_shading(ShadingMode::None);
+        .with_shading(ShadingMode::None)
+        .with_cell_labels(
+            heatmap_cell_labels(&color_data)
+                .into_iter()
+                .map(|mut column| {
+                    column.reverse();
+                    column
+                })
+                .collect(),
+        );
     if color_limits.is_some() {
         surface = surface.with_color_limits(color_limits);
     }
@@ -410,15 +421,13 @@ pub async fn heatmap_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let render_x_labels = x_labels.clone();
-    let render_y_labels = y_labels.clone();
+    let render_y_labels: Vec<String> = y_labels.iter().rev().cloned().collect();
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "",
-            x_label: "",
-            y_label: "",
-            axis_equal: true,
+            // Heatmap cells fill the chart area, as in MATLAB; they are not kept square.
+            axis_equal: false,
             ..Default::default()
         },
         move |figure, axes| {
@@ -773,6 +782,50 @@ fn exact_integer_renderer_limits(color_data: &Tensor, limits: &Tensor) -> Option
     }
 }
 
+/// The text printed in each cell, indexed `[column][row]` like the image surface, formatted
+/// as MATLAB's default `CellLabelFormat` (`%0.4g`); integer data prints exactly.
+fn heatmap_cell_labels(tensor: &Tensor) -> Vec<Vec<String>> {
+    let rows = tensor.rows;
+    let cols = tensor.cols;
+    let text = |index: usize| -> String {
+        if let Some(storage) = tensor.integer_storage() {
+            return match storage {
+                IntegerStorage::I8(v) => v[index].to_string(),
+                IntegerStorage::I16(v) => v[index].to_string(),
+                IntegerStorage::I32(v) => v[index].to_string(),
+                IntegerStorage::I64(v) => v[index].to_string(),
+                IntegerStorage::U8(v) => v[index].to_string(),
+                IntegerStorage::U16(v) => v[index].to_string(),
+                IntegerStorage::U32(v) => v[index].to_string(),
+                IntegerStorage::U64(v) => v[index].to_string(),
+            };
+        }
+        tensor
+            .as_f64_slice()
+            .and_then(|data| data.get(index).copied())
+            .map(|value| crate::builtins::strings::core::num2str::format_general(value, 4, false))
+            .unwrap_or_default()
+    };
+    (0..cols)
+        .map(|col| (0..rows).map(|row| text(row + col * rows)).collect())
+        .collect()
+}
+
+/// The matrix with its rows in reverse order (column-major data).
+fn flip_rows(tensor: &Tensor) -> Tensor {
+    let (rows, cols) = (tensor.rows, tensor.cols);
+    let Some(data) = tensor.as_f64_slice() else {
+        return tensor.clone();
+    };
+    let mut flipped = Vec::with_capacity(data.len());
+    for col in 0..cols {
+        for row in (0..rows).rev() {
+            flipped.push(data[row + col * rows]);
+        }
+    }
+    Tensor::new(flipped, tensor.shape.clone()).expect("flipped heatmap shape")
+}
+
 fn normalize_integer_color_data(tensor: &Tensor) -> Tensor {
     let Some(storage) = tensor.integer_storage() else {
         return tensor.clone();
@@ -928,9 +981,10 @@ mod tests {
         assert!(surface.image_mode);
         assert_eq!(surface.x_data, vec![1.0, 2.0, 3.0]);
         assert_eq!(surface.y_data, vec![1.0, 2.0]);
+        // Rows are drawn in reverse so the first row is at the top, as in MATLAB.
         assert_eq!(
             surface.z_data.as_deref(),
-            Some(&[vec![1.0, 2.0], vec![3.0, 4.0], vec![5.0, 6.0]][..])
+            Some(&[vec![2.0, 1.0], vec![4.0, 3.0], vec![6.0, 5.0]][..])
         );
         assert!(fig.axes_metadata(0).unwrap().colorbar_enabled);
     }
@@ -1002,13 +1056,14 @@ mod tests {
                 "Large".to_string()
             ]
         );
+        // The first row is drawn at the top, so the axis labels run bottom-up reversed.
         assert_eq!(
             meta.y_tick_labels.as_ref().unwrap(),
             &vec![
-                "Green".to_string(),
-                "Red".to_string(),
+                "Gray".to_string(),
                 "Blue".to_string(),
-                "Gray".to_string()
+                "Red".to_string(),
+                "Green".to_string()
             ]
         );
         let labels = get_builtin(vec![
@@ -1061,10 +1116,10 @@ mod tests {
         assert_eq!(
             meta.y_tick_labels.as_ref().unwrap(),
             &vec![
-                "G".to_string(),
-                "R".to_string(),
+                "Y".to_string(),
                 "B".to_string(),
-                "Y".to_string()
+                "R".to_string(),
+                "G".to_string()
             ]
         );
     }

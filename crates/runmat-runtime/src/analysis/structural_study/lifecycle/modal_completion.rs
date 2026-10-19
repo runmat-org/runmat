@@ -62,7 +62,7 @@ pub(in crate::analysis) fn complete_modal_study(
         authored_workload.backend(),
         options.clone(),
         prepared.context.clone(),
-        Some(solver_mesh.clone()),
+        Some(&solver_mesh),
         Some(&assigned_run_id),
     )?;
     let solver_result_identity = numerical.numerical_receipt.source_result();
@@ -258,7 +258,7 @@ pub(in crate::analysis) fn complete_modal_transient_study(
         modal_workload.backend(),
         modal_options.clone(),
         prepared.context.clone(),
-        Some(solver_mesh.clone()),
+        Some(&solver_mesh),
         Some(&modal_run_id),
     )?;
     let modal_result_identity = numerical.modal_numerical_receipt.source_result();

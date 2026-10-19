@@ -27,7 +27,7 @@ pub(super) async fn execute_streamed(
     limits: FrameLimits,
     parent: &runmat_process_host::ipc::WorkerParentGuard,
 ) -> NativeExecutionResult<()> {
-    let Some(controls) = request.console else {
+    let Some(controls) = request.request().console else {
         let response = execute(request).await;
         parent.disarm();
         return write_message(
@@ -41,15 +41,20 @@ pub(super) async fn execute_streamed(
         .await;
     };
     request
-        .validate_for_portable_host()
+        .validate()
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     controls
         .validate_transport(u64::from(limits.max_message_bytes))
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
     let sink: Rc<dyn PortableConsoleSink> = Rc::new(FramedSink(limits));
-    let (response, console) =
-        crate::program_workload::execute_unit_with_console(&request, None, None, None, Some(sink))
-            .await;
+    let (response, console) = crate::program_workload::execute_unit_with_console(
+        request.request(),
+        None,
+        None,
+        None,
+        Some(sink),
+    )
+    .await;
     parent.disarm();
     write_message(
         writer,

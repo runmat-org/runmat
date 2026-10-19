@@ -318,9 +318,6 @@ pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .map_err(map_mesh_invalid_argument)?,
     );
     let opts = PlotRenderOptions {
-        title: "Mesh Plot",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: false,
         ..Default::default()
     };

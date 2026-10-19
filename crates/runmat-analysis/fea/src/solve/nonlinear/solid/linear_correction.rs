@@ -21,15 +21,46 @@ impl SolidNewtonProblem<'_> {
         factor: f64,
         work: &mut SolidAttemptWork,
     ) -> Result<Vec<f64>, SolidNewtonError> {
-        let reduced = self
-            .reduction
-            .reduce_sparse_operator(tangent)
-            .map_err(constraint_error)?;
+        let reduced = if let Some(contact) = &self.contact {
+            self.reduction
+                .reduce_sparse_operator_planned(tangent, &contact.reduced_pattern)
+        } else {
+            self.reduction.reduce_sparse_operator(tangent)
+        }
+        .map_err(constraint_error)?;
         let count = reduced.rows();
         if count == 0 {
             return self.reduction.expand_linear(&[]).map_err(constraint_error);
         }
         work.linear_solves += 1;
+        if let Some(contact) = &self.contact {
+            let admission = contact
+                .solve_resources
+                .ok_or(crate::solve::general::GeneralSolveError::Admission)?
+                .admit_operator(&reduced, contact.input.solve_policy)?;
+            let rhs = residual.iter().map(|r| -r).collect::<Vec<_>>();
+            let solved = crate::solve::general::solve_general_system(
+                &reduced,
+                &rhs,
+                contact.input.solve_policy,
+                admission,
+            )
+            .map_err(|error| match error {
+                crate::solve::general::GeneralSolveError::Cancelled => SolidNewtonError::Cancelled,
+                crate::solve::general::GeneralSolveError::NotConverged { .. } => {
+                    SolidNewtonError::NotConverged {
+                        factor,
+                        cutbacks: 0,
+                        reason: error.to_string(),
+                    }
+                }
+                other => SolidNewtonError::General(other),
+            })?;
+            return self
+                .reduction
+                .expand_linear(&solved.solution)
+                .map_err(constraint_error);
+        }
         let mass = RealSparseAssembler::square(
             count,
             OperatorRole::Mass,

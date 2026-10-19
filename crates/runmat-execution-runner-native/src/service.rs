@@ -32,7 +32,7 @@ impl NativeExecutionService {
     pub fn new(mut config: NativeExecutionConfig) -> NativeExecutionResult<Self> {
         let nonce = NEXT_NATIVE_SCOPE.fetch_add(1, Ordering::Relaxed);
         let scope_id = fresh_scope_id(b"native-session", nonce);
-        config.store_root.push(scope_id.to_string());
+        config.scope_store(scope_id);
         Ok(Self {
             scope_id,
             driver: LocalDriver::new(config, scope_id)?,

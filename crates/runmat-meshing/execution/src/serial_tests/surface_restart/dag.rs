@@ -210,14 +210,28 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .surface_join(&second_pass, vec![second_partition_root])
         .unwrap();
     let final_pass = execute_planned(&mut fixture, &final_stage, &crate::ExactSurfaceJoinKernel);
+    let terminal = super::convergence::converge(
+        &mut fixture,
+        &planner,
+        &exact.geometry_objects().topology,
+        super::convergence::SurfacePass {
+            plan: second_pass,
+            curves: refined_curve,
+            partition: second_partition,
+            joined: final_pass,
+        },
+    );
+    let refined_curve = terminal.curves;
+    let second_partition = terminal.partition;
+    let final_pass = terminal.joined;
     let final_streams = final_pass
         .publication()
         .stage_objects()
         .decoded_streams()
         .unwrap();
-    assert_eq!(final_streams.len(), 2);
+    assert_eq!(final_streams.len(), 1);
     assert_eq!(
-        final_streams[1].media_type,
+        final_streams[0].media_type,
         runmat_meshing_core::MeshingChunkMediaType::SurfaceMesh
     );
 
@@ -238,9 +252,9 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .stage_objects()
         .decoded_streams()
         .unwrap()[0]
-        .records[0]
+        .records
         .clone();
-    let partition = runmat_meshing_surface::decode_exact_face_partition_result(
+    let partition = runmat_meshing_surface::decode_exact_face_partition_records(
         &partition_bytes,
         &exact.geometry_objects().topology,
         &curves,
@@ -253,23 +267,34 @@ fn exact_surface_dag_restarts_on_a_refined_curve_and_rejects_stale_partitions() 
         .unwrap()[0]
         .records[0]
         .clone();
-    let pass = runmat_meshing_surface::decode_exact_surface_pass_result(
-        &pass_bytes,
-        &exact.geometry_objects().topology,
+    let options = runmat_meshing_surface::ExactSurfaceJoinOptions {
+        coordinate_tolerance_m: curve_host.resolved_request.tolerance.absolute_floor_m,
+        maximum_nodes: curve_host.resolved_request.resources.maximum_nodes,
+        maximum_triangles: curve_host.resolved_request.resources.maximum_elements,
+        maximum_boundary_segments: curve_host.resolved_request.resources.maximum_elements,
+    };
+    let partitions = [partition];
+    let pass = runmat_meshing_surface::decide_exact_surface_pass(
         &curves,
-        &[partition],
-        runmat_meshing_surface::ExactSurfaceJoinOptions {
-            coordinate_tolerance_m: curve_host.resolved_request.tolerance.absolute_floor_m,
-            maximum_nodes: curve_host.resolved_request.resources.maximum_nodes,
-            maximum_triangles: curve_host.resolved_request.resources.maximum_elements,
-            maximum_boundary_segments: curve_host.resolved_request.resources.maximum_elements,
-        },
+        &partitions,
+        &exact.geometry_objects().topology,
+        options,
     )
     .unwrap();
-    assert!(matches!(
-        pass.outcome,
-        runmat_meshing_surface::ExactSurfacePassOutcome::Converged { .. }
-    ));
+    let decoded = runmat_meshing_surface::decode_exact_surface_mesh_from_pass(
+        &pass_bytes,
+        &pass,
+        &exact.geometry_objects().topology,
+        &curves,
+        &partitions,
+        options,
+    )
+    .unwrap();
+    let runmat_meshing_surface::ExactSurfacePassOutcome::Converged { surface } = pass.outcome
+    else {
+        panic!("terminal publication must have a complete independently joined surface")
+    };
+    assert_eq!(decoded, surface);
 }
 
 #[test]
@@ -390,7 +415,7 @@ fn exact_surface_dag_identity_is_independent_of_partition_completion_order() {
         .all(|pair| pair[0] < pair[1]));
 }
 
-fn execute_planned(
+pub(super) fn execute_planned(
     fixture: &mut Fixture,
     stage: &crate::PlannedMeshingStage,
     kernel: &dyn MeshingStageKernel,

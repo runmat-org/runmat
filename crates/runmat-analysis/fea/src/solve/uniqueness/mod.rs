@@ -89,6 +89,16 @@ pub fn certify_sparse_uniqueness(
     policy: SparseUniquenessPolicy,
     admitted: SparseUniquenessEnvelope,
 ) -> Result<SparseUniquenessVerdict, SparseUniquenessError> {
+    prepare_sparse_uniqueness(matrix, policy, admitted).map(|(verdict, _)| verdict)
+}
+
+/// Retain the same original candidate factor for a subsequent physical RHS.
+/// The factor is construction-only workspace, never portable proof authority.
+pub(crate) fn prepare_sparse_uniqueness(
+    matrix: &RealSparseMatrix,
+    policy: SparseUniquenessPolicy,
+    admitted: SparseUniquenessEnvelope,
+) -> Result<(SparseUniquenessVerdict, Option<SparseRightIlu>), SparseUniquenessError> {
     let required = SparseUniquenessEnvelope::derive(matrix, policy)?;
     if required.scalar_operations > admitted.scalar_operations
         || required.resident_bytes > admitted.resident_bytes
@@ -102,12 +112,15 @@ pub fn certify_sparse_uniqueness(
             return Err(SparseUniquenessError::Cancelled)
         }
         Err(_) => {
-            return Ok(SparseUniquenessVerdict::Indeterminate {
-                reason: SparseUniquenessUncertainty::FactorUnavailable,
-                completed_columns: 0,
-                iterations: 0,
-                defect_infinity_upper: None,
-            })
+            return Ok((
+                SparseUniquenessVerdict::Indeterminate {
+                    reason: SparseUniquenessUncertainty::FactorUnavailable,
+                    completed_columns: 0,
+                    iterations: 0,
+                    defect_infinity_upper: None,
+                },
+                None,
+            ))
         }
     };
     let checker_envelope =
@@ -142,12 +155,15 @@ pub fn certify_sparse_uniqueness(
             .checked_add(u64::from(result.iterations))
             .ok_or(SparseUniquenessError::Overflow)?;
         if !result.converged || result.breakdown {
-            return Ok(SparseUniquenessVerdict::Indeterminate {
-                reason: SparseUniquenessUncertainty::CandidateNotConverged,
-                completed_columns: index,
-                iterations,
-                defect_infinity_upper: None,
-            });
+            return Ok((
+                SparseUniquenessVerdict::Indeterminate {
+                    reason: SparseUniquenessUncertainty::CandidateNotConverged,
+                    completed_columns: index,
+                    iterations,
+                    defect_infinity_upper: None,
+                },
+                Some(ilu),
+            ));
         }
         let column = ilu
             .apply(&result.solution, crate::is_fea_cancelled)
@@ -158,23 +174,24 @@ pub fn certify_sparse_uniqueness(
         basis[index] = 0.0;
     }
     cancelled()?;
-    match checker
+    let verdict = match checker
         .finish()
         .map_err(|_| SparseUniquenessError::Operator)?
     {
-        RightInverseVerdict::Verified(certificate) => Ok(SparseUniquenessVerdict::Verified {
+        RightInverseVerdict::Verified(certificate) => SparseUniquenessVerdict::Verified {
             certificate,
             iterations,
-        }),
+        },
         RightInverseVerdict::Indeterminate {
             defect_infinity_upper,
-        } => Ok(SparseUniquenessVerdict::Indeterminate {
+        } => SparseUniquenessVerdict::Indeterminate {
             reason: SparseUniquenessUncertainty::DefectNotContractive,
             completed_columns: matrix.rows(),
             iterations,
             defect_infinity_upper: Some(defect_infinity_upper),
-        }),
-    }
+        },
+    };
+    Ok((verdict, Some(ilu)))
 }
 
 fn cancelled() -> Result<(), SparseUniquenessError> {

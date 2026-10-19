@@ -28,6 +28,7 @@ impl NonlinearSolidWorkload {
         if self.controls.formulation_requirement != FormulationRequirement::Experimental
             || self.controls.solver_mesh.is_some()
             || self.controls.contact_context.is_some()
+            || !self.model.interfaces.is_empty()
         {
             return Err(invalid(
                 "portable J2 requires experimental controls, separate mesh and no contact",

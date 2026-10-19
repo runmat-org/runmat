@@ -6,6 +6,7 @@ use crate::ContractError;
 mod admission;
 mod catalog;
 mod identity;
+mod storage;
 mod validation;
 
 pub use admission::{
@@ -227,6 +228,13 @@ pub struct ValueRef {
     pub kind: ValueRefKind,
     pub authorization_scope: String,
     pub resident_fence: Option<ResidentFence>,
+}
+
+impl ValueRef {
+    /// Validate borrowed reference fields without allocating a boxed payload copy.
+    pub fn validate(&self, limits: ValueLimits) -> Result<(), crate::ContractError> {
+        validation::validate_reference(self, limits)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

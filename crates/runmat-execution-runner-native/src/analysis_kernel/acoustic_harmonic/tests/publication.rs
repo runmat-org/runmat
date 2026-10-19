@@ -13,99 +13,104 @@ use runmat_execution_artifact::cache::FilesystemObjectStore;
 
 #[test]
 fn acoustic_result_to_shared_publication_reopens_cold_fields_for_both_orders() {
-    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
-        let mut expected_identity = None;
-        for chunk in [1024, 8192] {
-            let (_, _, task) = task(order, chunk);
-            let limits = ObjectInventoryLimits::default();
-            let directory = tempfile::tempdir().unwrap();
-            let object_path = directory.path().join("objects");
-            let mut store =
-                FilesystemObjectStore::open(&object_path, limits.max_object_bytes).unwrap();
-            task.program.write_to(&mut store).unwrap();
-            let completed = execute_serial_analysis(
-                &task.program.request,
-                &mut store,
-                &NativeAnalysisKernel,
-                chunk,
-                limits,
-            )
-            .unwrap();
-            let response = AnalysisHostResponse::completed(&task.host, &completed)
-                .unwrap()
-                .program_response();
-            // Reopen durable objects before importing the numerical completion. This is cold
-            // artifact recovery, not process replacement or a remote scheduler claim.
-            drop(store);
-            let mut store =
-                FilesystemObjectStore::open(&object_path, limits.max_object_bytes).unwrap();
-            let imported =
-                import_acoustic_harmonic_result(&store, response, &task, limits).unwrap();
-            let requests = imported.result.state_publication_requests().unwrap();
-            assert_eq!(requests.len(), 1);
-            let request = &requests[0];
-            let publication =
-                prepare_semantic_state_publication(SemanticStatePublicationPreparation {
-                    source_host: task.host.clone(),
-                    source_result: imported.objects.clone(),
-                    source_profiles: imported.source_profiles,
-                    source: SemanticStatePublicationSource::AcousticNativeFields,
-                    declaration: request.declaration.clone(),
-                    topology_digest: request.topology_digest,
-                    program_revision: task.program.request.recipe.program_revision.clone(),
-                    chunk_bytes: chunk,
-                    inventory_limits: limits,
-                })
+    for radiation in [false, true] {
+        for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+            let mut expected_identity = None;
+            for chunk in [1024, 8192] {
+                let (_, _, task) = task_with_boundary(order, chunk, "pressure", radiation);
+                let limits = ObjectInventoryLimits::default();
+                let directory = tempfile::tempdir().unwrap();
+                let object_path = directory.path().join("objects");
+                let mut store =
+                    FilesystemObjectStore::open(&object_path, limits.max_object_bytes).unwrap();
+                task.program.write_to(&mut store).unwrap();
+                let completed = execute_serial_analysis(
+                    &task.program.request,
+                    &mut store,
+                    &NativeAnalysisKernel,
+                    chunk,
+                    limits,
+                )
                 .unwrap();
-            assert_eq!(
-                publication.host.workload.kind,
-                AnalysisWorkKind::PublishState
-            );
-            assert_eq!(publication.request, *request);
-            assert!(publication.inputs.iter().all(|input| !matches!(
-                input.manifest.kind,
-                AnalysisNumericalObjectKind::Mesh
-                    | AnalysisNumericalObjectKind::AcousticHarmonicWorkload
-            )));
-            publication.program.write_to(&mut store).unwrap();
-            let completed = execute_serial_analysis(
-                &publication.program.request,
-                &mut store,
-                &NativeAnalysisKernel,
-                chunk,
-                limits,
-            )
-            .unwrap();
-            let response = AnalysisHostResponse::completed(&publication.host, &completed)
-                .unwrap()
-                .program_response();
-            drop(store);
-            let store = FilesystemObjectStore::open(&object_path, limits.max_object_bytes).unwrap();
-            let published =
-                import_semantic_state_completion(&store, response, &publication, limits).unwrap();
-            let state =
-                CanonicalSemanticState::from_canonical_bytes(&published.objects.payload()).unwrap();
-            assert_eq!(state, published.state);
-            assert_eq!(
-                state.source_result,
-                imported.result.source_result_identity().unwrap()
-            );
-            assert_eq!(state.producer, task.host.workload.step);
-            let payload = state.payload.acoustic().unwrap();
-            assert_eq!(payload.ordered_node_ids, imported.result.ordered_node_ids());
-            assert_eq!(
-                payload.ordered_element_ids,
-                imported.result.ordered_element_ids()
-            );
-            assert_eq!(payload.fields.fields().len(), 2);
-            assert_eq!(payload.fields.entity_counts.volume_integration_points, 0);
-            if let Some(expected) = expected_identity {
-                assert_eq!(state.identity, expected);
-            } else {
-                expected_identity = Some(state.identity);
-            }
-            if order == ElementOrder::Tet4 {
-                assert_exact_element_pressure(&state);
+                let response = AnalysisHostResponse::completed(&task.host, &completed)
+                    .unwrap()
+                    .program_response();
+                // Reopen durable objects before importing the numerical completion. This is cold
+                // artifact recovery, not process replacement or a remote scheduler claim.
+                drop(store);
+                let mut store =
+                    FilesystemObjectStore::open(&object_path, limits.max_object_bytes).unwrap();
+                let imported =
+                    import_acoustic_harmonic_result(&store, response, &task, limits).unwrap();
+                let requests = imported.result.state_publication_requests().unwrap();
+                assert_eq!(requests.len(), 1);
+                let request = &requests[0];
+                let publication =
+                    prepare_semantic_state_publication(SemanticStatePublicationPreparation {
+                        source_host: task.host.clone(),
+                        source_result: imported.objects.clone(),
+                        source_profiles: imported.source_profiles,
+                        source: SemanticStatePublicationSource::AcousticNativeFields,
+                        declaration: request.declaration.clone(),
+                        topology_digest: request.topology_digest,
+                        program_revision: task.program.request.recipe.program_revision.clone(),
+                        chunk_bytes: chunk,
+                        inventory_limits: limits,
+                    })
+                    .unwrap();
+                assert_eq!(
+                    publication.host.workload.kind,
+                    AnalysisWorkKind::PublishState
+                );
+                assert_eq!(publication.request, *request);
+                assert!(publication.inputs.iter().all(|input| !matches!(
+                    input.manifest.kind,
+                    AnalysisNumericalObjectKind::Mesh
+                        | AnalysisNumericalObjectKind::AcousticHarmonicWorkload
+                )));
+                publication.program.write_to(&mut store).unwrap();
+                let completed = execute_serial_analysis(
+                    &publication.program.request,
+                    &mut store,
+                    &NativeAnalysisKernel,
+                    chunk,
+                    limits,
+                )
+                .unwrap();
+                let response = AnalysisHostResponse::completed(&publication.host, &completed)
+                    .unwrap()
+                    .program_response();
+                drop(store);
+                let store =
+                    FilesystemObjectStore::open(&object_path, limits.max_object_bytes).unwrap();
+                let published =
+                    import_semantic_state_completion(&store, response, &publication, limits)
+                        .unwrap();
+                let state =
+                    CanonicalSemanticState::from_canonical_bytes(&published.objects.payload())
+                        .unwrap();
+                assert_eq!(state, published.state);
+                assert_eq!(
+                    state.source_result,
+                    imported.result.source_result_identity().unwrap()
+                );
+                assert_eq!(state.producer, task.host.workload.step);
+                let payload = state.payload.acoustic().unwrap();
+                assert_eq!(payload.ordered_node_ids, imported.result.ordered_node_ids());
+                assert_eq!(
+                    payload.ordered_element_ids,
+                    imported.result.ordered_element_ids()
+                );
+                assert_eq!(payload.fields.fields().len(), 2);
+                assert_eq!(payload.fields.entity_counts.volume_integration_points, 0);
+                if let Some(expected) = expected_identity {
+                    assert_eq!(state.identity, expected);
+                } else {
+                    expected_identity = Some(state.identity);
+                }
+                if order == ElementOrder::Tet4 {
+                    assert_exact_element_pressure(&state);
+                }
             }
         }
     }
@@ -156,7 +161,9 @@ fn acoustic_publication_rejects_foreign_source_and_understated_profile() {
         .map(|output| output.into_prepared(1024, limits).unwrap());
     let result_objects = objects.next().unwrap();
     let profile_objects = objects
-        .find(|objects| objects.manifest.kind == AnalysisNumericalObjectKind::StatePublicationProfiles)
+        .find(|objects| {
+            objects.manifest.kind == AnalysisNumericalObjectKind::StatePublicationProfiles
+        })
         .unwrap();
     let result =
         AcousticHarmonicSolverResult::from_canonical_bytes(&result_objects.payload()).unwrap();

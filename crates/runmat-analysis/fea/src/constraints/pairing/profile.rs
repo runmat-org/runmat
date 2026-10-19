@@ -15,6 +15,7 @@ pub struct ConstraintPairingWorkspaceProfile {
     pub identity_index_slots: usize,
     pub matching_used_slots: usize,
     pub pairing_slots: usize,
+    pub maximum_weights_per_pairing: usize,
     pub retained_weight_slots: usize,
     pub candidate_weight_slots: usize,
     pub total_requested_bytes: u64,
@@ -31,7 +32,7 @@ pub fn constraint_pairing_workspace_profile(
     derive(mesh, mesh.topology.nodes.len(), primary, secondary, policy)
 }
 
-pub(super) fn derive(
+pub(in crate::constraints) fn derive(
     mesh: &SolverMeshArtifact,
     node_count: usize,
     primary: &ResolvedConstraintTarget,
@@ -69,6 +70,7 @@ pub(super) fn derive(
             0
         },
         pairing_slots: secondary.matched_node_identities.len(),
+        maximum_weights_per_pairing: max_weights,
         retained_weight_slots: multiply(secondary.matched_node_identities.len(), max_weights)?,
         candidate_weight_slots: if matching {
             0

@@ -3,9 +3,12 @@ use super::*;
 use crate::analysis::storage::AnalysisPublicationError;
 
 fn manifest(
-    publication: &PreparedStudyPublication,
+    publication: &mut PreparedStudyPublication,
     compiled: &runmat_analysis_fea::study::CompiledAnalysisStudy,
-) -> StudyResultManifest<(), ()> {
+) -> (
+    StudyResultManifest<(), ()>,
+    crate::analysis::storage::publication::OwnedCopyReservation,
+) {
     let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(
         runmat_meshing_core::ElementOrder::Tet4,
     );
@@ -17,7 +20,7 @@ fn manifest(
         &mesh,
         &evidence,
         (),
-        &publication.completion,
+        &mut publication.completion,
     )
     .unwrap()
 }
@@ -38,7 +41,7 @@ fn authored_assessment_limit_is_capacity_and_preserves_hidden_original_children(
         .collect();
     publication.completion.published.data.study_fingerprint =
         compiled.definition_digest().unwrap().to_string();
-    let manifest = manifest(&publication, &compiled);
+    let manifest = manifest(&mut publication, &compiled);
     let error = PreparedStudyPublication::new(publication.completion, manifest)
         .err()
         .unwrap();
@@ -65,7 +68,7 @@ fn invalid_identity_and_cancelled_preparation_never_publish_staged_children() {
     for cancelled in [false, true] {
         let (mut publication, store) = fixture();
         let (compiled, _, _) = crate::analysis::assessment::tests::fixture();
-        let manifest = manifest(&publication, &compiled);
+        let manifest = manifest(&mut publication, &compiled);
         if !cancelled {
             publication.completion.published.data.study_fingerprint =
                 Digest::sha256(b"foreign-study").to_string();
@@ -91,7 +94,7 @@ fn invalid_identity_and_cancelled_preparation_never_publish_staged_children() {
 #[test]
 fn admitted_assessment_phase_keeps_missing_scalar_evidence_indeterminate() {
     let _guard = crate::analysis::tests::analysis_test_guard();
-    let (publication, store) = fixture();
+    let (mut publication, store) = fixture();
     let (compiled, _, _) = crate::analysis::assessment::tests::fixture();
     let original = publication
         .completion
@@ -100,7 +103,7 @@ fn admitted_assessment_phase_keeps_missing_scalar_evidence_indeterminate() {
         .unwrap()
         .unwrap();
     assert!(original.observation_scalars.is_empty());
-    let manifest = manifest(&publication, &compiled);
+    let manifest = manifest(&mut publication, &compiled);
     let prepared = PreparedStudyPublication::new(publication.completion, manifest).unwrap();
     let completed = prepared.publish_without_function_execution().unwrap();
     assert_eq!(completed.data.assessments.len(), 1);

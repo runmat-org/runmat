@@ -41,6 +41,7 @@ pub use sampled::{
     sampled_observation_partition_source_indices,
 };
 mod topology;
+pub use topology::resources::solid_observation_topology_resident_bytes;
 
 pub use source::{
     ObservationFieldSelection, ObservationFieldSelectionIdentity, ObservationFieldSource,
@@ -74,7 +75,7 @@ pub use evaluate::{
     evaluate_structural_observations, resolved_observation_accepts_sample,
 };
 pub(crate) use history::{
-    exact_scheduled_coordinates, exact_scheduled_sample_count, sample_matches_policy,
+    exact_scheduled_coordinate_at, exact_scheduled_sample_count, sample_matches_policy,
 };
 pub use history::{
     reduce_observation_history, AccuracyEventAttribution, BoundedObservationHistory,

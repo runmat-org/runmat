@@ -1,61 +1,95 @@
-use std::collections::{BTreeMap, BTreeSet};
+use super::PreparedEvaluation;
 
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{
     sort_solver_node_exact_parameters, MeshingCancellationSignal, SolverMeshNode,
     SolverMeshTopology, SolverNodeExactParameter, StableDigest,
 };
-use runmat_meshing_surface::ExactFaceMeshNode;
 
 use super::{sorted_edge, MidpointMap, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 use crate::cdt::solver_topology::{
-    checkpoint, error, DelaunayExactEvaluation, DelaunaySolverTopologyError,
-    DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
+    checkpoint, error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
+    DelaunaySolverTopologyOptions, ProjectionInput,
 };
 
+mod edge_inventory;
+mod sources;
+pub(super) use sources::ParameterSources;
+pub(super) mod boundary_sources;
+pub(super) use boundary_sources::{BoundaryExactEdges, BoundarySurfaceUses};
+mod completion;
 mod evaluation;
 use evaluation::{
     curve_parameter, evaluate_surface, midpoint_geometry, pcurve_uvs, require_matching_points,
 };
-pub(super) use evaluation::{edge_geometry, surface_geometry, EdgeGeometryRequest};
+pub(super) use evaluation::{
+    edge_geometry, surface_geometry, surface_parameters, EdgeGeometryRequest,
+};
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) struct SurfaceUse {
-    pub(super) source_face_id: PersistentEntityId,
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct SurfaceUse<'a> {
+    pub(super) source_face_id: &'a PersistentEntityId,
     pub(super) chart_id: StableDigest,
 }
 
-struct VolumeEdgeInventory {
-    edges: BTreeSet<[u64; 2]>,
-    provenance: BTreeMap<[u64; 2], BTreeSet<PersistentEntityId>>,
-}
-
-struct BoundaryParameterCompletion<'a> {
-    node_index: &'a BTreeMap<u64, usize>,
-    surface_uses: &'a BTreeMap<[u64; 2], Vec<SurfaceUse>>,
-    exact_edges: &'a BTreeMap<[u64; 2], PersistentEntityId>,
-    evaluation: DelaunayExactEvaluation<'a>,
+struct BoundaryParameterCompletion<'source, 'view> {
+    surface_uses: &'view BoundarySurfaceUses<'view>,
+    exact_edges: &'view BoundaryExactEdges<'view>,
+    evaluation: PreparedEvaluation<'source, 'view>,
     options: DelaunaySolverTopologyOptions,
-    cancellation: &'a dyn MeshingCancellationSignal,
+    cancellation: &'view dyn MeshingCancellationSignal,
 }
 
-pub(super) fn append_midpoint_nodes(
-    input: &DelaunaySolverTopologyInput<'_>,
+pub(super) fn append_midpoint_nodes<'source, 'control>(
+    input: &ProjectionInput<'source>,
     topology: &mut SolverMeshTopology,
-    evaluation: DelaunayExactEvaluation<'_>,
+    evaluation: PreparedEvaluation<'source, 'control>,
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<MidpointMap, DelaunaySolverTopologyError> {
-    let mut node_index = BTreeMap::new();
-    for (index, node) in topology.nodes.iter().enumerate() {
-        boundary_parameter_checkpoint(cancellation)?;
-        node_index.insert(node.node_id, index);
-    }
-    let edge_inventory = volume_edge_inventory(topology, cancellation)?;
+) -> Result<MidpointMap<'control>, DelaunaySolverTopologyError> {
+    let owner_count = input
+        .exact_topology
+        .regions
+        .len()
+        .checked_mul(2)
+        .ok_or_else(|| resource("owner source inventory overflow"))?;
+    let owner_bytes = owner_count
+        .checked_mul(std::mem::size_of::<&PersistentEntityId>())
+        .ok_or_else(|| resource("owner source storage overflow"))?;
+    let owner_storage = runmat_geometry_core::GeometryAllocationReservation::new(
+        evaluation.control,
+        owner_bytes as u64,
+    )
+    .map_err(error::geometry)?;
+    let mut owner_sources = input
+        .exact_topology
+        .regions
+        .iter()
+        .flat_map(|region| [&region.id, &region.solid_id])
+        .collect::<Vec<_>>();
+    let owner_scratch_storage = runmat_geometry_core::GeometryAllocationReservation::new(
+        evaluation.control,
+        owner_bytes as u64,
+    )
+    .map_err(error::geometry)?;
+    let mut scratch = owner_sources.clone();
+    runmat_cpu_execution::sort_copy_with_checkpoint(
+        &mut owner_sources,
+        &mut scratch,
+        |a: &&PersistentEntityId, b: &&PersistentEntityId| a.cmp(b),
+        || evaluation.control.checkpoint().map_err(error::geometry),
+    )?;
+    drop(scratch);
+    drop(owner_scratch_storage);
+    owner_sources.dedup();
+    let edge_inventory =
+        edge_inventory::EdgeOwners::prepare(topology, &owner_sources, evaluation.control)?;
+    drop(owner_sources);
+    drop(owner_storage);
     let final_node_count = topology
         .nodes
         .len()
-        .checked_add(edge_inventory.edges.len())
+        .checked_add(edge_inventory.groups.len())
         .ok_or_else(|| resource("Tet10 node inventory overflows the platform index space"))?;
     if final_node_count as u64 > input.request.resources.maximum_nodes {
         return Err(resource(format!(
@@ -63,13 +97,16 @@ pub(super) fn append_midpoint_nodes(
             input.request.resources.maximum_nodes
         )));
     }
-    let surface_uses = boundary_surface_uses(input, topology, cancellation)?;
-    let exact_edges = boundary_exact_edges(topology, cancellation)?;
-    complete_boundary_surface_parameters(
+    let storage = super::super::storage::Storage(Some(evaluation.control));
+    storage.reserve(&mut topology.nodes, final_node_count)?;
+    let surface_uses =
+        boundary_sources::surface_uses(input, topology, evaluation.control, cancellation)?;
+    let exact_edges =
+        boundary_sources::exact_edges(input, topology, evaluation.control, cancellation)?;
+    completion::complete_boundary_surface_parameters(
         input,
         topology,
         BoundaryParameterCompletion {
-            node_index: &node_index,
             surface_uses: &surface_uses,
             exact_edges: &exact_edges,
             evaluation,
@@ -77,231 +114,42 @@ pub(super) fn append_midpoint_nodes(
             cancellation,
         },
     )?;
-    let mut midpoint_by_edge = BTreeMap::new();
-    for (work, edge) in edge_inventory.edges.into_iter().enumerate() {
+    let mut midpoint_by_edge = MidpointMap::new(edge_inventory.groups.len(), evaluation.control)?;
+    for (work, (edge, owners)) in edge_inventory.groups.iter().enumerate() {
+        let edge = *edge;
         checkpoint(work as u64, options, cancellation)?;
         let left = topology
             .nodes
-            .get(
-                *node_index
-                    .get(&edge[0])
-                    .ok_or_else(|| invalid("edge node is absent"))?,
-            )
+            .get(node_slot(&topology.nodes, edge[0])?)
             .ok_or_else(|| invalid("edge node index is invalid"))?;
         let right = topology
             .nodes
-            .get(
-                *node_index
-                    .get(&edge[1])
-                    .ok_or_else(|| invalid("edge node is absent"))?,
-            )
+            .get(node_slot(&topology.nodes, edge[1])?)
             .ok_or_else(|| invalid("edge node index is invalid"))?;
-        let uses = surface_uses.get(&edge).cloned().unwrap_or_default();
+        let uses = surface_uses.get(&edge).unwrap_or_default();
         let exact_edge = exact_edges.get(&edge);
         let (coordinates_m, exact_parameters) =
-            midpoint_geometry(input, left, right, exact_edge, &uses, evaluation, options)?;
-        let provenance =
-            midpoint_provenance(edge_inventory.provenance.get(&edge), &uses, exact_edge)?;
+            midpoint_geometry(input, left, right, exact_edge, uses, evaluation, options)?;
+        let provenance = midpoint_provenance(
+            edge_inventory.owners(owners.clone()),
+            uses,
+            exact_edge,
+            storage,
+        )?;
         let node_id = topology.nodes.len() as u64 + 1;
         topology.nodes.push(SolverMeshNode {
             node_id,
-            stable_identity: runmat_meshing_core::solver_midside_node_identity(
-                edge.map(|node_id| topology.nodes[node_index[&node_id]].stable_identity),
-            ),
+            stable_identity: runmat_meshing_core::solver_midside_node_identity([
+                left.stable_identity,
+                right.stable_identity,
+            ]),
             coordinates_m,
             provenance,
             exact_parameters,
         });
-        midpoint_by_edge.insert(edge, node_id);
+        midpoint_by_edge.push(edge, node_id)?;
     }
     Ok(midpoint_by_edge)
-}
-
-fn volume_edge_inventory(
-    topology: &SolverMeshTopology,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<VolumeEdgeInventory, DelaunaySolverTopologyError> {
-    let mut edges = BTreeSet::new();
-    let mut provenance = BTreeMap::<[u64; 2], BTreeSet<PersistentEntityId>>::new();
-    for element in &topology.volume_elements {
-        boundary_parameter_checkpoint(cancellation)?;
-        let owners = element
-            .provenance
-            .iter()
-            .cloned()
-            .chain(std::iter::once(element.region_id.clone()))
-            .collect::<Vec<_>>();
-        for local_edge in TETRAHEDRON_MIDSIDE_EDGE_CORNERS {
-            let edge = sorted_edge([
-                element.node_ids[local_edge[0]],
-                element.node_ids[local_edge[1]],
-            ]);
-            edges.insert(edge);
-            provenance
-                .entry(edge)
-                .or_default()
-                .extend(owners.iter().cloned());
-        }
-    }
-    Ok(VolumeEdgeInventory { edges, provenance })
-}
-
-fn complete_boundary_surface_parameters(
-    input: &DelaunaySolverTopologyInput<'_>,
-    topology: &mut SolverMeshTopology,
-    completion: BoundaryParameterCompletion<'_>,
-) -> Result<(), DelaunaySolverTopologyError> {
-    let BoundaryParameterCompletion {
-        node_index,
-        surface_uses,
-        exact_edges,
-        evaluation,
-        options,
-        cancellation,
-    } = completion;
-    let mut source_nodes = BTreeMap::new();
-    for source in &input.exact_surface.nodes {
-        boundary_parameter_checkpoint(cancellation)?;
-        source_nodes.insert(source.node_id, source);
-    }
-    for (edge, edge_id) in exact_edges {
-        let Some(uses) = surface_uses.get(edge) else {
-            continue;
-        };
-        for node_id in edge {
-            boundary_parameter_checkpoint(cancellation)?;
-            let node = topology
-                .nodes
-                .get_mut(
-                    *node_index
-                        .get(node_id)
-                        .ok_or_else(|| invalid("edge node is absent"))?,
-                )
-                .ok_or_else(|| invalid("edge node index is invalid"))?;
-            let parameter = curve_parameter(node, edge_id)?;
-            for surface_use in uses {
-                for evaluator_uv in pcurve_uvs(input, edge_id, parameter, surface_use, evaluation)?
-                {
-                    let point =
-                        evaluate_surface(input, surface_use, evaluator_uv, evaluation, options)?;
-                    require_matching_points(input, node.coordinates_m, point)?;
-                    insert_surface_parameter(node, surface_use, evaluator_uv)?;
-                }
-            }
-        }
-    }
-    for (edge, uses) in surface_uses {
-        for node_id in edge {
-            boundary_parameter_checkpoint(cancellation)?;
-            let node = topology
-                .nodes
-                .get_mut(
-                    *node_index
-                        .get(node_id)
-                        .ok_or_else(|| invalid("surface edge node is absent"))?,
-                )
-                .ok_or_else(|| invalid("surface edge node index is invalid"))?;
-            for surface_use in uses {
-                for evaluator_uv in derive_surface_parameters(
-                    input,
-                    &source_nodes,
-                    node,
-                    surface_use,
-                    cancellation,
-                )? {
-                    insert_surface_parameter(node, surface_use, evaluator_uv)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-fn derive_surface_parameters(
-    input: &DelaunaySolverTopologyInput<'_>,
-    source_nodes: &BTreeMap<StableDigest, &ExactFaceMeshNode>,
-    node: &SolverMeshNode,
-    surface_use: &SurfaceUse,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Vec<[f64; 2]>, DelaunaySolverTopologyError> {
-    let mut parameters =
-        node.exact_parameters
-            .iter()
-            .filter_map(|parameter| match parameter {
-                SolverNodeExactParameter::Surface {
-                    source_face_id,
-                    chart_id,
-                    evaluator_uv,
-                } if source_face_id == &surface_use.source_face_id
-                    && chart_id == &surface_use.chart_id =>
-                {
-                    Some(*evaluator_uv)
-                }
-                SolverNodeExactParameter::Curve { .. }
-                | SolverNodeExactParameter::Surface { .. } => None,
-            })
-            .collect::<Vec<_>>();
-    for triangle in input.exact_surface.triangles.iter().filter(|triangle| {
-        triangle.source_face_id == surface_use.source_face_id
-            && triangle.chart_id == surface_use.chart_id
-    }) {
-        boundary_parameter_checkpoint(cancellation)?;
-        let sources = triangle
-            .node_ids
-            .map(|identity| source_nodes.get(&identity).copied());
-        let [Some(first), Some(second), Some(third)] = sources else {
-            return Err(invalid(
-                "source surface triangle references an absent exact surface node",
-            ));
-        };
-        let points = [first.point_m, second.point_m, third.point_m];
-        let tolerance_m = input
-            .request
-            .tolerance
-            .source_tolerance_m
-            .max(input.request.tolerance.absolute_floor_m)
-            .max(input.request.tolerance.maximum_healing_displacement_m);
-        let Some(weights) = triangle_coordinates(points, node.coordinates_m, tolerance_m) else {
-            continue;
-        };
-        let uses = [first, second, third].map(|source| {
-            source
-                .uses
-                .iter()
-                .filter(|candidate| {
-                    candidate.source_face_id == surface_use.source_face_id
-                        && candidate.chart_id == surface_use.chart_id
-                })
-                .collect::<Vec<_>>()
-        });
-        if uses.iter().any(Vec::is_empty) {
-            continue;
-        }
-        for first_use in &uses[0] {
-            for second_use in &uses[1] {
-                for third_use in &uses[2] {
-                    parameters.push(std::array::from_fn(|axis| {
-                        weights[0] * first_use.evaluator_uv[axis]
-                            + weights[1] * second_use.evaluator_uv[axis]
-                            + weights[2] * third_use.evaluator_uv[axis]
-                    }));
-                }
-            }
-        }
-    }
-    parameters.sort_by(|left, right| {
-        left[0]
-            .total_cmp(&right[0])
-            .then_with(|| left[1].total_cmp(&right[1]))
-    });
-    parameters.dedup_by(|left, right| left.map(f64::to_bits) == right.map(f64::to_bits));
-    if parameters.is_empty() {
-        return Err(invalid(format!(
-            "surface edge node {} cannot be located in its authoritative source triangle",
-            node.node_id
-        )));
-    }
-    Ok(parameters)
 }
 
 fn boundary_parameter_checkpoint(
@@ -365,6 +213,7 @@ fn insert_surface_parameter(
     node: &mut SolverMeshNode,
     surface_use: &SurfaceUse,
     evaluator_uv: [f64; 2],
+    storage: super::super::storage::Storage<'_>,
 ) -> Result<(), DelaunaySolverTopologyError> {
     if node.exact_parameters.iter().any(|parameter| {
         matches!(
@@ -373,7 +222,7 @@ fn insert_surface_parameter(
                 source_face_id,
                 chart_id,
                 evaluator_uv: existing,
-            } if source_face_id == &surface_use.source_face_id
+            } if source_face_id == surface_use.source_face_id
                 && chart_id == &surface_use.chart_id
                 && existing.map(f64::to_bits) == evaluator_uv.map(f64::to_bits)
         )
@@ -385,104 +234,64 @@ fn insert_surface_parameter(
     // poles can admit many values along the collapsed parameter direction.
     // Preserve every distinct coedge image. Midpoint construction later
     // chooses the nearest compatible pair instead of inventing one value.
-    node.exact_parameters
-        .push(SolverNodeExactParameter::Surface {
-            source_face_id: surface_use.source_face_id.clone(),
-            chart_id: surface_use.chart_id,
-            evaluator_uv,
-        });
+    let parameter = SolverNodeExactParameter::Surface {
+        source_face_id: storage.entity(surface_use.source_face_id)?,
+        chart_id: surface_use.chart_id,
+        evaluator_uv,
+    };
+    storage.push(&mut node.exact_parameters, parameter)?;
     sort_solver_node_exact_parameters(&mut node.exact_parameters);
     Ok(())
 }
 
-pub(super) fn boundary_surface_uses(
-    input: &DelaunaySolverTopologyInput<'_>,
-    topology: &SolverMeshTopology,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<BTreeMap<[u64; 2], Vec<SurfaceUse>>, DelaunaySolverTopologyError> {
-    let mut uses = BTreeMap::<[u64; 2], BTreeSet<SurfaceUse>>::new();
-    for face in &topology.boundary_faces {
-        boundary_parameter_checkpoint(cancellation)?;
-        let facet = input
-            .volume_mesh
-            .provenance
-            .facets
-            .get(face.face_id as usize - 1)
-            .ok_or_else(|| invalid("boundary face has no recovered facet lineage"))?;
-        let source_face_id = facet
-            .entity_ids
-            .iter()
-            .find(|entity| entity.kind == PersistentEntityKind::Face)
-            .ok_or_else(|| invalid("recovered facet has no exact face"))?
-            .clone();
-        let use_record = SurfaceUse {
-            source_face_id,
-            chart_id: facet.chart_id,
-        };
-        for pair in [[0, 1], [1, 2], [2, 0]] {
-            uses.entry(sorted_edge([
-                face.node_ids[pair[0]],
-                face.node_ids[pair[1]],
-            ]))
-            .or_default()
-            .insert(use_record.clone());
-        }
-    }
-    Ok(uses
-        .into_iter()
-        .map(|(edge, uses)| (edge, uses.into_iter().collect()))
-        .collect())
-}
-
-pub(super) fn boundary_exact_edges(
-    topology: &SolverMeshTopology,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<BTreeMap<[u64; 2], PersistentEntityId>, DelaunaySolverTopologyError> {
-    let mut result = BTreeMap::new();
-    for edge in &topology.boundary_edges {
-        boundary_parameter_checkpoint(cancellation)?;
-        let exact = edge
-            .provenance
-            .iter()
-            .filter(|entity| entity.kind == PersistentEntityKind::Edge)
-            .collect::<Vec<_>>();
-        if exact.len() > 1 {
-            return Err(invalid(
-                "one boundary mesh edge has multiple exact edge owners",
-            ));
-        }
-        if let Some(exact) = exact.first() {
-            result.insert(
-                sorted_edge([edge.node_ids[0], edge.node_ids[1]]),
-                (*exact).clone(),
-            );
-        }
-    }
-    Ok(result)
-}
-
-fn midpoint_provenance(
-    volume_provenance: Option<&BTreeSet<PersistentEntityId>>,
-    surface_uses: &[SurfaceUse],
-    exact_edge: Option<&PersistentEntityId>,
+fn midpoint_provenance<'a>(
+    volume_provenance: impl Iterator<Item = &'a PersistentEntityId>,
+    surface_uses: &[SurfaceUse<'a>],
+    exact_edge: Option<&'a PersistentEntityId>,
+    storage: super::super::storage::Storage<'_>,
 ) -> Result<Vec<PersistentEntityId>, DelaunaySolverTopologyError> {
-    let mut provenance = volume_provenance.cloned().unwrap_or_default();
-    provenance.extend(
-        surface_uses
-            .iter()
-            .map(|use_record| use_record.source_face_id.clone()),
-    );
-    if let Some(edge) = exact_edge {
-        provenance.insert(edge.clone());
-    }
-    if provenance.is_empty()
-        || provenance.len() > super::super::construction::MAX_PROVENANCE_PER_ENTITY
+    let mut values = [None; super::super::construction::MAX_PROVENANCE_PER_ENTITY];
+    let mut count = 0;
+    for entity in volume_provenance
+        .chain(surface_uses.iter().map(|usage| usage.source_face_id))
+        .chain(exact_edge)
     {
+        if values[..count].contains(&Some(entity)) {
+            continue;
+        }
+        if count == values.len() {
+            return Err(invalid("elevated node provenance exceeds its hard bound"));
+        }
+        values[count] = Some(entity);
+        count += 1;
+    }
+    if count == 0 {
+        return Err(invalid("elevated node provenance is empty"));
+    }
+    values[..count].sort_unstable();
+    storage.entities(
+        values[..count]
+            .iter()
+            .map(|value| value.expect("populated provenance")),
+    )
+}
+
+/// This constructor assigns contiguous one-based IDs. Check that invariant
+/// rather than retaining a second mesh-sized ID-to-position tree.
+pub(super) fn node_slot(
+    nodes: &[SolverMeshNode],
+    id: u64,
+) -> Result<usize, DelaunaySolverTopologyError> {
+    let slot = id
+        .checked_sub(1)
+        .and_then(|id| usize::try_from(id).ok())
+        .ok_or_else(|| invalid("solver node ID has no canonical position"))?;
+    if nodes.get(slot).is_none_or(|node| node.node_id != id) {
         return Err(invalid(
-            "elevated node provenance is empty or exceeds its hard bound",
+            "solver node ID differs from its canonical position",
         ));
     }
-    Ok(provenance.into_iter().collect())
+    Ok(slot)
 }
 
 fn invalid(reason: impl Into<String>) -> DelaunaySolverTopologyError {

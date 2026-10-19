@@ -15,7 +15,7 @@ use crate::topology::storage::CanonicalNodeValues as NodeValues;
 mod coordinates;
 use coordinates::CoordinateLookup;
 mod geometry;
-mod profile;
+pub(in crate::constraints) mod profile;
 mod rows;
 mod weights;
 use super::vector::{cross, magnitude, scale, subtract};

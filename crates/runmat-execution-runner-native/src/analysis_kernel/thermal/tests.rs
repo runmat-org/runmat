@@ -54,6 +54,7 @@ fn task(order: ElementOrder, chunk: usize) -> (ThermalWorkload, PreparedThermalT
     };
     let digest = Digest::sha256("thermal-native-test");
     let prepared = prepare_thermal_task(ThermalTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         authored_study_digest: digest,
         frozen_project_digest: None,

@@ -61,7 +61,8 @@ OcctPreviewSessionChunkPayload read_cad_preview_session_chunk(
 void close_cad_preview_session(std::uint64_t session_id);
 std::uint64_t start_exact_evaluator_session(
     rust::Slice<const std::uint8_t> representation,
-    double meters_per_source_unit);
+    double meters_per_source_unit,
+    rust::Slice<const std::uint64_t> face_keys);
 OcctCurveRangePayload exact_curve_range(std::uint64_t session_id,
                                         std::uint64_t shape_key);
 OcctCurveDerivativesPayload exact_curve_derivatives(std::uint64_t session_id,

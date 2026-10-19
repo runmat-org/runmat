@@ -1201,12 +1201,7 @@ fn render_scatter_axes(
     select_axes_for_figure(figure, axes).map_err(|err| internal(format!("scatterhist: {err}")))?;
     handle_plot_render_result(render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "Scatterhist",
-            x_label: "X",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         |figure, axes| {
             for item in series {
                 if item.scatter_x.is_empty() {
@@ -1238,12 +1233,7 @@ fn render_x_marginal(
     let hist_style = resolved_hist_style(options, series);
     handle_plot_render_result(render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "X Marginal",
-            x_label: "X",
-            y_label: "Count",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         |figure, axes| {
             for (idx, item) in series.iter().enumerate() {
                 if matches!(options.kernel, KernelMode::On | KernelMode::Overlay) {
@@ -1302,12 +1292,7 @@ fn render_y_marginal(
     let hist_style = resolved_hist_style(options, series);
     handle_plot_render_result(render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "Y Marginal",
-            x_label: "Count",
-            y_label: "Y",
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         |figure, axes| {
             for (idx, item) in series.iter().enumerate() {
                 if matches!(options.kernel, KernelMode::On | KernelMode::Overlay) {

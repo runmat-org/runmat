@@ -850,6 +850,7 @@ fn authored_modal_transient_study_publishes_and_binds_the_produced_basis() {
     let limits = ObjectInventoryLimits::default();
     let mut coordinator =
         StructuralModalTransientStudyCoordinator::new(StructuralModalTransientStudyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("authored-modal-transient"),
             frozen_project_digest: None,
             workloads,

@@ -263,15 +263,31 @@ pub fn render_presence(
             pointer.color[2],
             alpha,
         );
+        // Readable on any plot: a soft shadow and a dark halo sit under the
+        // white-edged pointer, so one of its two edges always contrasts.
+        let arrow = |offset: egui::Vec2| -> Vec<egui::Pos2> {
+            [(0.0, 0.0), (4.6, 17.2), (8.0, 10.4), (17.2, 8.0)]
+                .iter()
+                .map(|&(x, y)| point + offset + egui::vec2(x, y))
+                .collect()
+        };
+        let shade = |a: f32| egui::Color32::from_black_alpha((a * pointer.opacity * 255.0) as u8);
+        for (offset, a) in [(egui::vec2(1.5, 2.5), 0.22), (egui::vec2(0.75, 1.25), 0.32)] {
+            painter.add(egui::Shape::convex_polygon(
+                arrow(offset),
+                shade(a),
+                egui::Stroke::NONE,
+            ));
+        }
         painter.add(egui::Shape::convex_polygon(
-            vec![
-                point,
-                point + egui::vec2(4.0, 15.0),
-                point + egui::vec2(7.0, 9.0),
-                point + egui::vec2(15.0, 7.0),
-            ],
+            arrow(egui::Vec2::ZERO),
+            egui::Color32::TRANSPARENT,
+            egui::Stroke::new(3.0, shade(0.45)),
+        ));
+        painter.add(egui::Shape::convex_polygon(
+            arrow(egui::Vec2::ZERO),
             color,
-            egui::Stroke::new(1.0, egui::Color32::from_white_alpha(alpha)),
+            egui::Stroke::new(1.5, egui::Color32::from_white_alpha(alpha)),
         ));
         if let Some(progress) = pointer.click_progress {
             let click = pointer.click_position.as_ref().unwrap_or(&pointer.position);
@@ -288,13 +304,27 @@ pub fn render_presence(
         }
         if let Some(label) = &pointer.label {
             if labels < 3 {
-                painter.text(
-                    point + egui::vec2(17.0, 11.0),
-                    egui::Align2::LEFT_TOP,
-                    label,
-                    egui::FontId::proportional(11.0),
-                    color,
+                // A name tag in the collaborator's color carries its own
+                // background; text flips to near-black on light colors.
+                let [r, g, b] = pointer.color.map(|c| c as f32 / 255.0);
+                let light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.6;
+                let text_color = if light {
+                    egui::Color32::from_rgba_unmultiplied(17, 24, 39, alpha)
+                } else {
+                    egui::Color32::from_white_alpha(alpha)
+                };
+                let galley = painter.layout_no_wrap(
+                    label.clone(),
+                    egui::FontId::proportional(12.0),
+                    text_color,
                 );
+                let padding = egui::vec2(6.0, 3.0);
+                let origin = point + egui::vec2(14.0, 18.0);
+                let tag = egui::Rect::from_min_size(origin, galley.size() + padding * 2.0);
+                painter.rect_filled(tag.translate(egui::vec2(0.0, 1.5)), 5.0, shade(0.3));
+                painter.rect_filled(tag.expand(1.0), 6.0, shade(0.35));
+                painter.rect_filled(tag, 5.0, color);
+                painter.galley(origin + padding, galley, text_color);
                 labels += 1;
             }
         }

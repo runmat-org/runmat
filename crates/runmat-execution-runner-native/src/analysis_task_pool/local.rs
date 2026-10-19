@@ -20,6 +20,13 @@ impl LocalAnalysisTaskPool {
 }
 
 impl CacheImport for LocalAnalysisTaskPool {
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.store.read_verified_bounded(digest, maximum_bytes)
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         self.store.read_verified(digest)
     }
@@ -115,5 +122,42 @@ impl AnalysisTaskPool for LocalAnalysisTaskPool {
                 response.ok_or_else(|| protocol("local analysis task has no terminal response"))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_execution_artifact::{
+        cache::CacheExport, ArtifactError, LogicalObject, ObjectNamespace,
+    };
+
+    #[test]
+    fn local_analysis_pool_preserves_bounded_object_read() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut config = NativeExecutionConfig::for_current_executable().unwrap();
+        config.store_root = directory.path().join("sessions");
+        let session = NativeProgramSession::new(config).unwrap();
+        let mut store = session.object_store();
+        let object = LogicalObject::new(
+            ObjectNamespace::ResultValue,
+            "bounded",
+            "test/v1",
+            b"data".to_vec(),
+        )
+        .unwrap();
+        store.write_verified(&object).unwrap();
+        let pool = LocalAnalysisTaskPool::new(session);
+        for limit in [0, 3] {
+            assert!(matches!(
+                pool.read_verified_bounded(object.descriptor.digest, limit),
+                Err(ArtifactError::Limit(_))
+            ));
+        }
+        assert_eq!(
+            pool.read_verified_bounded(object.descriptor.digest, 4)
+                .unwrap(),
+            Some(object.bytes)
+        );
     }
 }

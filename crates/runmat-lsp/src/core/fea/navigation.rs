@@ -186,10 +186,8 @@ impl FeaDocumentAnalysis {
     }
 
     pub(super) fn logical_uri(&self, path: &LogicalSourcePath) -> Option<Url> {
-        let relative = path.as_str().strip_prefix("project/")?;
-        let physical_path = relative
-            .split('/')
-            .fold(self.source_root.clone(), |path, part| path.join(part));
+        let physical_path =
+            runmat_runtime::analysis::physical_source_path(&self.source_root, path).ok()?;
         #[cfg(not(target_arch = "wasm32"))]
         {
             Url::from_file_path(physical_path).ok()

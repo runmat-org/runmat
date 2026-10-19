@@ -7,12 +7,12 @@ use runmat_meshing_core::{
 };
 use sha2::{Digest, Sha256};
 
+mod admission;
 mod star;
 
 use crate::cdt::{
     insertion::{
         insert_delaunay_volume_node_locally_with_barriers,
-        legalize_delaunay_volume_topology_completely_with_barriers,
         validate_constrained_delaunay_volume_topology,
     },
     DelaunayInsertionError, DelaunayInsertionErrorKind, DelaunayInsertionOptions,
@@ -78,26 +78,12 @@ pub(super) fn seed_carved_regions(
             Err(failure) if seed_is_unavailable(&failure) => continue,
             Err(failure) => return Err(region_seed_insertion_error(failure)),
         };
-        let candidate = match legalize_delaunay_volume_topology_completely_with_barriers(
-            candidate,
-            protected_faces,
-            options,
-            cancellation,
-        ) {
-            Ok(candidate) => candidate,
-            Err(failure) if seed_is_unavailable(&failure) => continue,
-            Err(failure) => return Err(region_seed_insertion_error(failure)),
-        };
-        match validate_constrained_delaunay_volume_topology(
-            &candidate,
-            protected_faces,
-            options,
-            cancellation,
-        ) {
-            Ok(()) => {}
-            Err(failure) if seed_is_unavailable(&failure) => continue,
-            Err(failure) => return Err(region_seed_insertion_error(failure)),
-        }
+        let candidate =
+            match admission::admit_or_repair(candidate, protected_faces, options, cancellation) {
+                Ok(candidate) => candidate,
+                Err(failure) if seed_is_unavailable(&failure) => continue,
+                Err(failure) => return Err(region_seed_insertion_error(failure)),
+            };
         topology = candidate;
         node_identities.push(node.identity);
     }

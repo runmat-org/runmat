@@ -6,6 +6,10 @@ pub enum DelaunaySolverTopologyErrorKind {
     InvalidGeometry,
     InvalidMesh,
     ResourceLimit,
+    MemoryBudgetExceeded,
+    TimeBudgetExceeded,
+    SearchWorkBudgetExceeded,
+    IterationBudgetExceeded,
     Cancelled,
 }
 
@@ -87,12 +91,18 @@ pub(super) fn geometry(
 
     let kind = match error.kind {
         GeometryEvaluationErrorKind::Cancelled => DelaunaySolverTopologyErrorKind::Cancelled,
+        GeometryEvaluationErrorKind::AllocationBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::MemoryBudgetExceeded
+        }
+        GeometryEvaluationErrorKind::TimeBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::TimeBudgetExceeded
+        }
         GeometryEvaluationErrorKind::BudgetExceeded
-        | GeometryEvaluationErrorKind::TimeBudgetExceeded
-        | GeometryEvaluationErrorKind::AllocationBudgetExceeded
-        | GeometryEvaluationErrorKind::SearchWorkBudgetExceeded
-        | GeometryEvaluationErrorKind::IterationBudgetExceeded => {
-            DelaunaySolverTopologyErrorKind::ResourceLimit
+        | GeometryEvaluationErrorKind::SearchWorkBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::SearchWorkBudgetExceeded
+        }
+        GeometryEvaluationErrorKind::IterationBudgetExceeded => {
+            DelaunaySolverTopologyErrorKind::IterationBudgetExceeded
         }
         GeometryEvaluationErrorKind::UnknownEvaluator
         | GeometryEvaluationErrorKind::ParameterOutsideDomain

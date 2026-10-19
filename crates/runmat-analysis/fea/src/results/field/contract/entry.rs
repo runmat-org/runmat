@@ -1,5 +1,5 @@
 //! One wire authority for retained catalog entries and sampled shape projections.
-use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
+use runmat_canonical_codec::{profile_serialized_shape, SerializedCanonicalProfile};
 use serde::ser::SerializeSeq;
 
 use super::*;
@@ -122,7 +122,7 @@ impl RecoveredFieldArtifactEntry {
                 entity_count: 1,
             },
         };
-        profile_serialized(
+        profile_serialized_shape(
             &Repeated {
                 value: &row,
                 count: sample_count,

@@ -110,6 +110,15 @@ pub(crate) async fn execute_local_study_geometry(
     meshing_request.tolerance = output.document.tolerance;
 
     let analysis_config = config.clone();
+    // Worker slots advertise the whole machine, while the pool has one aggregate
+    // capacity. A wide volume task and narrow entity tasks draw from the same budget.
+    config.worker_memory_bytes = config
+        .worker_memory_bytes
+        .max(meshing_request.resources.maximum_memory_bytes);
+    config.worker_scratch_bytes = config
+        .worker_scratch_bytes
+        .max(meshing_request.resources.maximum_scratch_bytes);
+    let meshing_cpu_millicores = config.worker_cpu_millicores;
     config.enable_exact_meshing(
         &output.document,
         &meshing_request,
@@ -121,14 +130,19 @@ pub(crate) async fn execute_local_study_geometry(
         session_store.write_verified(object).map_err(protocol)?;
     }
     let geometry = prepare_exact_geometry_input(
-        exact.geometry_objects().clone(),
+        exact.into_geometry_objects(),
         artifact_access.clone(),
         inventory,
     )
     .map_err(protocol)?;
-    let mut executor =
-        NativeExactMeshingExecutor::new(&session, crate::MeshingExecutionPolicy::default())
-            .map_err(protocol)?;
+    let mut executor = NativeExactMeshingExecutor::new(
+        &session,
+        crate::MeshingExecutionPolicy {
+            cpu_millicores: meshing_cpu_millicores,
+            ..Default::default()
+        },
+    )
+    .map_err(protocol)?;
     let meshing = execute_exact_meshing_dag_async(
         ExactMeshingDagRun {
             geometry: &geometry,

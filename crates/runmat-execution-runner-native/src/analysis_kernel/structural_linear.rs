@@ -40,14 +40,6 @@ pub(super) fn execute(
                 .into(),
         ));
     }
-    let solver_model = if matches!(
-        solve.state_input,
-        Some(StructuralLinearStateInput::ThermalPrestress(_))
-    ) {
-        std::borrow::Cow::Borrowed(&solve.model)
-    } else {
-        std::borrow::Cow::Owned(solve.solver_model()?)
-    };
     let mesh = mesh_input
         .map(|input| {
             SolverMeshArtifact::canonical_decode(&input.payload())
@@ -66,17 +58,39 @@ pub(super) fn execute(
     let constraint_plan =
         CanonicalStructuralConstraintPlan::from_canonical_bytes(&constraint_plan.payload())
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    match mesh.as_ref() {
-        Some(mesh) => constraint_plan.validate_against(&solver_model, mesh),
-        None => constraint_plan.validate_against_explicit(&solver_model),
-    }
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let topology_digest = constraint_plan.topology.discretization_digest();
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_plan_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if resource_plan_input.manifest.logical_identity != resource_plan.identity.digest() {
         return Err(AnalysisBridgeError::Identity(
             "resource-plan manifest differs from its canonical identity",
+        ));
+    }
+    let all_input_facts = prepared_input_resource_facts(invocation.inputs)?;
+    let compiler_limit =
+        runmat_analysis_fea::planning::resource::constraint_compilation_available_bytes(
+            resource_plan.request.memory_bytes.min(
+                solve
+                    .procedure_step()?
+                    .accuracy
+                    .resources
+                    .maximum_resident_bytes,
+            ),
+            &all_input_facts,
+            resource_plan.input.worker.fixed_memory_bytes,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    // Validate from the unchanged authored constraints; solver_model only rewrites sequence
+    // execution controls. Release the fresh validation result before copying that model.
+    let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
+        &solve.model,
+        mesh.as_ref(),
+        compiler_limit,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if compiled.plan() != &constraint_plan {
+        return Err(AnalysisBridgeError::Identity(
+            "constraint plan differs from original bounded compilation",
         ));
     }
     let field_definitions = structural_static_observable_field_definitions()
@@ -98,21 +112,31 @@ pub(super) fn execute(
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let prepared_inputs = prepared_input_resource_facts_without_resource_plan(invocation.inputs)?;
-    let expected_resource_plan = build_structural_resource_plan(
-        mesh.as_ref(),
-        &constraint_plan,
-        &observations,
-        &solve,
-        &accelerator_requests,
-        local_execution,
-        Some(&prepared_inputs),
-    )
-    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_resource_plan =
+        runmat_analysis_fea::planning::resource::build_structural_resource_plan_from_compilation(
+            mesh.as_ref(),
+            &compiled,
+            &observations,
+            &solve,
+            &accelerator_requests,
+            local_execution,
+            Some(&prepared_inputs),
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     if expected_resource_plan != resource_plan {
         return Err(AnalysisBridgeError::Identity(
             "resource plan does not converge from authoritative structural inputs",
         ));
     }
+    drop(compiled);
+    let solver_model = if matches!(
+        solve.state_input,
+        Some(StructuralLinearStateInput::ThermalPrestress(_))
+    ) {
+        std::borrow::Cow::Borrowed(&solve.model)
+    } else {
+        std::borrow::Cow::Owned(solve.solver_model()?)
+    };
     let expected_constraint_identity = ConstraintPlanIdentity::new(
         invocation.host.workload.step,
         topology_digest,

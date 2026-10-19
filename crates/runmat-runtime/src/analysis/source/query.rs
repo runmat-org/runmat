@@ -11,7 +11,7 @@ mod tests {
         let checked = super::super::FeaSourceSnapshotBuilder::new(
             std::path::Path::new("/project"),
             super::super::FeaSourceSnapshotBuilder::source_module(
-                LogicalSourcePath::new("project/library.fea").unwrap(),
+                LogicalSourcePath::new("library.fea").unwrap(),
                 b"model first {}\nmodel second {}\nmodel third {}\n",
             ),
         )

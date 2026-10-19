@@ -43,7 +43,7 @@ pub(crate) fn import_cad_topology(
         bytes,
         materialized_path(&materialized)?,
         ffi_format(format),
-        ffi_import_options(options, cancel_token.id()),
+        ffi_import_options(options, cancel_token.id())?,
     )
     .map_err(|err| occt_bridge_error("OCCT CAD import failed", err))?;
     context.check_cancelled()?;
@@ -60,7 +60,14 @@ pub(crate) fn import_exact_cad_shape(
 ) -> Result<ImportedExactCad, GeometryImportError> {
     NATIVE_CAD_BACKEND_USED.store(true, Ordering::Relaxed);
     context.check_cancelled()?;
-    let meters_per_source_unit = meters_per_unit(options.source_units)?;
+    // Exchange readers resolve file-declared units into a stable millimetre
+    // kernel representation. Keep kernel tolerances independent of the caller's
+    // fallback units; BREP has no declared units and uses that explicit fallback.
+    let fallback_unit_m = meters_per_unit(options.source_units)?;
+    let meters_per_source_unit = match format {
+        OcctCadFormat::Step | OcctCadFormat::Iges => 0.001,
+        OcctCadFormat::Brep => fallback_unit_m,
+    };
     let materialized = materialize_iges_input(bytes, format, context)?;
     let cancel_token = ffi::OcctCancelTokenRegistration::new(context.cancellation_token());
     let payload = ffi::bridge::import_exact_cad_bytes(
@@ -339,7 +346,7 @@ pub(crate) fn start_cad_preview_session(
         bytes,
         materialized_path(&materialized)?,
         ffi_format(format),
-        ffi_import_options(options, cancel_token.id()),
+        ffi_import_options(options, cancel_token.id())?,
     )
     .map_err(|err| occt_bridge_error("OCCT CAD preview session failed", err))?;
     context.check_cancelled()?;
@@ -533,7 +540,7 @@ fn payload_to_topology(
 fn ffi_import_options(
     options: &GeometryImportOptions,
     cancel_token_id: u64,
-) -> ffi::bridge::OcctImportOptions {
+) -> Result<ffi::bridge::OcctImportOptions, GeometryImportError> {
     let linear_deflection = options
         .tessellation_profile
         .chord_tolerance
@@ -545,7 +552,8 @@ fn ffi_import_options(
         .filter(|value| value.is_finite() && *value > 0.0)
         .map(f64::to_radians)
         .unwrap_or(DEFAULT_ANGULAR_DEFLECTION);
-    ffi::bridge::OcctImportOptions {
+    Ok(ffi::bridge::OcctImportOptions {
+        step_coordinate_unit_m: meters_per_unit(options.units)?,
         linear_deflection,
         angular_deflection,
         relative_deflection: options.relative_deflection,
@@ -561,7 +569,7 @@ fn ffi_import_options(
         heal_short_edges_and_sliver_faces: false,
         maximum_healing_displacement: 0.0,
         cancel_token_id,
-    }
+    })
 }
 
 pub(super) fn ffi_exact_import_options(
@@ -570,6 +578,7 @@ pub(super) fn ffi_exact_import_options(
     meters_per_source_unit: f64,
 ) -> ffi::bridge::OcctImportOptions {
     ffi::bridge::OcctImportOptions {
+        step_coordinate_unit_m: meters_per_source_unit,
         linear_deflection: DEFAULT_LINEAR_DEFLECTION,
         angular_deflection: DEFAULT_ANGULAR_DEFLECTION,
         relative_deflection: false,

@@ -1,3 +1,4 @@
+mod storage;
 use runmat_types::PhysicalDimension;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -409,7 +410,7 @@ impl MaterialModel {
 mod tests {
     use super::*;
 
-    fn density_only_material() -> MaterialModel {
+    pub(super) fn density_only_material() -> MaterialModel {
         MaterialModel {
             fluid: None,
             material_id: "fluid".into(),
@@ -423,6 +424,21 @@ mod tests {
             electrical: None,
             plastic: None,
         }
+    }
+
+    #[test]
+    fn retained_material_buffers_follow_capacity_without_changing_semantics() {
+        let mut material = density_only_material();
+        let expected = material.material_id.capacity() + material.name.capacity();
+        assert_eq!(material.owned_buffer_bytes(), Some(expected as u64));
+        let original = material.clone();
+        material.name.reserve(8192);
+        assert_eq!(material, original);
+        assert_eq!(
+            material.owned_buffer_bytes(),
+            Some((material.material_id.capacity() + material.name.capacity()) as u64)
+        );
+        assert!(material.owned_buffer_bytes().unwrap() > original.owned_buffer_bytes().unwrap());
     }
 
     #[test]

@@ -68,6 +68,18 @@ pub(in crate::analysis) fn prepare_structural_study_intent_completion(
                 )
             },
         )?;
+    preparation
+        .staging
+        .admit_mesh_persistence(&meshing_output.artifact, &meshing_output.evidence)
+        .map_err(|error| {
+            intent_completion_error(
+                &intent,
+                "RM.FEA.RUN_STUDY.MESH_ARTIFACT_STORE_FAILED",
+                OperationErrorType::Internal,
+                OperationErrorSeverity::Error,
+                error.to_string(),
+            )
+        })?;
     let persisted_mesh = meshing::persist_mesh_output(&meshing_output).map_err(|message| {
         intent_completion_error(
             &intent,

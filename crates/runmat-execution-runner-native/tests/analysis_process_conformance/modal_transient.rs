@@ -79,6 +79,7 @@ pub(super) fn preparation(
         residual_target: 1.0e-8,
     };
     StructuralModalTransientStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: Digest::sha256(b"process-modal-transient-study"),
         frozen_project_digest: None,
         workloads: StructuralStudyWorkloads::HeterogeneousSequence {

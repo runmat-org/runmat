@@ -1,12 +1,33 @@
 import type { CapturedProjectResolver } from "./package-cache/browser-resolver.js";
 import type { InputManifest } from "./generated/collaboration-contracts.js";
 export type { InputManifest, AtomicCreateResult } from "./generated/collaboration-contracts.js";
+export { MAX_WORKSPACE_PUBLICATION_EDITS, MAX_WORKSPACE_PUBLICATION_BYTES } from "./generated/fea-workspace-contracts.js";
+export type {
+  WorkspaceCaptureRequest,
+  WorkspaceSnapshot as SourceWorkspaceSnapshot,
+  WorkspacePublicationRequest,
+  WorkspacePublicationOutcome,
+  WorkspaceEdit as SourceWorkspaceEdit,
+  WorkspaceRevision as SourceWorkspaceRevision,
+} from "./generated/fea-workspace-contracts.js";
 import type {
   RunMatFilesystemProvider
 } from "./fs/provider-types.js";
 import type {
   FeaCapabilities,
   FeaSourceCheckResult,
+  FeaBrowseRequest,
+  FeaBrowseOutcome,
+  FeaWorkingCheckRequest,
+  FeaChangeSetId,
+  FeaChangeSetRequest,
+  FeaChangeSetReviewRequest,
+  FeaChangeSetReview,
+  FeaChangeSetCheck,
+  FeaChangeSetPublication,
+  FeaWorkspaceCheckRequest,
+  FeaWorkspaceCheckResult,
+  SourceDigest,
   FeaSemanticProgram,
   FeaSourceIndex,
   FeaSourceIndexEntry,
@@ -40,6 +61,8 @@ import type {
   FeaRunResult
 } from "./fea-contracts.js";
 import {
+  isFeaSourceCheckContract,
+  isFeaSemanticProgram,
   FEA_ARTIFACT_MANIFEST_KIND,
   FEA_DATASET_ARTIFACT_KIND,
   FEA_DIAGNOSTICS_ARTIFACT_KIND,
@@ -126,6 +149,18 @@ export type {
   FeaCanonicalSequence,
   FeaCapabilities,
   FeaSourceCheckResult,
+  FeaBrowseRequest,
+  FeaBrowseOutcome,
+  FeaWorkingCheckRequest,
+  FeaChangeSetId,
+  FeaChangeSetRequest,
+  FeaChangeSetReviewRequest,
+  FeaChangeSetReview,
+  FeaChangeSetCheck,
+  FeaChangeSetPublication,
+  FeaWorkspaceCheckRequest,
+  FeaWorkspaceCheckResult,
+  SourceDigest,
   FeaDiagnosticsArtifactPayload,
   FeaDocumentKind,
   FeaFieldBinding,
@@ -1045,6 +1080,14 @@ export interface RunMatSessionHandle {
   ): Promise<void> | void;
   feaCapabilities(): Promise<FeaCapabilities>;
   checkFeaSource(path: string, inputManifest?: InputManifest): Promise<FeaSourceCheckResult>;
+  checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult>;
+  browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome>;
+  inspectFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetCheck>;
+  reviewFeaChanges(request: FeaChangeSetReviewRequest): Promise<FeaChangeSetReview>;
+  stageFeaChanges(request: FeaChangeSetRequest): Promise<FeaChangeSetCheck>;
+  publishFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetPublication>;
+  discardFeaChanges(id: FeaChangeSetId): Promise<void>;
+  checkFeaWorkingSource(request: FeaWorkingCheckRequest): Promise<FeaSourceCheckResult>;
   feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult>;
   materializeDataFileVariable(
     path: string,
@@ -1137,6 +1180,14 @@ interface RunMatNativeSession {
     geometrySceneHandle?: number | null,
   ) => void | Promise<void>;
   feaCapabilities?: () => FeaCapabilities | Promise<FeaCapabilities>;
+  inspectFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
+  reviewFeaChanges?: (request: FeaChangeSetReviewRequest) => FeaChangeSetReview | Promise<FeaChangeSetReview>;
+  stageFeaChanges?: (request: FeaChangeSetRequest) => FeaChangeSetCheck | Promise<FeaChangeSetCheck>;
+  publishFeaChanges?: (id: FeaChangeSetId) => FeaChangeSetPublication | Promise<FeaChangeSetPublication>;
+  discardFeaChanges?: (id: FeaChangeSetId) => void | Promise<void>;
+  checkFeaWorkingSource?: (request: FeaWorkingCheckRequest) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
+  browseFeaSource?: (request: FeaBrowseRequest) => FeaBrowseOutcome | Promise<FeaBrowseOutcome>;
+  checkFeaWorkspace?: (request: FeaWorkspaceCheckRequest) => FeaWorkspaceCheckResult | Promise<FeaWorkspaceCheckResult>;
   checkFeaSource?: (path: string, inputManifest?: InputManifest) => FeaSourceCheckResult | Promise<FeaSourceCheckResult>;
   feaField?: (
     runId: string,
@@ -2287,7 +2338,57 @@ class WebRunMatSession implements RunMatSessionHandle {
     if (typeof this.native.checkFeaSource !== "function") {
       throw new Error("The loaded runmat-wasm module does not expose checkFeaSource yet.");
     }
-    return inputManifest ? this.native.checkFeaSource(path, inputManifest) : this.native.checkFeaSource(path);
+    const result = await (inputManifest ? this.native.checkFeaSource(path, inputManifest) : this.native.checkFeaSource(path));
+    return admitFeaSourceCheckResult(result);
+  }
+
+  async inspectFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetCheck> {
+    this.ensureActive();
+    if (!this.native.inspectFeaChanges) throw new Error("The runtime does not support study drafts.");
+    const check = await this.native.inspectFeaChanges(id);
+    return { ...check, roots: check.roots.map(admitFeaSourceCheckResult) };
+  }
+
+  async reviewFeaChanges(request: FeaChangeSetReviewRequest): Promise<FeaChangeSetReview> {
+    this.ensureActive();
+    if (!this.native.reviewFeaChanges) throw new Error("The runtime does not support checked source proposals.");
+    return this.native.reviewFeaChanges(request);
+  }
+  async stageFeaChanges(request: FeaChangeSetRequest): Promise<FeaChangeSetCheck> {
+    this.ensureActive();
+    if (!this.native.stageFeaChanges) throw new Error("The runtime does not support checked source proposals.");
+    return this.native.stageFeaChanges(request);
+  }
+  async publishFeaChanges(id: FeaChangeSetId): Promise<FeaChangeSetPublication> {
+    this.ensureActive();
+    if (!this.native.publishFeaChanges) throw new Error("The runtime does not support coherent source publication.");
+    return this.native.publishFeaChanges(id);
+  }
+  async discardFeaChanges(id: FeaChangeSetId): Promise<void> {
+    this.ensureActive();
+    if (!this.native.discardFeaChanges) throw new Error("The runtime does not support discarding source proposals.");
+    return this.native.discardFeaChanges(id);
+  }
+
+  async checkFeaWorkingSource(request: FeaWorkingCheckRequest): Promise<FeaSourceCheckResult> {
+    this.ensureActive();
+    if (!this.native.checkFeaWorkingSource) throw new Error("The runtime does not expose working FEA checks.");
+    const result = await this.native.checkFeaWorkingSource(request);
+    return admitFeaSourceCheckResult(result);
+  }
+
+  async browseFeaSource(request: FeaBrowseRequest): Promise<FeaBrowseOutcome> {
+    this.ensureActive();
+    if (typeof this.native.browseFeaSource !== "function") throw new Error("The runtime does not expose checked FEA browsing.");
+    return this.native.browseFeaSource(request);
+  }
+
+  async checkFeaWorkspace(request: FeaWorkspaceCheckRequest): Promise<FeaWorkspaceCheckResult> {
+    this.ensureActive();
+    if (typeof this.native.checkFeaWorkspace !== "function") {
+      throw new Error("The loaded runtime does not support candidate workspace checks.");
+    }
+    return this.native.checkFeaWorkspace(request);
   }
 
   async feaField(runId: string, fieldId: string, options?: FeaFieldRequestOptions): Promise<FeaFieldResult> {
@@ -2589,6 +2690,13 @@ function ensureFsProvider(provider: RunMatFilesystemProvider): void {
       throw new Error(`fsProvider.${String(method)} must be a function`);
     }
   }
+}
+
+function admitFeaSourceCheckResult(result: FeaSourceCheckResult): FeaSourceCheckResult {
+  if (!isFeaSourceCheckContract(result.contract) || !isFeaSemanticProgram(result.program)) {
+    throw new Error("The runtime returned an incompatible study format. Update RunMat and try again.");
+  }
+  return result;
 }
 
 function requireNativeFunction<T, K extends keyof T>(
@@ -2895,3 +3003,5 @@ export const __internals = {
 function isNativeSession(value: unknown): value is RunMatNativeSession {
   return Boolean(value && typeof (value as RunMatNativeSession).executeRequest === "function");
 }
+
+export { readImmutableFilesystemResponse } from "./fs/immutable-input.js";

@@ -1,0 +1,11 @@
+[package]
+name = "runmat-public-ids"
+version = "0.6.2"
+edition = "2021"
+description = "Canonical typed identifiers shared by RunMat public API clients and servers"
+license-file = "../../LICENSE.md"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true, features = ["v7", "serde"] }

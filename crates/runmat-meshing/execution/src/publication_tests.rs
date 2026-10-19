@@ -136,7 +136,7 @@ fn runner_commits_root_and_complete_inventory_atomically() {
         .handle(DriverCommand::BackendReport(BackendReport::for_request(
             &request,
             AttemptReport::Succeeded {
-                result: publication.attempt_success(),
+                result: accounted_publication(&publication, &request),
             },
         )))
         .unwrap();
@@ -156,7 +156,7 @@ fn stale_and_duplicate_publications_are_not_visible_and_are_collected() {
     let mut stale = BackendReport::for_request(
         &request,
         AttemptReport::Succeeded {
-            result: publication.attempt_success(),
+            result: accounted_publication(&publication, &request),
         },
     );
     stale.driver_fence = stale.driver_fence.saturating_sub(1);
@@ -167,7 +167,7 @@ fn stale_and_duplicate_publications_are_not_visible_and_are_collected() {
     let success = BackendReport::for_request(
         &request,
         AttemptReport::Succeeded {
-            result: publication.attempt_success(),
+            result: accounted_publication(&publication, &request),
         },
     );
     driver
@@ -179,6 +179,23 @@ fn stale_and_duplicate_publications_are_not_visible_and_are_collected() {
         .unwrap();
     assert_eq!(driver.snapshot().tasks[&task_id].committed, committed);
     assert_gc_contains(&duplicate_actions, publication.result_objects());
+}
+
+// A scheduler report requires worker-bound accounting; a prepared domain publication
+// intentionally has no attempt allocation or observed execution interval.
+fn accounted_publication(
+    publication: &crate::PreparedMeshingResultPublication,
+    request: &runmat_execution_runner::AttemptRequest,
+) -> runmat_execution_runner::AttemptSuccess {
+    runmat_execution_runner::AttemptSuccess::new(
+        request,
+        vec![publication.root_output().clone()],
+        publication.result_objects().to_vec(),
+        1,
+        0,
+        0,
+    )
+    .unwrap()
 }
 
 fn publication() -> crate::PreparedMeshingResultPublication {
@@ -290,3 +307,5 @@ fn assert_gc_contains(actions: &[DriverAction], expected: &[runmat_execution::va
         DriverAction::GarbageCollectResults { objects, .. } if objects == expected
     )));
 }
+
+mod admitted;

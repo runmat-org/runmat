@@ -1,12 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use runmat_meshing_core::{SolverMeshNode, SolverMeshTopology, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
-
-use super::{consume_candidate_work, geometry, jacobian, OptimizationWork};
-use crate::cdt::solver_topology::{
-    DelaunayExactEvaluation, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
-    DelaunaySolverTopologyInput,
+use super::super::PreparedEvaluation;
+use super::{
+    consume_candidate_work, geometry, jacobian, transaction, OptimizationTopology, OptimizationWork,
 };
+use crate::cdt::solver_topology::{
+    storage::Storage, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind, ProjectionInput,
+};
+use runmat_geometry_core::GeometryAllocationScope;
+use runmat_meshing_core::{SolverMeshTopology, TETRAHEDRON_MIDSIDE_EDGE_CORNERS};
 
 const CORNER_STAR_DELTAS: [f64; 9] = [
     0.125,
@@ -21,10 +21,11 @@ const CORNER_STAR_DELTAS: [f64; 9] = [
 ];
 
 pub(in crate::cdt::solver_topology::order_elevation) fn repair_corner_star(
-    input: &DelaunaySolverTopologyInput<'_>,
+    input: &ProjectionInput<'_>,
     topology: &mut SolverMeshTopology,
     element_index: usize,
-    evaluation: DelaunayExactEvaluation<'_>,
+    evaluation: PreparedEvaluation<'_, '_>,
+    indexes: &OptimizationTopology<'_>,
     work: OptimizationWork<'_>,
 ) -> Result<u64, DelaunaySolverTopologyError> {
     let OptimizationWork {
@@ -36,155 +37,129 @@ pub(in crate::cdt::solver_topology::order_elevation) fn repair_corner_star(
     let element = topology
         .volume_elements
         .get(element_index)
-        .ok_or_else(|| invalid("corner-star repair element index is out of bounds"))?
-        .clone();
-    let node_index = topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.node_id, index))
-        .collect::<BTreeMap<_, _>>();
-    let surface_uses = geometry::boundary_surface_uses(input, topology, cancellation)?;
-    let exact_edges = geometry::boundary_exact_edges(topology, cancellation)?;
-
+        .ok_or_else(|| invalid("corner-star repair element index is out of bounds"))?;
+    let nodes: [u64; 10] = element
+        .node_ids
+        .as_slice()
+        .try_into()
+        .map_err(|_| invalid("corner-star repair requires ten nodes"))?;
     for local_corner in 0..4 {
-        let local_edges = TETRAHEDRON_MIDSIDE_EDGE_CORNERS
-            .iter()
-            .enumerate()
-            .filter_map(|(local_edge, edge)| edge.contains(&local_corner).then_some(local_edge))
-            .collect::<Vec<_>>();
-        let midpoint_node_ids = local_edges
-            .iter()
-            .map(|local_edge| element.node_ids[4 + local_edge])
-            .collect::<Vec<_>>();
-        let incident_elements = topology
-            .volume_elements
-            .iter()
-            .enumerate()
-            .filter_map(|(index, candidate)| {
-                midpoint_node_ids
-                    .iter()
-                    .any(|node_id| candidate.node_ids.contains(node_id))
-                    .then_some(index)
-            })
-            .collect::<BTreeSet<_>>();
+        let scope = GeometryAllocationScope::new(evaluation.control);
+        let storage = Storage(Some(&scope));
+        let mut local_edges = [0usize; 3];
+        let mut count = 0;
+        for (edge, endpoints) in TETRAHEDRON_MIDSIDE_EDGE_CORNERS.iter().enumerate() {
+            if endpoints.contains(&local_corner) {
+                local_edges[count] = edge;
+                count += 1;
+            }
+        }
+        let midpoint_ids = local_edges.map(|edge| nodes[4 + edge]);
+        let mut slots = [0usize; 3];
+        for (slot, id) in slots.iter_mut().zip(midpoint_ids) {
+            *slot = geometry::node_slot(&topology.nodes, id)?;
+        }
+        let mut incidence_count = 0usize;
+        for id in midpoint_ids {
+            incidence_count = incidence_count
+                .checked_add(indexes.incidence.elements(id)?.len())
+                .ok_or_else(|| super::resource("corner-star incidence storage overflow"))?;
+        }
+        let mut incident = storage.vector(incidence_count)?;
+        for id in midpoint_ids {
+            incident.extend_from_slice(indexes.incidence.elements(id)?);
+        }
+        incident.sort_unstable();
+        incident.dedup();
         let initial_profile = jacobian::optimization_margin_profile_elements(
             topology,
-            incident_elements.iter().copied(),
+            incident.iter().copied(),
             cancellation,
+            storage,
         )?;
-        let baseline = midpoint_node_ids
-            .iter()
-            .map(|node_id| {
-                let index = *node_index
-                    .get(node_id)
-                    .ok_or_else(|| invalid("corner-star midside node is absent"))?;
-                Ok((index, topology.nodes[index].clone()))
-            })
-            .collect::<Result<Vec<_>, DelaunaySolverTopologyError>>()?;
-
         for toward_corner in [true, false] {
             for delta in CORNER_STAR_DELTAS {
-                restore(topology, &baseline);
-                let mut complete = true;
-                for &local_edge in &local_edges {
-                    let local_endpoints = TETRAHEDRON_MIDSIDE_EDGE_CORNERS[local_edge];
-                    let mut endpoint_ids = [
-                        element.node_ids[local_endpoints[0]],
-                        element.node_ids[local_endpoints[1]],
-                    ];
-                    endpoint_ids.sort_unstable();
-                    let corner_node_id = element.node_ids[local_corner];
-                    let corner_is_left = endpoint_ids[0] == corner_node_id;
-                    let toward_left = corner_is_left == toward_corner;
-                    let fraction = if toward_left {
-                        0.5 - delta
-                    } else {
-                        0.5 + delta
-                    };
-                    let left = topology.nodes[*node_index
-                        .get(&endpoint_ids[0])
-                        .ok_or_else(|| invalid("corner-star left endpoint is absent"))?]
-                    .clone();
-                    let right = topology.nodes[*node_index
-                        .get(&endpoint_ids[1])
-                        .ok_or_else(|| invalid("corner-star right endpoint is absent"))?]
-                    .clone();
-                    let edge = super::super::sorted_edge(endpoint_ids);
-                    consume_candidate_work(candidate_work, options, cancellation)?;
-                    let Some(point) = geometry::edge_geometry(
-                        input,
-                        evaluation,
-                        options,
-                        geometry::EdgeGeometryRequest {
-                            left: &left,
-                            right: &right,
-                            exact_edge_id: exact_edges.get(&edge),
-                            surface_uses: surface_uses.get(&edge).map_or(&[], Vec::as_slice),
-                            fraction,
-                        },
-                    )?
-                    else {
-                        complete = false;
-                        break;
-                    };
-                    let midpoint_node_id = element.node_ids[4 + local_edge];
-                    let midpoint_index = *node_index
-                        .get(&midpoint_node_id)
-                        .ok_or_else(|| invalid("corner-star midside node is absent"))?;
-                    topology.nodes[midpoint_index].coordinates_m = point.coordinates_m;
-                    topology.nodes[midpoint_index].exact_parameters = point.exact_parameters;
-                }
-                if !complete {
-                    continue;
-                }
-                match jacobian::validate_elements(
+                let moved = transaction::edit_nodes(
                     topology,
-                    incident_elements.iter().copied(),
-                    input.request.resources.maximum_search_work,
-                    input.request.resources.maximum_recursion_depth,
-                    options.cancellation_check_interval,
-                    cancellation,
-                    jacobian_work,
-                ) {
-                    Ok(()) => return Ok(changed_count(topology, &baseline)),
-                    Err(failure)
-                        if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh =>
-                    {
-                        let profile = jacobian::optimization_margin_profile_elements(
-                            topology,
-                            incident_elements.iter().copied(),
-                            cancellation,
-                        )?;
-                        if profile > initial_profile {
-                            return Ok(changed_count(topology, &baseline));
+                    &slots,
+                    evaluation.control,
+                    |topology, control| {
+                        let evaluation = PreparedEvaluation {
+                            control,
+                            ..evaluation
+                        };
+                        for &local_edge in &local_edges {
+                            let endpoints = TETRAHEDRON_MIDSIDE_EDGE_CORNERS[local_edge];
+                            let mut endpoint_ids = [nodes[endpoints[0]], nodes[endpoints[1]]];
+                            endpoint_ids.sort_unstable();
+                            let toward_left =
+                                (endpoint_ids[0] == nodes[local_corner]) == toward_corner;
+                            let fraction = if toward_left {
+                                0.5 - delta
+                            } else {
+                                0.5 + delta
+                            };
+                            let left = &topology.nodes
+                                [geometry::node_slot(&topology.nodes, endpoint_ids[0])?];
+                            let right = &topology.nodes
+                                [geometry::node_slot(&topology.nodes, endpoint_ids[1])?];
+                            let edge = super::super::sorted_edge(endpoint_ids);
+                            consume_candidate_work(candidate_work, options, cancellation)?;
+                            let Some(point) = geometry::edge_geometry(
+                                input,
+                                evaluation,
+                                options,
+                                geometry::EdgeGeometryRequest {
+                                    left,
+                                    right,
+                                    exact_edge_id: indexes.edges.get(&edge),
+                                    surface_uses: indexes.surfaces.get(&edge).unwrap_or_default(),
+                                    fraction,
+                                },
+                            )?
+                            else {
+                                return Ok(false);
+                            };
+                            let slot = geometry::node_slot(&topology.nodes, nodes[4 + local_edge])?;
+                            topology.nodes[slot].coordinates_m = point.coordinates_m;
+                            topology.nodes[slot].exact_parameters = point.exact_parameters;
                         }
-                    }
-                    Err(failure) => {
-                        restore(topology, &baseline);
-                        return Err(failure);
-                    }
+                        match jacobian::validate_elements(
+                            topology,
+                            incident.iter().copied(),
+                            input.request.resources.maximum_search_work,
+                            input.request.resources.maximum_recursion_depth,
+                            options.cancellation_check_interval,
+                            cancellation,
+                            jacobian::ValidationWork {
+                                counter: jacobian_work,
+                                storage: Storage(Some(control)),
+                            },
+                        ) {
+                            Ok(()) => Ok(true),
+                            Err(failure)
+                                if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh =>
+                            {
+                                let profile = jacobian::optimization_margin_profile_elements(
+                                    topology,
+                                    incident.iter().copied(),
+                                    cancellation,
+                                    Storage(Some(control)),
+                                )?;
+                                Ok(profile > initial_profile)
+                            }
+                            Err(failure) => Err(failure),
+                        }
+                    },
+                )?;
+                if moved > 0 {
+                    return Ok(moved);
                 }
             }
         }
-        restore(topology, &baseline);
     }
     Ok(0)
 }
-
-fn changed_count(topology: &SolverMeshTopology, baseline: &[(usize, SolverMeshNode)]) -> u64 {
-    baseline
-        .iter()
-        .filter(|(index, node)| topology.nodes[*index] != *node)
-        .count() as u64
-}
-
-fn restore(topology: &mut SolverMeshTopology, baseline: &[(usize, SolverMeshNode)]) {
-    for (index, node) in baseline {
-        topology.nodes[*index] = node.clone();
-    }
-}
-
 fn invalid(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     super::error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
 }

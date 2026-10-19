@@ -1,7 +1,7 @@
 //! Transport is explicit immutable invocation data; worker settings are ceilings.
 use super::*;
 
-fn fixture() -> (
+pub(super) fn fixture() -> (
     AnalysisHostWorkload,
     PreparedAnalysisHostInvocation,
     MemoryObjects,
@@ -197,5 +197,27 @@ fn oversized_output_set_root_rejects_before_any_cache_read() {
         reads: RefCell::new(Vec::new()),
     };
     assert!(import_analysis_output_set(&source, response, &host).is_err());
+    assert!(source.reads.borrow().is_empty());
+}
+
+#[test]
+fn host_failure_retains_original_cause_and_reads_no_success_artifacts() {
+    let (host, _, _) = fixture();
+    let source = RecordingObjects {
+        objects: Default::default(),
+        reads: RefCell::new(Vec::new()),
+    };
+    let message = "modal eigensolver rejected its numerical result";
+    let error = import_analysis_output_set(
+        &source,
+        runmat_execution_artifact::ProgramExecutionResponse::Failure {
+            message: message.into(),
+        },
+        &host,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(error, AnalysisBridgeError::HostExecution(ref original) if original == message)
+    );
     assert!(source.reads.borrow().is_empty());
 }

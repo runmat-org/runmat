@@ -109,7 +109,9 @@ pub(crate) async fn execute_with_pool(
         .map(|declaration| declaration.state_id.clone())
         .collect();
     let mut state_publications = BTreeMap::new();
-    let solve = coordinator.prepare_solve().map_err(protocol)?;
+    let solve = coordinator
+        .prepare_solve()
+        .map_err(|e| protocol(format!("thermal solve preparation: {e}")))?;
     let (executed, accounting) = execute_one(
         pool,
         &solve.host,
@@ -128,7 +130,7 @@ pub(crate) async fn execute_with_pool(
     {
         let Some(task) = coordinator
             .prepare_next_observation(pool)
-            .map_err(protocol)?
+            .map_err(|e| protocol(format!("thermal observation preparation: {e}")))?
         else {
             break;
         };
@@ -147,7 +149,9 @@ pub(crate) async fn execute_with_pool(
             .map_err(protocol)?;
     }
 
-    let accuracy = coordinator.prepare_accuracy().map_err(protocol)?;
+    let accuracy = coordinator
+        .prepare_accuracy()
+        .map_err(|e| protocol(format!("thermal accuracy preparation: {e}")))?;
     let (executed, accounting) = execute_one(
         pool,
         &accuracy.host,
@@ -163,7 +167,9 @@ pub(crate) async fn execute_with_pool(
         .map_err(protocol)?;
 
     for state_id in state_ids {
-        let state = coordinator.prepare_next_state().map_err(protocol)?;
+        let state = coordinator
+            .prepare_next_state()
+            .map_err(|e| protocol(format!("thermal state preparation: {e}")))?;
         let (executed, accounting) = execute_one(
             pool,
             &state.host,
@@ -185,7 +191,9 @@ pub(crate) async fn execute_with_pool(
     }
 
     coordinator.freeze_baseline().map_err(protocol)?;
-    let publication = coordinator.prepare_publication().map_err(protocol)?;
+    let publication = coordinator
+        .prepare_publication()
+        .map_err(|e| protocol(format!("thermal publication preparation: {e}")))?;
     let (executed, accounting) = execute_one(
         pool,
         &publication.host,

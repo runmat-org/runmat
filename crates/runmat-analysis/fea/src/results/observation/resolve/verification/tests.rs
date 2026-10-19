@@ -179,3 +179,38 @@ fn exact_path_limit_retains_repeated_positions_and_canonical_ordinals() {
     );
     assert_ne!(samples[0].identity, samples[1].identity);
 }
+
+#[test]
+fn original_verification_inventory_limit_remains_typed_at_source_boundary() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let projection = projection(order);
+        let definition = scalar_definition();
+        let mut step = thermal_step(vec![ObservationRequest::Field(spec(
+            "budget",
+            ObservationTarget::WholeModel,
+        ))]);
+        let plan = resolve_observation_plan(
+            &step,
+            &projection,
+            std::slice::from_ref(&definition),
+            ObservationLimits::default(),
+        )
+        .unwrap();
+        let topology =
+            super::super::super::topology::resources::solid_observation_topology_resident_bytes(
+                &projection,
+            )
+            .unwrap();
+        let catalog = super::super::field_catalog::declaration_inventory_resident_bytes(1).unwrap();
+        step.accuracy.resources.maximum_resident_bytes = topology + catalog - 1;
+        let error =
+            verify_observation_plan(&step, &projection, std::slice::from_ref(&definition), &plan)
+                .unwrap_err();
+        assert!(matches!(
+            super::super::super::source::observation_error(error),
+            crate::execution::AnalysisExecutionError::Limit(
+                "recovered-field declaration inventory"
+            )
+        ));
+    }
+}

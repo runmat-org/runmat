@@ -731,7 +731,9 @@ impl RunMatWasm {
                 count => runmat_hir::RequestedOutputCount::Exactly(count as usize),
             };
         }
-        let exec_response = session.execute_request_with_inputs(request, request_payload.input_manifest).await;
+        let exec_response = session
+            .execute_request_with_inputs(request, request_payload.input_manifest)
+            .await;
         *self.session.borrow_mut() = session;
         let mut payload = match exec_response.result {
             Ok(outcome) => {
@@ -882,32 +884,131 @@ impl RunMatWasm {
         self.ensure_not_disposed()?;
         let payload = FeaCapabilitiesPayload::for_runtime(
             runmat_runtime::analysis::AnalysisExecutionCapability::CheckOnly,
-            [".stl", ".step", ".stp", ".obj", ".ply", ".gltf", ".glb"]
-                .into_iter()
-                .map(str::to_owned)
-                .collect(),
+            [".stl", ".step", ".stp", ".obj", ".ply", ".gltf", ".glb"].into_iter().map(str::to_owned).collect(),
         );
-        serde_wasm_bindgen::to_value(&payload)
+        crate::wire::json_contract_to_js(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA capabilities: {err}")))
     }
 
     #[wasm_bindgen(js_name = checkFeaSource)]
-    pub async fn check_fea_source_js(&self, path: String, inputs: JsValue) -> Result<JsValue, JsValue> {
+    pub async fn check_fea_source_js(
+        &self,
+        path: String,
+        inputs: JsValue,
+    ) -> Result<JsValue, JsValue> {
         self.ensure_not_disposed()?;
-        let inputs: Option<runmat_filesystem::pinned::InputManifest> = if inputs.is_null() || inputs.is_undefined() {
-            None
-        } else {
-            Some(serde_wasm_bindgen::from_value(inputs).map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?)
-        };
-        let _filesystem = inputs.map(|manifest| {
-            runmat_filesystem::pinned::PinnedFsProvider::new(runmat_filesystem::current_provider(), manifest)
+        let inputs: Option<runmat_filesystem::pinned::InputManifest> =
+            if inputs.is_null() || inputs.is_undefined() {
+                None
+            } else {
+                Some(
+                    serde_wasm_bindgen::from_value(inputs)
+                        .map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?,
+                )
+            };
+        let _filesystem = inputs
+            .map(|manifest| {
+                runmat_filesystem::pinned::PinnedFsProvider::new(
+                    runmat_filesystem::current_provider(),
+                    manifest,
+                )
                 .map(|provider| runmat_filesystem::replace_provider(std::sync::Arc::new(provider)))
-        }).transpose().map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?;
+            })
+            .transpose()
+            .map_err(|err| js_error(&format!("Invalid run inputs: {err}")))?;
         let payload = check_fea_path(path, &self.session)
             .await
             .map_err(|err| js_error(&err))?;
-        serde_wasm_bindgen::to_value(&payload)
+        crate::wire::json_contract_to_js(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize FEA check result: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = checkFeaWorkspace)]
+    pub async fn check_fea_workspace_js(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let request: runmat_core::FeaWorkspaceCheckRequest = serde_wasm_bindgen::from_value(request)
+            .map_err(|error| js_error(&format!("Invalid candidate workspace: {error}")))?;
+        let mut session = { let mut slot = self.session.borrow_mut(); std::mem::take(&mut *slot) };
+        let result = session.check_fea_workspace(request).await;
+        *self.session.borrow_mut() = session;
+        let result = result.map_err(|error| js_error(&error))?;
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&format!("Failed to serialize candidate check: {error}")))
+    }
+
+    #[wasm_bindgen(js_name = checkFeaWorkingSource)]
+    pub async fn check_fea_working_source_js(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let request: runmat_core::FeaWorkingCheckRequest = serde_wasm_bindgen::from_value(request)
+            .map_err(|error| js_error(&format!("Invalid working source: {error}")))?;
+        let mut session = { let mut slot = self.session.borrow_mut(); std::mem::take(&mut *slot) };
+        let result = session.check_fea_working_source(request).await;
+        *self.session.borrow_mut() = session;
+        let result = result.map_err(|error| js_error(&error))?;
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = inspectFeaChanges)]
+    pub async fn inspect_fea_changes_js(&self, id: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let id: runmat_fea_source::FeaChangeSetId = serde_wasm_bindgen::from_value(id).map_err(|error| js_error(&error.to_string()))?;
+        let mut session = { let mut slot = self.session.borrow_mut(); std::mem::take(&mut *slot) };
+        let result = session.inspect_fea_changes(id).await;
+        *self.session.borrow_mut() = session;
+        let result = result.map_err(|error| js_error(&error))?;
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = reviewFeaChanges)]
+    pub async fn review_fea_changes_js(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let request: runmat_fea_source::FeaChangeSetReviewRequest = serde_wasm_bindgen::from_value(request).map_err(|error| js_error(&error.to_string()))?;
+        let session = { let mut slot = self.session.borrow_mut(); std::mem::take(&mut *slot) };
+        let result = session.review_fea_changes(request).await;
+        *self.session.borrow_mut() = session;
+        let result = result.map_err(|error| js_error(&error))?;
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = stageFeaChanges)]
+    pub async fn stage_fea_changes_js(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let request: runmat_fea_source::FeaChangeSetRequest = serde_wasm_bindgen::from_value(request).map_err(|error| js_error(&error.to_string()))?;
+        let mut session = { let mut slot = self.session.borrow_mut(); std::mem::take(&mut *slot) };
+        let result = session.stage_fea_changes(request).await;
+        *self.session.borrow_mut() = session;
+        let result = result.map_err(|error| js_error(&error))?;
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = publishFeaChanges)]
+    pub async fn publish_fea_changes_js(&self, id: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let id: runmat_fea_source::FeaChangeSetId = serde_wasm_bindgen::from_value(id).map_err(|error| js_error(&error.to_string()))?;
+        let mut session = { let mut slot = self.session.borrow_mut(); std::mem::take(&mut *slot) };
+        let result = session.publish_fea_changes(id).await;
+        *self.session.borrow_mut() = session;
+        let result = result.map_err(|error| js_error(&error))?;
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = discardFeaChanges)]
+    pub async fn discard_fea_changes_js(&self, id: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let id: runmat_fea_source::FeaChangeSetId = serde_wasm_bindgen::from_value(id).map_err(|error| js_error(&error.to_string()))?;
+        let session = { let mut slot = self.session.borrow_mut(); std::mem::take(&mut *slot) };
+        let result = session.discard_fea_changes(id).await;
+        *self.session.borrow_mut() = session;
+        let result = result.map_err(|error| js_error(&error))?;
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = browseFeaSource)]
+    pub fn browse_fea_source_js(&self, request: JsValue) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let request: runmat_runtime::analysis::FeaBrowseRequest = serde_wasm_bindgen::from_value(request)
+            .map_err(|error| js_error(&format!("Invalid FEA browse request: {error}")))?;
+        let result = runmat_runtime::analysis::FeaBrowseOutcome::from(self.session.borrow_mut().browse_fea_source(&request));
+        crate::wire::json_contract_to_js(&result).map_err(|error| js_error(&error.to_string()))
     }
 
     #[wasm_bindgen(js_name = feaField)]

@@ -31,11 +31,29 @@ pub(super) fn map_volume_error(error: DelaunayVolumeMeshError) -> Box<MeshingFai
     )
 }
 
+pub(super) fn map_diagnostic_error(error: crate::MeshingSubtaskCacheError) -> Box<MeshingFailure> {
+    let (category, reason) = match error {
+        crate::MeshingSubtaskCacheError::Control(error) => {
+            (crate::geometry_failure::category(error.kind), error.reason)
+        }
+        crate::MeshingSubtaskCacheError::Storage(reason) => {
+            (MeshingFailureCategory::ArtifactBudgetExceeded, reason)
+        }
+    };
+    volume_failure(
+        category,
+        "inspect the bounded volume diagnostic persistence",
+        &reason,
+    )
+}
+
 pub(super) fn map_codec_error(error: DelaunayVolumeMeshCodecError) -> Box<MeshingFailure> {
     let category = match error.kind {
-        DelaunayVolumeMeshCodecErrorKind::InvalidEncoding => {
+        DelaunayVolumeMeshCodecErrorKind::InvalidEncoding
+        | DelaunayVolumeMeshCodecErrorKind::ResourceLimit => {
             MeshingFailureCategory::ArtifactBudgetExceeded
         }
+        DelaunayVolumeMeshCodecErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
         DelaunayVolumeMeshCodecErrorKind::InvalidMesh => {
             MeshingFailureCategory::InternalInvariantViolation
         }

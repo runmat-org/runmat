@@ -1,46 +1,95 @@
 use super::*;
 
 pub(super) fn execute(solved: &SolvedPipeline) -> RecoveredPipeline {
-    let step = solved.prepared.host.workload.step;
-    let mesh = SolverMeshArtifact::canonical_decode(&solved.prepared.inputs[1].payload()).unwrap();
-    let topology =
-        StructuralRecoveredFieldTopology::derive(&solved.solve.model, Some(&mesh)).unwrap();
-    let request = FieldRecoveryRequest::new(
-        step,
-        FieldRecoverySource::SolverResult(solved.source_result),
-        runmat_analysis_fea::execution::FieldTopologyIdentity::Structural {
-            topology: solved.constraint_plan.topology,
+    let prepared = runmat_analysis_execution::prepare_structural_field_recovery(
+        runmat_analysis_execution::StructuralFieldRecoveryPreparation {
+            source_host: solved.prepared.host.clone(),
+            source_invocation: solved.prepared.inputs[0].clone(),
+            source_result: solved.solver_result.clone(),
+            mesh: Some(solved.prepared.inputs[1].clone()),
+            program_revision: revision(),
+            chunk_bytes: 4096,
+            inventory_limits: ObjectInventoryLimits::default(),
         },
-        runmat_analysis_fea::execution::FieldRecoveryPlan::resolve_structural(
-            solved.solve.procedure_step().unwrap(),
-            topology,
-            solved.constraint_plan.groups.len(),
+    )
+    .unwrap();
+    let host = prepared.host;
+    let inputs = prepared.inputs;
+    assert_eq!(
+        prepared.resource_plan.input.accuracy_ceiling,
+        solved.solve.procedure_step().unwrap().accuracy.resources
+    );
+    assert_eq!(
+        prepared.resource_plan.input.structural_operator(),
+        None,
+        "publishing static fields must not invent an equilibrium solve"
+    );
+    assert_eq!(
+        runmat_analysis_execution::build_prepared_structural_recovery_resource_plan(
+            &prepared.request,
+            &inputs,
+            host.output_policy,
         )
         .unwrap(),
-    )
-    .unwrap();
-    let request = runmat_analysis_execution::prepare_analysis_objects(
-        AnalysisNumericalObjectKind::FieldRecoveryRequest,
-        request.identity().digest(),
-        &request.canonical_bytes().unwrap(),
-        4096,
-        ObjectNamespace::InputValue,
-        ObjectInventoryLimits::default(),
-    )
-    .unwrap();
-    let inputs = vec![
-        request,
-        solved.prepared.inputs[0].clone(),
-        solved.solver_result.clone(),
-        solved.prepared.inputs[1].clone(),
-    ];
-    let host = test_host_for_inputs(
-        &solved.prepared.host,
-        AnalysisWorkKind::RecoverField,
-        &inputs,
-        vec![AnalysisNumericalObjectKind::Field],
-        Some(2),
+        prepared.resource_plan
     );
+    for substitution in 0..3 {
+        let mut input = prepared.resource_plan.input.clone();
+        let runmat_analysis_fea::planning::resource::FeaResourceDemand::StructuralFieldRecovery(
+            demand,
+        ) = &mut input.demand
+        else {
+            panic!("static field recovery demand")
+        };
+        match substitution {
+            0 => demand.constraint_compilation_peak_bytes.0 -= 1,
+            1 => demand.construction_workspace_bytes.0 -= 1,
+            _ => demand.constraint_plan_digest = digest("foreign-constraint-plan"),
+        }
+        let forged = runmat_analysis_fea::planning::resource::build_resource_plan(input).unwrap();
+        let mut substituted = inputs.clone();
+        let resource = substituted
+            .iter_mut()
+            .find(|i| i.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+            .unwrap();
+        *resource = runmat_analysis_execution::prepare_analysis_objects(
+            AnalysisNumericalObjectKind::ResourcePlan,
+            forged.identity.digest(),
+            &forged.canonical_bytes().unwrap(),
+            4096,
+            ObjectNamespace::InputValue,
+            ObjectInventoryLimits::default(),
+        )
+        .unwrap();
+        let substituted_host = test_host_for_inputs(
+            &host,
+            AnalysisWorkKind::RecoverField,
+            &substituted,
+            vec![AnalysisNumericalObjectKind::Field],
+            Some(2),
+        );
+        assert!(
+            NativeAnalysisKernel
+                .execute(AnalysisKernelInvocation {
+                    output_policy: output_policy(),
+                    kind: AnalysisWorkKind::RecoverField,
+                    host: &substituted_host,
+                    inputs: &substituted,
+                })
+                .is_err(),
+            "positive rehashed demand substitution {substitution}"
+        );
+    }
+    let mut missing = inputs.clone();
+    missing.retain(|i| i.manifest.kind != AnalysisNumericalObjectKind::ResourcePlan);
+    assert!(NativeAnalysisKernel
+        .execute(AnalysisKernelInvocation {
+            output_policy: output_policy(),
+            kind: AnalysisWorkKind::RecoverField,
+            host: &host,
+            inputs: &missing,
+        })
+        .is_err());
     let outputs = NativeAnalysisKernel
         .execute(AnalysisKernelInvocation {
             output_policy: output_policy(),

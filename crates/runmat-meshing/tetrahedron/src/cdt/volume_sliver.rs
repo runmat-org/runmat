@@ -3,18 +3,27 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     validate_delaunay_volume_provenance, validate_delaunay_volume_quality,
-    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayVolumeNode,
-    DelaunayVolumeProvenanceErrorKind, DelaunayVolumeQuality, DelaunayVolumeQualityError,
-    DelaunayVolumeQualityErrorKind, DelaunayVolumeRefinementInput, DelaunayVolumeTopology,
+    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayTetrahedronQuality,
+    DelaunayVolumeNode, DelaunayVolumeProvenanceErrorKind, DelaunayVolumeQuality,
+    DelaunayVolumeQualityError, DelaunayVolumeQualityErrorKind, DelaunayVolumeRefinementInput,
+    DelaunayVolumeTopology,
 };
 
 mod admission;
+mod frontier;
 mod insertion;
+mod offcenter;
 pub(in crate::cdt) mod reconnection;
+#[cfg(test)]
+mod reference;
 mod relocation;
+#[cfg(test)]
+mod retained_state;
 mod retriangulate;
 mod validation;
 pub(in crate::cdt) mod work;
+mod working;
+pub(in crate::cdt) use working::treatment::run_in_state;
 
 pub(super) const CAVITY_SMOOTHING_STEPS: [f64; 4] =
     [1.0 / 1_024.0, 1.0 / 128.0, 1.0 / 16.0, 1.0 / 2.0];
@@ -22,12 +31,18 @@ pub(super) const MAXIMUM_CAVITY_SMOOTHING_ITERATIONS: usize = 100;
 pub(super) const MAXIMUM_CAVITY_SEARCH_DIRECTIONS: usize = 20;
 pub(super) const MAXIMUM_INSERTION_LOOKAHEAD_DEPTH: u8 = 1;
 
-use admission::{quality_spectrum, worst_quality_source, QualityObjective};
+#[cfg(test)]
+use admission::worst_quality_source;
+use admission::QualityObjective;
+#[cfg(test)]
 use insertion::insertion_candidates;
 pub(in crate::cdt) use insertion::insertion_identity_is_valid;
+#[cfg(test)]
 use reconnection::reconnection_candidates;
+#[cfg(test)]
 use relocation::{relocation_candidates, RelocationSearchScope};
 pub use validation::validate_delaunay_volume_sliver_treatment;
+#[cfg(test)]
 use work::OptimizationWork;
 
 #[derive(Clone, Copy)]
@@ -37,7 +52,8 @@ pub(super) struct SliverSearchPolicy {
     objective: QualityObjective,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeSliverOptions {
     pub maximum_passes: u64,
     pub maximum_candidate_evaluations_per_pass: u64,
@@ -91,7 +107,9 @@ pub enum DelaunayVolumeReconnectionKind {
 pub struct DelaunayVolumeSliverReconnection {
     pub kind: DelaunayVolumeReconnectionKind,
     pub source_tetrahedron_node_identities: [StableDigest; 4],
+    #[serde(deserialize_with = "runmat_canonical_codec::deserialize_exact_vec")]
     pub removed_tetrahedron_node_identities: Vec<[StableDigest; 4]>,
+    #[serde(deserialize_with = "runmat_canonical_codec::deserialize_exact_vec")]
     pub created_tetrahedron_node_identities: Vec<[StableDigest; 4]>,
 }
 
@@ -164,7 +182,9 @@ pub fn treat_delaunay_volume_slivers(
     validate_options(options)?;
     validate_input(input, options, cancellation)?;
     let treatment = run_treatment(
-        input,
+        input.topology.clone(),
+        input.quality.clone(),
+        input.into(),
         options,
         cancellation,
         QualityConvergenceMode::ShapeOnly,
@@ -177,220 +197,72 @@ pub fn treat_delaunay_volume_slivers(
 pub(super) enum QualityConvergenceMode {
     ShapeOnly,
     Coupled,
-    StalledRefinement,
+}
+
+impl SliverSearchPolicy {
+    fn current_objective(
+        self,
+        shape: Option<&DelaunayTetrahedronQuality>,
+        refinement: Option<&DelaunayTetrahedronQuality>,
+    ) -> QualityObjective {
+        if matches!(
+            self.refinement,
+            admission::CandidateRefinementPolicy::AllowForCoupledConvergence
+        ) {
+            QualityConvergenceMode::Coupled.objective(shape, refinement)
+        } else {
+            self.objective
+        }
+    }
 }
 
 impl QualityConvergenceMode {
     fn refinement_policy(self) -> admission::CandidateRefinementPolicy {
         match self {
             Self::ShapeOnly => admission::CandidateRefinementPolicy::Preserve,
-            Self::Coupled | Self::StalledRefinement => {
-                admission::CandidateRefinementPolicy::AllowForCoupledConvergence
-            }
+            Self::Coupled => admission::CandidateRefinementPolicy::AllowForCoupledConvergence,
         }
     }
 
-    fn objective(self) -> QualityObjective {
-        match self {
-            Self::ShapeOnly | Self::Coupled => QualityObjective::Shape,
-            Self::StalledRefinement => QualityObjective::Refinement,
+    fn objective(
+        self,
+        shape: Option<&DelaunayTetrahedronQuality>,
+        refinement: Option<&DelaunayTetrahedronQuality>,
+    ) -> QualityObjective {
+        if matches!(self, Self::Coupled)
+            && refinement.map_or(0., |cell| cell.refinement_violation_ratio)
+                > shape.map_or(0., |cell| cell.optimization_violation_ratio)
+        {
+            QualityObjective::Refinement
+        } else {
+            QualityObjective::Shape
         }
     }
 }
 
 pub(super) fn run_treatment(
-    input: DelaunayVolumeRefinementInput<'_>,
+    topology: DelaunayVolumeTopology,
+    quality: DelaunayVolumeQuality,
+    context: super::volume_refinement::context::RefinementContext<'_>,
     options: DelaunayVolumeSliverOptions,
     cancellation: &dyn MeshingCancellationSignal,
     mode: QualityConvergenceMode,
 ) -> Result<DelaunayVolumeSliverTreatment, DelaunayVolumeSliverError> {
-    let span = tracing::info_span!(
-        "meshing.tetrahedron.volume_optimization",
-        tetrahedron_count = input.topology.tetrahedra.len(),
-    );
-    let _guard = span.enter();
-    let mut topology = input.topology.clone();
-    let mut quality = input.quality.clone();
-    let mut mutations = Vec::new();
-    for pass in 0..options.maximum_passes {
-        checkpoint(pass, options, cancellation)?;
-        if matches!(
-            mode,
-            QualityConvergenceMode::Coupled | QualityConvergenceMode::StalledRefinement
-        ) && !mutations.is_empty()
-            && quality.worst_refinement_tetrahedron.is_some()
-        {
-            tracing::info!(
-                pass,
-                mutation_count = mutations.len(),
-                "volume optimization yielded to coupled refinement"
-            );
-            return Ok(DelaunayVolumeSliverTreatment {
-                topology,
-                quality,
-                mutations,
-            });
-        }
-        let objective = mode.objective();
-        let Some(source) = worst_quality_source(&quality, &topology, objective) else {
-            tracing::info!(
-                pass,
-                mutation_count = mutations.len(),
-                "volume optimization completed"
-            );
-            return Ok(DelaunayVolumeSliverTreatment {
-                topology,
-                quality,
-                mutations,
-            });
-        };
-        tracing::info!(
-            pass,
-            optimization_violation_ratio = source.optimization_violation_ratio,
-            boundary_node_count = source.boundary_node_count,
-            protected_facet_count = source.protected_facet_count,
-            metric_radius_edge_ratio = source.metric_radius_edge_ratio,
-            metric_scaled_jacobian = source.metric_scaled_jacobian,
-            "volume optimization pass started"
-        );
-        let current_spectrum = quality_spectrum(&quality, objective);
-        let current = DelaunayVolumeRefinementInput {
-            topology: &topology,
-            metric_request: input.metric_request,
-            provenance: input.provenance,
-            quality: &quality,
-            quality_options: input.quality_options,
-            fixed_node_identities: input.fixed_node_identities,
-        };
-        let mut work = OptimizationWork::new(
-            options.maximum_candidate_evaluations_per_pass,
-            options.cancellation_check_interval,
-            cancellation,
-        );
-        let reconnection = reconnection_candidates(
-            current,
-            source,
-            &current_spectrum,
-            cancellation,
-            &mut work,
-            SliverSearchPolicy {
-                options,
-                refinement: mode.refinement_policy(),
-                objective,
-            },
-            reconnection::ReconnectionMode {
-                allow_lookahead: true,
-                maximum_candidates: None,
-            },
-        )?;
-        if let Some(candidate) = reconnection.candidate {
-            topology = candidate.topology;
-            quality = candidate.quality;
-            mutations.extend(candidate.mutations);
-            tracing::info!(pass, "volume optimization admitted a local reconnection");
-            continue;
-        }
-        let search = relocation_candidates(
-            current,
-            source,
-            &current_spectrum,
-            cancellation,
-            &mut work,
-            SliverSearchPolicy {
-                options,
-                refinement: mode.refinement_policy(),
-                objective,
-            },
-            RelocationSearchScope::Complete,
-        )?;
-        if let Some(candidate) = search.candidate {
-            topology = candidate.topology;
-            quality = candidate.quality;
-            mutations.push(candidate.mutation);
-            continue;
-        }
-        let insertion = insertion_candidates(
-            current,
-            source,
-            &current_spectrum,
-            cancellation,
-            &mut work,
-            SliverSearchPolicy {
-                options,
-                refinement: mode.refinement_policy(),
-                objective,
-            },
-            MAXIMUM_INSERTION_LOOKAHEAD_DEPTH,
-        )?;
-        let Some(candidate) = insertion.candidate else {
-            let source_nodes = source.node_identities.map(|identity| {
-                topology
-                    .nodes
-                    .binary_search_by_key(&identity, |node| node.identity)
-                    .ok()
-                    .map(|index| topology.nodes[index].coordinates_m)
-            });
-            return Err(error(
-                DelaunayVolumeSliverErrorKind::NoAdmissibleOptimization,
-                format!(
-                    "no legal reconnection, interior relocation, or protected-boundary insertion improves volume defect {} at {:?} with {} boundary nodes and {} protected facets, optimization ratio {}, scaled Jacobian {}, and target {}; reconnection rejections {:?}; relocation rejections {:?}; insertion rejections {:?}; first insertion rejection details {:?}",
-                    stable_simplex(source.node_identities),
-                    source_nodes,
-                    source.boundary_node_count,
-                    source.protected_facet_count,
-                    source.optimization_violation_ratio,
-                    source.metric_scaled_jacobian,
-                    input.quality_options.minimum_metric_scaled_jacobian,
-                    reconnection.rejection_counts,
-                    search.rejection_counts,
-                    insertion.rejection_counts,
-                    insertion.first_rejection_details,
-                ),
-            ));
-        };
-        topology = candidate.topology;
-        quality = candidate.quality;
-        mutations.extend(candidate.mutations);
-        tracing::info!(
-            pass,
-            "volume optimization admitted a local Steiner insertion"
-        );
-    }
-    let remaining = worst_sliver(
-        &quality,
-        &topology,
-        input.quality_options.minimum_metric_scaled_jacobian,
+    let prepared = super::volume_quality::working::PreparedLocalQuality::prepare(
+        context.metric_request,
+        context.provenance,
+        context.quality_options,
     )
-    .map(|tetrahedron| tetrahedron.metric_scaled_jacobian)
-    .unwrap_or(input.quality_options.minimum_metric_scaled_jacobian);
-    Err(error(
-        DelaunayVolumeSliverErrorKind::ResourceLimit,
-        format!(
-            "sliver treatment exhausted {} passes with minimum metric scaled Jacobian {remaining}",
-            options.maximum_passes
-        ),
-    ))
-}
-
-fn worst_sliver<'a>(
-    quality: &'a DelaunayVolumeQuality,
-    topology: &DelaunayVolumeTopology,
-    _minimum: f64,
-) -> Option<&'a super::DelaunayTetrahedronQuality> {
-    quality
-        .tetrahedra
-        .iter()
-        .filter(|tetrahedron| tetrahedron.requires_optimization())
-        .max_by(|left, right| {
-            super::volume_quality::compare_violation_priority(
-                left.optimization_violation_ratio,
-                super::volume_quality::tetrahedron_geometry_key(topology, left.node_identities),
-                left.node_identities,
-                right.optimization_violation_ratio,
-                super::volume_quality::tetrahedron_geometry_key(topology, right.node_identities),
-                right.node_identities,
-            )
-        })
+    .map_err(quality_error)?;
+    working::treatment::run(
+        topology,
+        quality,
+        context,
+        &prepared,
+        options,
+        cancellation,
+        mode,
+    )
 }
 
 pub(super) fn validate_options(

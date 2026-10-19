@@ -39,7 +39,7 @@ pub fn constraint_coupling_workspace_profile(
     )?;
     Ok(p)
 }
-pub(super) fn rows_profile(
+pub(in crate::constraints) fn rows_profile(
     n: usize,
     kind: ConstraintCouplingKind,
     id_bytes: usize,
@@ -82,3 +82,21 @@ pub(super) fn rows_profile(
 }
 #[cfg(test)]
 mod tests;
+
+impl ConstraintCouplingWorkspaceProfile {
+    /// Coordinate/weight/lever-arm work excluding row buffers owned by row construction.
+    pub(in crate::constraints) fn geometry_workspace_bytes(
+        &self,
+    ) -> Result<u64, ConstraintPlanError> {
+        [
+            slots::<(StableDigest, [f64; 3])>(self.coordinate_slots)?,
+            slots::<(u64, StableDigest)>(self.identity_slots)?,
+            slots::<(StableDigest, f64)>(self.measure_slots)?,
+            slots::<ConstraintCouplingWeight>(self.weight_slots)?,
+            slots::<f64>(self.radii_slots)?,
+            slots::<[f64; 3]>(self.arm_slots)?,
+        ]
+        .into_iter()
+        .try_fold(0, add)
+    }
+}

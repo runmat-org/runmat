@@ -104,6 +104,8 @@ pub(crate) mod bridge {
 
     #[derive(Debug, Clone, Copy)]
     struct OcctImportOptions {
+        // Metres per coordinate unit requested for STEP XCAF transfer.
+        step_coordinate_unit_m: f64,
         linear_deflection: f64,
         angular_deflection: f64,
         relative_deflection: bool,
@@ -494,6 +496,7 @@ pub(crate) mod bridge {
         fn start_exact_evaluator_session(
             representation: &[u8],
             meters_per_source_unit: f64,
+            face_keys: &[u64],
         ) -> Result<u64>;
 
         fn exact_curve_range(session_id: u64, shape_key: u64) -> Result<OcctCurveRangePayload>;

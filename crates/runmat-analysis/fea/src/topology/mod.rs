@@ -8,11 +8,13 @@ mod element;
 mod finite_volume;
 mod flow;
 mod identity;
+mod neighbors;
 mod point_location;
 pub(crate) mod quadrature;
 mod resources;
 mod solid_integration;
 pub(crate) mod storage;
+mod surface_search;
 #[cfg(test)]
 pub(crate) mod test_meshes;
 
@@ -35,3 +37,14 @@ pub use solid_integration::{
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) use resources::measured as measure_test_allocations;
+
+pub use surface_search::{
+    BoundaryPairingError, BoundaryPairingPolicy, BoundaryProjectionDifferentialPolicy,
+    BoundaryProjectionDirection, BoundaryProjectionMixedVariation, BoundaryProjectionVariation,
+    BoundarySearchError, BoundarySearchPolicy, BoundaryStationaryPolicy, BoundarySurface,
+    BoundarySurfaceBounds, BoundarySurfaceIndex, BoundarySurfaceMatch, BoundarySurfacePoint,
+    ClosestBoundaryPoint, OrientedBoundarySurface, StationaryBoundaryProjection,
+};

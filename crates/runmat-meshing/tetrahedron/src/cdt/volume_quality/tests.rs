@@ -6,6 +6,8 @@ use runmat_meshing_size::metric::{
 };
 
 use super::*;
+#[path = "tests/thresholds.rs"]
+mod thresholds;
 
 #[test]
 fn violation_priority_ignores_only_low_order_metric_noise() {
@@ -40,7 +42,7 @@ use crate::cdt::{
     DelaunayTopologyOptions, DelaunayVolumeNode,
 };
 
-fn region(value: &str) -> PersistentEntityId {
+pub(super) fn region(value: &str) -> PersistentEntityId {
     entity(PersistentEntityKind::Region, value)
 }
 
@@ -52,7 +54,7 @@ fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
     }
 }
 
-fn metric_contexts(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
+pub(super) fn metric_contexts(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
     DelaunayVolumeProvenance {
         nodes: Vec::new(),
         segments: Vec::new(),
@@ -69,7 +71,7 @@ fn metric_contexts(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenan
     }
 }
 
-fn topology() -> DelaunayVolumeTopology {
+pub(super) fn topology() -> DelaunayVolumeTopology {
     let nodes = [
         [0.0, 0.0, 0.0],
         [1.0, 0.0, 0.0],
@@ -134,7 +136,7 @@ fn sliver_topology() -> DelaunayVolumeTopology {
     .unwrap()
 }
 
-fn metric_request() -> MetricFieldRequest {
+pub(super) fn metric_request() -> MetricFieldRequest {
     MetricFieldRequest {
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),

@@ -91,20 +91,20 @@ mod tests {
 
     #[test]
     fn resolves_relative_paths_inside_the_source_root() {
-        let root = LogicalSourcePath::new("project").unwrap();
-        let source = LogicalSourcePath::new("project/studies/main.fea").unwrap();
+        let root = LogicalSourcePath::root();
+        let source = LogicalSourcePath::new("studies/main.fea").unwrap();
         assert_eq!(
             resolve_logical_path(&root, &source, "../materials/steel.fea")
                 .unwrap()
                 .as_str(),
-            "project/materials/steel.fea"
+            "materials/steel.fea"
         );
     }
 
     #[test]
     fn rejects_paths_that_escape_the_source_root() {
-        let root = LogicalSourcePath::new("project").unwrap();
-        let source = LogicalSourcePath::new("project/main.fea").unwrap();
+        let root = LogicalSourcePath::root();
+        let source = LogicalSourcePath::new("main.fea").unwrap();
         assert_eq!(
             resolve_logical_path(&root, &source, "../outside.fea"),
             Err(LogicalPathError::EscapesRoot)

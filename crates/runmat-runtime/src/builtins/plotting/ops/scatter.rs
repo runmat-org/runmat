@@ -569,9 +569,6 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
         }
     };
     let opts = PlotRenderOptions {
-        title: "Scatter Plot",
-        x_label: "X",
-        y_label: "Y",
         ..Default::default()
     };
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -815,8 +812,16 @@ fn finalize_scatter_style(
     args: &PointArgs,
     context: &'static str,
 ) -> BuiltinResult<()> {
-    if style.per_point_colors.is_some() || style.color_values.is_some() {
-        style.filled = true;
+    // MATLAB leaves markers unfilled unless 'filled' or a MarkerFaceColor asks; with color
+    // data, the edge takes each point's color ('flat') unless MarkerEdgeColor is given.
+    let edge_color_given = args
+        .style
+        .appearance
+        .marker
+        .as_ref()
+        .is_some_and(|marker| !matches!(marker.edge_color, MarkerColor::Auto));
+    if (style.per_point_colors.is_some() || style.gpu_colors.is_some()) && !edge_color_given {
+        style.marker_edge_flat = true;
     }
 
     if style.marker_face_flat {
@@ -965,8 +970,16 @@ fn resolve_scatter_style(
         _ => {}
     }
 
-    if style.per_point_colors.is_some() || style.color_values.is_some() {
-        style.filled = true;
+    // MATLAB leaves markers unfilled unless 'filled' or a MarkerFaceColor asks; with color
+    // data, the edge takes each point's color ('flat') unless MarkerEdgeColor is given.
+    let edge_color_given = args
+        .style
+        .appearance
+        .marker
+        .as_ref()
+        .is_some_and(|marker| !matches!(marker.edge_color, MarkerColor::Auto));
+    if (style.per_point_colors.is_some() || style.gpu_colors.is_some()) && !edge_color_given {
+        style.marker_edge_flat = true;
     }
 
     if style.marker_face_flat {

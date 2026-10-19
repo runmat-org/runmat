@@ -1,3 +1,4 @@
+mod import_source;
 mod source_host;
 use source_host::receipt_matches_solve;
 use std::collections::BTreeSet;
@@ -122,7 +123,6 @@ pub fn prepare_accuracy(
     }
     if let Some(observations) = &preparation.source_observations {
         observations.validate_authored_step(&preparation.step)?;
-        observations.validate_source_result(producer, preparation.source_kind, source_result)?;
     }
     let request = AccuracyEvaluationRequest::new(
         producer,
@@ -166,7 +166,6 @@ pub fn prepare_accuracy(
             ValueRefKind::ResultObject,
         ),
     ];
-    let source_context_start = inputs.len();
     inputs.extend(preparation.source_context_inputs.into_iter().map(|input| {
         let kind = if matches!(
             input.manifest.kind,
@@ -179,7 +178,6 @@ pub fn prepare_accuracy(
         };
         (input, kind)
     }));
-    let source_context_end = inputs.len();
     if let Some(observations) = &preparation.source_observations {
         let bytes = observations
             .canonical_bytes()
@@ -215,13 +213,12 @@ pub fn prepare_accuracy(
         crate::build_prepared_accuracy_resource_plan(&request, &numerical_receipt, &inputs)?;
     // Reject an inadmissible task before source verification reconstructs constraints and
     // observation topology. Input serialization above is not covered by this boundary.
-    crate::validate_accuracy_source_context(
+    crate::validate_admitted_accuracy_source(
         &request,
         &numerical_receipt,
         preparation.source_observations.as_ref(),
-        &inputs[source_context_start..source_context_end]
-            .iter()
-            .collect::<Vec<_>>(),
+        &inputs,
+        &resource_plan,
     )?;
     let plan_objects = prepare_analysis_objects(
         AnalysisNumericalObjectKind::ResourcePlan,
@@ -296,110 +293,10 @@ pub fn import_accuracy(
             "accuracy result inventory differs from its canonical closure",
         ));
     }
-    if prepared.request.source_kind == AccuracySourceKind::FluidSteady {
-        crate::require_accuracy_source_decode_budget(
-            &prepared.inputs,
-            &prepared.resource_plan,
-            limits,
-        )?;
-        let runmat_analysis_fea::planning::resource::FeaResourceDemand::AccuracyEvaluation(demand) =
-            &prepared.resource_plan.input.demand
-        else {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid accuracy output resource family",
-            ));
-        };
-        if imported.manifest.encoded_length > demand.output.encoded_payload_bytes_upper_bound.0 {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid accuracy output exceeds admitted wire bound",
-            ));
-        }
-        let payload = imported.payload();
-        let resident =
-            runmat_canonical_codec::canonical_payload_materialization_resident_bytes_estimate(
-                &payload,
-            )
-            .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?;
-        if resident > demand.output.construction_resident_bytes_admission_budget.0 {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid accuracy output exceeds admitted decode bound",
-            ));
-        }
-    }
+    import_source::validate_output_bounds(prepared, &imported, limits)?;
     let artifact = AccuracyArtifact::from_canonical_bytes(&imported.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    if prepared.request.source_kind == AccuracySourceKind::FluidSteady {
-        crate::require_accuracy_source_decode_budget(
-            &prepared.inputs,
-            &prepared.resource_plan,
-            limits,
-        )?;
-        let receipt_objects = prepared
-            .inputs
-            .iter()
-            .filter(|i| i.manifest.kind == AnalysisNumericalObjectKind::NumericalReceipt)
-            .collect::<Vec<_>>();
-        let [receipt_objects] = receipt_objects.as_slice() else {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid accuracy original receipt closure",
-            ));
-        };
-        let receipt = AccuracySourceReceipt::from_canonical_bytes(
-            AccuracySourceKind::FluidSteady,
-            &receipt_objects.payload(),
-        )?;
-        if receipt.identity().digest() != receipt_objects.manifest.logical_identity {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid accuracy receipt logical identity",
-            ));
-        }
-        let catalogs = prepared
-            .inputs
-            .iter()
-            .filter(|i| i.manifest.kind == AnalysisNumericalObjectKind::ObservationCatalog)
-            .collect::<Vec<_>>();
-        let catalog = match catalogs.as_slice() {
-            [] => None,
-            [c] => Some(
-                ObservationPublicationCatalog::from_canonical_bytes(&c.payload())
-                    .map_err(|e| AnalysisBridgeError::Invalid(e.to_string()))?,
-            ),
-            _ => {
-                return Err(AnalysisBridgeError::Identity(
-                    "fluid accuracy original catalog closure",
-                ))
-            }
-        };
-        let original = prepared
-            .inputs
-            .iter()
-            .filter(|i| {
-                matches!(
-                    i.manifest.kind,
-                    AnalysisNumericalObjectKind::FluidSteadyWorkload
-                        | AnalysisNumericalObjectKind::Mesh
-                        | AnalysisNumericalObjectKind::SolverResult
-                )
-            })
-            .collect::<Vec<_>>();
-        crate::validate_accuracy_source_context(
-            &prepared.request,
-            &receipt,
-            catalog.as_ref(),
-            &original,
-        )?;
-        if crate::build_prepared_accuracy_resource_plan(
-            &prepared.request,
-            &receipt,
-            &prepared.inputs,
-        )? != prepared.resource_plan
-            || artifact.evidence() != receipt.evidence(&prepared.request)?.as_slice()
-        {
-            return Err(AnalysisBridgeError::Identity(
-                "fluid accuracy differs from original source-derived plan/evidence",
-            ));
-        }
-    }
+    import_source::validate_original_evidence(prepared, &artifact)?;
     let expected_evaluation = evaluate_accuracy(&prepared.request.plan, artifact.evidence())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let expected_gate = publication_gate(

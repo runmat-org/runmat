@@ -49,6 +49,9 @@ pub struct Scatter3Plot {
     pub label: Option<String>,
     /// Visibility flag.
     pub visible: bool,
+    /// Scalar color data (`C`) and its limits, kept so the colors follow the colormap.
+    pub color_values: Option<Vec<f64>>,
+    pub color_limits: Option<(f64, f64)>,
     source_x: Option<NumericPlotData>,
     source_y: Option<NumericPlotData>,
     source_z: Option<NumericPlotData>,
@@ -278,6 +281,8 @@ impl Scatter3Plot {
             gpu_point_count: None,
             gpu_inputs: None,
             gpu_has_per_point_colors: false,
+            color_values: None,
+            color_limits: None,
         })
     }
 
@@ -335,6 +340,8 @@ impl Scatter3Plot {
             gpu_point_count: Some(point_count),
             gpu_inputs: None,
             gpu_has_per_point_colors: style.has_per_point_colors,
+            color_values: None,
+            color_limits: None,
         }
     }
 
@@ -386,6 +393,41 @@ impl Scatter3Plot {
         self.invalidate_gpu_vertices();
         self.clear_gpu_source_inputs();
         Ok(self)
+    }
+
+    /// Keep scalar color data so the point colors can be remapped when the colormap changes.
+    pub fn with_color_values(mut self, values: Vec<f64>, limits: Option<(f64, f64)>) -> Self {
+        if values.len() == self.points.len() {
+            self.color_values = Some(values);
+            self.color_limits = limits;
+        }
+        self
+    }
+
+    /// Map scalar color data (`C`) through `cmap`; RGB colors are left as they are.
+    pub fn recolor_with_colormap(&mut self, cmap: &crate::plots::surface::ColorMap) {
+        let Some(values) = self.color_values.as_ref() else {
+            return;
+        };
+        let (lo, hi) = self.color_limits.unwrap_or_else(|| {
+            values
+                .iter()
+                .filter(|v| v.is_finite())
+                .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), &v| (a.min(v), b.max(v)))
+        });
+        let span = if hi > lo { hi - lo } else { 1.0 };
+        let colors: Vec<Vec4> = values
+            .iter()
+            .zip(&self.colors)
+            .map(|(&v, old)| {
+                let t = if v.is_finite() { ((v - lo) / span).clamp(0.0, 1.0) } else { 0.0 };
+                let rgb = cmap.map_value(t as f32);
+                Vec4::new(rgb.x, rgb.y, rgb.z, old.w)
+            })
+            .collect();
+        self.colors = colors;
+        self.invalidate_gpu_vertices();
+        self.clear_gpu_source_inputs();
     }
 
     /// Set the legend label.

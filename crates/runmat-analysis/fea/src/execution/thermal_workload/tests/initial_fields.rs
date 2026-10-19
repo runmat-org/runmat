@@ -9,6 +9,7 @@ use runmat_analysis_core::{
     InitialFieldArtifactRef, InitialValue, Temperature,
 };
 
+mod continuum;
 mod nonuniform;
 
 fn solved_temperature_binding(

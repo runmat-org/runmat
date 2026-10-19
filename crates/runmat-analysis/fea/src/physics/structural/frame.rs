@@ -114,11 +114,7 @@ fn require_orthogonal(left: [f64; 3], right: [f64; 3]) -> Result<(), StructuralF
 }
 
 pub(crate) fn unit_vector(vector: [f64; 3]) -> Result<[f64; 3], StructuralFrameError> {
-    let length = magnitude(vector);
-    if !length.is_finite() || length <= GEOMETRY_TOLERANCE {
-        return Err(StructuralFrameError::Degenerate);
-    }
-    Ok(scale(vector, length.recip()))
+    crate::algebra::normalized_vector(vector).map_err(|_| StructuralFrameError::Degenerate)
 }
 
 fn subtract(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
@@ -143,6 +139,17 @@ fn cross(left: [f64; 3], right: [f64; 3]) -> [f64; 3] {
 
 fn magnitude(vector: [f64; 3]) -> f64 {
     dot(vector, vector).sqrt()
+}
+
+/// Material-attached axes retain the supplied tangent, unlike an arbitrary world-axis frame.
+pub(crate) fn material_surface_basis(
+    normal: [f64; 3],
+    tangent: [f64; 3],
+) -> Result<[[f64; 3]; 3], StructuralFrameError> {
+    let normal = unit_vector(normal)?;
+    let tangent = unit_vector(tangent)?;
+    require_orthogonal(normal, tangent)?;
+    Ok([tangent, unit_vector(cross(normal, tangent))?, normal])
 }
 
 #[cfg(test)]

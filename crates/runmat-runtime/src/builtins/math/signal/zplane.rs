@@ -452,14 +452,13 @@ fn render_zero_pole_plot(data: ZeroPoleData) -> BuiltinResult<Value> {
     let handles_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(bool, usize, usize)>::new()));
     let handles_slot = std::rc::Rc::clone(&handles_out);
     let opts = PlotRenderOptions {
-        title: "Zero-Pole Plot",
-        x_label: "Real Part",
-        y_label: "Imaginary Part",
         grid: true,
         axis_equal: true,
     };
     let limits = zplane_limits(&data);
     let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        // MATLAB's zplane labels its axes; plots in general write no text (DEF-197).
+        figure.set_axes_labels(axes, "Real Part", "Imaginary Part");
         figure.set_axes_limits(axes, Some(limits), Some(limits));
         for plot in plots.lines.drain(..) {
             let plot_index = figure.add_line_plot_on_axes(plot, axes);

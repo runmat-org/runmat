@@ -9,12 +9,11 @@ use crate::{
     ExpectedTopology, FluidConstraintKind, MagneticConstraintKind, PairingPolicy,
     PeriodicConstraint, PeriodicTransform, PhysicalSignal, StructuralConstraintKind,
     StructuralKinematicHistory, StructuralMotionReconstruction, ThermalConstraintKind,
-    ValidatedAnalysisSequence,
 };
 
 pub(crate) fn validate_authored_model(
     model: &AnalysisModel,
-) -> Result<ValidatedAnalysisSequence, AnalysisValidationError> {
+) -> Result<(), AnalysisValidationError> {
     validate_coordinate_frame(&model.frame)?;
     crate::validate_materials::validate_materials(&model.materials, &model.material_assignments)?;
     crate::validate_signals::validate_signals(&model.signals)?;
@@ -24,7 +23,7 @@ pub(crate) fn validate_authored_model(
     connectors::validate_connectors(&model.connectors)?;
     interfaces::validate_interfaces(&model.interfaces)?;
     crate::validate_excitations::validate_model_excitations(model)?;
-    crate::validate_sequence::validate_sequence(model)
+    Ok(())
 }
 
 pub fn validate_coordinate_frame(frame: &CoordinateFrame) -> Result<(), AnalysisValidationError> {

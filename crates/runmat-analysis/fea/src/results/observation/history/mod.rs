@@ -21,7 +21,7 @@ pub use contract::{
     ObservationHistoryManifest, ObservationHistorySample, ObservationHistorySampleIdentity,
 };
 pub(crate) use schedule::{
-    exact_scheduled_coordinates, exact_scheduled_sample_count, sample_matches_history_policy,
+    exact_scheduled_coordinate_at, exact_scheduled_sample_count, sample_matches_history_policy,
     sample_matches_policy,
 };
 pub use series_contract::{

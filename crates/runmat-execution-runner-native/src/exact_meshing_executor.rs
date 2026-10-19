@@ -1,5 +1,8 @@
 //! Local-process adapter for the meshing-owned exact DAG.
 
+mod cache;
+mod completion;
+
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -19,6 +22,7 @@ use crate::{NativeProgramSession, NativeProgramTask, ProgramProgress};
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MeshingExecutionPolicy {
     pub cpu_millicores: u32,
+    pub reuse_accepted_stages: bool,
     pub maximum_egress_bytes: u64,
     pub maximum_relay_bytes: u64,
     pub deadline_unix_millis: Option<u64>,
@@ -30,7 +34,8 @@ pub struct MeshingExecutionPolicy {
 impl Default for MeshingExecutionPolicy {
     fn default() -> Self {
         Self {
-            cpu_millicores: 1_000,
+            cpu_millicores: crate::machine_capacity::cpu_millicores(),
+            reuse_accepted_stages: true,
             maximum_egress_bytes: 0,
             maximum_relay_bytes: 0,
             deadline_unix_millis: None,
@@ -45,6 +50,7 @@ pub struct NativeExactMeshingExecutor<'a> {
     session: &'a NativeProgramSession,
     policy: MeshingExecutionPolicy,
     progress: Vec<ProgramProgress>,
+    cache: Option<cache::NativeMeshingStageCache>,
 }
 
 impl<'a> NativeExactMeshingExecutor<'a> {
@@ -57,6 +63,11 @@ impl<'a> NativeExactMeshingExecutor<'a> {
             session,
             policy,
             progress: Vec::new(),
+            cache: if policy.reuse_accepted_stages {
+                cache::NativeMeshingStageCache::open(&session.meshing_cache_root)?
+            } else {
+                None
+            },
         })
     }
 
@@ -110,7 +121,13 @@ impl NativeExactMeshingExecutor<'_> {
                 pool_id: self.session.pool_id(),
                 program_artifact_id: ArtifactId::derive(&[program.artifact.id.0.bytes()]),
                 artifact_access: stage.host().artifact_access.clone(),
-                cpu_millicores: self.policy.cpu_millicores,
+                cpu_millicores: if stage.host().workload.stage
+                    == runmat_meshing_core::MeshingStageKind::Tetrahedralization
+                {
+                    self.policy.cpu_millicores
+                } else {
+                    self.policy.cpu_millicores.min(1_000)
+                },
                 maximum_egress_bytes: self.policy.maximum_egress_bytes,
                 maximum_relay_bytes: self.policy.maximum_relay_bytes,
                 deadline_unix_millis: self.policy.deadline_unix_millis,
@@ -133,6 +150,7 @@ impl NativeExactMeshingExecutor<'_> {
         let stage_span = tracing::info_span!(
             "meshing.stage",
             stage = ?workload.stage,
+            partition_kind = ?workload.partition.kind,
             partition_index = workload.partition.partition_index,
             partition_count = workload.partition.partition_count,
         );
@@ -143,7 +161,8 @@ impl NativeExactMeshingExecutor<'_> {
         );
         loop {
             self.record_progress(task.drain_progress());
-            if let Some(result) = task.try_result() {
+            if let Some(completion) = task.try_completion() {
+                let result = completion.into_delivery_result();
                 self.record_progress(task.drain_progress());
                 return match result {
                     Ok(success) => {
@@ -161,12 +180,7 @@ impl NativeExactMeshingExecutor<'_> {
                             error = %error,
                             "meshing stage failed"
                         );
-                        match MeshingHostResponse::failure_from_program_message(&error) {
-                            Some(failure) => {
-                                Err(MeshingStageExecutionError::Failure(Box::new(failure)))
-                            }
-                            None => Err(MeshingStageExecutionError::new(error)),
-                        }
+                        Err(completion::stage_failure(error, workload.stage))
                     }
                 };
             }
@@ -201,6 +215,25 @@ impl NativeExactMeshingExecutor<'_> {
 }
 
 impl CacheImport for NativeExactMeshingExecutor<'_> {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: runmat_execution::Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> runmat_execution_artifact::ArtifactResult<()>,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.session
+            .object_store()
+            .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: runmat_execution::Digest,
+        maximum_bytes: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.session
+            .object_store()
+            .read_verified_bounded(digest, maximum_bytes)
+    }
     fn read_verified(&self, digest: runmat_execution::Digest) -> ArtifactResult<Option<Vec<u8>>> {
         self.session.object_store().read_verified(digest)
     }
@@ -218,8 +251,31 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
         stage: &'a PlannedMeshingStage,
         revision: ProgramRevision,
     ) -> Result<AttemptSuccess, MeshingStageExecutionError> {
+        let started = std::time::Instant::now();
+        if let Some(cache) = &self.cache {
+            if let Some(success) = cache.restore(
+                stage,
+                &mut self.session.object_store(),
+                self.session,
+                self.policy.deadline_unix_millis,
+                started,
+            )? {
+                return Ok(success);
+            }
+        }
         let task = self.submit_stage(stage, revision)?;
-        self.wait_for_task(task, stage)
+        let success = self.wait_for_task(task, stage)?;
+        if let Some(cache) = &mut self.cache {
+            cache.retain(
+                stage,
+                &self.session.object_store(),
+                &success,
+                self.session,
+                self.policy.deadline_unix_millis,
+                started,
+            )?;
+        }
+        Ok(success)
     }
 
     async fn execute_stages<'a>(
@@ -227,15 +283,43 @@ impl ExactMeshingDagExecutor for NativeExactMeshingExecutor<'_> {
         stages: &'a [PlannedMeshingStage],
         revision: ProgramRevision,
     ) -> Result<Vec<AttemptSuccess>, MeshingStageExecutionError> {
-        let tasks = stages
-            .iter()
-            .map(|stage| self.submit_stage(stage, revision.clone()))
-            .collect::<Result<Vec<_>, _>>()?;
-        tasks
+        let mut results = Vec::with_capacity(stages.len());
+        let mut pending = Vec::new();
+        for (index, stage) in stages.iter().enumerate() {
+            let started = std::time::Instant::now();
+            let hit = match &self.cache {
+                Some(cache) => cache.restore(
+                    stage,
+                    &mut self.session.object_store(),
+                    self.session,
+                    self.policy.deadline_unix_millis,
+                    started,
+                )?,
+                None => None,
+            };
+            results.push(hit);
+            if results[index].is_none() {
+                pending.push((index, self.submit_stage(stage, revision.clone())?, started));
+            }
+        }
+        for (index, task, started) in pending {
+            let success = self.wait_for_task(task, &stages[index])?;
+            if let Some(cache) = &mut self.cache {
+                cache.retain(
+                    &stages[index],
+                    &self.session.object_store(),
+                    &success,
+                    self.session,
+                    self.policy.deadline_unix_millis,
+                    started,
+                )?;
+            }
+            results[index] = Some(success);
+        }
+        Ok(results
             .into_iter()
-            .zip(stages)
-            .map(|(task, stage)| self.wait_for_task(task, stage))
-            .collect()
+            .map(|value| value.expect("every submitted stage completed"))
+            .collect())
     }
 }
 

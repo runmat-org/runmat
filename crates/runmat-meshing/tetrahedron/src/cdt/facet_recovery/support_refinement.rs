@@ -444,9 +444,17 @@ pub(super) fn triangle_has_positive_area(
     triangle: [StableDigest; 3],
     constraint_index: u32,
 ) -> Result<bool, DelaunayFacetRecoveryError> {
+    triangle_has_positive_area_on(&recovery.topology, triangle, constraint_index)
+}
+
+pub(super) fn triangle_has_positive_area_on(
+    topology: &impl crate::cdt::insertion::topology_access::TetrahedralTopology,
+    triangle: [StableDigest; 3],
+    constraint_index: u32,
+) -> Result<bool, DelaunayFacetRecoveryError> {
     let points = triangle.map(|identity| {
-        node_index(&recovery.topology, identity)
-            .map(|index| recovery.topology.nodes[index].coordinates_m)
+        node_index(topology, identity)
+            .map(|index| topology.nodes()[index].coordinates_m)
             .ok_or_else(|| {
                 error(
                     DelaunayFacetRecoveryErrorKind::InvalidTopology,

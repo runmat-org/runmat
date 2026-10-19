@@ -4,7 +4,9 @@ mod artifact_identity;
 mod artifact_order;
 mod artifact_parameters;
 mod artifact_resources;
+mod artifact_storage;
 mod artifact_types;
+mod artifact_workspace;
 mod authoring;
 mod cancellation;
 mod chunk;
@@ -40,16 +42,21 @@ pub use artifact_types::{
 pub use authoring::MeshDefinition;
 pub use cancellation::{CancellationPolicy, MeshingCancellationSignal, NeverCancelled};
 pub use chunk::{
-    build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
-    decode_stage_manifest_streams_with_cancellation, verify_stage_manifest_closure,
-    EncodedMeshingChunk, MeshingChunkPolicy, MeshingChunkStream, MeshingChunkedPayload,
+    build_chunked_stage_payload, build_chunked_stage_payload_with_cancellation,
+    build_closed_stage_manifest, close_stage_payload_with_admission, decode_stage_manifest_streams,
+    decode_stage_manifest_streams_borrowed, decode_stage_manifest_streams_borrowed_with_admission,
+    decode_stage_manifest_streams_with_cancellation, profile_chunked_stage_payload,
+    verify_stage_manifest_closure, verify_stage_manifest_closure_borrowed,
+    verify_stage_manifest_closure_borrowed_with_admission, ClosedMeshingStage, EncodedMeshingChunk,
+    EncodedMeshingChunkRef, MeshingChunkPolicy, MeshingChunkStorageProfile, MeshingChunkStream,
+    MeshingChunkedPayload, MeshingManifestMetadata, MeshingStreamStorageProfile,
 };
-pub use codec::{CanonicalMeshingContract, MeshingCanonicalLimits};
+pub use codec::{CanonicalMeshingContract, MeshingCanonicalCodecControl, MeshingCanonicalLimits};
 pub use error::MeshingContractError;
 pub use evidence::{
     CacheAdmissionDecision, ErrorDistribution, InvariantEvidence, MeshingEvidence,
-    MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity, SizingResolutionEvidence,
-    MESHING_EVIDENCE_SCHEMA_VERSION,
+    MeshingResourceUsage, MeshingStageEvidence, PlatformBuildIdentity,
+    ReusedMeshingStageObservation, SizingResolutionEvidence, MESHING_EVIDENCE_SCHEMA_VERSION,
 };
 pub use failure::{
     GeometricWitness, MeshingDiagnosticEntry, MeshingDiagnosticValue, MeshingFailure,
@@ -85,7 +92,8 @@ pub use settings::{
     production_algorithm_versions, resolve_meshing_request, MeshingRequestSettings,
 };
 pub use solver_projection::{
-    SolverMeshProjection, SolverMeshValidation, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
+    SolverMeshProjection, SolverMeshValidation, ValidatedSolverMeshProjection,
+    ValidatedSolverMeshTopology, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
     SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
 };
 pub use transfer::{

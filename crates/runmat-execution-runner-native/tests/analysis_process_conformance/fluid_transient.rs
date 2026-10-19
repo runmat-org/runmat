@@ -1,4 +1,5 @@
 //! Actual shared task-pool blocks, cold fenced import and original pressure coordinates.
+use super::fluid_support as support;
 use super::*;
 use runmat_analysis_core::*;
 use runmat_analysis_execution::{
@@ -12,10 +13,8 @@ use runmat_analysis_fea::execution::{
 use runmat_execution_runner_native::{
     execute_fluid_transient_block_locally, FluidTransientBlockExecutionPolicy,
 };
-#[path = "../support/fluid.rs"]
-mod support;
 
-fn fixture() -> (
+pub(super) fn fixture() -> (
     FluidTransientWorkload,
     runmat_meshing_core::SolverMeshArtifact,
 ) {
@@ -163,7 +162,7 @@ pub(super) async fn run() {
     println!("scheduled original fluid blocks PASS: 3 terminated sessions; cold fences/source/accounting; original 1e12-Pa reference; split history exact");
 }
 
-async fn run_block(
+pub(super) async fn run_block(
     workload: &FluidTransientWorkload,
     mesh: &runmat_meshing_core::SolverMeshArtifact,
     predecessor: FluidTransientCheckpoint,

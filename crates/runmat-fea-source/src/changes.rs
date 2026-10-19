@@ -13,14 +13,23 @@ pub struct FeaChangeSetId(pub [u8; 16]);
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum FeaSourceChange {
     Write {
+        /// Workspace-relative source file, e.g. `bracket.fea` or `checks/verify.m`.
+        /// The host binds the workspace; absolute paths and traversal are rejected.
+        #[serde(deserialize_with = "deserialize_source_file")]
         path: LogicalSourcePath,
         source: String,
     },
     Remove {
+        /// Workspace-relative source file.
+        #[serde(deserialize_with = "deserialize_source_file")]
         path: LogicalSourcePath,
     },
     Rename {
+        /// Existing workspace-relative source file.
+        #[serde(deserialize_with = "deserialize_source_file")]
         from: LogicalSourcePath,
+        /// New workspace-relative source file.
+        #[serde(deserialize_with = "deserialize_source_file")]
         to: LogicalSourcePath,
     },
 }
@@ -122,4 +131,10 @@ pub struct FeaChangeSetReview {
     pub change: FeaSourceChangeSummary,
     pub before: Option<FeaSourceExcerpt>,
     pub after: Option<FeaSourceExcerpt>,
+}
+
+fn deserialize_source_file<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<LogicalSourcePath, D::Error> {
+    LogicalSourcePath::file(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
 }

@@ -1,0 +1,201 @@
+use super::*;
+use crate::cdt::volume_mesh::tests::{metric_request, volume_options};
+use crate::cdt::{
+    construct_delaunay_volume_mesh, encode_delaunay_volume_mesh, evaluate_delaunay_volume_quality,
+    DelaunayVolumeMesh,
+};
+use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
+
+fn component() -> DelaunayVolumeMesh {
+    let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();
+    construct_delaunay_volume_mesh(
+        &topology,
+        &surface,
+        &metric_request(),
+        volume_options(),
+        &NeverCancelled,
+    )
+    .unwrap()
+}
+
+fn reference(meshes: &[DelaunayVolumeMesh]) -> DelaunayVolumeMesh {
+    let options = volume_options();
+    let topology = super::reference::assemble_topology(
+        meshes,
+        options.refinement.step.insertion.topology,
+        &NeverCancelled,
+    )
+    .unwrap();
+    let provenance = super::reference::assemble_provenance(meshes);
+    let quality = evaluate_delaunay_volume_quality(
+        &topology,
+        &metric_request(),
+        &provenance,
+        options.quality,
+        &NeverCancelled,
+    )
+    .unwrap();
+    DelaunayVolumeMesh {
+        topology,
+        provenance,
+        quality,
+        facet_recovery_insertions: super::reference::assemble_insertions(meshes),
+        refinement_insertions: super::reference::assemble_refinement_insertions(meshes),
+        sliver_mutations: super::reference::assemble_sliver_mutations(meshes),
+    }
+}
+
+#[test]
+fn single_component_moves_storage_and_preserves_independent_encoding() {
+    let mesh = component();
+    let expected = reference(std::slice::from_ref(&mesh));
+    let nodes = mesh.topology.nodes.as_ptr();
+    let cells = mesh.topology.tetrahedra.as_ptr();
+    let quality = mesh.quality.tetrahedra.as_ptr();
+    let actual = assemble(
+        vec![mesh],
+        &metric_request(),
+        volume_options(),
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(actual.topology.nodes.as_ptr(), nodes);
+    assert_eq!(actual.topology.tetrahedra.as_ptr(), cells);
+    assert_eq!(actual.quality.tetrahedra.as_ptr(), quality);
+    assert_eq!(actual, expected);
+    let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();
+    let encode = |mesh| {
+        encode_delaunay_volume_mesh(
+            mesh,
+            &topology,
+            &surface,
+            &metric_request(),
+            volume_options(),
+            &NeverCancelled,
+        )
+        .unwrap()
+    };
+    assert_eq!(encode(&actual), encode(&expected));
+}
+
+#[test]
+fn multiple_components_match_original_assembly_and_merge_shared_provenance() {
+    let first = component();
+    let mut second = first.clone();
+    for cell in &mut second.topology.tetrahedra {
+        cell.region_id
+            .as_mut()
+            .unwrap()
+            .source_topology_id
+            .push_str("-second-region");
+    }
+    // Disjoint cells sharing an original boundary node exercise identity merging.
+    // Reflect one tetrahedral component across its original corner.
+    for node in &mut second.topology.nodes {
+        if node.coordinates_m != [0.0; 3] {
+            node.coordinates_m = node.coordinates_m.map(|value| -value);
+            let mut bytes = *node.identity.bytes();
+            bytes[0] ^= 0xff;
+            node.identity = StableDigest::from_bytes(bytes);
+        }
+    }
+    // Keep one common node binding; the remaining provenance belongs to the
+    // first component. Both algorithms must preserve exactly the same inventory.
+    second.provenance.nodes.retain(|binding| {
+        second
+            .topology
+            .nodes
+            .iter()
+            .any(|node| node.identity == binding.node_identity)
+    });
+    second.provenance.segments.clear();
+    second.provenance.facets.clear();
+    let meshes = vec![first, second];
+    let expected = reference(&meshes);
+    let actual = assemble(meshes, &metric_request(), volume_options(), &NeverCancelled).unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn conflicting_identity_and_cancelled_handoff_reject() {
+    let first = component();
+    let mut second = first.clone();
+    second.topology.nodes[0].coordinates_m[0] += 1.0;
+    assert_eq!(
+        assemble(
+            vec![first, second],
+            &metric_request(),
+            volume_options(),
+            &NeverCancelled
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshErrorKind::InvalidTopology
+    );
+    let mut invalid = volume_options();
+    invalid
+        .refinement
+        .step
+        .insertion
+        .topology
+        .cancellation_check_interval = 0;
+    assert_eq!(
+        assemble(
+            vec![component()],
+            &metric_request(),
+            invalid,
+            &NeverCancelled
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshErrorKind::InvalidOptions
+    );
+    let mut limited = volume_options();
+    limited.refinement.step.insertion.topology.maximum_nodes = 1;
+    assert_eq!(
+        assemble(
+            vec![component(), component()],
+            &metric_request(),
+            limited,
+            &NeverCancelled
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshErrorKind::ResourceLimit
+    );
+    struct Cancelled;
+    impl MeshingCancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+    }
+    assert_eq!(
+        assemble(
+            vec![component()],
+            &metric_request(),
+            volume_options(),
+            &Cancelled
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshErrorKind::Cancelled
+    );
+    struct CancelDuringAssembly(std::sync::atomic::AtomicUsize);
+    impl MeshingCancellationSignal for CancelDuringAssembly {
+        fn is_cancelled(&self) -> bool {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed) > 0
+        }
+    }
+    let cancellation = CancelDuringAssembly(std::sync::atomic::AtomicUsize::new(0));
+    assert_eq!(
+        assemble(
+            vec![component(), component()],
+            &metric_request(),
+            volume_options(),
+            &cancellation
+        )
+        .unwrap_err()
+        .kind,
+        DelaunayVolumeMeshErrorKind::Cancelled
+    );
+}

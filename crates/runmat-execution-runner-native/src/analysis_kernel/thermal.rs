@@ -94,13 +94,28 @@ pub(super) fn execute(
     // validation/rebinding. This verifies retained electrical loss, never solves it.
     validate_thermal_task_source(&workload, &mesh, invocation.inputs)?;
     let policy = invocation.output_policy;
-    let result = execute_thermal_solver_result_objects(
-        &workload,
-        &mesh,
-        policy.chunk_bytes(),
-        ObjectNamespace::ResultValue,
-        policy.inventory_limits(),
-    )?;
+    let cpu_threads = usize::from(
+        runmat_analysis_fea::planning::resource::LocalThreadCount::from_cpu_millicores(
+            resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+        .get(),
+    );
+    let progress = runmat_analysis_fea::progress::capture_fea_progress_context();
+    let span = tracing::Span::current();
+    let result = runmat_cpu_execution::with_cpu_pool(cpu_threads, || {
+        let _progress = runmat_analysis_fea::replace_fea_progress_context(progress);
+        span.in_scope(|| {
+            execute_thermal_solver_result_objects(
+                &workload,
+                &mesh,
+                policy.chunk_bytes(),
+                ObjectNamespace::ResultValue,
+                policy.inventory_limits(),
+            )
+        })
+    })
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))??;
     let receipt = thermal_receipt_from_prepared_result(&workload, &result)?;
     let profiles = thermal_state_publication_profiles(&workload, &result)?;
     let profile_objects = prepare_analysis_objects(

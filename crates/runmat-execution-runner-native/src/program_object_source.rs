@@ -45,6 +45,15 @@ impl CacheImport for NativeProgramObjectSource {
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         self.store.read_verified(digest)
     }
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.store
+            .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+    }
     fn read_verified_bounded(
         &self,
         digest: Digest,

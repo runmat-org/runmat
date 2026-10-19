@@ -62,7 +62,7 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
             manifest.identity(),
             SolverResultIdentity::from_step_result(
                 result.producer,
-                Digest::sha256(expected_content)
+                Digest::sha256(&expected_content)
             )
             .unwrap()
         );
@@ -94,6 +94,28 @@ fn manifest_retains_identity_without_histories_and_rejects_malformed_catalogs() 
                 <= identity_shape.materialization_resident_bytes_estimate
                     + initial_shape.materialization_resident_bytes_estimate
         );
+        let streamed = super::thermal_result::identity::ManifestFieldIdentities(&manifest.fields);
+        let streamed_payload = metadata.identity_serialization(streamed);
+        assert_eq!(
+            encode_contract(
+                b"runmat-thermal-solver-result/v1\0",
+                "thermal-solver-result-accepted-intent-field-content",
+                &streamed_payload,
+                LIMITS
+            )
+            .unwrap(),
+            expected_content
+        );
+        let budget = manifest.validation_resident_bytes_upper_bound().unwrap();
+        let (_, _, peak) = crate::topology::measure_test_allocations(|| {
+            assert_eq!(manifest.validate_admitted(budget).unwrap(), budget);
+        });
+        assert!(peak as u64 <= budget);
+        let error = manifest.validate_admitted(budget - 1).unwrap_err();
+        assert!(matches!(
+            error,
+            AnalysisExecutionError::Limit("thermal manifest validation workspace")
+        ));
         assert!(manifest.run.fields.is_empty());
         let mut duplicate = manifest.clone();
         duplicate.fields[1][0].partitions[0].partition =

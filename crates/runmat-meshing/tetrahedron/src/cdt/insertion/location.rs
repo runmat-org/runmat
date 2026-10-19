@@ -7,6 +7,9 @@ use super::{
     DelaunayInsertionError, DelaunayVolumeNode, InsertionWork,
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Deterministic point location for one immutable topology.
 ///
 /// Adjacency walking is the primary path. Exact orientation predicates decide
@@ -14,6 +17,12 @@ use super::{
 /// walk reaches a disconnected component or cycles on a degenerate complex.
 pub(super) struct TetrahedronPointLocator<'topology, T> {
     topology: &'topology T,
+}
+
+pub(super) enum PointLocation {
+    Contained(u32),
+    Outside { tetrahedron: u32, opposite: usize },
+    Unresolved,
 }
 
 impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
@@ -27,17 +36,24 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
         hint: Option<usize>,
         work: &mut InsertionWork<'_>,
     ) -> Result<Option<u32>, DelaunayInsertionError> {
-        if let Some(start) = hint.or_else(|| {
-            (0..self.topology.tetrahedron_slot_count())
-                .find(|index| self.topology.tetrahedron(*index as u32).is_some())
-        }) {
+        if let Some(start) = hint {
             if let Some(containing) = self.walk_containing(start, node, work)? {
                 return Ok(Some(containing));
             }
         }
 
-        for tetrahedron_index in 0..self.topology.tetrahedron_slot_count() {
-            let Some(tetrahedron) = self.topology.tetrahedron(tetrahedron_index as u32) else {
+        // Mutable topology supplies maintained cell bounds. Immutable owners
+        // retain their complete conservative candidate traversal. Neither the
+        // index nor a failed walk substitutes for exact physical containment.
+        let bounds = Aabb3 {
+            min_m: node.coordinates_m.map(f64::next_down),
+            max_m: node.coordinates_m.map(f64::next_up),
+        };
+        for tetrahedron_index in self
+            .topology
+            .tetrahedron_candidates_in_bounds(bounds, &mut || work.checkpoint())?
+        {
+            let Some(tetrahedron) = self.topology.tetrahedron(tetrahedron_index) else {
                 continue;
             };
             work.checkpoint()?;
@@ -45,7 +61,7 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
                 .contains_point(node.coordinates_m)
                 && point_in_tetrahedron(self.topology, tetrahedron.vertex_indices, node, work)?
             {
-                return Ok(Some(tetrahedron_index as u32));
+                return Ok(Some(tetrahedron_index));
             }
         }
         Ok(None)
@@ -57,10 +73,28 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
         node: DelaunayVolumeNode,
         work: &mut InsertionWork<'_>,
     ) -> Result<Option<u32>, DelaunayInsertionError> {
+        Ok(match self.walk_from(node, Some(start), work)? {
+            PointLocation::Contained(index) => Some(index),
+            _ => None,
+        })
+    }
+
+    pub(super) fn walk_from(
+        &self,
+        node: DelaunayVolumeNode,
+        hint: Option<usize>,
+        work: &mut InsertionWork<'_>,
+    ) -> Result<PointLocation, DelaunayInsertionError> {
+        let Some(start) = hint.or_else(|| {
+            (0..self.topology.tetrahedron_slot_count())
+                .find(|index| self.topology.tetrahedron(*index as u32).is_some())
+        }) else {
+            return Ok(PointLocation::Unresolved);
+        };
         if start >= self.topology.tetrahedron_slot_count()
             || self.topology.tetrahedron(start as u32).is_none()
         {
-            return Ok(None);
+            return Ok(PointLocation::Unresolved);
         }
         let mut visited = BTreeSet::new();
         let mut current = start;
@@ -90,14 +124,17 @@ impl<'topology, T: TetrahedralTopology> TetrahedronPointLocator<'topology, T> {
                 }
             }
             let Some(opposite) = crossing else {
-                return Ok(Some(current as u32));
+                return Ok(PointLocation::Contained(current as u32));
             };
             let Some(neighbor) = tetrahedron.neighbors[opposite] else {
-                return Ok(None);
+                return Ok(PointLocation::Outside {
+                    tetrahedron: current as u32,
+                    opposite,
+                });
             };
             current = neighbor as usize;
         }
-        Ok(None)
+        Ok(PointLocation::Unresolved)
     }
 }
 

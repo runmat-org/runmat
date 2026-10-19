@@ -2,15 +2,13 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use runmat_geometry_core::{
-    ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, GeometryTransform,
-    ParameterRange, PersistentEntityId, SurfaceEvaluatorId,
+    ExactSurfaceEvaluator, GeometryEvaluationControl, GeometryTransform, ParameterRange,
+    PersistentEntityId, SurfaceEvaluatorId,
 };
-use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
-use runmat_meshing_size::{
-    grading::grade_metric_evaluations,
-    incidence::TopologyMetricIncidence,
-    metric::{MetricTensor3, ResolvedMetricEvaluation, ResolvedMetricField},
-};
+use runmat_meshing_size::metric::{MetricTensor3, ResolvedMetricEvaluation};
+
+mod boundary;
+mod preparation;
 
 use super::{
     ExactFaceMetricError, ExactFaceMetricErrorKind, ExactFaceMetricEvaluation,
@@ -28,6 +26,8 @@ struct FaceMetricRecord {
     surface_evaluator_id: SurfaceEvaluatorId,
     world_transform: GeometryTransform,
     resolved: ResolvedMetricEvaluation,
+    boundary_metrics: Vec<boundary::EdgeMetric>,
+    provenance: std::sync::Arc<super::ExactFaceMetricProvenance>,
     evaluator_parameter_domain: OnceLock<EvaluatorParameterDomain>,
 }
 
@@ -36,6 +36,8 @@ impl PartialEq for FaceMetricRecord {
         self.surface_evaluator_id == other.surface_evaluator_id
             && self.world_transform == other.world_transform
             && self.resolved == other.resolved
+            && self.boundary_metrics == other.boundary_metrics
+            && self.provenance == other.provenance
     }
 }
 
@@ -46,77 +48,6 @@ struct EvaluatorParameterDomain {
 }
 
 impl ResolvedFaceMetricField {
-    pub fn new(
-        topology: &ExactBRepTopology,
-        request: &MetricFieldRequest,
-    ) -> Result<Self, ExactFaceMetricError> {
-        request
-            .validate()
-            .map_err(|error| invalid_request(error.to_string()))?;
-        let resolver = ResolvedMetricField::new(request)
-            .map_err(|error| invalid_request(error.to_string()))?;
-        let incidence = TopologyMetricIncidence::new(topology);
-        for contribution in &request.contributions {
-            let entity_id = match &contribution.scope {
-                MetricContributionScope::Region { region_id } => region_id,
-                MetricContributionScope::Entity { entity_id } => entity_id,
-            };
-            if !incidence.knows(entity_id) {
-                return Err(invalid_request(format!(
-                    "metric contribution references unknown exact entity {entity_id:?}"
-                )));
-            }
-        }
-
-        let mut resolved_by_face = BTreeMap::new();
-        for face in &topology.faces {
-            let incident = incidence.incident_face_entities(face);
-            let resolved = resolver.resolve(&incident).map_err(|error| {
-                ExactFaceMetricError::new(
-                    ExactFaceMetricErrorKind::InvalidRequest,
-                    Some(&face.id),
-                    error.to_string(),
-                )
-            })?;
-            if resolved_by_face.insert(face.id.clone(), resolved).is_some() {
-                return Err(ExactFaceMetricError::new(
-                    ExactFaceMetricErrorKind::InvalidRequest,
-                    Some(&face.id),
-                    "exact topology contains a duplicate face identity",
-                ));
-            }
-        }
-        grade_metric_evaluations(
-            request.maximum_grading_ratio,
-            &TopologyMetricIncidence::face_adjacency(topology),
-            &mut resolved_by_face,
-        )
-        .map_err(|error| invalid_request(error.to_string()))?;
-
-        let mut by_face = BTreeMap::new();
-        for face in &topology.faces {
-            let world_transform = topology.world_transform_for(&face.id).map_err(|error| {
-                ExactFaceMetricError::new(
-                    ExactFaceMetricErrorKind::InvalidRequest,
-                    Some(&face.id),
-                    error.to_string(),
-                )
-            })?;
-            by_face.insert(
-                face.id.clone(),
-                FaceMetricRecord {
-                    surface_evaluator_id: face.surface_evaluator_id.clone(),
-                    world_transform,
-                    resolved: resolved_by_face
-                        .remove(&face.id)
-                        .expect("resolved every exact face"),
-                    evaluator_parameter_domain: OnceLock::new(),
-                },
-            );
-        }
-        Ok(Self { by_face })
-    }
-
     pub fn evaluate(
         &self,
         source_face_id: &PersistentEntityId,
@@ -208,7 +139,7 @@ impl ResolvedFaceMetricField {
         })?;
 
         Ok(ExactFaceMetricEvaluation {
-            source_face_id: source_face_id.clone(),
+            provenance: std::sync::Arc::clone(&record.provenance),
             uv,
             evaluator_uv,
             point_m,
@@ -216,10 +147,6 @@ impl ResolvedFaceMetricField {
             derivative_v_m,
             physical_metric,
             sizing_metric,
-            active_sources: record.resolved.active_sources.clone(),
-            applied_contribution_count: record.resolved.applied_contribution_count,
-            clipped_contribution_count: record.resolved.clipped_contribution_count,
-            rejected_contribution_count: record.resolved.rejected_contribution_count,
         })
     }
 }

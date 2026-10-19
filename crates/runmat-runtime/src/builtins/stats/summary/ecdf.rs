@@ -21,7 +21,11 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::plotting::op_common::{apply_axes_target, split_leading_axes_handle};
-use crate::builtins::plotting::state::{render_active_plot, PlotRenderOptions};
+use crate::builtins::plotting::state::{
+    continue_line_color_cycle_after, current_axes_state, current_hold_enabled,
+    line_color_for_axes_series_index, next_line_color_for_axes, render_active_plot,
+    PlotRenderOptions,
+};
 use crate::builtins::stats::summary::distribution_math::standard_normal_inv;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -1388,30 +1392,36 @@ fn hazard_from_cdf_bounds(f: &[f64], flo: &[f64], fup: &[f64]) -> (Vec<f64>, Vec
 }
 
 fn plot_ecdf_line(builtin: &'static str, eval: &EcdfEvaluation) -> BuiltinResult<f64> {
+    // The curve takes the next color in the axes color order under `hold on`, as a line does.
+    let axes = current_axes_state().active_index;
+    let hold_enabled = current_hold_enabled();
+    let color = if hold_enabled {
+        next_line_color_for_axes(axes)
+    } else {
+        line_color_for_axes_series_index(axes, 0)
+    };
     let (x, y) = step_line_points(&eval.x, &eval.f);
     let label = eval.function.label();
-    let mut plots = vec![line_plot(builtin, x, y, label)?];
+    let mut plots = vec![line_plot(builtin, x, y, label, color)?];
     if eval.bounds_on {
         let (x, y) = step_line_points(&eval.x, &eval.flo);
-        plots.push(line_plot(builtin, x, y, "Lower confidence bound")?);
+        plots.push(line_plot(builtin, x, y, "Lower confidence bound", color)?);
         let (x, y) = step_line_points(&eval.x, &eval.fup);
-        plots.push(line_plot(builtin, x, y, "Upper confidence bound")?);
+        plots.push(line_plot(builtin, x, y, "Upper confidence bound", color)?);
     }
-    let opts = PlotRenderOptions {
-        title: if builtin == CDFPLOT_NAME {
-            "Empirical CDF"
-        } else {
-            ""
-        },
-        x_label: "x",
-        y_label: eval.function.y_label(),
-        ..Default::default()
-    };
+    let opts = PlotRenderOptions::default();
+    // ecdf and cdfplot label their axes (and cdfplot titles them) as MATLAB's do.
+    let title = (builtin == CDFPLOT_NAME).then_some("Empirical CDF");
+    let y_label = eval.function.y_label();
     let mut plots_opt = Some(plots);
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(builtin, opts, move |figure, axes_index| {
+        figure.set_axes_labels(axes_index, "x", y_label);
+        if let Some(title) = title {
+            figure.set_axes_title(axes_index, title);
+        }
         let plots = plots_opt.take().expect("ecdf plots consumed exactly once");
         for (idx, plot) in plots.into_iter().enumerate() {
             let plot_index = figure.add_line_plot_on_axes(plot, axes_index);
@@ -1421,6 +1431,10 @@ fn plot_ecdf_line(builtin: &'static str, eval: &EcdfEvaluation) -> BuiltinResult
         }
         Ok(())
     });
+    if !hold_enabled {
+        // Rendering cleared the axes and reset the color order; resume it after this curve.
+        continue_line_color_cycle_after(axes, 1);
+    }
     let Some((axes_index, plot_index)) = *plot_index_out.borrow() else {
         return render_result
             .map(|_| f64::NAN)
@@ -1446,16 +1460,11 @@ fn line_plot(
     x: Vec<f64>,
     y: Vec<f64>,
     label: &str,
+    color: glam::Vec4,
 ) -> BuiltinResult<LinePlot> {
     LinePlot::new(x, y)
         .map_err(|err| internal_error(builtin, format!("{builtin}: {err}")))
-        .map(|plot| {
-            plot.with_label(label).with_style(
-                [0.0, 0.4470, 0.7410, 1.0].into(),
-                1.5,
-                LineStyle::Solid,
-            )
-        })
+        .map(|plot| plot.with_label(label).with_style(color, 1.5, LineStyle::Solid))
 }
 
 fn step_line_points(x: &[f64], f: &[f64]) -> (Vec<f64>, Vec<f64>) {

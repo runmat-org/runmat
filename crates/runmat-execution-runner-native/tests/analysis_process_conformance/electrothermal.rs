@@ -93,6 +93,8 @@ pub(super) async fn run() {
         let executed = execute_thermal_study_locally_with_source(
             config,
             ThermalStudyPreparation {
+                local_execution:
+                    runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
                 scope: ThermalStudyScope::SelectedStep,
                 field_source: Some(source),
                 product: ThermalStudyProduct { compiled, workload },

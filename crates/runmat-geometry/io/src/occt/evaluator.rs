@@ -8,6 +8,8 @@ use std::{sync::mpsc, time::Duration};
 use super::{evaluator_bindings::EvaluatorBindings, ffi};
 use crate::exact::ImportedExactCad;
 
+mod session;
+
 /// Native evaluator for kernel-backed geometry from one admitted OCCT representation.
 ///
 /// The representation is loaded once. Immutable session state is shared across calls, while
@@ -64,12 +66,14 @@ impl OcctExactEvaluator {
         }
         let bindings = EvaluatorBindings::from_closure(representation, topology, evaluators, None)?;
         control.checkpoint()?;
+        let face_keys = session::face_keys(&bindings, Some(control))?;
         let owned_representation = representation.to_vec();
         let (sender, receiver) = mpsc::sync_channel(1);
         std::thread::spawn(move || {
             let result = ffi::bridge::start_exact_evaluator_session(
                 &owned_representation,
                 meters_per_source_unit,
+                &face_keys,
             )
             .map_err(kernel_error);
             match result {
@@ -94,11 +98,13 @@ impl OcctExactEvaluator {
                 }
             }
         };
-        control.checkpoint()?;
-        Ok(Self {
+        let evaluator = Self {
             session_id,
             bindings,
-        })
+        };
+        // Own the session before the final checkpoint so cancellation releases it.
+        control.checkpoint()?;
+        Ok(evaluator)
     }
 
     fn start(
@@ -106,9 +112,13 @@ impl OcctExactEvaluator {
         meters_per_source_unit: f64,
         bindings: EvaluatorBindings,
     ) -> Result<Self, GeometryEvaluationError> {
-        let session_id =
-            ffi::bridge::start_exact_evaluator_session(representation, meters_per_source_unit)
-                .map_err(kernel_error)?;
+        let face_keys = session::face_keys(&bindings, None)?;
+        let session_id = ffi::bridge::start_exact_evaluator_session(
+            representation,
+            meters_per_source_unit,
+            &face_keys,
+        )
+        .map_err(kernel_error)?;
         Ok(Self {
             session_id,
             bindings,

@@ -49,6 +49,7 @@ impl NonlinearSolidStorageDemand {
             size_of::<CanonicalNonlinearSolidBasis>() as u64,
             slots::<PreparedElement>(elements)?,
             slots::<[usize; 3]>(nodes)?,
+            slots::<PreparedBodyNode>(nodes)?,
             slots::<PreparedPoint>(points)?,
             slots::<[f64; 3]>(point_nodes)?,
         ])?;

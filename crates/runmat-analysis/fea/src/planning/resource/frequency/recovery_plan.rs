@@ -96,6 +96,7 @@ impl StructuralFrequencyEntryResourceProjection {
             phase: FeaResourcePhase::StructuralFrequencyFieldRecovery(request.identity()),
             demand: FeaResourceDemand::StructuralFrequencyFieldRecovery(
                 StructuralFrequencyOperatorResourceDemand {
+                    constraint_compilation_peak_bytes: self.constraint_compilation_peak_bytes,
                     inputs,
                     output: output.clone(),
                     operator: StructuralOperatorResourceDemand {

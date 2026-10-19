@@ -1,15 +1,16 @@
-use std::collections::BTreeMap;
-
 use runmat_meshing_core::MeshingCancellationSignal;
 
 use super::storage::{
     error, execution_error, TopologyMutation, TopologyMutationError, TopologyMutationErrorKind,
 };
 use crate::cdt::{
-    incidence::build_volume_incidence, topology::build_delaunay_volume_topology_with_regions,
-    DelaunayTopologyError, DelaunayTopologyErrorKind, DelaunayTopologyOptions,
-    DelaunayVolumeTetrahedron, DelaunayVolumeTopology,
+    incidence::build_volume_incidence, topology::CanonicalVolumeTopology, DelaunayTopologyError,
+    DelaunayTopologyErrorKind, DelaunayTopologyOptions, DelaunayVolumeTetrahedron,
+    DelaunayVolumeTopology,
 };
+
+mod canonical;
+use canonical::{admit, prepare};
 
 impl TopologyMutation {
     pub(in crate::cdt) fn freeze(
@@ -17,7 +18,46 @@ impl TopologyMutation {
         options: DelaunayTopologyOptions,
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<DelaunayVolumeTopology, TopologyMutationError> {
-        freeze_parts(&self.nodes, &self.tetrahedra, options, cancellation)
+        self.freeze_canonical(options, cancellation)
+            .map(CanonicalVolumeTopology::into_inner)
+    }
+
+    pub(in crate::cdt) fn freeze_canonical(
+        mut self,
+        options: DelaunayTopologyOptions,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<CanonicalVolumeTopology, TopologyMutationError> {
+        let nodes = std::mem::take(&mut self.nodes);
+        let tetrahedra = std::mem::take(&mut self.tetrahedra);
+        // All spatial, incidence, journal and search indexes are obsolete here.
+        drop(self);
+        let slot_count = tetrahedra.len();
+        let parts = prepare(
+            &nodes,
+            tetrahedra.into_iter(),
+            slot_count,
+            options,
+            cancellation,
+        )?;
+        drop(nodes);
+        admit(parts, options, cancellation)
+    }
+
+    /// Perform the same independent full admission as consuming `freeze`, while
+    /// retaining the working owner for a checked canonical handoff.
+    pub(in crate::cdt) fn validated_snapshot(
+        &self,
+        options: DelaunayTopologyOptions,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<DelaunayVolumeTopology, TopologyMutationError> {
+        let parts = prepare(
+            &self.nodes,
+            self.tetrahedra.iter().cloned(),
+            self.tetrahedra.len(),
+            options,
+            cancellation,
+        )?;
+        admit(parts, options, cancellation).map(CanonicalVolumeTopology::into_inner)
     }
 
     pub(in crate::cdt) fn snapshot(
@@ -30,8 +70,9 @@ impl TopologyMutation {
 }
 
 /// Canonicalizes working topology whose mutations have already passed the
-/// checked cavity-replacement boundary. This avoids repeating exact orientation,
-/// overlap, manifoldness, and neighbor reconstruction for unchanged tetrahedra.
+/// checked cavity-replacement boundary. Orientation follows the checked vertex
+/// permutation; compact adjacency construction checks shared-face ownership and
+/// overlap without retaining a second face tree.
 /// `freeze` and the public artifact validator retain the independent full check.
 fn snapshot_parts(
     source_nodes: &[crate::cdt::DelaunayVolumeNode],
@@ -110,34 +151,11 @@ fn snapshot_parts(
             region_id,
         })
         .collect::<Vec<_>>();
-    let mut face_uses = BTreeMap::<[u32; 3], Vec<(usize, usize)>>::new();
-    for (tetrahedron_index, tetrahedron) in tetrahedra.iter().enumerate() {
-        for opposite in 0..4 {
-            let mut face = [0_u32; 3];
-            let mut cursor = 0;
-            for (slot, vertex) in tetrahedron.vertex_indices.iter().enumerate() {
-                if slot != opposite {
-                    face[cursor] = *vertex;
-                    cursor += 1;
-                }
-            }
-            face.sort_unstable();
-            face_uses
-                .entry(face)
-                .or_default()
-                .push((tetrahedron_index, opposite));
-        }
-    }
-    for uses in face_uses.values() {
-        match uses.as_slice() {
-            [_] => {}
-            [(left, left_opposite), (right, right_opposite)] => {
-                tetrahedra[*left].neighbors[*left_opposite] = Some(*right as u32);
-                tetrahedra[*right].neighbors[*right_opposite] = Some(*left as u32);
-            }
-            _ => return Err(error("mutable topology contains a non-manifold face")),
-        }
-    }
+    // A retained transaction needs one canonical view, not a second tree of
+    // every face and its heap-owned use list. The topology owner provides the
+    // same compact, independently checked adjacency construction as freeze.
+    crate::cdt::topology::connect_volume_neighbors(&nodes, &mut tetrahedra, options, cancellation)
+        .map_err(topology_error)?;
     let incidence = build_volume_incidence(&nodes, &tetrahedra, cancellation, options)
         .map_err(topology_error)?;
     Ok(DelaunayVolumeTopology {
@@ -153,65 +171,6 @@ fn permutation_is_odd(values: [u32; 4]) -> bool {
         .filter(|(left, right)| values[*left] > values[*right])
         .count();
     inversions % 2 == 1
-}
-
-fn freeze_parts(
-    source_nodes: &[crate::cdt::DelaunayVolumeNode],
-    source_tetrahedra: &[Option<super::storage::MutableTetrahedron>],
-    options: DelaunayTopologyOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayVolumeTopology, TopologyMutationError> {
-    checkpoint(cancellation)?;
-    let mut node_order = (0..source_nodes.len()).collect::<Vec<_>>();
-    node_order.sort_by_key(|index| source_nodes[*index].identity);
-    checkpoint(cancellation)?;
-    if node_order
-        .windows(2)
-        .any(|pair| source_nodes[pair[0]].identity >= source_nodes[pair[1]].identity)
-    {
-        return Err(error("mutable topology contains duplicate node identities"));
-    }
-    let mut remap = vec![0_u32; source_nodes.len()];
-    let nodes = node_order
-        .into_iter()
-        .enumerate()
-        .map(|(canonical, mutable)| {
-            remap[mutable] = canonical as u32;
-            source_nodes[mutable]
-        })
-        .collect::<Vec<_>>();
-    checkpoint(cancellation)?;
-    let mut tetrahedra = Vec::with_capacity(source_tetrahedra.len());
-    for (index, tetrahedron) in source_tetrahedra.iter().enumerate() {
-        if (index as u64).is_multiple_of(options.cancellation_check_interval) {
-            checkpoint(cancellation)?;
-        }
-        let Some(tetrahedron) = tetrahedron else {
-            continue;
-        };
-        tetrahedra.push((
-            tetrahedron
-                .vertex_indices
-                .map(|vertex| remap[vertex as usize]),
-            tetrahedron.region_id.clone(),
-        ));
-    }
-    checkpoint(cancellation)?;
-    build_delaunay_volume_topology_with_regions(nodes, tetrahedra, options, cancellation).map_err(
-        |failure| {
-            let kind = match failure.kind {
-                DelaunayTopologyErrorKind::ResourceLimit => {
-                    TopologyMutationErrorKind::ResourceLimit
-                }
-                DelaunayTopologyErrorKind::Cancelled => TopologyMutationErrorKind::Cancelled,
-                _ => TopologyMutationErrorKind::InvalidTopology,
-            };
-            execution_error(
-                kind,
-                format!("canonical freeze rejected mutable topology: {failure}"),
-            )
-        },
-    )
 }
 
 fn checkpoint(cancellation: &dyn MeshingCancellationSignal) -> Result<(), TopologyMutationError> {

@@ -74,36 +74,51 @@ impl<Workloads, NumericalEvidence> StudyResultManifest<Workloads, NumericalEvide
         mesh: &SolverMeshArtifact,
         meshing_evidence: &MeshingEvidence,
         numerical_evidence: NumericalEvidence,
-        publication: &super::structural_study::publication::DeferredStudyRun,
-    ) -> Result<Self, super::storage::AnalysisPublicationError>
+        publication: &mut super::structural_study::publication::DeferredStudyRun,
+    ) -> Result<
+        (Self, super::storage::publication::OwnedCopyReservation),
+        super::storage::AnalysisPublicationError,
+    >
     where
         Workloads: serde::Serialize + Clone,
         NumericalEvidence: serde::Serialize,
     {
         let public_run = &publication.published.data;
-        publication.staging.admit_manifest_copy(&(
+        let reservation = publication.staging.admit_compiled_manifest_copy(
             compiled,
-            workloads,
-            meshing_evidence,
-            &numerical_evidence,
-            public_run,
-        ))?;
+            &(workloads, meshing_evidence, &numerical_evidence, public_run),
+        )?;
         let definition = compiled
             .definition_digest()
             .map_err(|error| error.to_string())?;
         if public_run.study_fingerprint != definition.to_string() {
             return Err("study result manifest differs from published definition identity".into());
         }
-        Ok(Self {
-            schema_version: 1,
-            study_definition_digest: definition,
-            compiled: compiled.clone(),
-            workload_digest,
-            workloads: workloads.clone(),
-            solver_mesh_digest: mesh.canonical_digest,
-            meshing_evidence: meshing_evidence.clone(),
-            numerical_evidence,
-            public_run: public_run.clone(),
-        })
+        Ok((
+            Self {
+                schema_version: 1,
+                study_definition_digest: definition,
+                compiled: compiled.clone(),
+                workload_digest,
+                workloads: workloads.clone(),
+                solver_mesh_digest: mesh.canonical_digest,
+                meshing_evidence: meshing_evidence.clone(),
+                numerical_evidence,
+                public_run: public_run.clone(),
+            },
+            reservation,
+        ))
     }
+}
+
+/// Read the original authenticated publication for saved-result presentation.
+/// This does not execute, reassess, or qualify it under a newer implementation.
+pub fn read_saved_study_publication(
+    definition: Digest,
+    path: &std::path::Path,
+    maximum_bytes: u64,
+) -> Result<AnalysisStudyRunData, String> {
+    load_for_reassessment(definition, path, maximum_bytes)
+        .map(|(_, publication)| publication)
+        .map_err(|error| format!("{error:?}"))
 }

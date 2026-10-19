@@ -1,4 +1,5 @@
 use super::*;
+use runmat_canonical_codec::profile_serialized;
 
 fn definition(
     quantity: ObservationQuantity,

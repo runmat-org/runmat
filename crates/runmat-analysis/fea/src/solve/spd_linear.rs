@@ -6,6 +6,7 @@ use crate::{
         preconditioner::{SpdPreconditioner, SpdPreconditionerKind},
     },
 };
+mod progress;
 
 pub(crate) struct SpdSolveAttempt {
     pub(crate) vector: Vec<f64>,
@@ -54,6 +55,14 @@ pub(crate) fn solve_spd_system_cg(
         Some(values) if values.len() == rhs.len() => values.to_vec(),
         _ => vec![0.0; rhs.len()],
     };
+    let cancellation = crate::progress::cancellation_token();
+    if cancellation.is_cancelled() {
+        return SpdSolveAttempt {
+            vector: solution,
+            converged: false,
+            accelerator: None,
+        };
+    }
     let mut residual = {
         let applied = apply_k(system, &solution);
         rhs.iter()
@@ -71,6 +80,13 @@ pub(crate) fn solve_spd_system_cg(
     let mut direction = preconditioned.clone();
     let mut residual_preconditioned = dot(&residual, &preconditioned);
     let rhs_norm = dot(rhs, rhs).sqrt();
+    if cancellation.is_cancelled() {
+        return SpdSolveAttempt {
+            vector: solution,
+            converged: false,
+            accelerator: None,
+        };
+    }
     if rhs_norm == 0.0 {
         return SpdSolveAttempt {
             vector: vec![0.0; rhs.len()],
@@ -78,7 +94,8 @@ pub(crate) fn solve_spd_system_cg(
             accelerator: None,
         };
     }
-    if dot(&residual, &residual).sqrt() <= options.tol * rhs_norm {
+    let mut residual_norm = dot(&residual, &residual).sqrt();
+    if residual_norm <= options.tol * rhs_norm {
         return SpdSolveAttempt {
             vector: solution,
             converged: true,
@@ -87,7 +104,12 @@ pub(crate) fn solve_spd_system_cg(
     }
 
     let mut converged = false;
-    for _ in 0..options.max_iters {
+    let mut iteration_count = 0;
+    for iteration in 1..=options.max_iters {
+        // The caller's deadline must remain effective during a long inverse solve.
+        if cancellation.is_cancelled() {
+            break;
+        }
         let applied_direction = apply_k(system, &direction);
         let denominator = dot(&direction, &applied_direction);
         if !denominator.is_finite() || denominator <= 0.0 {
@@ -101,7 +123,22 @@ pub(crate) fn solve_spd_system_cg(
             solution[index] += alpha * direction[index];
             residual[index] -= alpha * applied_direction[index];
         }
-        if dot(&residual, &residual).sqrt() <= options.tol * rhs_norm {
+        iteration_count = iteration;
+        residual_norm = dot(&residual, &residual).sqrt();
+        if cancellation.is_cancelled() {
+            break;
+        }
+        if iteration == 1 || iteration % 256 == 0 {
+            progress::report(
+                iteration,
+                residual_norm / rhs_norm,
+                crate::progress::FeaProgressStatus::Advanced,
+            );
+            if cancellation.is_cancelled() {
+                break;
+            }
+        }
+        if residual_norm <= options.tol * rhs_norm {
             converged = true;
             break;
         }
@@ -120,9 +157,22 @@ pub(crate) fn solve_spd_system_cg(
         residual_preconditioned = next_residual_preconditioned;
     }
 
+    progress::report(
+        iteration_count,
+        residual_norm / rhs_norm,
+        if cancellation.is_cancelled() {
+            crate::progress::FeaProgressStatus::Cancelled
+        } else if converged {
+            crate::progress::FeaProgressStatus::Completed
+        } else {
+            crate::progress::FeaProgressStatus::Failed
+        },
+    );
+
     SpdSolveAttempt {
         vector: solution,
-        converged,
+        // A terminal progress callback can also request cancellation.
+        converged: converged && !cancellation.is_cancelled(),
         accelerator: None,
     }
 }
@@ -133,6 +183,10 @@ fn dot(left: &[f64], right: &[f64]) -> f64 {
         .map(|(left, right)| left * right)
         .sum()
 }
+
+#[cfg(test)]
+#[path = "spd_linear/cancellation_tests.rs"]
+mod cancellation_tests;
 
 #[cfg(test)]
 mod tests {

@@ -16,7 +16,8 @@ pub use validation::validate_delaunay_carving;
 use validation::{validate_inputs, validate_options};
 use work::CarvingWork;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayCarvingOptions {
     pub facet_recovery: DelaunayFacetRecoveryOptions,
     pub maximum_flood_steps: u64,

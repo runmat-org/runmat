@@ -1,3 +1,4 @@
+mod compiler;
 use runmat_analysis_core::{
     FormulationRequirement, IndependentDomain, ProcedureStep, ProcedureStepId,
     ReferenceStatePolicy, SequenceDependency, SequenceDependencyReason, StateId, StateTransition,
@@ -452,6 +453,7 @@ fn frequency_recovery_plan_uses_the_same_exact_complex_field_layout_as_recovery(
         ),
     )
     .unwrap();
+    compiler::assert_recovery_compilation(&mesh, &workload, &request, &entry, &plan);
     assert_eq!(
         plan.input.phase,
         FeaResourcePhase::StructuralFrequencyFieldRecovery(request.identity())

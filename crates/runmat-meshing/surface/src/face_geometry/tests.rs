@@ -1,3 +1,6 @@
+mod acceptance_work;
+mod realization;
+mod storage;
 use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryEvaluationErrorKind, GeometryModel,
     GeometryTransform, PortableExactEvaluator,
@@ -116,6 +119,23 @@ fn independent_validation_rejects_triangle_and_summary_tampering() {
         )
     };
 
+    // The prepared reference must still independently check every sample.
+    let mut altered_vertex = geometry.clone();
+    std::sync::Arc::make_mut(&mut altered_vertex.vertices[0].evaluation.provenance)
+        .applied_contribution_count += 1;
+    assert_eq!(
+        validate(&altered_vertex).unwrap_err().kind,
+        ExactFaceGeometryErrorKind::Metric(crate::ExactFaceMetricErrorKind::InvalidEvaluation)
+    );
+    let mut altered_sample = geometry.clone();
+    altered_sample.triangles[0].deviation_samples[0]
+        .sizing_metric
+        .uu *= 2.0;
+    assert_eq!(
+        validate(&altered_sample).unwrap_err().kind,
+        ExactFaceGeometryErrorKind::Metric(crate::ExactFaceMetricErrorKind::InvalidEvaluation)
+    );
+
     let mut altered_triangle = geometry.clone();
     altered_triangle.triangles[0].chordal_deviation_m = 1.0;
     assert_eq!(
@@ -171,6 +191,8 @@ struct Fixture {
     registry: runmat_geometry_core::ExactEvaluatorRegistry,
     pslg: crate::ExactFacePslg,
     trimmed: crate::ExactFaceTrimmedDelaunay,
+    constrained: crate::ExactFaceConstrainedDelaunay,
+    curves: runmat_meshing_curve::SharedCurveMesh,
 }
 
 fn fixture(transform: Option<GeometryTransform>) -> Fixture {
@@ -211,6 +233,8 @@ fn fixture(transform: Option<GeometryTransform>) -> Fixture {
         registry,
         pslg,
         trimmed,
+        constrained,
+        curves,
     }
 }
 

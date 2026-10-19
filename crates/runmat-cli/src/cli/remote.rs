@@ -20,7 +20,7 @@ pub enum ProjectCommand {
     /// List projects for an organization
     List {
         /// Organization id
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         /// Page size
         #[arg(long)]
@@ -32,7 +32,7 @@ pub enum ProjectCommand {
     /// Create a project
     Create {
         /// Organization id
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         /// Project name
         name: String,
@@ -55,6 +55,7 @@ pub enum ProjectCommand {
     /// Set default project
     Select {
         /// Project id
+        #[arg(value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Uuid,
     },
 }
@@ -64,7 +65,7 @@ pub enum ProjectMembersCommand {
     /// List project members
     List {
         /// Project id
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         /// Page size
         #[arg(long)]
@@ -80,7 +81,7 @@ pub enum ProjectRetentionCommand {
     /// Show retention settings
     Get {
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Set retention max versions
@@ -88,7 +89,7 @@ pub enum ProjectRetentionCommand {
         /// Max versions to keep (0 = unlimited)
         max_versions: usize,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
 }
@@ -103,7 +104,7 @@ pub enum FsCommand {
         #[arg(long)]
         output: Option<PathBuf>,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Write a remote file from local input
@@ -113,7 +114,7 @@ pub enum FsCommand {
         /// Input file
         input: PathBuf,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// List directory contents
@@ -122,7 +123,7 @@ pub enum FsCommand {
         #[arg(default_value = "/")]
         path: String,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Create directory
@@ -133,7 +134,7 @@ pub enum FsCommand {
         #[arg(short, long)]
         recursive: bool,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Remove file or directory
@@ -147,7 +148,7 @@ pub enum FsCommand {
         #[arg(short, long)]
         recursive: bool,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// List file history
@@ -155,29 +156,31 @@ pub enum FsCommand {
         /// Remote path
         path: String,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Restore file version
     Restore {
         /// Version id to restore
+        #[arg(value_parser = runmat_server_client::auth::parse_fs_version_id_input)]
         version: Uuid,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Delete file version
     HistoryDelete {
         /// Version id to delete
+        #[arg(value_parser = runmat_server_client::auth::parse_fs_version_id_input)]
         version: Uuid,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// List filesystem snapshots
     SnapshotList {
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Create filesystem snapshot
@@ -186,45 +189,48 @@ pub enum FsCommand {
         #[arg(long)]
         message: Option<String>,
         /// Parent snapshot override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_snapshot_id_input)]
         parent: Option<Uuid>,
         /// Optional tag
         #[arg(long)]
         tag: Option<String>,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Restore filesystem snapshot
     SnapshotRestore {
         /// Snapshot id to restore
+        #[arg(value_parser = runmat_server_client::auth::parse_snapshot_id_input)]
         snapshot: Uuid,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Delete filesystem snapshot
     SnapshotDelete {
         /// Snapshot id to delete
+        #[arg(value_parser = runmat_server_client::auth::parse_snapshot_id_input)]
         snapshot: Uuid,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// List snapshot tags
     SnapshotTagList {
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Set snapshot tag
     SnapshotTagSet {
         /// Snapshot id to tag
+        #[arg(value_parser = runmat_server_client::auth::parse_snapshot_id_input)]
         snapshot: Uuid,
         /// Tag name
         tag: String,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Delete snapshot tag
@@ -232,7 +238,7 @@ pub enum FsCommand {
         /// Tag name
         tag: String,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Clone project snapshots into a git repo
@@ -240,7 +246,7 @@ pub enum FsCommand {
         /// Destination directory
         directory: PathBuf,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         /// Server override
         #[arg(long)]
@@ -252,7 +258,7 @@ pub enum FsCommand {
         #[arg(default_value = ".")]
         directory: PathBuf,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         /// Server override
         #[arg(long)]
@@ -264,7 +270,7 @@ pub enum FsCommand {
         #[arg(default_value = ".")]
         directory: PathBuf,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         /// Server override
         #[arg(long)]
@@ -275,15 +281,16 @@ pub enum FsCommand {
         /// Remote path
         path: String,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Restore shard manifest version
     ManifestRestore {
         /// Version id to restore
+        #[arg(value_parser = runmat_server_client::auth::parse_fs_version_id_input)]
         version: Uuid,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Update shard manifest with partial edits
@@ -292,12 +299,13 @@ pub enum FsCommand {
         path: String,
         /// Base manifest version id
         #[arg(long)]
+        #[arg(value_parser = runmat_server_client::auth::parse_fs_version_id_input)]
         base_version: Uuid,
         /// Manifest JSON file
         #[arg(long)]
         manifest: PathBuf,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
 }
@@ -309,7 +317,7 @@ pub enum RemoteCommand {
         /// Remote script path
         script: PathBuf,
         /// Project id override
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         /// Server URL override
         #[arg(long)]

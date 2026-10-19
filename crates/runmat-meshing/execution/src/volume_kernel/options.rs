@@ -137,10 +137,10 @@ pub(crate) fn volume_options(request: &MeshingRequest) -> DelaunayVolumeMeshOpti
             .cancellation_check_interval,
     );
     options.sliver.maximum_passes = options.sliver.maximum_passes.min(iteration_limit);
-    options.sliver.maximum_candidate_evaluations_per_pass = options
-        .sliver
-        .maximum_candidate_evaluations_per_pass
-        .min(search_limit);
+    // Standalone sliver helpers have a small default. Governed execution uses
+    // the original admitted search envelope; the shared stage control still
+    // charges cumulative work across strategies and passes, never resets it.
+    options.sliver.maximum_candidate_evaluations_per_pass = search_limit;
     options.sliver.maximum_compound_reconnections_per_insertion = options
         .sliver
         .maximum_compound_reconnections_per_insertion

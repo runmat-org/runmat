@@ -7,7 +7,7 @@ use super::super::{
 use super::integration::adaptive_arc_length;
 use super::projection::{charge_seed_allocation, project_curve, uniform_seeds};
 use super::spline::rational_derivatives;
-use super::vector::{add_scaled, cross, distance, dot, norm, normalize, subtract};
+use super::vector::{add_scaled, cross, distance, norm, normalize};
 use super::{invalid_result, kernel_owned, outside_domain, PortableExactEvaluator};
 
 const MAX_NURBS_PROJECTION_SEEDS: usize = 1_000_000;
@@ -148,34 +148,17 @@ impl ExactCurveEvaluator for PortableExactEvaluator<'_> {
             ..
         } = definition
         {
-            control.checkpoint()?;
-            control.consume_search_work(1)?;
-            let offset = subtract(&point_m, origin_m);
-            let denominator = dot(direction_m_per_parameter, direction_m_per_parameter);
-            let raw_parameter = dot(&offset, direction_m_per_parameter) / denominator;
-            if !raw_parameter.is_finite() {
-                return Err(invalid_result(
-                    "line projection produced an invalid parameter",
-                ));
-            }
-            let parameter = raw_parameter.clamp(range.start, range.end);
-            let projected = add_scaled(
+            let projection = super::projection::project_line(
+                range,
                 origin_m,
                 direction_m_per_parameter,
-                parameter,
-                &[0.0; 3],
-                0.0,
-            );
-            let distance_m = distance(&projected, &point_m);
-            if !distance_m.is_finite() {
-                return Err(invalid_result(
-                    "line projection produced an invalid distance",
-                ));
-            }
+                point_m,
+                control,
+            )?;
             return Ok(CurveProjection {
-                parameter,
-                point_m: projected,
-                distance_m,
+                parameter: projection.parameter,
+                point_m: projection.point,
+                distance_m: projection.distance,
             });
         }
         let seeds = projection_seeds(definition, range)?;
@@ -391,11 +374,14 @@ fn projection_seeds(
                             "NURBS projection seed count exceeds its hard bound",
                         ));
                     }
-                    seeds.push(start + (end - start) * index as f64 / subdivisions as f64);
+                    seeds.push(
+                        ParameterRange { start, end }
+                            .parameter_at_fraction(index as f64 / subdivisions as f64)?,
+                    );
                 }
             }
             Ok(seeds)
         }
-        _ => Ok(uniform_seeds(range, 256)),
+        _ => uniform_seeds(range, 256),
     }
 }

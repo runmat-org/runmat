@@ -1,14 +1,12 @@
 use runmat_meshing_core::{quality::predicate::PredicateSign, MeshingCancellationSignal};
 
 use super::{
-    cavity::stable_face, error, predicate_error, topology_error,
-    two_to_three_topology_is_admissible, validate_options, DelaunayInsertionError,
-    DelaunayInsertionErrorKind, DelaunayInsertionOptions, DelaunayVolumeNode,
-    DelaunayVolumeTopology, InsertionWork,
+    cavity::stable_face, error, predicate_error, topology_error, validate_options,
+    DelaunayInsertionError, DelaunayInsertionErrorKind, DelaunayInsertionOptions,
+    DelaunayVolumeNode, DelaunayVolumeTopology, InsertionWork,
 };
-use crate::cdt::topology::build_delaunay_volume_topology_with_regions;
 use crate::cdt::topology::insphere_materialized_volume_nodes as insphere_volume_nodes;
-use crate::reconnect::two_to_three_geometry_is_admissible;
+use crate::cdt::topology::validate_canonical_volume_topology;
 
 pub fn validate_delaunay_volume_topology(
     topology: &DelaunayVolumeTopology,
@@ -63,24 +61,59 @@ fn validate_topology(
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayInsertionError> {
     validate_options(options)?;
-    let rebuilt = build_delaunay_volume_topology_with_regions(
-        topology.nodes.clone(),
-        topology
-            .tetrahedra
-            .iter()
-            .map(|tetrahedron| (tetrahedron.vertex_indices, tetrahedron.region_id.clone()))
-            .collect(),
-        options.topology,
+    validate_canonical_volume_topology(topology, options.topology, cancellation)
+        .map_err(topology_error)?;
+
+    validate_boundary_and_spheres(
+        topology,
+        protected_faces,
+        protect_region_boundaries,
+        enforce_delaunay,
+        options,
         cancellation,
     )
-    .map_err(topology_error)?;
-    if rebuilt != *topology {
-        return Err(error(
-            DelaunayInsertionErrorKind::InvalidTopology,
-            "tetrahedra or neighbor links are not in canonical checked form",
-        ));
+}
+
+/// Recheck the current PLC and region contract against immutable construction authority.
+/// The token does not authorize any protected face or metric policy by itself.
+#[cfg(test)]
+pub(in crate::cdt) fn validate_canonical_conforming_volume_topology(
+    topology: &crate::cdt::topology::CanonicalVolumeTopology,
+    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunayInsertionError> {
+    validate_options(options)?;
+    if cancellation.is_cancelled() {
+        return Err(error(DelaunayInsertionErrorKind::Cancelled, "cancelled"));
     }
 
+    if topology.nodes.len() as u64 > options.topology.maximum_nodes
+        || topology.tetrahedra.len() as u64 > options.topology.maximum_tetrahedra
+    {
+        return Err(error(
+            DelaunayInsertionErrorKind::ResourceLimit,
+            "canonical topology exceeds current inventory limits",
+        ));
+    }
+    validate_boundary_and_spheres(
+        topology,
+        protected_faces,
+        true,
+        false,
+        options,
+        cancellation,
+    )
+}
+
+fn validate_boundary_and_spheres(
+    topology: &DelaunayVolumeTopology,
+    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+    protect_region_boundaries: bool,
+    enforce_delaunay: bool,
+    options: DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), DelaunayInsertionError> {
     if protected_faces.len() as u64 > options.maximum_protected_faces {
         return Err(error(
             DelaunayInsertionErrorKind::ResourceLimit,
@@ -152,17 +185,9 @@ fn validate_topology(
                         "neighbors do not share exactly one triangular face",
                     )
                 })?;
-            let local_opposite = tetrahedron
-                .vertex_indices
-                .iter()
-                .copied()
-                .find(|vertex| !neighbor.vertex_indices.contains(vertex))
-                .ok_or_else(|| {
-                    error(
-                        DelaunayInsertionErrorKind::InvalidTopology,
-                        "neighbors do not have distinct opposite vertices",
-                    )
-                })?;
+            // Empty-sphere admission is independent of the available flip.
+            // A nonconvex two-tet cavity can require an edge-star (3-to-2)
+            // repair; lack of a 2-to-3 edit does not establish Delaunay validity.
             if enforce_delaunay
                 && in_circumsphere_exact(
                     topology,
@@ -170,19 +195,6 @@ fn validate_topology(
                     topology.nodes[opposite as usize],
                     &mut work,
                 )?
-                && two_to_three_topology_is_admissible(
-                    topology,
-                    tetrahedron_index as u32,
-                    neighbor_index,
-                    local_opposite,
-                    opposite,
-                )
-                && two_to_three_geometry_is_admissible(
-                    tetrahedron.vertex_indices,
-                    neighbor.vertex_indices,
-                    |node| topology.nodes[node as usize].predicate_point(),
-                )
-                .map_err(predicate_error)?
             {
                 let mut face_indices = [0_u32; 3];
                 let mut cursor = 0;

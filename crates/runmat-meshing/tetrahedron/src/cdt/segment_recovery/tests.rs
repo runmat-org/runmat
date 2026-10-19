@@ -2,6 +2,12 @@ use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::NeverCancelled;
 
 use super::*;
+#[path = "tests/acute_family.rs"]
+mod acute_family;
+#[path = "tests/parameter.rs"]
+mod parameter;
+#[path = "tests/reconnection.rs"]
+mod reconnection;
 use crate::cdt::{
     assign_delaunay_volume_regions, build_delaunay_volume_point_set,
     build_delaunay_volume_topology, DelaunayConstraintNode, DelaunayConstraintSegment,
@@ -16,7 +22,7 @@ fn entity(kind: PersistentEntityKind, value: &str) -> PersistentEntityId {
     }
 }
 
-fn octahedron_constraints() -> DelaunayConstraints {
+pub(super) fn octahedron_constraints() -> DelaunayConstraints {
     let coordinates = [
         [-1.0, 0.0, 0.0],
         [0.0, -1.0, 0.0],
@@ -511,3 +517,8 @@ fn recovery_enforces_search_work_steiner_and_cancellation_limits() {
         DelaunaySegmentRecoveryErrorKind::Cancelled
     );
 }
+
+#[path = "tests/encroached_reconnection.rs"]
+mod encroached_reconnection;
+#[path = "tests/indexed_encroachment.rs"]
+mod indexed_encroachment;

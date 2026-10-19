@@ -54,9 +54,12 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
             face
         })
         .collect();
+    let ids = (0..count)
+        .map(|i| format!("component-outlet-{i}"))
+        .collect::<Vec<_>>();
     let boundaries = (0..count)
         .map(|i| boundary::FaceBoundary::PressureOutlet {
-            authority_id: format!("component-outlet-{i}"),
+            authority_id: ids[i].as_str(),
             pressure: i as f64,
         })
         .collect::<Vec<_>>();
@@ -105,7 +108,7 @@ fn disconnected_outlet_references_use_one_face_traversal_and_linear_envelope() {
     };
     let walls = vec![
         boundary::FaceBoundary::Velocity {
-            authority_id: "wall".into(),
+            authority_id: "wall",
             value: [0.0; 3],
             moving_wall: false
         };

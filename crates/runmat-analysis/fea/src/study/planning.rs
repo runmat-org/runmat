@@ -1,3 +1,4 @@
+use crate::pipeline::modal_governance::ModalConvergencePolicy;
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
@@ -33,6 +34,7 @@ pub struct StructuralNumericalPlanningPolicy {
     pub maximum_transient_intervals_per_block: u64,
     pub maximum_frequency_intervals_per_task: usize,
     pub maximum_modal_iterations: usize,
+    pub maximum_modal_subspace_dimension: usize,
     pub modal_eigenspace_relative_tolerance: f64,
     pub harmonic_restart: usize,
     pub maximum_harmonic_iterations: usize,
@@ -45,6 +47,8 @@ impl StructuralNumericalPlanningPolicy {
             maximum_transient_intervals_per_block: 256,
             maximum_frequency_intervals_per_task: 32,
             maximum_modal_iterations: 256,
+            maximum_modal_subspace_dimension: ModalConvergencePolicy::production()
+                .maximum_subspace_dimension(),
             modal_eigenspace_relative_tolerance: 1.0e-6,
             harmonic_restart: 32,
             maximum_harmonic_iterations: 2_048,
@@ -56,6 +60,7 @@ impl StructuralNumericalPlanningPolicy {
         if self.maximum_transient_intervals_per_block == 0
             || self.maximum_frequency_intervals_per_task == 0
             || self.maximum_modal_iterations == 0
+            || self.maximum_modal_subspace_dimension == 0
             || !open_unit_interval(self.modal_eigenspace_relative_tolerance)
             || self.harmonic_restart == 0
             || self.maximum_harmonic_iterations == 0

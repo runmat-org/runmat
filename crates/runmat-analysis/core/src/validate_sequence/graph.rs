@@ -1,221 +1,132 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::{
-    AnalysisSequence, AnalysisValidationError, ProcedureStep, ProcedureStepId, StateCompleteness,
-    StatePersistence, StateSource, ValidatedAnalysisSequence,
+    AnalysisSequence, AnalysisValidationError, ProcedureStep, StateCompleteness, StatePersistence,
+    StateSource,
 };
 
 use super::sequence_error;
 
-pub(super) struct ValidatedGraph<'a> {
-    pub(super) steps: HashMap<&'a str, &'a ProcedureStep>,
-    ancestors: HashMap<&'a str, HashSet<&'a str>>,
+mod index;
+mod owned;
+mod resources;
+use index::{Adjacency, StepIndex};
+pub(crate) use resources::resident_bytes;
+#[cfg(test)]
+mod tests;
+mod traversal;
+pub(crate) use owned::owned_topology;
+
+pub(crate) struct ValidatedGraph<'a> {
+    pub(super) steps: StepIndex<'a>,
+    predecessors: Adjacency,
 }
 
 impl<'a> ValidatedGraph<'a> {
     pub(super) fn is_ancestor(&self, candidate: &str, successor: &str) -> bool {
-        self.ancestors
-            .get(successor)
-            .is_some_and(|values| values.contains(candidate))
+        let (Some(candidate), Some(successor)) =
+            (self.steps.index(candidate), self.steps.index(successor))
+        else {
+            return false;
+        };
+        traversal::is_ancestor(&self.predecessors, candidate, successor)
     }
 }
 
 pub(super) fn validate(
     sequence: &AnalysisSequence,
 ) -> Result<ValidatedGraph<'_>, AnalysisValidationError> {
-    let mut steps = HashMap::new();
-    for step in &sequence.steps {
-        let id = step.step_id.as_str();
-        if id.trim().is_empty() {
-            return Err(super::step_error(step, "step id must be non-empty"));
+    // Check count overflow before any indexed graph allocation.
+    resident_bytes(sequence)?;
+    let first_empty = sequence
+        .steps
+        .iter()
+        .position(|step| step.step_id.as_str().trim().is_empty());
+    let mut entries: Vec<_> = sequence.steps.iter().enumerate().collect();
+    entries.sort_unstable_by(|(a, x), (b, y)| x.step_id.cmp(&y.step_id).then(a.cmp(b)));
+    if let Some((ordinal, step)) = entries
+        .windows(2)
+        .filter(|w| w[0].1.step_id == w[1].1.step_id)
+        .map(|w| w[1])
+        .min_by_key(|(i, _)| *i)
+    {
+        if let Some(i) = first_empty.filter(|&i| i < ordinal) {
+            return Err(super::step_error(
+                &sequence.steps[i],
+                "step id must be non-empty",
+            ));
         }
-        if steps.insert(id, step).is_some() {
-            return Err(super::step_error(step, format!("duplicate step id `{id}`")));
-        }
+        return Err(super::step_error(
+            step,
+            format!("duplicate step id `{}`", step.step_id.as_str()),
+        ));
     }
-
+    if let Some(i) = first_empty {
+        return Err(super::step_error(
+            &sequence.steps[i],
+            "step id must be non-empty",
+        ));
+    }
+    let steps = StepIndex(entries);
     let edges = validate_dependencies(sequence, &steps)?;
-    validate_acyclic(sequence, &steps, &edges)?;
-    let ancestors = transitive_ancestors(&steps, &edges);
-    let graph = ValidatedGraph { steps, ancestors };
+    let forward = Adjacency::from_edges(sequence.steps.len(), &edges, false);
+    traversal::validate_acyclic(sequence, &forward)?;
+    let predecessors = Adjacency::from_edges(sequence.steps.len(), &edges, true);
+    drop(forward);
+    drop(edges);
+    let graph = ValidatedGraph {
+        steps,
+        predecessors,
+    };
     validate_branches(sequence, &graph)?;
     Ok(graph)
 }
 
-pub(super) fn owned_topology(
+fn validate_dependencies(
     sequence: &AnalysisSequence,
-    graph: &ValidatedGraph<'_>,
-) -> ValidatedAnalysisSequence {
-    let mut direct_predecessors = BTreeMap::new();
-    for &step_id in graph.steps.keys() {
-        direct_predecessors.insert(ProcedureStepId(step_id.to_owned()), Vec::new());
-    }
-    for dependency in &sequence.dependencies {
-        direct_predecessors
-            .get_mut(&dependency.successor)
-            .expect("validated dependency successor must exist")
-            .push(dependency.predecessor.clone());
-    }
-    for predecessors in direct_predecessors.values_mut() {
-        predecessors.sort();
-    }
-
-    let mut successors: BTreeMap<ProcedureStepId, Vec<ProcedureStepId>> = graph
-        .steps
-        .keys()
-        .map(|id| (ProcedureStepId((*id).to_owned()), Vec::new()))
-        .collect();
-    for dependency in &sequence.dependencies {
-        successors
-            .get_mut(&dependency.predecessor)
-            .expect("validated dependency predecessor must exist")
-            .push(dependency.successor.clone());
-    }
-    for values in successors.values_mut() {
-        values.sort();
-    }
-
-    let mut remaining_predecessors: BTreeMap<_, _> = direct_predecessors
-        .iter()
-        .map(|(id, predecessors)| (id.clone(), predecessors.len()))
-        .collect();
-    let mut ready: BTreeSet<_> = remaining_predecessors
-        .iter()
-        .filter(|(_, count)| **count == 0)
-        .map(|(id, _)| id.clone())
-        .collect();
-    let mut topological_order = Vec::with_capacity(sequence.steps.len());
-    let mut parallel_levels = Vec::new();
-    while !ready.is_empty() {
-        let level: Vec<_> = ready.iter().cloned().collect();
-        ready.clear();
-        for step_id in &level {
-            topological_order.push(step_id.clone());
-            for successor in successors
-                .get(step_id)
-                .expect("validated step must have a successor inventory")
-            {
-                let count = remaining_predecessors
-                    .get_mut(successor)
-                    .expect("validated successor must have a predecessor count");
-                *count -= 1;
-                if *count == 0 {
-                    ready.insert(successor.clone());
-                }
-            }
+    steps: &StepIndex<'_>,
+) -> Result<Vec<(usize, usize)>, AnalysisValidationError> {
+    let mut declarations: Vec<_> = sequence.dependencies.iter().enumerate().collect();
+    declarations.sort_unstable_by(|(a, x), (b, y)| {
+        (&x.predecessor, &x.successor)
+            .cmp(&(&y.predecessor, &y.successor))
+            .then(a.cmp(b))
+    });
+    let mut duplicates = Vec::with_capacity(declarations.len());
+    for window in declarations.windows(2) {
+        if window[0].1.predecessor == window[1].1.predecessor
+            && window[0].1.successor == window[1].1.successor
+        {
+            duplicates.push(window[1].0);
         }
-        parallel_levels.push(level);
     }
-    debug_assert_eq!(topological_order.len(), sequence.steps.len());
-
-    ValidatedAnalysisSequence::new(
-        sequence.clone(),
-        topological_order,
-        parallel_levels,
-        direct_predecessors,
-    )
-}
-
-fn validate_dependencies<'a>(
-    sequence: &'a AnalysisSequence,
-    steps: &HashMap<&'a str, &'a ProcedureStep>,
-) -> Result<HashMap<&'a str, Vec<&'a str>>, AnalysisValidationError> {
-    let mut seen = HashSet::new();
-    let mut edges: HashMap<&str, Vec<&str>> = HashMap::new();
-    for dependency in &sequence.dependencies {
+    duplicates.sort_unstable();
+    drop(declarations);
+    let mut edges = Vec::with_capacity(sequence.dependencies.len());
+    for (ordinal, dependency) in sequence.dependencies.iter().enumerate() {
         let predecessor = dependency.predecessor.as_str();
         let successor = dependency.successor.as_str();
-        if !steps.contains_key(predecessor) || !steps.contains_key(successor) {
+        let (Some(from), Some(to)) = (steps.index(predecessor), steps.index(successor)) else {
             return Err(sequence_error(
                 sequence,
                 format!("dependency `{predecessor}` -> `{successor}` references an unknown step"),
             ));
-        }
-        if predecessor == successor {
+        };
+        if from == to {
             return Err(sequence_error(
                 sequence,
                 format!("step `{predecessor}` cannot depend on itself"),
             ));
         }
-        if !seen.insert((predecessor, successor)) {
+        if duplicates.binary_search(&ordinal).is_ok() {
             return Err(sequence_error(
                 sequence,
                 format!("duplicate dependency `{predecessor}` -> `{successor}`"),
             ));
         }
-        edges.entry(predecessor).or_default().push(successor);
+        edges.push((from, to));
     }
     Ok(edges)
-}
-
-fn validate_acyclic(
-    sequence: &AnalysisSequence,
-    steps: &HashMap<&str, &ProcedureStep>,
-    edges: &HashMap<&str, Vec<&str>>,
-) -> Result<(), AnalysisValidationError> {
-    fn visit<'a>(
-        node: &'a str,
-        edges: &HashMap<&'a str, Vec<&'a str>>,
-        visiting: &mut HashSet<&'a str>,
-        visited: &mut HashSet<&'a str>,
-    ) -> bool {
-        if visiting.contains(node) {
-            return false;
-        }
-        if visited.contains(node) {
-            return true;
-        }
-        visiting.insert(node);
-        if edges
-            .get(node)
-            .into_iter()
-            .flatten()
-            .any(|next| !visit(next, edges, visiting, visited))
-        {
-            return false;
-        }
-        visiting.remove(node);
-        visited.insert(node);
-        true
-    }
-
-    let mut visiting = HashSet::new();
-    let mut visited = HashSet::new();
-    if steps
-        .keys()
-        .any(|id| !visit(id, edges, &mut visiting, &mut visited))
-    {
-        Err(sequence_error(
-            sequence,
-            "dependency graph contains a cycle",
-        ))
-    } else {
-        Ok(())
-    }
-}
-
-fn transitive_ancestors<'a>(
-    steps: &HashMap<&'a str, &'a ProcedureStep>,
-    edges: &HashMap<&'a str, Vec<&'a str>>,
-) -> HashMap<&'a str, HashSet<&'a str>> {
-    let mut reverse: HashMap<&str, Vec<&str>> = HashMap::new();
-    for (from, successors) in edges {
-        for successor in successors {
-            reverse.entry(successor).or_default().push(from);
-        }
-    }
-    let mut result = HashMap::new();
-    for id in steps.keys().copied() {
-        let mut found = HashSet::new();
-        let mut pending = reverse.get(id).cloned().unwrap_or_default();
-        while let Some(previous) = pending.pop() {
-            if found.insert(previous) {
-                pending.extend(reverse.get(previous).into_iter().flatten().copied());
-            }
-        }
-        result.insert(id, found);
-    }
-    result
 }
 
 fn validate_branches(

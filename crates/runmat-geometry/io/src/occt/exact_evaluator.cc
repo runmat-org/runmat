@@ -1,13 +1,13 @@
 #include "runmat-geometry-io/src/occt/ffi.rs.h"
 #include "occt_bridge.hxx"
 #include "exact_evaluator_internal.hxx"
+#include "exact_surface_bounds.hxx"
 #include "exact_wire.hxx"
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepClass_FaceClassifier.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
-#include <BRepTools.hxx>
 #include <BRepTools_ShapeSet.hxx>
 #include <BRep_Builder.hxx>
 #include <Extrema_ExtPC.hxx>
@@ -49,6 +49,7 @@ struct ExactEvaluatorSession {
   TopoDS_Shape root;
   BRepTools_ShapeSet shapes{Standard_False};
   double meters_per_source_unit = 1.0;
+  detail::ExactSurfaceBounds face_parameter_bounds;
 };
 
 std::mutex& sessions_mutex() {
@@ -181,12 +182,14 @@ PcurveData pcurve(const ExactEvaluatorSession& session,
 detail::ExactFaceContext detail::exact_face_context(std::uint64_t session_id,
                                                     std::uint64_t face_key) {
   const auto value = session(session_id);
-  return {face(*value, face_key), value->meters_per_source_unit};
+  return {face(*value, face_key), value->meters_per_source_unit,
+          value->face_parameter_bounds.at(face_key)};
 }
 
 std::uint64_t start_exact_evaluator_session(
     rust::Slice<const std::uint8_t> representation,
-    double meters_per_source_unit) {
+    double meters_per_source_unit,
+    rust::Slice<const std::uint64_t> face_keys) {
   if (representation.empty()) {
     throw std::runtime_error("OCCT exact evaluator representation is empty");
   }
@@ -203,6 +206,7 @@ std::uint64_t start_exact_evaluator_session(
   }
   value->shapes.Add(value->root);
   value->meters_per_source_unit = meters_per_source_unit;
+  value->face_parameter_bounds = detail::ExactSurfaceBounds(value->shapes, face_keys);
 
   const std::uint64_t id = next_session_id().fetch_add(1, std::memory_order_relaxed);
   std::lock_guard<std::mutex> lock(sessions_mutex());

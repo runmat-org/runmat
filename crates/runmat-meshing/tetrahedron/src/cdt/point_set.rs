@@ -1,27 +1,20 @@
 use std::collections::BTreeSet;
 
-use runmat_meshing_core::{
-    quality::predicate::{orient3d, PredicateSign},
-    MeshingCancellationSignal, StableDigest,
-};
+use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
-use super::insertion::{
-    insert_delaunay_volume_node_into_mutation,
-    legalize_delaunay_volume_topology_completely_with_barriers,
-    validate_locally_delaunay_volume_topology,
-};
-use super::mutation::TopologyMutation;
+use super::insertion::{validate_locally_delaunay_volume_topology, UnconstrainedHull};
 use super::{
     build_delaunay_volume_topology, DelaunayInsertionError, DelaunayInsertionErrorKind,
     DelaunayInsertionOptions, DelaunayTopologyError, DelaunayTopologyErrorKind, DelaunayVolumeNode,
     DelaunayVolumeTopology,
 };
 
-mod enclosing;
-mod hull;
-
-use enclosing::enclosing_point_set;
-use hull::convex_hull_seed;
+mod hull_validation;
+#[cfg(test)]
+mod scaling;
+mod seed;
+mod work;
+use hull_validation::validate_convex_hull_closure;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DelaunayPointSetOptions {
@@ -57,59 +50,65 @@ impl std::fmt::Display for DelaunayPointSetError {
 impl std::error::Error for DelaunayPointSetError {}
 
 /// Builds the canonical unconstrained Delaunay tetrahedralization of a point
-/// set. Its exact convex hull is constructed first, then non-hull points are inserted internally.
+/// set by growing its real convex hull; no artificial enclosing vertices are used.
 pub fn build_delaunay_volume_point_set(
+    nodes: Vec<DelaunayVolumeNode>,
+    options: DelaunayPointSetOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<DelaunayVolumeTopology, DelaunayPointSetError> {
+    build_delaunay_volume_point_set_with_order(
+        nodes,
+        options,
+        cancellation,
+        compare_geometric_nodes,
+    )
+}
+
+/// Insertion ordering is a scheduling hint only. The original point inventory
+/// remains authoritative for every predicate, cavity and published coordinate.
+pub(in crate::cdt) fn build_delaunay_volume_point_set_with_order(
     mut nodes: Vec<DelaunayVolumeNode>,
     options: DelaunayPointSetOptions,
     cancellation: &dyn MeshingCancellationSignal,
+    compare: impl Fn(&DelaunayVolumeNode, &DelaunayVolumeNode) -> std::cmp::Ordering,
 ) -> Result<DelaunayVolumeTopology, DelaunayPointSetError> {
     validate_options(options)?;
     validate_and_order_nodes(&mut nodes, options, cancellation)?;
     validate_coordinate_range(&nodes)?;
-    match enclosing_point_set(&nodes, options, cancellation) {
-        Ok(topology) => match validate_convex_hull_closure(&topology, options, cancellation) {
-            Ok(()) => return Ok(topology),
-            Err(failure) if failure.kind == DelaunayPointSetErrorKind::InvalidTopology => {}
-            Err(failure) => return Err(failure),
-        },
-        Err(failure) if failure.kind == DelaunayPointSetErrorKind::InvalidTopology => {}
-        Err(failure) => return Err(failure),
-    }
-
     let mut geometric_nodes = nodes.clone();
-    geometric_nodes.sort_by(compare_geometric_nodes);
-    let seed = convex_hull_seed(&geometric_nodes, options, cancellation)?;
-    let working_options = options.insertion;
+    geometric_nodes.sort_by(compare);
+    let initial = seed::initial_tetrahedron(
+        &geometric_nodes,
+        &mut work::HullWork::new(options, cancellation),
+    )?;
+    let mut seed_nodes = initial.map(|index| geometric_nodes[index]).to_vec();
+    seed_nodes.sort_by_key(|node| node.identity);
     let topology = build_delaunay_volume_topology(
-        seed.nodes,
-        seed.tetrahedra,
-        working_options.topology,
+        seed_nodes,
+        vec![[0, 1, 2, 3]],
+        options.insertion.topology,
         cancellation,
     )
     .map_err(topology_error)?;
-    let topology = ensure_locally_delaunay(topology, working_options, cancellation)?;
-    validate_convex_hull_closure(&topology, options, cancellation)?;
-
-    let mut topology = TopologyMutation::from_canonical(topology);
+    let mut hull = UnconstrainedHull::new(topology).map_err(insertion_error)?;
     for (index, node) in geometric_nodes.iter().copied().enumerate() {
-        if seed.identities.contains(&node.identity) {
+        if initial.contains(&index) {
             continue;
         }
-        insert_delaunay_volume_node_into_mutation(
-            &mut topology,
-            node,
-            working_options,
-            cancellation,
-        )
-        .map_err(|failure| insertion_error_at_node(failure, index, node))?;
+        hull.insert(node, options.insertion, cancellation)
+            .map_err(|failure| insertion_error_at_node(failure, index, node))?;
     }
-    let topology = topology
-        .freeze(working_options.topology, cancellation)
-        .map_err(super::insertion::mutation_topology_error)
-        .map_err(insertion_error)?;
-    let topology = ensure_locally_delaunay(topology, working_options, cancellation)?;
 
-    if topology.nodes.len() != nodes.len() {
+    let topology = hull
+        .freeze(options.insertion, cancellation)
+        .map_err(insertion_error)?;
+    if topology.nodes.len() != nodes.len()
+        || topology
+            .incidence
+            .vertex_stars
+            .iter()
+            .any(|star| star.is_empty())
+    {
         return Err(error(
             DelaunayPointSetErrorKind::InvalidTopology,
             "convex-hull bootstrap did not retain every admitted point",
@@ -119,29 +118,6 @@ pub fn build_delaunay_volume_point_set(
         .map_err(insertion_error)?;
     validate_convex_hull_closure(&topology, options, cancellation)?;
     Ok(topology)
-}
-
-/// Bowyer-Watson insertion normally leaves the point set locally Delaunay. The
-/// complete flip search is a deterministic repair path for degenerate cases,
-/// not work every successful construction should pay unconditionally.
-fn ensure_locally_delaunay(
-    topology: DelaunayVolumeTopology,
-    options: DelaunayInsertionOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayVolumeTopology, DelaunayPointSetError> {
-    match validate_locally_delaunay_volume_topology(&topology, options, cancellation) {
-        Ok(()) => Ok(topology),
-        Err(failure) if failure.kind == DelaunayInsertionErrorKind::InvalidTopology => {
-            legalize_delaunay_volume_topology_completely_with_barriers(
-                topology,
-                &[],
-                options,
-                cancellation,
-            )
-            .map_err(insertion_error)
-        }
-        Err(failure) => Err(insertion_error(failure)),
-    }
 }
 
 fn validate_coordinate_range(nodes: &[DelaunayVolumeNode]) -> Result<(), DelaunayPointSetError> {
@@ -157,77 +133,6 @@ fn validate_coordinate_range(nodes: &[DelaunayVolumeNode]) -> Result<(), Delauna
         return Err(resource(
             "coordinate range cannot support finite spatial predicates",
         ));
-    }
-    Ok(())
-}
-
-fn validate_convex_hull_closure(
-    topology: &DelaunayVolumeTopology,
-    options: DelaunayPointSetOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<(), DelaunayPointSetError> {
-    let mut predicates = 0_u64;
-    for (tetrahedron_index, tetrahedron) in topology.tetrahedra.iter().enumerate() {
-        for opposite in 0..4 {
-            if tetrahedron.neighbors[opposite].is_some() {
-                continue;
-            }
-            let mut face = [0_u32; 3];
-            let mut cursor = 0;
-            for (slot, vertex) in tetrahedron.vertex_indices.iter().enumerate() {
-                if slot != opposite {
-                    face[cursor] = *vertex;
-                    cursor += 1;
-                }
-            }
-            let face_points = face.map(|vertex| topology.nodes[vertex as usize].coordinates_m);
-            let interior_index = tetrahedron.vertex_indices[opposite] as usize;
-            let interior_sign = orient3d([
-                face_points[0],
-                face_points[1],
-                face_points[2],
-                topology.nodes[interior_index].coordinates_m,
-            ])
-            .map_err(|failure| {
-                error(
-                    DelaunayPointSetErrorKind::InvalidTopology,
-                    format!("convex-hull predicate rejected an interior node: {failure:?}"),
-                )
-            })?;
-            for (node_index, node) in topology.nodes.iter().enumerate() {
-                predicates = predicates
-                    .checked_add(1)
-                    .ok_or_else(|| resource("convex-hull validation predicate count overflow"))?;
-                if predicates > options.insertion.maximum_predicate_evaluations {
-                    return Err(resource("convex-hull validation predicate limit exceeded"));
-                }
-                if predicates.is_multiple_of(options.insertion.topology.cancellation_check_interval)
-                    && cancellation.is_cancelled()
-                {
-                    return Err(error(DelaunayPointSetErrorKind::Cancelled, "cancelled"));
-                }
-                let sign = orient3d([
-                    face_points[0],
-                    face_points[1],
-                    face_points[2],
-                    node.coordinates_m,
-                ])
-                .map_err(|failure| {
-                    error(
-                        DelaunayPointSetErrorKind::InvalidTopology,
-                        format!("convex-hull predicate rejected an admitted node: {failure:?}"),
-                    )
-                })?;
-                if sign != PredicateSign::Zero && sign != interior_sign {
-                    return Err(error(
-                        DelaunayPointSetErrorKind::InvalidTopology,
-                        format!(
-                            "boundary face {face:?} of tetrahedron {tetrahedron_index} does not support the admitted convex hull; node {node_index} lies on its exterior side"
-                        ),
-                    ));
-                }
-            }
-        }
     }
     Ok(())
 }
@@ -248,8 +153,9 @@ fn validate_and_order_nodes(
     }
     // Persistent identities deliberately bind nodes to one source revision. They
     // must not decide the geometry produced for an equivalent point cloud.
-    // Canonical volume coordinates are exact dyadic values, so their total order
-    // provides a stable insertion schedule across source units and rigid motion.
+    // Geometric order gives equivalent inputs a deterministic insertion schedule.
+    // Rigid transformations may reorder cospherical choices; independent physical
+    // admission, rather than identical connectivity, governs those cases.
     nodes.sort_by_key(|node| node.identity);
     let mut positions = BTreeSet::new();
     for (index, node) in nodes.iter().enumerate() {

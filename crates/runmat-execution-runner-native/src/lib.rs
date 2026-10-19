@@ -1,10 +1,12 @@
 //! Native process composition for the portable RunMat execution driver.
 
 mod accelerator_placement;
+mod machine_capacity;
 pub use accelerator_placement::active_provider_resource;
 mod analysis_acoustic;
 mod analysis_electrical;
 mod analysis_fluid;
+pub use analysis_fluid::{execute_fluid_study_locally, FluidStudyExecutionPolicy};
 mod analysis_fluid_transient;
 pub use analysis_fluid_transient::{
     execute_fluid_transient_block_locally, CompletedFluidTransientBlockExecution,
@@ -33,11 +35,13 @@ mod analysis_placement;
 mod analysis_prestressed_frequency;
 mod analysis_prestressed_modal;
 mod analysis_prestressed_modal_frequency;
+mod analysis_progress;
 mod analysis_random_response;
 mod analysis_response_spectrum;
 mod analysis_sequence;
 mod analysis_task;
 mod analysis_task_pool;
+mod bounded_object_read;
 pub use analysis_acoustic::source::acoustic_study_completion_from_source;
 mod analysis_thermal;
 mod analysis_thermal_prestress;
@@ -62,9 +66,12 @@ mod local_store;
 mod local_structural_study;
 mod local_study_geometry;
 mod materialized_project;
+mod meshing_blob_cache;
+mod meshing_cache_identity;
 mod meshing_evaluator;
 mod meshing_host;
 mod meshing_platform;
+mod meshing_subtask_cache;
 mod metadata_identity;
 mod native_pool;
 mod process_provider;
@@ -97,7 +104,10 @@ pub use analysis_frequency::{
 pub use analysis_frequency_observations::{
     CompletedStructuralFrequencyHistory, CompletedStructuralFrequencyObservationSample,
 };
-pub use analysis_host::{execute_analysis_program_request, NativeAnalysisHostLimits};
+pub use analysis_host::{
+    execute_analysis_program_request, execute_reserved_analysis_program_request,
+    NativeAnalysisHostLimits,
+};
 pub use analysis_kernel::NativeAnalysisKernel;
 pub use analysis_modal::{
     execute_structural_modal_locally, execute_structural_modal_remotely,

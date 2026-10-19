@@ -35,6 +35,7 @@ fn thermal_accuracy_binds_numerical_workload_and_topology_not_host_identity() {
     let limits = ObjectInventoryLimits::default();
     let task = |workload: ThermalWorkload, mesh| {
         prepare_thermal_task(ThermalTaskPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             field_source: None,
             authored_study_digest: Digest::sha256("thermal-accuracy"),
             frozen_project_digest: None,

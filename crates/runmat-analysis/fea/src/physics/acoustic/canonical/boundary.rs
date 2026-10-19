@@ -21,6 +21,9 @@ use std::collections::BTreeSet;
 mod incident;
 mod volume_velocity;
 
+#[cfg(test)]
+mod radiation_tests;
+
 impl AcousticAssembly {
     pub(super) fn with_boundaries(
         mut self,
@@ -54,11 +57,9 @@ impl AcousticAssembly {
                     }
                     impedance.pascal_seconds_per_meter.recip()
                 }
-                BoundaryOperator::AcousticRadiation => {
-                    return Err(AcousticHarmonicError::Unsupported(
-                        "local radiation qualification is pending".into(),
-                    ));
-                }
+                // Radiation is face-local: its medium is resolved below from the unique
+                // exterior owner, not from the first material in the model.
+                BoundaryOperator::AcousticRadiation => 0.0,
                 _ => {
                     return Err(AcousticHarmonicError::Unsupported(
                         "non-acoustic boundary in acoustic model".into(),
@@ -67,6 +68,12 @@ impl AcousticAssembly {
             };
             let faces = self.faces(&boundary.target)?;
             for face in faces {
+                let admittance = if matches!(boundary.operator, BoundaryOperator::AcousticRadiation)
+                {
+                    self.radiation_admittance(&face)?
+                } else {
+                    admittance
+                };
                 if !owned.insert(face.face_id) {
                     return Err(AcousticHarmonicError::Boundary(
                         "overlapping acoustic boundaries".into(),

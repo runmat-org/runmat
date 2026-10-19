@@ -2,6 +2,55 @@ use super::exact::{exact_jacobian_at, exact_jacobian_from_reference_basis};
 use super::*;
 use runmat_meshing_core::{quality::predicate::ExactDyadic, NeverCancelled};
 
+#[test]
+fn borrowed_coordinate_gather_preserves_sparse_ids_connectivity_order_and_errors() {
+    use runmat_meshing_core::{ElementOrder, SolverMeshNode, SolverVolumeElement, StableDigest};
+    let original = straight();
+    let nodes = original
+        .iter()
+        .enumerate()
+        .map(|(index, coordinates)| SolverMeshNode {
+            node_id: (index as u64 + 1) * 17,
+            stable_identity: StableDigest::from_bytes([index as u8 + 1; 32]),
+            coordinates_m: *coordinates,
+            provenance: Vec::new(),
+            exact_parameters: Vec::new(),
+        })
+        .collect();
+    let topology = SolverMeshTopology {
+        nodes,
+        volume_elements: Vec::new(),
+        neighbors: Vec::new(),
+        boundary_faces: Vec::new(),
+        boundary_edges: Vec::new(),
+        regions: Vec::new(),
+        conformal_interfaces: Vec::new(),
+        contacts: Vec::new(),
+        field_topologies: Vec::new(),
+    };
+    let order = [7, 0, 9, 3, 1, 6, 4, 2, 5, 8];
+    let mut element = SolverVolumeElement {
+        element_id: 1,
+        stable_identity: StableDigest::from_bytes([99; 32]),
+        order: ElementOrder::Tet10,
+        node_ids: order.map(|index| (index as u64 + 1) * 17).into(),
+        region_id: runmat_geometry_core::PersistentEntityId {
+            kind: runmat_geometry_core::PersistentEntityKind::Region,
+            source_topology_id: "region".into(),
+            assembly_path: Vec::new(),
+        },
+        provenance: Vec::new(),
+    };
+    assert_eq!(
+        element_coordinates_from_topology(&element, &topology).unwrap(),
+        order.map(|index| original[index])
+    );
+    element.node_ids[0] = 0;
+    assert!(element_coordinates_from_topology(&element, &topology).is_err());
+    element.node_ids.pop();
+    assert!(element_coordinates_from_topology(&element, &topology).is_err());
+}
+
 fn straight() -> [[f64; 3]; 10] {
     let corners = [
         [0.0, 0.0, 0.0],
@@ -36,7 +85,18 @@ fn exact_jacobian(coordinates: [[f64; 3]; 10], barycentric: [f64; 4]) -> [[Exact
 #[test]
 fn interval_certificate_accepts_linear_mapping_and_rejects_curved_inversion() {
     let mut work = 0;
-    certify_element(straight(), 10_000, 16, 1, &NeverCancelled, &mut work).unwrap();
+    certify_element(
+        straight(),
+        10_000,
+        16,
+        1,
+        &NeverCancelled,
+        ValidationWork {
+            counter: &mut work,
+            storage: Storage(None),
+        },
+    )
+    .unwrap();
 
     let mut inverted = straight();
     inverted[4] = [0.5, 0.0, 4.0];
@@ -52,9 +112,19 @@ fn interval_certificate_accepts_linear_mapping_and_rejects_curved_inversion() {
     ));
     let mut work = 0;
     assert_eq!(
-        certify_element(inverted, 100_000, 24, 1, &NeverCancelled, &mut work)
-            .unwrap_err()
-            .kind,
+        certify_element(
+            inverted,
+            100_000,
+            24,
+            1,
+            &NeverCancelled,
+            ValidationWork {
+                counter: &mut work,
+                storage: Storage(None)
+            }
+        )
+        .unwrap_err()
+        .kind,
         DelaunaySolverTopologyErrorKind::InvalidMesh
     );
 }
@@ -84,7 +154,18 @@ fn exact_fallback_certifies_positive_mapping_below_interval_resolution() {
     .unwrap());
 
     let mut work = 0;
-    certify_element(coordinates, 10_000, 0, 1, &NeverCancelled, &mut work).unwrap();
+    certify_element(
+        coordinates,
+        10_000,
+        0,
+        1,
+        &NeverCancelled,
+        ValidationWork {
+            counter: &mut work,
+            storage: Storage(None),
+        },
+    )
+    .unwrap();
 }
 
 #[test]
@@ -178,9 +259,19 @@ fn exact_jacobian_construction_observes_cancellation_between_terms() {
 fn interval_certificate_enforces_work_and_cancellation() {
     let mut work = 0;
     assert_eq!(
-        certify_element(straight(), 3, 16, 1, &NeverCancelled, &mut work)
-            .unwrap_err()
-            .kind,
+        certify_element(
+            straight(),
+            3,
+            16,
+            1,
+            &NeverCancelled,
+            ValidationWork {
+                counter: &mut work,
+                storage: Storage(None)
+            }
+        )
+        .unwrap_err()
+        .kind,
         DelaunaySolverTopologyErrorKind::ResourceLimit
     );
 
@@ -192,9 +283,19 @@ fn interval_certificate_enforces_work_and_cancellation() {
     }
     let mut work = 0;
     assert_eq!(
-        certify_element(straight(), 10_000, 16, 1, &Cancelled, &mut work)
-            .unwrap_err()
-            .kind,
+        certify_element(
+            straight(),
+            10_000,
+            16,
+            1,
+            &Cancelled,
+            ValidationWork {
+                counter: &mut work,
+                storage: Storage(None)
+            }
+        )
+        .unwrap_err()
+        .kind,
         DelaunaySolverTopologyErrorKind::Cancelled
     );
 }

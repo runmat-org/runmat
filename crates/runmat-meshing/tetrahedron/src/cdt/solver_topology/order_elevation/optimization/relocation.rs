@@ -1,15 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
-
+//! Interior relocation changes coordinates only. Connectivity and exact histories
+//! remain borrowed; every attempted coordinate is restored before an error escapes.
+use super::{consume_candidate_work, geometry, jacobian, OptimizationTopology, OptimizationWork};
+use crate::cdt::solver_topology::{
+    error, storage::Storage, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
+};
+use runmat_geometry_core::{GeometryAllocationScope, GeometryEvaluationControl};
 use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign},
     SolverMeshTopology,
 };
-
-use super::{consume_candidate_work, jacobian, OptimizationWork};
-use crate::cdt::solver_topology::{
-    error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
-};
-
 const RELOCATION_FRACTIONS: [f64; 6] = [0.125, 0.25, 0.375, 0.5, 0.625, 0.75];
 
 pub(in crate::cdt::solver_topology::order_elevation) fn relocate_interior_corner(
@@ -17,6 +16,8 @@ pub(in crate::cdt::solver_topology::order_elevation) fn relocate_interior_corner
     element_index: usize,
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
+    indexes: &OptimizationTopology<'_>,
+    control: &dyn GeometryEvaluationControl,
     work: OptimizationWork<'_>,
 ) -> Result<u64, DelaunaySolverTopologyError> {
     let OptimizationWork {
@@ -28,145 +29,142 @@ pub(in crate::cdt::solver_topology::order_elevation) fn relocate_interior_corner
     let element = topology
         .volume_elements
         .get(element_index)
-        .ok_or_else(|| invalid("interior-corner repair element index is out of bounds"))?
-        .clone();
-    let boundary_nodes = topology
-        .boundary_faces
-        .iter()
-        .flat_map(|face| face.node_ids.iter().take(3).copied())
-        .collect::<BTreeSet<_>>();
-    let node_index = topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.node_id, index))
-        .collect::<BTreeMap<_, _>>();
-
-    for &node_id in element.node_ids.iter().take(4) {
-        if boundary_nodes.contains(&node_id) {
+        .ok_or_else(|| invalid("interior-corner repair element index is out of bounds"))?;
+    let corners: [u64; 4] = element.node_ids[..4]
+        .try_into()
+        .map_err(|_| invalid("interior-corner repair requires four corners"))?;
+    for node_id in corners {
+        let index = geometry::node_slot(&topology.nodes, node_id)?;
+        if indexes.is_boundary(index) {
             continue;
         }
-        let index = *node_index
-            .get(&node_id)
-            .ok_or_else(|| invalid("interior-corner repair node is absent"))?;
-        let incident_elements = topology
-            .volume_elements
-            .iter()
-            .enumerate()
-            .filter_map(|(element_index, candidate)| {
-                candidate.node_ids[..4]
-                    .contains(&node_id)
-                    .then_some(element_index)
-            })
-            .collect::<BTreeSet<_>>();
-        let original_signs = corner_signs(topology, &node_index, &incident_elements)?;
-        let neighbor_ids = incident_elements
-            .iter()
-            .flat_map(|element_index| topology.volume_elements[*element_index].node_ids[..4].iter())
-            .copied()
-            .filter(|candidate| *candidate != node_id)
-            .collect::<BTreeSet<_>>();
-        if neighbor_ids.is_empty() {
+        let scope = GeometryAllocationScope::new(control);
+        let storage = Storage(Some(&scope));
+        let incident = indexes.incidence.elements(node_id)?;
+        let original_signs = corner_signs(topology, incident, storage)?;
+        let count = incident
+            .len()
+            .checked_mul(3)
+            .ok_or_else(|| super::resource("interior-corner neighbor storage overflow"))?;
+        let mut neighbors = storage.vector(count)?;
+        for &element in incident {
+            scope.checkpoint().map_err(error::geometry)?;
+            neighbors.extend(
+                topology.volume_elements[element].node_ids[..4]
+                    .iter()
+                    .copied()
+                    .filter(|id| *id != node_id),
+            );
+        }
+        neighbors.sort_unstable();
+        neighbors.dedup();
+        if neighbors.is_empty() {
             continue;
         }
-        let target = neighbor_ids
+        let target = neighbors
             .iter()
-            .try_fold([0.0; 3], |mut sum, neighbor_id| {
-                let point = topology.nodes[*node_index
-                    .get(neighbor_id)
-                    .ok_or_else(|| invalid("interior-corner neighbor is absent"))?]
-                .coordinates_m;
+            .try_fold([0.0; 3], |mut sum, id| {
+                let point =
+                    topology.nodes[geometry::node_slot(&topology.nodes, *id)?].coordinates_m;
                 for axis in 0..3 {
                     sum[axis] += point[axis];
                 }
                 Ok::<_, DelaunaySolverTopologyError>(sum)
             })?
-            .map(|sum| sum / neighbor_ids.len() as f64);
-        let initial = topology.nodes[index].clone();
+            .map(|sum| sum / neighbors.len() as f64);
+        let initial = topology.nodes[index].coordinates_m;
         let initial_profile = jacobian::optimization_margin_profile_elements(
             topology,
-            incident_elements.iter().copied(),
+            incident.iter().copied(),
             cancellation,
+            storage,
         )?;
         let mut best = None;
+        let mut best_profile = storage.vector(initial_profile.len())?;
         for fraction in RELOCATION_FRACTIONS {
             consume_candidate_work(candidate_work, options, cancellation)?;
             topology.nodes[index].coordinates_m = std::array::from_fn(|axis| {
-                initial.coordinates_m[axis] * (1.0 - fraction) + target[axis] * fraction
+                initial[axis] * (1.0 - fraction) + target[axis] * fraction
             });
-            if corner_signs(topology, &node_index, &incident_elements)? != original_signs {
-                topology.nodes[index] = initial.clone();
-                continue;
-            }
-            match jacobian::validate_elements(
-                topology,
-                incident_elements.iter().copied(),
-                maximum_search_work,
-                maximum_recursion_depth,
-                options.cancellation_check_interval,
-                cancellation,
-                jacobian_work,
-            ) {
-                Ok(()) => return Ok(1),
-                Err(failure) if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh => {
-                    let profile = jacobian::optimization_margin_profile_elements(
-                        topology,
-                        incident_elements.iter().copied(),
-                        cancellation,
-                    )?;
-                    if profile > initial_profile
-                        && best
-                            .as_ref()
-                            .is_none_or(|(best_profile, _)| profile > *best_profile)
+            // Restoration is unconditional even when an orientation/profile/admission check fails.
+            let result = (|| {
+                let attempt = GeometryAllocationScope::new(control);
+                let storage = Storage(Some(&attempt));
+                if corner_signs(topology, incident, storage)? != original_signs {
+                    return Ok(false);
+                }
+                match jacobian::validate_elements(
+                    topology,
+                    incident.iter().copied(),
+                    maximum_search_work,
+                    maximum_recursion_depth,
+                    options.cancellation_check_interval,
+                    cancellation,
+                    jacobian::ValidationWork {
+                        counter: jacobian_work,
+                        storage,
+                    },
+                ) {
+                    Ok(()) => Ok(true),
+                    Err(failure)
+                        if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh =>
                     {
-                        best = Some((profile, topology.nodes[index].coordinates_m));
+                        let profile = jacobian::optimization_margin_profile_elements(
+                            topology,
+                            incident.iter().copied(),
+                            cancellation,
+                            storage,
+                        )?;
+                        if profile > initial_profile
+                            && (best.is_none() || profile.as_slice() > best_profile.as_slice())
+                        {
+                            best_profile.clear();
+                            best_profile.extend_from_slice(&profile);
+                            best = Some(topology.nodes[index].coordinates_m);
+                        }
+                        Ok(false)
                     }
-                    topology.nodes[index] = initial.clone();
+                    Err(failure) => Err(failure),
                 }
-                Err(failure) => {
-                    topology.nodes[index] = initial;
-                    return Err(failure);
-                }
+            })();
+            let coordinates = topology.nodes[index].coordinates_m;
+            topology.nodes[index].coordinates_m = initial;
+            if result? {
+                topology.nodes[index].coordinates_m = coordinates;
+                return Ok(1);
             }
         }
-        if let Some((_, coordinates_m)) = best {
-            topology.nodes[index].coordinates_m = coordinates_m;
+        if let Some(coordinates) = best {
+            topology.nodes[index].coordinates_m = coordinates;
             return Ok(1);
         }
-        topology.nodes[index] = initial;
     }
     Ok(0)
 }
-
 fn corner_signs(
     topology: &SolverMeshTopology,
-    node_index: &BTreeMap<u64, usize>,
-    element_indices: &BTreeSet<usize>,
+    elements: &[usize],
+    storage: Storage<'_>,
 ) -> Result<Vec<PredicateSign>, DelaunaySolverTopologyError> {
-    element_indices
-        .iter()
-        .map(|element_index| {
-            let element = topology
-                .volume_elements
-                .get(*element_index)
-                .ok_or_else(|| invalid("interior-corner incident element is absent"))?;
-            let points = element.node_ids[..4]
-                .iter()
-                .map(|node_id| {
-                    node_index
-                        .get(node_id)
-                        .map(|index| topology.nodes[*index].coordinates_m)
-                        .ok_or_else(|| invalid("interior-corner incident node is absent"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            orient3d(points.try_into().map_err(|_| {
-                invalid("interior-corner incident element does not have four corners")
-            })?)
-            .map_err(|failure| invalid(format!("interior-corner orientation failed: {failure:?}")))
-        })
-        .collect()
+    let mut signs = storage.vector(elements.len())?;
+    for &index in elements {
+        if let Some(control) = storage.0 {
+            control.checkpoint().map_err(error::geometry)?;
+        }
+        let element = topology
+            .volume_elements
+            .get(index)
+            .ok_or_else(|| invalid("interior-corner incident element is absent"))?;
+        let mut points = [[0.0; 3]; 4];
+        for (point, id) in points.iter_mut().zip(&element.node_ids[..4]) {
+            *point = topology.nodes[geometry::node_slot(&topology.nodes, *id)?].coordinates_m;
+        }
+        signs.push(orient3d(points).map_err(|failure| {
+            invalid(format!("interior-corner orientation failed: {failure:?}"))
+        })?);
+    }
+    Ok(signs)
 }
-
 fn invalid(reason: impl Into<String>) -> DelaunaySolverTopologyError {
     error::failure(DelaunaySolverTopologyErrorKind::InvalidMesh, reason)
 }

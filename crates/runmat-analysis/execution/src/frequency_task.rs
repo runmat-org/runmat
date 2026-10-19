@@ -102,15 +102,16 @@ pub fn prepare_structural_frequency_fanout(
         .as_ref()
         .map(decode_prepared_semantic_state)
         .transpose()?;
-    let constraints =
-        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
+    let compiled =
+        runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
             workload.model(),
             Some(&mesh),
+            workload.procedure_step()?.accuracy.resources.maximum_resident_bytes,
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let resource_projection = StructuralFrequencyEntryResourceProjection::new(
+    let resource_projection = StructuralFrequencyEntryResourceProjection::new_from_compilation(
         &mesh,
-        &constraints,
+        &compiled,
         &workload,
         StructuralFrequencyStateInputs {
             prestress: prestress_state.as_ref(),

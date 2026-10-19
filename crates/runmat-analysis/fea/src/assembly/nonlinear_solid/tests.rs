@@ -12,6 +12,7 @@ use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, BoundaryT
 
 mod heterogeneous;
 mod integration;
+mod nonuniform;
 
 pub(crate) fn fixture(
     order: ElementOrder,

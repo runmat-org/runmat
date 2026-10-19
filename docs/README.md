@@ -116,20 +116,21 @@ If you want to understand how the runtime works internally, start with the [Comp
 
 ## FEA on Geometry
 
-- [FEA on Geometry](./fea/index.md)
-- [Using FEA](./fea/using-fea.md)
-- [Geometry](./fea/geometry.md)
-- [Models](./fea/models.md)
-- [Procedure Sequences, Observations, and Accuracy](./fea/study-contracts.md)
-- [Physics guides](./fea/physics/)
-- [Constraint guides](./fea/constraints/)
-- [Load and excitation guides](./fea/loads/)
-- [Solves, Studies, and Sweeps](./fea/solves.md)
-- [Evidence & Artifacts](./fea/evidence.md)
-- [Verification & Validation](./fea/validation.md)
-- [Results & Trust](./fea/trust.md)
-- [Current Status](./fea/status.md)
-- [Operation Reference](./fea/operation-reference.md)
+- [FEA on Geometry](./simulation/index.md)
+- [Using FEA](./simulation/using-fea.md)
+- [Geometry](./simulation/geometry.md)
+- [Meshing](./simulation/meshing.md)
+- [Models](./simulation/models.md)
+- [Procedure Sequences, Observations, and Accuracy](./simulation/study-contracts.md)
+- [Physics guides](./simulation/physics/)
+- [Constraint guides](./simulation/constraints/)
+- [Load and excitation guides](./simulation/loads/)
+- [Solves, Studies, and Sweeps](./simulation/solves.md)
+- [Evidence & Artifacts](./simulation/evidence.md)
+- [Verification & Validation](./simulation/validation.md)
+- [Results & Trust](./simulation/trust.md)
+- [Current Status](./simulation/status.md)
+- [Operation Reference](./simulation/operation-reference.md)
 
 ## Filesystem
 

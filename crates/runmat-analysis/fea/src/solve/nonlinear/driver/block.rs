@@ -5,7 +5,8 @@ use super::super::{
 use super::{
     admission,
     continuation::{add, digest},
-    map_error, output, NonlinearExecution, NonlinearLoadContinuation, NonlinearLoadWork,
+    map_assembly_error, map_error, output, NonlinearExecution, NonlinearLoadContinuation,
+    NonlinearLoadWork,
 };
 use crate::{
     assembly::{nonlinear_solid::CanonicalNonlinearSolidBasis, AssemblySummary},
@@ -89,10 +90,20 @@ pub(crate) fn run_nonlinear_load_block(
     let mesh = options.solver_mesh.as_ref().ok_or_else(|| {
         FeaRunError::InvalidModel("J2 requires its canonical solid solver mesh".into())
     })?;
-    let basis = CanonicalNonlinearSolidBasis::prepare(model, mesh, summary)
-        .map_err(|e| FeaRunError::Assembly(e.to_string()))?;
+    crate::progress::check_cancelled("structural_nonlinear")?;
+    if let Some(contact) = execution.contact {
+        contact.admit_outputs(accepted_block_limit)?;
+    }
+    let coupling = execution.contact.map(|c| c.coupling);
+    let basis = CanonicalNonlinearSolidBasis::prepare_composed(
+        model,
+        mesh,
+        summary,
+        coupling.map(|c| c.operator),
+    )
+    .map_err(map_assembly_error)?;
     let mut policy = options.newton_policy();
-    let problem = SolidNewtonProblem::prepare(&basis, summary, policy)
+    let problem = SolidNewtonProblem::prepare_with_contact(&basis, summary, policy, coupling)
         .map_err(map_error)?
         .with_solver_admission(execution.solver_admission);
     let nominal = (end - start) / options.increment_count as f64;
@@ -116,7 +127,7 @@ pub(crate) fn run_nonlinear_load_block(
         options.max_line_search_backtracks,
         options.line_search_reduction,
     );
-    let scope = digest(
+    let mut scope = digest(
         b"runmat-j2-load-controller-scope/v3\0",
         &(
             model,
@@ -128,6 +139,10 @@ pub(crate) fn run_nonlinear_load_block(
             schedule,
         ),
     )?;
+    if let Some(contact) = execution.contact {
+        scope = contact.controller_scope(scope)?;
+    }
+    let mut prefix_work = super::super::solid::SolidAttemptWork::default();
     let mut cursor = match input {
         NonlinearLoadBlockStart::Fresh => NonlinearLoadContinuation {
             schema_version: 3,
@@ -139,7 +154,12 @@ pub(crate) fn run_nonlinear_load_block(
             nominal_increment: nominal,
             scheduled_origin: start,
             pending_target: None,
-            accepted_state: problem.initial_state().map_err(map_error)?,
+            accepted_state: if coupling.is_some() {
+                problem.initial_state_record(&mut prefix_work)
+            } else {
+                problem.initial_state()
+            }
+            .map_err(map_error)?,
             work: NonlinearLoadWork::default(),
             maximum_relative_residual: 0.0,
             maximum_relative_increment: 0.0,
@@ -155,11 +175,12 @@ pub(crate) fn run_nonlinear_load_block(
                 ));
             }
             problem
-                .validate_accepted(continuation.accepted_state())
+                .validate_accepted_record(continuation.accepted_state(), &mut prefix_work)
                 .map_err(map_error)?;
             continuation.clone()
         }
     };
+    cursor.work.linear_solves = add(cursor.work.linear_solves, prefix_work.linear_solves)?;
     // Fresh evaluates zero state above; Continue additionally revalidates its physical
     // prefix. Output initialization always uses original accepted point history.
     cursor.work.controller_evaluations = add(cursor.work.controller_evaluations, 2)?;
@@ -169,7 +190,12 @@ pub(crate) fn run_nonlinear_load_block(
             &cursor.accepted_state.constitutive,
         )
         .map_err(|e| FeaRunError::Solve(e.to_string()))?;
-    let mut result = output::initial_result(&cursor.accepted_state, &initial)?;
+    let mut result = output::initial_result(
+        &cursor.accepted_state,
+        &initial,
+        coupling.map(|c| c.operator),
+        accepted_block_limit,
+    )?;
     drop(initial);
     while !cursor.complete() && result.load_factors.len() < accepted_block_limit {
         if crate::is_fea_cancelled() {
@@ -191,7 +217,7 @@ pub(crate) fn run_nonlinear_load_block(
             ));
         }
         policy.max_accepted_subincrements = remaining;
-        let problem = SolidNewtonProblem::prepare(&basis, summary, policy)
+        let problem = SolidNewtonProblem::prepare_with_contact(&basis, summary, policy, coupling)
             .map_err(map_error)?
             .with_solver_admission(execution.solver_admission);
         let increment = problem
@@ -213,25 +239,31 @@ pub(crate) fn run_nonlinear_load_block(
             increment.attempted_work.tangent_evaluations,
         )?;
         cursor.work.controller_evaluations = add(cursor.work.controller_evaluations, 1)?;
-        cursor.work.validate(options)?;
+        cursor
+            .work
+            .validate_with_contact(options, coupling.is_some())?;
         cursor.maximum_relative_residual = cursor
             .maximum_relative_residual
             .max(increment.relative_residual);
         cursor.maximum_relative_increment = cursor
             .maximum_relative_increment
             .max(increment.relative_increment);
-        output::append_increment(&mut result, &increment)?;
+        output::append_increment(&mut result, &increment, coupling.map(|c| c.operator))?;
         cursor.accepted_state = increment.state;
         if cursor.accepted_state.load_factor().to_bits() == target.to_bits() {
             cursor.pending_target = None;
             cursor.scheduled_origin = target;
         }
     }
+    let mut terminal_work = super::super::solid::SolidAttemptWork::default();
     problem
-        .validate_accepted(&cursor.accepted_state)
+        .validate_accepted_record(&cursor.accepted_state, &mut terminal_work)
         .map_err(map_error)?;
+    cursor.work.linear_solves = add(cursor.work.linear_solves, terminal_work.linear_solves)?;
     cursor.work.controller_evaluations = add(cursor.work.controller_evaluations, 1)?;
-    cursor.work.validate(options)?;
+    cursor
+        .work
+        .validate_with_contact(options, coupling.is_some())?;
     cursor.content_digest = cursor.derive_digest()?;
     result.total_increments = result.load_factors.len();
     result.converged_increments = result.total_increments;

@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 
 use super::geometry_resolver::inspect_geometry;
 
-const LOGICAL_ROOT: &str = "project";
+const LOGICAL_ROOT: &str = ".";
 
 pub struct FilesystemFeaHost {
     physical_root: PathBuf,
@@ -69,28 +69,14 @@ pub fn physical_source_path(
     physical_root: &Path,
     logical_path: &LogicalSourcePath,
 ) -> Result<PathBuf, SourceDiagnostic> {
-    let prefix = format!("{LOGICAL_ROOT}/");
-    let relative = logical_path.as_str().strip_prefix(&prefix).ok_or_else(|| {
-        diagnostic(
-            "fea.host.path_outside_root",
-            format!("logical source `{logical_path}` is outside `{LOGICAL_ROOT}`"),
-            SourceAvailability::Available,
-        )
-    })?;
-    if relative.is_empty()
-        || relative
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..")
-    {
+    if logical_path.is_root() {
         return Err(diagnostic(
-            "fea.host.invalid_logical_path",
-            format!("logical source `{logical_path}` is not normalized"),
+            "fea.host.invalid_source_path",
+            "source path must name a file".into(),
             SourceAvailability::Available,
         ));
     }
-    Ok(relative
-        .split('/')
-        .fold(physical_root.to_path_buf(), |path, part| path.join(part)))
+    Ok(physical_root.join(logical_path.as_str()))
 }
 
 impl FilesystemFeaHost {
@@ -136,8 +122,9 @@ pub fn logical_source_path(
     if relative.as_os_str().is_empty() {
         return Err("FEA source path must name a file below the source root".to_string());
     }
-    let relative = logical_components(relative)?;
-    LogicalSourcePath::new(format!("{LOGICAL_ROOT}/{relative}")).map_err(|error| error.to_string())
+    let relative =
+        runmat_types::NormalizedRelativePath::file(relative).map_err(|error| error.to_string())?;
+    LogicalSourcePath::new(relative.as_str().to_owned()).map_err(|error| error.to_string())
 }
 
 pub(super) fn fea_operation_catalog() -> Result<ComposedOperationCatalog, String> {
@@ -247,20 +234,4 @@ fn normalized_root(path: &Path) -> Result<PathBuf, String> {
         ));
     }
     Ok(path.to_path_buf())
-}
-
-fn logical_components(path: &Path) -> Result<String, String> {
-    path.components()
-        .map(|component| match component {
-            Component::Normal(part) => part
-                .to_str()
-                .map(str::to_string)
-                .ok_or_else(|| "FEA source paths must be valid UTF-8".to_string()),
-            _ => Err(format!(
-                "FEA source path `{}` must be relative and normalized",
-                path.display()
-            )),
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|parts| parts.join("/"))
 }

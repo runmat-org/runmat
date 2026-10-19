@@ -1,7 +1,7 @@
 //! Authored standalone thermal composition; numerical and publication authority stay shared.
 use super::{preparation::PreparedAuthoredThermalStudy, LocalFeaExecutionOptions};
 use crate::{
-    analysis_task_pool::{configure_local_analysis, LocalAnalysisTaskPool},
+    analysis_task_pool::{configure_local_analysis_envelope, LocalAnalysisTaskPool},
     local_structural_study::emit_local_progress,
     LocalStructuralStudyObservers, NativeExecutionConfig, NativeProgramSession,
 };
@@ -47,7 +47,12 @@ pub(super) async fn execute(
     {
         return Err("authored thermal execution has no admitted accelerator envelope".into());
     }
-    let config = NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?;
+    let mut config = NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?;
+    config.max_workers = workers.max(1);
+    config.worker_cpu_millicores = prepared
+        .local_execution
+        .checked_cpu_millicores()
+        .map_err(|e| e.to_string())?;
     let observers = LocalStructuralStudyObservers {
         progress: options.progress_observer.clone(),
         mesh: options.mesh_observer.clone(),
@@ -186,7 +191,7 @@ pub(super) async fn execute(
     resources.validate().map_err(|e| e.to_string())?;
     let mut analysis_config = geometry.analysis_config;
     analysis_config.max_workers = workers.max(1);
-    configure_local_analysis(&mut analysis_config, &resources);
+    configure_local_analysis_envelope(&mut analysis_config, &resources);
     let session = NativeProgramSession::new(analysis_config).map_err(|e| e.to_string())?;
     // Publication outlives the executing pool. A writable store clone does not retain
     // the session directory; the shared object source carries that lifetime authority.
@@ -204,6 +209,7 @@ pub(super) async fn execute(
     let executed = Box::pin(crate::analysis_thermal::execute_with_pool(
         &mut pool,
         ThermalStudyPreparation {
+            local_execution: prepared.local_execution,
             field_source: None,
             scope: ThermalStudyScope::Standalone,
             product,

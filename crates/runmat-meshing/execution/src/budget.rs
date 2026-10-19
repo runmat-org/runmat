@@ -1,6 +1,10 @@
+use crate::checkpoint_clock::CheckpointClock;
+mod allocation_phase;
+#[cfg(test)]
+mod tests;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 
 use runmat_meshing_core::{
@@ -10,7 +14,7 @@ use runmat_meshing_core::{
     MESHING_FAILURE_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
 };
 
-use crate::geometry_control::MeshingGeometryEvaluationControl;
+use crate::geometry_control::{GeometryUsageCounters, MeshingGeometryEvaluationControl};
 
 pub trait MeshingProgressSink {
     fn record(&mut self, progress: &MeshingProgress);
@@ -45,12 +49,14 @@ pub struct MeshingStageControl<'a> {
     cancellation: &'a dyn MeshingCancellationSignal,
     progress: &'a mut dyn MeshingProgressSink,
     started: Instant,
-    last_checkpoint_at: Arc<Mutex<Instant>>,
+    last_checkpoint_at: Arc<CheckpointClock>,
     maximum_observed_checkpoint_latency_ms: Arc<AtomicU64>,
     last_checkpoint_search_work: Arc<AtomicU64>,
     last: MeshingStageCheckpoint,
     last_progress: Option<MeshingProgress>,
     sequence: u64,
+    geometry_usage: Arc<GeometryUsageCounters>,
+    allocation_phase: Option<Arc<crate::geometry_control::AllocationPhase>>,
 }
 
 impl<'a> MeshingStageControl<'a> {
@@ -77,12 +83,14 @@ impl<'a> MeshingStageControl<'a> {
             cancellation,
             progress,
             started: now,
-            last_checkpoint_at: Arc::new(Mutex::new(now)),
+            last_checkpoint_at: Arc::new(CheckpointClock::new(now)),
             maximum_observed_checkpoint_latency_ms: Arc::new(AtomicU64::new(0)),
             last_checkpoint_search_work: Arc::new(AtomicU64::new(0)),
             last: MeshingStageCheckpoint::default(),
             last_progress: None,
             sequence: 0,
+            geometry_usage: Arc::new(GeometryUsageCounters::default()),
+            allocation_phase: None,
         })
     }
 
@@ -90,7 +98,7 @@ impl<'a> MeshingStageControl<'a> {
         self.request
     }
 
-    pub fn geometry_evaluation_control(&self) -> MeshingGeometryEvaluationControl<'_> {
+    pub fn geometry_evaluation_control(&self) -> MeshingGeometryEvaluationControl<'a> {
         MeshingGeometryEvaluationControl::new(
             self.cancellation,
             self.started,
@@ -100,8 +108,11 @@ impl<'a> MeshingStageControl<'a> {
             &self.request.resources,
             &self.request.cancellation,
         )
+        .with_usage(Arc::clone(&self.geometry_usage))
+        .with_allocation_phase(self.allocation_phase.clone())
     }
 
+    #[track_caller]
     pub fn guard(&self) -> Result<(), Box<MeshingFailure>> {
         let now = Instant::now();
         if self.cancellation.is_cancelled() {
@@ -124,19 +135,17 @@ impl<'a> MeshingStageControl<'a> {
                 )),
             ));
         }
-        let last_checkpoint_at = *self.last_checkpoint_at.lock().map_err(|_| {
-            failure(
-                self.stage,
-                MeshingFailureCategory::InternalInvariantViolation,
-                "restart the stage because its checkpoint state is unavailable",
-                None,
-            )
-        })?;
-        let checkpoint_latency_ms = elapsed_millis(last_checkpoint_at, now).max(
+        let checkpoint_latency_ms = self.last_checkpoint_at.latency_ms(now).max(
             self.maximum_observed_checkpoint_latency_ms
                 .load(Ordering::Relaxed),
         );
         if checkpoint_latency_ms > self.request.cancellation.maximum_checkpoint_latency_ms {
+            crate::checkpoint_diagnostic::report_first_miss(
+                self.maximum_observed_checkpoint_latency_ms
+                    .load(Ordering::Relaxed),
+                checkpoint_latency_ms,
+                self.request.cancellation.maximum_checkpoint_latency_ms,
+            );
             return Err(failure(
                 self.stage,
                 MeshingFailureCategory::InternalInvariantViolation,
@@ -152,15 +161,20 @@ impl<'a> MeshingStageControl<'a> {
     }
 
     pub(crate) fn stage_evidence(
-        &self,
+        &mut self,
         partition: MeshingPartitionDescriptor,
         stage_result_digest: StableDigest,
     ) -> MeshingStageEvidence {
+        // Geometry, codec and publication views share cumulative usage. They can
+        // do work after the last algorithm checkpoint; retain those costs too.
+        // Both inventories are absolute observations, so merge by max, not sum.
+        let geometry = self.geometry_evaluation_control().usage();
         MeshingStageEvidence {
+            reused_from: None,
             stage: self.stage,
             partition,
             stage_result_digest,
-            entity_counts: self.last.entity_counts.clone(),
+            entity_counts: std::mem::take(&mut self.last.entity_counts),
             invariants: vec![InvariantEvidence {
                 invariant_id: "canonical_stage_validation".into(),
                 passed: true,
@@ -171,32 +185,26 @@ impl<'a> MeshingStageControl<'a> {
             achieved_error_distributions: BTreeMap::new(),
             completed_work: self.last.completed_work,
             estimated_work: self.last.estimated_work,
-            peak_memory_bytes: self.last.peak_memory_bytes,
+            peak_memory_bytes: self.last.peak_memory_bytes.max(geometry.allocation_bytes),
             peak_scratch_bytes: self.last.peak_scratch_bytes,
-            search_work: self.last.search_work,
+            search_work: self.last.search_work.max(geometry.search_work),
             maximum_recursion_depth: self.last.recursion_depth,
-            iterations: self.last.iterations,
+            iterations: self.last.iterations.max(geometry.iterations),
             elapsed_time_ms: elapsed_millis(self.started, Instant::now()),
             cancellation_checkpoints: self.sequence,
         }
     }
 
+    #[track_caller]
     pub fn checkpoint(
         &mut self,
         checkpoint: MeshingStageCheckpoint,
     ) -> Result<(), Box<MeshingFailure>> {
         let now = Instant::now();
         let elapsed_ms = elapsed_millis(self.started, now);
-        let mut last_checkpoint_at = self.last_checkpoint_at.lock().map_err(|_| {
-            failure(
-                self.stage,
-                MeshingFailureCategory::InternalInvariantViolation,
-                "restart the stage because its checkpoint state is unavailable",
-                None,
-            )
-        })?;
-        let current_checkpoint_latency_ms = elapsed_millis(*last_checkpoint_at, now);
-        self.maximum_observed_checkpoint_latency_ms
+        let current_checkpoint_latency_ms = self.last_checkpoint_at.latency_ms(now);
+        let prior_maximum = self
+            .maximum_observed_checkpoint_latency_ms
             .fetch_max(current_checkpoint_latency_ms, Ordering::Relaxed);
         let checkpoint_latency_ms = self
             .maximum_observed_checkpoint_latency_ms
@@ -232,6 +240,11 @@ impl<'a> MeshingStageControl<'a> {
                         self.request.cancellation.maximum_checkpoint_latency_ms,
                     )
                 };
+            crate::checkpoint_diagnostic::report_first_miss(
+                prior_maximum,
+                current_checkpoint_latency_ms,
+                self.request.cancellation.maximum_checkpoint_latency_ms,
+            );
             return Err(failure(
                 self.stage,
                 MeshingFailureCategory::InternalInvariantViolation,
@@ -285,7 +298,7 @@ impl<'a> MeshingStageControl<'a> {
         self.last_checkpoint_search_work
             .store(self.last.search_work, Ordering::Relaxed);
         self.last_progress = Some(progress);
-        *last_checkpoint_at = now;
+        self.last_checkpoint_at.observe(now);
         Ok(())
     }
 

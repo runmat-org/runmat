@@ -76,7 +76,16 @@ pub(super) fn meshing_contact_definitions_for_model(
 pub(crate) fn persist_mesh_output(
     output: &crate::meshing::MeshingExecutionOutput,
 ) -> Result<ResolvedStudyMesh, String> {
-    let artifact_digest = encode_digest(output.artifact.canonical_digest.bytes());
+    persist_mesh_borrowed(&output.artifact, &output.evidence, &output.region_aliases)
+}
+
+/// Persist original admitted inventories without constructing a second mesh owner.
+pub(crate) fn persist_mesh_borrowed(
+    artifact: &runmat_meshing_core::SolverMeshArtifact,
+    evidence: &runmat_meshing_core::MeshingEvidence,
+    region_aliases: &BTreeMap<String, PersistentEntityId>,
+) -> Result<ResolvedStudyMesh, String> {
+    let artifact_digest = encode_digest(artifact.canonical_digest.bytes());
     let root = current_fea_runtime_config()
         .artifact_root
         .or_else(|| {
@@ -88,12 +97,10 @@ pub(crate) fn persist_mesh_output(
         .join("meshes");
     runmat_filesystem::create_dir_all(&root)
         .map_err(|error| format!("failed to create {}: {error}", root.display()))?;
-    let artifact_bytes = output
-        .artifact
-        .canonical_encode()
+    let artifact_bytes = artifact
+        .canonical_encode_with_cancellation(&MeshPersistenceCancellation)
         .map_err(|error| error.to_string())?;
-    let evidence_bytes = output
-        .evidence
+    let evidence_bytes = evidence
         .canonical_encode()
         .map_err(|error| error.to_string())?;
     let evidence_digest = encode_digest(&Sha256::digest(&evidence_bytes).into());
@@ -106,15 +113,40 @@ pub(crate) fn persist_mesh_output(
     Ok(ResolvedStudyMesh {
         artifact_path: Some(artifact_path.display().to_string()),
         evidence_path: Some(evidence_path.display().to_string()),
-        region_aliases: output.region_aliases.clone(),
+        region_aliases: region_aliases.clone(),
     })
+}
+
+struct MeshPersistenceCancellation;
+impl runmat_meshing_core::MeshingCancellationSignal for MeshPersistenceCancellation {
+    fn is_cancelled(&self) -> bool {
+        crate::interrupt::is_cancelled()
+    }
 }
 
 fn persist_canonical(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if path.exists() {
-        let existing = runmat_filesystem::read(path)
-            .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
-        if existing == bytes {
+        let mut existing = runmat_filesystem::File::open(path)
+            .map_err(|error| format!("failed to open {}: {error}", path.display()))?;
+        let mut offset = 0;
+        let mut buffer = [0_u8; 8192];
+        while offset < bytes.len() {
+            if crate::interrupt::is_cancelled() {
+                return Err("meshing persistence cancelled".into());
+            }
+            let count = buffer.len().min(bytes.len() - offset);
+            let read = std::io::Read::read(&mut existing, &mut buffer[..count])
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?;
+            if read == 0 || buffer[..read] != bytes[offset..offset + read] {
+                break;
+            }
+            offset += read;
+        }
+        if offset == bytes.len()
+            && std::io::Read::read(&mut existing, &mut buffer[..1])
+                .map_err(|error| format!("failed to read {}: {error}", path.display()))?
+                == 0
+        {
             return Ok(());
         }
         return Err(format!(
@@ -134,3 +166,7 @@ fn encode_digest(bytes: &[u8; 32]) -> String {
     }
     encoded
 }
+
+#[cfg(test)]
+#[path = "meshing/persistence_tests.rs"]
+mod persistence_tests;

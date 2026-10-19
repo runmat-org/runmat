@@ -6,7 +6,7 @@ use crate::{
     execution::MagnetostaticWorkload, physics::magnetic::MagneticSystemPlan,
     topology::AnalysisProjection,
 };
-use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
 mod payload;

@@ -6,6 +6,8 @@ use crate::FilesystemObjectStore;
 use std::sync::atomic::AtomicBool;
 
 pub const NATIVE_OBJECT_STORE_ROOT_ENV: &str = "RUNMAT_EXECUTION_OBJECT_STORE_ROOT";
+pub(crate) const NATIVE_MESHING_SUBTASK_CACHE_ROOT_ENV: &str =
+    "RUNMAT_EXECUTION_MESHING_SUBTASK_CACHE_ROOT";
 pub const NATIVE_ACCELERATOR_REQUIRED_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUIRED";
 pub const NATIVE_ACCELERATOR_REQUESTS_ENV: &str = "RUNMAT_EXECUTION_ACCELERATOR_REQUESTS";
 pub(crate) type TransferResult = Result<AttemptSuccess, String>;
@@ -217,7 +219,7 @@ fn prepare_program(
         .map_err(|error| error.to_string())?;
     let stored: StoredProgram =
         serde_json::from_slice(&stored).map_err(|error| error.to_string())?;
-    let worker_request = WorkerRequest {
+    let worker_request = runmat_execution_artifact::ProgramExecutionRequest {
         console: request.task.console,
         environment: request.task.environment.clone(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
@@ -247,7 +249,8 @@ fn prepare_program(
     if minimum > request.task.resources.memory_bytes {
         return Err("native invocation and parent monitor exceed task memory reservation".into());
     }
-    Ok(worker_request)
+    WorkerRequest::new(worker_request, request.task.resources.clone())
+        .map_err(|error| error.to_string())
 }
 
 async fn run_process(
@@ -267,6 +270,16 @@ async fn run_process(
     command.environment.insert(
         NATIVE_OBJECT_STORE_ROOT_ENV.into(),
         provider.objects.root().to_string_lossy().into_owned(),
+    );
+    command.environment.insert(
+        NATIVE_MESHING_SUBTASK_CACHE_ROOT_ENV.into(),
+        provider
+            .config
+            .meshing_subtask_cache_root
+            .clone()
+            .unwrap_or_else(|| provider.config.store_root.join("meshing-subtask-cache/v1"))
+            .to_string_lossy()
+            .into_owned(),
     );
     if !provider.config.worker_accelerators.is_empty() {
         command

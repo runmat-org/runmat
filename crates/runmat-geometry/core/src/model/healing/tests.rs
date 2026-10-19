@@ -1,3 +1,5 @@
+mod admission;
+
 use super::*;
 use crate::{
     GeometryRevisionIdentity, GeometryRevisionOperation, PersistentEntityKind,

@@ -13,7 +13,8 @@ use crate::{
 /// and partition meaning.
 #[derive(Clone, Debug)]
 pub struct MeshingKernelDispatcher<P = PortableMeshingEvaluatorProvider> {
-    evaluator_provider: P,
+    evaluator_provider: crate::geometry_metric::PreparedMetricProvider<P>,
+    subtask_cache: Option<std::sync::Arc<dyn crate::MeshingSubtaskCacheStore>>,
 }
 
 impl Default for MeshingKernelDispatcher<PortableMeshingEvaluatorProvider> {
@@ -23,8 +24,24 @@ impl Default for MeshingKernelDispatcher<PortableMeshingEvaluatorProvider> {
 }
 
 impl<P> MeshingKernelDispatcher<P> {
-    pub const fn new(evaluator_provider: P) -> Self {
-        Self { evaluator_provider }
+    pub fn new(evaluator_provider: P) -> Self {
+        Self {
+            evaluator_provider: crate::geometry_metric::PreparedMetricProvider::new(
+                evaluator_provider,
+            ),
+            subtask_cache: None,
+        }
+    }
+
+    pub fn with_subtask_cache(
+        mut self,
+        cache: std::sync::Arc<dyn crate::MeshingSubtaskCacheStore>,
+    ) -> Self {
+        self.evaluator_provider = self
+            .evaluator_provider
+            .with_subtask_cache(std::sync::Arc::clone(&cache));
+        self.subtask_cache = Some(cache);
+        self
     }
 }
 
@@ -56,11 +73,17 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for MeshingKernelDispa
             (
                 runmat_meshing_core::MeshingStageKind::SurfaceMesh,
                 MeshingPartitionKind::CanonicalEntityBatch,
-            ) => ExactSurfacePartitionKernel::new(&self.evaluator_provider).execute(invocation),
+            ) => ExactSurfacePartitionKernel::new(&self.evaluator_provider)
+                .with_subtask_cache(self.subtask_cache.clone())
+                .execute(invocation),
             (
                 runmat_meshing_core::MeshingStageKind::Tetrahedralization,
                 MeshingPartitionKind::WholeStage,
-            ) => ExactVolumeKernel.execute(invocation),
+            ) => ExactVolumeKernel.execute_with_diagnostics(
+                invocation,
+                &self.evaluator_provider,
+                self.subtask_cache.as_deref(),
+            ),
             (
                 runmat_meshing_core::MeshingStageKind::OrderElevation,
                 MeshingPartitionKind::WholeStage,

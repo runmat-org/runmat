@@ -4,7 +4,10 @@ use crate::{
     execution::FluidSteadyWorkload, physics::cfd::canonical::CanonicalFluidPolicy,
     topology::FiniteVolumeProjectionPolicy,
 };
-use runmat_analysis_core::{AccuracyTolerance, ErrorContributionKind, FormulationRequirement};
+use runmat_analysis_core::{
+    AccuracyTarget, AccuracyTolerance, ErrorContributionKind, FormulationRequirement,
+    RequiredAccuracyEvidence,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -58,8 +61,30 @@ pub fn plan_fluid_study(
         .validate()
         .map_err(|error| FluidStudyPlanningError::UnsupportedIntent(error.to_string()))?;
     numerical.linear_relative_tolerance = numerical.linear_relative_tolerance.min(target);
-    // Physical mass/momentum/constitutive closure has separate evidence semantics;
-    // the algebraic criterion does not reinterpret its caller-owned acceptance policy.
+    // Fluid receipts certify original momentum/flux residuals and conservation, not
+    // the inner Krylov residual. Honor matching authored closure targets before solving.
+    // Spatial, field, absolute and unrelated evidence cannot set this dimensionless control.
+    if let Some(physical) = step
+        .accuracy
+        .criteria
+        .iter()
+        .filter(|c| {
+            c.target == AccuracyTarget::GlobalEquilibrium
+                && c.contribution == ErrorContributionKind::Algebraic
+                && matches!(
+                    c.evidence,
+                    RequiredAccuracyEvidence::ResidualBound
+                        | RequiredAccuracyEvidence::ConservationBalance
+                )
+        })
+        .filter_map(|c| match c.tolerance {
+            AccuracyTolerance::Relative(value) => Some(value),
+            AccuracyTolerance::Absolute { .. } => None,
+        })
+        .reduce(f64::min)
+    {
+        numerical.physical_relative_tolerance = numerical.physical_relative_tolerance.min(physical);
+    }
     Ok(FluidSteadyWorkload {
         policy: numerical,
         ..workload

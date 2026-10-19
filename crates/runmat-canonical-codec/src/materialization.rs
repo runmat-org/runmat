@@ -9,7 +9,7 @@ use crate::{value, CanonicalCodecError};
 // typed materialization, and simultaneous input/output buffers. The fixed allowance covers the
 // collection allocators and envelope metadata that do not scale linearly with payload bytes.
 const PROJECTED_MATERIALIZATION_BYTES_PER_ENCODED_BYTE: u64 = 128;
-pub(crate) const CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT: u64 = 64 * 1024;
+pub const CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT: u64 = 64 * 1024;
 
 pub fn projected_canonical_materialization_resident_bytes_estimate(
     encoded_bytes: u64,
@@ -43,6 +43,17 @@ pub fn canonical_chunked_payload_materialization_resident_bytes_estimate<'a>(
 ) -> Result<u64, CanonicalCodecError> {
     let (profile, encoded_bytes) = value::chunked_profile(chunks, control)?;
     materialization_resident_bytes_estimate(profile, encoded_bytes)
+}
+
+/// Profile the bare canonical value supplied to decode_contract_with_admission.
+/// Envelope validation belongs to that decoder; this never prepends or copies it.
+/// The same structural scanner and cooperative checkpoints serve both forms.
+pub fn canonical_value_materialization_resident_bytes_estimate(
+    value: &[u8],
+    control: &dyn crate::CanonicalCodecControl,
+) -> Result<u64, CanonicalCodecError> {
+    let (profile, bytes) = crate::value::value_profile(value, control)?;
+    materialization_resident_bytes_estimate(profile, bytes)
 }
 
 pub(crate) fn materialization_resident_bytes_estimate(

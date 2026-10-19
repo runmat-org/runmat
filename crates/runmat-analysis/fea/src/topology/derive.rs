@@ -1,6 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
-
-use runmat_meshing_core::{CanonicalMeshingContract, SolverMeshArtifact};
+use runmat_meshing_core::{MeshingCancellationSignal, SolverMeshArtifact};
 
 use super::{
     boundary::project_boundary_face,
@@ -11,6 +9,7 @@ use super::{
     element::tetrahedron_geometry,
     identity::projection_digest,
     quadrature::visit_volume_quadrature,
+    storage::{check_cancelled, reserve, SortedValues},
 };
 
 impl AnalysisProjection {
@@ -22,41 +21,55 @@ impl AnalysisProjection {
         mesh: &SolverMeshArtifact,
         policy: AnalysisProjectionPolicy,
     ) -> Result<Self, AnalysisProjectionError> {
-        mesh.validate_canonical()
-            .map_err(|error| AnalysisProjectionError::InvalidMesh(error.to_string()))?;
-        let nodes = mesh
-            .topology
-            .nodes
-            .iter()
-            .map(|node| ProjectedNode {
+        check_cancelled()?;
+        Self::derivation_resident_bytes_estimate(mesh)?;
+        check_cancelled()?;
+        mesh.validate_canonical_with_cancellation(&ProjectionCancellation)
+            .map_err(|error| {
+                if crate::is_fea_cancelled() {
+                    AnalysisProjectionError::Cancelled
+                } else {
+                    AnalysisProjectionError::InvalidMesh(error.to_string())
+                }
+            })?;
+        check_cancelled()?;
+        let mut nodes = reserve(mesh.topology.nodes.len())?;
+        for node in &mesh.topology.nodes {
+            check_cancelled()?;
+            nodes.push(ProjectedNode {
                 node_id: node.node_id,
                 stable_identity: node.stable_identity,
                 coordinates_m: node.coordinates_m,
-            })
-            .collect::<Vec<_>>();
-        let node_by_id = nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (node.node_id, index))
-            .collect::<BTreeMap<_, _>>();
-        let mut element_by_id = BTreeMap::new();
-        let mut elements = Vec::with_capacity(mesh.topology.volume_elements.len());
-        let mut neighbor_sets = vec![BTreeSet::new(); nodes.len()];
-        for element in &mesh.topology.volume_elements {
-            let node_indices = element
-                .node_ids
+            });
+        }
+        let node_by_id = SortedValues::derive(
+            nodes
                 .iter()
-                .map(|node_id| {
-                    node_by_id
-                        .get(node_id)
-                        .copied()
-                        .ok_or(AnalysisProjectionError::UnknownNode {
-                            entity_kind: "volume element",
-                            entity_id: element.element_id,
-                            node_id: *node_id,
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+                .enumerate()
+                .map(|(index, node)| (node.node_id, index)),
+            nodes.len(),
+        )?;
+        let element_by_id = SortedValues::derive(
+            mesh.topology
+                .volume_elements
+                .iter()
+                .enumerate()
+                .map(|(index, element)| (element.element_id, index)),
+            mesh.topology.volume_elements.len(),
+        )?;
+        let mut elements = reserve(mesh.topology.volume_elements.len())?;
+        for element in &mesh.topology.volume_elements {
+            check_cancelled()?;
+            let mut node_indices = reserve(element.node_ids.len())?;
+            for node_id in &element.node_ids {
+                node_indices.push(*node_by_id.get(node_id).ok_or(
+                    AnalysisProjectionError::UnknownNode {
+                        entity_kind: "volume element",
+                        entity_id: element.element_id,
+                        node_id: *node_id,
+                    },
+                )?);
+            }
             let corners =
                 node_indices
                     .get(..4)
@@ -74,30 +87,28 @@ impl AnalysisProjection {
                     element_id: element.element_id,
                 },
             )?;
-            let element_coordinates = node_indices
-                .iter()
-                .map(|index| nodes[*index].coordinates_m)
-                .collect::<Vec<_>>();
+            let mut element_coordinates = [[0.0; 3]; 10];
+            for (slot, index) in element_coordinates.iter_mut().zip(&node_indices) {
+                *slot = nodes[*index].coordinates_m;
+            }
             let mut signed_volume_m3 = 0.0;
             let mut first_moment_m4 = [0.0; 3];
-            visit_volume_quadrature(element.order, &element_coordinates, |point| {
-                signed_volume_m3 += point.volume_weight_m3;
-                for (first_moment, position) in first_moment_m4.iter_mut().zip(point.position_m) {
-                    *first_moment += position * point.volume_weight_m3;
-                }
-            })
+            visit_volume_quadrature(
+                element.order,
+                &element_coordinates[..node_indices.len()],
+                |point| {
+                    signed_volume_m3 += point.volume_weight_m3;
+                    for (first_moment, position) in first_moment_m4.iter_mut().zip(point.position_m)
+                    {
+                        *first_moment += position * point.volume_weight_m3;
+                    }
+                },
+            )
             .ok_or(AnalysisProjectionError::InvalidElementGeometry {
                 element_id: element.element_id,
             })?;
             let centroid_m = first_moment_m4.map(|value| value / signed_volume_m3);
             let characteristic_length_m = (6.0 * signed_volume_m3).cbrt();
-            for left in 0..node_indices.len() {
-                for right in (left + 1)..node_indices.len() {
-                    neighbor_sets[node_indices[left]].insert(node_indices[right]);
-                    neighbor_sets[node_indices[right]].insert(node_indices[left]);
-                }
-            }
-            element_by_id.insert(element.element_id, elements.len());
             elements.push(ProjectedElement {
                 element_id: element.element_id,
                 stable_identity: element.stable_identity,
@@ -110,45 +121,36 @@ impl AnalysisProjection {
                 characteristic_length_m,
             });
         }
-        let boundary_faces = mesh
-            .topology
-            .boundary_faces
-            .iter()
-            .map(|face| {
-                let node_indices = face
-                    .node_ids
-                    .iter()
-                    .map(|node_id| {
-                        node_by_id.get(node_id).copied().ok_or(
-                            AnalysisProjectionError::UnknownNode {
-                                entity_kind: "boundary face",
-                                entity_id: face.face_id,
-                                node_id: *node_id,
-                            },
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                let adjacent_element_indices = face
-                    .adjacent_volume_element_ids
-                    .iter()
-                    .map(|element_id| {
-                        element_by_id.get(element_id).copied().ok_or(
-                            AnalysisProjectionError::UnknownAdjacentElement {
-                                face_id: face.face_id,
-                                element_id: *element_id,
-                            },
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                project_boundary_face(
-                    face,
-                    node_indices,
-                    adjacent_element_indices,
-                    &nodes,
-                    &elements,
-                )
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut boundary_faces = reserve(mesh.topology.boundary_faces.len())?;
+        for face in &mesh.topology.boundary_faces {
+            check_cancelled()?;
+            let mut node_indices = reserve(face.node_ids.len())?;
+            for node_id in &face.node_ids {
+                node_indices.push(*node_by_id.get(node_id).ok_or(
+                    AnalysisProjectionError::UnknownNode {
+                        entity_kind: "boundary face",
+                        entity_id: face.face_id,
+                        node_id: *node_id,
+                    },
+                )?);
+            }
+            let mut adjacent_element_indices = reserve(face.adjacent_volume_element_ids.len())?;
+            for element_id in &face.adjacent_volume_element_ids {
+                adjacent_element_indices.push(*element_by_id.get(element_id).ok_or(
+                    AnalysisProjectionError::UnknownAdjacentElement {
+                        face_id: face.face_id,
+                        element_id: *element_id,
+                    },
+                )?);
+            }
+            boundary_faces.push(project_boundary_face(
+                face,
+                node_indices,
+                adjacent_element_indices,
+                &nodes,
+                &elements,
+            )?);
+        }
         let bounds_m = std::array::from_fn(|axis| {
             nodes
                 .iter()
@@ -164,10 +166,8 @@ impl AnalysisProjection {
             .map(|[min, max]| (max - min).powi(2))
             .sum::<f64>()
             .sqrt();
-        let node_neighbors = neighbor_sets
-            .into_iter()
-            .map(|neighbors| neighbors.into_iter().collect())
-            .collect();
+        let node_neighbors = super::neighbors::derive(&elements, nodes.len())?;
+        check_cancelled()?;
         Ok(Self {
             schema_version: 1,
             mesh_digest: mesh.canonical_digest,
@@ -182,5 +182,12 @@ impl AnalysisProjection {
             node_by_id,
             element_by_id,
         })
+    }
+}
+
+struct ProjectionCancellation;
+impl MeshingCancellationSignal for ProjectionCancellation {
+    fn is_cancelled(&self) -> bool {
+        crate::is_fea_cancelled()
     }
 }

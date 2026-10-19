@@ -3,7 +3,7 @@ use crate::{
     constraints::CanonicalStructuralConstraintPlan,
     execution::{CanonicalSemanticState, StructuralModalWorkload},
     results::observation::ResolvedObservationPlan,
-    solve::modal::{MODAL_BOUNDARY_PROBE_WIDTH, MODAL_MASS_ORTHOGONALIZATION_PASSES},
+    solve::modal::MODAL_MASS_ORTHOGONALIZATION_PASSES,
     ComputeBackend,
 };
 use runmat_execution::resource::{AcceleratorRequest, Capability};
@@ -27,10 +27,14 @@ const ACCELERATOR_CG_RESIDENT_VECTOR_COUNT: u64 = 6;
 const FIXED_WORKER_MEMORY_BYTES: u64 = 16 * 1024 * 1024;
 const FIXED_WORKER_SCRATCH_BYTES: u64 = 8 * 1024 * 1024;
 
+mod accelerator;
+use accelerator::modal_accelerator_requirements;
 mod arithmetic;
 mod energy;
 mod observations;
+pub(super) mod output;
 mod sizing;
+mod subspace;
 use arithmetic::{checked_add, checked_bytes, checked_mul, count};
 use observations::resolve_modal_observations;
 pub(super) use sizing::structural_modal_accelerator_minimum_bytes;
@@ -41,6 +45,7 @@ use sizing::{
 };
 pub use sizing::{
     structural_modal_receipt_payload_bytes_upper_bound,
+    structural_modal_result_output_resource_facts,
     structural_modal_result_payload_bytes_upper_bound,
 };
 
@@ -54,6 +59,45 @@ pub fn build_structural_modal_resource_plan(
     accelerator_requests: &[AcceleratorRequest],
     prepared: PreparedStructuralModalResourceFacts,
 ) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let compiled = super::constraint_compilation::compile_original_inventory(
+        workload.model(),
+        mesh,
+        constraints,
+        workload
+            .procedure_step()
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+            .accuracy
+            .resources
+            .maximum_resident_bytes,
+    )?;
+    build_structural_modal_resource_plan_from_compilation(
+        mesh,
+        &compiled,
+        observations,
+        workload,
+        prestress_state,
+        accelerator_requests,
+        prepared,
+    )
+}
+
+/// Reuse the exact fresh construction; detached or cold inventory is not accepted.
+pub fn build_structural_modal_resource_plan_from_compilation(
+    mesh: Option<&SolverMeshArtifact>,
+    compilation: &crate::constraints::ConstraintCompilation<'_>,
+    observations: &ResolvedObservationPlan,
+    workload: &StructuralModalWorkload,
+    prestress_state: Option<&CanonicalSemanticState>,
+    accelerator_requests: &[AcceleratorRequest],
+    prepared: PreparedStructuralModalResourceFacts,
+) -> Result<FeaResourcePlan, ResourcePlanningError> {
+    let constraints = compilation.plan();
+    let compiler_peak = super::constraint_compilation::original_compilation_peak(
+        compilation,
+        workload.model(),
+        mesh,
+        constraints,
+    )?;
     workload
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
@@ -109,26 +153,17 @@ pub fn build_structural_modal_resource_plan(
             "modal extraction requires at least one unconstrained degree of freedom".into(),
         ));
     }
-    let requested_mode_count = count(
-        workload.truncation().requested_mode_count(),
-        "requested modal count",
-    )?
-    .min(reduced_dimension);
+    let subspace::ModalSubspaceBounds {
+        requested_mode_count,
+        maximum_subspace_dimension,
+        initial_subspace_dimension,
+        boundary_probe_width,
+        expansion_count,
+    } = subspace::derive(reduction.reduced_dof_count, workload)?;
     let residual_vector_count = count(
         workload.residual_vector_directions().len(),
         "modal residual-vector count",
     )?;
-    let boundary_probe_width = count(MODAL_BOUNDARY_PROBE_WIDTH, "modal boundary probe width")?;
-    let initial_subspace_dimension = requested_mode_count
-        .checked_add(boundary_probe_width)
-        .ok_or(ResourcePlanningError::Overflow("modal initial subspace"))?
-        .min(reduced_dimension);
-    let remaining = reduced_dimension - initial_subspace_dimension;
-    let expansion_count = remaining
-        .checked_add(boundary_probe_width - 1)
-        .ok_or(ResourcePlanningError::Overflow("modal subspace expansions"))?
-        / boundary_probe_width
-        + 1;
 
     let tangent_pattern = match linearization {
         Some(linearization) => facts
@@ -178,8 +213,8 @@ pub fn build_structural_modal_resource_plan(
     )?;
     let contribution_bytes = checked_bytes(contribution_nonzeros, 24, "modal contributions")?;
     let dense_projected_values = checked_mul(
-        reduced_dimension,
-        reduced_dimension,
+        maximum_subspace_dimension,
+        maximum_subspace_dimension,
         "modal dense projected values",
     )?;
     let source_bytes = energy::original_energy_source_bytes(
@@ -187,11 +222,13 @@ pub fn build_structural_modal_resource_plan(
         &reduction,
         linearization.is_some(),
         workload.model(),
+        admission,
     )?;
     let workspace_bytes = checked_add(
         modal_workspace_bytes(
             full_dimension,
             reduced_dimension,
+            maximum_subspace_dimension,
             residual_vector_count,
             reduced_tangent_nonzeros,
             reduced_mass_nonzeros,
@@ -200,18 +237,26 @@ pub fn build_structural_modal_resource_plan(
         source_bytes,
         "modal original energy source",
     )?;
-    let modal_output_values =
-        modal_output_value_count(full_dimension, reduced_dimension, residual_vector_count)?;
+    let modal_output_values = modal_output_value_count(
+        full_dimension,
+        maximum_subspace_dimension,
+        residual_vector_count,
+    )?;
     let modal_phase_values = modal_phase_value_count(
         modal_output_values,
         full_dimension,
-        reduced_dimension,
+        maximum_subspace_dimension,
         count(facts.recovery_node_count, "modal recovery nodes")?,
         count(facts.recovery_element_count, "modal recovery elements")?,
     )?;
     let observations =
         ObservationResourceFacts::from_plan(observations, workload.observation_execution())?;
-    let result_payload_bytes = modal_result_payload_bytes(modal_output_values, 0)?;
+    let expected_result_output = output::result_output(
+        modal_output_values,
+        maximum_subspace_dimension,
+        residual_vector_count,
+    )?;
+    let result_payload_bytes = expected_result_output.encoded_payload_bytes_upper_bound.0;
     let receipt_payload_bytes = structural_modal_receipt_payload_bytes_upper_bound();
     let profiles_payload_bytes =
         crate::execution::structural_state_publication_profiles_encoding_profile(
@@ -224,7 +269,7 @@ pub fn build_structural_modal_resource_plan(
         )
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
         .encoded_bytes_upper_bound;
-    if prepared.result_output.encoded_payload_bytes_upper_bound.0 != result_payload_bytes
+    if prepared.result_output != expected_result_output
         || prepared.receipt_output.encoded_payload_bytes_upper_bound.0 != receipt_payload_bytes
         || !prepared_output_covers_transport(&prepared.result_output)
         || !prepared_output_covers_transport(&prepared.receipt_output)
@@ -325,12 +370,13 @@ pub fn build_structural_modal_resource_plan(
         estimation_model_revision: RESOURCE_ESTIMATION_MODEL_REVISION,
         phase: FeaResourcePhase::StructuralModalExtraction(workload.identity()),
         demand: FeaResourceDemand::StructuralModalExtraction(StructuralModalResourceDemand {
+            constraint_compilation_peak_bytes: compiler_peak,
             original_energy_source_bytes: ByteCount(source_bytes),
             workload: workload.identity(),
             prestress_linearization: linearization.map(|linearization| linearization.identity()),
             geometric_stiffness_nonzero_count: Count(geometric_stiffness_nonzeros),
             reduced_tangent_nonzero_count_upper_bound: Count(reduced_tangent_nonzeros),
-            retained_mode_count_upper_bound: Count(reduced_dimension),
+            retained_mode_count_upper_bound: Count(maximum_subspace_dimension),
             residual_vector_count: Count(residual_vector_count),
             residual_vector_static_iteration_count_upper_bound: Count(
                 if residual_vector_count == 0 {
@@ -389,7 +435,7 @@ pub fn build_structural_modal_resource_plan(
                     reduced_dimension: Count(reduced_dimension),
                     requested_mode_count: Count(requested_mode_count),
                     initial_subspace_dimension: Count(initial_subspace_dimension),
-                    maximum_subspace_dimension: Count(reduced_dimension),
+                    maximum_subspace_dimension: Count(maximum_subspace_dimension),
                     boundary_probe_width: Count(boundary_probe_width),
                     subspace_expansion_count_upper_bound: Count(expansion_count),
                     maximum_iterations_per_expansion: Count(count(
@@ -429,7 +475,10 @@ pub fn build_structural_modal_resource_plan(
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1_000,
+            cpu_millicores: prepared
+                .local_execution
+                .checked_cpu_millicores()
+                .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(FIXED_WORKER_MEMORY_BYTES),
             fixed_scratch_bytes: ByteCount(FIXED_WORKER_SCRATCH_BYTES),
@@ -438,37 +487,4 @@ pub fn build_structural_modal_resource_plan(
         },
         accuracy_ceiling: step.accuracy.resources,
     })
-}
-
-fn modal_accelerator_requirements(
-    backend: ComputeBackend,
-    requests: &[AcceleratorRequest],
-    reduced_dimension: u64,
-    stiffness_nonzeros: u64,
-) -> Result<Vec<AcceleratorRequirement>, ResourcePlanningError> {
-    if backend != ComputeBackend::Gpu {
-        if !requests.is_empty() {
-            return Err(ResourcePlanningError::Invalid(
-                "CPU modal execution cannot claim accelerator resources".into(),
-            ));
-        }
-        return Ok(Vec::new());
-    }
-    let [request] = requests else {
-        return Err(ResourcePlanningError::Invalid(
-            "GPU modal execution requires exactly one accelerator request".into(),
-        ));
-    };
-    let required =
-        structural_modal_accelerator_minimum_bytes(reduced_dimension, stiffness_nonzeros)?;
-    if request.count != 1 || request.memory_bytes_each < required {
-        return Err(ResourcePlanningError::Invalid(format!(
-            "the modal accelerator requires one device with at least {required} bytes"
-        )));
-    }
-    Ok(vec![AcceleratorRequirement {
-        class: request.class.clone(),
-        count: request.count,
-        memory_bytes_each: ByteCount(request.memory_bytes_each),
-    }])
 }

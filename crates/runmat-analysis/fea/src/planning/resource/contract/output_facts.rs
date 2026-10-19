@@ -48,6 +48,9 @@ impl FeaResourceDemand {
                 Self::MaxwellHarmonic(demand),
                 AnalysisNumericalObjectKind::StatePublicationProfiles,
             ) => Some(&demand.state_profiles_output),
+            (Self::StructuralFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
+                Some(&demand.output)
+            }
             (Self::NonlinearFieldRecovery(demand), AnalysisNumericalObjectKind::Field) => {
                 Some(&demand.output)
             }

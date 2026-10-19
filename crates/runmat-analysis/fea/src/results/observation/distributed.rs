@@ -518,7 +518,7 @@ pub fn evaluate_solid_observation_partition(
     field: &RecoveredFieldPartitionSet,
     event_attribution: Option<ObservationEventAttribution>,
 ) -> Result<ObservationPartitionContribution, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection)?;
     if topology.digest() != plan.topology_digest {
         return Err(ObservationError::Identity(
             "observation partition topology differs from its resolved plan",

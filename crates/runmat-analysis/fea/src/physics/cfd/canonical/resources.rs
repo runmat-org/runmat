@@ -1,6 +1,6 @@
 use super::{CanonicalFluidError as Error, CanonicalFluidPolicy};
 use crate::{
-    solve::krylov::{GmresPolicy, GmresWorkEnvelope},
+    solve::krylov::{right_ilu::SparseRightIluEnvelope, GmresPolicy, GmresWorkEnvelope},
     topology::{AnalysisProjection, FiniteVolumeReservation, FiniteVolumeTopology},
 };
 use runmat_analysis_core::{
@@ -126,9 +126,16 @@ pub(super) fn admit_authority_profile(
         mul(profile.maximum_entity_units.max(1), 2)?,
         u64::from(usize::BITS),
     )?;
+    let mass_flow_actions = actions
+        .iter()
+        .filter(|a| matches!(a, ExcitationAction::MassFlow(_)))
+        .count() as u64;
     let boundary_work = mul(
         mul(
-            add(constraints.len() as u64, operators.len() as u64)?,
+            add(
+                add(constraints.len() as u64, operators.len() as u64)?,
+                mass_flow_actions,
+            )?,
             reservation.faces,
         )?,
         mul(max_aliases, mul(compare, 2)?)?,
@@ -145,7 +152,10 @@ pub(super) fn admit_authority_profile(
         mul(max_signal_bytes, 2)?,
     )?;
     let work = add(
-        add(boundary_work, forcing_work)?,
+        add(
+            add(boundary_work, forcing_work)?,
+            mul(mul(mass_flow_actions, reservation.faces)?, 64)?,
+        )?,
         add(signal_work, mul(profile.metadata_units, 128)?)?,
     )?;
     reservation.operator_work_upper_bound = add(reservation.operator_work_upper_bound, work)?;
@@ -256,6 +266,8 @@ impl CanonicalFluidReservation {
         let f = u64::try_from(face_count).map_err(|_| Error::Resource("face count"))?;
         // A tetrahedral cell has at most four distinct face-neighbours plus its diagonal.
         let nnz = mul(n, 5)?;
+        let ilu = SparseRightIluEnvelope::for_counts(n, nnz, 5)
+            .ok_or(Error::Resource("shared ILU envelope"))?;
         // Three coexisting CSR operators/pattern clones plus assembly/output temporaries,
         // immutable boundary/bodyforce, all cell vectors/gradients/3x3 LS stencils, and
         // shared GMRES peak. Includes doubled Vec payload/header growth allowances.
@@ -271,6 +283,7 @@ impl CanonicalFluidReservation {
         // Original governing fluctuation coexists with its absolute-Pa output projection.
         // Charge the extra retained vector with the same doubled payload allowance.
         let mut bytes = add(add(baseline_bytes, mul(n, 4 * 8)?)?, add(mul(n, 32)?, 96)?)?;
+        bytes = add(bytes, ilu.resident_bytes_upper_bound)?;
         // Frozen velocity reconstruction: four source/weight records per cell,
         // doubled payload growth plus the owning Vec header. No field is retained.
         bytes = add(
@@ -318,12 +331,21 @@ impl CanonicalFluidReservation {
                 add(gmres.operator_applications_upper_bound, 1)?,
                 mul(nnz, 2)?,
             )?,
-            mul(
-                add(gmres.dot_calls_upper_bound, gmres.axpy_calls_upper_bound)?,
-                mul(n, 4)?,
+            add(
+                mul(gmres.dot_calls_upper_bound, mul(n, 4)?)?,
+                gmres.recurrence_scalar_operations_upper_bound,
             )?,
         )?;
-        let linear_work = add(linear_work, mul(n, 4)?)?;
+        let linear_work = add(
+            add(linear_work, mul(n, 4)?)?,
+            add(
+                ilu.factor_scalar_operations,
+                mul(
+                    add(gmres.operator_applications_upper_bound, 1)?,
+                    ilu.application_scalar_operations,
+                )?,
+            )?,
+        )?;
         let linear_iterations_upper_bound = mul(solves, p.maximum_linear_iterations as u64)?;
         let mut work = add(
             add(

@@ -1,3 +1,11 @@
+mod cooperative_classification;
+mod cooperative_insertion;
+mod cooperative_selection;
+mod local_queries;
+mod protected_edge_inventory;
+mod separated_size_candidate;
+mod sized_curve_boundary;
+
 use runmat_geometry_core::{
     GeometryEvaluationControl, GeometryEvaluationError, GeometryModel, PersistentEntityId,
     PersistentEntityKind, PortableExactEvaluator, TopologicalOrientation,
@@ -76,6 +84,7 @@ fn canonical_bad_triangle_selects_a_reason_specific_construction() {
     });
     duplicate_geometry.vertices.push(ExactFaceGeometryVertex {
         pslg_vertex_index: 3,
+        point_m: evaluation(&geometry.source_face_id, candidate.uv).point_m,
         evaluation: evaluation(&geometry.source_face_id, candidate.uv),
         unit_normal: [0.0, 0.0, 1.0],
     });
@@ -143,6 +152,7 @@ fn refinement_batch_never_inserts_adjacent_stale_cavities() {
         &geometry,
         &pslg,
         0.01,
+        None,
     )
     .unwrap();
 
@@ -160,7 +170,8 @@ fn shape_candidate_batch_respects_the_two_child_spacing_collar() {
     near.reason = ExactFaceRefinementReason::MetricAngle;
 
     let selected =
-        super::select::independent_candidate_batch(vec![near], &geometry, &pslg, 0.02).unwrap();
+        super::select::independent_candidate_batch(vec![near], &geometry, &pslg, 0.02, None)
+            .unwrap();
 
     assert!(selected.is_empty());
 }
@@ -644,6 +655,28 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
         uv,
     };
 
+    // Cancellation must reach each admission walk before triangulation starts.
+    for cancel_at in [
+        1,
+        pslg.vertices.len() + 1,
+        pslg.vertices.len() + pslg.segments.len() + 1,
+    ] {
+        let signal = cooperative_insertion::CancelDuringCandidateWalk::new(cancel_at);
+        let failure = insert_exact_face_refinement_candidate(
+            face_boundary,
+            &initial,
+            &candidate,
+            &signal,
+            options,
+        )
+        .unwrap_err();
+        assert_eq!(
+            failure.kind,
+            ExactFaceRefinementErrorKind::Delaunay(crate::ExactFaceDelaunayErrorKind::Cancelled)
+        );
+        assert_eq!(signal.observed(), cancel_at);
+    }
+
     let refined = insert_exact_face_refinement_candidate(
         face_boundary,
         &initial,
@@ -1092,7 +1125,7 @@ fn nonencroaching_candidate_is_inserted_into_validated_trimmed_topology() {
     );
 }
 
-fn geometry(
+pub(super) fn geometry(
     metric_edges: [f64; 3],
     minimum_angle: f64,
     aspect: f64,
@@ -1106,6 +1139,7 @@ fn geometry(
         .enumerate()
         .map(|(index, uv)| ExactFaceGeometryVertex {
             pslg_vertex_index: index as u32,
+            point_m: evaluation(&face_id, uv).point_m,
             evaluation: evaluation(&face_id, uv),
             unit_normal: [0.0, 0.0, 1.0],
         })
@@ -1139,7 +1173,13 @@ fn geometry(
 
 fn evaluation(face_id: &PersistentEntityId, uv: [f64; 2]) -> ExactFaceMetricEvaluation {
     ExactFaceMetricEvaluation {
-        source_face_id: face_id.clone(),
+        provenance: std::sync::Arc::new(crate::ExactFaceMetricProvenance {
+            source_face_id: face_id.clone(),
+            active_sources: vec![MetricSourceKind::Global],
+            applied_contribution_count: 0,
+            clipped_contribution_count: 0,
+            rejected_contribution_count: 0,
+        }),
         uv,
         evaluator_uv: uv,
         point_m: [uv[0], uv[1], 0.0],
@@ -1147,10 +1187,6 @@ fn evaluation(face_id: &PersistentEntityId, uv: [f64; 2]) -> ExactFaceMetricEval
         derivative_v_m: [0.0, 1.0, 0.0],
         physical_metric: identity_metric(),
         sizing_metric: identity_metric(),
-        active_sources: vec![MetricSourceKind::Global],
-        applied_contribution_count: 0,
-        clipped_contribution_count: 0,
-        rejected_contribution_count: 0,
     }
 }
 
@@ -1292,6 +1328,7 @@ fn acute_corner_geometry() -> (ExactFacePslg, ExactFaceGeometry) {
             .enumerate()
             .map(|(index, uv)| ExactFaceGeometryVertex {
                 pslg_vertex_index: index as u32,
+                point_m: evaluation(&face_id, uv).point_m,
                 evaluation: evaluation(&face_id, uv),
                 unit_normal: [0.0, 0.0, 1.0],
             })

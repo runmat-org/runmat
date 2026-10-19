@@ -1,5 +1,6 @@
 use super::*;
 use crate::fixtures::{fixture_model, mixed_solid_beam_model, FixtureId};
+use runmat_canonical_codec::encode_contract;
 use runmat_meshing_core::ElementOrder;
 #[test]
 fn finalization_profile_bounds_original_canonical_payload_and_component_rank() {

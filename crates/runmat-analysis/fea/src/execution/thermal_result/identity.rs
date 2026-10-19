@@ -27,9 +27,9 @@ pub(in crate::execution) struct IdentitySerialization<'a, T, F, R, E, N, L, I, H
 );
 
 impl ThermalResultMetadata<'_> {
-    pub(in crate::execution) fn identity_serialization<'a>(
+    pub(in crate::execution) fn identity_serialization<'a, F: Serialize + 'a>(
         &'a self,
-        fields: &'a [[crate::results::field::RecoveredFieldIdentity; 4]],
+        fields: F,
     ) -> impl Serialize + 'a {
         IdentitySerialization(
             self.numerical_intent,
@@ -49,9 +49,9 @@ impl ThermalResultMetadata<'_> {
         )
     }
 
-    pub(in crate::execution) fn identity(
+    pub(in crate::execution) fn identity<F: Serialize>(
         &self,
-        fields: &[[crate::results::field::RecoveredFieldIdentity; 4]],
+        fields: F,
     ) -> AnalysisExecutionResult<SolverResultIdentity> {
         // Presentation diagnostics and execution telemetry are not numerical identity inputs.
         let content = encode_contract(
@@ -61,5 +61,19 @@ impl ThermalResultMetadata<'_> {
             LIMITS,
         )?;
         SolverResultIdentity::from_step_result(self.producer, Digest::sha256(content))
+    }
+}
+
+pub(in crate::execution) struct ManifestFieldIdentities<'a>(
+    pub &'a [[crate::results::field::RecoveredFieldArtifactEntry; 4]],
+);
+impl Serialize for ManifestFieldIdentities<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut sequence = serializer.serialize_seq(Some(self.0.len()))?;
+        for entries in self.0 {
+            sequence.serialize_element(&entries.each_ref().map(|entry| entry.field))?;
+        }
+        sequence.end()
     }
 }

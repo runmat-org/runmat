@@ -25,7 +25,7 @@ use runmat_execution_runner_native::{
 use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
 
 #[path = "thermal/cold_reimport.rs"]
-mod cold_reimport;
+pub(super) mod cold_reimport;
 #[path = "thermal/selected.rs"]
 mod selected;
 
@@ -166,6 +166,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         let output_policy =
             AnalysisOutputPolicy::new(limits.chunk_bytes, limits.inventory).unwrap();
         let mut study = ThermalStudyCoordinator::new(ThermalStudyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             field_source: None,
             scope,
             product: ThermalStudyProduct { compiled, workload },
@@ -442,6 +443,7 @@ pub(super) async fn run_driver<D: PublicationChainDriver>(
         assert_eq!(receipt.accuracy_status, AccuracyStatus::Satisfied);
         let recovered =
             cold_reimport::assert_closed_completion(driver.store(), completed, limits.inventory);
+        assert_equilibrium(&recovered.result);
         if scope == ThermalStudyScope::SelectedStep {
             selected::execute_downstream(driver, &recovered).await;
         }

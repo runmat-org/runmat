@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use crate::cdt::solver_topology::storage::{ReservedBuffer, Storage};
 
 use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign},
@@ -31,13 +31,18 @@ const REFERENCE_TETRAHEDRON: [[f64; 4]; 4] = [
     [0.0, 0.0, 0.0, 1.0],
 ];
 
+pub(super) struct ValidationWork<'storage, 'work> {
+    pub counter: &'work mut u64,
+    pub storage: Storage<'storage>,
+}
+
 pub(super) fn validate(
     topology: &SolverMeshTopology,
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
     cancellation_check_interval: u64,
     cancellation: &dyn MeshingCancellationSignal,
-    work: &mut u64,
+    work: ValidationWork<'_, '_>,
 ) -> Result<(), DelaunaySolverTopologyError> {
     if cancellation_check_interval == 0 {
         return Err(error::failure(
@@ -64,26 +69,24 @@ pub(super) fn validate_elements(
     maximum_recursion_depth: u32,
     cancellation_check_interval: u64,
     cancellation: &dyn MeshingCancellationSignal,
-    work: &mut u64,
+    work: ValidationWork<'_, '_>,
 ) -> Result<(), DelaunaySolverTopologyError> {
-    let node_by_id = topology
-        .nodes
-        .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
-        .collect::<BTreeMap<_, _>>();
     for element_index in element_indices {
         let element = topology
             .volume_elements
             .get(element_index)
             .ok_or_else(|| invalid("Tet10 Jacobian element index is out of bounds"))?;
-        let coordinates = element_coordinates(element, &node_by_id)?;
+        let coordinates = element_coordinates_from_topology(element, topology)?;
         certify_element(
             coordinates,
             maximum_search_work,
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
-            work,
+            ValidationWork {
+                counter: work.counter,
+                storage: work.storage,
+            },
         )
         .map_err(|failure| DelaunaySolverTopologyError {
             kind: failure.kind,
@@ -96,33 +99,31 @@ pub(super) fn validate_elements(
     Ok(())
 }
 
-pub(super) fn invalid_element_indices(
+pub(super) fn invalid_element_indices<'storage>(
     topology: &SolverMeshTopology,
     maximum_search_work: u64,
     maximum_recursion_depth: u32,
     cancellation_check_interval: u64,
     cancellation: &dyn MeshingCancellationSignal,
-    work: &mut u64,
-) -> Result<BTreeSet<usize>, DelaunaySolverTopologyError> {
-    let node_by_id = topology
-        .nodes
-        .iter()
-        .map(|node| (node.node_id, node.coordinates_m))
-        .collect::<BTreeMap<_, _>>();
-    let mut invalid_indices = BTreeSet::new();
+    work: ValidationWork<'storage, '_>,
+) -> Result<ReservedBuffer<'storage, usize>, DelaunaySolverTopologyError> {
+    let mut invalid_indices = ReservedBuffer::new(topology.volume_elements.len(), work.storage)?;
     for (element_index, element) in topology.volume_elements.iter().enumerate() {
-        let coordinates = element_coordinates(element, &node_by_id)?;
+        let coordinates = element_coordinates_from_topology(element, topology)?;
         match certify_element(
             coordinates,
             maximum_search_work,
             maximum_recursion_depth,
             cancellation_check_interval,
             cancellation,
-            work,
+            ValidationWork {
+                counter: work.counter,
+                storage: work.storage,
+            },
         ) {
             Ok(()) => {}
             Err(failure) if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh => {
-                invalid_indices.insert(element_index);
+                invalid_indices.push(element_index)?;
             }
             Err(failure) => return Err(failure),
         }
@@ -130,30 +131,13 @@ pub(super) fn invalid_element_indices(
     Ok(invalid_indices)
 }
 
-fn element_coordinates(
-    element: &runmat_meshing_core::SolverVolumeElement,
-    node_by_id: &BTreeMap<u64, [f64; 3]>,
-) -> Result<[[f64; 3]; 10], DelaunaySolverTopologyError> {
-    element
-        .node_ids
-        .iter()
-        .map(|node_id| {
-            node_by_id
-                .get(node_id)
-                .copied()
-                .ok_or_else(|| invalid("Tet10 Jacobian references an absent node"))
-        })
-        .collect::<Result<Vec<_>, _>>()?
-        .try_into()
-        .map_err(|_| invalid("Tet10 Jacobian requires exactly ten nodes"))
-}
-
-pub(super) fn optimization_margin_profile_elements(
+pub(super) fn optimization_margin_profile_elements<'storage>(
     topology: &SolverMeshTopology,
-    element_indices: impl IntoIterator<Item = usize>,
+    element_indices: impl Iterator<Item = usize> + Clone,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Vec<u64>, DelaunaySolverTopologyError> {
-    let mut profile = Vec::new();
+    storage: Storage<'storage>,
+) -> Result<ReservedBuffer<'storage, u64>, DelaunaySolverTopologyError> {
+    let mut profile = ReservedBuffer::new(element_indices.clone().count(), storage)?;
     for element_index in element_indices {
         margin_checkpoint(cancellation)?;
         let element = topology
@@ -163,7 +147,7 @@ pub(super) fn optimization_margin_profile_elements(
         profile.push(margin_priority_key(bernstein_margin(
             element_coordinates_from_topology(element, topology)?,
             cancellation,
-        )?));
+        )?))?;
     }
     profile.sort_unstable();
     if profile.is_empty() {
@@ -174,7 +158,7 @@ pub(super) fn optimization_margin_profile_elements(
 
 pub(super) fn worst_invalid_element(
     topology: &SolverMeshTopology,
-    invalid_elements: &BTreeSet<usize>,
+    invalid_elements: &[usize],
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Option<usize>, DelaunaySolverTopologyError> {
     let mut worst = None::<(u64, usize)>;
@@ -207,20 +191,18 @@ fn element_coordinates_from_topology(
     element: &runmat_meshing_core::SolverVolumeElement,
     topology: &SolverMeshTopology,
 ) -> Result<[[f64; 3]; 10], DelaunaySolverTopologyError> {
-    element
-        .node_ids
-        .iter()
-        .map(|node_id| {
-            topology
-                .nodes
-                .binary_search_by_key(node_id, |node| node.node_id)
-                .ok()
-                .map(|index| topology.nodes[index].coordinates_m)
-                .ok_or_else(|| invalid("Tet10 Jacobian references an absent node"))
-        })
-        .collect::<Result<Vec<_>, _>>()?
-        .try_into()
-        .map_err(|_| invalid("Tet10 Jacobian requires exactly ten nodes"))
+    if element.node_ids.len() != 10 {
+        return Err(invalid("Tet10 Jacobian requires exactly ten nodes"));
+    }
+    let mut coordinates = [[0.0; 3]; 10];
+    for (coordinate, node_id) in coordinates.iter_mut().zip(&element.node_ids) {
+        let index = topology
+            .nodes
+            .binary_search_by_key(node_id, |node| node.node_id)
+            .map_err(|_| invalid("Tet10 Jacobian references an absent node"))?;
+        *coordinate = topology.nodes[index].coordinates_m;
+    }
+    Ok(coordinates)
 }
 
 fn bernstein_margin(
@@ -288,8 +270,18 @@ fn certify_element(
     maximum_recursion_depth: u32,
     cancellation_check_interval: u64,
     cancellation: &dyn MeshingCancellationSignal,
-    work: &mut u64,
+    work: ValidationWork<'_, '_>,
 ) -> Result<(), DelaunaySolverTopologyError> {
+    let storage_scope = work
+        .storage
+        .0
+        .map(runmat_geometry_core::GeometryAllocationScope::new);
+    let storage = Storage(
+        storage_scope
+            .as_ref()
+            .map(|scope| scope as &dyn runmat_geometry_core::GeometryEvaluationControl),
+    );
+    let work = work.counter;
     if cancellation_check_interval == 0 {
         return Err(error::failure(
             DelaunaySolverTopologyErrorKind::InvalidOptions,
@@ -309,7 +301,7 @@ fn certify_element(
         PredicateSign::Zero => return Err(invalid("Tet10 corners are exactly coplanar")),
     };
     let mut exact_reference_jacobians = None;
-    let mut pending = vec![(REFERENCE_TETRAHEDRON, 0_u32)];
+    let mut pending = storage.collect(std::iter::once((REFERENCE_TETRAHEDRON, 0_u32)))?;
     while let Some((cell, depth)) = pending.pop() {
         *work = work
             .checked_add(4)
@@ -369,8 +361,8 @@ fn certify_element(
             )));
         }
         let (left, right) = bisect(cell);
-        pending.push((right, depth + 1));
-        pending.push((left, depth + 1));
+        storage.push(&mut pending, (right, depth + 1))?;
+        storage.push(&mut pending, (left, depth + 1))?;
     }
     Ok(())
 }

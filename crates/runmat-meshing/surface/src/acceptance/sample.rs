@@ -1,9 +1,9 @@
+use super::ExactFaceRefinedMeshView;
 use runmat_meshing_core::SurfaceQualityTargets;
 
 use crate::{
     validate_exact_face_geometry_in_parameterization, ExactFaceChartParameterization,
-    ExactFaceGeometryContext, ExactFaceMetricError, ExactFaceRefinedMesh,
-    ExactFaceRefinementContext, ResolvedFaceMetricField,
+    ExactFaceMetricError, ExactFaceRefinedMesh, ExactFaceRefinementContext,
 };
 
 use super::{
@@ -18,8 +18,8 @@ pub fn accept_exact_face_mesh(
     options: ExactFaceAcceptanceOptions,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
     let parameterization = ExactFaceChartParameterization::EvaluatorParameters;
-    let report = sample(mesh, context, quality, options, &parameterization)?;
-    enforce_report(mesh, &report, quality)?;
+    let report = sample(mesh.into(), context, quality, options, &parameterization)?;
+    enforce_report(mesh.into(), &report, quality)?;
     validate_exact_face_acceptance_in_parameterization(
         &report,
         mesh,
@@ -55,13 +55,13 @@ pub(crate) fn accept_exact_face_mesh_in_parameterization(
     options: ExactFaceAcceptanceOptions,
     parameterization: &ExactFaceChartParameterization,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
-    let report = sample(mesh, context, quality, options, parameterization)?;
-    enforce_report(mesh, &report, quality)?;
+    let report = sample(mesh.into(), context, quality, options, parameterization)?;
+    enforce_report(mesh.into(), &report, quality)?;
     Ok(report)
 }
 
 pub(crate) fn sample_exact_face_mesh_in_parameterization(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     context: ExactFaceRefinementContext<'_>,
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
@@ -78,27 +78,55 @@ pub(crate) fn validate_exact_face_acceptance_in_parameterization(
     options: ExactFaceAcceptanceOptions,
     parameterization: &ExactFaceChartParameterization,
 ) -> Result<(), ExactFaceAcceptanceError> {
-    let expected = sample(mesh, context, quality, options, parameterization)?;
+    let expected = sample(mesh.into(), context, quality, options, parameterization)?;
     if report != &expected {
         return Err(error(
-            mesh,
+            mesh.into(),
             ExactFaceAcceptanceErrorKind::InvalidInput,
             "acceptance report differs from independent exact-surface resampling",
         ));
     }
-    enforce_report(mesh, report, quality)?;
+    enforce_report(mesh.into(), report, quality)?;
     Ok(())
 }
 
 fn sample(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     context: ExactFaceRefinementContext<'_>,
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
     parameterization: &ExactFaceChartParameterization,
 ) -> Result<ExactFaceAcceptanceReport, ExactFaceAcceptanceError> {
-    validate_inputs(mesh, context, quality, options, parameterization)?;
-    let field = ResolvedFaceMetricField::new(context.topology, context.metric_request)
+    validate_inputs(mesh, quality, options)?;
+    // Reject an impossible work envelope before independent geometry evaluation
+    // or allocating the report, rather than spending the entire sample cap first.
+    if options
+        .minimum_sample_count(mesh.geometry.triangles.len() as u64)
+        .is_none_or(|minimum| minimum > options.maximum_samples)
+    {
+        return Err(error(
+            mesh,
+            ExactFaceAcceptanceErrorKind::ResourceLimit,
+            "minimum adaptive acceptance samples exceed the admitted work budget",
+        ));
+    }
+    validate_exact_face_geometry_in_parameterization(
+        mesh.geometry,
+        &mesh.topology.trimmed,
+        &mesh.topology.pslg,
+        parameterization,
+        context.geometry_context(),
+    )
+    .map_err(|failure| {
+        error(
+            mesh,
+            ExactFaceAcceptanceErrorKind::Geometry(failure.kind),
+            failure.reason,
+        )
+    })?;
+    let field = context
+        .geometry_context()
+        .resolve_metric()
         .map_err(|failure| map_metric(mesh, failure))?;
     let mut budget = SampleBudget::new(mesh, options.maximum_samples);
     let mut triangle_reports = Vec::with_capacity(mesh.geometry.triangles.len());
@@ -110,10 +138,21 @@ fn sample(
             .vertex_indices
             .map(|index| &mesh.geometry.vertices[index as usize]);
         let original_uv = corners.map(|corner| corner.evaluation.uv);
-        let original_points = corners.map(|corner| corner.evaluation.point_m);
+        let original_points = corners.map(|corner| corner.point_m);
         let before = budget.consumed;
         let mut triangle_chordal = SampleMaximum::default();
         let mut triangle_normal = SampleMaximum::default();
+        for corner in corners {
+            if corner.point_m != corner.evaluation.point_m {
+                budget.consume()?;
+                let chordal = distance(corner.evaluation.point_m, corner.point_m);
+                let normal = angle(evidence.unit_normal, corner.unit_normal);
+                triangle_chordal.observe(chordal, corner.evaluation.uv);
+                triangle_normal.observe(normal, corner.evaluation.uv);
+                face_chordal.observe(chordal, corner.evaluation.uv);
+                face_normal.observe(normal, corner.evaluation.uv);
+            }
+        }
         let mut cells = vec![(original_uv, 0u8)];
         while let Some((cell, depth)) = cells.pop() {
             let mut cell_chordal = 0.0_f64;
@@ -206,7 +245,7 @@ fn sample(
 }
 
 fn enforce_report(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     report: &ExactFaceAcceptanceReport,
     quality: SurfaceQualityTargets,
 ) -> Result<(), ExactFaceAcceptanceError> {
@@ -229,11 +268,9 @@ fn enforce_report(
 }
 
 fn validate_inputs(
-    mesh: &ExactFaceRefinedMesh,
-    context: ExactFaceRefinementContext<'_>,
+    mesh: ExactFaceRefinedMeshView<'_>,
     quality: SurfaceQualityTargets,
     options: ExactFaceAcceptanceOptions,
-    parameterization: &ExactFaceChartParameterization,
 ) -> Result<(), ExactFaceAcceptanceError> {
     quality.validate().map_err(|failure| {
         error(
@@ -254,29 +291,11 @@ fn validate_inputs(
             "acceptance depths, refinement margin, or sample bound are invalid",
         ));
     }
-    validate_exact_face_geometry_in_parameterization(
-        &mesh.geometry,
-        &mesh.topology.trimmed,
-        &mesh.topology.pslg,
-        parameterization,
-        ExactFaceGeometryContext::new(
-            context.topology,
-            context.metric_request,
-            context.evaluator,
-            context.geometry_control,
-        ),
-    )
-    .map_err(|failure| {
-        error(
-            mesh,
-            ExactFaceAcceptanceErrorKind::Geometry(failure.kind),
-            failure.reason,
-        )
-    })
+    Ok(())
 }
 
 fn enforce_quality(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     triangle: crate::ExactFaceDelaunayTriangle,
     chordal: SampleMaximum,
     normal: SampleMaximum,
@@ -385,7 +404,7 @@ fn angle(left: [f64; 3], right: [f64; 3]) -> f64 {
 }
 
 fn map_metric(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     failure: ExactFaceMetricError,
 ) -> ExactFaceAcceptanceError {
     error(
@@ -396,7 +415,7 @@ fn map_metric(
 }
 
 fn error(
-    mesh: &ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'_>,
     kind: ExactFaceAcceptanceErrorKind,
     reason: impl Into<String>,
 ) -> ExactFaceAcceptanceError {
@@ -419,13 +438,13 @@ impl SampleMaximum {
 }
 
 struct SampleBudget<'a> {
-    mesh: &'a ExactFaceRefinedMesh,
+    mesh: ExactFaceRefinedMeshView<'a>,
     maximum: u64,
     consumed: u64,
 }
 
 impl<'a> SampleBudget<'a> {
-    fn new(mesh: &'a ExactFaceRefinedMesh, maximum: u64) -> Self {
+    fn new(mesh: ExactFaceRefinedMeshView<'a>, maximum: u64) -> Self {
         Self {
             mesh,
             maximum,

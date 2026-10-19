@@ -61,7 +61,7 @@ pub fn build_structural_transient_block_resource_plan(
         ));
     }
     let prepared = prepare_transient_preassembly(&workload.model, workload.into())
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        .map_err(ResourcePlanningError::from_preparation_error)?;
     let scope_plan = build_structural_transient_scope_resource_plan(
         workload,
         mesh,

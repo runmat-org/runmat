@@ -6,6 +6,8 @@ use crate::algebra::SparsePattern;
 
 use super::CoercivityError;
 
+#[cfg(test)]
+mod independent_tests;
 mod numeric_support;
 
 const MAX_FACTOR_FILL_MULTIPLIER: u64 = 16;

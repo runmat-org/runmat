@@ -19,8 +19,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{build_runtime_error, RuntimeError};
 
-use super::bar::apply_bar_style;
-use super::state::{render_active_plot, HistogramHandleMetadata, PlotRenderOptions};
+use super::bar::{apply_bar_style, series_bar_style};
+use super::state::{
+    continue_line_color_cycle_after, current_axes_state, current_hold_enabled,
+    render_active_plot, HistogramHandleMetadata, PlotRenderOptions,
+};
 use super::style::{parse_bar_style_args, BarStyleDefaults};
 
 const BUILTIN_NAME: &str = "histogram";
@@ -64,7 +67,8 @@ pub const HISTOGRAM_INTEGER_CAPABILITIES: [BuiltinIntegerCapabilityDescriptor; 2
     },
 ];
 const HIST_BAR_WIDTH: f32 = 0.95;
-const HIST_DEFAULT_COLOR: glam::Vec4 = glam::Vec4::new(0.15, 0.5, 0.8, 0.95);
+// MATLAB histograms draw with FaceAlpha 0.6 so overlapping series stay visible.
+const HIST_DEFAULT_COLOR: glam::Vec4 = glam::Vec4::new(0.15, 0.5, 0.8, 0.6);
 const HIST_DEFAULT_LABEL: &str = "Frequency";
 
 const HISTOGRAM_OUTPUT_HANDLE: [BuiltinParamDescriptor; 1] = [BuiltinParamDescriptor {
@@ -437,17 +441,11 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut chart = BarChart::new(labels, render_counts)
         .map_err(|e| histogram_internal(format!("chart construction failed: {e}")))?;
     chart.set_histogram_bin_edges(edges.clone());
-    apply_bar_style(&mut chart, &style, HIST_DEFAULT_LABEL);
+    let color_axes = target_axes.unwrap_or_else(|| current_axes_state().active_index);
+    let hold_enabled = current_hold_enabled();
+    let series_style = series_bar_style(&style, color_axes, hold_enabled, 0);
+    apply_bar_style(&mut chart, &series_style, HIST_DEFAULT_LABEL);
 
-    let y_label = match normalization.as_str() {
-        "count" => "Count",
-        "probability" => "Probability",
-        "percentage" => "Percentage",
-        "countdensity" => "CountDensity",
-        "pdf" => "PDF",
-        "cdf" => "CDF",
-        _ => HIST_DEFAULT_LABEL,
-    };
 
     let mut chart_opt = Some(chart);
     let plot_index_out = Rc::new(RefCell::new(None));
@@ -455,12 +453,7 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         BUILTIN_NAME,
-        PlotRenderOptions {
-            title: "Histogram",
-            x_label: "Bin",
-            y_label,
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
             let plot_index = figure.add_bar_chart_on_axes(
@@ -471,6 +464,10 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             Ok(())
         },
     );
+    if !hold_enabled {
+        // Rendering cleared the axes and reset the color order; resume it after this series.
+        continue_line_color_cycle_after(color_axes, 1);
+    }
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };

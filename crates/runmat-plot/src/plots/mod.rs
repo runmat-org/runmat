@@ -5,6 +5,7 @@
 
 pub mod area;
 pub mod bar;
+mod colormap_tables;
 pub mod contour;
 pub mod contour_fill;
 pub mod errorbar;
@@ -21,6 +22,7 @@ pub mod scatter;
 pub mod scatter3;
 pub mod stairs;
 pub mod stem;
+mod stroke;
 pub mod surface;
 pub mod volume;
 

@@ -46,7 +46,12 @@ pub(super) async fn execute(
     {
         return Err("authored J2 execution requires the admitted CPU/source envelope".into());
     }
-    let config = NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?;
+    let mut config = NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?;
+    config.max_workers = workers.max(1);
+    config.worker_cpu_millicores = prepared
+        .local_execution
+        .checked_cpu_millicores()
+        .map_err(|e| e.to_string())?;
     let observers = LocalStructuralStudyObservers {
         progress: options.progress_observer.clone(),
         mesh: options.mesh_observer.clone(),

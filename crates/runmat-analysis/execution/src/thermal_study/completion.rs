@@ -56,6 +56,7 @@ impl ThermalStudyResultClosure {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct ThermalStudyReplayContext {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,
     pub scope: ThermalStudyScope,
     pub mesh: SolverMeshArtifact,
@@ -87,6 +88,7 @@ impl CompletedThermalStudy {
     /// Original validated preparation, retained for durable artifact packaging.
     pub fn preparation(&self) -> ThermalStudyPreparation {
         ThermalStudyPreparation {
+            local_execution: self.replay.local_execution,
             field_source: self.replay.field_source.clone(),
             scope: self.replay.scope,
             product: ThermalStudyProduct {

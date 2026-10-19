@@ -96,6 +96,17 @@ pub fn execute_meshing_program_request<
         Ok(host) => host,
         Err(error) => return failure(error.to_string()),
     };
+    // Blocking worker threads have no ambient async span. Give their events a
+    // process-local owner so OTLP retains budget and kernel diagnostics.
+    let worker_span = tracing::info_span!(
+        "meshing.worker_stage",
+        cpu_threads = runmat_cpu_execution::current_threads(),
+        stage = ?host.workload.stage,
+        partition_kind = ?host.workload.partition.kind,
+        partition_index = host.workload.partition.partition_index,
+        partition_count = host.workload.partition.partition_count,
+    );
+    let _worker_stage = worker_span.enter();
     let response = match execute_serial_stage(
         request,
         store,
@@ -133,8 +144,22 @@ pub async fn run_meshing_worker_stdio(
     };
     let (mut reader, mut writer) = runmat_process_host::ipc::stdio::endpoint()?;
     let payload = read_payload(&mut reader, frame_limits).await?;
-    let request: ProgramExecutionRequest = serde_json::from_slice(&payload)
+    let reserved: runmat_execution_artifact::ReservedProgramExecutionRequest =
+        serde_json::from_slice(&payload)
+            .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    // The decoded request owns its fields. Keep no redundant wire buffer alive
+    // across the asynchronous native stage and its numerical working storage.
+    drop(payload);
+    reserved
+        .validate()
         .map_err(|error| NativeExecutionError::Protocol(error.to_string()))?;
+    let (request, resources) = reserved.into_parts();
+    let cpu_threads = admitted_cpu_threads(resources.cpu_millicores, resources.memory_bytes)?;
+    tracing::info!(target: "runmat::meshing::cpu", cpu_threads,
+        admitted_cpu_millicores = resources.cpu_millicores,
+        admitted_memory_bytes = resources.memory_bytes,
+        pool_stack_bytes = if cpu_threads > 1 { cpu_threads as u64 * runmat_cpu_execution::WORKER_STACK_BYTES } else { 0 },
+        "meshing worker CPU allocation");
     let cancellation = Arc::new(ParentConnectionCancellation::default());
     let parent_connection = Arc::clone(&cancellation);
     let parent_watchdog = tokio::spawn(cancel_and_terminate_on_parent_disconnect(
@@ -154,14 +179,21 @@ pub async fn run_meshing_worker_stdio(
             sender: progress_sender,
             error: sink_error,
         };
-        execute_meshing_program_request(
-            &request,
-            &mut store,
-            kernel.as_ref(),
-            execution_cancellation.as_ref(),
-            &mut progress,
-            limits,
+        runmat_cpu_execution::with_cpu_pool_cancellable(
+            cpu_threads,
+            || execution_cancellation.is_cancelled(),
+            || {
+                execute_meshing_program_request(
+                    &request,
+                    &mut store,
+                    kernel.as_ref(),
+                    execution_cancellation.as_ref(),
+                    &mut progress,
+                    limits,
+                )
+            },
         )
+        .unwrap_or_else(|error| failure(error.to_string()))
     });
     let response = loop {
         tokio::select! {
@@ -282,6 +314,25 @@ fn failure(message: String) -> ProgramExecutionResponse {
             message
         },
     }
+}
+
+/// One CPU/stack contract shared by dispatch and worker admission.
+pub(crate) fn admitted_cpu_threads(
+    cpu_millicores: u32,
+    memory_bytes: u64,
+) -> NativeExecutionResult<usize> {
+    let cpu_threads = usize::try_from(cpu_millicores / 1_000)
+        .map_err(|error| NativeExecutionError::Configuration(error.to_string()))?;
+    if cpu_threads == 0
+        || !cpu_millicores.is_multiple_of(1_000)
+        || cpu_threads > runmat_cpu_execution::MAX_THREADS
+        || memory_bytes < cpu_threads as u64 * runmat_cpu_execution::WORKER_STACK_BYTES
+    {
+        return Err(NativeExecutionError::Configuration(
+            "meshing CPU reservation lacks a whole-thread/stack envelope".into(),
+        ));
+    }
+    Ok(cpu_threads)
 }
 
 #[cfg(test)]

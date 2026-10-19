@@ -1,7 +1,10 @@
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::{
-    quality::predicate::{orient2d, points_collinear_constructed, PredicateSign},
+    quality::predicate::{
+        points_collinear_constructed, projected_orient2d_constructed,
+        triangle_projection_axes_constructed, PredicateSign,
+    },
     StableDigest,
 };
 
@@ -308,52 +311,50 @@ fn point_location(
     {
         return Ok(None);
     }
-    let points = vertices.map(|vertex| vertex.coordinates_m);
-    for axes in [[0, 1], [0, 2], [1, 2]] {
-        let projected = points.map(|point| [point[axes[0]], point[axes[1]]]);
-        if orient2d(projected).is_ok_and(|sign| sign == PredicateSign::Zero) {
-            continue;
-        }
-        let query = [node.coordinates_m[axes[0]], node.coordinates_m[axes[1]]];
-        let signs = [
-            orient2d([projected[0], projected[1], query]),
-            orient2d([projected[1], projected[2], query]),
-            orient2d([projected[2], projected[0], query]),
-        ];
-        if signs.iter().any(Result::is_err) {
-            return Err(invalid(
+    let points = vertices.map(DelaunayVolumeNode::predicate_point);
+    let axes = triangle_projection_axes_constructed(points)
+        .map_err(|failure| {
+            invalid(
                 constraint_index,
-                "facet split projection predicate failed",
-            ));
-        }
-        let signs = signs.map(Result::unwrap);
-        if signs.contains(&PredicateSign::Positive) && signs.contains(&PredicateSign::Negative) {
-            return Ok(None);
-        }
-        if let Some(slot) = signs.iter().position(|sign| *sign == PredicateSign::Zero) {
-            if !points_collinear_constructed([
-                vertices[slot].predicate_point(),
-                vertices[(slot + 1) % 3].predicate_point(),
-                node.predicate_point(),
-            ])
-            .map_err(|failure| {
+                format!("facet split projection failed: {failure:?}"),
+            )
+        })?
+        .ok_or_else(|| invalid(constraint_index, "protected facet is collinear"))?;
+    let query = node.predicate_point();
+    let signs = [
+        projected_orient2d_constructed([points[0], points[1], query], axes),
+        projected_orient2d_constructed([points[1], points[2], query], axes),
+        projected_orient2d_constructed([points[2], points[0], query], axes),
+    ];
+    if signs.iter().any(Result::is_err) {
+        return Err(invalid(
+            constraint_index,
+            "facet split projection predicate failed",
+        ));
+    }
+    let signs = signs.map(Result::unwrap);
+    if signs.contains(&PredicateSign::Positive) && signs.contains(&PredicateSign::Negative) {
+        return Ok(None);
+    }
+    if let Some(slot) = signs.iter().position(|sign| *sign == PredicateSign::Zero) {
+        if !points_collinear_constructed([points[slot], points[(slot + 1) % 3], query]).map_err(
+            |failure| {
                 invalid(
                     constraint_index,
                     format!("facet edge classification failed: {failure:?}"),
                 )
-            })? {
-                return Ok(Some(PointLocation::Interior));
-            }
-            let mut edge = [
-                triangle.node_identities[slot],
-                triangle.node_identities[(slot + 1) % 3],
-            ];
-            edge.sort_unstable();
-            return Ok(Some(PointLocation::Edge(edge)));
+            },
+        )? {
+            return Ok(Some(PointLocation::Interior));
         }
-        return Ok(Some(PointLocation::Interior));
+        let mut edge = [
+            triangle.node_identities[slot],
+            triangle.node_identities[(slot + 1) % 3],
+        ];
+        edge.sort_unstable();
+        return Ok(Some(PointLocation::Edge(edge)));
     }
-    Err(invalid(constraint_index, "protected facet is collinear"))
+    Ok(Some(PointLocation::Interior))
 }
 
 type Replacement = (

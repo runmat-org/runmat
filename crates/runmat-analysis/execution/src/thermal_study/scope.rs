@@ -1,8 +1,5 @@
 use runmat_analysis_core::ProcedureStep;
-use runmat_analysis_fea::{
-    execution::ThermalWorkload,
-    study::{plan_thermal_step, plan_thermal_study, ThermalStudyPlanningPolicy},
-};
+use runmat_analysis_fea::{execution::ThermalWorkload, study::ThermalStudyPlanningPolicy};
 use serde::{Deserialize, Serialize};
 
 use super::{invalid, ThermalStudyPreparation};
@@ -18,30 +15,51 @@ pub enum ThermalStudyScope {
 }
 
 impl ThermalStudyPreparation {
-    pub(super) fn planned_workload(&self) -> AnalysisBridgeResult<ThermalWorkload> {
+    pub(super) fn validate_workload(&self) -> AnalysisBridgeResult<()> {
+        if self.field_source.is_some() {
+            if self.planned_workload()? != self.product.workload {
+                return Err(invalid(
+                    "thermal workload differs from its retained source binding",
+                ));
+            }
+            return Ok(());
+        }
         let policy = ThermalStudyPlanningPolicy {
             backend: self.product.workload.backend,
             formulation_requirement: self.product.workload.formulation_requirement,
         };
-        let intent = match self.scope {
-            ThermalStudyScope::Standalone => plan_thermal_study(&self.product.compiled, policy),
-            ThermalStudyScope::SelectedStep => plan_thermal_step(
-                &self.product.compiled,
-                &self.product.workload.step_id.0,
-                policy,
-            ),
+        let workload = &self.product.workload;
+        match self.scope {
+            ThermalStudyScope::Standalone => {
+                workload.validate_authored_standalone(&self.product.compiled, policy)
+            }
+            ThermalStudyScope::SelectedStep => {
+                workload.validate_authored_selected_step(&self.product.compiled, policy)
+            }
         }
-        .map_err(|error| invalid(error.to_string()))?;
-        let Some(source) = &self.field_source else {
-            return Ok(intent);
-        };
-        if self.scope != ThermalStudyScope::SelectedStep || source.thermal_intent() != &intent {
+        .map_err(|e| invalid(e.to_string()))
+    }
+    pub(super) fn planned_workload(&self) -> AnalysisBridgeResult<ThermalWorkload> {
+        let source = self
+            .field_source
+            .as_ref()
+            .ok_or_else(|| invalid("retained thermal source is absent"))?;
+        if self.scope != ThermalStudyScope::SelectedStep {
             return Err(invalid(
-                "retained thermal source requires the exact authored selected-step intent",
+                "retained thermal source requires selected-step scope",
             ));
         }
-        let bound = source.bind(&self.mesh)?;
-        Ok(bound)
+        source
+            .thermal_intent()
+            .validate_authored_selected_step(
+                &self.product.compiled,
+                ThermalStudyPlanningPolicy {
+                    backend: self.product.workload.backend,
+                    formulation_requirement: self.product.workload.formulation_requirement,
+                },
+            )
+            .map_err(|e| invalid(e.to_string()))?;
+        source.bind(&self.mesh).map_err(|e| invalid(e.to_string()))
     }
 
     /// Only used after exact selected-workload validation by the coordinator constructor.

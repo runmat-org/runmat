@@ -40,6 +40,8 @@ use super::{
     PreparedMeshingInput, ValidatedMeshingStageOutput,
 };
 
+mod chunk_admission;
+mod reuse;
 mod surface_restart;
 mod volume;
 
@@ -49,6 +51,40 @@ struct MemoryStore {
 }
 
 impl CacheImport for MemoryStore {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if let Some(bytes) = self.objects.get(&digest) {
+            if maximum_bytes == 0 || bytes.len() as u64 > maximum_bytes {
+                return Err(runmat_execution_artifact::ArtifactError::Limit(
+                    "test read exceeds admitted bound".into(),
+                ));
+            }
+            admit(bytes.len() as u64)?;
+            return Ok(Some(bytes.clone()));
+        }
+        Ok(None)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if maximum_bytes == 0
+            || self
+                .objects
+                .get(&digest)
+                .is_some_and(|bytes| bytes.len() as u64 > maximum_bytes)
+        {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "test read exceeds admitted bound".into(),
+            ));
+        }
+        Ok(self.objects.get(&digest).cloned())
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.objects.get(&digest).cloned())
     }
@@ -98,6 +134,18 @@ impl MeshingStageKernel for SurfaceKernel {
             entity_counts: counts.clone(),
             ..MeshingStageCheckpoint::default()
         })?;
+        invocation
+            .control
+            .geometry_evaluation_control()
+            .consume_allocation_bytes(3 * 700)
+            .map_err(|error| {
+                crate::budget::failure(
+                    invocation.host.workload.stage,
+                    crate::geometry_failure::category(error.kind),
+                    &error.reason,
+                    None,
+                )
+            })?;
         Ok(ValidatedMeshingStageOutput {
             invariant_summary_digest: stable(90),
             streams: vec![MeshingChunkStream {
@@ -415,7 +463,15 @@ fn serial_surface_partition_consumes_the_global_curve_artifact() {
         streams[0].media_type,
         MeshingChunkMediaType::SurfacePartitions
     );
-    assert_eq!(streams[0].records.len(), 1);
+    assert_eq!(
+        streams[0].records.len(),
+        2,
+        "one explicit header and one original face"
+    );
+    assert_eq!(
+        streams[0].schema_version,
+        runmat_meshing_surface::EXACT_FACE_PARTITION_RECORD_SET_SCHEMA_VERSION
+    );
     let curve_streams = joined
         .publication()
         .stage_objects()
@@ -426,12 +482,71 @@ fn serial_surface_partition_consumes_the_global_curve_artifact() {
         &exact.geometry_objects().topology,
     )
     .unwrap();
-    let result = runmat_meshing_surface::decode_exact_face_partition_result(
-        &streams[0].records[0],
+    let result = runmat_meshing_surface::decode_exact_face_partition_records(
+        &streams[0].records,
         &exact.geometry_objects().topology,
         &curves,
     )
     .unwrap();
+    assert!(
+        runmat_meshing_surface::decode_exact_face_partition_records(
+            &streams[0].records[..1],
+            &exact.geometry_objects().topology,
+            &curves
+        )
+        .is_err(),
+        "missing original face must reject before any complete-partition claim"
+    );
+    let mut duplicated = streams[0].records.clone();
+    duplicated.push(streams[0].records[1].clone());
+    assert!(
+        runmat_meshing_surface::decode_exact_face_partition_records(
+            &duplicated,
+            &exact.geometry_objects().topology,
+            &curves
+        )
+        .is_err(),
+        "extra face record cannot enter the declared partition"
+    );
+    let admitted = crate::geometry_control::tests::bounded_control(512 * 1024 * 1024);
+    {
+        let scope = runmat_geometry_core::GeometryAllocationScope::new(&admitted);
+        let decoded = runmat_meshing_surface::decode_exact_face_partition_records_admitted(
+            &streams[0].records,
+            &exact.geometry_objects().topology,
+            &curves,
+            &runmat_meshing_core::NeverCancelled,
+            &scope,
+        )
+        .unwrap();
+        assert_eq!(decoded, result);
+        let retained = decoded.retained_storage_bytes(&scope).unwrap();
+        let owned = scope.transfer_reservation(retained).unwrap();
+        drop(scope);
+        assert_eq!(
+            admitted.usage().live_allocation_bytes,
+            retained,
+            "cold original faces stay charged after wire and DTO scope release"
+        );
+        drop(decoded);
+        drop(owned);
+    }
+    assert_eq!(admitted.usage().live_allocation_bytes, 0);
+    let denied = crate::geometry_control::tests::bounded_control(1);
+    {
+        let scope = runmat_geometry_core::GeometryAllocationScope::new(&denied);
+        assert!(
+            runmat_meshing_surface::decode_exact_face_partition_records_admitted(
+                &streams[0].records,
+                &exact.geometry_objects().topology,
+                &curves,
+                &runmat_meshing_core::NeverCancelled,
+                &scope
+            )
+            .is_err()
+        );
+    }
+    assert_eq!(denied.usage().live_allocation_bytes, 0);
     assert_eq!(result.partition, partition);
 }
 

@@ -137,6 +137,17 @@ pub(super) fn validate_operator_demand(
         ));
     }
     match demand.solve {
+        SolveResourcePolicy::GeneralSparse(general) => {
+            general
+                .validate()
+                .map_err(|e| ResourcePlanningError::Invalid(e.to_string()))?;
+            if general.dimension().0 > demand.sparse.rows.0
+                || demand.partitioning != crate::planning::resource::PartitioningPolicy::Monolithic
+                || !input.worker.accelerators.is_empty()
+            {
+                return Err(ResourcePlanningError::Invalid("GENERAL solve requires matching reduced dimension and serial host operator placement".into()));
+            }
+        }
         SolveResourcePolicy::NoSolve { .. } => {}
         SolveResourcePolicy::Iterative { vector_count, .. }
         | SolveResourcePolicy::DirectFactorization { vector_count, .. }
@@ -245,7 +256,7 @@ pub(super) fn validate_operator_demand(
             || requested_mode_count.0 > reduced_dimension.0
             || initial_subspace_dimension.0 < requested_mode_count.0
             || initial_subspace_dimension.0 > maximum_subspace_dimension.0
-            || maximum_subspace_dimension != reduced_dimension
+            || maximum_subspace_dimension.0 > reduced_dimension.0
             || boundary_probe_width.0 == 0
             || subspace_expansion_count_upper_bound.0 == 0
             || maximum_iterations_per_expansion.0 == 0

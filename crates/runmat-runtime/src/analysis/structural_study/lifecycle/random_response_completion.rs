@@ -130,7 +130,7 @@ pub(in crate::analysis) fn complete_random_response_study(
         modal_workload.backend(),
         modal_options.clone(),
         prepared.context.clone(),
-        Some(solver_mesh.clone()),
+        Some(&solver_mesh),
         Some(&modal_run_id),
     )?;
     let modal_result_identity = numerical.modal_numerical_receipt.source_result();

@@ -15,6 +15,7 @@ pub(super) struct Compound<'a> {
     count: usize,
     kind: Kind,
     pending_value: bool,
+    ancestor_map_metadata: u64,
 }
 
 impl<'a> Compound<'a> {
@@ -28,6 +29,8 @@ impl<'a> Compound<'a> {
             return Err(invalid("collection length exceeds the contract limit"));
         }
         counter.node(depth)?;
+        counter.encoded(expected.map_or(9, |length| super::wire::header(length as u64)))?;
+        let ancestor_map_metadata = counter.live_map_metadata;
         Ok(Self {
             counter,
             depth,
@@ -35,6 +38,7 @@ impl<'a> Compound<'a> {
             count: 0,
             kind,
             pending_value: false,
+            ancestor_map_metadata,
         })
     }
 
@@ -107,6 +111,9 @@ impl<'a> Compound<'a> {
             return Err(invalid(
                 "incomplete collection or mismatched declared length",
             ));
+        }
+        if self.kind == Kind::Map {
+            self.counter.live_map_metadata = self.ancestor_map_metadata;
         }
         Ok(())
     }

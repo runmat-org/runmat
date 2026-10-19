@@ -6,13 +6,18 @@ use std::collections::BTreeSet;
 mod assessment;
 mod binding;
 mod catalog;
+mod owned_storage;
+pub(in crate::analysis) use owned_storage::OwnedCopyReservation;
 pub(super) mod filesystem;
 mod initial_fields;
 pub(super) mod memory;
 mod preparation;
+mod run_admission;
 mod source_fields;
 mod source_phase;
+mod typed_preparation;
 pub(in crate::analysis) use preparation::PreparationReservation;
+pub(in crate::analysis) use typed_preparation::retained_mesh_storage;
 pub(in crate::analysis::storage) mod resources;
 pub(in crate::analysis::storage) mod retention;
 #[cfg(test)]
@@ -226,13 +231,7 @@ impl AnalysisPublicationBuilder {
         if *guard {
             return Err("publication inventory is frozen for manifest preparation".into());
         }
-        self.admit(
-            resident(run, self.maximum_bytes)?
-                .checked_mul(2)
-                .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
-                    message: "staging byte overflow".into(),
-                })?,
-        )?;
+        self.admit_run(run)?;
         self.store.persist_run(run).map_err(Into::into)
     }
     pub fn stage_structural_frequency(
@@ -356,7 +355,8 @@ impl AnalysisPublicationBuilder {
             )?;
             drop(observations);
             drop(runs);
-            self.admit(additional)?;
+            self.admit(additional)
+                .map_err(|error| error.context("publication commit phase"))?;
         }
         if manifest.get("study_definition_digest")
             != Some(&serde_json::to_value(self.definition).map_err(|e| e.to_string())?)

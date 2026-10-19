@@ -8,8 +8,15 @@ use crate::{
 };
 
 mod compound;
+mod integer_values;
+mod materialization_profile;
+pub use materialization_profile::{
+    profile_serialized, profile_serialized_shape, profile_serialized_with_control,
+    serialized_materialization_resident_bytes_estimate,
+};
 #[cfg(test)]
 mod tests;
+mod wire;
 use compound::{Compound, Kind};
 
 // Maximum accepted prefix/domain lengths, plus conservative array/string CBOR headers.
@@ -23,6 +30,19 @@ pub struct SerializedCanonicalProfile {
 }
 
 impl SerializedCanonicalProfile {
+    /// Requested workspace for Serde-to-JSON value projection alone. Retains the
+    /// conservative node/container/string allowances; excludes the two canonical
+    /// wire buffers reserved by decode/re-encode materialization. Callers must
+    /// separately charge their original typed input, retained outputs and any
+    /// subsequent encoding. This is not typed heap or measured allocator usage.
+    pub fn json_projection_resident_bytes_estimate(&self) -> Option<u64> {
+        self.materialization_resident_bytes_estimate
+            .checked_sub(self.encoded_bytes_upper_bound.checked_mul(2)?)
+            .filter(|bytes| {
+                *bytes >= crate::materialization::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT
+            })
+    }
+
     /// Incremental structural storage when a collection already reserves the shared
     /// contract envelope. This must not replace admission of an independent contract.
     /// Synthetic profiles below the shared envelope are rejected rather than rounded up.
@@ -32,48 +52,59 @@ impl SerializedCanonicalProfile {
     }
 }
 
-/// Projects canonical materialization residency directly from a borrowed Serde value.
-///
-/// The traversal itself allocates no value tree, output buffer, or owned strings. Custom
-/// `Serialize`/`Display` implementations (including Serde-generated buffering for some advanced
-/// representations) may allocate independently. Errors allocate their diagnostic message.
-/// Counters, per-container lengths, string lengths, and nesting are checked during traversal.
-/// Encoded bytes reserve the largest valid canonical envelope and nine-byte CBOR headers/scalars,
-/// so this can conservatively reject values that a particular smaller envelope would accept.
-/// Nesting also counts transparent `Some`/newtype wrappers, bounding traversal stack depth even
-/// though those wrappers do not add nodes to the canonical value tree.
-/// Nonfinite numbers, integers outside the JSON number range, and non-scalar map keys fail closed.
-/// This is the shared materialization estimate, not an exact typed-object heap measurement.
-pub fn serialized_materialization_resident_bytes_estimate<T: Serialize + ?Sized>(
-    value: &T,
-    limits: CanonicalLimits,
-) -> Result<u64, CanonicalCodecError> {
-    Ok(profile_serialized(value, limits)?.materialization_resident_bytes_estimate)
+/// Requested direct-encoding workspace, distinct from typed retention and hostile decoding.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CanonicalEncodingProfile {
+    pub encoded_bytes_upper_bound: u64,
+    pub resident_workspace_bytes_estimate: u64,
 }
 
-/// Profiles both canonical wire size and materialization without constructing either.
-///
-/// Uses the same traversal, conservative envelope, validation and custom-serializer caveats as
-/// [`serialized_materialization_resident_bytes_estimate`]. The wire bound includes one contract
-/// envelope; separately encoded partitions must each be profiled with their own envelope.
-pub fn profile_serialized<T: Serialize + ?Sized>(
+/// Profiles the direct encoder's byte buffers and sorted-map metadata. Four wire
+/// bounds cover simultaneous input/output buffer capacities during concatenation;
+/// peak live ancestor-map metadata and copied keys remain additional. Finished
+/// child-map metadata is released before the next sibling; string values are
+/// borrowed. No full JSON tree is
+/// constructed by that encoder. Original typed input must be charged separately.
+pub fn profile_canonical_encoding<T: Serialize + ?Sized>(
     value: &T,
     limits: CanonicalLimits,
-) -> Result<SerializedCanonicalProfile, CanonicalCodecError> {
+) -> Result<CanonicalEncodingProfile, CanonicalCodecError> {
     let mut counter = Counter {
         profile: MaterializationProfile::default(),
         encoded_bytes: 0,
         limits,
+        live_map_metadata: 0,
+        peak_map_metadata: 0,
+        integer_value_bounds: false,
     };
     counter.encoded(ENVELOPE_BYTES)?;
     value.serialize(Profiler::value(&mut counter, 0))?;
-    Ok(SerializedCanonicalProfile {
+    let workspace = counter
+        .encoded_bytes
+        .checked_mul(4)
+        .and_then(|bytes| bytes.checked_add(counter.peak_map_metadata))
+        .and_then(|bytes| {
+            bytes.checked_add(
+                crate::materialization::CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
+            )
+        })
+        .ok_or_else(|| {
+            CanonicalCodecError::resource_limit("canonical encoding profile", "workspace overflow")
+        })?;
+    Ok(CanonicalEncodingProfile {
         encoded_bytes_upper_bound: counter.encoded_bytes,
-        materialization_resident_bytes_estimate: materialization_resident_bytes_estimate(
-            counter.profile,
-            counter.encoded_bytes,
-        )?,
+        resident_workspace_bytes_estimate: workspace,
     })
+}
+
+/// Profiles the same borrowed encoding with cancellation at recursive boundaries.
+/// The adapter reuses the shared controlled Serde traversal and constructs no value tree.
+pub fn profile_canonical_encoding_with_control<T: Serialize + ?Sized>(
+    value: &T,
+    limits: CanonicalLimits,
+    control: &dyn crate::CanonicalCodecControl,
+) -> Result<CanonicalEncodingProfile, CanonicalCodecError> {
+    profile_canonical_encoding(&crate::controlled_serde::tracked(value, control), limits)
 }
 
 fn invalid(reason: &'static str) -> CanonicalCodecError {
@@ -90,6 +121,9 @@ struct Counter {
     profile: MaterializationProfile,
     encoded_bytes: u64,
     limits: CanonicalLimits,
+    live_map_metadata: u64,
+    peak_map_metadata: u64,
+    integer_value_bounds: bool,
 }
 
 impl Counter {
@@ -128,7 +162,7 @@ impl Counter {
                 "value count overflow",
             )
         })?;
-        self.encoded(9)
+        Ok(())
     }
 
     fn string(&mut self, len: usize, key: bool, depth: usize) -> Result<(), CanonicalCodecError> {
@@ -140,6 +174,18 @@ impl Counter {
             ));
         }
         if key {
+            // Only keys and slots on active ancestor maps stay live. Scalar
+            // string values are borrowed; completed child maps become bytes.
+            let slot = (2
+                * (std::mem::size_of::<String>()
+                    + std::mem::size_of::<Vec<u8>>()
+                    + 4 * std::mem::size_of::<usize>())) as u64;
+            self.live_map_metadata = self
+                .live_map_metadata
+                .checked_add(slot)
+                .and_then(|bytes| bytes.checked_add((len as u64).checked_mul(2)?))
+                .ok_or_else(|| invalid("live map metadata overflow"))?;
+            self.peak_map_metadata = self.peak_map_metadata.max(self.live_map_metadata);
             self.profile.map_entries =
                 self.profile.map_entries.checked_add(1).ok_or_else(|| {
                     CanonicalCodecError::resource_limit(
@@ -147,10 +193,10 @@ impl Counter {
                         "map entry count overflow",
                     )
                 })?;
-            self.encoded(9)?;
         } else {
             self.node(depth)?;
         }
+        self.encoded(wire::header(len as u64))?;
         self.profile.string_bytes = self
             .profile
             .string_bytes
@@ -180,11 +226,12 @@ impl<'a> Profiler<'a> {
         }
     }
 
-    fn scalar(self) -> Result<(), CanonicalCodecError> {
+    fn scalar(self, bytes: u64) -> Result<(), CanonicalCodecError> {
         if self.key {
             return Err(invalid("unsupported map key"));
         }
-        self.counter.node(self.depth)
+        self.counter.node(self.depth)?;
+        self.counter.encoded(bytes)
     }
 
     fn display(self, value: impl std::fmt::Display) -> Result<(), CanonicalCodecError> {
@@ -207,7 +254,7 @@ impl<'a> Profiler<'a> {
             maximum: self.counter.limits.maximum_string_bytes.min(
                 (self.counter.limits.maximum_encoded_bytes as u64)
                     .saturating_sub(self.counter.encoded_bytes)
-                    .saturating_sub(9) as usize,
+                    .saturating_sub(1) as usize,
             ),
         };
         write!(&mut count, "{value}").map_err(|_| {
@@ -237,7 +284,11 @@ impl<'a> Profiler<'a> {
             ));
         }
         self.counter.node(self.depth)?;
+        self.counter.encoded(wire::header(1))?;
+        let retained = self.counter.live_map_metadata;
         self.counter.string(variant.len(), true, self.depth)?;
+        // The direct encoder writes enum wrappers directly, without a map owner.
+        self.counter.live_map_metadata = retained;
         let depth = self.depth.checked_add(1).ok_or_else(|| {
             CanonicalCodecError::resource_limit(
                 "serialized materialization profile",
@@ -264,7 +315,8 @@ impl<'a> Profiler<'a> {
 macro_rules! integer {
     ($($name:ident($ty:ty)),* $(,)?) => { $(
         fn $name(self, value: $ty) -> Result<(), Self::Error> {
-            if self.key { self.display(value) } else { self.scalar() }
+            // Full-width CBOR integer: one tag byte plus its Serde type width.
+            self.integer(value as i128, 1 + std::mem::size_of::<$ty>() as u64, 20)
         }
     )* };
 }
@@ -295,27 +347,27 @@ impl<'a> ser::Serializer for Profiler<'a> {
         if !self.key && (value < i64::MIN as i128 || value > u64::MAX as i128) {
             return Err(invalid("integer is outside the JSON number range"));
         }
-        if self.key {
-            self.display(value)
-        } else {
-            self.scalar()
-        }
+        self.integer(value, 9, 40)
     }
     fn serialize_u128(self, value: u128) -> Result<(), Self::Error> {
         if !self.key && value > u64::MAX as u128 {
             return Err(invalid("integer is outside the JSON number range"));
         }
         if self.key {
-            self.display(value)
+            if self.counter.integer_value_bounds {
+                self.counter.string(40, true, self.depth)
+            } else {
+                self.display(value)
+            }
         } else {
-            self.scalar()
+            self.integer(value as i128, 9, 40)
         }
     }
     fn serialize_bool(self, value: bool) -> Result<(), Self::Error> {
         if self.key {
             self.display(value)
         } else {
-            self.scalar()
+            self.scalar(1)
         }
     }
     fn serialize_f32(self, value: f32) -> Result<(), Self::Error> {
@@ -329,7 +381,7 @@ impl<'a> ser::Serializer for Profiler<'a> {
         if self.key {
             return Err(invalid("floating point map keys are unsupported"));
         }
-        self.scalar()
+        self.scalar(9)
     }
     fn serialize_char(self, value: char) -> Result<(), Self::Error> {
         self.counter.string(value.len_utf8(), self.key, self.depth)
@@ -346,7 +398,7 @@ impl<'a> ser::Serializer for Profiler<'a> {
         sequence.end()
     }
     fn serialize_none(self) -> Result<(), Self::Error> {
-        self.scalar()
+        self.scalar(1)
     }
     fn serialize_some<T: Serialize + ?Sized>(self, value: &T) -> Result<(), Self::Error> {
         if self.key {
@@ -355,10 +407,10 @@ impl<'a> ser::Serializer for Profiler<'a> {
         self.transparent(value)
     }
     fn serialize_unit(self) -> Result<(), Self::Error> {
-        self.scalar()
+        self.scalar(1)
     }
     fn serialize_unit_struct(self, _: &'static str) -> Result<(), Self::Error> {
-        self.scalar()
+        self.scalar(1)
     }
     fn serialize_unit_variant(
         self,

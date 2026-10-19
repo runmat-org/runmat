@@ -5,7 +5,10 @@
 use super::{CoercivityWorkEnvelope, MatrixSymmetry, RealSparseMatrix};
 use runmat_execution::Digest;
 use std::collections::{BTreeMap, VecDeque};
+mod admission;
 mod local;
+pub(crate) use admission::SourceEnergyDemand;
+use admission::{EnergyAdmission, LOCAL_PROOF_CACHE_CAPACITY};
 mod projection;
 use projection::EnergyProjection;
 mod source;
@@ -78,7 +81,7 @@ pub(crate) struct AnchoredEnergyCheck<'a> {
     minimum_local: f64,
     operations: u64,
     resident: u64,
-    admitted: CoercivityWorkEnvelope,
+    admitted: EnergyAdmission,
     failed: bool,
     peak_resident: u64,
     local_proofs: VecDeque<(Vec<f64>, f64)>,
@@ -94,7 +97,7 @@ impl<'a> AnchoredEnergyCheck<'a> {
         Self::new_projected(
             matrix,
             EnergyProjection::Identity(prescribed),
-            admitted,
+            admitted.into(),
             0,
             0,
         )
@@ -103,7 +106,7 @@ impl<'a> AnchoredEnergyCheck<'a> {
     fn new_projected(
         matrix: &'a RealSparseMatrix,
         projection: EnergyProjection<'a>,
-        admitted: CoercivityWorkEnvelope,
+        admitted: EnergyAdmission,
         retained_bytes: u64,
         source_operations: u64,
     ) -> Result<Self, EnergyError> {
@@ -279,7 +282,7 @@ impl<'a> AnchoredEnergyCheck<'a> {
                         .ok_or(EnergyError::Arithmetic)?,
                 )?;
                 let lower = local::lower_bound(values, n)?;
-                if self.local_proofs.len() == 32 {
+                if self.local_proofs.len() == LOCAL_PROOF_CACHE_CAPACITY {
                     let (removed, _) = self
                         .local_proofs
                         .pop_front()

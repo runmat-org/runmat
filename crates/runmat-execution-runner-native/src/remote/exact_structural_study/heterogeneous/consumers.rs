@@ -242,6 +242,7 @@ pub(super) async fn spectrum(
     let completion = match crate::execute_structural_modal_response_spectrum_remotely(
         Arc::clone(&pool),
         runmat_analysis_execution::StructuralModalResponseSpectrumStudyPreparation {
+            local_execution: decoded.local_execution,
             authored_study_digest: decoded.authored_study_digest,
             frozen_project_digest: decoded.frozen_project_digest,
             workloads: authored,
@@ -296,6 +297,7 @@ pub(super) async fn random(
     let completion = match crate::execute_structural_random_response_remotely(
         Arc::clone(&pool),
         runmat_analysis_execution::StructuralRandomResponseStudyPreparation {
+            local_execution: decoded.local_execution,
             authored_study_digest: decoded.authored_study_digest,
             frozen_project_digest: decoded.frozen_project_digest,
             workloads: authored,
@@ -371,6 +373,7 @@ pub(super) async fn transient(
     let completion = match crate::execute_structural_modal_transient_remotely(
         Arc::clone(&pool),
         runmat_analysis_execution::StructuralModalTransientStudyPreparation {
+            local_execution: decoded.local_execution,
             authored_study_digest: decoded.authored_study_digest,
             frozen_project_digest: decoded.frozen_project_digest,
             workloads: authored,

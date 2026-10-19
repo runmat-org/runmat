@@ -922,7 +922,7 @@ impl GeometryScenePickIndex {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GeometrySceneCompleteness {
     Complete,
     Loading,
@@ -930,7 +930,7 @@ pub enum GeometrySceneCompleteness {
     FailedComplete,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometrySceneOverlay {
     pub source_name: Option<String>,
     pub status: GeometrySceneCompleteness,
@@ -951,7 +951,7 @@ pub struct GeometrySceneOverlay {
     pub warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometrySceneScalarLegend {
     pub label: String,
     pub unit: String,
@@ -959,14 +959,14 @@ pub struct GeometrySceneScalarLegend {
     pub maximum: f64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometrySceneAssemblyNode {
     pub node_id: String,
     pub label: String,
     pub children: Vec<GeometrySceneAssemblyNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeometrySceneRegionSummary {
     pub region_id: String,
     pub label: String,

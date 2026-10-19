@@ -77,12 +77,29 @@ pub(super) fn execute_structural_frequency_entry(
             "structural frequency entry inputs differ from their exact identities",
         ));
     }
-    let constraints =
-        CanonicalStructuralConstraintPlan::compile_for_model(workload.model(), Some(&mesh))
-            .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let expected_resource_plan = build_structural_frequency_entry_resource_plan(
+    let all_input_facts = prepared_input_resource_facts(invocation.inputs)?;
+    let compiler_limit =
+        runmat_analysis_fea::planning::resource::constraint_compilation_available_bytes(
+            resource_plan.request.memory_bytes.min(
+                workload
+                    .procedure_step()?
+                    .accuracy
+                    .resources
+                    .maximum_resident_bytes,
+            ),
+            &all_input_facts,
+            resource_plan.input.worker.fixed_memory_bytes,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
+        workload.model(),
+        Some(&mesh),
+        compiler_limit,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let expected_resource_plan = build_structural_frequency_entry_resource_plan_from_compilation(
         &mesh,
-        &constraints,
+        &compiled,
         &workload,
         &request,
         StructuralFrequencyStateInputs {
@@ -105,6 +122,7 @@ pub(super) fn execute_structural_frequency_entry(
             "frequency entry resource plan does not converge from authoritative inputs",
         ));
     }
+    drop(compiled);
     let result = match prestress_state {
         Some(state) => runmat_analysis_fea::pipeline::structural_frequency::execute_prestressed_structural_frequency_entry(
             &workload,

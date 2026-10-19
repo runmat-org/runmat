@@ -20,6 +20,8 @@ use crate::{
 };
 
 mod backend_evidence;
+mod residual;
+use residual::linear_residual;
 mod diagnostics;
 mod nonlinear;
 mod snapshots;
@@ -317,7 +319,6 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
             .map(|(value, reference)| value - reference)
             .collect::<Vec<_>>()
     });
-    let rhs_norm = rhs_norm(&operator.linear_rhs());
     let mut solve = solve_checked(
         &operator,
         requested_solver_backend,
@@ -326,6 +327,10 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         &facts.operators,
         residual_target,
     )?;
+    // Numerical preparation is complete. Release the guess, constraint mask and
+    // zero damping carrier before allocating the complete recovered fields.
+    drop(initial_increment);
+    drop(operator);
     for ((temperature, prescribed), reference) in solve
         .solution
         .iter_mut()
@@ -336,6 +341,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
         // round trip when their magnitude differs greatly from the reference.
         *temperature = prescribed.unwrap_or(*temperature + reference);
     }
+    drop(reference_temperature_k);
     let mut recovered = RecoveredSnapshots::with_capacity(1);
     push_recovered_snapshot(assembly, &solve.solution, None, 1.0, 0.0, &mut recovered)?;
     let energy_balance = assembly
@@ -350,7 +356,7 @@ fn solve_steady(input: SteadySolveInput<'_>) -> Result<ProcedureOutcome, FeaRunE
     Ok(ProcedureOutcome {
         time_points_s: vec![time_origin_s],
         recovered,
-        residual_norms: vec![solve.residual_norm / rhs_norm],
+        residual_norms: vec![linear_residual(&solve)?],
         energy_balances: vec![energy_balance],
         nonlinear_evidence: Vec::new(),
         source_evidence: assembly.source_evidence.clone(),

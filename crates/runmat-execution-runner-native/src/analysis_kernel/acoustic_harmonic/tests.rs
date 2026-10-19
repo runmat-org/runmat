@@ -42,6 +42,19 @@ fn task_with_constraint_name(
     SolverMeshArtifact,
     PreparedAcousticHarmonicTask,
 ) {
+    task_with_boundary(order, chunk, constraint_name, false)
+}
+
+fn task_with_boundary(
+    order: ElementOrder,
+    chunk: usize,
+    constraint_name: &str,
+    radiation: bool,
+) -> (
+    AcousticHarmonicWorkload,
+    SolverMeshArtifact,
+    PreparedAcousticHarmonicTask,
+) {
     let mut model = runmat_analysis_fea::fixtures::fixture_model(
         runmat_analysis_fea::fixtures::FixtureId::CantileverLinearStatic,
     );
@@ -75,8 +88,12 @@ fn task_with_constraint_name(
         .push(runmat_analysis_core::AnalysisBoundary {
             boundary_id: "matched".into(),
             target: RegionTarget::boundary("face:3"),
-            operator: runmat_analysis_core::BoundaryOperator::AcousticImpedance {
-                impedance: runmat_analysis_core::SpecificAcousticImpedance::new(6.0),
+            operator: if radiation {
+                runmat_analysis_core::BoundaryOperator::AcousticRadiation
+            } else {
+                runmat_analysis_core::BoundaryOperator::AcousticImpedance {
+                    impedance: runmat_analysis_core::SpecificAcousticImpedance::new(6.0),
+                }
             },
         });
     let workload = AcousticHarmonicWorkload {

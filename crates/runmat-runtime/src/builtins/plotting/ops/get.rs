@@ -450,7 +450,12 @@ mod tests {
         assert_eq!(st.fields.get("Name"), Some(&Value::String("demo".into())));
         assert_eq!(st.fields.get("NumberTitle"), Some(&Value::Bool(false)));
         assert_eq!(st.fields.get("Visible"), Some(&Value::Bool(false)));
-        assert_eq!(st.fields.get("Color"), Some(&Value::String("k".into())));
+        assert_eq!(
+            st.fields.get("Color"),
+            Some(&Value::Tensor(
+                runmat_value::Tensor::new(vec![0.0, 0.0, 0.0], vec![1, 3]).unwrap()
+            ))
+        );
         assert_eq!(st.fields.get("CurrentAxes"), Some(&Value::Num(ax)));
         assert!(matches!(st.fields.get("Children"), Some(Value::Tensor(_))));
         let parent = st.fields.get("Parent").expect("parent property");

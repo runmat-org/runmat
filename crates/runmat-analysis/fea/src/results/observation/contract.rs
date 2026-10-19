@@ -355,11 +355,11 @@ pub use artifact::{
     ObservationArtifactManifest,
 };
 
+mod point;
+pub(super) use point::{derive_resolved_point_identity, resolved_point_identity_resident_bytes};
 mod validation;
 use validation::validate_resolved_observation;
-pub(super) use validation::{
-    derive_resolved_point_identity, materialized_field_location, validate_output_numeric_contract,
-};
+pub(super) use validation::{materialized_field_location, validate_output_numeric_contract};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ObservationError {

@@ -1,14 +1,12 @@
-use sha2::{Digest as _, Sha256};
-
-use super::{encode_contract, CanonicalMeshingContract, MeshingCanonicalLimits};
+use super::{CanonicalMeshingContract, MeshingCanonicalLimits};
 use crate::contracts::canonical::{
     AlgorithmVersionSet, GeometryRevisionRef, GeometryTolerancePolicy, MeshingCancellationSignal,
     MeshingContractError, MeshingEvidence, MeshingFailure, MeshingJoinIdentity,
     MeshingPartitionDescriptor, MeshingPartitionIdentity, MeshingProgress, MeshingRequest,
     MeshingStageEvidence, MeshingStageIdentity, MeshingStageManifest, MeshingStageResultIdentity,
     MeshingValidationIdentity, MeshingWorkloadRequest, MeshingWorkloadResult, MetricFieldRequest,
-    SolverMeshAdaptationLineage, SolverMeshArtifact, SolverMeshProjection, SolverMeshTopology,
-    SolverMeshTransferMap, SolverMeshValidation, StableDigest,
+    SolverMeshAdaptationLineage, SolverMeshArtifact, SolverMeshTopology, SolverMeshTransferMap,
+    SolverMeshValidation, StableDigest,
 };
 
 macro_rules! canonical_contract {
@@ -53,12 +51,6 @@ canonical_contract!(
     "analysis.mesh.algorithm-versions/v2",
     MeshingCanonicalLimits::IDENTITY,
     AlgorithmVersionSet::validate
-);
-canonical_contract!(
-    SolverMeshProjection,
-    "analysis.mesh.solver-projection/v1",
-    MeshingCanonicalLimits::ARTIFACT,
-    SolverMeshProjection::validate
 );
 canonical_contract!(
     SolverMeshValidation,
@@ -162,16 +154,7 @@ impl CanonicalMeshingContract for SolverMeshArtifact {
     const LIMITS: MeshingCanonicalLimits = MeshingCanonicalLimits::ARTIFACT;
 
     fn validate_canonical(&self) -> Result<(), MeshingContractError> {
-        self.validate_payload()?;
-        self.canonical_digest
-            .validate_nonzero("artifact.canonical_digest")?;
-        if self.canonical_digest != artifact_identity_digest(self)? {
-            return Err(MeshingContractError::invalid(
-                "artifact.canonical_digest",
-                "does not match the canonical artifact payload",
-            ));
-        }
-        Ok(())
+        self.validate_canonical_with_cancellation(&crate::NeverCancelled)
     }
 
     fn canonical_digest(&self) -> Result<StableDigest, MeshingContractError> {
@@ -181,6 +164,33 @@ impl CanonicalMeshingContract for SolverMeshArtifact {
 }
 
 impl SolverMeshArtifact {
+    pub fn canonical_encode_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<Vec<u8>, MeshingContractError> {
+        self.validate_canonical_with_cancellation(cancellation)?;
+        super::encode_contract_with_cancellation(Self::DOMAIN, self, Self::LIMITS, cancellation)
+    }
+
+    /// Validates the original artifact and sealed identity under the supplied execution signal.
+    /// Decoding and already-owned validation share this owner; neither trusts claimed hashes.
+    pub fn validate_canonical_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<(), MeshingContractError> {
+        self.validate_payload_with_cancellation(cancellation)?;
+        self.canonical_digest
+            .validate_nonzero("artifact.canonical_digest")?;
+        if self.canonical_digest != artifact_identity_digest_with_cancellation(self, cancellation)?
+        {
+            return Err(MeshingContractError::invalid(
+                "artifact.canonical_digest",
+                "does not match the canonical artifact payload",
+            ));
+        }
+        Ok(())
+    }
+
     /// Decodes and independently validates a solver artifact under an execution-owned
     /// cancellation signal. This retains the canonical byte and sealed-identity checks while
     /// allowing large topology validation to satisfy the execution cadence contract.
@@ -194,24 +204,20 @@ impl SolverMeshArtifact {
             Self::LIMITS,
             cancellation,
         )?;
-        artifact.validate_payload_with_cancellation(cancellation)?;
-        artifact
-            .canonical_digest
-            .validate_nonzero("artifact.canonical_digest")?;
-        if artifact.canonical_digest
-            != artifact_identity_digest_with_cancellation(&artifact, cancellation)?
-        {
-            return Err(MeshingContractError::invalid(
-                "artifact.canonical_digest",
-                "does not match the canonical artifact payload",
-            ));
-        }
+        artifact.validate_canonical_with_cancellation(cancellation)?;
         Ok(artifact)
     }
 
     pub fn seal_canonical_digest(&mut self) -> Result<StableDigest, MeshingContractError> {
-        self.validate_payload()?;
-        let digest = artifact_identity_digest(self)?;
+        self.seal_canonical_digest_with_cancellation(&crate::NeverCancelled)
+    }
+
+    pub fn seal_canonical_digest_with_cancellation(
+        &mut self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<StableDigest, MeshingContractError> {
+        self.validate_payload_with_cancellation(cancellation)?;
+        let digest = artifact_identity_digest_with_cancellation(self, cancellation)?;
         self.canonical_digest = digest;
         Ok(digest)
     }
@@ -228,19 +234,13 @@ fn artifact_identity_digest_with_cancellation(
         <SolverMeshArtifact as CanonicalMeshingContract>::LIMITS,
         cancellation,
     )?;
-    Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
+    super::digest_with_cancellation(&encoded, cancellation)
 }
 
 fn artifact_identity_digest(
     artifact: &SolverMeshArtifact,
 ) -> Result<StableDigest, MeshingContractError> {
-    let projection = SolverMeshArtifactIdentity::from(artifact);
-    let encoded = encode_contract(
-        <SolverMeshArtifact as CanonicalMeshingContract>::DOMAIN,
-        &projection,
-        <SolverMeshArtifact as CanonicalMeshingContract>::LIMITS,
-    )?;
-    Ok(StableDigest::from_bytes(Sha256::digest(encoded).into()))
+    artifact_identity_digest_with_cancellation(artifact, &crate::NeverCancelled)
 }
 
 /// Borrowed identity projection: the validation manifest authenticates one physical stage/chunk
@@ -265,5 +265,39 @@ impl<'a> From<&'a SolverMeshArtifact> for SolverMeshArtifactIdentity<'a> {
             resolved_request: &artifact.resolved_request,
             topology: &artifact.topology,
         }
+    }
+}
+
+impl<'a> From<&'a crate::SolverMeshProjection> for SolverMeshArtifactIdentity<'a> {
+    fn from(projection: &'a crate::SolverMeshProjection) -> Self {
+        SolverMeshArtifactIdentity {
+            schema_version: crate::SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
+            canonical_digest: StableDigest::ZERO,
+            root_stage_manifest_digest: StableDigest::ZERO,
+            geometry: &projection.geometry,
+            resolved_request: &projection.resolved_request,
+            topology: &projection.topology,
+        }
+    }
+}
+
+impl crate::SolverMeshProjection {
+    /// Profile the actual borrowed artifact identity before consuming this
+    /// projection. No temporary rich artifact, request or topology is cloned.
+    pub fn artifact_sealing_workspace_bytes(
+        &self,
+        control: &dyn runmat_canonical_codec::CanonicalCodecControl,
+    ) -> Result<u64, MeshingContractError> {
+        let identity = SolverMeshArtifactIdentity::from(self);
+        let encoding = runmat_canonical_codec::profile_canonical_encoding_with_control(
+            &identity,
+            <SolverMeshArtifact as CanonicalMeshingContract>::LIMITS.into(),
+            control,
+        )
+        .map_err(|error| MeshingContractError::invalid(error.field, error.reason))?;
+        Ok(encoding.resident_workspace_bytes_estimate.max(
+            self.topology
+                .validation_scratch_bytes(self.resolved_request.element_order)?,
+        ))
     }
 }

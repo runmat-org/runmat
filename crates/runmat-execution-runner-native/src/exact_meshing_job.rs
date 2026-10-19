@@ -128,7 +128,15 @@ pub fn mesh_exact_geometry(
         (session, access, geometry)
     };
 
-    let mut executor = NativeExactMeshingExecutor::new(&session, job.execution)?;
+    let mut executor = NativeExactMeshingExecutor::new(
+        &session,
+        MeshingExecutionPolicy {
+            reuse_accepted_stages: job.execution.reuse_accepted_stages
+                && job.evidence.cache_admission
+                    == runmat_meshing_core::CacheAdmissionDecision::Admitted,
+            ..job.execution
+        },
+    )?;
     let dag_result = {
         let span = tracing::info_span!("meshing.exact_dag");
         let _entered = span.enter();

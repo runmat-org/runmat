@@ -49,3 +49,21 @@ fn explicit_integration_preserves_affine_physics_and_rejects_foreign_history() {
         }
     }
 }
+
+#[test]
+fn cancelled_original_basis_preparation_preserves_typed_cancellation() {
+    let (model, mesh, summary) = fixture(ElementOrder::Tet4, true);
+    let context = crate::progress::FeaProgressContext::default();
+    context.cancellation.cancel();
+    let guard = crate::progress::replace_fea_progress_context(context);
+    assert!(matches!(
+        CanonicalNonlinearSolidBasis::prepare(&model, &mesh, &summary),
+        Err(NonlinearSolidError::Cancelled)
+    ));
+    assert!(matches!(
+        NonlinearSolidError::from(crate::topology::AnalysisProjectionError::Cancelled),
+        NonlinearSolidError::Cancelled
+    ));
+    drop(guard);
+    assert!(CanonicalNonlinearSolidBasis::prepare(&model, &mesh, &summary).is_ok());
+}

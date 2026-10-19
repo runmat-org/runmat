@@ -16,6 +16,7 @@ use runmat_meshing_core::SolverMeshArtifact;
 
 mod affine_forcing;
 mod execution;
+mod finer_envelope;
 mod initial_equilibrium;
 mod proof_workspace;
 mod reference;

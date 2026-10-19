@@ -58,3 +58,56 @@ fn provider_without_a_preallocation_bound_never_falls_back_to_an_unbounded_read(
         Err(ArtifactError::Limit(_))
     ));
 }
+
+#[test]
+fn admitted_reads_charge_actual_buffer_before_payload_and_preserve_hostile_bounds() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut store = FilesystemObjectStore::open(directory.path().join("objects"), 1 << 30).unwrap();
+    let object = LogicalObject::new(
+        ObjectNamespace::ResultValue,
+        "admitted",
+        "test/v1",
+        vec![7; 128],
+    )
+    .unwrap();
+    store.write_verified(&object).unwrap();
+    let digest = object.descriptor.digest;
+    let mut amounts = Vec::new();
+    let value = store
+        .read_verified_bounded_with_admission(digest, 1 << 30, &mut |bytes| {
+            amounts.push(bytes);
+            Ok(())
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(amounts, [128]);
+    assert_eq!(value, object.bytes);
+    let mut called = false;
+    assert!(store
+        .read_verified_bounded_with_admission(digest, 127, &mut |_| {
+            called = true;
+            Ok(())
+        })
+        .is_err());
+    assert!(
+        !called,
+        "reject metadata length before requesting payload storage"
+    );
+    fs::write(store.path(digest), vec![9; 128]).unwrap();
+    let error = store
+        .read_verified_bounded_with_admission(digest, 1 << 30, &mut |_| {
+            Err(ArtifactError::Limit("allocation denied before read".into()))
+        })
+        .unwrap_err();
+    assert!(error.to_string().contains("allocation denied before read"));
+    assert!(matches!(
+        store.read_verified_bounded_with_admission(digest, 1 << 30, &mut |_| Ok(())),
+        Err(ArtifactError::Identity(_))
+    ));
+    assert!(store
+        .read_verified_bounded_with_admission(Digest::sha256(b"absent"), 1 << 30, &mut |_| panic!(
+            "missing bytes must not request storage"
+        ))
+        .unwrap()
+        .is_none());
+}

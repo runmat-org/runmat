@@ -1,3 +1,6 @@
+mod allocation;
+mod capacity;
+mod compiler;
 mod local_energy;
 mod proof_workspace;
 use runmat_analysis_core::{
@@ -22,7 +25,7 @@ use crate::{
 use super::{
     build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,
     structural_modal_result_payload_bytes_upper_bound, ByteCount, FeaResourceDemand,
-    FeaResourcePhase, PartitioningPolicy, PreparedInputResourceFacts, PreparedOutputResourceFacts,
+    FeaResourcePhase, PartitioningPolicy, PreparedInputResourceFacts,
     PreparedOutputSetResourceFacts, PreparedStructuralModalResourceFacts, SolveResourcePolicy,
 };
 
@@ -32,7 +35,7 @@ fn prepared(
     workload: &StructuralModalWorkload,
 ) -> PreparedStructuralModalResourceFacts {
     let result =
-        structural_modal_result_payload_bytes_upper_bound(Some(mesh), constraints, workload)
+        super::structural_modal_result_output_resource_facts(Some(mesh), constraints, workload)
             .unwrap();
     let receipt = structural_modal_receipt_payload_bytes_upper_bound();
     let profiles = crate::execution::structural_state_publication_profiles_encoding_profile(
@@ -44,26 +47,15 @@ fn prepared(
     .unwrap()
     .encoded_bytes_upper_bound;
     PreparedStructuralModalResourceFacts {
+        local_execution: super::LocalExecutionPlan::serial(),
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(1024),
             transport_closure_bytes: ByteCount(2048),
             decoded_resident_bytes_admission_budget: ByteCount(128 * 1024),
         },
-        result_output: PreparedOutputResourceFacts {
-            encoded_payload_bytes_upper_bound: ByteCount(result),
-            transport_closure_bytes_upper_bound: ByteCount(result + 128 * 1024),
-            construction_resident_bytes_admission_budget: ByteCount(result * 2),
-        },
-        receipt_output: PreparedOutputResourceFacts {
-            encoded_payload_bytes_upper_bound: ByteCount(receipt),
-            transport_closure_bytes_upper_bound: ByteCount(receipt + 128 * 1024),
-            construction_resident_bytes_admission_budget: ByteCount(receipt * 2),
-        },
-        state_profiles_output: PreparedOutputResourceFacts {
-            encoded_payload_bytes_upper_bound: ByteCount(profiles),
-            transport_closure_bytes_upper_bound: ByteCount(profiles + 128 * 1024),
-            construction_resident_bytes_admission_budget: ByteCount(profiles * 2),
-        },
+        result_output: result,
+        receipt_output: super::projected_canonical_output_resource_facts(receipt).unwrap(),
+        state_profiles_output: super::projected_canonical_output_resource_facts(profiles).unwrap(),
         output_set: PreparedOutputSetResourceFacts {
             encoded_bytes_upper_bound: ByteCount(64 * 1024),
         },
@@ -290,10 +282,10 @@ fn modal_plan_accounts_for_requested_residual_vectors() {
         prepared(&mesh, &constraints, &enriched),
     )
     .unwrap();
-    let FeaResourceDemand::StructuralModalExtraction(base_demand) = base_plan.input.demand else {
+    let FeaResourceDemand::StructuralModalExtraction(base_demand) = &base_plan.input.demand else {
         panic!("modal plan must retain typed demand")
     };
-    let FeaResourceDemand::StructuralModalExtraction(enriched_demand) = enriched_plan.input.demand
+    let FeaResourceDemand::StructuralModalExtraction(enriched_demand) = &enriched_plan.input.demand
     else {
         panic!("modal plan must retain typed demand")
     };
@@ -321,7 +313,7 @@ fn modal_plan_accounts_for_requested_residual_vectors() {
         enriched_demand.modal_output_value_count_upper_bound.0
             > base_demand.modal_output_value_count_upper_bound.0
     );
-    assert!(enriched_plan.request.memory_bytes > base_plan.request.memory_bytes);
+    compiler::assert_residual_work_storage(&base_plan, &enriched_plan);
 }
 
 #[test]

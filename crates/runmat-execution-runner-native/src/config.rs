@@ -15,6 +15,12 @@ pub struct NativeExecutionConfig {
     pub executable: PathBuf,
     pub worker_arguments: Vec<String>,
     pub max_workers: u32,
+    /// Aggregate local capacity, shared by all registered worker slots.
+    /// None is reserved for externally supplied/simulated inventories.
+    #[serde(default)]
+    pub local_cpu_capacity_millicores: Option<u32>,
+    #[serde(default)]
+    pub local_memory_capacity_bytes: Option<u64>,
     pub max_message_bytes: u32,
     pub max_object_bytes: u64,
     pub max_stderr_bytes: usize,
@@ -22,11 +28,21 @@ pub struct NativeExecutionConfig {
     pub worker_scratch_bytes: u64,
     pub worker_cpu_millicores: u32,
     pub store_root: PathBuf,
+    /// Host-granted, bounded numerical reuse/diagnostics, outside transient
+    /// session storage. Session constructors resolve None before adding a scope.
+    #[serde(default)]
+    pub meshing_subtask_cache_root: Option<PathBuf>,
     pub worker_capabilities: BTreeSet<Capability>,
     pub worker_accelerators: Vec<AcceleratorRequest>,
 }
 
 impl NativeExecutionConfig {
+    pub(crate) fn scope_store(&mut self, scope: ExecutionScopeId) {
+        self.meshing_subtask_cache_root
+            .get_or_insert_with(|| self.store_root.join("meshing-subtask-cache/v1"));
+        self.store_root.push(scope.to_string());
+    }
+
     pub fn for_current_executable() -> std::io::Result<Self> {
         let store_root = session_store_root(
             std::env::var_os("RUNMAT_EXECUTION_STATE_DIR").map(PathBuf::from),
@@ -39,13 +55,16 @@ impl NativeExecutionConfig {
                 .to_string()],
             max_workers: std::thread::available_parallelism()
                 .map_or(1, |count| count.get().min(32) as u32),
+            local_cpu_capacity_millicores: Some(super::machine_capacity::cpu_millicores()),
+            local_memory_capacity_bytes: Some(super::machine_capacity::memory_bytes()?),
             max_message_bytes: 64 * 1024 * 1024,
             max_object_bytes: 512 * 1024 * 1024,
             max_stderr_bytes: 1024 * 1024,
             worker_memory_bytes: 1024 * 1024 * 1024,
             worker_scratch_bytes: 1024 * 1024 * 1024,
-            worker_cpu_millicores: 1_000,
+            worker_cpu_millicores: super::machine_capacity::cpu_millicores(),
             store_root,
+            meshing_subtask_cache_root: None,
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
             worker_accelerators: Vec::new(),
         })
@@ -75,6 +94,8 @@ impl NativeExecutionConfig {
         if self.executable.as_os_str().is_empty()
             || self.worker_arguments.is_empty()
             || self.max_workers == 0
+            || self.local_cpu_capacity_millicores == Some(0)
+            || self.local_memory_capacity_bytes == Some(0)
             || self.max_message_bytes == 0
             || self.max_object_bytes == 0
             || self.max_stderr_bytes == 0
@@ -82,6 +103,10 @@ impl NativeExecutionConfig {
             || self.worker_scratch_bytes == 0
             || self.worker_cpu_millicores == 0
             || self.store_root.as_os_str().is_empty()
+            || self
+                .meshing_subtask_cache_root
+                .as_ref()
+                .is_some_and(|root| !root.is_absolute())
             || !self
                 .worker_capabilities
                 .contains(&Capability::ProcessIsolation)
@@ -166,6 +191,30 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{fresh_scope_id, session_store_root, NativeExecutionConfig};
+
+    #[test]
+    fn meshing_cache_grant_is_resolved_before_transient_scope_and_preserves_explicit_root() {
+        let directory = tempfile::tempdir().unwrap();
+        for explicit in [false, true] {
+            let mut config = NativeExecutionConfig::for_current_executable().unwrap();
+            config.store_root = directory.path().join("sessions");
+            let expected = if explicit {
+                directory.path().join("explicit-numerical-cache")
+            } else {
+                config.store_root.join("meshing-subtask-cache/v1")
+            };
+            if explicit {
+                config.meshing_subtask_cache_root = Some(expected.clone());
+            }
+            let scope = fresh_scope_id(b"retention-test", 1);
+            config.scope_store(scope);
+            assert_eq!(config.meshing_subtask_cache_root, Some(expected.clone()));
+            assert!(!expected.starts_with(&config.store_root));
+            assert!(config.validate().is_ok());
+            config.meshing_subtask_cache_root = Some(PathBuf::from("relative-cache"));
+            assert!(config.validate().is_err());
+        }
+    }
 
     #[test]
     fn default_session_store_is_scoped_to_the_current_user() {

@@ -28,7 +28,7 @@ fn static_transport_is_accounted_independently_of_numerical_storage() {
     );
     assert_eq!(
         transported.request.memory_bytes,
-        baseline.request.memory_bytes + 8192
+        baseline.request.memory_bytes + 8192 + 2048
     );
     assert_eq!(
         transported.request.max_relay_bytes,
@@ -83,7 +83,7 @@ fn static_transport_deduplication_does_not_shrink_decoded_reservations() {
     );
     assert_eq!(
         deduplicated.request.memory_bytes,
-        baseline.request.memory_bytes + 32768
+        baseline.request.memory_bytes + 32768 + 2048
     );
     assert_eq!(
         deduplicated.request.max_relay_bytes,

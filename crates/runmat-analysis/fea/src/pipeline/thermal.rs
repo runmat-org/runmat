@@ -15,7 +15,8 @@ use crate::{
 mod inline_history;
 mod physical;
 mod prepared;
-pub use prepared::PreparedThermalSolve;
+pub(crate) use prepared::ThermalObservationExecution;
+pub use prepared::{PreparedThermalPrimarySolve, PreparedThermalSolve};
 
 pub fn run_thermal_with_options(
     model: &AnalysisModel,
@@ -48,7 +49,32 @@ pub(crate) fn prepare_selected<'a>(
     step: &'a ProcedureStep,
 ) -> Result<PreparedThermalSolve<'a>, FeaRunError> {
     validate_run(model, &options)?;
-    prepare_validated_model(model, backend, options, mesh, step)
+    prepare_validated_model(
+        model,
+        backend,
+        options,
+        mesh,
+        step,
+        ThermalObservationExecution::Inline,
+    )
+}
+
+pub(crate) fn prepare_selected_primary<'a>(
+    model: &'a AnalysisModel,
+    backend: ComputeBackend,
+    options: ThermalSolveOptions,
+    mesh: &'a SolverMeshArtifact,
+    step: &'a ProcedureStep,
+) -> Result<PreparedThermalPrimarySolve<'a>, FeaRunError> {
+    validate_run(model, &options)?;
+    Ok(PreparedThermalPrimarySolve::new(prepare_validated_model(
+        model,
+        backend,
+        options,
+        mesh,
+        step,
+        ThermalObservationExecution::Deferred,
+    )?))
 }
 
 fn validate_run(model: &AnalysisModel, options: &ThermalSolveOptions) -> Result<(), FeaRunError> {
@@ -88,7 +114,15 @@ fn execute_validated_model(
     mesh: &SolverMeshArtifact,
     step: &ProcedureStep,
 ) -> Result<FeaThermalRunResult, FeaRunError> {
-    prepare_validated_model(model, backend, options, mesh, step)?.execute()
+    prepare_validated_model(
+        model,
+        backend,
+        options,
+        mesh,
+        step,
+        ThermalObservationExecution::Inline,
+    )?
+    .execute()
 }
 
 fn prepare_validated_model<'a>(
@@ -97,6 +131,7 @@ fn prepare_validated_model<'a>(
     options: ThermalSolveOptions,
     mesh: &'a SolverMeshArtifact,
     step: &'a ProcedureStep,
+    observations: ThermalObservationExecution,
 ) -> Result<PreparedThermalSolve<'a>, FeaRunError> {
     validate_step(step, options.procedure)?;
     let radiation = model.boundaries.iter().any(|boundary| {
@@ -145,14 +180,16 @@ fn prepare_validated_model<'a>(
         Some(temporal),
     )?;
     let schedule = crate::execution::ThermalSolveSchedule::derive(model, step, options.procedure)?;
-    let facts = crate::planning::resource::ThermalPreassemblyResourceFacts::derive(
-        &options.initial_fields,
-        model,
-        step,
-        mesh,
-        &schedule,
-        &identity,
-    )?;
+    let facts =
+        crate::planning::resource::ThermalPreassemblyResourceFacts::derive_with_observations(
+            &options.initial_fields,
+            model,
+            step,
+            mesh,
+            &schedule,
+            &identity,
+            observations,
+        )?;
     facts.require_fits(step.accuracy.resources.maximum_resident_bytes)?;
     Ok(PreparedThermalSolve {
         model,

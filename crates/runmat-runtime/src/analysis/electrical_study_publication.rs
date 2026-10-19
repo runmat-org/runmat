@@ -97,12 +97,9 @@ pub fn prepare_electrical_study_publication(
                 error, &context, invalid,
             )
         })?;
-    let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
-        artifact: mesh.clone(),
-        evidence: meshing_evidence.clone(),
-        region_aliases: Default::default(),
-    })
-    .map_err(invalid)?;
+    let persisted =
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence, &Default::default())
+            .map_err(invalid)?;
     let execution = super::AnalysisExecutionStep {
         step_id: completed.workload.step_id.clone(),
         backend: runmat_analysis_fea::ComputeBackend::Cpu,
@@ -125,13 +122,14 @@ pub fn prepare_electrical_study_publication(
         run: super::structural_study::CompletedStudyStepRun::Standard(Box::new(run)),
         resolved_solver_options: super::AnalysisSolverOptions::ElectricalStatic(options.clone()),
     };
-    let published = crate::analysis::structural_study::publication::complete_study_run_prepared(
-        prepared,
-        vec![step],
-        completed.states.clone(),
-        completed.frozen_project_digest,
-        preparation,
-    )?;
+    let mut published =
+        crate::analysis::structural_study::publication::complete_study_run_prepared(
+            prepared,
+            vec![step],
+            completed.states.clone(),
+            completed.frozen_project_digest,
+            preparation,
+        )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(
         &completed.compiled,
         completed
@@ -147,7 +145,7 @@ pub fn prepare_electrical_study_publication(
             catalog: completed.catalog.clone(),
             object_artifact_paths,
         },
-        &published,
+        &mut published,
     )
     .map_err(|error| {
         crate::analysis::prepared_study_publication::publication_failure(error, &context, invalid)

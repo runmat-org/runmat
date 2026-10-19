@@ -199,7 +199,8 @@ impl AnalysisPublicationBuilder {
                 .ok_or_else(|| AnalysisPublicationError::ResourceLimit {
                     message: "publication input profile overflow".into(),
                 })?;
-        self.admit(required)?;
+        self.admit(required)
+            .map_err(|error| error.context("publication preparation input and copy"))?;
         self.preparation_resident_bytes = add(self.preparation_resident_bytes, required)?;
         Ok(PreparationReservation {
             scope: self.preparation_scope.clone(),

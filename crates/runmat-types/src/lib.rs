@@ -30,3 +30,6 @@ pub use symbolic::{
     SymbolicDeclarationError,
 };
 pub use version::{SchemaIdentity, RUNMAT_TYPES_SCHEMA};
+
+pub mod path;
+pub use path::{NormalizedRelativePath, RelativePathError};

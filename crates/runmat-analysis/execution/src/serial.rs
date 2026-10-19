@@ -7,16 +7,17 @@ use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::ProgramExecutionRequest;
 
 use crate::{
-    import_analysis_objects,
     response::{prepare_analysis_output_set, AnalysisOutputSet},
     AnalysisBridgeError, AnalysisBridgeResult, AnalysisHostWorkload, PreparedAnalysisObjects,
 };
 
 mod output;
+mod reservation;
 pub use output::{
     AnalysisKernelOutput, AnalysisKernelOutputPartition, AnalysisKernelPayload,
     AnalysisOutputPolicy,
 };
+pub use reservation::ReservedAnalysisKernelInvocation;
 
 pub struct AnalysisKernelInvocation<'a> {
     pub output_policy: AnalysisOutputPolicy,
@@ -28,6 +29,14 @@ pub struct AnalysisKernelInvocation<'a> {
 /// Executes analysis-owned numerical semantics after the bridge has closed and validated every
 /// input artifact. Implementations must not retain borrowed payloads or publish objects directly.
 pub trait AnalysisKernel: Send + Sync {
+    /// The shared boundary has compared the complete governing request with this reservation.
+    /// Domain implementations may inspect execution capacity without changing physical identities.
+    fn execute_reserved(
+        &self,
+        invocation: ReservedAnalysisKernelInvocation<'_>,
+    ) -> AnalysisBridgeResult<Vec<AnalysisKernelOutput>> {
+        self.execute(invocation.into_invocation())
+    }
     fn execute(
         &self,
         invocation: AnalysisKernelInvocation<'_>,
@@ -65,7 +74,72 @@ where
     S: CacheImport + CacheExport,
     K: AnalysisKernel + ?Sized,
 {
-    let host = AnalysisHostWorkload::from_program_request(request, store)?;
+    execute_analysis(request, store, kernel, chunk_bytes, limits, None)
+        .map(|(_, completed)| completed)
+}
+
+/// Scheduled execution receives the original scheduler reservation explicitly.
+/// This does not infer an allocation from a numerical plan or a host's machine inventory.
+pub fn execute_reserved_serial_analysis<S, K>(
+    request: &ProgramExecutionRequest,
+    store: &mut S,
+    kernel: &K,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+    resources: &runmat_execution::resource::ResourceRequest,
+) -> AnalysisBridgeResult<CompletedAnalysisWorkload>
+where
+    S: CacheImport + CacheExport,
+    K: AnalysisKernel + ?Sized,
+{
+    resources
+        .validate()
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    execute_analysis(request, store, kernel, chunk_bytes, limits, Some(resources))
+        .map(|(_, completed)| completed)
+}
+
+/// Construct the shared host response from the same admitted invocation used for execution.
+/// `None` is explicit standalone execution; scheduled callers supply their carried reservation.
+pub fn execute_serial_analysis_host_response<S, K>(
+    request: &ProgramExecutionRequest,
+    store: &mut S,
+    kernel: &K,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+    resources: Option<&runmat_execution::resource::ResourceRequest>,
+) -> AnalysisBridgeResult<crate::AnalysisHostResponse>
+where
+    S: CacheImport + CacheExport,
+    K: AnalysisKernel + ?Sized,
+{
+    let (host, completed) =
+        execute_analysis(request, store, kernel, chunk_bytes, limits, resources)?;
+    crate::AnalysisHostResponse::completed(&host, &completed)
+}
+
+fn execute_analysis<S, K>(
+    request: &ProgramExecutionRequest,
+    store: &mut S,
+    kernel: &K,
+    chunk_bytes: usize,
+    limits: ObjectInventoryLimits,
+    resources: Option<&runmat_execution::resource::ResourceRequest>,
+) -> AnalysisBridgeResult<(AnalysisHostWorkload, CompletedAnalysisWorkload)>
+where
+    S: CacheImport + CacheExport,
+    K: AnalysisKernel + ?Sized,
+{
+    let admission = resources
+        .map(|resources| {
+            resources
+                .validate()
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+            crate::object::AnalysisInputAdmission::new(request, resources.memory_bytes)
+        })
+        .transpose()?;
+    let host =
+        AnalysisHostWorkload::from_program_request_admitted(request, store, admission.as_ref())?;
     let output_policy = host.output_policy;
     output_policy.require_within(AnalysisOutputPolicy::new(chunk_bytes, limits)?)?;
     let limits = output_policy.inventory_limits();
@@ -76,14 +150,17 @@ where
         .iter()
         .zip(&roots)
         .map(|(input, root)| {
-            import_analysis_objects(
+            crate::object::import_analysis_objects_admitted(
                 store,
-                root,
-                input.kind,
-                input.logical_identity,
-                input.payload_digest,
-                &host.artifact_access,
-                limits,
+                crate::object::AnalysisObjectImport {
+                    root,
+                    expected_kind: input.kind,
+                    expected_logical_identity: input.logical_identity,
+                    expected_payload_digest: input.payload_digest,
+                    access: &host.artifact_access,
+                    limits,
+                },
+                admission.as_ref(),
             )
         })
         .collect::<AnalysisBridgeResult<Vec<_>>>()?;
@@ -91,6 +168,11 @@ where
         .iter()
         .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
         .collect::<Vec<_>>();
+    if let Some(admission) = &admission {
+        let facts =
+            crate::prepared_input_resource_facts_from_refs(resource_plan_inputs.iter().copied())?;
+        admission.require_additional(facts.decoded_resident_bytes_admission_budget.0)?;
+    }
     let mut resource_plans = resource_plan_inputs
         .iter()
         .map(|input| crate::decode_admitted_resource_plan(input, limits))
@@ -122,12 +204,26 @@ where
         Some(resource_plans.swap_remove(*index))
     };
 
-    let kernel_outputs = kernel.execute(AnalysisKernelInvocation {
+    let invocation = AnalysisKernelInvocation {
         output_policy,
         kind: host.workload.kind,
         host: &host,
         inputs: &inputs,
-    })?;
+    };
+    let kernel_outputs = match resources {
+        Some(resources) => {
+            let invocation = ReservedAnalysisKernelInvocation::new(
+                invocation,
+                resources,
+                resource_plan.as_ref(),
+            )?;
+            if let Some(admission) = &admission {
+                admission.admit_payload_decoding(&inputs)?;
+            }
+            kernel.execute_reserved(invocation)?
+        }
+        None => kernel.execute(invocation)?,
+    };
     if kernel_outputs.len() != host.workload.outputs.len()
         || kernel_outputs
             .iter()
@@ -200,14 +296,17 @@ where
     let output_set_root = prepared_output_set.root;
     crate::object::retain_unique_references(&mut result_objects);
     result_objects.push(output_set_root.clone());
-    Ok(CompletedAnalysisWorkload {
-        identity,
-        outputs,
-        roots,
-        output_set,
-        output_set_root,
-        result_objects,
-    })
+    Ok((
+        host,
+        CompletedAnalysisWorkload {
+            identity,
+            outputs,
+            roots,
+            output_set,
+            output_set_root,
+            result_objects,
+        },
+    ))
 }
 
 fn input_roots(request: &ProgramExecutionRequest) -> AnalysisBridgeResult<Vec<ValueRef>> {

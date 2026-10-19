@@ -34,12 +34,8 @@ impl<'a> PreparedTargets<'a> {
         mixed: Option<(&StructuralModel, &CanonicalStructuralNodeSpace)>,
     ) -> Result<Self, ConstraintPlanError> {
         check_cancelled()?;
-        let mut count = 0usize;
-        visit_targets(&constraint.kind, |_| {
-            count = super::workspace::count_add(count, 1)?;
-            Ok(())
-        })?;
-        let mut selections = reserve(count)?;
+        let profile = profile::derive(constraint, mesh, mixed.map(|(model, _)| model))?;
+        let mut selections = reserve(profile.target_occurrences)?;
         let mut requires_mixed = mixed.is_some() && mesh.is_none();
         visit_targets(&constraint.kind, |target| {
             check_cancelled()?;
@@ -68,6 +64,16 @@ impl<'a> PreparedTargets<'a> {
             selections: selections.into_iter(),
             requires_mixed,
         })
+    }
+
+    /// Borrow original selections before expansion; this does not consume or resolve them.
+    pub(super) fn selections(
+        &self,
+    ) -> impl ExactSizeIterator<Item = (&ResolvedConstraintTarget, &[usize])> {
+        self.selections
+            .as_slice()
+            .iter()
+            .map(|(_, selection)| (&selection.resolved, selection.nodes.as_slice()))
     }
 
     pub(super) fn requires_mixed(&self) -> bool {
@@ -162,13 +168,10 @@ fn resolve_target(
                 actual: identities.len(),
             });
         }
-        let selection_digest = super::plan::canonical_digest(
-            "resolved-constraint-target",
-            &(
-                target,
-                Vec::<runmat_meshing_core::PersistentEntityId>::new(),
-                &identities,
-            ),
+        let selection_digest = super::target::identity::digest(
+            target,
+            &[] as &[runmat_meshing_core::PersistentEntityId],
+            &identities,
         )?;
         ResolvedConstraintTarget {
             authored: target.clone(),
@@ -231,3 +234,5 @@ fn visit_targets<'a>(
 
 #[cfg(test)]
 mod tests;
+
+pub(in crate::constraints) mod profile;

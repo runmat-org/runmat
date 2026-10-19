@@ -8,7 +8,7 @@ pub enum JobCommand {
     /// Submit an exact encrypted program as a durable remote job
     Submit {
         file: PathBuf,
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         #[arg(long)]
         cluster: String,
@@ -33,7 +33,7 @@ pub enum JobCommand {
     },
     /// List durable remote jobs
     List {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         #[arg(long)]
         limit: Option<u32>,
@@ -127,7 +127,7 @@ pub enum JobRecoveryCommand {
     /// Recover and decrypt a terminal result or diagnostic with a local key
     Recover {
         run_id: String,
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
         #[arg(long)]
         key: PathBuf,

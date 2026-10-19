@@ -1,8 +1,10 @@
-use std::collections::{BTreeMap, BTreeSet};
+mod comparison;
+use comparison::{approximately_equal, approximately_equal_ill_conditioned};
+
+use std::collections::BTreeSet;
 
 use runmat_meshing_core::MeshingCancellationSignal;
-use runmat_meshing_size::grading::grade_metric_evaluations;
-use runmat_meshing_size::metric::{MetricTensor3, ResolvedMetricField};
+use runmat_meshing_size::metric::MetricTensor3;
 
 use super::{
     checkpoint, error, validate_inputs, DelaunayTetrahedronQuality, DelaunayVolumeProvenance,
@@ -40,39 +42,13 @@ pub fn validate_delaunay_volume_quality(
             "quality inventory is incomplete or malformed",
         ));
     }
-    let field = ResolvedMetricField::new(metric_request).map_err(super::metric_error)?;
-    let mut resolved_metrics = BTreeMap::new();
-    let mut adjacency = BTreeMap::new();
-    for (tetrahedron, context) in topology.tetrahedra.iter().zip(&metric_contexts) {
-        let incident_entities = context
-            .incident_entity_ids
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        resolved_metrics.insert(
-            context.tetrahedron_node_identities,
-            field
-                .resolve(&incident_entities)
-                .map_err(super::metric_error)?,
-        );
-        let neighbors = tetrahedron
-            .neighbors
-            .iter()
-            .flatten()
-            .map(|neighbor| {
-                topology.tetrahedra[*neighbor as usize]
-                    .vertex_indices
-                    .map(|vertex| topology.nodes[vertex as usize].identity)
-            })
-            .collect::<BTreeSet<_>>();
-        adjacency.insert(context.tetrahedron_node_identities, neighbors);
-    }
-    grade_metric_evaluations(
-        metric_request.maximum_grading_ratio,
-        &adjacency,
-        &mut resolved_metrics,
-    )
-    .map_err(super::metric_error)?;
+    let resolved_metrics = super::metrics::resolve_graded_metrics(
+        topology,
+        &metric_contexts,
+        metric_request,
+        options,
+        cancellation,
+    )?;
     let mut maximum_edge = 0.0_f64;
     let mut maximum_ratio = 0.0_f64;
     let mut minimum_scaled_jacobian = f64::INFINITY;
@@ -81,7 +57,8 @@ pub fn validate_delaunay_volume_quality(
     let mut worst_optimization = None::<(f64, [runmat_meshing_core::StableDigest; 4])>;
     let mut observed_worst_optimization =
         None::<(f64, [[u64; 3]; 4], [runmat_meshing_core::StableDigest; 4])>;
-    let mut independent_violations = BTreeMap::new();
+    let mut reported_refinement_value = None;
+    let mut reported_optimization_jacobian = None;
     let boundary_nodes = provenance
         .facets
         .iter()
@@ -93,23 +70,22 @@ pub fn validate_delaunay_volume_quality(
         .map(|facet| facet.node_identities)
         .collect::<BTreeSet<_>>();
 
-    for (index, ((tetrahedron, context), observed)) in topology
+    for (index, (((tetrahedron, context), observed), resolved)) in topology
         .tetrahedra
         .iter()
-        .zip(&metric_contexts)
+        .zip(metric_contexts)
         .zip(&quality.tetrahedra)
+        .zip(resolved_metrics)
         .enumerate()
     {
         checkpoint(index as u64, options, cancellation)?;
+        let context = context?;
         let region_id = tetrahedron.region_id.clone().ok_or_else(|| {
             invalid(
                 Some(index),
                 "quality cannot describe an unassigned tetrahedron",
             )
         })?;
-        let resolved = resolved_metrics
-            .remove(&context.tetrahedron_node_identities)
-            .ok_or_else(|| invalid(Some(index), "graded metric inventory is incomplete"))?;
         let points = tetrahedron
             .vertex_indices
             .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
@@ -152,7 +128,7 @@ pub fn validate_delaunay_volume_quality(
         let independent = IndependentTetrahedronQuality {
             identities,
             region_id,
-            incident_entity_ids: context.incident_entity_ids.clone(),
+            incident_entity_ids: context.incident_entity_ids,
             metric: resolved.metric,
             sources: resolved.active_sources,
             contribution_count: resolved.applied_contribution_count,
@@ -171,7 +147,12 @@ pub fn validate_delaunay_volume_quality(
             ],
         };
         validate_tetrahedron(observed, &independent, options, index)?;
-        independent_violations.insert(identities, (violation_ratio, optimization_violation_ratio));
+        if quality.worst_refinement_tetrahedron == Some(identities) {
+            reported_refinement_value = Some(violation_ratio);
+        }
+        if quality.worst_optimization_tetrahedron == Some(identities) {
+            reported_optimization_jacobian = Some(scaled_jacobian);
+        }
         if observed.requires_refinement() {
             let candidate = (
                 observed.refinement_violation_ratio,
@@ -215,7 +196,7 @@ pub fn validate_delaunay_volume_quality(
         maximum_edge = maximum_edge.max(local_maximum_edge);
         maximum_ratio = maximum_ratio.max(radius_edge_ratio);
         minimum_scaled_jacobian = minimum_scaled_jacobian.min(scaled_jacobian);
-        if super::violation_priority_key(violation_ratio) > super::violation_priority_key(1.0) {
+        if super::violates_quality_bound(violation_ratio) {
             let candidate = (violation_ratio, identities);
             if worst.as_ref().is_none_or(|current| {
                 candidate.0.total_cmp(&current.0).is_gt()
@@ -224,9 +205,7 @@ pub fn validate_delaunay_volume_quality(
                 worst = Some(candidate);
             }
         }
-        if super::violation_priority_key(optimization_violation_ratio)
-            > super::violation_priority_key(1.0)
-        {
+        if super::violates_quality_bound(optimization_violation_ratio) {
             let candidate = (optimization_violation_ratio, identities);
             if worst_optimization.as_ref().is_none_or(|current| {
                 candidate.0.total_cmp(&current.0).is_gt()
@@ -236,29 +215,29 @@ pub fn validate_delaunay_volume_quality(
             }
         }
     }
-    let observed_shape_admissible = super::violation_priority_key(saturated_ratio(
+    let observed_shape_admissible = !super::violates_quality_bound(saturated_ratio(
         options.minimum_metric_scaled_jacobian,
         quality.minimum_metric_scaled_jacobian,
-    )) <= super::violation_priority_key(1.0);
-    let independent_shape_admissible = super::violation_priority_key(saturated_ratio(
+    ));
+    let independent_shape_admissible = !super::violates_quality_bound(saturated_ratio(
         options.minimum_metric_scaled_jacobian,
         minimum_scaled_jacobian,
-    )) <= super::violation_priority_key(1.0);
+    ));
     if observed_shape_admissible != independent_shape_admissible
         || quality.worst_refinement_tetrahedron != observed_worst.map(|(_, _, identity)| identity)
         || !reported_worst_is_independently_maximal(
             quality.worst_refinement_tetrahedron,
             worst,
-            &independent_violations,
-            0,
+            reported_refinement_value,
         )
         || quality.worst_optimization_tetrahedron
             != observed_worst_optimization.map(|(_, _, identity)| identity)
-        || !reported_worst_is_independently_maximal(
+        || !comparison::reported_shape_extremum_matches(
             quality.worst_optimization_tetrahedron,
             worst_optimization,
-            &independent_violations,
-            1,
+            reported_optimization_jacobian,
+            minimum_scaled_jacobian,
+            options.minimum_metric_scaled_jacobian,
         )
         || !approximately_equal(quality.maximum_metric_edge_length, maximum_edge)
         || !(if independent_shape_admissible {
@@ -282,7 +261,7 @@ pub fn validate_delaunay_volume_quality(
         return Err(invalid(
             None,
             format!(
-                "aggregate quality evidence is inconsistent: shape admissible observed/independent={observed_shape_admissible}/{independent_shape_admissible}; refinement worst reported/observed/independent={:?}/{:?}/{:?}; optimization worst reported/observed/independent={:?}/{:?}/{:?}; maximum edge reported/independent={:.17e}/{:.17e}; maximum radius ratio reported/independent={:.17e}/{:.17e}; minimum scaled Jacobian reported/independent={:.17e}/{:.17e}",
+                "aggregate quality evidence is inconsistent: shape admissible observed/independent={observed_shape_admissible}/{independent_shape_admissible}; reported optimization independent Jacobian={reported_optimization_jacobian:?}; minimum independent Jacobian={minimum_scaled_jacobian:.17e}; refinement worst reported/observed/independent={:?}/{:?}/{:?}; optimization worst reported/observed/independent={:?}/{:?}/{:?}; maximum edge reported/independent={:.17e}/{:.17e}; maximum radius ratio reported/independent={:.17e}/{:.17e}; minimum scaled Jacobian reported/independent={:.17e}/{:.17e}",
                 quality.worst_refinement_tetrahedron,
                 observed_worst.map(|(_, _, identity)| identity),
                 worst.map(|(_, identity)| identity),
@@ -302,25 +281,21 @@ pub fn validate_delaunay_volume_quality(
 }
 
 /// Independent arithmetic can reverse two numerically tied extrema even after
-/// every per-cell value has cross-validated. The published identity must be the
-/// exact maximum of the published evidence, while the independent path proves
-/// that the same cell belongs to the independently maximal tolerance class.
+/// every per-cell value has cross-validated. The published work source must
+/// match its deterministic priority order, and independent arithmetic must place
+/// it in the independently maximal scheduling class. Physical violation
+/// classification still uses the full value.
 fn reported_worst_is_independently_maximal(
     reported: Option<[runmat_meshing_core::StableDigest; 4]>,
     independent_worst: Option<(f64, [runmat_meshing_core::StableDigest; 4])>,
-    independent_violations: &BTreeMap<[runmat_meshing_core::StableDigest; 4], (f64, f64)>,
-    component: usize,
+    reported_value: Option<f64>,
 ) -> bool {
     match (reported, independent_worst) {
         (None, None) => true,
-        (Some(reported), Some((maximum, _))) => independent_violations
-            .get(&reported)
-            .map(|values| [values.0, values.1][component])
-            .is_some_and(|value| {
-                super::violation_priority_key(value) > super::violation_priority_key(1.0)
-                    && super::violation_priority_key(value)
-                        == super::violation_priority_key(maximum)
-            }),
+        (Some(_), Some((maximum, _))) => reported_value.is_some_and(|value| {
+            super::violates_quality_bound(value)
+                && super::violation_priority_key(value) == super::violation_priority_key(maximum)
+        }),
         _ => false,
     }
 }
@@ -347,14 +322,14 @@ fn validate_tetrahedron(
             "tetrahedron quality identity or metric provenance does not match independent evaluation",
         ));
     }
-    let observed_shape_admissible = super::violation_priority_key(saturated_ratio(
+    let observed_shape_admissible = !super::violates_quality_bound(saturated_ratio(
         options.minimum_metric_scaled_jacobian,
         observed.metric_scaled_jacobian,
-    )) <= super::violation_priority_key(1.0);
-    let independent_shape_admissible = super::violation_priority_key(saturated_ratio(
+    ));
+    let independent_shape_admissible = !super::violates_quality_bound(saturated_ratio(
         options.minimum_metric_scaled_jacobian,
         independent.values[4],
-    )) <= super::violation_priority_key(1.0);
+    ));
     let independent_shape_well_conditioned = independent.values[4] >= 1.0e-5;
     // Independent direct-metric evaluation and the construction path's factored-coordinate
     // evaluation lose agreement as a cell collapses. Numerical conditioning is geometric and
@@ -636,46 +611,10 @@ fn gaussian_solve(mut matrix: [[f64; 3]; 3], mut right: [f64; 3]) -> Option<[f64
     result.into_iter().all(f64::is_finite).then_some(result)
 }
 
-fn approximately_equal(left: f64, right: f64) -> bool {
-    left.is_finite()
-        && right.is_finite()
-        && (left - right).abs()
-            <= 131_072.0 * f64::EPSILON * left.abs().max(right.abs()).max(f64::MIN_POSITIVE)
-}
-
-fn approximately_equal_ill_conditioned(left: f64, right: f64, scaled_jacobian: f64) -> bool {
-    const BASE_RELATIVE_TOLERANCE: f64 = 131_072.0 * f64::EPSILON;
-    const MAXIMUM_RELATIVE_TOLERANCE: f64 = 0.01;
-
-    let relative_tolerance = (BASE_RELATIVE_TOLERANCE
-        / scaled_jacobian.abs().max(f64::MIN_POSITIVE))
-    .min(MAXIMUM_RELATIVE_TOLERANCE);
-    left.is_finite()
-        && right.is_finite()
-        && (left - right).abs()
-            <= BASE_RELATIVE_TOLERANCE
-                .max(relative_tolerance * left.abs().max(right.abs()).max(f64::MIN_POSITIVE))
-}
-
 fn invalid(index: Option<usize>, reason: impl Into<String>) -> DelaunayVolumeQualityError {
     error(
         DelaunayVolumeQualityErrorKind::InvalidQuality,
         index,
         reason,
     )
-}
-
-#[cfg(test)]
-mod comparison_tests {
-    use super::approximately_equal_ill_conditioned;
-
-    #[test]
-    fn rejected_near_zero_quality_is_compared_with_a_bounded_absolute_floor() {
-        assert!(approximately_equal_ill_conditioned(
-            9.979_522_325_282_932e-25,
-            1.294_961_824_278_155_4e-24,
-            1.294_961_824_278_155_4e-24,
-        ));
-        assert!(!approximately_equal_ill_conditioned(0.0, 1.0e-6, 1.0e-24));
-    }
 }

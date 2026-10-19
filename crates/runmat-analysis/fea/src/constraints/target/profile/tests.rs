@@ -26,7 +26,7 @@ fn selection_counts_raw_candidates_but_retains_unique_metadata_and_nodes() {
     let old_entities: std::collections::BTreeSet<_> = selected.matched_entities.iter().collect();
     assert_eq!(
         selected.selection_digest,
-        super::super::canonical_digest(
+        crate::constraints::plan::canonical_digest(
             "resolved-constraint-target",
             &(&target, &old_entities, &selected.matched_node_identities)
         )

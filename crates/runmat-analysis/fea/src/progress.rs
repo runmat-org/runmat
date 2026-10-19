@@ -101,8 +101,20 @@ thread_local! {
     static FEA_PROGRESS_CONTEXT: RefCell<Option<FeaProgressContext>> = const { RefCell::new(None) };
 }
 
+/// Restores the previous solver context on the thread that installed it.
+///
+/// Install a separate context inside each worker; share the cancellation token
+/// and handler rather than moving this guard between threads.
+///
+/// ```compile_fail
+/// use runmat_analysis_fea::{replace_fea_progress_context, FeaProgressContext};
+/// let guard = replace_fea_progress_context(FeaProgressContext::default());
+/// std::thread::spawn(move || drop(guard));
+/// ```
 pub struct FeaProgressContextGuard {
     previous: Option<FeaProgressContext>,
+    // Zero storage, but prevents Send/Sync for a thread-local restoration owner.
+    thread_affinity: std::marker::PhantomData<std::rc::Rc<()>>,
 }
 
 impl Drop for FeaProgressContextGuard {
@@ -113,9 +125,18 @@ impl Drop for FeaProgressContextGuard {
     }
 }
 
+/// Capture shared handler, cancellation and attempt identity for a CPU worker.
+/// Install the clone on its destination thread; never move the thread-bound guard.
+pub fn capture_fea_progress_context() -> FeaProgressContext {
+    FEA_PROGRESS_CONTEXT.with(|slot| slot.borrow().clone().unwrap_or_default())
+}
+
 pub fn replace_fea_progress_context(context: FeaProgressContext) -> FeaProgressContextGuard {
     let previous = FEA_PROGRESS_CONTEXT.with(|slot| slot.replace(Some(context)));
-    FeaProgressContextGuard { previous }
+    FeaProgressContextGuard {
+        previous,
+        thread_affinity: std::marker::PhantomData,
+    }
 }
 
 pub fn emit_progress(event: FeaProgressEvent) {
@@ -201,21 +222,4 @@ impl runmat_canonical_codec::CanonicalCodecControl for FeaCancellationToken {
 }
 
 #[cfg(test)]
-mod control_tests {
-    use super::*;
-    #[test]
-    fn adapter_keeps_live_parent_and_deadline_without_mutating_primary_flag() {
-        let owner = Arc::new(AtomicBool::new(false));
-        let caller = Arc::new(AtomicBool::new(false));
-        let shared = runmat_execution::CancellationToken::from_shared(owner.clone())
-            .with_source(caller.clone());
-        let adapter = FeaCancellationToken::from_token(shared.clone());
-        assert!(!adapter.is_cancelled());
-        caller.store(true, std::sync::atomic::Ordering::Release);
-        assert!(adapter.is_cancelled());
-        assert!(!owner.load(std::sync::atomic::Ordering::Acquire));
-        caller.store(false, std::sync::atomic::Ordering::Release);
-        assert!(FeaCancellationToken::from_token(shared.with_deadline(Some(0))).is_cancelled());
-        assert!(!owner.load(std::sync::atomic::Ordering::Acquire));
-    }
-}
+mod control_tests;

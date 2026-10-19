@@ -1,5 +1,5 @@
 //! Pre-value bound for the shared complete recovered-field identity materialization.
-use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
+use runmat_canonical_codec::{profile_serialized_shape, SerializedCanonicalProfile};
 
 use super::*;
 
@@ -30,7 +30,7 @@ impl RecoveredField {
         let values = ProjectedValues(value_count);
         let storage = AnalysisField::host_f64_serialization(definition.field_id(), &shape, &values);
         let content = identity_content(definition, sample, &storage);
-        profile_serialized(&content, FIELD_LIMITS)
+        profile_serialized_shape(&content, FIELD_LIMITS)
             .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))
     }
 }

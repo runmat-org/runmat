@@ -282,9 +282,6 @@ pub async fn surfc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         .map_err(map_surfc_invalid_argument)?,
     );
     let opts = PlotRenderOptions {
-        title: "Surface with Contours",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: false,
         ..Default::default()
     };

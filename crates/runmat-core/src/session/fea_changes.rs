@@ -17,6 +17,8 @@ const MAX_STAGES: usize = 1_000;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Stage {
+    #[serde(default = "legacy_path_format")]
+    path_format_version: u16,
     id: FeaChangeSetId,
     publication: WorkspacePublicationRequest,
     project: Option<runmat_package::ProjectRevision>,
@@ -24,6 +26,38 @@ struct Stage {
     original_sources:
         std::collections::BTreeMap<runmat_runtime::analysis::LogicalSourcePath, String>,
 }
+impl Stage {
+    fn source_edits(&self) -> Result<Vec<FeaWorkspaceEdit>, String> {
+        self.publication
+            .edits
+            .iter()
+            .map(|edit| {
+                let logical = |path: &std::path::Path| {
+                    runmat_runtime::analysis::LogicalSourcePath::new(
+                        path.to_str()
+                            .ok_or("change set path is not UTF-8")?
+                            .to_owned(),
+                    )
+                    .map_err(|error| error.to_string())
+                };
+                Ok(match edit {
+                    WorkspaceEdit::Write { path, bytes } => FeaWorkspaceEdit::Write {
+                        path: logical(path)?,
+                        bytes: bytes.clone(),
+                    },
+                    WorkspaceEdit::Remove { path } => FeaWorkspaceEdit::Remove {
+                        path: logical(path)?,
+                    },
+                    WorkspaceEdit::Rename { from, to } => FeaWorkspaceEdit::Rename {
+                        from: logical(from)?,
+                        to: logical(to)?,
+                    },
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()
+    }
+}
+
 fn path(root: &std::path::Path, id: FeaChangeSetId) -> PathBuf {
     root.join(DIRECTORY)
         .join(format!("{}.json", uuid::Uuid::from_bytes(id.0)))
@@ -68,7 +102,8 @@ impl RunMatSession {
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err("source change set exceeds its persisted record budget".into());
         }
-        let stage: Stage = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        let mut stage: Stage = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
+        stage.migrate_paths()?;
         if stage.id != id || stage.publication.id.0 != id.0 || stage.publication.root != root {
             return Err(
                 "source change set belongs to a different project or compiler environment".into(),
@@ -129,6 +164,7 @@ impl RunMatSession {
         }
         let id = FeaChangeSetId(prepared.publication_id().0);
         let stage = Stage {
+            path_format_version: 2,
             id,
             publication: prepared.request.clone(),
             original_sources: prepared.original_sources.clone(),
@@ -171,33 +207,7 @@ impl RunMatSession {
             return Ok(publication(outcome));
         }
         self.validate_change_set_environment(&stage)?;
-        let edits = stage
-            .publication
-            .edits
-            .iter()
-            .map(|edit| {
-                let logical = |path: &std::path::Path| {
-                    runmat_runtime::analysis::LogicalSourcePath::new(format!(
-                        "project/{}",
-                        path.to_str().ok_or("change set path is not UTF-8")?
-                    ))
-                    .map_err(|error| error.to_string())
-                };
-                Ok(match edit {
-                    WorkspaceEdit::Write { path, bytes } => FeaWorkspaceEdit::Write {
-                        path: logical(path)?,
-                        bytes: bytes.clone(),
-                    },
-                    WorkspaceEdit::Remove { path } => FeaWorkspaceEdit::Remove {
-                        path: logical(path)?,
-                    },
-                    WorkspaceEdit::Rename { from, to } => FeaWorkspaceEdit::Rename {
-                        from: logical(from)?,
-                        to: logical(to)?,
-                    },
-                })
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+        let edits = stage.source_edits()?;
         let mut prepared = match self
             .prepare_fea_workspace_publication_at(edits, Some(stage.publication.expected_revision))
             .await?
@@ -219,6 +229,24 @@ impl RunMatSession {
         Ok(publication(self.publish_fea_workspace(&prepared).await?))
     }
 
+    /// Rebuild a retained draft against its original workspace fence. This is
+    /// read-only inspection, never publication or execution authority.
+    pub async fn inspect_fea_changes(
+        &mut self,
+        id: FeaChangeSetId,
+    ) -> Result<FeaChangeSetCheck, String> {
+        let stage = self.read_change_set(id).await?;
+        self.validate_change_set_environment(&stage)?;
+        let prepared = self.prepare_fea_workspace_publication_at(
+            stage.source_edits()?, Some(stage.publication.expected_revision),
+        ).await?.map_err(|_| "The workspace changed since this draft was captured. Refresh the draft before previewing or running it.")?;
+        Ok(FeaChangeSetCheck {
+            id,
+            roots: prepared.check().roots.clone(),
+            publication_valid: prepared.check().publication_valid,
+        })
+    }
+
     pub async fn review_fea_changes(
         &self,
         request: FeaChangeSetReviewRequest,
@@ -231,10 +259,9 @@ impl RunMatSession {
             .get(request.change_index as usize)
             .ok_or("source change index is out of range")?;
         let logical = |path: &std::path::Path| {
-            runmat_runtime::analysis::LogicalSourcePath::new(format!(
-                "project/{}",
-                path.to_str().ok_or("source path is not UTF-8")?
-            ))
+            runmat_runtime::analysis::LogicalSourcePath::new(
+                path.to_str().ok_or("source path is not UTF-8")?.to_owned(),
+            )
             .map_err(|error| error.to_string())
         };
         let (change, before_path, after) = match edit {
@@ -356,4 +383,36 @@ fn excerpt(text: &str, offset: u32) -> Result<FeaSourceExcerpt, String> {
         text: text[start..end].to_owned(),
         next_offset: (end < text.len()).then_some(end as u32),
     })
+}
+
+fn legacy_path_format() -> u16 {
+    1
+}
+impl Stage {
+    fn migrate_paths(&mut self) -> Result<(), String> {
+        match self.path_format_version {
+            2 => Ok(()),
+            1 => {
+                self.original_sources = std::mem::take(&mut self.original_sources)
+                    .into_iter()
+                    .map(|(path, bytes)| {
+                        let relative = path
+                            .as_str()
+                            .strip_prefix("project/")
+                            .ok_or("legacy source record has an invalid source namespace")?;
+                        let path =
+                            runmat_runtime::analysis::LogicalSourcePath::new(relative.to_owned())
+                                .map_err(|error| error.to_string())?;
+                        if path.is_root() {
+                            return Err("legacy source record must name a file".into());
+                        }
+                        Ok((path, bytes))
+                    })
+                    .collect::<Result<_, String>>()?;
+                self.path_format_version = 2;
+                Ok(())
+            }
+            _ => Err("unsupported source proposal path format".into()),
+        }
+    }
 }

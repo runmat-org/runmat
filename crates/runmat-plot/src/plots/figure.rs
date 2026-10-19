@@ -84,6 +84,10 @@ pub struct TextStyle {
     pub font_angle: Option<String>,
     pub interpreter: Option<String>,
     pub visible: bool,
+    /// MATLAB `HorizontalAlignment` ("left", "center", "right") for text placed in the axes.
+    pub horizontal_alignment: Option<String>,
+    /// MATLAB `VerticalAlignment` ("top", "middle", "bottom", ...) for text placed in the axes.
+    pub vertical_alignment: Option<String>,
 }
 
 impl Default for TextStyle {
@@ -95,6 +99,8 @@ impl Default for TextStyle {
             font_angle: None,
             interpreter: None,
             visible: true,
+            horizontal_alignment: None,
+            vertical_alignment: None,
         }
     }
 }
@@ -222,6 +228,18 @@ pub struct LegendEntry {
     pub label: String,
     pub color: Vec4,
     pub plot_type: PlotType,
+    /// The series' marker, drawn in its swatch as MATLAB's legend draws it.
+    pub marker: Option<LegendMarker>,
+    /// False for a marker-only line (`'o'` with no line style): the swatch has no segment.
+    pub line_visible: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LegendMarker {
+    pub kind: crate::plots::scatter::MarkerStyle,
+    pub face_color: Vec4,
+    pub edge_color: Vec4,
+    pub filled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -271,7 +289,8 @@ impl Figure {
             axis_equal: false,
             data_aspect_ratio: [1.0, 1.0, 1.0],
             data_aspect_ratio_mode: "auto".into(),
-            legend_enabled: true,
+            // As in MATLAB, a legend is shown only once `legend` is called.
+            legend_enabled: false,
             colorbar_enabled: false,
             colormap: ColorMap::Parula,
             color_limits: None,
@@ -292,7 +311,7 @@ impl Figure {
             x_label: None,
             y_label: None,
             z_label: None,
-            legend_enabled: true,
+            legend_enabled: false,
             grid_enabled: true,
             minor_grid_enabled: false,
             box_enabled: true,
@@ -1140,12 +1159,36 @@ impl Figure {
             if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
                 continue;
             }
-            if let PlotElement::Surface(surface) = plot {
-                *surface = surface.clone().with_colormap(cmap.clone());
-            }
+            Self::apply_colormap_to_plot(plot, &cmap);
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    /// Color a colormapped plot (surface, scalar-colored scatter, contour) through `cmap`.
+    fn apply_colormap_to_plot(plot: &mut PlotElement, cmap: &ColorMap) {
+        match plot {
+            PlotElement::Surface(surface) => {
+                *surface = surface.clone().with_colormap(cmap.clone());
+            }
+            PlotElement::Scatter(scatter) => scatter.recolor_with_colormap(cmap),
+            PlotElement::Scatter3(scatter) => scatter.recolor_with_colormap(cmap),
+            PlotElement::Contour(contour) => contour.recolor_with_colormap(cmap),
+            PlotElement::ContourFill(fill) => fill.recolor_with_colormap(cmap),
+            _ => {}
+        }
+    }
+
+    /// Plots from `start` on take their axes' colormap, as MATLAB colors new graphics.
+    pub fn apply_axes_colormaps_from(&mut self, start: usize) {
+        for idx in start..self.plots.len() {
+            let axes_index = self.plot_axes_indices.get(idx).copied().unwrap_or(0);
+            let Some(cmap) = self.axes_metadata.get(axes_index).map(|m| m.colormap.clone()) else {
+                continue;
+            };
+            Self::apply_colormap_to_plot(&mut self.plots[idx], &cmap);
         }
         self.dirty = true;
     }
@@ -1452,6 +1495,23 @@ impl Figure {
         self.dirty = true;
     }
 
+    /// Clears the title, subtitle and axis labels of one axes, as a MATLAB plot with
+    /// `NextPlot` 'replace' (hold off) resets them; `cla` keeps them.
+    pub fn reset_axes_text(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title = None;
+            meta.subtitle = None;
+            meta.x_label = None;
+            meta.y_label = None;
+            meta.z_label = None;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
     /// Get the number of plots
     pub fn len(&self) -> usize {
         self.plots.len()
@@ -1635,6 +1695,11 @@ impl Figure {
                 }
             }
 
+            let log_axes = self
+                .axes_metadata
+                .get(axes_index)
+                .map(|meta| (meta.x_log, meta.y_log))
+                .unwrap_or((self.x_log, self.y_log));
             match p {
                 PlotElement::Line(plot) => {
                     let axes_viewport_px = axes_viewports_px
@@ -1654,7 +1719,12 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport_gpu(axes_viewport_px, axes_view_bounds, gpu),
+                        plot.render_data_with_viewport_gpu(
+                            axes_viewport_px,
+                            axes_view_bounds,
+                            log_axes,
+                            gpu,
+                        ),
                         plot.marker_render_data(),
                     );
                 }
@@ -1666,6 +1736,8 @@ impl Figure {
                             axes_viewports_px
                                 .and_then(|viewports| viewports.get(axes_index).copied())
                                 .or(viewport_px),
+                            axes_view_bounds,
+                            log_axes,
                             gpu,
                         ),
                         plot.marker_render_data(),
@@ -1675,10 +1747,12 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
+                        plot.render_data_on_axes(
                             axes_viewports_px
                                 .and_then(|viewports| viewports.get(axes_index).copied())
                                 .or(viewport_px),
+                            axes_view_bounds,
+                            log_axes,
                         ),
                         plot.marker_render_data(),
                     );
@@ -1687,10 +1761,12 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport(
+                        plot.render_data_on_axes(
                             axes_viewports_px
                                 .and_then(|viewports| viewports.get(axes_index).copied())
                                 .or(viewport_px),
+                            axes_view_bounds,
+                            log_axes,
                         ),
                         plot.marker_render_data(),
                     );
@@ -1719,6 +1795,7 @@ impl Figure {
                             axes_viewports_px
                                 .and_then(|viewports| viewports.get(axes_index).copied())
                                 .or(viewport_px),
+                            log_axes,
                         ),
                     ));
                 }
@@ -1836,6 +1913,8 @@ impl Figure {
                     label,
                     color: plot.color(),
                     plot_type: plot.plot_type(),
+                    marker: plot.legend_marker(),
+                    line_visible: plot.legend_line_visible(),
                 });
             }
         }
@@ -1852,11 +1931,14 @@ impl Figure {
             }
             match plot {
                 PlotElement::Pie(pie) => {
-                    for slice in pie.slice_meta() {
+                    let legend_labels = pie.legend_labels.clone();
+                    for (slice_index, slice) in pie.slice_meta().into_iter().enumerate() {
                         entries.push(LegendEntry {
-                            label: slice.label,
+                            label: legend_labels.get(slice_index).cloned().unwrap_or(slice.label),
                             color: slice.color,
                             plot_type: plot.plot_type(),
+                            marker: None,
+                            line_visible: true,
                         });
                     }
                 }
@@ -1869,6 +1951,8 @@ impl Figure {
                             label,
                             color: plot.color(),
                             plot_type: plot.plot_type(),
+                            marker: plot.legend_marker(),
+                            line_visible: plot.legend_line_visible(),
                         });
                     }
                 }
@@ -1899,6 +1983,115 @@ impl Figure {
         out
     }
 
+    /// The data range an axes' colormap spans (its `CLim`): the set limits, else the range of
+    /// the colormapped data on the axes. `None` when nothing on the axes is colormapped.
+    pub fn axes_color_range(&self, axes_index: usize) -> Option<(f64, f64)> {
+        if let Some(limits) = self.axes_metadata(axes_index).and_then(|m| m.color_limits) {
+            return Some(limits);
+        }
+        let mut range: Option<(f64, f64)> = None;
+        let mut include = |lo: f64, hi: f64| {
+            if lo.is_finite() && hi.is_finite() {
+                range = Some(match range {
+                    Some((a, b)) => (a.min(lo), b.max(hi)),
+                    None => (lo, hi),
+                });
+            }
+        };
+        let finite_range = |values: &mut dyn Iterator<Item = f64>| {
+            values
+                .filter(|v| v.is_finite())
+                .fold(None, |acc: Option<(f64, f64)>, v| match acc {
+                    Some((a, b)) => Some((a.min(v), b.max(v))),
+                    None => Some((v, v)),
+                })
+        };
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            if *self.plot_axes_indices.get(plot_idx).unwrap_or(&0) != axes_index {
+                continue;
+            }
+            let found = match plot {
+                PlotElement::Surface(surface) if surface.visible && surface.color_grid.is_none() => {
+                    surface.color_limits.or_else(|| {
+                        surface
+                            .z_data
+                            .as_ref()
+                            .and_then(|rows| finite_range(&mut rows.iter().flatten().copied()))
+                    })
+                }
+                PlotElement::Scatter(scatter) if scatter.visible => scatter.color_limits.or_else(|| {
+                    scatter
+                        .color_values
+                        .as_ref()
+                        .and_then(|values| finite_range(&mut values.iter().copied()))
+                }),
+                PlotElement::Contour(contour) if contour.visible => contour.value_range,
+                PlotElement::ContourFill(fill) if fill.visible => fill.value_range,
+                _ => None,
+            };
+            if let Some((lo, hi)) = found {
+                include(lo, hi);
+            }
+        }
+        range
+    }
+
+    /// `xline`/`yline` labels on an axes: orientation, line value, label text and line color.
+    pub fn reference_line_labels_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(ReferenceLineOrientation, f64, String, Option<Vec4>)> {
+        let mut out = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            if *self.plot_axes_indices.get(plot_idx).unwrap_or(&0) != axes_index {
+                continue;
+            }
+            if let PlotElement::ReferenceLine(line) = plot {
+                if let Some(label) = line.label.as_ref().filter(|l| !l.trim().is_empty()) {
+                    if line.visible {
+                        out.push((
+                            line.orientation,
+                            line.value,
+                            label.clone(),
+                            (!line.color_auto).then_some(line.color),
+                        ));
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Give reference lines without a set color the theme's axes color (in this copy).
+    pub fn resolve_auto_reference_line_colors(&mut self, axes_color: Vec4) {
+        for plot in &mut self.plots {
+            if let PlotElement::ReferenceLine(line) = plot {
+                if line.color_auto {
+                    line.color = axes_color;
+                }
+            }
+        }
+    }
+
+    /// Heatmap cell labels on an axes: position, text and the color of the cell under it.
+    pub fn cell_label_marks_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(glam::Vec3, String, glam::Vec4)> {
+        let mut out = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            if *self.plot_axes_indices.get(plot_idx).unwrap_or(&0) != axes_index {
+                continue;
+            }
+            if let PlotElement::Surface(surface) = plot {
+                if surface.visible {
+                    out.extend(surface.cell_label_marks());
+                }
+            }
+        }
+        out
+    }
+
     /// Assign labels to visible plots in order
     pub fn set_labels(&mut self, labels: &[String]) {
         self.set_labels_for_axes(self.active_axes_index, labels);
@@ -1911,7 +2104,8 @@ impl Figure {
             if plot_axes != axes_index {
                 continue;
             }
-            if !plot.is_visible() {
+            // Objects hidden from the legend (HandleVisibility 'off') take no label, as in MATLAB.
+            if !plot.is_visible() || plot.is_hidden_from_legend() {
                 continue;
             }
             if idx >= labels.len() {
@@ -1920,11 +2114,12 @@ impl Figure {
             match plot {
                 PlotElement::Pie(pie) => {
                     let remaining = &labels[idx..];
+                    // Legend names go in the legend, as in MATLAB; slices keep their text.
                     if remaining.len() >= pie.values.len() {
-                        pie.set_slice_labels(remaining[..pie.values.len()].to_vec());
+                        pie.set_legend_labels(remaining[..pie.values.len()].to_vec());
                         idx += pie.values.len();
                     } else {
-                        pie.set_slice_labels(remaining.to_vec());
+                        pie.set_legend_labels(remaining.to_vec());
                         idx = labels.len();
                     }
                 }
@@ -2131,6 +2326,22 @@ impl PlotElement {
         }
     }
 
+    fn legend_marker(&self) -> Option<LegendMarker> {
+        match self {
+            PlotElement::Line(plot) => plot.marker.as_ref().map(|m| LegendMarker {
+                kind: m.kind,
+                face_color: m.face_color,
+                edge_color: m.edge_color,
+                filled: m.filled,
+            }),
+            _ => None,
+        }
+    }
+
+    fn legend_line_visible(&self) -> bool {
+        !matches!(self, PlotElement::Line(plot) if plot.line_style == crate::plots::line::LineStyle::None)
+    }
+
     fn is_hidden_from_legend(&self) -> bool {
         matches!(
             self,
@@ -2178,7 +2389,7 @@ impl PlotElement {
             PlotElement::Patch(plot) => plot.effective_face_color(),
             PlotElement::Line3(plot) => plot.color,
             PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
-            PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Contour(plot) => plot.legend_color(),
             PlotElement::ContourFill(_plot) => Vec4::new(0.9, 0.9, 0.9, 1.0),
             PlotElement::ReferenceLine(plot) => plot.color,
         }
@@ -2250,7 +2461,7 @@ impl PlotElement {
             PlotElement::Contour(plot) => plot.render_data(),
             PlotElement::ContourFill(plot) => plot.render_data(),
             PlotElement::ReferenceLine(plot) => {
-                plot.render_data_with_range((0.0, 1.0), (0.0, 1.0), None)
+                plot.render_data_with_range((0.0, 1.0), (0.0, 1.0), None, (false, false))
             }
         }
     }
@@ -2383,7 +2594,7 @@ mod tests {
 
         assert_eq!(figure.len(), 0);
         assert!(figure.is_empty());
-        assert!(figure.legend_enabled);
+        assert!(!figure.legend_enabled);
         assert!(figure.grid_enabled);
     }
 
@@ -2492,7 +2703,10 @@ mod tests {
         let stats = figure.statistics();
         assert_eq!(stats.total_plots, 3);
         assert_eq!(stats.visible_plots, 3);
-        assert!(stats.has_legend);
+        // Labels alone do not show a legend, as in MATLAB; `legend` turns it on.
+        assert!(!stats.has_legend);
+        figure.legend_enabled = true;
+        assert!(figure.statistics().has_legend);
     }
 
     #[test]
@@ -2678,6 +2892,38 @@ mod tests {
             figure.axes_metadata(1).unwrap().axes_style.font_size,
             Some(14.0)
         );
+    }
+
+    #[test]
+    fn legend_entry_carries_marker_and_omits_line_for_marker_only_series() {
+        let mut figure = Figure::new();
+        let mut plot = LinePlot::new(vec![2.0], vec![6.0]).unwrap().with_label("optimum");
+        plot.line_style = crate::plots::line::LineStyle::None;
+        plot.marker = Some(crate::plots::line::LineMarkerAppearance {
+            kind: crate::plots::scatter::MarkerStyle::Circle,
+            size: 10.0,
+            edge_color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            face_color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            filled: true,
+        });
+        figure.add_line_plot(plot);
+        let entry = &figure.legend_entries()[0];
+        assert!(!entry.line_visible);
+        assert!(entry.marker.as_ref().is_some_and(|m| m.filled));
+    }
+
+    #[test]
+    fn set_labels_skips_lines_hidden_from_legend() {
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
+        let mut hidden = LinePlot::new(vec![0.0, 1.0], vec![2.0, 1.0]).unwrap();
+        hidden.handle_visibility = "off".to_string();
+        figure.add_line_plot(hidden);
+        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![3.0, 4.0]).unwrap());
+        figure.set_labels(&["first".into(), "second".into()]);
+
+        let labels: Vec<String> = figure.legend_entries().into_iter().map(|e| e.label).collect();
+        assert_eq!(labels, vec!["first".to_string(), "second".to_string()]);
     }
 
     #[test]

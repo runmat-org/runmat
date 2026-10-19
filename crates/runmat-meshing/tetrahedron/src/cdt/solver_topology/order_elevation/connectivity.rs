@@ -10,8 +10,9 @@ use crate::cdt::solver_topology::{
 
 pub(super) fn elevate(
     topology: &mut SolverMeshTopology,
-    midpoint_by_edge: &MidpointMap,
+    midpoint_by_edge: &MidpointMap<'_>,
     cancellation: &dyn MeshingCancellationSignal,
+    control: &dyn runmat_geometry_core::GeometryEvaluationControl,
 ) -> Result<(), DelaunaySolverTopologyError> {
     for element in &mut topology.volume_elements {
         cancellation_checkpoint(cancellation)?;
@@ -50,7 +51,8 @@ pub(super) fn elevate(
         edge.order = BoundaryEdgeOrder::Line3;
         edge.node_ids.push(midpoint(midpoint_by_edge, corners)?);
     }
-    let mut node_ids = Vec::with_capacity(topology.nodes.len());
+    let storage = crate::cdt::solver_topology::storage::Storage(Some(control));
+    let mut node_ids = storage.vector(topology.nodes.len())?;
     for node in &topology.nodes {
         cancellation_checkpoint(cancellation)?;
         node_ids.push(node.node_id);
@@ -60,7 +62,8 @@ pub(super) fn elevate(
         .iter_mut()
         .find(|field| field.location == FieldTopologyLocation::Node)
         .ok_or_else(|| invalid("solver topology has no node field map"))?;
-    node_field.ordered_entity_ids = node_ids;
+    let original = std::mem::replace(&mut node_field.ordered_entity_ids, node_ids);
+    storage.release_backing(original)?;
     Ok(())
 }
 
@@ -77,7 +80,7 @@ fn cancellation_checkpoint(
 }
 
 fn midpoint(
-    midpoint_by_edge: &MidpointMap,
+    midpoint_by_edge: &MidpointMap<'_>,
     corners: [u64; 2],
 ) -> Result<u64, DelaunaySolverTopologyError> {
     midpoint_by_edge

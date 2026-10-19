@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{
-    quality::predicate::{orient2d, PredicateSign},
+    quality::predicate::{
+        projected_orient2d_constructed, triangle_projection_axes_constructed, PredicateSign,
+        SpatialPredicatePoint,
+    },
     StableDigest,
 };
 
@@ -11,6 +14,12 @@ use super::{
     FacetRecoveryWork,
 };
 
+use crate::cdt::insertion::topology_access::TetrahedralTopology;
+
+mod topology;
+mod witness;
+use topology::triangulate_with_existing_topology_edges;
+
 fn triangle_edges(triangle: [StableDigest; 3]) -> [[StableDigest; 2]; 3] {
     [
         [triangle[0], triangle[1]],
@@ -19,27 +28,51 @@ fn triangle_edges(triangle: [StableDigest; 3]) -> [[StableDigest; 2]; 3] {
     ]
 }
 
-fn topology_edge_exists(
-    topology: &crate::cdt::DelaunayVolumeTopology,
-    endpoints: [StableDigest; 2],
-) -> bool {
-    let Some(first) = node_index(topology, endpoints[0]) else {
+fn topology_edge_exists(topology: &impl TetrahedralTopology, endpoints: [StableDigest; 2]) -> bool {
+    let [Some(first), Some(second)] = endpoints.map(|identity| topology.node_index(identity))
+    else {
         return false;
     };
-    let Some(second) = node_index(topology, endpoints[1]) else {
-        return false;
-    };
-    topology.incidence.vertex_stars[first]
-        .iter()
-        .any(|tetrahedron| {
-            topology.tetrahedra[*tetrahedron as usize]
-                .vertex_indices
-                .contains(&(second as u32))
-        })
+    topology.has_edge([first, second])
+}
+
+pub(super) struct FacetSupportView<'a, T> {
+    pub(super) topology: &'a T,
+    segments: &'a [crate::cdt::DelaunayRecoveredSegment],
 }
 
 pub(super) fn facet_support(
     recovery: &DelaunaySegmentRecovery,
+    constraints: &DelaunayConstraints,
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Vec<DelaunayRecoveredFacetTriangle>, DelaunayFacetRecoveryError> {
+    facet_support_on(
+        &recovery.topology,
+        &recovery.segments,
+        constraints,
+        constraint_index,
+        work,
+    )
+}
+
+pub(super) fn facet_support_on(
+    topology: &impl TetrahedralTopology,
+    segments: &[crate::cdt::DelaunayRecoveredSegment],
+    constraints: &DelaunayConstraints,
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<Vec<DelaunayRecoveredFacetTriangle>, DelaunayFacetRecoveryError> {
+    construct_support(
+        &FacetSupportView { topology, segments },
+        constraints,
+        constraint_index,
+        work,
+    )
+}
+
+fn construct_support(
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     constraints: &DelaunayConstraints,
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
@@ -97,7 +130,7 @@ pub(super) fn facet_support(
 }
 
 fn edge_chain(
-    recovery: &DelaunaySegmentRecovery,
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     constraints: &DelaunayConstraints,
     edge: [u32; 2],
     constraint_index: u32,
@@ -136,7 +169,7 @@ fn edge_chain(
 }
 
 fn triangulate_boundary(
-    recovery: &DelaunaySegmentRecovery,
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     mut boundary: Vec<StableDigest>,
     source: [StableDigest; 3],
     source_edge_membership: &BTreeMap<StableDigest, BTreeSet<usize>>,
@@ -144,7 +177,9 @@ fn triangulate_boundary(
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Vec<DelaunayRecoveredFacetTriangle>, DelaunayFacetRecoveryError> {
     let projection = projection_axes(recovery, source, constraint_index, work)?;
-    let polygon_sign = polygon_sign(recovery, &boundary, projection, constraint_index, work)?;
+    // Source-edge traversal fixes winding. A rounded split-point corner cannot
+    // replace the original facet's orientation authority.
+    let polygon_sign = orientation(recovery, source, projection, constraint_index, work)?;
     if let Some(triangles) = triangulate_with_existing_topology_edges(
         recovery,
         &boundary,
@@ -195,7 +230,7 @@ fn triangulate_boundary(
                 constraint_index,
                 work,
             )? {
-                if topology_edge_exists(&recovery.topology, [triangle[0], triangle[2]]) {
+                if topology_edge_exists(recovery.topology, [triangle[0], triangle[2]]) {
                     ear = Some((index, triangle));
                     break;
                 }
@@ -204,6 +239,15 @@ fn triangulate_boundary(
         }
         let ear = ear.or(recoverable_ear);
         let Some((index, triangle)) = ear else {
+            witness::report(
+                recovery,
+                &boundary,
+                source,
+                source_edge_membership,
+                (projection, polygon_sign),
+                constraint_index,
+                work,
+            )?;
             return Err(invalid(
                 constraint_index,
                 "facet boundary has no deterministic nondegenerate ear",
@@ -238,88 +282,8 @@ fn triangulate_boundary(
     Ok(triangles)
 }
 
-fn triangulate_with_existing_topology_edges(
-    recovery: &DelaunaySegmentRecovery,
-    boundary: &[StableDigest],
-    axes: [usize; 2],
-    polygon_sign: PredicateSign,
-    source_edge_membership: &BTreeMap<StableDigest, BTreeSet<usize>>,
-    constraint_index: u32,
-    work: &mut FacetRecoveryWork<'_>,
-) -> Result<Option<Vec<DelaunayRecoveredFacetTriangle>>, DelaunayFacetRecoveryError> {
-    let node_count = boundary.len();
-    let mut splits = vec![vec![None::<usize>; node_count]; node_count];
-    for (index, row) in splits
-        .iter_mut()
-        .enumerate()
-        .take(node_count.saturating_sub(1))
-    {
-        row[index + 1] = Some(usize::MAX);
-    }
-    for width in 2..node_count {
-        for first in 0..(node_count - width) {
-            let last = first + width;
-            for middle in (first + 1)..last {
-                work.support_step(constraint_index)?;
-                if splits[first][middle].is_none() || splits[middle][last].is_none() {
-                    continue;
-                }
-                let triangle = [boundary[first], boundary[middle], boundary[last]];
-                if shares_source_edge(triangle, source_edge_membership)
-                    || orientation(recovery, triangle, axes, constraint_index, work)?
-                        != polygon_sign
-                    || !triangle_edges(triangle)
-                        .into_iter()
-                        .all(|edge| topology_edge_exists(&recovery.topology, edge))
-                {
-                    continue;
-                }
-                splits[first][last] = Some(middle);
-                break;
-            }
-        }
-    }
-    if splits[0][node_count - 1].is_none() {
-        return Ok(None);
-    }
-    let mut triangles = Vec::with_capacity(node_count - 2);
-    append_interval_triangulation(
-        boundary,
-        &splits,
-        0,
-        node_count - 1,
-        &mut triangles,
-        constraint_index,
-    )?;
-    Ok(Some(triangles))
-}
-
-fn append_interval_triangulation(
-    boundary: &[StableDigest],
-    splits: &[Vec<Option<usize>>],
-    first: usize,
-    last: usize,
-    triangles: &mut Vec<DelaunayRecoveredFacetTriangle>,
-    constraint_index: u32,
-) -> Result<(), DelaunayFacetRecoveryError> {
-    if last == first + 1 {
-        return Ok(());
-    }
-    let Some(middle) = splits[first][last] else {
-        return Err(invalid(
-            constraint_index,
-            "facet support dynamic program lost a reachable interval split",
-        ));
-    };
-    triangles.push(DelaunayRecoveredFacetTriangle {
-        node_identities: [boundary[first], boundary[middle], boundary[last]],
-    });
-    append_interval_triangulation(boundary, splits, first, middle, triangles, constraint_index)?;
-    append_interval_triangulation(boundary, splits, middle, last, triangles, constraint_index)
-}
-
 fn align_support_with_topology(
-    recovery: &DelaunaySegmentRecovery,
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     triangles: &mut [DelaunayRecoveredFacetTriangle],
     axes: [usize; 2],
     polygon_sign: PredicateSign,
@@ -337,7 +301,7 @@ fn align_support_with_topology(
         let mut replacement = None;
         for (edge, owner_indices) in owners {
             work.support_step(constraint_index)?;
-            if owner_indices.len() != 2 || topology_edge_exists(&recovery.topology, edge) {
+            if owner_indices.len() != 2 || topology_edge_exists(recovery.topology, edge) {
                 continue;
             }
             let opposite = [owner_indices[0], owner_indices[1]].map(|triangle_index| {
@@ -349,7 +313,7 @@ fn align_support_with_topology(
             let [Some(first), Some(second)] = opposite else {
                 continue;
             };
-            if first == second || !topology_edge_exists(&recovery.topology, [first, second]) {
+            if first == second || !topology_edge_exists(recovery.topology, [first, second]) {
                 continue;
             }
             let mut candidates = [[first, second, edge[0]], [second, first, edge[1]]];
@@ -392,7 +356,7 @@ fn shares_source_edge(
 }
 
 fn triangle_contains_other_boundary_node(
-    recovery: &DelaunaySegmentRecovery,
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     boundary: &[StableDigest],
     triangle: [StableDigest; 3],
     axes: [usize; 2],
@@ -439,7 +403,7 @@ fn triangle_contains_other_boundary_node(
 }
 
 fn polygon_has_area(
-    recovery: &DelaunaySegmentRecovery,
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     boundary: &[StableDigest],
     axes: [usize; 2],
     polygon_sign: PredicateSign,
@@ -464,63 +428,14 @@ fn polygon_has_area(
     Ok(false)
 }
 
-fn projection_axes(
-    recovery: &DelaunaySegmentRecovery,
+fn points(
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
     triangle: [StableDigest; 3],
     constraint_index: u32,
-    work: &mut FacetRecoveryWork<'_>,
-) -> Result<[usize; 2], DelaunayFacetRecoveryError> {
-    for axes in [[0, 1], [0, 2], [1, 2]] {
-        if orientation(recovery, triangle, axes, constraint_index, work)? != PredicateSign::Zero {
-            return Ok(axes);
-        }
-    }
-    Err(invalid(
-        constraint_index,
-        "facet source vertices are exactly collinear",
-    ))
-}
-
-fn polygon_sign(
-    recovery: &DelaunaySegmentRecovery,
-    boundary: &[StableDigest],
-    axes: [usize; 2],
-    constraint_index: u32,
-    work: &mut FacetRecoveryWork<'_>,
-) -> Result<PredicateSign, DelaunayFacetRecoveryError> {
-    for index in 0..boundary.len() {
-        let sign = orientation(
-            recovery,
-            [
-                boundary[(index + boundary.len() - 1) % boundary.len()],
-                boundary[index],
-                boundary[(index + 1) % boundary.len()],
-            ],
-            axes,
-            constraint_index,
-            work,
-        )?;
-        if sign != PredicateSign::Zero {
-            return Ok(sign);
-        }
-    }
-    Err(invalid(
-        constraint_index,
-        "facet boundary is exactly collinear",
-    ))
-}
-
-fn orientation(
-    recovery: &DelaunaySegmentRecovery,
-    triangle: [StableDigest; 3],
-    axes: [usize; 2],
-    constraint_index: u32,
-    work: &mut FacetRecoveryWork<'_>,
-) -> Result<PredicateSign, DelaunayFacetRecoveryError> {
-    work.support_step(constraint_index)?;
+) -> Result<[SpatialPredicatePoint; 3], DelaunayFacetRecoveryError> {
     let points = triangle.map(|identity| {
-        node_index(&recovery.topology, identity)
-            .map(|index| recovery.topology.nodes[index].coordinates_m)
+        node_index(recovery.topology, identity)
+            .map(|index| recovery.topology.nodes()[index].predicate_point())
             .ok_or_else(|| {
                 invalid(
                     constraint_index,
@@ -529,14 +444,47 @@ fn orientation(
             })
     });
     let [first, second, third] = points;
-    let points = [first?, second?, third?];
-    orient2d(points.map(|point| [point[axes[0]], point[axes[1]]])).map_err(|predicate| {
-        error(
-            DelaunayFacetRecoveryErrorKind::InvalidTopology,
-            Some(constraint_index),
-            format!("facet support predicate failed: {predicate:?}"),
-        )
-    })
+    Ok([first?, second?, third?])
+}
+fn projection_axes(
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
+    triangle: [StableDigest; 3],
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<[usize; 2], DelaunayFacetRecoveryError> {
+    work.support_step(constraint_index)?;
+    triangle_projection_axes_constructed(points(recovery, triangle, constraint_index)?)
+        .map_err(|failure| {
+            error(
+                DelaunayFacetRecoveryErrorKind::InvalidTopology,
+                Some(constraint_index),
+                format!("facet projection predicate failed: {failure:?}"),
+            )
+        })?
+        .ok_or_else(|| {
+            invalid(
+                constraint_index,
+                "facet source vertices are exactly collinear",
+            )
+        })
+}
+fn orientation(
+    recovery: &FacetSupportView<'_, impl TetrahedralTopology>,
+    triangle: [StableDigest; 3],
+    axes: [usize; 2],
+    constraint_index: u32,
+    work: &mut FacetRecoveryWork<'_>,
+) -> Result<PredicateSign, DelaunayFacetRecoveryError> {
+    work.support_step(constraint_index)?;
+    projected_orient2d_constructed(points(recovery, triangle, constraint_index)?, axes).map_err(
+        |failure| {
+            error(
+                DelaunayFacetRecoveryErrorKind::InvalidTopology,
+                Some(constraint_index),
+                format!("facet support predicate failed: {failure:?}"),
+            )
+        },
+    )
 }
 
 fn invalid(constraint_index: u32, reason: &'static str) -> DelaunayFacetRecoveryError {
@@ -546,3 +494,6 @@ fn invalid(constraint_index: u32, reason: &'static str) -> DelaunayFacetRecovery
         reason,
     )
 }
+
+#[cfg(test)]
+mod tests;

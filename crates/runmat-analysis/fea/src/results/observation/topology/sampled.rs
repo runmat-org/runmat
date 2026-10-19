@@ -1,24 +1,30 @@
 //! Exact sampled storage authority; no structural topology or field interpolation is invented.
 use super::*;
 
-impl ObservationTopology {
+impl ObservationTopology<'_> {
     pub fn from_sampled(
         sampling: &SampledVolumeFieldTopology,
         mesh: &SolverMeshArtifact,
     ) -> Result<Self, ObservationError> {
         sampling.validate_for_mesh(mesh).map_err(invalid)?;
         let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
-        let element_indices = projection
-            .elements
-            .iter()
-            .enumerate()
-            .map(|(index, element)| (element.stable_identity, index))
-            .collect::<BTreeMap<_, _>>();
-        let node_coordinates = projection
-            .nodes
-            .iter()
-            .map(|node| (node.stable_identity, node.coordinates_m))
-            .collect::<BTreeMap<_, _>>();
+        let element_indices = SortedValues::derive(
+            projection
+                .elements
+                .iter()
+                .enumerate()
+                .map(|(i, element)| (element.stable_identity, i)),
+            projection.elements.len(),
+        )
+        .map_err(storage_error)?;
+        let node_coordinates = SortedValues::derive(
+            projection
+                .nodes
+                .iter()
+                .map(|node| (node.stable_identity, node.coordinates_m)),
+            projection.nodes.len(),
+        )
+        .map_err(storage_error)?;
         let mut integration_points_by_parent = vec![Vec::new(); projection.elements.len()];
         let volume_integration_points = sampling
             .integration_samples()
@@ -91,13 +97,16 @@ impl ObservationTopology {
             face_boundary_sources: Vec::new(),
             beam_elements: Vec::new(),
             shell_elements: Vec::new(),
-            node_selectors: projection
-                .nodes
-                .iter()
-                .enumerate()
-                .map(|(index, node)| (node.node_id, vec![index]))
-                .collect(),
-            solid_projection: Some(projection),
+            node_selectors: SortedValues::derive_grouped(
+                projection
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, node)| (node.node_id, i)),
+                projection.nodes.len(),
+            )
+            .map_err(storage_error)?,
+            solid_projection: Some(Cow::Owned(projection)),
             sampling: Some(sampling.clone()),
             integration_points_by_parent,
         })

@@ -483,9 +483,6 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut y_input =
         Some(NumericInput::from_value(y, BUILTIN_NAME).map_err(map_stem_invalid_argument)?);
     let opts = PlotRenderOptions {
-        title: "Stem",
-        x_label: "X",
-        y_label: "Y",
         ..Default::default()
     };
     let plot_index_out = Rc::new(RefCell::new(None));
@@ -668,6 +665,8 @@ fn build_stem_gpu_plot(
                 x_span: 1.0,
                 y_min: 0.0,
                 y_span: 1.0,
+                x_log: false,
+                y_log: false,
                 line_style: runmat_plot::plots::LineStyle::Solid,
                 marker_size: marker.size,
             },
@@ -706,6 +705,8 @@ fn build_stem_gpu_plot(
                 x_span: 1.0,
                 y_min: 0.0,
                 y_span: 1.0,
+                x_log: false,
+                y_log: false,
                 line_style: runmat_plot::plots::LineStyle::Solid,
                 marker_size: marker.size,
             },

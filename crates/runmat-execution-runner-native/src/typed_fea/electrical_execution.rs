@@ -46,7 +46,12 @@ pub(super) async fn execute(
         prepared.input_materializations.len(),
     )
     .map_err(|error| error.to_string())?;
-    let config = NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?;
+    let mut config = NativeExecutionConfig::for_current_executable().map_err(|e| e.to_string())?;
+    config.max_workers = workers.max(1);
+    config.worker_cpu_millicores = prepared
+        .local_execution
+        .checked_cpu_millicores()
+        .map_err(|e| e.to_string())?;
     let observers = LocalStructuralStudyObservers {
         progress: options.progress_observer.clone(),
         mesh: options.mesh_observer.clone(),

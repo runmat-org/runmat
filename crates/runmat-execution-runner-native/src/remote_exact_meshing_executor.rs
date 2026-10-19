@@ -194,15 +194,34 @@ impl RemoteExactMeshingExecutor {
 }
 
 impl CacheImport for RemoteExactMeshingExecutor {
-    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        if let Some(bytes) = self
-            .pool
-            .execution_object_by_digest(digest)
-            .map_err(|error| runmat_execution_artifact::ArtifactError::Invalid(error.to_string()))?
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if let Some(bytes) =
+            self.pool
+                .read_verified_bounded_with_admission(digest, maximum_bytes, admit)?
         {
-            return Ok(Some(bytes.as_ref().to_vec()));
+            return Ok(Some(bytes));
         }
-        self.local_store.read_verified(digest)
+        self.local_store
+            .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        if let Some(bytes) = self.pool.read_verified_bounded(digest, maximum_bytes)? {
+            return Ok(Some(bytes));
+        }
+        self.local_store
+            .read_verified_bounded(digest, maximum_bytes)
+    }
+    fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified_bounded(digest, u64::MAX)
     }
 }
 

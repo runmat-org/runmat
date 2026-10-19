@@ -11,9 +11,13 @@ impl SolidNewtonProblem<'_> {
         work: &mut SolidAttemptWork,
     ) -> Result<AcceptedSolidIncrement, SolidNewtonError> {
         let mut displacement = committed.displacement.clone();
-        let mut evaluation = self.evaluate(&displacement, &committed.constitutive)?;
+        let mut evaluation = self.evaluate_trial(
+            &displacement,
+            &committed.constitutive,
+            committed.contact.as_ref(),
+        )?;
         work.tangent_evaluations += 1;
-        let mut residual = self.residual(&evaluation, factor)?;
+        let mut residual = self.residual(&evaluation.evaluation, factor)?;
         let force_norm = norm(
             &self
                 .reduction
@@ -38,7 +42,8 @@ impl SolidNewtonProblem<'_> {
             {
                 break;
             }
-            let correction = self.correction(&evaluation.tangent, &residual, factor, work)?;
+            let correction =
+                self.correction(&evaluation.evaluation.tangent, &residual, factor, work)?;
             let motion_norm = |u: &[f64]| {
                 u.iter()
                     .zip(&self.reduction.offset)
@@ -50,6 +55,7 @@ impl SolidNewtonProblem<'_> {
                 && relative_increment <= self.policy.relative_residual_tolerance
             {
                 let dissipation = evaluation
+                    .evaluation
                     .element_evidence
                     .iter()
                     .map(|e| e.plastic_dissipation_increment_j)
@@ -65,18 +71,32 @@ impl SolidNewtonProblem<'_> {
                         "plastic dissipation overflow".into(),
                     ));
                 }
+                let contact_energy = match (
+                    committed.contact_energy.as_ref(),
+                    evaluation.contact_diagnostics,
+                ) {
+                    (None, None) => None,
+                    (Some(previous), Some(diagnostics)) => Some(previous.advance(diagnostics)?),
+                    _ => {
+                        return Err(SolidNewtonError::Invalid(
+                            "contact energy/trial inventory differs".into(),
+                        ))
+                    }
+                };
                 let state = AcceptedSolidState {
                     scope_identity: self.scope_identity,
                     load_factor: factor,
                     displacement,
-                    constitutive: evaluation.trial_state.clone(),
+                    constitutive: evaluation.evaluation.trial_state.clone(),
+                    contact: evaluation.contact,
+                    contact_energy,
                     accumulated_plastic_dissipation_j: accumulated,
                 };
-                self.validate_accepted(&state)?;
+                self.validate_accepted_record(&state, work)?;
                 work.tangent_evaluations += 1;
                 return Ok(AcceptedSolidIncrement {
                     state,
-                    evaluation,
+                    evaluation: evaluation.evaluation,
                     relative_residual,
                     relative_increment,
                     correction_norm,
@@ -105,9 +125,13 @@ impl SolidNewtonProblem<'_> {
                     .map(|(u, delta)| u + alpha * delta)
                     .collect::<Vec<_>>();
                 // Every line-search candidate uses the SAME accepted constitutive history.
-                let trial = self.evaluate(&trial_u, &committed.constitutive)?;
+                let trial = self.evaluate_trial(
+                    &trial_u,
+                    &committed.constitutive,
+                    committed.contact.as_ref(),
+                )?;
                 work.tangent_evaluations += 1;
-                let trial_residual = self.residual(&trial, factor)?;
+                let trial_residual = self.residual(&trial.evaluation, factor)?;
                 let trial_norm = norm(&trial_residual);
                 if !self.policy.line_search
                     || trial_norm <= (1.0 - 1.0e-4 * alpha) * old_norm

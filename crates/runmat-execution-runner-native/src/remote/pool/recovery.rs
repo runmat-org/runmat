@@ -181,6 +181,7 @@ impl RemotePoolCheckpoint {
                         .0
                         .bytes()])
                 || request.environment != program.environment
+                || request.console != program.console
                 || request.inputs != program.arguments
                 || request.outputs.requested_outputs != program.requested_outputs
             {

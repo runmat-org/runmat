@@ -39,6 +39,33 @@ pub fn projected_canonical_output_resource_facts(
     })
 }
 
+/// A domain-owned structural profile replaces the unknown-shape multiplier.
+/// Transport and manifest allowances stay identical to ordinary output planning.
+pub(super) fn profiled_canonical_output_resource_facts(
+    profile: runmat_canonical_codec::SerializedCanonicalProfile,
+) -> Result<PreparedOutputResourceFacts, ResourcePlanningError> {
+    let encoded = profile.encoded_bytes_upper_bound;
+    if encoded == 0 {
+        return Err(ResourcePlanningError::Invalid(
+            "profiled output must be nonempty".into(),
+        ));
+    }
+    let closure = encoded
+        .checked_add(ANALYSIS_MANIFEST_MAX_ENCODED_BYTES)
+        .ok_or(ResourcePlanningError::Overflow("profiled output closure"))?;
+    let construction = profile
+        .materialization_resident_bytes_estimate
+        .checked_add(closure)
+        .ok_or(ResourcePlanningError::Overflow(
+            "profiled output construction",
+        ))?;
+    Ok(PreparedOutputResourceFacts {
+        encoded_payload_bytes_upper_bound: ByteCount(encoded),
+        transport_closure_bytes_upper_bound: ByteCount(closure),
+        construction_resident_bytes_admission_budget: ByteCount(construction),
+    })
+}
+
 pub fn structural_state_profiles_output_resource_facts(
     model: &AnalysisModel,
     step: &ProcedureStep,

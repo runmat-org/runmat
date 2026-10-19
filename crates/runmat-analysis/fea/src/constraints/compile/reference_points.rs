@@ -2,64 +2,77 @@
 use super::super::workspace::{add, slots};
 use super::*;
 
-/// Counted reference/record/ID-copy slots, excluding borrowed model, identity encoding,
-/// allocator rounding/bookkeeping and RSS. Repeated IDs are bounded before deduplication.
+/// Counted reference/record/ID-copy slots and the largest shared identity materialization,
+/// excluding borrowed model, allocator rounding/bookkeeping and RSS. Repeated IDs are bounded before deduplication.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConstraintReferencePointWorkspaceProfile {
     pub candidate_slots: usize,
     pub point_slots: usize,
     pub id_payload_bytes: u64,
+    pub identity_materialization_bytes: u64,
     pub total_requested_bytes: u64,
 }
 pub fn constraint_reference_point_workspace_profile(
     model: &AnalysisModel,
 ) -> Result<ConstraintReferencePointWorkspaceProfile, ConstraintPlanError> {
+    from_constraints(
+        model
+            .constraints
+            .iter()
+            .filter_map(|constraint| constraint.structural()),
+    )
+}
+
+fn from_constraints<'a>(
+    constraints: impl IntoIterator<Item = &'a StructuralConstraint>,
+) -> Result<ConstraintReferencePointWorkspaceProfile, ConstraintPlanError> {
     check_cancelled()?;
+    let mut identity_materialization_bytes = 0;
     let mut count = 0usize;
     let mut bytes = 0u64;
-    for constraint in &model.constraints {
+    for constraint in constraints {
         check_cancelled()?;
-        let runmat_analysis_core::AnalysisConstraint::Structural(c) = constraint else {
-            continue;
-        };
-        let coupling = match &c.kind {
+        let coupling = match &constraint.kind {
             StructuralConstraintKind::RigidCoupling(c)
             | StructuralConstraintKind::DistributingCoupling(c) => c,
             _ => continue,
         };
         count = super::super::workspace::count_add(count, 1)?;
+        identity_materialization_bytes = identity_materialization_bytes.max(
+            super::super::plan::canonical_value_workspace_bytes(&(
+                coupling.reference_point.reference_point_id.trim(),
+                coupling.reference_point.position.meters,
+            ))?,
+        );
         bytes = add(
             bytes,
             coupling.reference_point.reference_point_id.trim().len() as u64,
         )?;
     }
     let total = add(
-        bytes,
+        identity_materialization_bytes,
         add(
-            slots::<(&str, [f64; 3], usize)>(count)?,
-            slots::<CanonicalStructuralReferencePoint>(count)?,
+            bytes,
+            add(
+                slots::<(&str, [f64; 3], usize)>(count)?,
+                slots::<CanonicalStructuralReferencePoint>(count)?,
+            )?,
         )?,
     )?;
+    usize::try_from(total).map_err(|_| super::super::workspace::overflow())?;
     Ok(ConstraintReferencePointWorkspaceProfile {
         candidate_slots: count,
         point_slots: count,
         id_payload_bytes: bytes,
+        identity_materialization_bytes,
         total_requested_bytes: total,
     })
 }
 pub(in crate::constraints) fn canonical_reference_points(
     constraints: &[&StructuralConstraint],
 ) -> Result<Vec<CanonicalStructuralReferencePoint>, ConstraintPlanError> {
-    let count = constraints
-        .iter()
-        .filter(|c| {
-            matches!(
-                c.kind,
-                StructuralConstraintKind::RigidCoupling(_)
-                    | StructuralConstraintKind::DistributingCoupling(_)
-            )
-        })
-        .count();
+    let profile = from_constraints(constraints.iter().copied())?;
+    let count = profile.candidate_slots;
     let mut by_id = reserve(count)?;
     for constraint in constraints {
         check_cancelled()?;

@@ -9,12 +9,11 @@ use crate::{
 
 use super::{graph::ValidatedGraph, step::family_can_consume_state, step_error, transition_error};
 
-pub(super) fn validate_inputs<'a>(
-    step: &'a crate::ProcedureStep,
+// Upstream contracts have already been checked by the original graph authority.
+pub(super) fn validate_initial_inputs(
+    step: &crate::ProcedureStep,
     model: &AnalysisModel,
-    graph: &ValidatedGraph<'a>,
 ) -> Result<(), AnalysisValidationError> {
-    validate_input_contracts(step, graph)?;
     for input in &step.state_inputs {
         if matches!(input.source, StateSource::InitialConditions)
             && !model.initial_conditions.iter().any(|condition| {

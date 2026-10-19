@@ -30,7 +30,7 @@ pub struct TestArgs {
     pub cluster: Option<String>,
 
     /// Remote project used for admission and billing
-    #[arg(long)]
+    #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
     pub project: Option<Uuid>,
 
     /// Authorized remote execution queue

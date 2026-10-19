@@ -66,6 +66,10 @@ impl AccumulationWorkspace {
         Ok(Self { retained_bytes })
     }
 
+    pub(super) fn retained_bytes(&self) -> u64 {
+        self.retained_bytes
+    }
+
     pub(super) fn advance(
         &mut self,
         group: &ConstraintGroupEvidence,
@@ -78,9 +82,18 @@ impl AccumulationWorkspace {
         if current_row_count > current_row_capacity || incoming.len() > incoming_capacity {
             return Err(crate::constraints::workspace::overflow());
         }
-        let increment = plan::canonical_value_workspace_profile(&([group], incoming))?
+        let payload = plan::canonical_value_workspace_profile(&([group], incoming))?
             .materialization_bytes_without_envelope()
             .ok_or_else(crate::constraints::workspace::overflow)?;
+        let buffers = add(
+            super::storage::row_buffers(incoming, incoming_capacity)?,
+            super::storage::evidence_buffers(
+                &group.targets,
+                &group.pairings,
+                group.coupling.as_ref(),
+            )?,
+        )?;
+        let increment = add(payload, buffers)?;
         let retained_bytes = add(self.retained_bytes, increment)?;
         // A moving exact reserve may overlap its old allocation, the new row buffer,
         // and incoming row records. Payload ownership itself moves without cloning.

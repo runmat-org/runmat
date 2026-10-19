@@ -40,23 +40,7 @@ pub fn build_resource_planned_task_submission_with_closure(
         ));
     };
     host.validate_inputs(input_roots)?;
-    if closure.inputs.len() != host.workload.inputs.len()
-        || closure
-            .inputs
-            .iter()
-            .zip(&host.workload.inputs)
-            .any(|(prepared, input)| {
-                prepared.manifest.kind != input.kind
-                    || prepared.manifest.logical_identity != input.logical_identity
-                    || prepared.manifest.payload_digest != input.payload_digest
-                    || prepared.root.digest != input.manifest_digest
-                    || prepared.root.encoded_length != input.manifest_encoded_length
-            })
-    {
-        return Err(crate::AnalysisBridgeError::Identity(
-            "analysis immutable closure differs from host",
-        ));
-    }
+    crate::transport::validate_prepared_analysis_inputs(host, closure.inputs)?;
     let plans = closure
         .inputs
         .iter()

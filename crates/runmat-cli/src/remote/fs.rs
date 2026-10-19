@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use runmat_config::runtime::RunMatRuntimeConfig;
 use runmat_filesystem::{FsFileType, FsProvider, RemoteFsConfig, RemoteFsProvider};
 use runmat_server_client::auth::{
-    resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
+    resolve_auth_token, resolve_public_project_id, resolve_server_url, RemoteConfig,
 };
 use std::fs;
 use std::io::{self, Write};
@@ -38,7 +38,9 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
         | FsCommand::GitPush { project, .. }
         | FsCommand::ManifestHistory { project, .. }
         | FsCommand::ManifestRestore { project, .. }
-        | FsCommand::ManifestUpdate { project, .. } => resolve_project_id(&config, *project)?,
+        | FsCommand::ManifestUpdate { project, .. } => {
+            resolve_public_project_id(&config, *project)?
+        }
     };
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
@@ -69,19 +71,19 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
     ) {
         match command {
             FsCommand::History { path, .. } => {
-                history::list_history(&server_url, &token, project_id, &path).await?
+                history::list_history(&server_url, &token, &project_id, &path).await?
             }
             FsCommand::Restore { version, .. } => {
-                history::restore_version(&server_url, &token, project_id, version).await?
+                history::restore_version(&server_url, &token, &project_id, version).await?
             }
             FsCommand::HistoryDelete { version, .. } => {
-                history::delete_version(&server_url, &token, project_id, version).await?
+                history::delete_version(&server_url, &token, &project_id, version).await?
             }
             FsCommand::ManifestHistory { path, .. } => {
-                history::list_manifest_history(&server_url, &token, project_id, &path).await?
+                history::list_manifest_history(&server_url, &token, &project_id, &path).await?
             }
             FsCommand::ManifestRestore { version, .. } => {
-                history::restore_manifest_version(&server_url, &token, project_id, version).await?
+                history::restore_manifest_version(&server_url, &token, &project_id, version).await?
             }
             FsCommand::ManifestUpdate {
                 path,
@@ -92,7 +94,7 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 history::update_manifest(
                     &server_url,
                     &token,
-                    project_id,
+                    &project_id,
                     &path,
                     base_version,
                     &manifest,
@@ -100,7 +102,7 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 .await?
             }
             FsCommand::SnapshotList { .. } => {
-                snapshots::list_snapshots(&server_url, &token, project_id).await?
+                snapshots::list_snapshots(&server_url, &token, &project_id).await?
             }
             FsCommand::SnapshotCreate {
                 message,
@@ -108,41 +110,42 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 tag,
                 ..
             } => {
-                snapshots::create_snapshot(&server_url, &token, project_id, message, parent, tag)
+                snapshots::create_snapshot(&server_url, &token, &project_id, message, parent, tag)
                     .await?
             }
             FsCommand::SnapshotRestore { snapshot, .. } => {
-                snapshots::restore_snapshot(&server_url, &token, project_id, snapshot).await?
+                snapshots::restore_snapshot(&server_url, &token, &project_id, snapshot).await?
             }
             FsCommand::SnapshotDelete { snapshot, .. } => {
-                snapshots::delete_snapshot(&server_url, &token, project_id, snapshot).await?
+                snapshots::delete_snapshot(&server_url, &token, &project_id, snapshot).await?
             }
             FsCommand::SnapshotTagList { .. } => {
-                snapshots::list_snapshot_tags(&server_url, &token, project_id).await?
+                snapshots::list_snapshot_tags(&server_url, &token, &project_id).await?
             }
             FsCommand::SnapshotTagSet { snapshot, tag, .. } => {
-                snapshots::set_snapshot_tag(&server_url, &token, project_id, snapshot, &tag).await?
+                snapshots::set_snapshot_tag(&server_url, &token, &project_id, snapshot, &tag)
+                    .await?
             }
             FsCommand::SnapshotTagDelete { tag, .. } => {
-                snapshots::delete_snapshot_tag(&server_url, &token, project_id, &tag).await?
+                snapshots::delete_snapshot_tag(&server_url, &token, &project_id, &tag).await?
             }
             FsCommand::GitClone {
                 directory, server, ..
             } => {
                 let url = resolve_server_url(&config, server.clone())?;
-                git::git_clone(&url, &token, project_id, &directory).await?
+                git::git_clone(&url, &token, &project_id, &directory).await?
             }
             FsCommand::GitPull {
                 directory, server, ..
             } => {
                 let url = resolve_server_url(&config, server.clone())?;
-                git::git_pull(&url, &token, project_id, &directory).await?
+                git::git_pull(&url, &token, &project_id, &directory).await?
             }
             FsCommand::GitPush {
                 directory, server, ..
             } => {
                 let url = resolve_server_url(&config, server.clone())?;
-                git::git_push(&url, &token, project_id, &directory).await?
+                git::git_push(&url, &token, &project_id, &directory).await?
             }
             _ => {}
         }
@@ -268,7 +271,7 @@ pub async fn run_with_remote_fs(
     config: &RunMatRuntimeConfig,
 ) -> Result<()> {
     let mut remote_config = RemoteConfig::load()?;
-    let project_id = resolve_project_id(&remote_config, project)?;
+    let project_id = resolve_public_project_id(&remote_config, project)?;
     let server_url = resolve_server_url(&remote_config, server)?;
     let token = resolve_auth_token(&mut remote_config, &server_url).await?;
     let shard_threshold_bytes = read_u64_env("RUNMAT_FS_SHARD_THRESHOLD_BYTES")

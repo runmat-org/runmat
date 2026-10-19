@@ -95,6 +95,17 @@ impl RemoteObjectStore {
 }
 
 impl CacheImport for RemoteObjectStore {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> runmat_execution_artifact::ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.0
+            .lock()
+            .expect("remote object store poisoned")
+            .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+    }
     fn read_verified_bounded(
         &self,
         digest: Digest,
@@ -277,6 +288,15 @@ impl RemoteObjectCache {
 }
 
 impl CacheImport for RemoteObjectCache {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> runmat_execution_artifact::ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.store
+            .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+    }
     fn read_verified_bounded(
         &self,
         digest: Digest,
@@ -613,3 +633,6 @@ mod tests {
             .is_err());
     }
 }
+
+#[cfg(test)]
+mod read_admission_tests;

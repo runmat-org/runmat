@@ -32,7 +32,11 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 use super::common::numeric_vector;
 use super::gpu_helpers::axis_bounds;
-use super::state::{render_active_plot, PlotRenderOptions};
+use super::state::{
+    continue_line_color_cycle_after, current_axes_state, current_hold_enabled,
+    line_color_for_axes_series_index, next_line_color_for_axes, render_active_plot,
+    PlotRenderOptions,
+};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
 use crate::builtins::plotting::type_resolvers::handle_array_type;
 
@@ -586,9 +590,6 @@ fn bar_descriptor_error(
 #[derive(Clone, Copy)]
 struct BarRenderConfig {
     builtin_name: &'static str,
-    title: &'static str,
-    x_label: &'static str,
-    y_label: &'static str,
     orientation: Orientation,
     gpu_orientation: BarOrientation,
     invalid_error: &'static BuiltinErrorDescriptor,
@@ -607,9 +608,6 @@ impl BarRenderConfig {
 
 const BAR_CONFIG: BarRenderConfig = BarRenderConfig {
     builtin_name: BUILTIN_NAME,
-    title: "Bar Chart",
-    x_label: "Category",
-    y_label: "Value",
     orientation: Orientation::Vertical,
     gpu_orientation: BarOrientation::Vertical,
     invalid_error: &BAR_ERROR_INVALID_ARGUMENT,
@@ -618,9 +616,6 @@ const BAR_CONFIG: BarRenderConfig = BarRenderConfig {
 
 const BARH_CONFIG: BarRenderConfig = BarRenderConfig {
     builtin_name: BARH_BUILTIN_NAME,
-    title: "Horizontal Bar Chart",
-    x_label: "Value",
-    y_label: "Category",
     orientation: Orientation::Horizontal,
     gpu_orientation: BarOrientation::Horizontal,
     invalid_error: &BARH_ERROR_INVALID_ARGUMENT,
@@ -720,13 +715,14 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
     let style = parse_bar_style_args(config.builtin_name, &rest, defaults)?;
     let mut input = Some(BarInput::from_value(x_values, values, config).await?);
     let opts = PlotRenderOptions {
-        title: config.title,
-        x_label: config.x_label,
-        y_label: config.y_label,
         ..Default::default()
     };
     let plot_indices = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices);
+    let series_total = std::rc::Rc::new(std::cell::RefCell::new(0usize));
+    let series_total_slot = std::rc::Rc::clone(&series_total);
+    let target_axes = current_axes_state().active_index;
+    let hold_enabled = current_hold_enabled();
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(config.builtin_name, opts, move |figure, axes| {
         let style = style.clone();
@@ -736,8 +732,10 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
                 match build_bar_gpu_series(arg.x_tensor().cloned(), handle, &style, config) {
                     Ok(charts) if !charts.is_empty() => {
                         let total = charts.len();
+                        *series_total_slot.borrow_mut() = total;
                         for (idx, mut bar) in charts.into_iter().enumerate() {
                             let default_label = default_series_label(idx, total);
+                            let style = series_bar_style(&style, axes, hold_enabled, idx);
                             apply_bar_style(&mut bar, &style, &default_label);
                             let plot_index = figure.add_bar_chart_on_axes(bar, axes);
                             plot_indices_slot.borrow_mut().push((axes, plot_index));
@@ -754,14 +752,20 @@ async fn bar_impl(args: Vec<Value>, config: BarRenderConfig) -> crate::BuiltinRe
         let (x_tensor, tensor) = arg.into_tensors(config)?;
         let charts = build_bar_series_from_tensor(x_tensor, tensor, &style, config)?;
         let total = charts.len();
+        *series_total_slot.borrow_mut() = total;
         for (idx, mut bar) in charts.into_iter().enumerate() {
             let default_label = default_series_label(idx, total);
+            let style = series_bar_style(&style, axes, hold_enabled, idx);
             apply_bar_style(&mut bar, &style, &default_label);
             let plot_index = figure.add_bar_chart_on_axes(bar, axes);
             plot_indices_slot.borrow_mut().push((axes, plot_index));
         }
         Ok(())
     });
+    if !hold_enabled {
+        // Rendering cleared the axes and reset the color order; resume it after these series.
+        continue_line_color_cycle_after(target_axes, *series_total.borrow());
+    }
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if !(lower.contains("plotting is unavailable") || lower.contains("non-main thread")) {
@@ -1277,6 +1281,26 @@ fn gather_tensor_from_gpu(
     config: BarRenderConfig,
 ) -> BuiltinResult<Tensor> {
     block_on(gather_tensor_from_gpu_async(handle, config))
+}
+
+/// The style for one series: without a face color in the call, the series takes its
+/// color from the axes color order (the next color under `hold on`), as in MATLAB.
+pub(crate) fn series_bar_style(
+    style: &BarStyle,
+    axes: usize,
+    hold_enabled: bool,
+    series_index: usize,
+) -> BarStyle {
+    let mut style = style.clone();
+    if !style.face_color_explicit && !style.face_color_flat {
+        let color = if hold_enabled {
+            next_line_color_for_axes(axes)
+        } else {
+            line_color_for_axes_series_index(axes, series_index)
+        };
+        style.face_color = Vec4::new(color.x, color.y, color.z, style.face_color.w);
+    }
+    style
 }
 
 pub(crate) fn apply_bar_style(bar: &mut BarChart, style: &BarStyle, default_label: &str) {

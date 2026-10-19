@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_geometry_core::PersistentEntityId;
@@ -29,30 +30,69 @@ impl std::fmt::Display for TopologyMutationError {
 
 impl std::error::Error for TopologyMutationError {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub(in crate::cdt) struct MutableTetrahedron {
     pub(in crate::cdt) vertex_indices: [u32; 4],
     pub(in crate::cdt) neighbors: [Option<u32>; 4],
     pub(in crate::cdt) region_id: Option<PersistentEntityId>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub(in crate::cdt) struct TopologyMutation {
+    pub(super) trace_enabled: bool,
+    pub(super) edit_trace: super::trace::TopologyEdits,
+    pub(super) trial_journals: Vec<super::trial::TrialJournal>,
+    pub(super) edge_observers: Vec<BTreeMap<u32, Option<[u32; 4]>>>,
     pub(in crate::cdt) nodes: Vec<DelaunayVolumeNode>,
     pub(in crate::cdt) node_indices: BTreeMap<StableDigest, u32>,
-    positions: BTreeSet<[u64; 3]>,
+    pub(super) positions: BTreeSet<[u64; 3]>,
+    pub(super) spatial_index:
+        RefCell<Option<std::sync::Arc<runmat_meshing_core::PointSpatialIndex<StableDigest>>>>,
+    pub(super) coordinate_scale_m: f64,
+    pub(super) cell_spatial_index: RefCell<Option<super::spatial_cells::CellSpatialCache>>,
+    pub(super) connectivity_state: RefCell<Option<crate::cdt::topology::ConnectivitySearchState>>,
+    pub(super) physical_dirty_faces: Option<BTreeSet<[u32; 3]>>,
     pub(in crate::cdt) tetrahedra: Vec<Option<MutableTetrahedron>>,
     pub(super) tetrahedron_indices: BTreeMap<[u32; 4], u32>,
     pub(super) free_tetrahedra: BTreeSet<u32>,
     pub(in crate::cdt) vertex_stars: Vec<BTreeSet<u32>>,
     pub(super) face_uses: BTreeMap<[u32; 3], Vec<(u32, usize)>>,
+    pub(in crate::cdt) boundary_faces: BTreeMap<[u32; 3], (u32, usize)>,
 }
 
 impl TopologyMutation {
+    /// Cavity commits maintain canonical corner keys in this ordered index.
+    /// Seed once from maintained keys, then update the cycle hint with each
+    /// atomic cavity. Fixed nodes/regions are a search precondition, not proof.
+    pub(in crate::cdt) fn connectivity_search_fingerprint<E>(
+        &self,
+        checkpoint: &mut impl FnMut() -> Result<(), E>,
+    ) -> Result<[u8; 32], E> {
+        let mut retained = self.connectivity_state.borrow_mut();
+        if let Some(state) = *retained {
+            checkpoint()?;
+            return Ok(state.fingerprint());
+        }
+        let mut state = crate::cdt::topology::ConnectivitySearchState::default();
+        for vertices in self.tetrahedron_indices.keys() {
+            checkpoint()?;
+            state.insert(*vertices);
+        }
+        *retained = Some(state);
+        Ok(state.fingerprint())
+    }
+
+    pub(in crate::cdt) fn contains_position(&self, coordinates: [f64; 3]) -> bool {
+        self.positions.contains(&coordinates.map(coordinate_bits))
+    }
     pub(in crate::cdt) fn from_canonical(topology: DelaunayVolumeTopology) -> Self {
-        let vertex_stars = topology
-            .incidence
-            .vertex_stars
+        let mut incidence = topology.incidence;
+        let original_stars = std::mem::take(&mut incidence.vertex_stars);
+        // The working owner reconstructs faces and region support. Release the
+        // obsolete canonical incidence before allocating its mutation indexes.
+        drop(incidence);
+        let vertex_stars = original_stars
             .into_iter()
             .map(|star| star.into_iter().collect())
             .collect();
@@ -88,15 +128,30 @@ impl TopologyMutation {
             .iter()
             .map(|node| node.coordinates_m.map(coordinate_bits))
             .collect();
+        let coordinate_scale_m = nodes
+            .iter()
+            .flat_map(|node| node.coordinates_m)
+            .map(f64::abs)
+            .fold(1.0, f64::max);
         let mut result = Self {
+            trace_enabled: false,
+            edit_trace: super::trace::TopologyEdits::default(),
+            trial_journals: Vec::new(),
+            edge_observers: Vec::new(),
             nodes,
             node_indices,
+            coordinate_scale_m,
+            spatial_index: RefCell::new(None),
+            cell_spatial_index: RefCell::new(None),
+            connectivity_state: RefCell::new(None),
+            physical_dirty_faces: None,
             positions,
             tetrahedra,
             tetrahedron_indices,
             free_tetrahedra: BTreeSet::new(),
             vertex_stars,
             face_uses: BTreeMap::new(),
+            boundary_faces: BTreeMap::new(),
         };
         result.rebuild_face_uses();
         result
@@ -122,16 +177,30 @@ impl TopologyMutation {
         }
         let index = u32::try_from(self.nodes.len())
             .map_err(|_| error("mutable topology exhausted its node index space"))?;
+        self.coordinate_scale_m = node
+            .coordinates_m
+            .into_iter()
+            .map(f64::abs)
+            .fold(self.coordinate_scale_m, f64::max);
         self.nodes.push(node);
         self.node_indices.insert(node.identity, index);
         self.positions
             .insert(node.coordinates_m.map(coordinate_bits));
         self.vertex_stars.push(BTreeSet::new());
+        if self.trace_enabled && !self.trial_journals.is_empty() {
+            self.edit_trace
+                .push(super::trace::TopologyEdit::AppendNode(node));
+        }
         Ok(index)
     }
 
     pub(in crate::cdt) fn tetrahedron(&self, index: u32) -> Option<&MutableTetrahedron> {
         self.tetrahedra.get(index as usize)?.as_ref()
+    }
+
+    pub(in crate::cdt) fn tetrahedron_index(&self, mut vertices: [u32; 4]) -> Option<u32> {
+        vertices.sort_unstable();
+        self.tetrahedron_indices.get(&vertices).copied()
     }
 
     pub(super) fn oriented_vertices(
@@ -193,6 +262,12 @@ impl TopologyMutation {
                     .push((tetrahedron_index as u32, opposite));
             }
         }
+        self.boundary_faces = self
+            .face_uses
+            .iter()
+            .filter(|(_, uses)| uses.len() == 1)
+            .map(|(face, uses)| (*face, uses[0]))
+            .collect();
     }
 
     pub(super) fn remove_face_uses(&mut self, tetrahedron_index: u32, vertices: [u32; 4]) {
@@ -207,6 +282,7 @@ impl TopologyMutation {
             if remove_face {
                 self.face_uses.remove(&face);
             }
+            self.sync_boundary_face(face);
         }
     }
 
@@ -218,11 +294,12 @@ impl TopologyMutation {
                 .or_default();
             uses.push((tetrahedron_index, opposite));
             uses.sort_unstable();
+            self.sync_boundary_face(Self::face(vertices, opposite));
         }
     }
 }
 
-fn coordinate_bits(value: f64) -> u64 {
+pub(super) fn coordinate_bits(value: f64) -> u64 {
     if value == 0.0 {
         0
     } else {

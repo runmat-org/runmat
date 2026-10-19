@@ -1,6 +1,7 @@
 use super::*;
 use crate::results::field::VolumeFieldSamplingRule;
 use runmat_meshing_core::fixtures::{canonical_tetrahedron_solver_mesh, slab_mesh};
+use runmat_meshing_core::ElementOrder;
 
 #[test]
 fn sampled_observation_topology_retains_each_original_rule_order_and_identity() {
@@ -69,7 +70,7 @@ fn sampled_observation_topology_retains_each_original_rule_order_and_identity() 
 fn parent_expansion_counts_actual_samples_and_preserves_structural_legacy_identity() {
     let mesh = slab_mesh(1);
     let projection = AnalysisProjection::derive(&mesh).unwrap();
-    let structural = ObservationTopology::from_projection(&projection);
+    let structural = ObservationTopology::from_projection(&projection).unwrap();
     assert_eq!(
         structural.identity,
         Some(CanonicalStructuralTopologyIdentity::Solid {

@@ -1,6 +1,6 @@
 //! Counted construction storage shared by topology and its numerical consumers.
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
-use std::{mem::size_of, ops::Index};
+use std::{borrow::Borrow, mem::size_of, ops::Index};
 use thiserror::Error;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Error)]
 pub(crate) enum TopologyStorageError {
@@ -36,7 +36,11 @@ pub(crate) fn add(a: u64, b: u64) -> Result<u64, TopologyStorageError> {
     a.checked_add(b).ok_or(TopologyStorageError::Capacity)
 }
 pub(crate) fn slots<T>(count: usize) -> Result<u64, TopologyStorageError> {
-    u64::try_from(multiply(count, size_of::<T>())?).map_err(|_| TopologyStorageError::Capacity)
+    let bytes = multiply(count, size_of::<T>())?;
+    if bytes > isize::MAX as usize {
+        return Err(TopologyStorageError::Capacity);
+    }
+    u64::try_from(bytes).map_err(|_| TopologyStorageError::Capacity)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,21 +63,33 @@ impl<K: Copy + Ord, T> SortedValues<K, T> {
         if entries.len() != count {
             return Err(TopologyStorageError::Index);
         }
+        Self::from_entries(entries)
+    }
+    /// Validate an already counted inventory without allocating a second copy.
+    pub(crate) fn from_entries(mut entries: Vec<(K, T)>) -> Result<Self, TopologyStorageError> {
+        check_cancelled()?;
         entries.sort_unstable_by_key(|v| v.0);
         if entries.windows(2).any(|p| p[0].0 == p[1].0) {
             return Err(TopologyStorageError::Index);
         }
+        check_cancelled()?;
         Ok(Self(entries))
     }
-    pub(crate) fn get(&self, key: &K) -> Option<&T> {
+    pub(crate) fn get<Q: Ord + ?Sized>(&self, key: &Q) -> Option<&T>
+    where
+        K: Borrow<Q>,
+    {
         self.0
-            .binary_search_by_key(key, |v| v.0)
+            .binary_search_by(|v| v.0.borrow().cmp(key))
             .ok()
             .map(|i| &self.0[i].1)
     }
-    pub(crate) fn get_mut(&mut self, key: &K) -> Option<&mut T> {
+    pub(crate) fn get_mut<Q: Ord + ?Sized>(&mut self, key: &Q) -> Option<&mut T>
+    where
+        K: Borrow<Q>,
+    {
         self.0
-            .binary_search_by_key(key, |v| v.0)
+            .binary_search_by(|v| v.0.borrow().cmp(key))
             .ok()
             .map(|i| &mut self.0[i].1)
     }
@@ -112,5 +128,20 @@ pub(crate) fn solver_node_identities(
     )
 }
 
+mod dense;
+pub(crate) use dense::{DenseIndexUnion, DenseUnionError};
+mod grouped;
+mod keys;
+pub(crate) use keys::SortedKeys;
+
 #[cfg(test)]
 mod tests;
+
+impl From<TopologyStorageError> for super::AnalysisProjectionError {
+    fn from(error: TopologyStorageError) -> Self {
+        match error {
+            TopologyStorageError::Cancelled => Self::Cancelled,
+            other => Self::ResourceEstimate(other.to_string()),
+        }
+    }
+}

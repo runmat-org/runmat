@@ -1,6 +1,8 @@
 mod chart;
+mod mesh_view;
 mod sample;
 mod types;
+pub(crate) use mesh_view::ExactFaceRefinedMeshView;
 
 pub use chart::{accept_exact_face_chart_mesh, validate_exact_face_chart_acceptance};
 pub use sample::{accept_exact_face_mesh, validate_exact_face_acceptance};

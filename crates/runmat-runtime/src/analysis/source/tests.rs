@@ -281,7 +281,7 @@ import function impactPulse from \"./signals.m\"\n";
     assert_eq!(requests.len(), 1);
     assert_eq!(
         requests[0].module_path,
-        LogicalSourcePath::new("project/signals.m").unwrap()
+        LogicalSourcePath::new("signals.m").unwrap()
     );
     assert_eq!(
         requests[0].symbol,
@@ -290,8 +290,8 @@ import function impactPulse from \"./signals.m\"\n";
     assert_eq!(
         prepared.source_dependencies().unwrap(),
         [
-            LogicalSourcePath::new("project/main.fea").unwrap(),
-            LogicalSourcePath::new("project/signals.m").unwrap(),
+            LogicalSourcePath::new("main.fea").unwrap(),
+            LogicalSourcePath::new("signals.m").unwrap(),
         ]
         .into_iter()
         .collect()
@@ -312,7 +312,7 @@ fn prepared_dependency_closure_keeps_unavailable_import_targets() {
     assert!(prepared
         .source_dependencies()
         .unwrap()
-        .contains(&LogicalSourcePath::new("project/missing.fea").unwrap()));
+        .contains(&LogicalSourcePath::new("missing.fea").unwrap()));
 }
 
 #[test]
@@ -411,7 +411,7 @@ study second {
 #[test]
 fn immutable_snapshot_discovers_modules_and_geometry_before_checking() {
     let temporary = tempdir().unwrap();
-    let root_path = LogicalSourcePath::new("project/main.fea").unwrap();
+    let root_path = LogicalSourcePath::new("main.fea").unwrap();
     let root = super::FeaSourceSnapshotBuilder::source_module(
         root_path,
         br#"import material steel from "./materials.fea"
@@ -425,11 +425,11 @@ geometry bracket {
 
     assert_eq!(
         builder.missing_module_paths().unwrap(),
-        vec![LogicalSourcePath::new("project/materials.fea").unwrap()]
+        vec![LogicalSourcePath::new("materials.fea").unwrap()]
     );
     builder
         .add_module(super::FeaSourceSnapshotBuilder::source_module(
-            LogicalSourcePath::new("project/materials.fea").unwrap(),
+            LogicalSourcePath::new("materials.fea").unwrap(),
             br#"material steel {
     mass_density = 7850 kg/m^3
     elastic {
@@ -447,7 +447,7 @@ geometry bracket {
     assert_eq!(requests.geometry.len(), 1);
     assert_eq!(
         requests.geometry[0].logical_path,
-        LogicalSourcePath::new("project/geometry/box.brep").unwrap()
+        LogicalSourcePath::new("geometry/box.brep").unwrap()
     );
     prepared
         .add_geometry(
@@ -514,8 +514,8 @@ fn filesystem_host_retains_normalized_ap242_exchange_facts() {
     let host = FilesystemFeaHost::new(temporary.path()).unwrap();
     let exchange = host
         .inspect(&GeometryInspectionRequest {
-            referrer: LogicalSourcePath::new("project/main.fea").unwrap(),
-            logical_path: LogicalSourcePath::new("project/part.step").unwrap(),
+            referrer: LogicalSourcePath::new("main.fea").unwrap(),
+            logical_path: LogicalSourcePath::new("part.step").unwrap(),
             source_units: runmat_geometry_core::UnitSystem::Meter,
             expected_content_digest: None,
         })
@@ -613,7 +613,7 @@ study static {
     let program = check_fea_path_in_root(temporary.path(), &path).unwrap();
     assert!(program.is_valid(), "{:#?}", program.diagnostics);
 
-    let resolved = program.resolve_study("project/main.fea", "static").unwrap();
+    let resolved = program.resolve_study("main.fea", "static").unwrap();
     assert_eq!(resolved.mesh.mesh_id, "volume");
     assert!(resolved.execution_policy.is_none());
     let realized = resolved

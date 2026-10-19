@@ -1,5 +1,9 @@
 //! Surface parameter triangulation, recovery, and validation stages.
 
+/// Actual package build configuration used for internal artifact reuse.
+#[doc(hidden)]
+pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
+
 pub const CRATE_PURPOSE: &str = "face-domain triangulation, loop recovery, and surface validation";
 
 mod acceptance;
@@ -32,8 +36,9 @@ pub use chart::{
     ExactFaceCharts,
 };
 pub use exact_boundary::{
-    build_exact_surface_boundary, validate_exact_surface_boundary, ExactFaceBoundary,
-    ExactFaceBoundaryLoop, ExactFaceBoundarySegment, ExactSurfaceBoundary,
+    build_exact_surface_boundary, build_exact_surface_boundary_with_cancellation,
+    validate_exact_surface_boundary, validate_exact_surface_boundary_with_cancellation,
+    ExactFaceBoundary, ExactFaceBoundaryLoop, ExactFaceBoundarySegment, ExactSurfaceBoundary,
     ExactSurfaceBoundaryConflict, ExactSurfaceBoundaryError, ExactSurfaceBoundaryErrorKind,
     EXACT_SURFACE_BOUNDARY_SCHEMA_VERSION,
 };
@@ -51,14 +56,15 @@ pub use exact_cdt::{
 pub use exact_metric::{
     validate_exact_face_metric_evaluation,
     validate_exact_face_metric_evaluation_in_parameterization, ExactFaceMetricError,
-    ExactFaceMetricErrorKind, ExactFaceMetricEvaluation, ParametricMetricTensor,
-    ResolvedFaceMetricField,
+    ExactFaceMetricErrorKind, ExactFaceMetricEvaluation, ExactFaceMetricProvenance,
+    ParametricMetricTensor, ResolvedFaceMetricField,
 };
 pub use face_geometry::{
     evaluate_exact_face_geometry, evaluate_exact_face_geometry_in_parameterization,
     validate_exact_face_geometry, validate_exact_face_geometry_in_parameterization,
-    ExactFaceGeometry, ExactFaceGeometryContext, ExactFaceGeometryError,
-    ExactFaceGeometryErrorKind, ExactFaceGeometryVertex, ExactFaceTriangleGeometry,
+    ExactBoundaryNodeCoordinates, ExactFaceGeometry, ExactFaceGeometryContext,
+    ExactFaceGeometryError, ExactFaceGeometryErrorKind, ExactFaceGeometryVertex,
+    ExactFaceTriangleGeometry,
 };
 pub use face_mesh::{
     join_exact_face_charts, validate_exact_face_mesh, ExactFaceJoinContext, ExactFaceJoinError,
@@ -67,7 +73,9 @@ pub use face_mesh::{
     ExactFaceMeshTriangle, EXACT_FACE_MESH_SCHEMA_VERSION,
 };
 pub use face_pipeline::{
-    mesh_exact_face_partition, ExactFacePartitionContext, ExactFacePartitionError,
+    mesh_exact_face_partition, mesh_exact_face_partition_with_reuse, visit_exact_face_partition,
+    visit_exact_face_partition_with_reuse, AcceptedExactFace, ExactFaceMeshReuse,
+    ExactFacePartitionCompletion, ExactFacePartitionContext, ExactFacePartitionError,
     ExactFacePartitionErrorKind, ExactFacePartitionOptions,
 };
 pub use refinement::{
@@ -85,19 +93,38 @@ pub use refinement::{
 };
 pub use surface_mesh::{
     build_exact_face_mesh_batch, build_exact_face_partition_result, decide_exact_surface_pass,
-    decode_exact_face_mesh_batch, decode_exact_face_partition_result, decode_exact_surface_mesh,
+    decide_exact_surface_pass_owned, decide_exact_surface_pass_owned_admitted,
+    decide_exact_surface_pass_with_cancellation, decode_exact_face_mesh_batch,
+    decode_exact_face_partition_result, decode_exact_face_partition_result_admitted,
+    decode_exact_face_partition_result_with_cancellation,
+    decode_exact_face_reuse_record_with_cancellation, decode_exact_surface_mesh,
     decode_exact_surface_mesh_from_pass, decode_exact_surface_pass_result,
-    decode_published_exact_surface_mesh, encode_decided_exact_surface_pass_result,
-    encode_exact_face_mesh_batch, encode_exact_face_partition_result, encode_exact_surface_mesh,
-    encode_exact_surface_mesh_from_pass, encode_exact_surface_pass_result,
-    face_partition_descriptors, join_exact_face_mesh_batches, resolve_exact_surface_pass,
+    decode_exact_surface_pass_result_with_cancellation, decode_published_exact_surface_mesh,
+    decode_published_exact_surface_mesh_admitted,
+    decode_published_exact_surface_mesh_with_cancellation,
+    encode_decided_exact_surface_pass_result,
+    encode_decided_exact_surface_pass_result_with_cancellation, encode_exact_face_mesh_batch,
+    encode_exact_face_partition_result, encode_exact_face_partition_result_with_cancellation,
+    encode_exact_surface_mesh, encode_exact_surface_mesh_from_pass,
+    encode_exact_surface_mesh_from_pass_with_cancellation, encode_exact_surface_pass_result,
+    face_partition_descriptors, join_exact_face_mesh_batches,
+    profile_exact_face_partition_result_encoding, resolve_exact_surface_pass,
     validate_exact_face_mesh_batch, validate_exact_face_partition_result,
-    validate_exact_surface_mesh, validate_exact_surface_pass_result,
-    validate_published_exact_surface_mesh, ExactFaceMeshBatch, ExactFacePartitionOutcome,
+    validate_exact_face_partition_result_with_cancellation, validate_exact_surface_mesh,
+    validate_exact_surface_pass_result, validate_published_exact_surface_mesh,
+    AcceptedExactSurfacePass, ExactFaceMeshBatch, ExactFacePartitionOutcome,
     ExactFacePartitionResult, ExactSurfaceConvergenceError, ExactSurfaceConvergenceErrorKind,
     ExactSurfaceConvergenceOutcome, ExactSurfaceJoinOptions, ExactSurfaceMesh,
     ExactSurfaceMeshError, ExactSurfaceMeshErrorKind, ExactSurfacePassOutcome,
-    ExactSurfacePassResult, ExactSurfaceShellEvidence, EXACT_FACE_MESH_BATCH_SCHEMA_VERSION,
-    EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION, EXACT_SURFACE_MESH_SCHEMA_VERSION,
-    EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION, MAX_EXACT_FACE_PARTITIONS,
+    ExactSurfacePassResult, ExactSurfaceShellEvidence, PreparedExactSurfacePassEncoding,
+    EXACT_FACE_MESH_BATCH_SCHEMA_VERSION, EXACT_FACE_PARTITION_RESULT_SCHEMA_VERSION,
+    EXACT_SURFACE_MESH_SCHEMA_VERSION, EXACT_SURFACE_PASS_RESULT_SCHEMA_VERSION,
+    MAX_EXACT_FACE_PARTITIONS,
 };
+pub use surface_mesh::{
+    decode_exact_face_partition_records, decode_exact_face_partition_records_admitted,
+    decode_exact_face_partition_records_with_cancellation, encode_exact_face_partition_completion,
+    profile_exact_face_partition_completion, EXACT_FACE_PARTITION_RECORD_SET_SCHEMA_VERSION,
+};
+
+pub use surface_mesh::ExactFacePartitionEncoding;

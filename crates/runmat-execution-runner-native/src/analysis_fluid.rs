@@ -23,6 +23,21 @@ pub struct FluidStudyExecutionPolicy {
     pub priority: i16,
 }
 
+/// Execute all governed fluid phases through the shared native task pool.
+/// Retain `session.object_source()` before passing the session for cold result access.
+pub async fn execute_fluid_study_locally(
+    session: crate::NativeProgramSession,
+    preparation: FluidStudyPreparation,
+    policy: FluidStudyExecutionPolicy,
+) -> NativeExecutionResult<CompletedFluidStudy> {
+    execute_with_pool(
+        &mut crate::analysis_task_pool::LocalAnalysisTaskPool::new(session),
+        preparation,
+        policy,
+    )
+    .await
+}
+
 pub(crate) async fn execute_with_pool(
     pool: &mut impl AnalysisTaskPool,
     preparation: FluidStudyPreparation,

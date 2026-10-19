@@ -6,8 +6,10 @@ use serde::{Deserialize, Serialize};
 
 use super::{GeometryDocument, PersistentEntityId};
 
-pub use codec::{decode_faceted_solid, encode_faceted_solid};
-pub use construction::{admit_faceted_solid, build_faceted_solid_closure};
+pub use codec::{decode_faceted_solid, decode_faceted_solid_with_control, encode_faceted_solid};
+pub use construction::{
+    admit_faceted_solid, admit_faceted_solid_with_control, build_faceted_solid_closure,
+};
 
 pub const FACETED_SOLID_SCHEMA_VERSION: u16 = 2;
 
@@ -26,6 +28,17 @@ impl FacetedSolid {
         model: &super::FacetedSolidModel,
     ) -> Result<(), super::GeometryContractError> {
         validation::validate_faceted_solid(self, model)
+    }
+    pub fn validate_against_with_control(
+        &self,
+        model: &super::FacetedSolidModel,
+        control: &dyn crate::GeometryEvaluationControl,
+    ) -> Result<(), super::GeometryContractError> {
+        validation::validate_admitted(
+            self,
+            model,
+            crate::model::validation_storage::ValidationWork(Some(control)),
+        )
     }
 }
 

@@ -42,7 +42,7 @@ impl ParametricMetricTensor {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ExactFaceMetricEvaluation {
-    pub source_face_id: PersistentEntityId,
+    pub provenance: std::sync::Arc<ExactFaceMetricProvenance>,
     /// Authoritative chart-local coordinate used by meshing topology.
     pub uv: [f64; 2],
     /// Periodically equivalent coordinate admitted by the exact evaluator.
@@ -52,10 +52,44 @@ pub struct ExactFaceMetricEvaluation {
     pub derivative_v_m: [f64; 3],
     pub physical_metric: ParametricMetricTensor,
     pub sizing_metric: ParametricMetricTensor,
+}
+
+/// Immutable face-scoped provenance shared by all point evaluations of one field.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactFaceMetricProvenance {
+    pub source_face_id: PersistentEntityId,
     pub active_sources: Vec<MetricSourceKind>,
     pub applied_contribution_count: u32,
     pub clipped_contribution_count: u32,
     pub rejected_contribution_count: u32,
+}
+impl ExactFaceMetricProvenance {
+    /// Requested typed payload and owned string/vector data; allocator/Arc headers excluded.
+    pub(crate) fn storage_bytes(
+        face: &PersistentEntityId,
+        sources: &[MetricSourceKind],
+    ) -> Option<u64> {
+        let strings = face
+            .assembly_path
+            .iter()
+            .try_fold(face.source_topology_id.len(), |sum, path| {
+                sum.checked_add(path.len())
+            })?;
+        let paths = face
+            .assembly_path
+            .len()
+            .checked_mul(std::mem::size_of::<String>())?;
+        let sources = sources
+            .len()
+            .checked_mul(std::mem::size_of::<MetricSourceKind>())?;
+        u64::try_from(
+            std::mem::size_of::<Self>()
+                .checked_add(strings)?
+                .checked_add(paths)?
+                .checked_add(sources)?,
+        )
+        .ok()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

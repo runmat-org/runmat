@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    admission::validate_exact_face_mesh_contract,
+    admission::validate_exact_face_mesh_contract_with_cancellation,
     identity::{canonical_triangle, exact_face_triangle_id, rotate},
     lineage::{node_edge_parameters, validate_trim_lineage},
     ExactFaceJoinContext, ExactFaceJoinError, ExactFaceJoinErrorKind, ExactFaceJoinOptions,
@@ -108,7 +108,7 @@ pub fn join_exact_face_charts(
             match nodes.entry(pslg_vertex.node_id) {
                 std::collections::btree_map::Entry::Vacant(entry) => {
                     entry.insert(NodeBuilder {
-                        point_m: vertex.evaluation.point_m,
+                        point_m: vertex.point_m,
                         uses: vec![use_record],
                     });
                 }
@@ -123,7 +123,7 @@ pub fn join_exact_face_charts(
                         .fold(join_options.coordinate_tolerance_m, |maximum, tolerance| {
                             maximum.max(*tolerance)
                         });
-                    let discrepancy_m = distance(entry.get().point_m, vertex.evaluation.point_m);
+                    let discrepancy_m = distance(entry.get().point_m, vertex.point_m);
                     if discrepancy_m > coordinate_tolerance_m {
                         return Err(invalid(
                             &charts.source_face_id,
@@ -260,7 +260,11 @@ pub fn join_exact_face_charts(
         maximum_chordal_deviation_m,
         maximum_normal_deviation_rad,
     };
-    validate_exact_face_mesh_contract(&result, context.refinement.topology)?;
+    validate_exact_face_mesh_contract_with_cancellation(
+        &result,
+        context.refinement.topology,
+        Some(context.refinement.cancellation),
+    )?;
     Ok(result)
 }
 

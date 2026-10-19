@@ -1,5 +1,5 @@
 {
-  "crates/runmat-runtime/src/analysis/mod.rs": 5358,
+  "crates/runmat-runtime/src/analysis/mod.rs": 4818,
   "crates/runmat-analysis/fea/src/assembly/mod.rs": 4390,
   "crates/runmat-runtime/src/analysis/figures.rs": 3748,
   "crates/runmat-runtime/src/analysis/contracts.rs": 2828,
@@ -18,6 +18,5 @@
   "crates/runmat-analysis/fea/src/planning/resource/post_process.rs": 697,
   "crates/runmat-runtime/src/analysis/structural_study/lifecycle/preparation.rs": 715,
   "crates/runmat-analysis/fea/src/constraints/result.rs": 763,
-  "crates/runmat-analysis/fea/src/pipeline/structural_frequency.rs": 691,
-  "crates/runmat-analysis/fea/src/constraints/algebra.rs": 738
+  "crates/runmat-analysis/fea/src/constraints/algebra.rs": 697
 }

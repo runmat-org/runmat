@@ -361,6 +361,8 @@ pub(super) fn visit_boundary_quadrature(
         }
         let reference_weight = 0.5 * normalized_weight;
         visit(BoundaryQuadraturePoint {
+            reference_barycentric: barycentric,
+            reference_weight,
             position_m,
             area_vector_weight_m2: jacobian_vector.map(|value| value * reference_weight),
             area_weight_m2: jacobian * reference_weight,
@@ -371,7 +373,10 @@ pub(super) fn visit_boundary_quadrature(
     Some(())
 }
 
-fn signed_boundary_area_minimum(coordinates: &[[f64; 3]], corner_normal: [f64; 3]) -> Option<f64> {
+pub(super) fn signed_boundary_area_minimum(
+    coordinates: &[[f64; 3]],
+    corner_normal: [f64; 3],
+) -> Option<f64> {
     let signed_area = |u: f64, v: f64| {
         let (_, derivatives) = boundary_shape(BoundaryTriangleOrder::Tri6, [1.0 - u - v, u, v]);
         let tangent_u = weighted_derivative(coordinates, &derivatives, 0);
@@ -442,7 +447,7 @@ fn quadratic_edge_minimum(start: f64, end: f64, midpoint: f64) -> f64 {
     (curvature * position + slope) * position + start
 }
 
-fn boundary_shape(
+pub(super) fn boundary_shape(
     order: BoundaryTriangleOrder,
     [l1, l2, l3]: [f64; 3],
 ) -> ([f64; 6], [[f64; 2]; 6]) {
@@ -479,7 +484,19 @@ fn boundary_shape(
     }
 }
 
-fn weighted_position(coordinates: &[[f64; 3]], weights: &[f64]) -> [f64; 3] {
+/// Boundary shape derivatives are affine for Tri6; differentiate the shared owner exactly.
+pub(super) fn boundary_shape_second_derivatives(
+    order: BoundaryTriangleOrder,
+) -> [[[f64; 2]; 2]; 6] {
+    let (_, origin) = boundary_shape(order, [1.0, 0.0, 0.0]);
+    let (_, u) = boundary_shape(order, [0.0, 1.0, 0.0]);
+    let (_, v) = boundary_shape(order, [0.0, 0.0, 1.0]);
+    std::array::from_fn(|node| {
+        std::array::from_fn(|i| [u[node][i] - origin[node][i], v[node][i] - origin[node][i]])
+    })
+}
+
+pub(super) fn weighted_position(coordinates: &[[f64; 3]], weights: &[f64]) -> [f64; 3] {
     std::array::from_fn(|axis| {
         coordinates
             .iter()
@@ -489,7 +506,7 @@ fn weighted_position(coordinates: &[[f64; 3]], weights: &[f64]) -> [f64; 3] {
     })
 }
 
-fn weighted_derivative(
+pub(super) fn weighted_derivative(
     coordinates: &[[f64; 3]],
     derivatives: &[[f64; 2]],
     reference_axis: usize,

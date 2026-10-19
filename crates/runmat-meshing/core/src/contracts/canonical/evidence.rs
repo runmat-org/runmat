@@ -1,3 +1,5 @@
+mod observation;
+use runmat_canonical_codec::CanonicalCodecControl;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -93,9 +95,23 @@ impl InvariantEvidence {
     }
 }
 
+/// Provenance of original producing-stage observations imported from accepted
+/// artifacts. This is retained lineage, not an independently replayed proof.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReusedMeshingStageObservation {
+    pub original_observation_digest: StableDigest,
+    pub implementation_digest: StableDigest,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MeshingStageEvidence {
+    /// None denotes the original producer; cached observations retain original
+    /// counters and timings and explicitly bind their original evidence identity.
+    /// Omission preserves canonical bytes of existing fresh observations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reused_from: Option<ReusedMeshingStageObservation>,
     pub stage: MeshingStageKind,
     pub partition: MeshingPartitionDescriptor,
     pub stage_result_digest: StableDigest,
@@ -115,6 +131,22 @@ pub struct MeshingStageEvidence {
 
 impl MeshingStageEvidence {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
+        let control = super::MeshingCanonicalCodecControl::new(&super::NeverCancelled);
+        self.validate_with_control(&control)
+    }
+    fn validate_with_control(
+        &self,
+        control: &dyn CanonicalCodecControl,
+    ) -> Result<(), MeshingContractError> {
+        observation::checkpoint(control)?;
+        if let Some(origin) = &self.reused_from {
+            origin
+                .original_observation_digest
+                .validate_nonzero("original observation digest")?;
+            origin
+                .implementation_digest
+                .validate_nonzero("reused implementation digest")?;
+        }
         self.partition.validate()?;
         self.stage_result_digest
             .validate_nonzero("stage evidence result digest")?;
@@ -145,6 +177,14 @@ impl MeshingStageEvidence {
         }
         for distribution in self.achieved_error_distributions.values() {
             distribution.validate()?;
+        }
+        if let Some(origin) = &self.reused_from {
+            if observation::original_digest(self, control)? != origin.original_observation_digest {
+                return Err(MeshingContractError::invalid(
+                    "reused stage observation",
+                    "retained values differ from the original observation identity",
+                ));
+            }
         }
         Ok(())
     }
@@ -327,6 +367,14 @@ impl MeshingEvidence {
     }
 
     pub(super) fn validate_standalone(&self) -> Result<(), MeshingContractError> {
+        let control = super::MeshingCanonicalCodecControl::new(&super::NeverCancelled);
+        self.validate_standalone_with_control(&control)
+    }
+    fn validate_standalone_with_control(
+        &self,
+        control: &dyn CanonicalCodecControl,
+    ) -> Result<(), MeshingContractError> {
+        observation::checkpoint(control)?;
         if self.schema_version != MESHING_EVIDENCE_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
                 "meshing evidence schema version",
@@ -363,7 +411,8 @@ impl MeshingEvidence {
             ));
         }
         for stage in &self.stages {
-            stage.validate()?;
+            observation::checkpoint(control)?;
+            stage.validate_with_control(control)?;
             if stage.peak_memory_bytes > self.resources.peak_memory_bytes
                 || stage.peak_scratch_bytes > self.resources.peak_scratch_bytes
                 || stage.search_work > self.resources.search_work
@@ -409,6 +458,7 @@ impl MeshingEvidence {
             ));
         }
         for sizing in &self.sizing {
+            observation::checkpoint(control)?;
             sizing.validate()?;
         }
         Ok(())
@@ -441,4 +491,22 @@ fn validate_map_keys<T>(
 
 fn strictly_increasing_by<T, K: Ord>(values: &[T], key: impl Fn(&T) -> &K) -> bool {
     values.windows(2).all(|pair| key(&pair[0]) < key(&pair[1]))
+}
+
+impl MeshingEvidence {
+    /// Admit actual typed CBOR materialization and the largest original-observation
+    /// codec workspace before validating the complete evidence. No stage clone.
+    pub fn canonical_decode_with_control(
+        bytes: &[u8],
+        control: &dyn CanonicalCodecControl,
+        admit: impl FnMut(u64) -> Result<(), MeshingContractError>,
+    ) -> Result<Self, MeshingContractError> {
+        super::codec::decode_validated(
+            bytes,
+            control,
+            admit,
+            |evidence: &Self| observation::validation_workspace(evidence, control),
+            |evidence| evidence.validate_standalone_with_control(control),
+        )
+    }
 }

@@ -15,8 +15,10 @@ pub(super) fn compile(
 ) -> Result<Vec<V>, Error> {
     let mut force = vec![[0.0; 3]; t.cells.len()];
     for action in actions {
-        let ExcitationAction::BodyForce(a) = action else {
-            return Err(Error::Unsupported("non-bodyforce fluid excitation"));
+        let a = match action {
+            ExcitationAction::BodyForce(a) => a,
+            ExcitationAction::MassFlow(_) => continue, // Validated and bound by the physical boundary owner.
+            _ => return Err(Error::Unsupported("unsupported fluid excitation")),
         };
         if a.frame != CoordinateFrame::Global
             || a.kinematics != ExcitationKinematics::FixedFrame

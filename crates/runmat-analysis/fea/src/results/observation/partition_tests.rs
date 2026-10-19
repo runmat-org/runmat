@@ -173,7 +173,7 @@ fn canonical_partition_plan_covers_a_selected_field_once() {
     decoded.validate_for(&plan).unwrap();
     assert_eq!(decoded, partition_plan);
 
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let single = evaluate_partitioned_observation(
         &plan,
         &plan.observations[0],
@@ -230,7 +230,7 @@ fn integration_point_partitions_reconstruct_exact_entities_and_values() {
         ),
     )
     .unwrap();
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
 
     let serial = evaluate_partitioned_observation(
         &plan,
@@ -276,7 +276,7 @@ fn path_interpolation_is_equivalent_across_partition_layouts() {
     path.output_location = FieldLocation::Point;
     path.recovery = RecoveryPolicy::ShapeFunctionInterpolation;
     let (projection, plan, field) = prepared(ObservationRequest::Field(path));
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let serial = evaluate_partitioned_observation(
         &plan,
         &plan.observations[0],
@@ -345,7 +345,7 @@ fn materialized_volume_weighted_recovery_is_partition_equivalent() {
         AnalysisField::host_f64("structural.nodal_von_mises", vec![values.len()], values),
     )
     .unwrap();
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let serial = evaluate_partitioned_observation(
         &plan,
         &plan.observations[0],
@@ -387,7 +387,7 @@ fn spatial_extrema_retain_canonical_locations_and_tie_policy_across_partitions()
             extrema_ties: ties,
         });
         let (projection, plan, field) = prepared(ObservationRequest::Reduction(maximum));
-        let topology = ObservationTopology::from_projection(&projection);
+        let topology = ObservationTopology::from_projection(&projection).unwrap();
         let serial = evaluate_partitioned_observation(
             &plan,
             &plan.observations[0],
@@ -446,7 +446,7 @@ fn path_extrema_return_physical_sample_locations() {
         extrema_ties: ExtremaTiePolicy::AllLocations,
     });
     let (projection, plan, field) = prepared(ObservationRequest::Reduction(maximum));
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let result = evaluate_partitioned_observation(
         &plan,
         &plan.observations[0],
@@ -499,7 +499,7 @@ fn partitioned_boundary_reduction_matches_single_partition_evaluation() {
     observation.output_location = FieldLocation::Global;
     let (projection, plan, field) =
         prepared_on(projection, ObservationRequest::Reduction(observation));
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let resolved = &plan.observations[0];
     let single = evaluate_partitioned_observation(
         &plan,
@@ -569,7 +569,7 @@ fn partitioned_history_restart_preserves_placement_neutral_result_identity() {
         )
         .unwrap();
         let observation_id = ObservationId("partitioned_history".into());
-        let topology = ObservationTopology::from_projection(&projection);
+        let topology = ObservationTopology::from_projection(&projection).unwrap();
         let result_at = |time: f64, policy: ObservationExecutionPolicy| {
             let coordinate = RecoveredFieldSample::TimeSeconds(time);
             let values = projection
@@ -740,7 +740,7 @@ pub(super) fn checkpoint_test_evidence(time: f64) -> super::ObservationPartition
         &plan,
         &plan.observations[0],
         &field,
-        &ObservationTopology::from_projection(&projection),
+        &ObservationTopology::from_projection(&projection).unwrap(),
         ObservationExecutionPolicy::serial(),
         None,
     )
@@ -806,7 +806,7 @@ fn pressure_resultant_and_offset_moment_match_the_divergence_theorem() {
         AnalysisField::host_f64("contact.pressure", vec![values.len()], values),
     )
     .unwrap();
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let policy = ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(3).unwrap());
     let resultant = evaluate_partitioned_observation(
         &plan,
@@ -934,7 +934,7 @@ fn complex_volume_resultant_and_moment_preserve_the_complete_phasor() {
         ),
     )
     .unwrap();
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let volume = projection
         .elements
         .iter()
@@ -1058,7 +1058,7 @@ fn boundary_stress_resultant_uses_cauchy_traction_and_rejects_ambiguous_pressure
         &plan,
         &plan.observations[0],
         &field,
-        &ObservationTopology::from_projection(&projection),
+        &ObservationTopology::from_projection(&projection).unwrap(),
         ObservationExecutionPolicy::serial(),
         None,
     )
@@ -1154,7 +1154,7 @@ fn complex_boundary_pressure_resultant_is_partition_equivalent() {
         ),
     )
     .unwrap();
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let serial = evaluate_partitioned_observation(
         &plan,
         &plan.observations[0],
@@ -1239,7 +1239,7 @@ fn vector_l2_norm_is_scalar_and_partition_equivalent() {
         ),
     )
     .unwrap();
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let serial = evaluate_partitioned_observation(
         &plan,
         &plan.observations[0],
@@ -1337,7 +1337,7 @@ fn nodal_reaction_resultant_and_moment_are_discrete_partition_equivalent_sums() 
         AnalysisField::host_f64("reaction.force", vec![projection.nodes.len(), 3], values),
     )
     .unwrap();
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let serial_policy = ObservationExecutionPolicy::serial();
     let split_policy = ObservationExecutionPolicy::canonical(std::num::NonZeroU32::new(4).unwrap());
     for (observation, expected) in plan
@@ -1524,7 +1524,7 @@ fn partitioned_event_evaluation_binds_exact_attribution_across_workers() {
         occurrence_index: 0,
         source: SolverEventSource::CompletedResult { result: source },
     });
-    let topology = ObservationTopology::from_projection(&projection);
+    let topology = ObservationTopology::from_projection(&projection).unwrap();
     let single = evaluate_partitioned_observation(
         &plan,
         &plan.observations[0],

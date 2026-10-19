@@ -156,6 +156,7 @@ fn acoustic_accuracy_admission_binds_retained_result_and_original_intent() {
                 inventory_limits: limits,
             };
             let prepared = prepare_accuracy(preparation()).unwrap();
+            super::accuracy_import::assert_original_evidence(&prepared);
             let source = AccuracySourceReceipt::AcousticHarmonic(receipt);
             let check = |inputs: &[PreparedAnalysisObjects]| {
                 validate_accuracy_source_context(

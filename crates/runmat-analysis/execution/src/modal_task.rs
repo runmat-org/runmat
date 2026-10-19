@@ -10,8 +10,9 @@ use runmat_analysis_fea::{
         StructuralModalSolverResult, StructuralModalWorkload, StudyIdentity,
     },
     planning::resource::{
-        build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,
-        structural_modal_result_payload_bytes_upper_bound, FeaResourcePlan,
+        build_structural_modal_resource_plan_from_compilation,
+        structural_modal_receipt_payload_bytes_upper_bound,
+        structural_modal_result_output_resource_facts, FeaResourcePlan,
         PreparedStructuralModalResourceFacts,
     },
     post::fields::structural_observable_field_definitions,
@@ -44,6 +45,7 @@ const MODAL_TASK_LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
 pub struct StructuralModalTaskPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub program_revision: ProgramRevision,
@@ -114,18 +116,25 @@ pub fn prepare_structural_modal_task(
             "modal task has an invalid chunk size, mesh revision, or prestress binding".into(),
         ));
     }
-    let constraints = CanonicalStructuralConstraintPlan::compile_for_model(
+    let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
         preparation.workload.model(),
         Some(&preparation.mesh),
+        preparation
+            .workload
+            .procedure_step()?
+            .accuracy
+            .resources
+            .maximum_resident_bytes,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let constraints = compiled.plan();
     let field_definitions = structural_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let observations = resolve_structural_observation_plan(
         preparation.workload.procedure_step()?,
         preparation.workload.model(),
         Some(&preparation.mesh),
-        &constraints,
+        constraints,
         &field_definitions,
         ObservationLimits::default(),
     )
@@ -179,22 +188,23 @@ pub fn prepare_structural_modal_task(
         )?);
     }
     numerical_inputs.push(constraint_objects);
-    let result_payload_upper_bound = structural_modal_result_payload_bytes_upper_bound(
+    let result_output = structural_modal_result_output_resource_facts(
         Some(&preparation.mesh),
-        &constraints,
+        constraints,
         &preparation.workload,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let resource_plan = build_structural_modal_resource_plan(
+    let resource_plan = build_structural_modal_resource_plan_from_compilation(
         Some(&preparation.mesh),
-        &constraints,
+        &compiled,
         &observations,
         &preparation.workload,
         preparation.prestress_state.as_ref(),
         &preparation.accelerator_requests,
         PreparedStructuralModalResourceFacts {
+            local_execution: preparation.local_execution,
             inputs: prepared_input_resource_facts(&numerical_inputs)?,
-            result_output: projected_output_resource_facts(result_payload_upper_bound)?,
+            result_output,
             receipt_output: projected_output_resource_facts(
                 structural_modal_receipt_payload_bytes_upper_bound(),
             )?,

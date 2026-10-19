@@ -25,7 +25,7 @@ pub use driver::{NonlinearLoadContinuation, NonlinearLoadWork};
 pub(crate) use events::{detect_completed_nonlinear_events, nonlinear_solver_content_digest};
 pub use options::NonlinearSolveOptions;
 pub(crate) use schedule::LoadIncrementSchedule;
-pub use solid::AcceptedSolidState;
+pub use solid::{AcceptedContactEnergy, AcceptedSolidState};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonlinearSolveResult {

@@ -6,7 +6,8 @@ use runmat_execution_artifact::{LogicalObject, ObjectDescriptor, ObjectNamespace
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingChunkMediaType, MeshingEvidence};
 
 use crate::object_support::{
-    enforce_object_length, input_object_reference, logical_object, read_exact, validate_input_root,
+    admit_import_storage, enforce_object_length, import_slots, input_object_reference,
+    logical_object, read_exact, validate_input_root,
 };
 use crate::{ArtifactAccess, MeshingExecutionError, MeshingExecutionResult};
 
@@ -34,9 +35,24 @@ impl PreparedEvidenceObjects {
     }
 
     pub fn revalidate(&self, limits: ObjectInventoryLimits) -> MeshingExecutionResult<()> {
-        if prepare_evidence_objects(self.evidence.clone(), limits)? != *self {
+        validate_inventory(&self.objects, limits)?;
+        let bytes = self.evidence.canonical_encode()?;
+        if self.objects.len() != 1 {
             return Err(MeshingExecutionError::Identity(
-                "prepared meshing evidence is not its canonical object closure",
+                "meshing evidence has an invalid object inventory",
+            ));
+        }
+        let object = &self.objects[0];
+        crate::object_support::check_canonical_object(
+            object,
+            ObjectNamespace::InputValue,
+            "meshing/evidence",
+            MeshingChunkMediaType::MeshingEvidence.media_type(),
+            &bytes,
+        )?;
+        if self.root != object.descriptor {
+            return Err(MeshingExecutionError::Identity(
+                "meshing evidence root differs from its inventory",
             ));
         }
         Ok(())
@@ -71,12 +87,35 @@ pub fn prepare_evidence_input(
 ) -> MeshingExecutionResult<PreparedEvidenceInput> {
     access.validate()?;
     evidence_objects.revalidate(limits)?;
+    project_evidence_input(evidence_objects, access, None)
+}
+
+fn project_evidence_input(
+    evidence_objects: PreparedEvidenceObjects,
+    access: ArtifactAccess,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
+) -> MeshingExecutionResult<PreparedEvidenceInput> {
+    admit_import_storage(control, import_slots::<ValueRef>(1)?)?;
     let object = evidence_objects
         .objects
         .first()
         .ok_or(MeshingExecutionError::Identity(
             "prepared meshing evidence has no root object",
         ))?;
+    admit_import_storage(
+        control,
+        access
+            .reference_text_bytes(
+                MeshingChunkMediaType::MeshingEvidence.media_type(),
+                EVIDENCE_VALUE_SCHEMA,
+            )?
+            .checked_mul(2)
+            .ok_or_else(|| {
+                runmat_execution_artifact::ArtifactError::Limit(
+                    "input reference storage overflow".into(),
+                )
+            })?,
+    )?;
     let root_input = input_object_reference(
         object,
         &access,
@@ -96,6 +135,15 @@ pub fn import_evidence_input(
     access: ArtifactAccess,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedEvidenceInput> {
+    import_evidence_input_controlled(source, root, access, limits, None)
+}
+pub(crate) fn import_evidence_input_controlled(
+    source: &impl CacheImport,
+    root: &ValueRef,
+    access: ArtifactAccess,
+    limits: ObjectInventoryLimits,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
+) -> MeshingExecutionResult<PreparedEvidenceInput> {
     access.validate()?;
     validate_input_root(
         root,
@@ -104,15 +152,16 @@ pub fn import_evidence_input(
         EVIDENCE_VALUE_SCHEMA,
         "meshing evidence root is outside input artifact authority",
     )?;
-    let objects = import_evidence_objects(
+    let objects = import_evidence_objects_controlled(
         source,
         EvidenceObjectRoot {
             digest: root.logical_digest,
             encoded_length: root.encoded_length,
         },
         limits,
+        control,
     )?;
-    let prepared = prepare_evidence_input(objects, access, limits)?;
+    let prepared = project_evidence_input(objects, access, control)?;
     if prepared.root_input != *root {
         return Err(MeshingExecutionError::Identity(
             "imported meshing evidence root differs from its execution reference",
@@ -147,6 +196,14 @@ pub fn import_evidence_objects(
     root: EvidenceObjectRoot,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedEvidenceObjects> {
+    import_evidence_objects_controlled(source, root, limits, None)
+}
+fn import_evidence_objects_controlled(
+    source: &impl CacheImport,
+    root: EvidenceObjectRoot,
+    limits: ObjectInventoryLimits,
+    control: Option<&dyn runmat_geometry_core::GeometryCanonicalControl>,
+) -> MeshingExecutionResult<PreparedEvidenceObjects> {
     enforce_object_length("meshing evidence", root.encoded_length, limits)?;
     if limits.max_objects == 0 || root.encoded_length > limits.max_total_bytes {
         return Err(runmat_execution_artifact::ArtifactError::Limit(
@@ -155,8 +212,42 @@ pub fn import_evidence_objects(
         .into());
     }
     let bytes = read_exact(source, root.digest, root.encoded_length)?;
-    let evidence = MeshingEvidence::canonical_decode(&bytes)?;
-    let prepared = prepare_evidence_objects(evidence, limits)?;
+    let evidence = match control {
+        Some(control) => {
+            MeshingEvidence::canonical_decode_with_control(&bytes, control, |bytes| {
+                control.consume_allocation_bytes(bytes).map_err(|error| {
+                    runmat_meshing_core::MeshingContractError::invalid(
+                        "evidence input admission",
+                        error.to_string(),
+                    )
+                })
+            })?
+        }
+        None => MeshingEvidence::canonical_decode(&bytes)?,
+    };
+    admit_import_storage(control, import_slots::<LogicalObject>(1)?)?;
+    admit_import_storage(
+        control,
+        runmat_execution_artifact::ObjectDescriptor::content_named_text_bytes(
+            "meshing/evidence",
+            MeshingChunkMediaType::MeshingEvidence.media_type(),
+        )?
+        .checked_mul(2)
+        .ok_or_else(|| {
+            runmat_execution_artifact::ArtifactError::Limit("input object metadata overflow".into())
+        })?,
+    )?;
+    let object = logical_object(
+        "meshing/evidence",
+        ObjectNamespace::InputValue,
+        MeshingChunkMediaType::MeshingEvidence.media_type(),
+        bytes,
+    )?;
+    let prepared = PreparedEvidenceObjects {
+        evidence,
+        root: object.descriptor.clone(),
+        objects: vec![object],
+    };
     if prepared.root.digest != root.digest || prepared.root.encoded_length != root.encoded_length {
         return Err(MeshingExecutionError::Identity(
             "imported meshing evidence differs from requested root",

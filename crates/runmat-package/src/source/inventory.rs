@@ -107,7 +107,7 @@ fn normalize_paths(
         .into_iter()
         .map(NormalizedRelativePath::new)
         .collect::<Result<BTreeSet<_>, _>>()
-        .map(|paths| paths.into_iter().collect())
+        .map(|paths| paths.into_iter().collect()).map_err(Into::into)
 }
 
 fn strict_paths(paths: &[NormalizedRelativePath]) -> bool {

@@ -1,11 +1,12 @@
-use std::{cmp::Ordering, collections::BTreeSet};
+pub(super) mod sources;
+use std::collections::BTreeSet;
 
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 
 use super::{
     construct_candidate,
     insertion::{candidate_error, error, insertion_error, quality_error},
-    CandidateWork, DelaunayVolumeRefinementInput, DelaunayVolumeRefinementStep,
+    CandidateQueries, CandidateWork, DelaunayVolumeRefinementInput, DelaunayVolumeRefinementStep,
     DelaunayVolumeRefinementStepError, DelaunayVolumeRefinementStepErrorKind,
     DelaunayVolumeRefinementStepOptions,
 };
@@ -15,14 +16,18 @@ use crate::cdt::{
         prepare_delaunay_volume_node_insertion_with_prepared_barriers_from_hint, PreparedInsertion,
     },
     mutation::TopologyMutation,
-    volume_quality::{
-        evaluate_delaunay_volume_quality_from_admitted_input, evaluate_tetrahedron_geometry,
-    },
+    volume_quality::evaluate_delaunay_volume_quality_from_admitted_input,
     DelaunayInsertionErrorKind, DelaunayVolumeNode, DelaunayVolumeQualityErrorKind,
     DelaunayVolumeRefinementCandidateErrorKind,
 };
 
 const MAXIMUM_SOURCE_CANDIDATE_ATTEMPTS: usize = 16;
+
+pub(super) struct RefinementBatchOptions<'a> {
+    pub(super) step: DelaunayVolumeRefinementStepOptions,
+    pub(super) maximum_insertions: usize,
+    pub(super) frontier: &'a mut sources::Frontier,
+}
 
 pub(super) struct RefinementBatch {
     pub(super) step: DelaunayVolumeRefinementStep,
@@ -32,6 +37,7 @@ pub(super) struct RefinementBatch {
 pub(super) enum RefinementBatchOutcome {
     Admitted(Box<RefinementBatch>),
     Unavailable,
+    MoreSources,
     RetrySmaller,
 }
 
@@ -47,78 +53,73 @@ struct PreparedRefinement {
 /// the combined topology.
 pub(super) fn insert_independent_refinement_batch(
     input: DelaunayVolumeRefinementInput<'_>,
-    options: DelaunayVolumeRefinementStepOptions,
+    queries: &CandidateQueries,
+    options: RefinementBatchOptions<'_>,
     excluded_node_identities: &mut BTreeSet<StableDigest>,
-    maximum_insertions: usize,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<RefinementBatchOutcome, DelaunayVolumeRefinementStepError> {
+    let RefinementBatchOptions {
+        step: options,
+        maximum_insertions,
+        frontier,
+    } = options;
     let span = tracing::info_span!(
         "meshing.tetrahedron.refinement_batch",
         maximum_insertions,
         tetrahedron_count = input.topology.tetrahedra.len(),
     );
     let _guard = span.enter();
-    if maximum_insertions < 2 || worst_violation(input.quality) == f64::MAX {
+    if maximum_insertions < 2
+        || options.candidate.maximum_candidate_evaluations < 2
+        || worst_violation(input.quality) == f64::MAX
+    {
         return Ok(RefinementBatchOutcome::Unavailable);
     }
-    let mut sources = input
-        .quality
-        .tetrahedra
-        .iter()
-        .filter(|quality| quality.requires_refinement())
-        .collect::<Vec<_>>();
-    sources.sort_by(|left, right| {
-        crate::cdt::volume_quality::compare_violation_priority(
-            right.refinement_violation_ratio,
-            crate::cdt::volume_quality::tetrahedron_geometry_key(
-                input.topology,
-                right.node_identities,
-            ),
-            right.node_identities,
-            left.refinement_violation_ratio,
-            crate::cdt::volume_quality::tetrahedron_geometry_key(
-                input.topology,
-                left.node_identities,
-            ),
-            left.node_identities,
-        )
-    });
+    // A batch is a bounded scheduling window, not a demand to fill every slot.
+    // Remaining violating cells stay in the accepted quality inventory.
+    let sources = sources::select_window(input, maximum_insertions, frontier, cancellation)?;
+    let source_count = sources.len();
+    let mut examined_sources = 0usize;
     let protected_faces = input
         .provenance
         .facets
         .iter()
         .map(|facet| facet.node_identities)
         .collect::<BTreeSet<_>>();
-    let exact_boundary_nodes = protected_faces
-        .iter()
-        .flatten()
-        .copied()
-        .collect::<BTreeSet<_>>();
-    let source_indices = input
-        .topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .map(|(index, tetrahedron)| {
-            (
-                tetrahedron
-                    .vertex_indices
-                    .map(|vertex| input.topology.nodes[vertex as usize].identity),
-                index as u32,
-            )
-        })
-        .collect::<std::collections::BTreeMap<_, _>>();
     let mut claimed_tetrahedra = BTreeSet::new();
     let mut candidate_locations = BTreeSet::new();
     let mut prepared = Vec::new();
+    let indexed_topology = queries.topology(input.topology);
+    let mut attempts = 0u64;
+    let mut insertion_rejections = 0u64;
+    let mut overlap_rejections = 0u64;
     let mut work = CandidateWork::new(options.candidate, cancellation);
     'sources: for source in sources {
         if prepared.len() >= maximum_insertions {
             break;
         }
+        if !work.can_construct() {
+            break;
+        }
+        frontier.advance(input, source);
+        examined_sources += 1;
         for _ in 0..MAXIMUM_SOURCE_CANDIDATE_ATTEMPTS {
+            if !work.can_construct() {
+                break 'sources;
+            }
+            attempts += 1;
+            if attempts.is_multiple_of(1024) {
+                tracing::info!(
+                    attempts,
+                    insertion_rejections,
+                    overlap_rejections,
+                    selected = prepared.len(),
+                    "tetrahedral refinement batch search progress"
+                );
+            }
             let candidate = match construct_candidate(
                 input.topology,
+                queries,
                 source,
                 input.quality_options,
                 input.fixed_node_identities,
@@ -137,10 +138,10 @@ pub(super) fn insert_independent_refinement_batch(
                 }
                 Err(failure) => return Err(candidate_error(failure)),
             };
-            let Some(source_index) = source_indices
-                .get(&candidate.source_node_identities)
-                .copied()
-            else {
+            let Some((source_index, _)) = crate::cdt::topology::queries::find_oriented_tetrahedron(
+                input.topology,
+                candidate.source_node_identities,
+            ) else {
                 return Err(error(
                     DelaunayVolumeRefinementStepErrorKind::InvalidTopology,
                     "refinement source tetrahedron is absent from the admitted topology",
@@ -148,11 +149,11 @@ pub(super) fn insert_independent_refinement_batch(
             };
             let insertion =
                 match prepare_delaunay_volume_node_insertion_with_prepared_barriers_from_hint(
-                    input.topology,
+                    &indexed_topology,
                     candidate.node,
                     &protected_faces,
                     true,
-                    Some(source_index),
+                    Some(source_index as u32),
                     options.insertion,
                     cancellation,
                 ) {
@@ -165,30 +166,29 @@ pub(super) fn insert_independent_refinement_batch(
                                 | DelaunayInsertionErrorKind::PointOutsideTopology
                         ) =>
                     {
+                        insertion_rejections += 1;
+                        if insertion_rejections <= 3 {
+                            tracing::info!(reason = %failure, "tetrahedral refinement insertion rejected");
+                        }
                         excluded_node_identities.insert(candidate.node.identity);
                         continue;
                     }
                     Err(failure) => return Err(insertion_error(failure)),
                 };
             let prepared_node = insertion.node;
-            if !prepared_cavity_meets_quality_floor(
-                input.topology,
-                &candidate,
-                &insertion,
-                &exact_boundary_nodes,
-                input.quality_options,
-            ) {
-                excluded_node_identities.insert(candidate.node.identity);
-                continue;
-            }
             if insertion
                 .removed
                 .iter()
                 .any(|tetrahedron| claimed_tetrahedra.contains(tetrahedron))
             {
+                overlap_rejections += 1;
                 continue 'sources;
             }
-            let location = candidate.node.coordinates_m.map(f64::to_bits);
+            let location =
+                candidate
+                    .node
+                    .coordinates_m
+                    .map(|value| if value == 0.0 { 0 } else { value.to_bits() });
             if !candidate_locations.insert(location) {
                 excluded_node_identities.insert(candidate.node.identity);
                 continue;
@@ -205,8 +205,12 @@ pub(super) fn insert_independent_refinement_batch(
             continue 'sources;
         }
     }
-    if prepared.len() < 2 {
-        return Ok(RefinementBatchOutcome::Unavailable);
+    if prepared.is_empty() {
+        return Ok(if frontier.has_more() || examined_sources < source_count {
+            RefinementBatchOutcome::MoreSources
+        } else {
+            RefinementBatchOutcome::Unavailable
+        });
     }
     tracing::info!(
         candidate_count = prepared.len(),
@@ -244,11 +248,13 @@ pub(super) fn insert_independent_refinement_batch(
         accepted_count = inserted_nodes.len(),
         "tetrahedral refinement batch insertions completed"
     );
-    if inserted_nodes.len() < 2 {
+    if inserted_nodes.is_empty() {
         return Ok(RefinementBatchOutcome::Unavailable);
     }
+    // Rejection retains input.topology; this owned candidate no longer needs
+    // its mutation indexes during canonical output and quality admission.
     let topology = mutation
-        .snapshot(options.insertion.topology, cancellation)
+        .freeze(options.insertion.topology, cancellation)
         .map_err(crate::cdt::insertion::mutation_topology_error)
         .map_err(insertion_error)?;
     let quality = match evaluate_delaunay_volume_quality_from_admitted_input(
@@ -277,7 +283,7 @@ pub(super) fn insert_independent_refinement_batch(
     };
     let prior_worst = worst_violation(input.quality);
     let resulting_worst = worst_violation(&quality);
-    if !quality_strictly_improves(input.quality, &quality)
+    if !super::admission::canonical_progress(input.quality, &quality, cancellation)?
         || creates_new_all_boundary_violation(input, &quality)
     {
         tracing::info!(
@@ -313,85 +319,19 @@ pub(super) fn insert_independent_refinement_batch(
     )))
 }
 
-fn prepared_cavity_meets_quality_floor(
-    topology: &crate::cdt::DelaunayVolumeTopology,
-    candidate: &crate::cdt::DelaunayVolumeRefinementCandidate,
-    insertion: &PreparedInsertion,
-    exact_boundary_nodes: &BTreeSet<StableDigest>,
-    options: crate::cdt::DelaunayVolumeQualityOptions,
-) -> bool {
-    insertion.boundary.iter().all(|face| {
-        let points = [
-            topology.nodes[face[0] as usize].coordinates_m,
-            topology.nodes[face[1] as usize].coordinates_m,
-            topology.nodes[face[2] as usize].coordinates_m,
-            candidate.node.coordinates_m,
-        ];
-        let Some(geometry) = evaluate_tetrahedron_geometry(points, candidate.resolved_metric)
-        else {
-            return false;
-        };
-        let size_violation =
-            geometry.maximum_metric_edge_length / options.maximum_metric_edge_length;
-        let boundary_node_count = face
-            .iter()
-            .filter(|index| {
-                exact_boundary_nodes.contains(&topology.nodes[**index as usize].identity)
-            })
-            .count();
-        let violation = if boundary_node_count == 0 {
-            size_violation
-                .max(geometry.metric_radius_edge_ratio / options.maximum_radius_edge_ratio)
-        } else {
-            size_violation
-        };
-        let jacobian_violation =
-            options.minimum_metric_scaled_jacobian / geometry.metric_scaled_jacobian;
-        violation.is_finite()
-            && jacobian_violation.is_finite()
-            && crate::cdt::volume_quality::violation_priority_key(jacobian_violation)
-                <= crate::cdt::volume_quality::violation_priority_key(1.0)
-            && crate::cdt::volume_quality::violation_priority_key(violation)
-                <= crate::cdt::volume_quality::violation_priority_key(
-                    candidate.source_violation_ratio,
-                )
-    })
-}
-
+#[cfg(test)]
 pub(super) fn quality_strictly_improves(
     prior: &crate::cdt::DelaunayVolumeQuality,
     resulting: &crate::cdt::DelaunayVolumeQuality,
 ) -> bool {
-    compare_violation_spectra(resulting, prior) == Ordering::Less
-}
-
-fn compare_violation_spectra(
-    left: &crate::cdt::DelaunayVolumeQuality,
-    right: &crate::cdt::DelaunayVolumeQuality,
-) -> Ordering {
-    let spectrum = |quality: &crate::cdt::DelaunayVolumeQuality| {
-        let mut values = quality
-            .tetrahedra
-            .iter()
-            .filter(|tetrahedron| tetrahedron.requires_refinement())
-            .map(|tetrahedron| tetrahedron.refinement_violation_ratio)
-            .collect::<Vec<_>>();
-        values.sort_by(|left, right| {
-            crate::cdt::volume_quality::violation_priority_key(*right)
-                .cmp(&crate::cdt::volume_quality::violation_priority_key(*left))
-        });
-        values
-    };
-    let left = spectrum(left);
-    let right = spectrum(right);
-    for (left, right) in left.iter().zip(&right) {
-        let ordering = crate::cdt::volume_quality::violation_priority_key(*left)
-            .cmp(&crate::cdt::volume_quality::violation_priority_key(*right));
-        if ordering != Ordering::Equal {
-            return ordering;
-        }
-    }
-    left.len().cmp(&right.len())
+    super::admission::compare(
+        prior,
+        resulting,
+        crate::cdt::volume_quality::QualityObjective::Refinement,
+        &runmat_meshing_core::NeverCancelled,
+    )
+    .unwrap()
+        == std::cmp::Ordering::Less
 }
 
 fn worst_violation(quality: &crate::cdt::DelaunayVolumeQuality) -> f64 {

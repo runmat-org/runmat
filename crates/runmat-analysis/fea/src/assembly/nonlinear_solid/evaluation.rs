@@ -15,6 +15,9 @@ impl CanonicalNonlinearSolidBasis {
         displacement: &[f64],
         committed: &NonlinearSolidState,
     ) -> Result<NonlinearSolidEvaluation, NonlinearSolidError> {
+        if crate::progress::is_cancelled() {
+            return Err(NonlinearSolidError::Cancelled);
+        }
         self.validate_state(committed)?;
         if displacement.len() != self.dof_count || displacement.iter().any(|u| !u.is_finite()) {
             return Err(NonlinearSolidError::Authority(
@@ -49,13 +52,35 @@ impl CanonicalNonlinearSolidBasis {
                 hardening_energy_j: 0.0,
                 plastic_dissipation_increment_j: 0.0,
             };
+            // The admitted Tet4/Tet10 envelope has at most 30 translation columns.
+            // Point scratch lives on the stack and is reused for every quadrature point.
+            let mut point_columns = [(0usize, [0.0; 6]); 30];
+            let mut point_products = [[0.0; 6]; 30];
+            let column_count = element.dofs.len() * 3;
+            if !matches!(element.dofs.len(), 4 | 10) {
+                return Err(NonlinearSolidError::Authority(
+                    "unsupported element column inventory".into(),
+                ));
+            }
             for point in &element.points {
-                let basis = element
-                    .dofs
-                    .iter()
-                    .zip(&point.gradients)
-                    .flat_map(|(rows, g)| rows.iter().copied().zip(columns(g)))
-                    .collect::<Vec<_>>();
+                if crate::progress::is_cancelled() {
+                    return Err(NonlinearSolidError::Cancelled);
+                }
+                if point.gradients.len() != element.dofs.len() {
+                    return Err(NonlinearSolidError::Authority(
+                        "point gradient inventory differs".into(),
+                    ));
+                }
+                for (slot, value) in point_columns[..column_count].iter_mut().zip(
+                    element
+                        .dofs
+                        .iter()
+                        .zip(&point.gradients)
+                        .flat_map(|(rows, g)| rows.iter().copied().zip(columns(g))),
+                ) {
+                    *slot = value;
+                }
+                let basis = &point_columns[..column_count];
                 let strain: [f64; 6] = std::array::from_fn(|component| {
                     basis
                         .iter()
@@ -83,19 +108,17 @@ impl CanonicalNonlinearSolidBasis {
                         "nonfinite stress/tangent or invalid constitutive energy".into(),
                     ));
                 }
-                let cb = basis
-                    .iter()
-                    .map(|(_, b)| {
-                        std::array::from_fn::<_, 6, _>(|i| {
-                            response.tangent_pa[i]
-                                .iter()
-                                .zip(b)
-                                .map(|(c, v)| c * v)
-                                .sum::<f64>()
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                for (row, b) in &basis {
+                let cb = &mut point_products[..column_count];
+                for (product, (_, b)) in cb.iter_mut().zip(basis) {
+                    *product = std::array::from_fn::<_, 6, _>(|i| {
+                        response.tangent_pa[i]
+                            .iter()
+                            .zip(b)
+                            .map(|(c, v)| c * v)
+                            .sum::<f64>()
+                    });
+                }
+                for (row, b) in basis {
                     internal_force[*row] += point.weight_m3
                         * b.iter()
                             .zip(response.stress_pa)
@@ -144,9 +167,15 @@ impl CanonicalNonlinearSolidBasis {
                 "nonfinite assembled internal force".into(),
             ));
         }
+        if crate::progress::is_cancelled() {
+            return Err(NonlinearSolidError::Cancelled);
+        }
         let tangent = tangent
             .finish()
             .map_err(|e| NonlinearSolidError::Tangent(e.to_string()))?;
+        if crate::progress::is_cancelled() {
+            return Err(NonlinearSolidError::Cancelled);
+        }
         Ok(NonlinearSolidEvaluation {
             internal_force,
             tangent,

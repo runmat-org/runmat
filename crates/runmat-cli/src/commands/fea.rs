@@ -20,6 +20,7 @@ mod preparation;
 pub(crate) mod remote;
 pub(crate) mod result_presentation;
 mod run;
+mod snapshot;
 pub(crate) mod source;
 
 pub async fn execute_command(

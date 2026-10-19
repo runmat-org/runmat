@@ -24,8 +24,8 @@ fn checked_refactor_is_staged_privately_then_published_as_one_revision() {
     runmat_filesystem::with_provider_override(provider.clone(), || {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let prepared = block_on(session.prepare_fea_workspace_publication(vec![
-            FeaWorkspaceEdit::Rename { from: path("project/supports.fea"), to: path("project/shared.fea") },
-            FeaWorkspaceEdit::Write { path: path("project/main.fea"), bytes: b"import model supports from \"./shared.fea\"\nmodel assembly { include model.supports }\n".to_vec() },
+            FeaWorkspaceEdit::Rename { from: path("supports.fea"), to: path("shared.fea") },
+            FeaWorkspaceEdit::Write { path: path("main.fea"), bytes: b"import model supports from \"./shared.fea\"\nmodel assembly { include model.supports }\n".to_vec() },
         ])).unwrap();
         assert!(prepared.check().publication_valid);
         assert_eq!(prepared.check().roots.len(), 2);
@@ -60,7 +60,7 @@ fn invalid_candidate_and_intervening_dependency_changes_never_publish() {
         let invalid =
             block_on(
                 session.prepare_fea_workspace_publication(vec![FeaWorkspaceEdit::Remove {
-                    path: path("project/supports.fea"),
+                    path: path("supports.fea"),
                 }]),
             )
             .unwrap();
@@ -69,7 +69,7 @@ fn invalid_candidate_and_intervening_dependency_changes_never_publish() {
         let valid =
             block_on(
                 session.prepare_fea_workspace_publication(vec![FeaWorkspaceEdit::Write {
-                    path: path("project/supports.fea"),
+                    path: path("supports.fea"),
                     bytes: b"model supports {}\n".to_vec(),
                 }]),
             )
@@ -97,7 +97,7 @@ fn checked_handle_cannot_be_published_into_a_different_provider() {
         let prepared =
             block_on(
                 session.prepare_fea_workspace_publication(vec![FeaWorkspaceEdit::Write {
-                    path: path("project/supports.fea"),
+                    path: path("supports.fea"),
                     bytes: b"model supports {}\n".to_vec(),
                 }]),
             )
@@ -119,7 +119,7 @@ fn checked_handle_rejects_a_changed_language_environment() {
         let prepared =
             block_on(
                 session.prepare_fea_workspace_publication(vec![FeaWorkspaceEdit::Write {
-                    path: path("project/supports.fea"),
+                    path: path("supports.fea"),
                     bytes: b"model supports {}\n".to_vec(),
                 }]),
             )

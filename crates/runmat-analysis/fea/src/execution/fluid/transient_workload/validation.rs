@@ -87,7 +87,7 @@ impl FluidTransientWorkload {
         // Keep unsupported actions explicit; selection itself belongs to the shared case owner.
         if crate::excitation::active_actions(&self.model, Some(step))
             .map_err(invalid)?
-            .any(|a| !matches!(a.action, ExcitationAction::BodyForce(_)))
+            .any(|a| !crate::physics::cfd::canonical::supports_action(a.action))
         {
             return Err(invalid(
                 "transient fluid action lacks canonical realization",

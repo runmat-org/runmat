@@ -137,12 +137,13 @@ pub enum AcousticHarmonicError {
 
 /// Solve one explicitly authored acoustic harmonic step on its sealed canonical mesh.
 /// Supports lossless isotropic fluids, prescribed complex pressure, outward normal velocity,
-/// rigid walls and positive real specific impedance. Unspecified exterior faces are rigid.
+/// rigid walls, positive real specific impedance and first-order local outgoing radiation.
+/// Unspecified exterior faces are rigid. Radiation is exact for planar normal incidence;
+/// it is not a general exterior-domain DtN, spherical radiation or PML condition.
 /// Matching translated exterior-face periodic/Bloch constraints use unit-phase pressure
 /// relations. Uniform normally incoming incident pressure requires a planar face in one
-/// homogeneous medium. Rotated/nonmatching pairing, oblique/spatial incident fields,
-/// material damping and radiation
-/// fail closed.
+/// homogeneous medium. Rotated/nonmatching pairing, oblique/spatial incident fields and
+/// material damping fail closed.
 /// This entry does not advertise workload admission, bounded-resource or release qualification.
 pub fn solve_canonical_harmonic(
     model: &AnalysisModel,

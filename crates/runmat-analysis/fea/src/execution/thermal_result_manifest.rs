@@ -19,6 +19,7 @@ mod tests;
 
 mod admission_profile;
 mod profile;
+mod validation_profile;
 pub use profile::ThermalResultEncodingProfile;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -81,12 +82,9 @@ impl ThermalSolverResultManifest {
             };
             fields.push([entry(0)?, entry(1)?, entry(2)?, entry(3)?]);
         }
-        let field_identities = fields
-            .iter()
-            .map(|entries| entries.each_ref().map(|entry| entry.field))
-            .collect::<Vec<_>>();
-        let identity = result.metadata().identity(&field_identities)?;
-        drop(field_identities);
+        let identity = result.metadata().identity(
+            super::thermal_result::identity::ManifestFieldIdentities(&fields),
+        )?;
         let run = &result.run;
         let manifest = Self {
             schema_version: 1,
@@ -222,12 +220,13 @@ impl ThermalSolverResultManifest {
             return Err(invalid("invalid canonical field partition coverage"));
         }
         drop(identities);
-        let fields = self
-            .fields
-            .iter()
-            .map(|entries| entries.each_ref().map(|entry| entry.field))
-            .collect::<Vec<_>>();
-        if self.metadata().identity(&fields)? != self.identity {
+        if self
+            .metadata()
+            .identity(super::thermal_result::identity::ManifestFieldIdentities(
+                &self.fields,
+            ))?
+            != self.identity
+        {
             return Err(invalid("numerical identity does not converge"));
         }
         Ok(())

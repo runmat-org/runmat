@@ -477,14 +477,13 @@ async fn render_surface(
     color_limits: Option<(f64, f64)>,
     c_data: Tensor,
 ) -> crate::BuiltinResult<f64> {
+    // An intensity image sets the axes colormap to gray, as MATLAB's imshow does.
+    let grayscale = color_limits.is_some() && surface.colormap == ColorMap::Gray;
     let mut surface = Some(surface);
     let plot_index_out = Rc::new(RefCell::new(None));
     let plot_index_slot = Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Image",
-        x_label: "X",
-        y_label: "Y",
         axis_equal: true,
         ..Default::default()
     };
@@ -492,6 +491,16 @@ async fn render_surface(
         if let Some(limits) = color_limits {
             figure.set_axes_color_limits(axes, Some(limits));
         }
+        if grayscale {
+            figure.set_axes_colormap(axes, ColorMap::Gray);
+        }
+        // MATLAB's imshow shows the image without axes.
+        let mut style = figure
+            .axes_metadata(axes)
+            .map(|meta| meta.axes_style.clone())
+            .unwrap_or_default();
+        style.visible = false;
+        figure.set_axes_style(axes, style);
         let plot_index = figure
             .add_surface_plot_on_axes(surface.take().expect("imshow plot consumed once"), axes);
         *plot_index_slot.borrow_mut() = Some((axes, plot_index));

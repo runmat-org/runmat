@@ -17,7 +17,7 @@ pub fn solid_observation_partition_source_indices(
     partition: &ObservationPartition,
     projection: &AnalysisProjection,
 ) -> Result<Vec<usize>, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection)?;
     observation_partition_source_indices(plan, partition_plan, partition, &topology)
 }
 
@@ -71,7 +71,7 @@ pub fn prepare_solid_observation_field_partition(
     projection: &AnalysisProjection,
     field: &RecoveredField,
 ) -> Result<RecoveredFieldPartitionSet, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection)?;
     prepare_observation_field_partition(plan, partition_plan, partition, field, &topology)
 }
 

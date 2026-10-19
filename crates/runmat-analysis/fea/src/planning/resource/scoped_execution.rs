@@ -1,4 +1,4 @@
-use std::{cell::Cell, fmt, panic::AssertUnwindSafe, thread};
+use std::{cell::Cell, fmt, panic::AssertUnwindSafe};
 
 use super::{LocalExecutionPlan, LocalExecutionPlanError, LocalWorkChunk};
 
@@ -77,9 +77,25 @@ impl Drop for LocalChunkGuard {
     }
 }
 
-/// Executes deterministic contiguous chunks in a fresh scoped thread set.
+fn execute_in_pool<T: Send>(
+    plan: LocalExecutionPlan,
+    work: impl FnOnce() -> T + Send,
+) -> Result<T, runmat_cpu_execution::CpuExecutionError> {
+    let threads = usize::from(plan.thread_count().get());
+    let installed = runmat_cpu_execution::current_threads();
+    if installed > 1 {
+        if installed != threads {
+            return Err(runmat_cpu_execution::CpuExecutionError::InvalidThreadCount);
+        }
+        Ok(work())
+    } else {
+        runmat_cpu_execution::with_cpu_pool(threads, work)
+    }
+}
+
+/// Executes deterministic contiguous chunks in the admitted reusable CPU pool.
 ///
-/// This function deliberately creates no global pool and performs no host CPU discovery. The
+/// This function performs no host CPU discovery. The process retains one bounded pool; the
 /// caller-supplied plan is the complete concurrency authority. Results and failures are returned
 /// in canonical chunk order, independently of worker completion order.
 pub fn execute_scoped_chunks<T, E, F>(
@@ -95,8 +111,11 @@ where
     let chunks = plan
         .chunks(item_count)
         .map_err(ScopedLocalExecutionError::InvalidPlan)?;
-    let _guard = LocalChunkGuard::enter().ok_or(ScopedLocalExecutionError::NestedExecution)?;
+    if EXECUTING_LOCAL_CHUNK.with(Cell::get) {
+        return Err(ScopedLocalExecutionError::NestedExecution);
+    }
     if chunks.len() == 1 {
+        let _guard = LocalChunkGuard::enter().expect("checked serial execution");
         let chunk = chunks[0];
         return std::panic::catch_unwind(AssertUnwindSafe(|| work(chunk)))
             .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
@@ -104,41 +123,28 @@ where
             .map_err(|source| ScopedLocalExecutionError::Work { chunk, source });
     }
 
-    thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(chunks.len());
-        for chunk in chunks {
-            let work = &work;
-            let handle = thread::Builder::new().spawn_scoped(scope, move || {
-                let _guard = LocalChunkGuard::enter().expect("new scoped worker is not active");
-                work(chunk)
-            });
-            match handle {
-                Ok(handle) => handles.push((chunk, handle)),
-                Err(error) => {
-                    for (_, handle) in handles {
-                        let _ = handle.join();
-                    }
-                    return Err(ScopedLocalExecutionError::WorkerSpawnFailed {
-                        chunk,
-                        reason: error.to_string(),
-                    });
-                }
-            }
-        }
-        let outcomes = handles
-            .into_iter()
-            .map(|(chunk, handle)| (chunk, handle.join()))
-            .collect::<Vec<_>>();
-
-        let mut results = Vec::with_capacity(outcomes.len());
-        for (chunk, outcome) in outcomes {
-            let result = outcome
-                .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
-                .map_err(|source| ScopedLocalExecutionError::Work { chunk, source })?;
-            results.push(result);
-        }
-        Ok(results)
+    let progress = crate::progress::capture_fea_progress_context();
+    execute_in_pool(plan, || {
+        runmat_cpu_execution::ordered_map(&chunks, |&chunk| {
+            let _guard = LocalChunkGuard::enter().expect("pool worker is not active");
+            let _progress = crate::progress::replace_fea_progress_context(progress.clone());
+            (
+                chunk,
+                std::panic::catch_unwind(AssertUnwindSafe(|| work(chunk))),
+            )
+        })
     })
+    .map_err(|error| ScopedLocalExecutionError::WorkerSpawnFailed {
+        chunk: chunks[0],
+        reason: error.to_string(),
+    })?
+    .into_iter()
+    .map(|(chunk, outcome)| {
+        outcome
+            .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
+            .map_err(|source| ScopedLocalExecutionError::Work { chunk, source })
+    })
+    .collect()
 }
 
 /// Updates disjoint contiguous slices under the admitted local plan without a full-size
@@ -159,50 +165,45 @@ where
     let chunks = plan
         .chunks(values.len() as u64)
         .map_err(ScopedLocalExecutionError::InvalidPlan)?;
-    let _guard = LocalChunkGuard::enter().ok_or(ScopedLocalExecutionError::NestedExecution)?;
+    if EXECUTING_LOCAL_CHUNK.with(Cell::get) {
+        return Err(ScopedLocalExecutionError::NestedExecution);
+    }
     if chunks.len() == 1 {
+        let _guard = LocalChunkGuard::enter().expect("checked serial execution");
         let chunk = chunks[0];
         return std::panic::catch_unwind(AssertUnwindSafe(|| work(chunk, values)))
             .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
             .map_err(|source| ScopedLocalExecutionError::Work { chunk, source });
     }
 
-    thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(chunks.len());
-        let mut remaining = values;
-        for chunk in chunks {
-            let len = (chunk.end_exclusive() - chunk.start()) as usize;
-            let (slice, rest) = remaining.split_at_mut(len);
-            remaining = rest;
-            let work = &work;
-            let handle = thread::Builder::new().spawn_scoped(scope, move || {
-                let _guard = LocalChunkGuard::enter().expect("new scoped worker is not active");
-                work(chunk, slice)
-            });
-            match handle {
-                Ok(handle) => handles.push((chunk, handle)),
-                Err(error) => {
-                    for (_, handle) in handles {
-                        let _ = handle.join();
-                    }
-                    return Err(ScopedLocalExecutionError::WorkerSpawnFailed {
-                        chunk,
-                        reason: error.to_string(),
-                    });
-                }
-            }
-        }
-        let outcomes = handles
-            .into_iter()
-            .map(|(chunk, handle)| (chunk, handle.join()))
-            .collect::<Vec<_>>();
-        for (chunk, outcome) in outcomes {
-            outcome
-                .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
-                .map_err(|source| ScopedLocalExecutionError::Work { chunk, source })?;
-        }
-        Ok(())
+    let mut remaining = values;
+    let mut slices = Vec::with_capacity(chunks.len());
+    for &chunk in &chunks {
+        let (slice, rest) = remaining.split_at_mut(chunk.len() as usize);
+        remaining = rest;
+        slices.push((chunk, slice, None));
+    }
+    let progress = crate::progress::capture_fea_progress_context();
+    execute_in_pool(plan, || {
+        runmat_cpu_execution::for_each_mut(&mut slices, |(chunk, slice, outcome)| {
+            let _guard = LocalChunkGuard::enter().expect("pool worker is not active");
+            let _progress = crate::progress::replace_fea_progress_context(progress.clone());
+            *outcome = Some(std::panic::catch_unwind(AssertUnwindSafe(|| {
+                work(*chunk, slice)
+            })));
+        });
     })
+    .map_err(|error| ScopedLocalExecutionError::WorkerSpawnFailed {
+        chunk: chunks[0],
+        reason: error.to_string(),
+    })?;
+    for (chunk, _, outcome) in slices {
+        outcome
+            .expect("joined worker outcome")
+            .map_err(|_| ScopedLocalExecutionError::WorkerPanicked { chunk })?
+            .map_err(|source| ScopedLocalExecutionError::Work { chunk, source })?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -334,5 +335,37 @@ mod tests {
             nested[0],
             Err(ScopedLocalExecutionError::NestedExecution)
         ));
+    }
+}
+
+#[cfg(test)]
+mod installed_pool_tests {
+    use super::*;
+    use crate::planning::resource::LocalThreadCount;
+    #[test]
+    fn admitted_outer_pool_is_reused_and_chunk_nesting_stays_rejected() {
+        let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(4).unwrap()).unwrap();
+        let cancellation = crate::progress::FeaCancellationToken::new();
+        cancellation.cancel();
+        let _context =
+            crate::progress::replace_fea_progress_context(crate::progress::FeaProgressContext {
+                cancellation,
+                ..Default::default()
+            });
+        let context = crate::progress::capture_fea_progress_context();
+        let results = runmat_cpu_execution::with_cpu_pool(4, || {
+            let _context = crate::progress::replace_fea_progress_context(context);
+            execute_scoped_chunks(plan, 32, |chunk| {
+                assert!(crate::progress::is_cancelled());
+                assert!(matches!(
+                    execute_scoped_chunks(plan, 32, |_| Ok::<_, ()>(())),
+                    Err(ScopedLocalExecutionError::NestedExecution)
+                ));
+                Ok::<_, ()>(chunk.ordinal())
+            })
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(results, vec![0, 1, 2, 3]);
     }
 }

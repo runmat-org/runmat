@@ -8,8 +8,9 @@ pub(in crate::analysis) struct PreparationReservation {
 
 impl AnalysisPublicationBuilder {
     /// The source's inclusive allowance contains this input; its original profile
-    /// is subtracted by the source. Both retained copies remain charged here for
-    /// later staging/commit. No reservation is released or host ceiling enlarged.
+    /// is subtracted by the source. Handoff releases neither the original nor
+    /// temporary copy reservations. Temporary owners end only through consuming
+    /// their scoped reservation after drop; original input remains charged.
     pub(in crate::analysis) fn source_workspace_with_preparation(
         &self,
         reservation: &PreparationReservation,

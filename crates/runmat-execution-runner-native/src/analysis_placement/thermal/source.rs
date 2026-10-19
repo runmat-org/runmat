@@ -34,6 +34,36 @@ impl<S: CacheImport> CacheImport for RetainedThermalSource<S> {
         self.read_verified_bounded(digest, self.inventory_limits.max_object_bytes)
     }
 
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        let reference = self
+            .catalog
+            .objects
+            .iter()
+            .find(|r| r.logical_digest == digest)
+            .ok_or_else(|| {
+                runmat_execution_artifact::ArtifactError::Identity(
+                    "thermal source read outside original catalog".into(),
+                )
+            })?;
+        let maximum = maximum_bytes.min(self.inventory_limits.max_object_bytes);
+        if reference.encoded_length > maximum {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "thermal source object exceeds caller read allowance".into(),
+            ));
+        }
+        crate::bounded_object_read::read_overlay_admitted(
+            &self.store,
+            digest,
+            self.objects.get(&digest).map(Vec::as_slice),
+            reference.encoded_length,
+            admit,
+        )
+    }
     fn read_verified_bounded(
         &self,
         digest: Digest,

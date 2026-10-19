@@ -47,6 +47,33 @@ pub enum FeaCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Run one study and capture portable scenes and previews for an example package
+    Snapshot {
+        /// Root .fea source in the example project
+        file: PathBuf,
+        /// Select one study declared by the root module
+        #[arg(long)]
+        study: Option<String>,
+        /// Snapshot metadata output; scenes and previews are written beside it
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Render an original saved numerical result without meshing or solving
+    #[command(hide = true)]
+    RenderSnapshot {
+        snapshot: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// Verify a documentation project's original saved field pages without execution
+    #[command(hide = true)]
+    VerifySnapshot {
+        /// Original snapshot metadata, relative to the project working directory
+        snapshot: PathBuf,
+        /// Cold field replay receipt
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Evaluate checked criteria against an immutable saved result without solving again
     Reassess {
         /// Checked .fea source containing the revised assessment declarations
@@ -69,6 +96,9 @@ pub enum FeaCommand {
 impl FeaCommand {
     pub fn machine_output(&self) -> bool {
         match self {
+            Self::Snapshot { .. } | Self::RenderSnapshot { .. } | Self::VerifySnapshot { .. } => {
+                true
+            }
             Self::Check { json, .. }
             | Self::Plan { json, .. }
             | Self::Run { json, .. }

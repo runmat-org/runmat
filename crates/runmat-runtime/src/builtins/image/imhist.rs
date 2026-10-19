@@ -948,12 +948,7 @@ fn render_imhist_plot(counts: &Tensor, locations: &Tensor) -> BuiltinResult<()> 
     let mut chart = Some(chart);
     let render_result = crate::builtins::plotting::state::render_active_plot(
         NAME,
-        crate::builtins::plotting::state::PlotRenderOptions {
-            title: "Image Histogram",
-            x_label: "Intensity",
-            y_label: "Count",
-            ..Default::default()
-        },
+        crate::builtins::plotting::state::PlotRenderOptions::default(),
         move |figure, axes| {
             figure.add_bar_chart_on_axes(
                 chart.take().expect("imhist chart consumed exactly once"),

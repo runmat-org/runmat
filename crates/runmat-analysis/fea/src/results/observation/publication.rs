@@ -10,7 +10,11 @@ use runmat_analysis_core::{ExtremaTiePolicy, ObservationRequest, ProcedureStep, 
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+
+mod coordinates;
+mod coverage;
+mod resources;
+mod validation;
 
 const PREFIX: &[u8] = b"runmat-observation-publication-catalog/v2\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024 * 1024, 4_000_000, 65_536, 64);
@@ -156,7 +160,7 @@ impl ObservationPublicationCatalog {
     /// alone excludes observation declarations and cannot establish this relationship.
     /// This checks authorship, not mesh-derived target indices; use `validate_for` for both.
     pub fn validate_authored_step(&self, step: &ProcedureStep) -> AnalysisExecutionResult<()> {
-        self.validate()?;
+        self.validate_metadata_admitted(step.accuracy.resources.maximum_resident_bytes)?;
         if self.declarations != step.observations
             || self.plan.step_id != step.step_id
             || self.plan.independent_domain != step.independent_domain
@@ -276,15 +280,12 @@ impl ObservationPublicationCatalog {
                         "thermal publication producer or authored step differs",
                     ));
                 }
-                self.source
-                    .validate_thermal_plan(&self.plan, workload, mesh)?;
+                let authority =
+                    super::source::ThermalFieldSourceAuthority::new(workload, manifest, mesh)?;
+                authority.validate_plan(&self.plan)?;
                 for entry in &self.entries {
                     if let ObservationPublicationEntry::Sample(value) = entry {
-                        self.source.validate_thermal_selection(
-                            &value.request.selection,
-                            workload,
-                            mesh,
-                        )?;
+                        authority.validate_selection(&value.request.selection)?;
                     }
                 }
             }
@@ -317,216 +318,6 @@ impl ObservationPublicationCatalog {
             _ => return Err(invalid("publication source context differs")),
         }
         self.validate_execution_for(context)?;
-        Ok(())
-    }
-    pub fn validate(&self) -> AnalysisExecutionResult<()> {
-        self.plan.validate_identity().map_err(invalid)?;
-        self.source.validate()?;
-        if self.schema_version != 2
-            || self.identity != self.derive_identity()?
-            || self.declarations.len() != self.plan.observations.len()
-        {
-            return Err(invalid(
-                "catalog schema, identity, or declaration coverage differs",
-            ));
-        }
-        let mut expected = std::collections::BTreeMap::new();
-        for (declaration, resolved) in self.declarations.iter().zip(&self.plan.observations) {
-            let spec = declaration.spec().ok_or_else(|| {
-                invalid("diagnostic/monitor publication is not supported by this catalog")
-            })?;
-            if spec != &resolved.spec
-                || expected
-                    .insert(
-                        spec.observation_id.0.as_str(),
-                        matches!(declaration, ObservationRequest::History(_)),
-                    )
-                    .is_some()
-            {
-                return Err(invalid(
-                    "authored declaration differs from resolved plan or duplicates ID",
-                ));
-            }
-        }
-        let mut seen = BTreeSet::new();
-        let mut previous = None;
-        for entry in &self.entries {
-            match entry {
-                ObservationPublicationEntry::Sample(value) => {
-                    value.validate()?;
-                    self.source.validate_canonical_selection(
-                        &value.request.plan,
-                        &value.request.selection,
-                    )?;
-                    match (self.source.source(), value.request.selection.source()) {
-                        (
-                            ObservationFieldCatalogSource::FiniteVolumeRecovery { .. },
-                            ObservationFieldSource::FiniteVolumeRecovery { .. },
-                        ) => self
-                            .source
-                            .validate_finite_volume_selection(&value.request.selection)?,
-                        (
-                            ObservationFieldCatalogSource::SampledRecovery { .. },
-                            ObservationFieldSource::SampledRecovery { .. },
-                        ) => self
-                            .source
-                            .validate_sampled_selection(&value.request.selection)?,
-                        (
-                            ObservationFieldCatalogSource::Structural { .. },
-                            ObservationFieldSource::StructuralRecovery { .. },
-                        ) => {
-                            self.source
-                                .validate_structural_selection(&value.request.selection)?;
-                        }
-                        (
-                            ObservationFieldCatalogSource::Thermal { manifest },
-                            ObservationFieldSource::ThermalResult {
-                                workload,
-                                result,
-                                numerical_intent,
-                                mesh_digest,
-                                sample_ordinal,
-                                ..
-                            },
-                        ) => {
-                            let fields = manifest.fields.get(sample_ordinal).ok_or_else(|| {
-                                invalid("sample ordinal absent from source catalog")
-                            })?;
-                            if workload != manifest.source_workload
-                                || result != manifest.identity()
-                                || numerical_intent != manifest.numerical_intent
-                                || Digest::from_bytes(*mesh_digest.bytes())
-                                    != manifest.topology_digest
-                                || manifest.producer != self.producer
-                                || value
-                                    .request
-                                    .selection
-                                    .fields()
-                                    .iter()
-                                    .any(|field| !fields.contains(field))
-                            {
-                                return Err(invalid(
-                                    "sample selection differs from source catalog",
-                                ));
-                            }
-                        }
-                        _ => return Err(invalid("sample source kind differs from catalog")),
-                    }
-                    if value.request.producer != self.producer || value.request.plan != self.plan {
-                        return Err(invalid("sample producer or plan differs"));
-                    }
-                    let mut published_fields = 0;
-                    for result in &value.manifest.results {
-                        match expected.get(result.observation_id.0.as_str()) {
-                            // A sample artifact covers its entire scheduled coordinate, including
-                            // history samples. Those do NOT discharge any History declaration.
-                            Some(true) => {}
-                            Some(false) if seen.insert(result.observation_id.0.as_str()) => {
-                                published_fields += 1;
-                            }
-                            _ => {
-                                return Err(invalid(
-                                    "sample duplicates or contains an undeclared observation",
-                                ))
-                            }
-                        }
-                    }
-                    if published_fields == 0 {
-                        return Err(invalid("sample cannot replace a complete history"));
-                    }
-                }
-                ObservationPublicationEntry::History(value) => {
-                    value.validate()?;
-                    if value.request.producer != self.producer
-                        || value.request.plan != self.plan
-                        || value.request.source_catalog != self.source.identity()
-                        || expected.get(value.history.observation_id.0.as_str()) != Some(&true)
-                        || !seen.insert(value.history.observation_id.0.as_str())
-                    {
-                        return Err(invalid(
-                            "history producer, source, plan, or declaration differs",
-                        ));
-                    }
-                    let observation = self
-                        .plan
-                        .observations
-                        .iter()
-                        .find(|item| item.spec.observation_id == value.history.observation_id)
-                        .ok_or_else(|| invalid("history observation absent"))?;
-                    let source_fields = match self.source.source() {
-                        ObservationFieldCatalogSource::SampledRecovery { .. }
-                        | ObservationFieldCatalogSource::FiniteVolumeRecovery { .. } => {
-                            return Err(invalid("sampled native histories are not admitted"));
-                        }
-                        ObservationFieldCatalogSource::Structural { manifest, .. } => {
-                            manifest.fields.iter().collect::<Vec<_>>()
-                        }
-                        ObservationFieldCatalogSource::StructuralFrequencyHistory { samples } => {
-                            let mut fields = Vec::new();
-                            for sample in samples {
-                                let ObservationFieldCatalogSource::Structural {
-                                    recovery_request,
-                                    manifest,
-                                } = sample.source()
-                                else {
-                                    return Err(invalid(
-                                        "frequency history contains a nonstructural sample",
-                                    ));
-                                };
-                                if recovery_request.producer != self.producer {
-                                    return Err(invalid("frequency history producer differs"));
-                                }
-                                fields.extend(manifest.fields.iter());
-                            }
-                            fields
-                        }
-                        ObservationFieldCatalogSource::Thermal { manifest } => {
-                            if manifest.producer != self.producer {
-                                return Err(invalid("thermal history producer differs"));
-                            }
-                            manifest.fields.iter().flatten().collect::<Vec<_>>()
-                        }
-                    };
-                    let mut coordinates = Vec::new();
-                    for field in source_fields {
-                        if field.definition.identity()
-                            == observation.source_field_definition_identity
-                            && resolved_observation_accepts_sample(
-                                &self.plan,
-                                observation,
-                                field.sample,
-                                None,
-                            )
-                            .map_err(invalid)?
-                        {
-                            coordinates.push(field.sample);
-                        }
-                    }
-                    if coordinates
-                        != value
-                            .history
-                            .samples
-                            .iter()
-                            .map(|sample| sample.coordinate)
-                            .collect::<Vec<_>>()
-                    {
-                        return Err(invalid(
-                            "history omits or substitutes an accepted source coordinate",
-                        ));
-                    }
-                }
-            }
-            if previous.is_some_and(|id| id >= entry.first_id()) {
-                return Err(invalid("publication entries are not canonically ordered"));
-            }
-            previous = Some(entry.first_id());
-        }
-        if seen.len() != expected.len() {
-            return Err(invalid(
-                "publication does not cover every authored observation",
-            ));
-        }
-        self.visit_execution(|_, _, _, _| Ok(()))?;
         Ok(())
     }
     fn derive_identity(&self) -> AnalysisExecutionResult<ObservationPublicationCatalogIdentity> {

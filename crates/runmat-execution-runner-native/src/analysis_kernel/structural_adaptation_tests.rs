@@ -21,6 +21,7 @@ use runmat_execution_artifact::{
 };
 use runmat_meshing_core::*;
 mod cold;
+mod compilation_budget;
 mod fixture;
 mod process;
 

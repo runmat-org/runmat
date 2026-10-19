@@ -112,6 +112,7 @@ fn derive_resource_input(
         input.phase = FeaResourcePhase::StructuralNonlinearRecovery;
         input.demand = FeaResourceDemand::StructuralNonlinearRecovery(
             StructuralNonlinearRecoveryResourceDemand {
+                constraint_compilation_peak_bytes: baseline.constraint_compilation_peak_bytes,
                 operator: baseline.operator,
                 integration_identity: integration.identity(),
                 point_count: Count(integration.total_point_count() as u64),
@@ -148,6 +149,7 @@ fn derive_resource_input(
     input.phase = FeaResourcePhase::StructuralNonlinearPipeline;
     input.demand =
         FeaResourceDemand::StructuralNonlinearPipeline(StructuralNonlinearPipelineResourceDemand {
+            constraint_compilation_peak_bytes: baseline.constraint_compilation_peak_bytes,
             operator: baseline.operator,
             integration_identity: integration.identity(),
             point_count: Count(integration.total_point_count() as u64),

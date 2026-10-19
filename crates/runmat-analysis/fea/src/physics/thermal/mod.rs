@@ -1,6 +1,7 @@
 pub(crate) mod assembly;
 pub(crate) mod history_fields;
 pub(crate) mod initial_state;
+pub mod qualification;
 pub mod radiation;
 
 #[derive(Debug, Clone, Copy, PartialEq)]

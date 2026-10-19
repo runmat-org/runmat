@@ -1,21 +1,27 @@
-use std::collections::BTreeMap;
-
 use runmat_meshing_core::{
     MeshingCancellationSignal, SolverMeshTopology, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 
 use super::{
     error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
-    DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
+    DelaunaySolverTopologyOptions, ProjectionInput,
 };
 
+mod affine;
 mod connectivity;
 mod geometry;
 mod jacobian;
 mod optimization;
 
+#[derive(Clone, Copy)]
+struct PreparedEvaluation<'source, 'view> {
+    evaluator: &'view dyn crate::cdt::solver_topology::DelaunayExactEvaluator,
+    control: &'view dyn runmat_geometry_core::GeometryEvaluationControl,
+    sources: &'view geometry::ParameterSources<'source>,
+}
+
 pub(super) fn elevate(
-    input: &DelaunaySolverTopologyInput<'_>,
+    input: &ProjectionInput<'_>,
     mut topology: SolverMeshTopology,
     options: DelaunaySolverTopologyOptions,
     cancellation: &dyn MeshingCancellationSignal,
@@ -28,16 +34,50 @@ pub(super) fn elevate(
             "Tet10 elevation requires exact curve, pcurve, surface, and trim evaluation",
         )
     })?;
+    let sources = geometry::ParameterSources::prepare(input, evaluation.control)
+        .map_err(|failure| phase_error("exact parameter preparation", failure))?;
+    let evaluation = PreparedEvaluation {
+        evaluator: evaluation.evaluator,
+        control: evaluation.control,
+        sources: &sources,
+    };
     let midpoint_by_edge =
-        geometry::append_midpoint_nodes(input, &mut topology, evaluation, options, cancellation)?;
-    connectivity::elevate(&mut topology, &midpoint_by_edge, cancellation)?;
+        geometry::append_midpoint_nodes(input, &mut topology, evaluation, options, cancellation)
+            .map_err(|failure| phase_error("exact midpoint construction", failure))?;
+    connectivity::elevate(
+        &mut topology,
+        &midpoint_by_edge,
+        cancellation,
+        evaluation.control,
+    )?;
     let mut invalid_elements = jacobian::invalid_element_indices(
         &topology,
         input.request.resources.maximum_search_work,
         input.request.resources.maximum_recursion_depth,
         options.cancellation_check_interval,
         cancellation,
-        &mut jacobian_work,
+        jacobian::ValidationWork {
+            counter: &mut jacobian_work,
+            storage: super::storage::Storage(Some(evaluation.control)),
+        },
+    )?;
+    if invalid_elements.is_empty()
+        && affine::retains_affine_edge_nodes(&topology, &midpoint_by_edge, evaluation.control)?
+    {
+        tracing::info!(
+            event_code = "meshing.tet10.affine_geometry",
+            node_count = topology.nodes.len(),
+            element_count = topology.volume_elements.len(),
+            jacobian_work,
+            "retained certified affine edge geometry without optional shape search"
+        );
+        return Ok(topology);
+    }
+    let optimization_topology = optimization::OptimizationTopology::prepare(
+        input,
+        &topology,
+        evaluation.control,
+        cancellation,
     )?;
     let initial_invalid_element_count = invalid_elements.len();
     let mut moved_node_count = 0_u64;
@@ -54,9 +94,13 @@ pub(super) fn elevate(
                 jacobian_work: &mut jacobian_work,
                 candidate_work: &mut candidate_work,
             },
-            improve_valid_nodes,
-            &invalid_elements,
-        )?;
+            optimization::OptimizationTargets {
+                improve_valid_nodes,
+                invalid_elements: &invalid_elements,
+                indexes: &optimization_topology,
+            },
+        )
+        .map_err(|failure| phase_error("curved-node optimization", failure))?;
         moved_node_count = moved_node_count.checked_add(moved).ok_or_else(|| {
             error::failure(
                 DelaunaySolverTopologyErrorKind::ResourceLimit,
@@ -69,7 +113,10 @@ pub(super) fn elevate(
             input.request.resources.maximum_recursion_depth,
             options.cancellation_check_interval,
             cancellation,
-            &mut jacobian_work,
+            jacobian::ValidationWork {
+                counter: &mut jacobian_work,
+                storage: super::storage::Storage(Some(evaluation.control)),
+            },
         )?;
         if invalid_elements.is_empty() {
             return Ok(topology);
@@ -88,6 +135,7 @@ pub(super) fn elevate(
                 &mut topology,
                 worst_element,
                 evaluation,
+                &optimization_topology,
                 optimization::OptimizationWork {
                     options,
                     cancellation,
@@ -108,7 +156,10 @@ pub(super) fn elevate(
                     input.request.resources.maximum_recursion_depth,
                     options.cancellation_check_interval,
                     cancellation,
-                    &mut jacobian_work,
+                    jacobian::ValidationWork {
+                        counter: &mut jacobian_work,
+                        storage: super::storage::Storage(Some(evaluation.control)),
+                    },
                 )?;
                 if invalid_elements.is_empty() {
                     return Ok(topology);
@@ -120,6 +171,8 @@ pub(super) fn elevate(
                 worst_element,
                 input.request.resources.maximum_search_work,
                 input.request.resources.maximum_recursion_depth,
+                &optimization_topology,
+                evaluation.control,
                 optimization::OptimizationWork {
                     options,
                     cancellation,
@@ -140,7 +193,10 @@ pub(super) fn elevate(
                     input.request.resources.maximum_recursion_depth,
                     options.cancellation_check_interval,
                     cancellation,
-                    &mut jacobian_work,
+                    jacobian::ValidationWork {
+                        counter: &mut jacobian_work,
+                        storage: super::storage::Storage(Some(evaluation.control)),
+                    },
                 )?;
                 if invalid_elements.is_empty() {
                     return Ok(topology);
@@ -153,7 +209,10 @@ pub(super) fn elevate(
                 input.request.resources.maximum_recursion_depth,
                 options.cancellation_check_interval,
                 cancellation,
-                &mut jacobian_work,
+                jacobian::ValidationWork {
+                    counter: &mut jacobian_work,
+                    storage: super::storage::Storage(Some(evaluation.control)),
+                },
             )
             .map(|()| topology);
         }
@@ -175,4 +234,13 @@ pub(super) fn sorted_edge(mut nodes: [u64; 2]) -> [u64; 2] {
     nodes
 }
 
-pub(super) type MidpointMap = BTreeMap<[u64; 2], u64>;
+mod midpoints;
+use midpoints::MidpointMap;
+
+fn phase_error(
+    phase: &str,
+    mut failure: DelaunaySolverTopologyError,
+) -> DelaunaySolverTopologyError {
+    failure.reason = format!("{phase}: {}", failure.reason);
+    failure
+}

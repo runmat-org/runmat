@@ -200,6 +200,21 @@ fn overflow() -> AnalysisBridgeError {
     )
 }
 
+/// Ordered imported occurrences retain separate owned buffers even when digests repeat.
+pub(super) fn import_transport_metadata_bytes(count: usize) -> AnalysisBridgeResult<u64> {
+    let strings = CHUNK_PREFIX.len()
+        + ORDINAL_CAPACITY
+        + DIGEST_SUFFIX_BYTES
+        + ANALYSIS_CHUNK_MEDIA_TYPE.len();
+    let slots = count
+        .checked_mul(std::mem::size_of::<LogicalObject>() + strings)
+        .ok_or_else(overflow)?;
+    // Root descriptor clone and root naming/media; count includes its object slot.
+    let root = std::mem::size_of::<ObjectDescriptor>()
+        + 2 * (ROOT_PREFIX.len() + DIGEST_SUFFIX_BYTES + ANALYSIS_MANIFEST_MEDIA_TYPE.len());
+    u64::try_from(slots.checked_add(root).ok_or_else(overflow)?).map_err(|_| overflow())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

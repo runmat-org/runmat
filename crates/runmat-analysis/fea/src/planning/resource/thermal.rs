@@ -9,6 +9,7 @@ mod tests;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedThermalResourceFacts {
+    pub local_execution: super::LocalExecutionPlan,
     pub field_source: Option<ThermalFieldSourceResourceFacts>,
     pub inputs: PreparedInputResourceFacts,
     pub result_output: PreparedOutputResourceFacts,
@@ -31,7 +32,9 @@ pub fn build_thermal_resource_plan(
             "thermal host resource planning requires an explicit CPU backend".into(),
         ));
     }
-    let numerical = workload.prepare(mesh).map_err(|e| invalid(&e))?;
+    let numerical = workload
+        .prepare_primary_fields(mesh)
+        .map_err(|e| invalid(&e))?;
     let transport = numerical
         .transport_profile(chunk_bytes)
         .map_err(|e| invalid(&e))?;
@@ -107,7 +110,10 @@ pub fn build_thermal_resource_plan(
         }),
         output_set: Some(prepared.output_set),
         worker: WorkerResourcePolicy {
-            cpu_millicores: 1000,
+            cpu_millicores: prepared
+                .local_execution
+                .checked_cpu_millicores()
+                .map_err(|error| invalid(&error))?,
             maximum_wall_milliseconds: step.accuracy.resources.maximum_wall_time_milliseconds,
             fixed_memory_bytes: ByteCount(16 * 1024 * 1024),
             fixed_scratch_bytes: ByteCount(8 * 1024 * 1024),

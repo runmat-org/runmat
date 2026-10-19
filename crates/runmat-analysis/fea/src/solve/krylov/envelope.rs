@@ -24,6 +24,9 @@ pub(crate) struct GmresWorkEnvelope {
     pub operator_applications_upper_bound: u64,
     pub dot_calls_upper_bound: u64,
     pub axpy_calls_upper_bound: u64,
+    /// Vector recurrence and projected-system arithmetic; operator/dot callbacks
+    /// are charged separately by the owning component.
+    pub recurrence_scalar_operations_upper_bound: u64,
 }
 
 impl GmresWorkEnvelope {
@@ -84,6 +87,12 @@ impl GmresWorkEnvelope {
             operator_applications_upper_bound: add(mul(i, 3)?, 2)?,
             dot_calls_upper_bound: add(mul(attempted, add(r, 2)?)?, add(mul(i, 2)?, 4)?)?,
             axpy_calls_upper_bound: add(mul(attempted, r)?, i)?,
+            // Normalization/residual/solution vector passes plus rotations and
+            // triangular projected solves. Includes unsuccessful Arnoldi columns.
+            recurrence_scalar_operations_upper_bound: add(
+                mul(add(mul(attempted, add(r, 4)?)?, 8)?, mul(n, 8)?)?,
+                mul(add(i, 1)?, mul(mul(basis, basis)?, 32)?)?,
+            )?,
         })
     }
 }

@@ -98,9 +98,9 @@ fn physical_shear_and_cold_norm_identity_are_explicit() {
             StructuralRecoveryEstimatorOptions::default(),
         )
         .unwrap();
-        // The original scalar-normal discrepancy is0.5. Physical shear appears
-        // twice in the symmetric3x3 tensor, giving sqrt(2)*0.5.
-        assert!((estimate.total_error - 0.5 * 2.0_f64.sqrt()).abs() < 1.0e-12);
+        // The scalar-normal volume integral is 4/15. Physical shear appears
+        // twice in the symmetric 3x3 tensor, giving squared discrepancy 8/15.
+        assert!((estimate.total_error - (8.0_f64 / 15.0).sqrt()).abs() < 1.0e-12);
         assert!((estimate.reference_norm - (8.0 / 3.0_f64).sqrt()).abs() < 1e-12);
         assert_eq!(
             estimate.norm,

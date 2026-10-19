@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+#[path = "storage.rs"]
+mod storage;
+use std::{collections::BTreeMap, sync::Arc};
 
 use runmat_analysis_core::{
     BeamSectionModel, EvidenceConfidence, LaminatePlyModel, LaminateShellSectionModel,
@@ -100,20 +102,23 @@ pub struct CompiledShellProperty {
 }
 
 /// Immutable material ownership after exact geometry-to-element projection.
+/// Clones share original validated element and audit inventories. Sharing is
+/// process-local; the canonical wire contract and cold integrity checks are unchanged.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "CompiledPropertyMapData")]
 pub struct CompiledPropertyMap {
     #[serde(with = "ordered_map_serde", skip_serializing_if = "BTreeMap::is_empty")]
-    cell_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
+    cell_materials: Arc<BTreeMap<StableDigest, CompiledElementMaterial>>,
     pub identity: CompiledPropertyMapIdentity,
     pub audit_digest: Digest,
     #[serde(with = "ordered_map_serde")]
-    solid_materials: BTreeMap<StableDigest, CompiledElementMaterial>,
+    solid_materials: Arc<BTreeMap<StableDigest, CompiledElementMaterial>>,
     #[serde(with = "ordered_map_serde")]
-    beam_properties: BTreeMap<StableDigest, CompiledBeamProperty>,
+    beam_properties: Arc<BTreeMap<StableDigest, CompiledBeamProperty>>,
     #[serde(with = "ordered_map_serde")]
-    shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
-    audit: Vec<CompiledPropertyAudit>,
+    shell_properties: Arc<BTreeMap<StableDigest, CompiledShellProperty>>,
+    #[serde(serialize_with = "serialize_shared_audit")]
+    audit: Arc<Vec<CompiledPropertyAudit>>,
 }
 
 #[derive(Deserialize)]
@@ -130,6 +135,13 @@ struct CompiledPropertyMapData {
     #[serde(with = "ordered_map_serde")]
     shell_properties: BTreeMap<StableDigest, CompiledShellProperty>,
     audit: Vec<CompiledPropertyAudit>,
+}
+
+fn serialize_shared_audit<S: serde::Serializer>(
+    audit: &Arc<Vec<CompiledPropertyAudit>>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    audit.as_ref().serialize(serializer)
 }
 
 mod ordered_map_serde {
@@ -201,14 +213,21 @@ impl CompiledPropertyMap {
                 semantic_digest,
             },
             audit_digest,
-            solid_materials,
-            cell_materials,
-            beam_properties,
-            shell_properties,
-            audit,
+            solid_materials: Arc::new(solid_materials),
+            cell_materials: Arc::new(cell_materials),
+            beam_properties: Arc::new(beam_properties),
+            shell_properties: Arc::new(shell_properties),
+            audit: Arc::new(audit),
         };
         compiled.validate_integrity()?;
         Ok(compiled)
+    }
+
+    /// Requested storage introduced by cloning this shared immutable owner.
+    /// Element/audit allocations remain shared and must be charged once by their
+    /// retaining owner; only the root and cloned identity string are new here.
+    pub fn shared_clone_storage_bytes(&self) -> Option<u64> {
+        (std::mem::size_of::<Self>() as u64).checked_add(self.identity.geometry_id.len() as u64)
     }
 
     pub fn validate_integrity(&self) -> Result<(), String> {
@@ -278,11 +297,11 @@ impl TryFrom<CompiledPropertyMapData> for CompiledPropertyMap {
         let compiled = Self {
             identity: data.identity,
             audit_digest: data.audit_digest,
-            solid_materials: data.solid_materials,
-            cell_materials: data.cell_materials,
-            beam_properties: data.beam_properties,
-            shell_properties: data.shell_properties,
-            audit: data.audit,
+            solid_materials: Arc::new(data.solid_materials),
+            cell_materials: Arc::new(data.cell_materials),
+            beam_properties: Arc::new(data.beam_properties),
+            shell_properties: Arc::new(data.shell_properties),
+            audit: Arc::new(data.audit),
         };
         compiled.validate_integrity()?;
         Ok(compiled)

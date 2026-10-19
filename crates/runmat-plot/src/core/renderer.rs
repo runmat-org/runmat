@@ -562,7 +562,8 @@ impl WgpuRenderer {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
+            // Enlarged images show each pixel as a flat cell, as MATLAB draws them.
+            mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
@@ -1821,6 +1822,11 @@ pub mod vertex_utils {
         Some(p + r * t)
     }
 
+    /// Longest miter, as a multiple of half the line width, before a join is beveled instead
+    /// (the SVG and canvas default). Without it, a sharp turn in noisy data throws a spike far
+    /// past the data: a 2,000-point noise trace drew peaks 9 dB above its maximum.
+    const MITER_LIMIT: f32 = 4.0;
+
     /// Extrude polyline with join styles at internal vertices.
     pub fn extrude_polyline_with_join(
         points: &[Vec3],
@@ -1864,7 +1870,8 @@ pub mod vertex_utils {
                     crate::plots::line::LineJoin::Miter => {
                         let dir_edge0 = (p.truncate() - p_prev.truncate()).normalize_or_zero();
                         let dir_edge1 = (p_next.truncate() - p.truncate()).normalize_or_zero();
-                        let l_edge = line_intersection(left0, dir_edge0, left1, dir_edge1);
+                        let l_edge = line_intersection(left0, dir_edge0, left1, dir_edge1)
+                            .filter(|m| m.distance(p.truncate()) <= MITER_LIMIT * half_w);
                         if let Some(miter) = l_edge {
                             // fill wedge left0-miter-left1
                             out.push(Vertex::new(left0.extend(0.0), color));
@@ -1917,7 +1924,8 @@ pub mod vertex_utils {
                     crate::plots::line::LineJoin::Miter => {
                         let dir_edge0 = (p.truncate() - p_prev.truncate()).normalize_or_zero();
                         let dir_edge1 = (p_next.truncate() - p.truncate()).normalize_or_zero();
-                        let l_edge = line_intersection(right0, dir_edge0, right1, dir_edge1);
+                        let l_edge = line_intersection(right0, dir_edge0, right1, dir_edge1)
+                            .filter(|m| m.distance(p.truncate()) <= MITER_LIMIT * half_w);
                         if let Some(miter) = l_edge {
                             out.push(Vertex::new(right1.extend(0.0), color));
                             out.push(Vertex::new(miter.extend(0.0), color));
@@ -2081,6 +2089,81 @@ pub mod vertex_utils {
                 let seg = [pts[i], pts[i + 1]];
                 out.extend(extrude_polyline(&seg, color, width_px));
             }
+        }
+        out
+    }
+
+    /// Dashed, dotted and dash-dot strokes for a polyline in viewport pixels. The pattern
+    /// runs along the line's length, so dashes look the same however densely it is sampled.
+    pub fn create_thick_polyline_dashed_px(
+        x_px: &[f64],
+        y_px: &[f64],
+        color: Vec4,
+        width_px: f32,
+        style: crate::plots::line::LineStyle,
+    ) -> Vec<Vertex> {
+        use crate::plots::line::LineStyle;
+        let w = width_px.max(1.0);
+        // (on, off) lengths in pixels, scaled with the line width.
+        let pattern: Vec<f32> = match style {
+            LineStyle::None => return Vec::new(),
+            LineStyle::Solid => {
+                return create_thick_polyline_with_join(
+                    x_px,
+                    y_px,
+                    color,
+                    width_px,
+                    crate::plots::line::LineJoin::Miter,
+                )
+            }
+            LineStyle::Dashed => vec![6.0 + 2.0 * w, 4.0 + w],
+            LineStyle::Dotted => vec![w, 2.0 + 1.5 * w],
+            LineStyle::DashDot => vec![6.0 + 2.0 * w, 3.0 + w, w, 3.0 + w],
+        };
+        let mut out = Vec::new();
+        let n = x_px.len().min(y_px.len());
+        if n < 2 {
+            return out;
+        }
+        let mut phase = 0usize;
+        let mut remaining = pattern[0];
+        let mut dash: Vec<Vec3> = vec![Vec3::new(x_px[0] as f32, y_px[0] as f32, 0.0)];
+        let flush = |dash: &mut Vec<Vec3>, out: &mut Vec<Vertex>| {
+            if dash.len() >= 2 {
+                out.extend(extrude_polyline(dash, color, width_px));
+            }
+            dash.clear();
+        };
+        for i in 0..n - 1 {
+            let a = Vec3::new(x_px[i] as f32, y_px[i] as f32, 0.0);
+            let b = Vec3::new(x_px[i + 1] as f32, y_px[i + 1] as f32, 0.0);
+            let length = (b - a).truncate().length();
+            if !length.is_finite() || length <= 0.0 {
+                continue;
+            }
+            let mut t = 0.0f32;
+            while t < length {
+                let step = remaining.min(length - t);
+                t += step;
+                remaining -= step;
+                let p = a + (b - a) * (t / length);
+                if phase % 2 == 0 {
+                    dash.push(p);
+                }
+                if remaining <= 1.0e-4 {
+                    if phase % 2 == 0 {
+                        flush(&mut dash, &mut out);
+                    }
+                    phase = (phase + 1) % pattern.len();
+                    remaining = pattern[phase];
+                    if phase % 2 == 0 {
+                        dash.push(p);
+                    }
+                }
+            }
+        }
+        if phase % 2 == 0 {
+            flush(&mut dash, &mut out);
         }
         out
     }

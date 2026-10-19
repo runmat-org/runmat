@@ -39,3 +39,11 @@ bindings/ts/dist/**/*
 
 node_modules/
 **/node_modules/
+
+# Local simulation results and interrupted WASM registry generation.
+# Keep authored examples, CAD inputs, and explicit regression fixtures trackable.
+.artifacts/
+.runmat-wasm-registry-*/
+
+# Transferable local evidence bundles; distributed separately from source.
+/.handoff/

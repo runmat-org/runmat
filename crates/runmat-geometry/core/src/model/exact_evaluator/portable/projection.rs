@@ -1,9 +1,11 @@
+mod line;
 use super::super::{
     CurveDerivatives, CurveProjection, GeometryEvaluationControl, GeometryEvaluationError,
     GeometryEvaluationErrorKind, ParameterRange,
 };
 use super::invalid_result;
 use super::vector::{distance, dot, norm, subtract};
+pub(super) use line::project_line;
 
 const MAX_NEWTON_ITERATIONS: usize = 64;
 const MAX_PROJECTION_SEEDS: usize = 1_000_000;
@@ -186,10 +188,13 @@ fn refine_stationary_point<const N: usize>(
     Ok(None)
 }
 
-pub(super) fn uniform_seeds(range: ParameterRange, interval_count: usize) -> Vec<f64> {
+pub(super) fn uniform_seeds(
+    range: ParameterRange,
+    interval_count: usize,
+) -> Result<Vec<f64>, GeometryEvaluationError> {
     let interval_count = interval_count.clamp(1, MAX_PROJECTION_SEEDS - 1);
     (0..=interval_count)
-        .map(|index| range.start + (range.end - range.start) * index as f64 / interval_count as f64)
+        .map(|index| range.parameter_at_fraction(index as f64 / interval_count as f64))
         .collect()
 }
 

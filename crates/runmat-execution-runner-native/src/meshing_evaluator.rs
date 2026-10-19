@@ -17,7 +17,9 @@ impl ExactMeshingEvaluatorProvider for NativeMeshingEvaluatorProvider {
         geometry: &'a PreparedExactGeometryObjects,
         control: &dyn GeometryEvaluationControl,
     ) -> Result<Box<dyn ExactMeshingGeometryEvaluation + 'a>, GeometryContractError> {
-        match geometry.kernel_representation.as_deref() {
+        match geometry.kernel_representation().map_err(|error| {
+            GeometryContractError::invalid("native exact geometry", error.to_string())
+        })? {
             Some(representation) => kernel_evaluator(representation, geometry, control),
             None => PortableMeshingEvaluatorProvider.evaluator(geometry, control),
         }
@@ -55,7 +57,11 @@ fn kernel_evaluator<'a>(
 
 pub fn native_meshing_kernel_dispatcher() -> MeshingKernelDispatcher<NativeMeshingEvaluatorProvider>
 {
-    MeshingKernelDispatcher::new(NativeMeshingEvaluatorProvider)
+    let dispatcher = MeshingKernelDispatcher::new(NativeMeshingEvaluatorProvider);
+    match crate::meshing_subtask_cache::native_subtask_cache() {
+        Some(cache) => dispatcher.with_subtask_cache(cache),
+        None => dispatcher,
+    }
 }
 
 #[cfg(all(test, feature = "occt-native"))]

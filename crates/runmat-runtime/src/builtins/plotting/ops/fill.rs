@@ -175,9 +175,6 @@ pub fn fill_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Filled Polygons",
-            x_label: "X",
-            y_label: "Y",
             ..Default::default()
         },
         move |figure, axes| {

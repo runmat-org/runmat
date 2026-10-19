@@ -4,7 +4,11 @@ use crate::{
         spmv, ContributionDomain, ContributionId, ContributionProvenance, MatrixProperties,
         OperatorRole, RealSparseAssembler, RealSparseMatrix, SparsePattern,
     },
-    solve::krylov::{restarted_gmres, right_diagonal::DiagonalRightPreconditioner, GmresPolicy},
+    solve::krylov::{
+        restarted_gmres,
+        right_ilu::{SparseRightIlu, SparseRightIluEnvelope, SparseRightIluError},
+        GmresPolicy,
+    },
 };
 
 pub(super) fn assembler(
@@ -45,23 +49,6 @@ pub(super) fn assembler(
     Ok(assembler)
 }
 
-pub(super) fn diagonal(a: &RealSparseMatrix) -> Result<Vec<f64>, Error> {
-    (0..a.rows())
-        .map(|r| {
-            let start = a.pattern().row_offsets()[r] as usize;
-            let end = a.pattern().row_offsets()[r + 1] as usize;
-            let k = a.pattern().column_indices()[start..end]
-                .binary_search(&(r as u64))
-                .map_err(|_| Error::Invalid("missing momentum diagonal"))?;
-            let value = a.values()[start + k];
-            if !value.is_finite() || value <= 0.0 {
-                return Err(Error::Invalid("nonpositive finite-volume diagonal"));
-            }
-            Ok(value)
-        })
-        .collect()
-}
-
 pub(super) fn solve(
     p: &CanonicalFluidProblem<'_>,
     a: &RealSparseMatrix,
@@ -86,9 +73,21 @@ pub(super) fn solve(
         .map(|(b, a)| b - a)
         .collect::<Vec<_>>();
     drop(action);
-    let d = diagonal(a)?;
-    let preconditioner =
-        DiagonalRightPreconditioner::new(&d).map_err(|e| Error::Operator(e.to_string()))?;
+    let actual = SparseRightIluEnvelope::derive(a)
+        .ok_or(Error::Resource("actual ILU component envelope"))?;
+    let planned = SparseRightIluEnvelope::for_counts(
+        p.topology.cells.len() as u64,
+        p.reservation.sparse_entries,
+        5,
+    )
+    .ok_or(Error::Resource("planned ILU component envelope"))?;
+    if actual.resident_bytes_upper_bound > planned.resident_bytes_upper_bound
+        || actual.factor_scalar_operations > planned.factor_scalar_operations
+        || actual.application_scalar_operations > planned.application_scalar_operations
+    {
+        return Err(Error::Resource("ILU component exceeds original admission"));
+    }
+    let preconditioner = SparseRightIlu::factor(a, crate::is_fea_cancelled).map_err(ilu_error)?;
     let result = restarted_gmres(
         &defect,
         &vec![0.0; b.len()],
@@ -99,8 +98,8 @@ pub(super) fn solve(
         },
         |v| {
             let x = preconditioner
-                .apply(v)
-                .map_err(|e| Error::Operator(e.to_string()))?;
+                .apply(v, crate::is_fea_cancelled)
+                .map_err(ilu_error)?;
             spmv(a, &x).map_err(|e| Error::Operator(e.to_string()))
         },
         |x, y| {
@@ -113,16 +112,20 @@ pub(super) fn solve(
         },
         crate::is_fea_cancelled,
     )?
-    .ok_or(Error::NotConverged)?;
+    .ok_or(Error::Invalid("GMRES returned no correction inventory"))?;
     if result.cancelled {
         return Err(Error::Cancelled);
     }
     if !result.converged || result.breakdown {
-        return Err(Error::NotConverged);
+        return Err(Error::LinearNotConverged {
+            iterations: result.iterations,
+            relative_residual: result.relative_residual,
+            breakdown: result.breakdown,
+        });
     }
     let correction = preconditioner
-        .apply(&result.solution)
-        .map_err(|e| Error::Operator(e.to_string()))?;
+        .apply(&result.solution, crate::is_fea_cancelled)
+        .map_err(ilu_error)?;
     let x = current
         .iter()
         .zip(correction)
@@ -132,4 +135,11 @@ pub(super) fn solve(
         return Err(Error::Invalid("nonfinite linear correction"));
     }
     Ok((x, u64::from(result.iterations)))
+}
+
+fn ilu_error(error: SparseRightIluError) -> Error {
+    match error {
+        SparseRightIluError::Cancelled => Error::Cancelled,
+        other => Error::Operator(other.to_string()),
+    }
 }

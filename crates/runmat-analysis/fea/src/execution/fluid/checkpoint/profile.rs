@@ -24,17 +24,11 @@ pub(super) fn complete_profile(
     )?;
     let count = schedule.points_s().len() - 1;
     let source = &p.source;
-    let authorities = source
-        .constraints
-        .iter()
-        .map(|c| c.constraint_id.as_str())
-        .chain(
-            p.workload
-                .model
-                .boundaries
-                .iter()
-                .map(|b| b.boundary_id.as_str()),
-        );
+    let authorities = crate::physics::cfd::canonical::potential_boundary_authorities(
+        &source.constraints,
+        &p.workload.model.boundaries,
+        &p.workload.model.excitations,
+    );
     // One single-interval block per interval is the maximum ledger/container inventory.
     // Original arrays and boundary metadata use the shared actual block profile.
     let original = super::super::profile::original_block_profile(

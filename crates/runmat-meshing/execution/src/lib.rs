@@ -3,10 +3,17 @@
 //! Meshing owns logical records, stage identity, and manifest closure. This crate only maps that
 //! immutable closure onto execution artifact objects and, in later modules, execution workloads.
 
+/// Actual package build configuration used for internal artifact reuse.
+#[doc(hidden)]
+pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
+
 pub(crate) use runmat_execution_artifact::ArtifactAccess;
 
 mod accounting;
 mod budget;
+mod checkpoint_clock;
+mod checkpoint_diagnostic;
+mod controlled_streams;
 mod curve_join_kernel;
 mod curve_kernel;
 mod curve_refinement_kernel;
@@ -20,18 +27,30 @@ mod exact_dag;
 mod exact_dag_run;
 mod faceted_geometry_objects;
 mod geometry_control;
+mod geometry_failure;
+mod geometry_metric;
 mod geometry_objects;
 mod host;
 mod object_support;
 mod objects;
 mod publication;
+mod publication_digest;
 mod response;
+mod reuse;
+pub use reuse::{
+    meshing_build_configuration, meshing_stage_reuse_key, AcceptedMeshingStageReceipt,
+};
 mod serial;
 mod solver_projection_kernel;
 mod solver_terminal_kernel;
 mod stage_evidence_object;
+mod subtask_cache;
 mod surface_join_kernel;
 mod surface_kernel;
+pub use subtask_cache::diagnostic_chunks::{read_volume_diagnostic, VolumeDiagnosticRecord};
+pub use subtask_cache::{
+    MeshingSubtaskCacheEntry, MeshingSubtaskCacheError, MeshingSubtaskCacheStore,
+};
 mod task;
 mod volume_kernel;
 
@@ -119,3 +138,5 @@ pub use task::{
     EXACT_CAD_ADMISSION_CAPABILITY, MESHING_EXECUTION_CALLABLE_OWNER,
 };
 pub use volume_kernel::ExactVolumeKernel;
+
+mod codec_control;

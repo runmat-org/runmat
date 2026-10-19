@@ -24,6 +24,8 @@ pub struct CanonicalAcousticResponse {
     pub relative_residual: f64,
     /// Positive into the fluid; includes prescribed-pressure reaction flux.
     pub mean_input_power_w: f64,
+    /// Total mean power leaving through passive boundary admittance, including
+    /// positive real impedance and first-order local outgoing radiation.
     pub mean_impedance_loss_w: f64,
     pub power_relative_error: f64,
     pub source_evidence: Vec<SpatialProjectionEvidence>,

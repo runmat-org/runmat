@@ -5,6 +5,7 @@ pub mod buckling;
 pub(crate) mod convergence;
 pub mod dynamics;
 pub mod fixed_point;
+pub mod general;
 pub(crate) mod krylov;
 pub mod linear;
 pub mod modal;

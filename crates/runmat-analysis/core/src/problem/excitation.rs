@@ -98,6 +98,8 @@ pub enum ExcitationAction {
     /// Total outward volume flow through one finite acoustic boundary patch.
     VolumeVelocity(AnalysisExcitation),
     InletVelocity(AnalysisExcitation),
+    /// Signed total mass input into the selected fluid boundary, in kg/s.
+    /// Canonical realization uses inward normals; outward balance reporting has the opposite sign.
     MassFlow(AnalysisExcitation),
     WallMotion(AnalysisExcitation),
 }

@@ -40,6 +40,28 @@ impl ObservationPublicationCatalog {
         result: SolverResultIdentity,
     ) -> AnalysisExecutionResult<()> {
         self.validate()?;
+        self.validate_source_result_binding(producer, kind, result)
+    }
+
+    /// Admit and validate metadata once, then bind it to the original producing result.
+    /// The ceiling excludes physical source reconstruction and borrowed catalog storage.
+    pub fn validate_source_result_admitted(
+        &self,
+        producer: StepIdentity,
+        kind: AccuracySourceKind,
+        result: SolverResultIdentity,
+        maximum_metadata_bytes: u64,
+    ) -> AnalysisExecutionResult<()> {
+        self.validate_metadata_admitted(maximum_metadata_bytes)?;
+        self.validate_source_result_binding(producer, kind, result)
+    }
+
+    fn validate_source_result_binding(
+        &self,
+        producer: StepIdentity,
+        kind: AccuracySourceKind,
+        result: SolverResultIdentity,
+    ) -> AnalysisExecutionResult<()> {
         if self.producer() != producer {
             return Err(AnalysisExecutionError::Identity(
                 "observation publication producer differs",
@@ -149,7 +171,12 @@ impl AccuracyEvaluationRequest {
     ) -> AnalysisExecutionResult<Self> {
         let source_observations = match observations {
             Some(observations) => {
-                observations.validate_source_result(producer, source_kind, source_result)?;
+                observations.validate_source_result_admitted(
+                    producer,
+                    source_kind,
+                    source_result,
+                    plan.resources.maximum_resident_bytes,
+                )?;
                 Some(observations.identity())
             }
             None => None,

@@ -13,7 +13,7 @@ pub fn execute_thermal_solver_result_objects(
     namespace: ObjectNamespace,
     limits: ObjectInventoryLimits,
 ) -> AnalysisBridgeResult<PreparedAnalysisObjects> {
-    let prepared = workload.prepare(mesh)?;
+    let prepared = workload.prepare_primary_fields(mesh)?;
     let transport = prepared.transport_profile(chunk_bytes)?;
     require_inventory(&transport, limits)?;
     let output = crate::projected_transport_output_resource_facts(&transport)?;

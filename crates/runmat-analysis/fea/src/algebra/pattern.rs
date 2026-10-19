@@ -4,7 +4,9 @@ use std::fmt;
 use runmat_canonical_codec::{CanonicalCodecError, CanonicalLimits};
 use runmat_execution::Digest;
 
+mod coordinates;
 mod operations;
+pub use operations::SparsePatternStatistics;
 
 const PATTERN_IDENTITY_PREFIX: &[u8] = b"runmat-fea-sparse-pattern/v1\0";
 const PATTERN_IDENTITY_DOMAIN: &str = "analysis.fea.sparse-pattern/v1";
@@ -52,6 +54,11 @@ pub enum SparsePatternError {
         row: usize,
     },
     ShapeMismatch,
+    RowOutOfBounds {
+        entry: usize,
+        row: usize,
+        rows: usize,
+    },
 }
 
 impl fmt::Display for SparsePatternError {
@@ -68,8 +75,8 @@ pub struct SparsePattern {
     rows: u64,
     columns: u64,
     index_width: SparseIndexWidth,
-    row_offsets: Vec<u64>,
-    column_indices: Vec<u64>,
+    row_offsets: std::sync::Arc<Vec<u64>>,
+    column_indices: std::sync::Arc<Vec<u64>>,
 }
 
 #[derive(Deserialize)]
@@ -164,8 +171,8 @@ impl SparsePattern {
             rows,
             columns,
             index_width: SparseIndexWidth::U64,
-            row_offsets,
-            column_indices,
+            row_offsets: std::sync::Arc::new(row_offsets),
+            column_indices: std::sync::Arc::new(column_indices),
         })
     }
 
@@ -199,8 +206,23 @@ impl SparsePattern {
         &self.column_indices
     }
 
-    pub(crate) fn into_index_buffers(self) -> (Vec<u64>, Vec<u64>) {
-        (self.row_offsets, self.column_indices)
+    pub(crate) fn into_index_buffers(self) -> Result<(Vec<u64>, Vec<u64>), SparsePatternError> {
+        fn take(buffer: std::sync::Arc<Vec<u64>>) -> Result<Vec<u64>, SparsePatternError> {
+            match std::sync::Arc::try_unwrap(buffer) {
+                Ok(unique) => Ok(unique),
+                Err(shared) => {
+                    let mut owned = Vec::new();
+                    owned.try_reserve_exact(shared.len()).map_err(|_| {
+                        SparsePatternError::StorageAllocation {
+                            elements: shared.len(),
+                        }
+                    })?;
+                    owned.extend_from_slice(&shared);
+                    Ok(owned)
+                }
+            }
+        }
+        Ok((take(self.row_offsets)?, take(self.column_indices)?))
     }
 
     /// Find the first assembled entry not covered by this planned upper-bound pattern.

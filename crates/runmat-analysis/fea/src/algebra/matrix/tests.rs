@@ -195,3 +195,35 @@ fn fluid_provenance_roundtrips_without_changing_numerical_identity() {
         fluid.numerical_identity().unwrap()
     );
 }
+#[test]
+fn immutable_clones_share_numeric_storage_and_cold_decode_revalidates() {
+    let original = RealSparseMatrix::diagonal(
+        vec![2.0, 3.0, 4.0],
+        OperatorRole::Conductivity,
+        MatrixProperties::SYMMETRIC_POSITIVE_DEFINITE,
+    )
+    .unwrap();
+    let cloned = original.clone();
+    assert_eq!(original.values().as_ptr(), cloned.values().as_ptr());
+    assert_eq!(
+        original.pattern().row_offsets().as_ptr(),
+        cloned.pattern().row_offsets().as_ptr()
+    );
+    assert_eq!(
+        original.pattern().column_indices().as_ptr(),
+        cloned.pattern().column_indices().as_ptr()
+    );
+    let bytes = serde_json::to_vec(&original).unwrap();
+    let cold: RealSparseMatrix = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(cold, original);
+    assert_eq!(
+        cold.numerical_identity().unwrap(),
+        original.numerical_identity().unwrap()
+    );
+    assert_eq!(serde_json::to_vec(&cold).unwrap(), bytes);
+    let mut corrupt = serde_json::to_value(&original).unwrap();
+    corrupt["values"] = serde_json::json!([2.0]);
+    assert!(serde_json::from_value::<RealSparseMatrix>(corrupt).is_err());
+    drop(original);
+    assert_eq!(cloned.values(), &[2.0, 3.0, 4.0]);
+}

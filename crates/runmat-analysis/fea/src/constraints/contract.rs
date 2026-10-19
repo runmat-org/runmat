@@ -183,6 +183,12 @@ pub struct CanonicalStructuralConstraintPlan {
 
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
 pub enum ConstraintPlanError {
+    #[error("constraint compilation {phase:?} requires {required} requested bytes, above caller limit {maximum}")]
+    WorkspaceLimit {
+        phase: super::compilation::ConstraintCompilationPhase,
+        required: u64,
+        maximum: u64,
+    },
     #[error("constraint construction cancelled")]
     Cancelled,
     #[error("constraint `{constraint_id}` uses unsupported frame `{frame}`")]

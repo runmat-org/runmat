@@ -2,8 +2,8 @@ use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEva
 use runmat_meshing_core::MetricFieldRequest;
 
 use crate::{
-    validate_exact_face_metric_evaluation_in_parameterization, ExactFaceChartParameterization,
-    ExactFaceMetricEvaluation, ExactFacePslg, ExactFaceTrimmedDelaunay, ParametricMetricTensor,
+    ExactFaceChartParameterization, ExactFaceMetricEvaluation, ExactFacePslg,
+    ExactFaceTrimmedDelaunay, ParametricMetricTensor,
 };
 
 use super::{
@@ -45,10 +45,17 @@ pub fn validate_exact_face_geometry_in_parameterization(
             "face geometry inventory differs from its inputs",
         ));
     }
+    let metric_reference =
+        crate::exact_metric::prepared_validation::PreparedFaceMetricValidation::new(
+            context.topology,
+            context.metric_request,
+            context.control,
+        )
+        .map_err(|error| metric(&geometry.source_face_id, error))?;
     for (index, (actual, source)) in geometry.vertices.iter().zip(&pslg.vertices).enumerate() {
         checkpoint(context.control, &geometry.source_face_id)?;
         if actual.pslg_vertex_index != index as u32
-            || actual.evaluation.source_face_id != geometry.source_face_id
+            || actual.evaluation.provenance.source_face_id != geometry.source_face_id
             || actual.evaluation.uv != source.uv
         {
             return Err(invalid(
@@ -56,15 +63,25 @@ pub fn validate_exact_face_geometry_in_parameterization(
                 "face geometry vertex identity or UV is inconsistent",
             ));
         }
-        validate_exact_face_metric_evaluation_in_parameterization(
-            &actual.evaluation,
-            context.topology,
-            context.metric_request,
-            parameterization,
-            context.evaluator,
-            context.control,
-        )
-        .map_err(|error| metric(&geometry.source_face_id, error))?;
+        metric_reference
+            .validate(
+                &actual.evaluation,
+                parameterization,
+                context.evaluator,
+                context.control,
+            )
+            .map_err(|error| metric(&geometry.source_face_id, error))?;
+        let expected_point = context.realize(
+            &geometry.source_face_id,
+            source.node_id,
+            actual.evaluation.point_m,
+        )?;
+        if actual.point_m != expected_point {
+            return Err(invalid(
+                &geometry.source_face_id,
+                "realized face coordinate differs from its original authority",
+            ));
+        }
         let expected_normal = independent_surface_normal(&actual.evaluation)?;
         if !same_vector(actual.unit_normal, expected_normal) {
             return Err(invalid(
@@ -110,27 +127,19 @@ pub fn validate_exact_face_geometry_in_parameterization(
         ];
         for (sample, weights) in actual.deviation_samples.iter().zip(sample_weights) {
             let expected_uv = independent_weighted_point_2d(corner_uv, weights);
-            if sample.source_face_id != geometry.source_face_id || sample.uv != expected_uv {
+            if sample.provenance.source_face_id != geometry.source_face_id
+                || sample.uv != expected_uv
+            {
                 return Err(invalid(
                     &geometry.source_face_id,
                     "face triangle deviation sample identity or UV is inconsistent",
                 ));
             }
-            validate_exact_face_metric_evaluation_in_parameterization(
-                sample,
-                context.topology,
-                context.metric_request,
-                parameterization,
-                context.evaluator,
-                context.control,
-            )
-            .map_err(|error| metric(&geometry.source_face_id, error))?;
+            metric_reference
+                .validate(sample, parameterization, context.evaluator, context.control)
+                .map_err(|error| metric(&geometry.source_face_id, error))?;
         }
-        let points = [
-            first.evaluation.point_m,
-            second.evaluation.point_m,
-            third.evaluation.point_m,
-        ];
+        let points = [first.point_m, second.point_m, third.point_m];
         let area_vector = vector_product(
             difference(points[1], points[0]),
             difference(points[2], points[0]),
@@ -181,6 +190,11 @@ pub fn validate_exact_face_geometry_in_parameterization(
             }
         }
         for vertex in [first, second, third] {
+            let corner_chordal = magnitude(difference(vertex.evaluation.point_m, vertex.point_m));
+            if corner_chordal > chordal {
+                chordal = corner_chordal;
+                chordal_uv = vertex.evaluation.uv;
+            }
             let corner_normal = normal_angle(expected_normal, vertex.unit_normal);
             if corner_normal > normal_deviation {
                 normal_deviation = corner_normal;
@@ -268,7 +282,7 @@ fn independent_metric_edge(
     tensor
         .squared_length(displacement)
         .map(f64::sqrt)
-        .map_err(|reason| invalid(&left.source_face_id, reason))
+        .map_err(|reason| invalid(&left.provenance.source_face_id, reason))
 }
 
 fn independent_metric_angle(
@@ -283,10 +297,10 @@ fn independent_metric_angle(
     let tensor = origin.sizing_metric;
     let first_norm = tensor
         .squared_length(first)
-        .map_err(|reason| invalid(&origin.source_face_id, reason))?;
+        .map_err(|reason| invalid(&origin.provenance.source_face_id, reason))?;
     let second_norm = tensor
         .squared_length(second)
-        .map_err(|reason| invalid(&origin.source_face_id, reason))?;
+        .map_err(|reason| invalid(&origin.provenance.source_face_id, reason))?;
     let inner = first[0] * (tensor.uu * second[0] + tensor.uv * second[1])
         + first[1] * (tensor.uv * second[0] + tensor.vv * second[1]);
     Ok((inner / (first_norm * second_norm).sqrt())
@@ -301,7 +315,7 @@ fn independent_surface_normal(
     let length = magnitude(normal);
     if !length.is_finite() || length <= 0.0 {
         Err(invalid(
-            &evaluation.source_face_id,
+            &evaluation.provenance.source_face_id,
             "surface chart is singular at an evaluated point",
         ))
     } else {

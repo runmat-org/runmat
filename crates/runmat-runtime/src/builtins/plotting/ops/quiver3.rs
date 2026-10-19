@@ -585,9 +585,6 @@ pub async fn quiver3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         materialize_quiver3_components(x_tensor, y_tensor, z_tensor, u_tensor, v_tensor, w_tensor)
             .map_err(map_quiver3_invalid_argument)?;
     let opts = PlotRenderOptions {
-        title: "Quiver3",
-        x_label: "X",
-        y_label: "Y",
         ..Default::default()
     };
     let plot_index_out = Rc::new(RefCell::new(None));

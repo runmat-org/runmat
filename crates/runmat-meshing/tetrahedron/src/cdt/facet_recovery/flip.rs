@@ -1,20 +1,24 @@
+#[cfg(test)]
+use super::node_index;
+#[cfg(test)]
+use super::{DelaunaySegmentRecovery, DelaunayVolumeTopology};
+mod local;
+pub(super) use local::recover as try_recover_facet_with_local_edge_flip;
 use std::collections::{BTreeMap, BTreeSet};
 
-use runmat_meshing_core::{
-    quality::predicate::{orient3d, PredicateSign},
-    StableDigest,
-};
+#[cfg(test)]
+use runmat_meshing_core::quality::predicate::orient3d;
+use runmat_meshing_core::{quality::predicate::PredicateSign, StableDigest};
 
-use super::{
-    error, node_index, DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind,
-    DelaunaySegmentRecovery, DelaunayVolumeTopology, FacetRecoveryWork,
-};
+use super::{error, DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, FacetRecoveryWork};
+#[cfg(test)]
 use crate::cdt::{
     insertion::validate_constrained_delaunay_volume_topology,
     topology::build_delaunay_volume_topology_with_regions, DelaunayInsertionErrorKind,
     DelaunayTopologyErrorKind,
 };
 
+#[cfg(test)]
 pub(super) fn try_recover_facet_with_edge_flip(
     recovery: &DelaunaySegmentRecovery,
     facet: [StableDigest; 3],
@@ -167,6 +171,7 @@ pub(super) fn try_recover_facet_with_edge_flip(
     Ok(None)
 }
 
+#[cfg(test)]
 fn edge_stars(
     topology: &DelaunayVolumeTopology,
     constraint_index: u32,
@@ -192,6 +197,7 @@ fn edge_stars(
     Ok(stars)
 }
 
+#[cfg(test)]
 fn protected_segment_edges(
     recovery: &DelaunaySegmentRecovery,
     constraint_index: u32,
@@ -215,6 +221,7 @@ fn protected_segment_edges(
         .collect()
 }
 
+#[cfg(test)]
 fn opposite_sides(
     topology: &DelaunayVolumeTopology,
     edge: [u32; 2],
@@ -255,6 +262,7 @@ fn invalid_topology(constraint_index: u32, reason: &'static str) -> DelaunayFace
     )
 }
 
+#[cfg(test)]
 fn resource_or_cancelled(
     kind: DelaunayFacetRecoveryErrorKind,
     constraint_index: u32,

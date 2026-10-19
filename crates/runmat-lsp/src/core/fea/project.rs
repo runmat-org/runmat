@@ -175,11 +175,5 @@ fn function_facts(
 }
 
 fn physical_path(root: &Path, logical: &LogicalSourcePath) -> Result<PathBuf, String> {
-    let relative = logical
-        .as_str()
-        .strip_prefix("project/")
-        .ok_or_else(|| format!("imported function `{logical}` is outside the project root"))?;
-    Ok(relative
-        .split('/')
-        .fold(root.to_path_buf(), |path, part| path.join(part)))
+    runmat_runtime::analysis::physical_source_path(root, logical).map_err(|error| error.to_string())
 }

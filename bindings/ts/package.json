@@ -39,12 +39,13 @@
     "build:lsp": "wasm-pack build ../../crates/runmat-lsp --target web --out-dir ../../bindings/ts/lsp-web --out-name runmat_lsp --release -- --no-default-features --features wasm",
     "build:types": "npm run generate:builtins && npm run generate:fea-contracts && npm run generate:collaboration-contracts && tsc -p tsconfig.json",
     "build": "npm run clean && npm run build:registry && npm run build:wasm:web && npm run build:lsp && npm run build:types && npm run sync:wasm",
-    "ci": "npm run build && npm run lint && npm test && cargo check -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host",
+    "ci": "npm run build && npm run lint && npm test && npm run test:fea-assessments:wasm && cargo check -p runmat-wasm --target wasm32-unknown-unknown --features occt-wasm-host",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:pinned-wasm": "node ./scripts/test-pinned-wasm.mjs",
+    "test:fea-assessments:wasm": "node ./scripts/test-fea-assessment-authoring-wasm.mjs",
     "sync:wasm": "node ./scripts/sync-wasm-artifacts.cjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm run test:fea-assessments:wasm"
   },
   "exports": {
     ".": {
@@ -97,7 +98,9 @@
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   },
+  "packageManager": "pnpm@10.26.1+sha512.664074abc367d2c9324fdc18037097ce0a8f126034160f709928e9e9f95d98714347044e5c3164d65bd5da6c59c6be362b107546292a8eecb7999196e5ce58fa",
   "dependencies": {
+    "cbor-x": "^1.6.0",
     "zod": "^3.25.76"
   }
 }

@@ -4,6 +4,7 @@ mod identity;
 mod native_object;
 mod recipe;
 mod request;
+mod reservation;
 mod target;
 mod transport;
 
@@ -26,3 +27,5 @@ pub use transport::{
     MAX_PROGRAM_EXECUTION_OBJECT_TOTAL_BYTES, PROGRAM_EXECUTION_OBJECT_CLOSURE_MEDIA_TYPE,
     PROGRAM_EXECUTION_OBJECT_CLOSURE_SCHEMA_VERSION, PROGRAM_EXECUTION_OBJECT_CLOSURE_VALUE_SCHEMA,
 };
+
+pub use reservation::{ReservedProgramExecutionRequest, RESERVED_PROGRAM_REQUEST_SCHEMA_VERSION};

@@ -1,9 +1,12 @@
+use crate::cdt::topology::VolumeTopologyRead;
 use std::collections::BTreeSet;
 
 use runmat_meshing_core::quality::predicate::{orient3d, PredicateSign};
 
 #[path = "candidate/interior.rs"]
 mod interior;
+mod queries;
+pub(super) use queries::CandidateQueries;
 
 pub(super) use interior::canonical_interior_points;
 
@@ -25,6 +28,25 @@ struct CandidateChoice {
 
 pub(super) fn construct_candidate(
     topology: &DelaunayVolumeTopology,
+    queries: &CandidateQueries,
+    quality: &DelaunayTetrahedronQuality,
+    quality_options: crate::cdt::DelaunayVolumeQualityOptions,
+    fixed_node_identities: &[runmat_meshing_core::StableDigest],
+    excluded_node_identities: &BTreeSet<runmat_meshing_core::StableDigest>,
+    work: &mut CandidateWork<'_>,
+) -> Result<DelaunayVolumeRefinementCandidate, DelaunayVolumeRefinementCandidateError> {
+    construct_candidate_on_topology(
+        &queries.topology(topology),
+        quality,
+        quality_options,
+        fixed_node_identities,
+        excluded_node_identities,
+        work,
+    )
+}
+
+pub(in crate::cdt::volume_refinement) fn construct_candidate_on_topology(
+    topology: &impl VolumeTopologyRead,
     quality: &DelaunayTetrahedronQuality,
     quality_options: crate::cdt::DelaunayVolumeQualityOptions,
     fixed_node_identities: &[runmat_meshing_core::StableDigest],
@@ -32,49 +54,41 @@ pub(super) fn construct_candidate(
     work: &mut CandidateWork<'_>,
 ) -> Result<DelaunayVolumeRefinementCandidate, DelaunayVolumeRefinementCandidateError> {
     work.evaluate()?;
+    let missing = || {
+        error(
+            DelaunayVolumeRefinementCandidateErrorKind::InvalidTopology,
+            "quality source tetrahedron is absent from topology",
+        )
+    };
+    let vertices = quality.node_identities.map(|id| topology.node_index(id));
+    let [Some(a), Some(b), Some(c), Some(d)] = vertices else {
+        return Err(missing());
+    };
     let tetrahedron_index = topology
-        .tetrahedra
-        .iter()
-        .position(|tetrahedron| {
-            tetrahedron
-                .vertex_indices
-                .map(|vertex| topology.nodes[vertex as usize].identity)
-                == quality.node_identities
-        })
-        .ok_or_else(|| {
-            error(
-                DelaunayVolumeRefinementCandidateErrorKind::InvalidTopology,
-                "quality source tetrahedron is absent from topology",
-            )
-        })?;
-    let mut points = topology.tetrahedra[tetrahedron_index]
+        .tetrahedron_index([a, b, c, d])
+        .ok_or_else(missing)? as usize;
+    let mut points = topology
+        .tetrahedron(tetrahedron_index as u32)
+        .expect("resolved quality source")
         .vertex_indices
-        .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+        .map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
     // Topology indices are canonically ordered by persistent identity for the
     // published contract. Candidate arithmetic is geometric, so its operand
     // order must instead be invariant under a source-revision identity change.
     points.sort_by(compare_points);
-    let source_roles = quality.node_identities.map(|identity| {
-        let index = topology
-            .nodes
-            .binary_search_by_key(&identity, |node| node.identity)
-            .expect("quality source nodes resolve to the topology");
-        let boundary = topology
-            .incidence
-            .boundary_facets
-            .iter()
-            .any(|facet| facet.vertex_indices.contains(&(index as u32)));
-        let fixed = fixed_node_identities.binary_search(&identity).is_ok();
-        (boundary, fixed)
-    });
     let mut choices = Vec::new();
     if let Some(center) = metric_circumcenter(points, quality.resolved_metric) {
         // A Delaunay insertion removes the complete circumsphere cavity; it does
         // not split only the source tetrahedron. Consequently, the source's four
         // hypothetical point-split children are not an admission criterion. The
         // prepared cavity and resulting quality are validated downstream.
-        let center_is_admissible =
-            strictly_inside_region_from(topology, tetrahedron_index, &quality.region_id, center)?;
+        let center_is_admissible = strictly_inside_region_from(
+            topology,
+            tetrahedron_index,
+            &quality.region_id,
+            center,
+            work.cancellation,
+        )?;
         if center_is_admissible {
             choices.push(CandidateChoice {
                 kind: DelaunayRefinementCandidateKind::MetricCircumcenter,
@@ -92,6 +106,7 @@ pub(super) fn construct_candidate(
                     &quality.region_id,
                     points,
                     center,
+                    work.cancellation,
                 )?
                 .into_iter()
                 .enumerate()
@@ -107,26 +122,34 @@ pub(super) fn construct_candidate(
         }
     }
     work.evaluate()?;
-    choices.extend(
-        canonical_interior_points(points)?
-            .into_iter()
+    // Preserve the original family order, but construct only the prefix needed
+    // to find an available point. A valid circumcenter needs no interior lattice.
+    let choices = choices.into_iter().map(Ok).chain(
+        interior::CanonicalInteriorPoints::new(points)
             .enumerate()
-            .filter_map(|(index, coordinates_m)| {
-                Some(CandidateChoice {
+            .filter_map(|(index, coordinates)| {
+                let construction_point_index = u16::try_from(index).ok()?;
+                Some(coordinates.map(|coordinates_m| CandidateChoice {
                     kind: DelaunayRefinementCandidateKind::InteriorPoint,
                     coordinates_m,
                     construction_node_identities: quality.node_identities,
-                    construction_point_index: u16::try_from(index).ok()?,
-                })
+                    construction_point_index,
+                }))
             }),
     );
     let (choice, identity) = first_available_choice(
-        &choices,
+        choices,
         quality,
         topology,
         excluded_node_identities,
-    )
+        work.cancellation,
+    )?
     .ok_or_else(|| {
+            let source_roles = quality.node_identities.map(|identity| {
+                let index = topology.node_index(identity).expect("quality source corner");
+                (topology.vertex_is_boundary(index),
+                    fixed_node_identities.binary_search(&identity).is_ok())
+            });
             error(
                 DelaunayVolumeRefinementCandidateErrorKind::NumericalFailure,
                 format!(
@@ -165,11 +188,12 @@ fn compare_points(left: &[f64; 3], right: &[f64; 3]) -> std::cmp::Ordering {
 }
 
 pub(in crate::cdt::volume_refinement) fn metric_offcenter_points(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl VolumeTopologyRead,
     source_index: usize,
     region_id: &runmat_geometry_core::PersistentEntityId,
     points: [[f64; 3]; 4],
     circumcenter: [f64; 3],
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
 ) -> Result<Vec<[f64; 3]>, DelaunayVolumeRefinementCandidateError> {
     const BRACKET_STEPS: u32 = 32;
     const BISECTION_STEPS: u32 = 48;
@@ -185,7 +209,13 @@ pub(in crate::cdt::volume_refinement) fn metric_offcenter_points(
     let mut outside = 1.0;
     for step in 1..=BRACKET_STEPS {
         let fraction = step as f64 / BRACKET_STEPS as f64;
-        if strictly_inside_region_from(topology, source_index, region_id, point_at(fraction))? {
+        if strictly_inside_region_from(
+            topology,
+            source_index,
+            region_id,
+            point_at(fraction),
+            cancellation,
+        )? {
             inside = fraction;
         } else {
             outside = fraction;
@@ -200,7 +230,13 @@ pub(in crate::cdt::volume_refinement) fn metric_offcenter_points(
         if middle == inside || middle == outside {
             break;
         }
-        if strictly_inside_region_from(topology, source_index, region_id, point_at(middle))? {
+        if strictly_inside_region_from(
+            topology,
+            source_index,
+            region_id,
+            point_at(middle),
+            cancellation,
+        )? {
             inside = middle;
         } else {
             outside = middle;
@@ -210,7 +246,13 @@ pub(in crate::cdt::volume_refinement) fn metric_offcenter_points(
     for fraction in INWARD_FRACTIONS {
         let candidate = point_at(inside * fraction);
         if !candidates.contains(&candidate)
-            && strictly_inside_region_from(topology, source_index, region_id, candidate)?
+            && strictly_inside_region_from(
+                topology,
+                source_index,
+                region_id,
+                candidate,
+                cancellation,
+            )?
         {
             candidates.push(candidate);
         }
@@ -219,23 +261,36 @@ pub(in crate::cdt::volume_refinement) fn metric_offcenter_points(
 }
 
 fn first_available_choice(
-    choices: &[CandidateChoice],
+    choices: impl IntoIterator<Item = Result<CandidateChoice, DelaunayVolumeRefinementCandidateError>>,
     quality: &DelaunayTetrahedronQuality,
-    topology: &DelaunayVolumeTopology,
+    topology: &impl VolumeTopologyRead,
     excluded_node_identities: &BTreeSet<runmat_meshing_core::StableDigest>,
-) -> Option<(CandidateChoice, runmat_meshing_core::StableDigest)> {
-    choices.iter().copied().find_map(|choice| {
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+) -> Result<
+    Option<(CandidateChoice, runmat_meshing_core::StableDigest)>,
+    DelaunayVolumeRefinementCandidateError,
+> {
+    for choice in choices {
+        if cancellation.is_cancelled() {
+            return Err(error(
+                DelaunayVolumeRefinementCandidateErrorKind::Cancelled,
+                "cancelled",
+            ));
+        }
+        let choice = choice?;
         let identity = candidate_identity(
             quality.node_identities,
             choice.kind,
             choice.construction_point_index,
         );
-        (!excluded_node_identities.contains(&identity)
-            && !topology.nodes.iter().any(|node| {
-                node.identity == identity || node.coordinates_m == choice.coordinates_m
-            }))
-        .then_some((choice, identity))
-    })
+        if !excluded_node_identities.contains(&identity)
+            && topology.node_index(identity).is_none()
+            && !topology.contains_position(choice.coordinates_m)
+        {
+            return Ok(Some((choice, identity)));
+        }
+    }
+    Ok(None)
 }
 
 fn average(points: impl Iterator<Item = [f64; 3]>) -> [f64; 3] {
@@ -249,15 +304,22 @@ fn average(points: impl Iterator<Item = [f64; 3]>) -> [f64; 3] {
 }
 
 pub(super) fn strictly_inside_region_from(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl VolumeTopologyRead,
     source_index: usize,
     region_id: &runmat_geometry_core::PersistentEntityId,
     candidate: [f64; 3],
+    cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
 ) -> Result<bool, DelaunayVolumeRefinementCandidateError> {
     let mut visited = BTreeSet::new();
     let mut current = source_index;
     while visited.insert(current) {
-        let tetrahedron = topology.tetrahedra.get(current).ok_or_else(|| {
+        if cancellation.is_cancelled() {
+            return Err(error(
+                DelaunayVolumeRefinementCandidateErrorKind::Cancelled,
+                "cancelled",
+            ));
+        }
+        let tetrahedron = topology.tetrahedron(current as u32).ok_or_else(|| {
             error(
                 DelaunayVolumeRefinementCandidateErrorKind::InvalidTopology,
                 "candidate point-location walk reached an absent tetrahedron",
@@ -265,7 +327,7 @@ pub(super) fn strictly_inside_region_from(
         })?;
         let points = tetrahedron
             .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+            .map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
         let mut crossing = None;
         for replace in 0..4 {
             let mut simplex = points;
@@ -296,13 +358,22 @@ pub(super) fn strictly_inside_region_from(
     // Exact orientation normally makes the adjacency walk decisive. Retain a
     // complete fallback for degenerate complexes where choosing the first of
     // several crossed faces cycles, so this optimization cannot change admission.
-    for tetrahedron in &topology.tetrahedra {
+    for slot in 0..topology.tetrahedron_slot_count() {
+        if cancellation.is_cancelled() {
+            return Err(error(
+                DelaunayVolumeRefinementCandidateErrorKind::Cancelled,
+                "cancelled",
+            ));
+        }
+        let Some(tetrahedron) = topology.tetrahedron(slot as u32) else {
+            continue;
+        };
         if tetrahedron.region_id.as_ref() != Some(region_id) {
             continue;
         }
         let points = tetrahedron
             .vertex_indices
-            .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
+            .map(|vertex| topology.nodes()[vertex as usize].coordinates_m);
         if strictly_inside(points, candidate)? {
             return Ok(true);
         }
@@ -314,6 +385,17 @@ pub(super) fn strictly_inside(
     points: [[f64; 3]; 4],
     candidate: [f64; 3],
 ) -> Result<bool, DelaunayVolumeRefinementCandidateError> {
+    // Candidate arithmetic uses geometric operand order, which can have either
+    // orientation. Strict containment compares every child with its source.
+    let source_sign = orient3d(points).map_err(|failure| {
+        error(
+            DelaunayVolumeRefinementCandidateErrorKind::NumericalFailure,
+            format!("candidate source orientation failed: {failure:?}"),
+        )
+    })?;
+    if source_sign == PredicateSign::Zero {
+        return Ok(false);
+    }
     for replace in 0..4 {
         let mut simplex = points;
         simplex[replace] = candidate;
@@ -323,7 +405,7 @@ pub(super) fn strictly_inside(
                 format!("candidate orientation failed: {failure:?}"),
             )
         })?;
-        if sign != PredicateSign::Positive {
+        if sign != source_sign {
             return Ok(false);
         }
     }

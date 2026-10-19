@@ -99,20 +99,16 @@ impl StructuralLinearFieldQuantity {
 pub fn take_structural_observable_fields(
     fields: &mut Vec<AnalysisField>,
 ) -> Result<Vec<RecoveredField>, RecoveredFieldError> {
-    let declarations = structural_observable_field_definitions()?;
-    let mut recovered = Vec::with_capacity(declarations.len());
-    for definition in declarations.into_iter().filter(|definition| {
-        definition.entity_domain() != RecoveredFieldEntityDomain::ConstraintGroups
-    }) {
-        let Some(index) = fields.iter().position(|field| {
-            field.field_id == definition.field_id()
-                && field
-                    .shape
-                    .first()
-                    .is_some_and(|entity_count| *entity_count > 0)
-        }) else {
-            continue;
-        };
+    let inventory = structural_retained_field_inventory(fields, 0)?;
+    let mut recovered = Vec::with_capacity(inventory.len());
+    for (definition, _) in inventory {
+        let index = fields
+            .iter()
+            .position(|field| {
+                field.field_id == definition.field_id()
+                    && field.shape.first().is_some_and(|count| *count > 0)
+            })
+            .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
         let storage = fields.remove(index);
         recovered.push(RecoveredField::new(
             definition,
@@ -121,6 +117,37 @@ pub fn take_structural_observable_fields(
         )?);
     }
     Ok(recovered)
+}
+
+/// Shared original field inventory used both by move-only recovery and its resource planner.
+/// Constraint-group channels are generated from canonical reactions, not nodal totals.
+pub fn structural_retained_field_inventory(
+    fields: &[AnalysisField],
+    constraint_group_count: usize,
+) -> Result<Vec<(RecoveredFieldDefinition, usize)>, RecoveredFieldError> {
+    let declarations = structural_observable_field_definitions()?;
+    let mut inventory = Vec::with_capacity(declarations.len());
+    for definition in declarations {
+        let count = if definition.entity_domain() == RecoveredFieldEntityDomain::ConstraintGroups {
+            constraint_group_count
+        } else {
+            let Some(storage) = fields.iter().find(|field| {
+                field.field_id == definition.field_id()
+                    && field.shape.first().is_some_and(|count| *count > 0)
+            }) else {
+                continue;
+            };
+            let count = storage.shape[0];
+            if storage.shape != definition.storage_shape(count)? {
+                return Err(RecoveredFieldError::StorageShapeMismatch);
+            }
+            count
+        };
+        if count > 0 {
+            inventory.push((definition, count));
+        }
+    }
+    Ok(inventory)
 }
 
 /// Semantic field inventory produced by the structural solid recovery path.

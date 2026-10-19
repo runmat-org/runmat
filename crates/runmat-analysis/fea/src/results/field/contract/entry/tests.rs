@@ -1,5 +1,6 @@
 use super::*;
 use crate::results::field::RecoveredFieldView;
+use runmat_canonical_codec::profile_serialized;
 
 fn definitions() -> [RecoveredFieldDefinition; 3] {
     [

@@ -268,26 +268,6 @@ pub(in crate::results::observation) fn materialized_field_location(
     }
 }
 
-pub(in crate::results::observation) fn derive_resolved_point_identity(
-    topology_digest: Digest,
-    sample: &ResolvedObservationPoint,
-) -> Result<StableDigest, ObservationError> {
-    let bytes = encode_contract(
-        OBSERVATION_PREFIX,
-        "resolved-observation-point",
-        &(
-            topology_digest,
-            sample.ordinal,
-            sample.position_m,
-            sample.source_element_identity,
-            &sample.source_node_indices,
-            &sample.shape_values,
-        ),
-        OBSERVATION_LIMITS,
-    )?;
-    Ok(StableDigest::from_bytes(*Digest::sha256(bytes).bytes()))
-}
-
 pub(in crate::results::observation) fn validate_output_numeric_contract(
     spec: &ObservationSpec,
 ) -> Result<(), ObservationError> {

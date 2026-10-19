@@ -133,7 +133,7 @@ fn canonical_fea_documentation_examples_check_cleanly() {
         "modal-random-response-experimental.fea",
         "acoustic-production-rejected.fea",
     ] {
-        let path = format!("docs/fea/examples/{name}");
+        let path = format!("docs/simulation/examples/{name}");
         assert_fea_checks(&temp, &path);
     }
 }
@@ -211,7 +211,7 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
     ];
     let temp = TempDir::new().unwrap();
     for expected in cases {
-        let path = format!("docs/fea/examples/{}", expected.file);
+        let path = format!("docs/simulation/examples/{}", expected.file);
         let plan = fea_plan(&temp, &path);
         assert_eq!(plan["schema_version"], 1, "{path}");
         assert_eq!(plan["root_kind"], "study", "{path}");
@@ -268,7 +268,7 @@ fn representative_documentation_plans_expose_the_complete_resolved_contract() {
 #[test]
 fn structural_static_step_documentation_example_runs_and_publishes_fields() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/fea/examples/structural-static-experimental.fea";
+    let path = "docs/simulation/examples/structural-static-experimental.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
     assert!(
         output.status.success(),
@@ -295,7 +295,7 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
         &temp,
         &[
             "mesh",
-            "docs/fea/examples/geometry/two-box-assembly.step",
+            "docs/simulation/examples/geometry/two-box-assembly.step",
             "--source-units",
             "meter",
             "--target-size",
@@ -414,7 +414,7 @@ fn structural_static_step_documentation_example_runs_and_publishes_fields() {
 #[test]
 fn response_spectrum_documentation_example_runs_its_two_step_study() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/fea/examples/modal-response-spectrum-experimental.fea";
+    let path = "docs/simulation/examples/modal-response-spectrum-experimental.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
     assert!(
         output.status.success(),
@@ -471,7 +471,7 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
         "function y = design_input(frequency, scale)\narguments\n    frequency (:,1) double\n    scale (1,1) double\nend\ny = scale .* (1 + 0 .* frequency);\nend\n",
     )
     .unwrap();
-    let source = repository.join("docs/fea/examples/modal-response-spectrum-experimental.fea");
+    let source = repository.join("docs/simulation/examples/modal-response-spectrum-experimental.fea");
     fs::create_dir_all(temp.path().join("geometry")).unwrap();
     fs::copy(
         repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep"),
@@ -515,7 +515,7 @@ fn named_response_spectrum_generator_materializes_before_the_solve() {
 #[test]
 fn random_response_documentation_example_exposes_paged_statistical_fields() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/fea/examples/modal-random-response-experimental.fea";
+    let path = "docs/simulation/examples/modal-random-response-experimental.fea";
     let run = runmat_from_repository(&temp, &["run", path, "--json"]);
     assert!(
         run.status.success(),
@@ -569,7 +569,7 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
         "function y = pulse(t, magnitude)\narguments\n    t (:,1) double\n    magnitude (1,1) double\nend\ny = magnitude .* (1 + 0 .* t);\nend\n",
     )
     .unwrap();
-    let fixture = repository.join("docs/fea/examples/structural-transient-experimental.fea");
+    let fixture = repository.join("docs/simulation/examples/structural-transient-experimental.fea");
     fs::create_dir_all(temp.path().join("geometry")).unwrap();
     fs::copy(
         repository.join("crates/runmat-geometry/io/tests/fixtures/box.brep"),
@@ -614,7 +614,7 @@ fn fea_check_and_run_materialize_a_named_project_signal_generator() {
 #[test]
 fn production_example_rejects_an_unqualified_formulation() {
     let temp = TempDir::new().unwrap();
-    let path = "docs/fea/examples/acoustic-production-rejected.fea";
+    let path = "docs/simulation/examples/acoustic-production-rejected.fea";
     let output = runmat_from_repository(&temp, &["run", path, "--json"]);
 
     assert!(

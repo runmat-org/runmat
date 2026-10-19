@@ -9,6 +9,8 @@ homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
+sysinfo = { version = "0.30", default-features = false }
+runmat-cpu-execution = { workspace = true }
 runmat-analysis-core = { workspace = true }
 runmat-analysis-execution = { workspace = true }
 runmat-analysis-fea = { workspace = true }
@@ -49,11 +51,16 @@ tokio = { workspace = true, features = ["io-util", "macros", "net", "process", "
 uuid = { workspace = true }
 tempfile = "3.12"
 tracing = "0.1"
+rusqlite = { version = "0.32", features = ["bundled", "blob"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
+runmat-logging = { workspace = true }
 rcgen = "0.14"
 runmat-geometry-fixtures = { workspace = true }
 runmat-meshing-curve = { workspace = true }
@@ -86,3 +93,7 @@ harness = false
 name = "output_process_conformance"
 path = "tests/output_process_conformance.rs"
 harness = false
+
+[build-dependencies]
+sha2 = { workspace = true }
+serde_json = { workspace = true }

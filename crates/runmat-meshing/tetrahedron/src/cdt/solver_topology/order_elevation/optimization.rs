@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use super::PreparedEvaluation;
 
 use runmat_geometry_core::PersistentEntityId;
 use runmat_meshing_core::{
@@ -7,8 +7,8 @@ use runmat_meshing_core::{
 
 use super::{geometry, jacobian, MidpointMap};
 use crate::cdt::solver_topology::{
-    error, DelaunayExactEvaluation, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
-    DelaunaySolverTopologyInput, DelaunaySolverTopologyOptions,
+    error, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
+    DelaunaySolverTopologyOptions, ProjectionInput,
 };
 
 mod patch;
@@ -16,6 +16,12 @@ pub(super) use patch::repair_corner_star;
 mod relocation;
 pub(super) use relocation::relocate_interior_corner;
 mod candidates;
+mod incidence;
+mod indexes;
+mod node;
+mod transaction;
+pub(super) use indexes::OptimizationTopology;
+use node::NodeOptimizer;
 
 // These fractions deliberately exclude the initial parameter midpoint. They form a
 // stable, bounded search set and preserve the source edge's closed parameter domain.
@@ -47,14 +53,14 @@ const REPAIR_CANDIDATE_FRACTIONS: [f64; 24] = [
     0.875,
 ];
 
-#[derive(Clone, Debug)]
-struct MovableNode {
+#[derive(Clone, Copy, Debug)]
+struct MovableNode<'a> {
     edge: [u64; 2],
     node_id: u64,
     stable_identity: StableDigest,
-    incident_elements: Vec<usize>,
-    surface_uses: Vec<geometry::SurfaceUse>,
-    exact_edge_id: Option<PersistentEntityId>,
+    incident_elements: &'a [usize],
+    surface_uses: &'a [geometry::SurfaceUse<'a>],
+    exact_edge_id: Option<&'a PersistentEntityId>,
 }
 
 #[derive(Clone)]
@@ -66,7 +72,7 @@ struct Candidate {
 }
 
 struct RepairRequest<'a> {
-    movable: &'a MovableNode,
+    movable: &'a MovableNode<'a>,
     node_index: usize,
     endpoints: [runmat_meshing_core::SolverMeshNode; 2],
     target: [f64; 3],
@@ -80,40 +86,49 @@ pub(in crate::cdt::solver_topology::order_elevation) struct OptimizationWork<'a>
     pub candidate_work: &'a mut u64,
 }
 
-pub(super) fn optimize(
-    input: &DelaunaySolverTopologyInput<'_>,
+pub(super) struct OptimizationTargets<'a> {
+    pub improve_valid_nodes: bool,
+    pub invalid_elements: &'a [usize],
+    pub indexes: &'a OptimizationTopology<'a>,
+}
+
+pub(super) fn optimize<'source>(
+    input: &ProjectionInput<'source>,
     topology: &mut SolverMeshTopology,
-    midpoint_by_edge: &MidpointMap,
-    evaluation: DelaunayExactEvaluation<'_>,
+    midpoint_by_edge: &MidpointMap<'_>,
+    evaluation: PreparedEvaluation<'source, '_>,
     work: OptimizationWork<'_>,
-    improve_valid_nodes: bool,
-    invalid_elements: &BTreeSet<usize>,
+    targets: OptimizationTargets<'_>,
 ) -> Result<u64, DelaunaySolverTopologyError> {
+    let OptimizationTargets {
+        improve_valid_nodes,
+        invalid_elements,
+        indexes,
+    } = targets;
     let OptimizationWork {
         options,
         cancellation,
         jacobian_work,
         candidate_work,
     } = work;
-    let surface_uses = geometry::boundary_surface_uses(input, topology, cancellation)?;
-    let exact_edges = geometry::boundary_exact_edges(topology, cancellation)?;
+    let scratch_scope = runmat_geometry_core::GeometryAllocationScope::new(evaluation.control);
+    let scratch = crate::cdt::solver_topology::storage::Storage(Some(&scratch_scope));
     let movable = movable_nodes(
         topology,
+        &indexes.incidence,
         midpoint_by_edge,
-        &surface_uses,
-        &exact_edges,
+        &indexes.surfaces,
+        &indexes.edges,
+        scratch,
         cancellation,
     )?;
     let rounds = nonoverlapping_rounds(
         movable,
         options.maximum_curved_optimization_rounds,
+        topology.volume_elements.len(),
+        scratch,
         cancellation,
     )?;
-    let mut node_index = BTreeMap::new();
-    for (index, node) in topology.nodes.iter().enumerate() {
-        candidate_checkpoint(cancellation)?;
-        node_index.insert(node.node_id, index);
-    }
     let mut optimizer = NodeOptimizer {
         input,
         evaluation,
@@ -123,7 +138,6 @@ pub(super) fn optimize(
         candidate_work,
         improve_valid_nodes,
         invalid_elements,
-        node_index,
     };
 
     let mut moved = 0_u64;
@@ -135,68 +149,65 @@ pub(super) fn optimize(
     Ok(moved)
 }
 
-fn movable_nodes(
+fn movable_nodes<'a>(
     topology: &SolverMeshTopology,
-    midpoint_by_edge: &MidpointMap,
-    surface_uses: &BTreeMap<[u64; 2], Vec<geometry::SurfaceUse>>,
-    exact_edges: &BTreeMap<[u64; 2], PersistentEntityId>,
+    incidence: &'a incidence::Incidence<'_>,
+    midpoint_by_edge: &MidpointMap<'_>,
+    surface_uses: &'a geometry::BoundarySurfaceUses<'a>,
+    exact_edges: &geometry::BoundaryExactEdges<'a>,
+    storage: crate::cdt::solver_topology::storage::Storage<'_>,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Vec<MovableNode>, DelaunaySolverTopologyError> {
-    let mut incident_by_node = BTreeMap::<u64, Vec<usize>>::new();
-    for (element_index, element) in topology.volume_elements.iter().enumerate() {
-        candidate_checkpoint(cancellation)?;
-        for node_id in element.node_ids.iter().skip(4) {
-            incident_by_node
-                .entry(*node_id)
-                .or_default()
-                .push(element_index);
-        }
-    }
-    let mut identity_by_node = BTreeMap::new();
-    for node in &topology.nodes {
-        candidate_checkpoint(cancellation)?;
-        identity_by_node.insert(node.node_id, node.stable_identity);
-    }
-    let mut result = Vec::new();
+) -> Result<Vec<MovableNode<'a>>, DelaunaySolverTopologyError> {
+    let count = midpoint_by_edge.into_iter().count();
+    let mut result = storage.vector(count)?;
     for (edge, node_id) in midpoint_by_edge {
         candidate_checkpoint(cancellation)?;
-        let uses = surface_uses.get(edge).cloned().unwrap_or_default();
-        let exact_edge_id = exact_edges.get(edge).cloned();
-        let incident_elements = incident_by_node.remove(node_id).unwrap_or_default();
+        let incident_elements = incidence.elements(*node_id)?;
         if incident_elements.is_empty() {
             return Err(invalid("curved midside node has no incident Tet10 element"));
         }
-        let stable_identity = *identity_by_node
-            .get(node_id)
-            .ok_or_else(|| invalid("curved midside node is absent"))?;
+        let slot = geometry::node_slot(&topology.nodes, *node_id)?;
         result.push(MovableNode {
             edge: *edge,
             node_id: *node_id,
-            stable_identity,
+            stable_identity: topology.nodes[slot].stable_identity,
             incident_elements,
-            surface_uses: uses,
-            exact_edge_id,
+            surface_uses: surface_uses.get(edge).unwrap_or_default(),
+            exact_edge_id: exact_edges.get(edge),
         });
     }
-    result.sort_by_key(|node| node.stable_identity);
+    let mut scratch = storage.collect(result.iter().copied())?;
+    runmat_cpu_execution::sort_copy_with_checkpoint(
+        &mut result,
+        &mut scratch,
+        |a: &MovableNode<'_>, b: &MovableNode<'_>| a.stable_identity.cmp(&b.stable_identity),
+        || candidate_checkpoint(cancellation),
+    )?;
+    storage.release_backing(scratch)?;
     Ok(result)
 }
 
-fn nonoverlapping_rounds(
-    movable: Vec<MovableNode>,
+fn nonoverlapping_rounds<'a>(
+    movable: Vec<MovableNode<'a>>,
     maximum_rounds: u32,
+    element_count: usize,
+    storage: crate::cdt::solver_topology::storage::Storage<'_>,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Vec<Vec<MovableNode>>, DelaunaySolverTopologyError> {
-    let mut rounds = Vec::<(BTreeSet<usize>, Vec<MovableNode>)>::new();
+) -> Result<Vec<Vec<MovableNode<'a>>>, DelaunaySolverTopologyError> {
+    let words = element_count.div_ceil(64);
+    let mut rounds: Vec<(Vec<u64>, Vec<MovableNode<'a>>)> =
+        storage.vector(movable.len().min(maximum_rounds as usize))?;
     for node in movable {
         candidate_checkpoint(cancellation)?;
         if let Some((occupied, nodes)) = rounds.iter_mut().find(|(occupied, _)| {
             node.incident_elements
                 .iter()
-                .all(|element| !occupied.contains(element))
+                .all(|element| occupied[*element / 64] & (1u64 << (*element % 64)) == 0)
         }) {
-            occupied.extend(node.incident_elements.iter().copied());
-            nodes.push(node);
+            for &element in node.incident_elements {
+                occupied[element / 64] |= 1u64 << (element % 64);
+            }
+            storage.push(nodes, node)?;
             continue;
         }
         if rounds.len() as u32 >= maximum_rounds {
@@ -204,247 +215,19 @@ fn nonoverlapping_rounds(
                 "curved-node conflict coloring exceeds its hard round limit of {maximum_rounds}"
             )));
         }
-        rounds.push((node.incident_elements.iter().copied().collect(), vec![node]));
+        let mut occupied = storage.vector(words)?;
+        occupied.resize(words, 0u64);
+        for &element in node.incident_elements {
+            occupied[element / 64] |= 1u64 << (element % 64);
+        }
+        rounds.push((occupied, storage.collect(std::iter::once(node))?));
     }
-    Ok(rounds.into_iter().map(|(_, nodes)| nodes).collect())
-}
-
-struct NodeOptimizer<'a, 'b> {
-    input: &'a DelaunaySolverTopologyInput<'a>,
-    evaluation: DelaunayExactEvaluation<'a>,
-    options: DelaunaySolverTopologyOptions,
-    cancellation: &'b dyn MeshingCancellationSignal,
-    jacobian_work: &'b mut u64,
-    candidate_work: &'b mut u64,
-    improve_valid_nodes: bool,
-    invalid_elements: &'b BTreeSet<usize>,
-    node_index: BTreeMap<u64, usize>,
-}
-
-impl NodeOptimizer<'_, '_> {
-    fn optimize(
-        &mut self,
-        topology: &mut SolverMeshTopology,
-        movable: &MovableNode,
-    ) -> Result<bool, DelaunaySolverTopologyError> {
-        let node_index = *self
-            .node_index
-            .get(&movable.node_id)
-            .ok_or_else(|| invalid("curved midside node is absent"))?;
-        let left = topology
-            .nodes
-            .get(
-                *self
-                    .node_index
-                    .get(&movable.edge[0])
-                    .ok_or_else(|| invalid("curved edge endpoint is absent"))?,
-            )
-            .ok_or_else(|| invalid("curved edge endpoint is absent"))?
-            .clone();
-        let right = topology
-            .nodes
-            .get(
-                *self
-                    .node_index
-                    .get(&movable.edge[1])
-                    .ok_or_else(|| invalid("curved edge endpoint is absent"))?,
-            )
-            .ok_or_else(|| invalid("curved edge endpoint is absent"))?
-            .clone();
-        let target = midpoint(left.coordinates_m, right.coordinates_m);
-        let initial = topology.nodes[node_index].clone();
-        let initial_objective = squared_distance(initial.coordinates_m, target);
-        let initial_is_valid = movable
-            .incident_elements
-            .iter()
-            .all(|element| !self.invalid_elements.contains(element));
-        if initial_is_valid && !self.improve_valid_nodes {
-            return Ok(false);
-        }
-        if !initial_is_valid {
-            return self.repair_invalid(
-                topology,
-                RepairRequest {
-                    movable,
-                    node_index,
-                    endpoints: [left, right],
-                    target,
-                    initial,
-                },
-            );
-        }
-        let mut candidates = Vec::new();
-
-        for fraction in SHAPE_CANDIDATE_FRACTIONS {
-            if let Some(candidate) = self.candidate(movable, &left, &right, target, fraction)? {
-                if candidate.objective < initial_objective {
-                    candidates.push(candidate);
-                }
-            }
-        }
-        candidates.sort_by(|left, right| {
-            left.objective
-                .total_cmp(&right.objective)
-                .then_with(|| left.fraction.total_cmp(&right.fraction))
-        });
-
-        for candidate in candidates {
-            topology.nodes[node_index].coordinates_m = candidate.coordinates_m;
-            topology.nodes[node_index].exact_parameters = candidate.exact_parameters.clone();
-            match jacobian::validate_elements(
-                topology,
-                movable.incident_elements.iter().copied(),
-                self.input.request.resources.maximum_search_work,
-                self.input.request.resources.maximum_recursion_depth,
-                self.options.cancellation_check_interval,
-                self.cancellation,
-                self.jacobian_work,
-            ) {
-                Ok(()) => return Ok(topology.nodes[node_index] != initial),
-                Err(failure) if failure.kind == DelaunaySolverTopologyErrorKind::InvalidMesh => {
-                    topology.nodes[node_index] = initial.clone();
-                }
-                Err(failure) => {
-                    topology.nodes[node_index] = initial;
-                    return Err(failure);
-                }
-            }
-        }
-        topology.nodes[node_index] = initial;
-        Ok(false)
+    let mut result = storage.vector(rounds.len())?;
+    for (occupied, nodes) in rounds {
+        storage.release_backing(occupied)?;
+        result.push(nodes);
     }
-
-    fn repair_invalid(
-        &mut self,
-        topology: &mut SolverMeshTopology,
-        request: RepairRequest<'_>,
-    ) -> Result<bool, DelaunaySolverTopologyError> {
-        let initial_profile = jacobian::optimization_margin_profile_elements(
-            topology,
-            request.movable.incident_elements.iter().copied(),
-            self.cancellation,
-        )?;
-        let mut best_candidate = None::<(Vec<u64>, Candidate)>;
-        let mut candidates = Vec::new();
-        for fraction in REPAIR_CANDIDATE_FRACTIONS {
-            let Some(candidate) = self.candidate(
-                request.movable,
-                &request.endpoints[0],
-                &request.endpoints[1],
-                request.target,
-                fraction,
-            )?
-            else {
-                continue;
-            };
-            candidates.push(candidate);
-        }
-        if request.movable.exact_edge_id.is_none() && request.movable.surface_uses.is_empty() {
-            for (index, coordinates_m) in candidates::interior_coordinates(
-                request.initial.coordinates_m,
-                request.endpoints.clone().map(|node| node.coordinates_m),
-            )
-            .into_iter()
-            .enumerate()
-            {
-                consume_candidate_work(self.candidate_work, self.options, self.cancellation)?;
-                candidates.push(Candidate {
-                    fraction: 2.0 + index as f64,
-                    objective: squared_distance(coordinates_m, request.target),
-                    coordinates_m,
-                    exact_parameters: Vec::new(),
-                });
-            }
-        } else if request.movable.exact_edge_id.is_none() && request.movable.surface_uses.len() == 1
-        {
-            let surface_use = &request.movable.surface_uses[0];
-            for (index, evaluator_uv) in candidates::surface_parameters(
-                &request.initial,
-                [&request.endpoints[0], &request.endpoints[1]],
-                surface_use,
-            )
-            .into_iter()
-            .enumerate()
-            {
-                consume_candidate_work(self.candidate_work, self.options, self.cancellation)?;
-                let Some(point) = geometry::surface_geometry(
-                    self.input,
-                    self.evaluation,
-                    self.options,
-                    surface_use,
-                    evaluator_uv,
-                )?
-                else {
-                    continue;
-                };
-                candidates.push(Candidate {
-                    fraction: 2.0 + index as f64,
-                    objective: squared_distance(point.coordinates_m, request.target),
-                    coordinates_m: point.coordinates_m,
-                    exact_parameters: point.exact_parameters,
-                });
-            }
-        }
-        for candidate in candidates {
-            topology.nodes[request.node_index].coordinates_m = candidate.coordinates_m;
-            topology.nodes[request.node_index].exact_parameters =
-                candidate.exact_parameters.clone();
-            let profile = jacobian::optimization_margin_profile_elements(
-                topology,
-                request.movable.incident_elements.iter().copied(),
-                self.cancellation,
-            )?;
-            if profile_improves(
-                &initial_profile,
-                best_candidate
-                    .as_ref()
-                    .map(|(profile, _)| profile.as_slice()),
-                &profile,
-            ) {
-                best_candidate = Some((profile, candidate));
-            }
-            topology.nodes[request.node_index] = request.initial.clone();
-        }
-        if let Some((_, candidate)) = best_candidate {
-            topology.nodes[request.node_index].coordinates_m = candidate.coordinates_m;
-            topology.nodes[request.node_index].exact_parameters = candidate.exact_parameters;
-            return Ok(topology.nodes[request.node_index] != request.initial);
-        }
-        topology.nodes[request.node_index] = request.initial;
-        Ok(false)
-    }
-
-    fn candidate(
-        &mut self,
-        movable: &MovableNode,
-        left: &runmat_meshing_core::SolverMeshNode,
-        right: &runmat_meshing_core::SolverMeshNode,
-        target: [f64; 3],
-        fraction: f64,
-    ) -> Result<Option<Candidate>, DelaunaySolverTopologyError> {
-        consume_candidate_work(self.candidate_work, self.options, self.cancellation)?;
-        Ok(geometry::edge_geometry(
-            self.input,
-            self.evaluation,
-            self.options,
-            geometry::EdgeGeometryRequest {
-                left,
-                right,
-                exact_edge_id: movable.exact_edge_id.as_ref(),
-                surface_uses: &movable.surface_uses,
-                fraction,
-            },
-        )?
-        .and_then(|point| {
-            let objective = squared_distance(point.coordinates_m, target);
-            objective.is_finite().then_some(Candidate {
-                fraction,
-                objective,
-                coordinates_m: point.coordinates_m,
-                exact_parameters: point.exact_parameters,
-            })
-        }))
-    }
+    Ok(result)
 }
 
 fn profile_improves(initial: &[u64], best: Option<&[u64]>, candidate: &[u64]) -> bool {
@@ -505,13 +288,13 @@ mod tests {
     use super::*;
     use runmat_meshing_core::NeverCancelled;
 
-    fn movable(node_id: u64, incident_elements: &[usize]) -> MovableNode {
+    fn movable(node_id: u64, incident_elements: &[usize]) -> MovableNode<'_> {
         MovableNode {
             edge: [node_id, node_id + 1],
             node_id,
             stable_identity: StableDigest::from_bytes([node_id as u8; 32]),
-            incident_elements: incident_elements.to_vec(),
-            surface_uses: Vec::new(),
+            incident_elements,
+            surface_uses: &[],
             exact_edge_id: None,
         }
     }
@@ -524,7 +307,14 @@ mod tests {
             movable(3, &[0, 1]),
             movable(4, &[2]),
         ];
-        let rounds = nonoverlapping_rounds(input, 2, &NeverCancelled).unwrap();
+        let rounds = nonoverlapping_rounds(
+            input,
+            2,
+            3,
+            crate::cdt::solver_topology::storage::Storage(None),
+            &NeverCancelled,
+        )
+        .unwrap();
         assert_eq!(
             rounds
                 .iter()
@@ -533,9 +323,15 @@ mod tests {
             vec![vec![1, 2, 4], vec![3]]
         );
         assert_eq!(
-            nonoverlapping_rounds(vec![movable(1, &[0]), movable(2, &[0])], 1, &NeverCancelled,)
-                .unwrap_err()
-                .kind,
+            nonoverlapping_rounds(
+                vec![movable(1, &[0]), movable(2, &[0])],
+                1,
+                1,
+                crate::cdt::solver_topology::storage::Storage(None),
+                &NeverCancelled,
+            )
+            .unwrap_err()
+            .kind,
             DelaunaySolverTopologyErrorKind::ResourceLimit
         );
     }

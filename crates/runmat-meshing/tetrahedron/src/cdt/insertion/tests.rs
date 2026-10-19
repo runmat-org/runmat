@@ -4,6 +4,8 @@ use runmat_meshing_core::{
 };
 
 use super::*;
+#[path = "tests/incremental_admission.rs"]
+mod incremental_admission;
 use crate::cdt::topology::insphere_materialized_volume_nodes;
 use crate::cdt::{
     build_delaunay_volume_point_set, build_delaunay_volume_topology, DelaunayPointSetOptions,

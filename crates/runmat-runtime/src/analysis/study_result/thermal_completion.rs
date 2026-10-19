@@ -26,3 +26,68 @@ pub struct ThermalStudyCompletion {
     pub root: ValueRef,
     pub catalog: PublishedObjectCatalog,
 }
+
+impl ThermalStudyCompletion {
+    /// Original completion metadata and its validated constitutive inventory.
+    pub(in crate::analysis) fn retained_storage_bytes_estimate(
+        &self,
+        limits: runmat_canonical_codec::CanonicalLimits,
+    ) -> Result<u64, String> {
+        self.shared_clone_storage_bytes_estimate(limits)?
+            .checked_add(
+                self.compiled
+                    .properties
+                    .retained_storage_bytes_estimate(limits)?,
+            )
+            .ok_or_else(|| "thermal original storage overflow".into())
+    }
+
+    /// Additional completion metadata introduced by a clone; compiled property
+    /// inventories remain shared. Original ownership and codec work are separate.
+    pub(in crate::analysis) fn shared_clone_storage_bytes_estimate(
+        &self,
+        limits: runmat_canonical_codec::CanonicalLimits,
+    ) -> Result<u64, String> {
+        let Self {
+            observations,
+            compiled,
+            workload,
+            host_workload_digest,
+            manifest,
+            numerical_receipt,
+            field_partitions,
+            accuracy,
+            states,
+            baseline_usage,
+            terminal_usage,
+            publication,
+            frozen_project_digest,
+            root,
+            catalog,
+        } = self;
+        let metadata = runmat_canonical_codec::profile_serialized(
+            &(
+                observations,
+                workload,
+                host_workload_digest,
+                manifest,
+                numerical_receipt,
+                field_partitions,
+                accuracy,
+                states,
+                baseline_usage,
+                terminal_usage,
+                publication,
+                frozen_project_digest,
+                root,
+                catalog,
+            ),
+            limits,
+        )
+        .map_err(|error| error.to_string())?
+        .materialization_resident_bytes_estimate;
+        metadata
+            .checked_add(compiled.shared_clone_storage_bytes_estimate(limits)?)
+            .ok_or_else(|| "thermal completion clone storage overflow".into())
+    }
+}

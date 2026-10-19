@@ -12,7 +12,65 @@ use super::{
     row,
 };
 
+mod admission;
+mod lowering_profile;
+mod storage;
+use super::workspace::{add, slots};
+use admission::CompilationAdmission;
+pub use admission::{ConstraintCompilationPhase, ConstraintCompilationWorkspace};
+
+/// Original compilation and its construction inventory stay paired and immutable.
+/// The inventory is requested storage, not a numerical certificate or cold artifact.
+///
+/// Callers cannot attach a foreign plan to another construction's inventory:
+/// ```compile_fail
+/// use runmat_analysis_fea::constraints::{ConstraintCompilation, CanonicalStructuralConstraintPlan};
+/// fn substitute(compiled: &mut ConstraintCompilation, foreign: CanonicalStructuralConstraintPlan) {
+///     compiled.plan = foreign;
+/// }
+/// ```
+#[derive(Debug)]
+pub struct ConstraintCompilation<'a> {
+    model: &'a AnalysisModel,
+    mesh: Option<&'a SolverMeshArtifact>,
+    plan: CanonicalStructuralConstraintPlan,
+    workspace: ConstraintCompilationWorkspace,
+}
+impl ConstraintCompilation<'_> {
+    /// Construction scope only; no memory address enters a physical or resource identity.
+    pub(crate) fn require_original_inputs(
+        &self,
+        model: &AnalysisModel,
+        mesh: Option<&SolverMeshArtifact>,
+    ) -> Result<(), ConstraintPlanError> {
+        let same_mesh = match (self.mesh, mesh) {
+            (None, None) => true,
+            (Some(a), Some(b)) => std::ptr::eq(a, b),
+            _ => false,
+        };
+        if !std::ptr::eq(self.model, model) || !same_mesh {
+            return Err(ConstraintPlanError::Invalid(
+                "compilation inventory belongs to different borrowed inputs".into(),
+            ));
+        }
+        Ok(())
+    }
+    pub fn plan(&self) -> &CanonicalStructuralConstraintPlan {
+        &self.plan
+    }
+    pub fn workspace(&self) -> &ConstraintCompilationWorkspace {
+        &self.workspace
+    }
+    /// Consume the carrier when only the original physical plan is needed.
+    pub fn into_plan(self) -> CanonicalStructuralConstraintPlan {
+        self.plan
+    }
+}
+mod preparation;
 mod topology;
+pub use preparation::{
+    constraint_preparation_workspace_profile, ConstraintPreparationWorkspaceProfile,
+};
 mod workspace;
 use topology::CompilationTopology;
 use workspace::AccumulationWorkspace;
@@ -54,18 +112,32 @@ impl CompiledConstraint {
     }
 }
 
-pub(super) fn compile(
-    model: &AnalysisModel,
-    mesh: Option<&SolverMeshArtifact>,
-) -> Result<CanonicalStructuralConstraintPlan, ConstraintPlanError> {
+pub(super) fn compile<'a>(
+    model: &'a AnalysisModel,
+    mesh: Option<&'a SolverMeshArtifact>,
+    maximum_workspace_bytes: u64,
+) -> Result<ConstraintCompilation<'a>, ConstraintPlanError> {
     super::workspace::check_cancelled()?;
-    let _authored_profile = super::plan::constraint_authored_workspace_profile(model)?;
+    let preparation = constraint_preparation_workspace_profile(model, mesh)?;
+    let count = super::plan::constraint_authored_workspace_profile(model)?.constraint_count;
+    let mut accumulation = AccumulationWorkspace::new(count)?;
+    let mut admission = CompilationAdmission::new(maximum_workspace_bytes);
+    admission.require(
+        ConstraintCompilationPhase::Preparation,
+        accumulation.retained_bytes(),
+        preparation.total_requested_bytes,
+    )?;
+    // Retain conservative owner inventories for authored/topology/reference state.
+    // Target preparation is added separately at each actual occurrence's lifetime.
+    let baseline = add(
+        add(preparation.authored_bytes, preparation.topology_bytes)?,
+        preparation.reference_point_bytes,
+    )?;
     let authored = structural_constraints(model)?;
     validate_unique_ids(&authored)?;
     let topology = CompilationTopology::derive(model, mesh)?;
     let reference_points = canonical_reference_points(&authored)?;
     let authored_constraints_digest = authored_constraints_digest(&authored)?;
-    let mut accumulation = AccumulationWorkspace::new(authored.len())?;
     let mut groups = super::workspace::reserve(authored.len())?;
     let mut rows = Vec::new();
     let mut enforcement_mode = ConstraintEnforcement::DirectElimination;
@@ -76,7 +148,13 @@ pub(super) fn compile(
                 constraint_id: constraint.constraint_id.clone(),
             }
         })?;
-        let (compiled, implementation) = topology.lower(model, constraint)?;
+        let retained = add(
+            add(baseline, accumulation.retained_bytes())?,
+            slots::<CanonicalStructuralConstraintRow>(rows.capacity())?,
+        )?;
+        let (compiled, implementation) =
+            topology.lower_admitted(model, constraint, &mut admission, retained)?;
+        let lowered_bytes = storage::lowered_bytes(&compiled)?;
         let CompiledConstraint {
             mut targets,
             rows: compiled_rows,
@@ -88,8 +166,11 @@ pub(super) fn compile(
             targets.len(),
             coupling.is_some(),
         )?;
-        usize::try_from(group_workspace.total_requested_bytes)
-            .map_err(|_| super::workspace::overflow())?;
+        admission.require(
+            ConstraintCompilationPhase::Group,
+            add(retained, lowered_bytes)?,
+            group_workspace.total_requested_bytes,
+        )?;
         super::workspace::sort_stable_by(&mut targets, |a, b| {
             a.selection_digest.cmp(&b.selection_digest)
         })?;
@@ -107,22 +188,36 @@ pub(super) fn compile(
             coupling,
             row_count,
         )?;
-        accumulation.advance(
+        let accumulated = accumulation.advance(
             &group,
             &compiled_rows,
             compiled_rows.capacity(),
             rows.len(),
             rows.capacity(),
         )?;
+        admission.require(
+            ConstraintCompilationPhase::Accumulation,
+            baseline,
+            accumulated,
+        )?;
         rows.try_reserve_exact(row_count).map_err(allocation)?;
         rows.extend(compiled_rows);
         groups.push(group);
     }
 
-    super::workspace::sort_stable_by(&mut groups, |a, b| a.constraint_id.cmp(&b.constraint_id))?;
-    super::workspace::sort_stable_by(&mut rows, row::compare_rows)?;
-    let (active_row_count, redundant_row_count) = row::classify(&mut rows)?;
-    let plan = CanonicalStructuralConstraintPlan {
+    let retained = add(
+        add(baseline, accumulation.retained_bytes())?,
+        slots::<CanonicalStructuralConstraintRow>(rows.capacity())?,
+    )?;
+    // The profile's connectivity graph allocates too; admit its count-only envelope first.
+    let graph_bytes = super::rank::constraint_rank_graph_workspace_bytes(&rows)?;
+    admission.require(
+        ConstraintCompilationPhase::RankProfile,
+        retained,
+        graph_bytes,
+    )?;
+    let row_count = rows.len();
+    let mut plan = CanonicalStructuralConstraintPlan {
         schema_version: 1,
         topology: topology.identity(),
         authored_constraints_digest,
@@ -130,16 +225,36 @@ pub(super) fn compile(
         reference_points,
         evidence: ConstraintPlanEvidence {
             authored_constraint_count: groups.len(),
-            active_row_count,
-            redundant_row_count,
+            active_row_count: row_count,
+            redundant_row_count: row_count,
             conflicting_row_count: 0,
-            rank: active_row_count,
+            rank: row_count,
         },
         groups,
         rows,
     };
+    // Preliminary evidence only bounds inventory; it is replaced before validation/return.
+    let finalization = super::plan::constraint_plan_finalization_workspace_profile(&plan)?;
+    admission.require(
+        ConstraintCompilationPhase::Finalization,
+        retained,
+        finalization.total_requested_bytes,
+    )?;
+    super::workspace::sort_stable_by(&mut plan.groups, |a, b| {
+        a.constraint_id.cmp(&b.constraint_id)
+    })?;
+    super::workspace::sort_stable_by(&mut plan.rows, row::compare_rows)?;
+    let (active, redundant) = row::classify(&mut plan.rows)?;
+    plan.evidence.active_row_count = active;
+    plan.evidence.redundant_row_count = redundant;
+    plan.evidence.rank = active;
     plan.validate()?;
-    Ok(plan)
+    Ok(ConstraintCompilation {
+        model,
+        mesh,
+        plan,
+        workspace: admission.finish(),
+    })
 }
 
 fn group(

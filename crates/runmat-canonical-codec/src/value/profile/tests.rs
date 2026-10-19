@@ -120,3 +120,56 @@ fn cancellation_interrupts_one_large_string_chunk() {
     assert!(reader.position > 0 && reader.position <= 6 * 1024);
     assert!(!reader.current.is_empty());
 }
+
+#[test]
+fn admission_value_and_envelope_share_the_same_independent_structural_inventory() {
+    let original = serde_json::json!({"array": [null, true, -4, 0.125, u64::MAX], "text": "é𝄞"});
+    let limits = CanonicalLimits::new(4096, 100, 100, 8);
+    let encoded = encode_contract(b"test-prefix\0", "unicode-domain", &original, limits).unwrap();
+    let mut admitted = false;
+    let decoded: serde_json::Value = crate::decode_contract_with_admission(
+        b"test-prefix\0",
+        "unicode-domain",
+        &encoded,
+        limits,
+        &NeverCancelled,
+        |value| {
+            let (profile, bytes) = value_profile(value, &NeverCancelled)?;
+            assert_eq!(
+                profile,
+                MaterializationProfile {
+                    value_nodes: 8,
+                    map_entries: 2,
+                    string_bytes: 15
+                }
+            );
+            assert_eq!(bytes, value.len() as u64);
+            let value_estimate = crate::canonical_value_materialization_resident_bytes_estimate(
+                value,
+                &NeverCancelled,
+            )?;
+            let envelope_estimate =
+                crate::canonical_payload_materialization_resident_bytes_estimate(&encoded)?;
+            assert_eq!(
+                envelope_estimate - value_estimate,
+                2 * (encoded.len() - value.len()) as u64
+            );
+            admitted = true;
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert!(admitted);
+    assert_eq!(decoded, original);
+    assert!(
+        crate::canonical_value_materialization_resident_bytes_estimate(&[0x18], &NeverCancelled)
+            .is_err()
+    );
+    assert!(
+        crate::canonical_value_materialization_resident_bytes_estimate(
+            &[0x01, 0x01],
+            &NeverCancelled
+        )
+        .is_err()
+    );
+}

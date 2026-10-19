@@ -16,7 +16,7 @@ use runmat_execution_runner_native::{
     NativeMeshingPartitionPolicy,
 };
 use runmat_geometry_io::ExactCadImportOptions;
-use runmat_meshing_core::{CanonicalMeshingContract, MeshingRequestSettings};
+use runmat_meshing_core::MeshingRequestSettings;
 use runmat_meshing_execution::{import_exact_meshing_result, ExactMeshingDagRunResult};
 
 use crate::cli::RemoteExecutionTarget;
@@ -25,8 +25,8 @@ use crate::commands::job::submit::{PreparedRemoteExecution, RemoteSubmissionOpti
 use crate::presentation;
 
 use super::{
-    import_options, meshing_settings, print_result, validate_output_paths,
-    verify_persisted_outputs, MeshCommand,
+    import_options, meshing_settings, persist_completed_mesh, print_result, validate_output_paths,
+    ExistingOutputPolicy, MeshCommand, MeshOutputSummary,
 };
 
 pub(super) async fn execute(
@@ -161,47 +161,18 @@ pub(crate) fn materialize_outputs(
     output: &Path,
     evidence_path: &Path,
     force: bool,
-) -> Result<ExactMeshingDagRunResult> {
-    let result = decode_result(response, objects)?;
-    persist_result(
+) -> Result<MeshOutputSummary> {
+    let (artifact, evidence) =
+        decode_result(response, objects).map(|result| (result.artifact, result.evidence))?;
+    persist_completed_mesh(
         output,
         evidence_path,
-        &result.artifact,
-        &result.evidence,
-        force,
-    )?;
-    Ok(result)
-}
-
-fn persist_result(
-    output: &Path,
-    evidence_path: &Path,
-    artifact: &runmat_meshing_core::SolverMeshArtifact,
-    evidence: &runmat_meshing_core::MeshingEvidence,
-    force: bool,
-) -> Result<()> {
-    if output.exists() || evidence_path.exists() {
-        if verify_persisted_outputs(output, evidence_path, artifact, evidence).is_ok() {
-            return Ok(());
-        }
-        if !force {
-            bail!(
-                "mesh output destinations already contain a different or incomplete result; \
-                 resubmit with --force to authorize replacement"
-            );
-        }
-    }
-    let artifact_bytes = artifact.canonical_encode()?;
-    let evidence_bytes = evidence.canonical_encode()?;
-    runmat_runtime::meshing::write_canonical_artifact_pair(
-        output,
-        &artifact_bytes,
-        evidence_path,
-        &evidence_bytes,
-        force,
+        artifact,
+        evidence,
+        ExistingOutputPolicy::ReuseIdentical {
+            replace_different: force,
+        },
     )
-    .map_err(anyhow::Error::msg)?;
-    verify_persisted_outputs(output, evidence_path, artifact, evidence)
 }
 
 fn prepare_root<'a>(
@@ -343,6 +314,26 @@ fn decode_result(
 struct DownloadedResultCache(BTreeMap<Digest, Vec<u8>>);
 
 impl CacheImport for DownloadedResultCache {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> runmat_execution_artifact::ArtifactResult<()>,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        runmat_execution_artifact::cache::copy_verified_bounded_with_admission(
+            digest,
+            self.0.get(&digest).map(Vec::as_slice),
+            maximum_bytes,
+            admit,
+        )
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.read_verified_bounded_with_admission(digest, maximum_bytes, &mut |_| Ok(()))
+    }
     fn read_verified(
         &self,
         digest: Digest,
@@ -395,7 +386,7 @@ mod tests {
     use runmat_execution::{Digest, ProgramEnvironment, ProgramRevision};
     use runmat_execution_artifact::ProgramExecutionDescriptor;
 
-    use super::{persist_result, prepare_remote_root};
+    use super::{persist_completed_mesh, prepare_remote_root, ExistingOutputPolicy};
 
     fn revision() -> ProgramRevision {
         ProgramRevision::new(
@@ -471,20 +462,56 @@ mod tests {
         let evidence =
             runmat_meshing_core::fixtures::canonical_tetrahedron_meshing_evidence(&artifact);
 
-        persist_result(&output, &evidence_path, &artifact, &evidence, false).unwrap();
+        persist_completed_mesh(
+            &output,
+            &evidence_path,
+            artifact.clone(),
+            evidence.clone(),
+            ExistingOutputPolicy::ReuseIdentical {
+                replace_different: false,
+            },
+        )
+        .unwrap();
         let first_mesh = std::fs::read(&output).unwrap();
         let first_evidence = std::fs::read(&evidence_path).unwrap();
 
-        persist_result(&output, &evidence_path, &artifact, &evidence, false).unwrap();
+        persist_completed_mesh(
+            &output,
+            &evidence_path,
+            artifact.clone(),
+            evidence.clone(),
+            ExistingOutputPolicy::ReuseIdentical {
+                replace_different: false,
+            },
+        )
+        .unwrap();
         assert_eq!(std::fs::read(&output).unwrap(), first_mesh);
         assert_eq!(std::fs::read(&evidence_path).unwrap(), first_evidence);
 
         std::fs::write(&output, b"different result").unwrap();
-        assert!(persist_result(&output, &evidence_path, &artifact, &evidence, false).is_err());
+        assert!(persist_completed_mesh(
+            &output,
+            &evidence_path,
+            artifact.clone(),
+            evidence.clone(),
+            ExistingOutputPolicy::ReuseIdentical {
+                replace_different: false
+            }
+        )
+        .is_err());
         assert_eq!(std::fs::read(&output).unwrap(), b"different result");
         assert_eq!(std::fs::read(&evidence_path).unwrap(), first_evidence);
 
-        persist_result(&output, &evidence_path, &artifact, &evidence, true).unwrap();
+        persist_completed_mesh(
+            &output,
+            &evidence_path,
+            artifact.clone(),
+            evidence.clone(),
+            ExistingOutputPolicy::ReuseIdentical {
+                replace_different: true,
+            },
+        )
+        .unwrap();
         assert_eq!(std::fs::read(&output).unwrap(), first_mesh);
         assert_eq!(std::fs::read(&evidence_path).unwrap(), first_evidence);
     }

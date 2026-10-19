@@ -7,7 +7,7 @@
 use std::cmp::Ordering;
 
 use runmat_analysis_core::{AnalysisModel, StructuralConstraintKind};
-use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
+use runmat_canonical_codec::CanonicalLimits;
 use runmat_execution::Digest;
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 use serde::Serialize;
@@ -21,6 +21,7 @@ use super::target::validate_resolved_target;
 use crate::physics::structural::topology::CanonicalStructuralTopologyIdentity;
 
 mod authored_profile;
+mod codec;
 mod profile;
 mod validation;
 pub use authored_profile::{
@@ -44,7 +45,18 @@ impl CanonicalStructuralConstraintPlan {
         model: &AnalysisModel,
         mesh: Option<&SolverMeshArtifact>,
     ) -> Result<Self, ConstraintPlanError> {
-        super::compilation::compile(model, mesh)
+        Self::compile_for_model_with_workspace_limit(model, mesh, u64::MAX)
+            .map(|compiled| compiled.into_plan())
+    }
+
+    /// Compile under the caller's additional-heap ceiling. Checks precede each allocating
+    /// phase; borrowed model/mesh and other caller-retained inputs must be admitted separately.
+    pub fn compile_for_model_with_workspace_limit<'a>(
+        model: &'a AnalysisModel,
+        mesh: Option<&'a SolverMeshArtifact>,
+        maximum_workspace_bytes: u64,
+    ) -> Result<super::compilation::ConstraintCompilation<'a>, ConstraintPlanError> {
+        super::compilation::compile(model, mesh, maximum_workspace_bytes)
     }
 
     pub fn compile(
@@ -119,13 +131,11 @@ impl CanonicalStructuralConstraintPlan {
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ConstraintPlanError> {
         self.validate()?;
-        encode_contract(PLAN_PREFIX, PLAN_DOMAIN, self, PLAN_LIMITS)
-            .map_err(|error| ConstraintPlanError::Encoding(error.to_string()))
+        codec::encode(PLAN_DOMAIN, self)
     }
 
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, ConstraintPlanError> {
-        let plan = decode_contract(PLAN_PREFIX, PLAN_DOMAIN, bytes, PLAN_LIMITS)
-            .map_err(|error| ConstraintPlanError::Encoding(error.to_string()))?;
+        let plan = codec::decode(PLAN_DOMAIN, bytes)?;
         Self::validate(&plan)?;
         Ok(plan)
     }
@@ -218,9 +228,7 @@ pub(super) fn canonical_digest<T: Serialize>(
     domain: &'static str,
     value: &T,
 ) -> Result<Digest, ConstraintPlanError> {
-    encode_contract(PLAN_PREFIX, domain, value, PLAN_LIMITS)
-        .map(|bytes| Digest::sha256(&bytes))
-        .map_err(|error| ConstraintPlanError::Encoding(error.to_string()))
+    codec::encode(domain, value).map(|bytes| Digest::sha256(&bytes))
 }
 
 pub(super) fn reference_point_identity(
@@ -243,13 +251,16 @@ pub(super) fn canonical_value_workspace_profile<T: Serialize + ?Sized>(
     value: &T,
 ) -> Result<runmat_canonical_codec::SerializedCanonicalProfile, ConstraintPlanError> {
     super::workspace::check_cancelled()?;
-    runmat_canonical_codec::profile_serialized(value, PROFILE_LIMITS).map_err(|e| {
-        if crate::is_fea_cancelled() {
-            ConstraintPlanError::Cancelled
-        } else {
-            ConstraintPlanError::Encoding(e.to_string())
-        }
-    })
+    let profile =
+        runmat_canonical_codec::profile_serialized(value, PROFILE_LIMITS).map_err(|e| {
+            if crate::is_fea_cancelled() {
+                ConstraintPlanError::Cancelled
+            } else {
+                ConstraintPlanError::Encoding(e.to_string())
+            }
+        })?;
+    super::workspace::check_cancelled()?;
+    Ok(profile)
 }
 
 #[cfg(test)]

@@ -1,14 +1,8 @@
-use std::collections::BTreeMap;
-
 use runmat_geometry_core::{
     ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl, PersistentEntityId,
 };
-use runmat_meshing_core::{MetricContributionScope, MetricFieldRequest};
-use runmat_meshing_size::{
-    grading::grade_metric_evaluations,
-    incidence::TopologyMetricIncidence,
-    metric::{MetricTensor3, ResolvedMetricField},
-};
+use runmat_meshing_core::MetricFieldRequest;
+use runmat_meshing_size::metric::MetricTensor3;
 
 use super::{
     resolved::evaluator_parameters, ExactFaceMetricError, ExactFaceMetricErrorKind,
@@ -41,6 +35,21 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
     evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
     control: &dyn GeometryEvaluationControl,
 ) -> Result<(), ExactFaceMetricError> {
+    let prepared =
+        super::prepared_validation::PreparedFaceMetricValidation::new(topology, request, control)?;
+    prepared.validate(evaluation, parameterization, evaluator, control)
+}
+
+pub(super) fn validate_prepared_face_metric_evaluation(
+    evaluation: &ExactFaceMetricEvaluation,
+    reference: &std::collections::BTreeMap<
+        PersistentEntityId,
+        super::prepared_validation::FaceMetricReference<'_>,
+    >,
+    parameterization: &ExactFaceChartParameterization,
+    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    control: &dyn GeometryEvaluationControl,
+) -> Result<(), ExactFaceMetricError> {
     if evaluation
         .uv
         .iter()
@@ -48,29 +57,28 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
         .any(|value| !value.is_finite())
     {
         return Err(invalid(
-            &evaluation.source_face_id,
+            &evaluation.provenance.source_face_id,
             "metric evaluation chart or evaluator UV is not finite",
         ));
     }
-    let face = topology
-        .faces
-        .iter()
-        .find(|face| face.id == evaluation.source_face_id)
+    let record = reference
+        .get(&evaluation.provenance.source_face_id)
         .ok_or_else(|| {
             ExactFaceMetricError::new(
                 ExactFaceMetricErrorKind::UnknownFace,
-                Some(&evaluation.source_face_id),
+                Some(&evaluation.provenance.source_face_id),
                 "metric evaluation face is absent from exact topology",
             )
         })?;
+    let face = record.face;
     parameterization
         .validate()
-        .map_err(|reason| invalid(&evaluation.source_face_id, reason))?;
+        .map_err(|reason| invalid(&evaluation.provenance.source_face_id, reason))?;
     let expected = independent_sample(
         parameterization,
         evaluator,
         &face.surface_evaluator_id,
-        &evaluation.source_face_id,
+        &evaluation.provenance.source_face_id,
         evaluation.uv,
         control,
     )?;
@@ -80,13 +88,7 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
             "metric evaluation uses a noncanonical evaluator image",
         ));
     }
-    let transform = topology.world_transform_for(&face.id).map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            Some(&face.id),
-            error.to_string(),
-        )
-    })?;
+    let transform = record.world_transform;
     let expected_point = transform.transform_point(expected.point_m);
     let expected_u = transform.transform_vector(expected.derivatives[0]);
     let expected_v = transform.transform_vector(expected.derivatives[1]);
@@ -118,18 +120,16 @@ pub fn validate_exact_face_metric_evaluation_in_parameterization(
         ));
     }
 
-    let expected = resolve_face_metrics(topology, request)?
-        .remove(&face.id)
-        .ok_or_else(|| invalid(&face.id, "resolved metric does not contain the exact face"))?;
+    let expected = &record.metric;
     let sizing_metric = independent_pullback(expected.metric, expected_u, expected_v);
     sizing_metric
         .validate()
         .map_err(|reason| invalid(&face.id, format!("invalid sizing pullback: {reason}")))?;
     if evaluation.sizing_metric != sizing_metric
-        || evaluation.active_sources != expected.active_sources
-        || evaluation.applied_contribution_count != expected.applied_contribution_count
-        || evaluation.clipped_contribution_count != expected.clipped_contribution_count
-        || evaluation.rejected_contribution_count != expected.rejected_contribution_count
+        || evaluation.provenance.active_sources != expected.active_sources
+        || evaluation.provenance.applied_contribution_count != expected.applied_contribution_count
+        || evaluation.provenance.clipped_contribution_count != expected.clipped_contribution_count
+        || evaluation.provenance.rejected_contribution_count != expected.rejected_contribution_count
     {
         return Err(invalid(
             &face.id,
@@ -268,66 +268,6 @@ fn geometry(
         Some(face_id),
         error.reason,
     )
-}
-
-fn resolve_face_metrics(
-    topology: &ExactBRepTopology,
-    request: &MetricFieldRequest,
-) -> Result<
-    BTreeMap<PersistentEntityId, runmat_meshing_size::metric::ResolvedMetricEvaluation>,
-    ExactFaceMetricError,
-> {
-    request.validate().map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            None,
-            error.to_string(),
-        )
-    })?;
-    let resolver = ResolvedMetricField::new(request).map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            None,
-            error.to_string(),
-        )
-    })?;
-    let incidence = TopologyMetricIncidence::new(topology);
-    for contribution in &request.contributions {
-        let entity = match &contribution.scope {
-            MetricContributionScope::Region { region_id } => region_id,
-            MetricContributionScope::Entity { entity_id } => entity_id,
-        };
-        if !incidence.knows(entity) {
-            return Err(ExactFaceMetricError::new(
-                ExactFaceMetricErrorKind::InvalidRequest,
-                None,
-                format!("metric contribution references unknown exact entity {entity:?}"),
-            ));
-        }
-    }
-    let mut by_face = topology
-        .faces
-        .iter()
-        .map(|face| {
-            resolver
-                .resolve(&incidence.incident_face_entities(face))
-                .map(|metric| (face.id.clone(), metric))
-                .map_err(|error| invalid(&face.id, error.to_string()))
-        })
-        .collect::<Result<BTreeMap<_, _>, _>>()?;
-    grade_metric_evaluations(
-        request.maximum_grading_ratio,
-        &TopologyMetricIncidence::face_adjacency(topology),
-        &mut by_face,
-    )
-    .map_err(|error| {
-        ExactFaceMetricError::new(
-            ExactFaceMetricErrorKind::InvalidRequest,
-            None,
-            error.to_string(),
-        )
-    })?;
-    Ok(by_face)
 }
 
 fn independent_pullback(

@@ -4,9 +4,7 @@ use runmat_execution::Digest;
 use runmat_meshing_core::SolverMeshArtifact;
 use serde::{Deserialize, Serialize};
 
-use super::resolve::{
-    verify_authored_observations, verify_observation_plan, verify_structural_observation_plan,
-};
+use super::resolve::{verify_authored_observations, verify_structural_observation_plan};
 use super::{ObservationFieldSelection, ResolvedObservationPlan};
 use crate::execution::{
     AnalysisExecutionError, AnalysisExecutionResult, FieldRecoveryRequest,
@@ -146,27 +144,8 @@ impl ObservationFieldCatalog {
         let ObservationFieldCatalogSource::Thermal { manifest } = &self.source else {
             return Err(invalid("thermal plan requires a thermal catalog"));
         };
-        let first = manifest
-            .fields
-            .first()
-            .filter(|entries| !entries.is_empty())
-            .ok_or_else(|| invalid("thermal source has no accepted sample"))?;
-        // This validates producer, workload, mesh, sample schedule, and field ordering.
-        ObservationFieldSelection::thermal(workload, manifest, mesh, 0, vec![first[0].field])?;
-        let step = workload
-            .model
-            .sequence
-            .steps
-            .iter()
-            .find(|step| step.step_id == workload.step_id)
-            .ok_or_else(|| invalid("thermal authored step absent"))?;
-        verify_authored_observations(step, plan).map_err(invalid)?;
-        let projection = crate::topology::AnalysisProjection::derive(mesh).map_err(invalid)?;
-        let definitions = first
-            .iter()
-            .map(|entry| entry.definition.clone())
-            .collect::<Vec<_>>();
-        verify_observation_plan(step, &projection, &definitions, plan).map_err(invalid)
+        super::source::ThermalFieldSourceAuthority::new(workload, manifest, mesh)?
+            .validate_plan(plan)
     }
 
     pub fn structural(

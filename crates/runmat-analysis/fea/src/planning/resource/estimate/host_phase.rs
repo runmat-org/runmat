@@ -99,9 +99,21 @@ pub(super) fn build_host_phase_resource_plan(
         ],
         "host phase peak memory",
     )?;
-    let total_memory = add(
-        input.worker.fixed_memory_bytes.0,
-        numerical_memory,
+    let pool_stacks = mul(
+        u64::from(if input.worker.cpu_millicores > 1_000 {
+            input.worker.cpu_millicores / 1_000
+        } else {
+            0
+        }),
+        runmat_cpu_execution::WORKER_STACK_BYTES,
+        "persistent CPU pool stacks",
+    )?;
+    let total_memory = sum(
+        &[
+            input.worker.fixed_memory_bytes.0,
+            numerical_memory,
+            pool_stacks,
+        ],
         "worker peak memory",
     )?;
     let total_scratch = input.worker.fixed_scratch_bytes.0;

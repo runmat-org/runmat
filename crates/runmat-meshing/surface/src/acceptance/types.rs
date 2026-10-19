@@ -11,6 +11,23 @@ pub struct ExactFaceAcceptanceOptions {
     pub maximum_samples: u64,
 }
 
+impl ExactFaceAcceptanceOptions {
+    /// Minimum adaptive sample demand, excluding additional boundary checks and
+    /// deeper subdivision near the quality envelope. This is a lower bound,
+    /// never authority to skip sampling or bypass the shared work control.
+    pub fn minimum_sample_count(&self, triangles: u64) -> Option<u64> {
+        let mut cells = 1u64;
+        let mut samples = 0u64;
+        for depth in 0..=self.minimum_subdivision_depth {
+            samples = samples.checked_add(cells.checked_mul(4)?)?;
+            if depth < self.minimum_subdivision_depth {
+                cells = cells.checked_mul(4)?;
+            }
+        }
+        samples.checked_mul(triangles)
+    }
+}
+
 impl Default for ExactFaceAcceptanceOptions {
     fn default() -> Self {
         Self {

@@ -107,6 +107,20 @@ fn native_volume_checkpoint_batches_preserve_tighter_kernel_cadences() {
 }
 
 #[test]
+fn governed_optimization_uses_the_declared_search_envelope_without_a_standalone_cap() {
+    let mut request = crate::serial_tests::request();
+    for maximum in [12, 2048, 1_000_000] {
+        request.resources.maximum_search_work = maximum;
+        let options = volume_options(&request);
+        assert_eq!(
+            options.sliver.maximum_candidate_evaluations_per_pass,
+            maximum
+        );
+        assert_eq!(request.resources.maximum_search_work, maximum);
+    }
+}
+
+#[test]
 fn general_volume_errors_keep_typed_stage_categories() {
     for (stage, expected) in [
         (

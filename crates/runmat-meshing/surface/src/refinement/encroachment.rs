@@ -1,11 +1,15 @@
+mod classification;
+mod influence;
+pub(crate) use classification::{
+    classify_exact_face_refinement_candidates_in_parameterization, classify_with_context,
+};
 use runmat_geometry_core::{ExactBRepTopology, ExactSurfaceEvaluator, GeometryEvaluationControl};
 use runmat_meshing_core::MetricFieldRequest;
 use runmat_meshing_curve::SharedCurveSegmentSplit;
-use std::collections::BTreeSet;
 
 use crate::{
     exact_face_chart_cut_node_id, ExactFaceChartParameterization, ExactFaceMetricError,
-    ExactFacePslg, ExactFacePslgSegmentSource, ResolvedFaceMetricField,
+    ExactFacePslg, ExactFacePslgSegmentSource,
 };
 
 use super::{
@@ -25,7 +29,7 @@ pub fn classify_exact_face_refinement_candidate(
     pslg: &ExactFacePslg,
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
-    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
     classify_exact_face_refinement_candidate_in_parameterization(
@@ -45,7 +49,7 @@ pub(crate) fn classify_exact_face_refinement_candidate_in_parameterization(
     topology: &ExactBRepTopology,
     request: &MetricFieldRequest,
     parameterization: &ExactFaceChartParameterization,
-    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
+    evaluator: &dyn ExactSurfaceEvaluator,
     control: &dyn GeometryEvaluationControl,
 ) -> Result<ExactFaceCandidateDisposition, ExactFaceRefinementError> {
     let mut classifications = classify_exact_face_refinement_candidates_in_parameterization(
@@ -73,135 +77,6 @@ pub(crate) fn classify_exact_face_refinement_candidate_in_parameterization(
             "candidate classification is empty",
         ))
     }
-}
-
-pub(crate) fn classify_exact_face_refinement_candidates_in_parameterization(
-    candidates: &[ExactFaceRefinementCandidate],
-    pslg: &ExactFacePslg,
-    topology: &ExactBRepTopology,
-    request: &MetricFieldRequest,
-    parameterization: &ExactFaceChartParameterization,
-    evaluator: &(impl ExactSurfaceEvaluator + ?Sized),
-    control: &dyn GeometryEvaluationControl,
-) -> Result<ExactFaceCandidateClassifications, ExactFaceRefinementError> {
-    if candidates.iter().any(|candidate| {
-        candidate.source_face_id != pslg.source_face_id
-            || candidate.uv.iter().any(|value| !value.is_finite())
-    }) {
-        return Err(invalid(
-            &pslg.source_face_id,
-            "candidate face or UV is inconsistent with the PSLG",
-        ));
-    }
-    let field = ResolvedFaceMetricField::new(topology, request)
-        .map_err(|error| metric(&pslg.source_face_id, error))?;
-    let mut segment_metrics = Vec::with_capacity(pslg.segments.len());
-    for (segment_index, segment) in pslg.segments.iter().enumerate() {
-        control.checkpoint().map_err(|error| {
-            ExactFaceRefinementError::new(
-                ExactFaceRefinementErrorKind::Metric(
-                    crate::ExactFaceMetricErrorKind::GeometryEvaluation(error.kind),
-                ),
-                &pslg.source_face_id,
-                error.reason,
-            )
-        })?;
-        let endpoints = segment
-            .vertex_indices
-            .map(|index| pslg.vertices.get(index as usize));
-        let [Some(first), Some(second)] = endpoints else {
-            return Err(invalid(
-                &pslg.source_face_id,
-                "protected segment references an absent PSLG vertex",
-            ));
-        };
-        let midpoint = [
-            (first.uv[0] + second.uv[0]) * 0.5,
-            (first.uv[1] + second.uv[1]) * 0.5,
-        ];
-        let metric = field
-            .evaluate_parameterized(
-                &pslg.source_face_id,
-                midpoint,
-                parameterization,
-                evaluator,
-                control,
-            )
-            .map_err(|error| metric(&pslg.source_face_id, error))?
-            .sizing_metric;
-        segment_metrics.push((segment_index, first, second, metric));
-    }
-    let mut encroached_segments = BTreeSet::new();
-    let mut insertions = Vec::new();
-    for candidate in candidates {
-        let mut encroached = false;
-        for (segment_index, first, second, metric) in &segment_metrics {
-            let segment = &pslg.segments[*segment_index];
-            if matches!(
-                candidate.reason,
-                super::ExactFaceRefinementReason::MetricAngle
-                    | super::ExactFaceRefinementReason::PhysicalAspectRatio
-            ) && matches!(segment.source, ExactFacePslgSegmentSource::ExactTrim { .. })
-            {
-                // Shared exact curves already satisfy their independently validated metric-size
-                // contract. Face-owned shape refinement may split chart cuts, but it must not
-                // repeatedly rewrite a global curve merely to improve a local triangle angle or
-                // aspect ratio. Geometric-deviation and metric-size candidates remain hard and
-                // can request an exact-curve split.
-                continue;
-            }
-            let Some(encroached_by_candidate) =
-                metric_diametral_disk_contains(candidate.uv, first.uv, second.uv, *metric)
-            else {
-                return Err(invalid(
-                    &pslg.source_face_id,
-                    "protected-segment encroachment measure is not finite",
-                ));
-            };
-            if encroached_by_candidate {
-                encroached_segments.insert(*segment_index);
-                encroached = true;
-            }
-        }
-        if !encroached {
-            insertions.push(candidate.clone());
-        }
-    }
-    let mut protected_splits = Vec::new();
-    let mut chart_cut_splits = Vec::new();
-    for segment_index in encroached_segments {
-        let (_, first, second, _) = &segment_metrics[segment_index];
-        match split_protected_segment(pslg, segment_index, first, second)? {
-            ExactFaceCandidateDisposition::SplitProtectedSegment(split) => {
-                let split = *split;
-                if protected_splits
-                    .iter()
-                    .all(|existing: &ExactProtectedSegmentSplit| {
-                        existing.curve_split != split.curve_split
-                    })
-                {
-                    protected_splits.push(split);
-                }
-            }
-            ExactFaceCandidateDisposition::SplitChartCut(split) => {
-                let split = *split;
-                if !chart_cut_splits.contains(&split) {
-                    chart_cut_splits.push(split);
-                }
-            }
-            ExactFaceCandidateDisposition::Insert => {
-                return Err(invalid(
-                    &pslg.source_face_id,
-                    "encroached segment classification did not request a split",
-                ));
-            }
-        }
-    }
-    Ok(ExactFaceCandidateClassifications {
-        protected_splits,
-        chart_cut_splits,
-        insertions,
-    })
 }
 
 /// Conservatively classifies a point against the closed diametral disk in the

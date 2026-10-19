@@ -172,7 +172,12 @@ impl CadOverlayState {
             #[cfg(not(target_arch = "wasm32"))]
             painter.rect_stroke(rect, 3.0 * scale, egui::Stroke::new(1.0, color));
             #[cfg(target_arch = "wasm32")]
-            painter.rect_stroke(rect, 3.0 * scale, egui::Stroke::new(1.0, color), egui::StrokeKind::Inside);
+            painter.rect_stroke(
+                rect,
+                3.0 * scale,
+                egui::Stroke::new(1.0, color),
+                egui::StrokeKind::Inside,
+            );
             painter.circle_filled(anchor, 3.0 * scale, color);
             painter.galley(rect.min + padding, galley, theme.primary_text);
         }

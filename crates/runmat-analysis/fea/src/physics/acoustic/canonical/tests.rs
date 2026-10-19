@@ -1,7 +1,8 @@
 use super::*;
 mod continuum;
-mod incident;
 mod interface;
+mod incident;
+mod radiation;
 mod volume_velocity;
 use crate::fixtures::{fixture_model, replace_fixture_excitations, FixtureId};
 use crate::topology::test_meshes::slab_mesh;
@@ -452,7 +453,7 @@ fn quadratic_phasor_recovery_integrates_products_not_products_of_averages() {
 }
 
 #[test]
-fn boundaries_fail_closed_on_missing_targets_overlap_and_radiation() {
+fn boundaries_fail_closed_on_missing_targets_and_overlap() {
     let mesh = slab_mesh(2);
     let mut model = model();
     model.material_assignments[0].target = PropertyRegionTarget::solid("slab");
@@ -483,10 +484,7 @@ fn boundaries_fail_closed_on_missing_targets_overlap_and_radiation() {
     ));
     model.boundaries.pop();
     model.boundaries[0].operator = BoundaryOperator::AcousticRadiation;
-    assert!(matches!(
-        solve(&model),
-        Err(AcousticHarmonicError::Unsupported(_))
-    ));
+    assert!(solve(&model).is_ok());
 }
 
 #[test]

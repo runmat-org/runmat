@@ -146,6 +146,7 @@ pub(crate) fn validate_face_delaunay_topology(
     check_cancelled(cancellation, pslg, "surface Delaunay validation cancelled")
 }
 
+#[track_caller]
 fn consume_predicate(
     pslg: &ExactFacePslg,
     count: u64,
@@ -163,6 +164,7 @@ fn consume_predicate(
     }
 }
 
+#[track_caller]
 fn check_cancelled(
     cancellation: &dyn MeshingCancellationSignal,
     pslg: &ExactFacePslg,

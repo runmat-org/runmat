@@ -38,7 +38,20 @@ pub async fn run_worker_stdio() -> NativeExecutionResult<()> {
 }
 
 pub(crate) async fn execute(request: WorkerRequest) -> WorkerResponse {
-    crate::execute_host_program_request(request).await
+    if let Err(error) = request.validate() {
+        return WorkerResponse::Failure {
+            message: error.to_string(),
+        };
+    }
+    let (program, resources) = request.into_parts();
+    crate::test_workload::execute_host_program_request_in_context(
+        program,
+        None,
+        None,
+        None,
+        Some(&resources),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -86,16 +99,18 @@ mod tests {
         )
         .unwrap();
         artifact.executable_bytes.push(0);
-        let response = execute(WorkerRequest {
-            console: None,
-            environment: runmat_execution::EnvironmentSnapshot::default(),
-            schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
-            recipe,
-            artifact,
-            function: 0,
-            arguments: Vec::new(),
-            requested_outputs: 1,
-        })
+        let response = crate::execute_host_program_request(
+            runmat_execution_artifact::ProgramExecutionRequest {
+                console: None,
+                environment: runmat_execution::EnvironmentSnapshot::default(),
+                schema_version: runmat_execution_artifact::PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
+                recipe,
+                artifact,
+                function: 0,
+                arguments: Vec::new(),
+                requested_outputs: 1,
+            },
+        )
         .await;
         assert!(
             matches!(response, WorkerResponse::Failure { message } if message.contains("identity mismatch"))

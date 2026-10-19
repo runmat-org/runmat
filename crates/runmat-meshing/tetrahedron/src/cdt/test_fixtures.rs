@@ -1,3 +1,8 @@
+pub(in crate::cdt) mod allocation;
+pub(in crate::cdt) mod coupled_quality;
+pub(in crate::cdt) mod diagnostics;
+pub(in crate::cdt) mod structured_volume;
+pub(in crate::cdt) mod volume;
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use runmat_meshing_core::{
     quality::predicate::{orient3d, PredicateSign},

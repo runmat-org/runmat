@@ -1,3 +1,6 @@
+mod checkpoint;
+use checkpoint::emit_progress_checkpoint;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
@@ -17,61 +20,62 @@ use crate::cdt::{
 const MAXIMUM_REFINEMENT_BATCH_SIZE: u64 = 128;
 const PROGRESS_INSERTION_INTERVAL: u64 = 32;
 
-pub fn refine_delaunay_volume(
-    input: DelaunayVolumeRefinementInput<'_>,
+mod entry;
+pub use entry::refine_delaunay_volume;
+#[cfg(test)]
+pub(in crate::cdt) use entry::refine_owned_until_stalled;
+pub(in crate::cdt) use entry::{DelaunayVolumeRefinementProgress, RefinementSchedule};
+
+pub(in crate::cdt) fn refine_owned_with_schedule(
+    mut topology: crate::cdt::DelaunayVolumeTopology,
+    mut quality: crate::cdt::DelaunayVolumeQuality,
+    context: super::context::RefinementContext<'_>,
     options: DelaunayVolumeRefinementOptions,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayVolumeRefinement, DelaunayVolumeRefinementStepError> {
-    let progress = refine_delaunay_volume_until_stalled(input, options, cancellation)?;
-    if progress.stalled {
-        return Err(error(
-            DelaunayVolumeRefinementStepErrorKind::ResourceLimit,
-            "volume refinement exhausted every admissible construction before convergence",
-        ));
-    }
-    validate_delaunay_volume_refinement(input, &progress.refinement, options, cancellation)?;
-    Ok(progress.refinement)
-}
-
-pub(in crate::cdt) struct DelaunayVolumeRefinementProgress {
-    pub(in crate::cdt) refinement: DelaunayVolumeRefinement,
-    pub(in crate::cdt) stalled: bool,
-}
-
-pub(in crate::cdt) fn refine_delaunay_volume_until_stalled(
-    input: DelaunayVolumeRefinementInput<'_>,
-    options: DelaunayVolumeRefinementOptions,
-    cancellation: &dyn MeshingCancellationSignal,
+    schedule: RefinementSchedule,
 ) -> Result<DelaunayVolumeRefinementProgress, DelaunayVolumeRefinementStepError> {
     validate_options(options)?;
-    let mut topology = input.topology.clone();
-    let mut quality = input.quality.clone();
     let mut insertions = Vec::new();
     let mut unusable_node_identities = BTreeSet::new();
     let mut insertion_count = 0u64;
     let mut maximum_batch_size = MAXIMUM_REFINEMENT_BATCH_SIZE;
     let mut next_progress_insertion = PROGRESS_INSERTION_INTERVAL;
     emit_progress_checkpoint(insertion_count, &topology, &quality, "started");
+    if quality.worst_refinement_tetrahedron.is_none() {
+        emit_progress_checkpoint(insertion_count, &topology, &quality, "completed");
+        return Ok(DelaunayVolumeRefinementProgress {
+            refinement: DelaunayVolumeRefinement {
+                topology,
+                quality,
+                insertions,
+            },
+            stalled: false,
+        });
+    }
+    let mut queries = super::CandidateQueries::new(&topology, cancellation)
+        .map_err(super::insertion::candidate_error)?;
+    let mut frontier = super::batch::sources::Frontier::default();
     loop {
-        let current = DelaunayVolumeRefinementInput {
-            topology: &topology,
-            metric_request: input.metric_request,
-            provenance: input.provenance,
-            quality: &quality,
-            quality_options: input.quality_options,
-            fixed_node_identities: input.fixed_node_identities,
-        };
+        let current = context.with_state(&topology, &quality);
         let remaining_insertions = options.maximum_insertions.saturating_sub(insertion_count);
         if remaining_insertions >= 2 {
             let maximum_batch = remaining_insertions.min(maximum_batch_size) as usize;
+            let prior_frontier = frontier;
             match insert_independent_refinement_batch(
                 current,
-                options.step,
+                &queries,
+                super::batch::RefinementBatchOptions {
+                    step: options.step,
+                    maximum_insertions: maximum_batch,
+                    frontier: &mut frontier,
+                },
                 &mut unusable_node_identities,
-                maximum_batch,
                 cancellation,
             )? {
                 RefinementBatchOutcome::Admitted(batch) => {
+                    queries
+                        .append(&batch.inserted_nodes, cancellation)
+                        .map_err(super::insertion::candidate_error)?;
                     maximum_batch_size = maximum_batch_size
                         .saturating_mul(2)
                         .min(MAXIMUM_REFINEMENT_BATCH_SIZE);
@@ -88,14 +92,41 @@ pub(in crate::cdt) fn refine_delaunay_volume_until_stalled(
                         next_progress_insertion =
                             insertion_count.saturating_add(PROGRESS_INSERTION_INTERVAL);
                     }
+                    if schedule == RefinementSchedule::Cooperative {
+                        return Ok(DelaunayVolumeRefinementProgress {
+                            refinement: DelaunayVolumeRefinement {
+                                topology,
+                                quality,
+                                insertions,
+                            },
+                            stalled: false,
+                        });
+                    }
                     continue;
                 }
+                RefinementBatchOutcome::MoreSources => continue,
                 RefinementBatchOutcome::RetrySmaller if maximum_batch > 2 => {
+                    frontier = prior_frontier;
                     maximum_batch_size = ((maximum_batch / 2).max(2)) as u64;
                     continue;
                 }
                 RefinementBatchOutcome::Unavailable | RefinementBatchOutcome::RetrySmaller => {}
             }
+        }
+        // A shape defect can block every floor-preserving batch candidate.
+        // Hand it back to the shape owner; this is an intermediate checkpoint,
+        // never a convergence or publication verdict.
+        if schedule == RefinementSchedule::Cooperative
+            && quality.worst_optimization_tetrahedron.is_some()
+        {
+            return Ok(DelaunayVolumeRefinementProgress {
+                refinement: DelaunayVolumeRefinement {
+                    topology,
+                    quality,
+                    insertions,
+                },
+                stalled: false,
+            });
         }
         let candidate =
             match select_delaunay_volume_refinement_candidate_excluding_from_admitted_input(
@@ -103,6 +134,7 @@ pub(in crate::cdt) fn refine_delaunay_volume_until_stalled(
                 options.step.candidate,
                 &unusable_node_identities,
                 cancellation,
+                &queries,
             ) {
                 Ok(candidate) => candidate,
                 Err(failure)
@@ -150,10 +182,23 @@ pub(in crate::cdt) fn refine_delaunay_volume_until_stalled(
             Err(failure) => return Err(failure),
         };
         insertion_count += 1;
+        queries
+            .append(std::slice::from_ref(&candidate.node), cancellation)
+            .map_err(super::insertion::candidate_error)?;
         insertions.push(candidate.node);
         topology = step.topology;
         quality = step.quality;
         unusable_node_identities.clear();
+        if schedule == RefinementSchedule::Cooperative {
+            return Ok(DelaunayVolumeRefinementProgress {
+                refinement: DelaunayVolumeRefinement {
+                    topology,
+                    quality,
+                    insertions,
+                },
+                stalled: false,
+            });
+        }
         if insertion_count >= next_progress_insertion {
             emit_progress_checkpoint(insertion_count, &topology, &quality, "refining");
             next_progress_insertion = insertion_count.saturating_add(PROGRESS_INSERTION_INTERVAL);
@@ -174,80 +219,6 @@ pub(in crate::cdt) fn refine_delaunay_volume_until_stalled(
             options.maximum_insertions
         ),
     ))
-}
-
-fn emit_progress_checkpoint(
-    insertion_count: u64,
-    topology: &crate::cdt::DelaunayVolumeTopology,
-    quality: &crate::cdt::DelaunayVolumeQuality,
-    state: &'static str,
-) {
-    let violation_count = quality
-        .tetrahedra
-        .iter()
-        .filter(|tetrahedron| tetrahedron.requires_refinement())
-        .count();
-    let worst = quality.tetrahedra.iter().max_by(|left, right| {
-        left.refinement_violation_ratio
-            .total_cmp(&right.refinement_violation_ratio)
-            .then_with(|| right.node_identities.cmp(&left.node_identities))
-    });
-    let worst_violation_ratio = worst.map_or(0.0, |cell| cell.refinement_violation_ratio);
-    let worst_violation_count = quality
-        .tetrahedra
-        .iter()
-        .filter(|cell| cell.refinement_violation_ratio.to_bits() == worst_violation_ratio.to_bits())
-        .count();
-    let boundary_nodes = topology
-        .incidence
-        .boundary_facets
-        .iter()
-        .flat_map(|facet| facet.vertex_indices)
-        .collect::<BTreeSet<_>>();
-    let worst_boundary_node_count = worst.map_or(0, |cell| {
-        cell.node_identities
-            .iter()
-            .filter(|identity| {
-                topology
-                    .nodes
-                    .binary_search_by_key(identity, |node| &node.identity)
-                    .is_ok_and(|index| boundary_nodes.contains(&(index as u32)))
-            })
-            .count()
-    });
-    let worst_maximum_metric_edge_length =
-        worst.map_or(0.0, |cell| cell.maximum_metric_edge_length);
-    let worst_metric_radius_edge_ratio = worst.map_or(0.0, |cell| cell.metric_radius_edge_ratio);
-    let worst_metric_scaled_jacobian = worst.map_or(0.0, |cell| cell.metric_scaled_jacobian);
-    let span = tracing::info_span!(
-        "meshing.tetrahedron.refinement_checkpoint",
-        state,
-        insertion_count,
-        node_count = topology.nodes.len(),
-        tetrahedron_count = topology.tetrahedra.len(),
-        violation_count,
-        worst_violation_ratio,
-        worst_violation_count,
-        worst_boundary_node_count,
-        worst_maximum_metric_edge_length,
-        worst_metric_radius_edge_ratio,
-        worst_metric_scaled_jacobian,
-    );
-    let _guard = span.enter();
-    tracing::info!(
-        state,
-        insertion_count,
-        node_count = topology.nodes.len(),
-        tetrahedron_count = topology.tetrahedra.len(),
-        violation_count,
-        worst_violation_ratio,
-        worst_violation_count,
-        worst_boundary_node_count,
-        worst_maximum_metric_edge_length,
-        worst_metric_radius_edge_ratio,
-        worst_metric_scaled_jacobian,
-        "tetrahedral refinement checkpoint"
-    );
 }
 
 pub fn validate_delaunay_volume_refinement(

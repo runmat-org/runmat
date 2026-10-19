@@ -56,6 +56,7 @@ pub fn run_nonlinear_block(
         options,
         execution: crate::solve::nonlinear::NonlinearExecution {
             backend,
+            contact: None,
             solver_admission: Some(admission),
         },
         start: prepared.load_factor_start,

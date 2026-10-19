@@ -1,6 +1,5 @@
-use std::collections::{BTreeMap, BTreeSet};
-
 use super::{
+    artifact_workspace::{reserve, unique},
     solver_boundary_edge_identity, solver_boundary_face_identity, solver_volume_element_identity,
     validate_finite, validate_token, CanonicalMeshingContract, ElementOrder, FieldTopologyLocation,
     MeshingCancellationSignal, MeshingContractError, MeshingRequest, NeverCancelled,
@@ -13,10 +12,6 @@ const MAX_ENTITY_PROVENANCE: usize = 32;
 impl SolverMeshArtifact {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
         self.validate_canonical()
-    }
-
-    pub(super) fn validate_payload(&self) -> Result<(), MeshingContractError> {
-        self.validate_payload_with_cancellation(&NeverCancelled)
     }
 
     pub(super) fn validate_payload_with_cancellation(
@@ -54,32 +49,42 @@ impl SolverMeshTopology {
             ));
         }
 
-        let node_ids = ordered_ids("mesh nodes", self.nodes.iter().map(|node| node.node_id))?;
+        super::artifact_resources::validation_scratch_bytes(self, request.element_order)?;
+        let node_ids = ordered_ids(
+            "mesh nodes",
+            self.nodes.iter().map(|node| node.node_id),
+            self.nodes.len(),
+            cancellation,
+        )?;
         validation_checkpoint(cancellation)?;
         let element_ids = ordered_ids(
             "volume elements",
             self.volume_elements
                 .iter()
                 .map(|element| element.element_id),
+            self.volume_elements.len(),
+            cancellation,
         )?;
         let face_ids = ordered_ids(
             "boundary faces",
             self.boundary_faces.iter().map(|face| face.face_id),
+            self.boundary_faces.len(),
+            cancellation,
         )?;
         let edge_ids = ordered_ids(
             "boundary edges",
             self.boundary_edges.iter().map(|edge| edge.edge_id),
+            self.boundary_edges.len(),
+            cancellation,
         )?;
         validation_checkpoint(cancellation)?;
-        let node_identities = self
-            .nodes
-            .iter()
-            .map(|node| (node.node_id, node.stable_identity))
-            .collect::<BTreeMap<_, _>>();
-        validate_stable_identities(
-            "mesh nodes",
-            self.nodes.iter().map(|node| node.stable_identity),
-        )?;
+        let mut node_identities = reserve(self.nodes.len(), cancellation)?;
+        for node in &self.nodes {
+            validation_checkpoint(cancellation)?;
+            node_identities.push(node.stable_identity);
+        }
+        validate_stable_identities("mesh nodes", &mut node_identities, cancellation)?;
+        drop(node_identities);
 
         for node in &self.nodes {
             validation_checkpoint(cancellation)?;
@@ -89,7 +94,7 @@ impl SolverMeshTopology {
             validate_provenance("mesh node", &node.provenance)?;
             super::artifact_parameters::validate_node_exact_parameters(node)?;
         }
-        let mut element_identities = BTreeSet::new();
+        let mut element_identities = reserve(self.volume_elements.len(), cancellation)?;
         for element in &self.volume_elements {
             validation_checkpoint(cancellation)?;
             if element.order != request.element_order
@@ -99,32 +104,31 @@ impl SolverMeshTopology {
                         ElementOrder::Tet10 => 10,
                     }
                 || !all_references_exist(&element.node_ids, &node_ids)
-                || element.node_ids.iter().collect::<BTreeSet<_>>().len() != element.node_ids.len()
+                || !unique(&element.node_ids)
             {
                 return Err(MeshingContractError::invalid(
                     "volume element",
                     "order or node connectivity is inconsistent",
                 ));
             }
-            let corners = std::array::from_fn(|index| node_identities[&element.node_ids[index]]);
-            if element.stable_identity != solver_volume_element_identity(corners)
-                || !element_identities.insert(element.stable_identity)
-            {
+            let corners = std::array::from_fn(|index| self.node_identity(element.node_ids[index]));
+            if element.stable_identity != solver_volume_element_identity(corners) {
                 return Err(MeshingContractError::invalid(
                     "volume element stable identity",
                     "identity must be unique and derive from the stable corner nodes",
                 ));
             }
+            element_identities.push(element.stable_identity);
             validate_region_id(&element.region_id)?;
             validate_provenance("volume element", &element.provenance)?;
         }
-        self.validate_boundaries(
-            &node_ids,
-            &node_identities,
-            &element_ids,
-            &face_ids,
+        validate_stable_identities(
+            "volume element stable identity",
+            &mut element_identities,
             cancellation,
         )?;
+        drop(element_identities);
+        self.validate_boundaries(&node_ids, &element_ids, &face_ids, cancellation)?;
         super::artifact_order::validate_order_topology(self, request, &node_ids, cancellation)?;
         super::artifact_classification::validate_classification(
             self,
@@ -138,41 +142,28 @@ impl SolverMeshTopology {
 
     fn validate_boundaries(
         &self,
-        node_ids: &BTreeSet<u64>,
-        node_identities: &BTreeMap<u64, StableDigest>,
-        element_ids: &BTreeSet<u64>,
-        face_ids: &BTreeSet<u64>,
+        node_ids: &[u64],
+        element_ids: &[u64],
+        face_ids: &[u64],
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
-        let element_nodes = self
-            .volume_elements
-            .iter()
-            .map(|element| {
-                (
-                    element.element_id,
-                    element.node_ids.iter().copied().collect::<BTreeSet<_>>(),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
-        let boundary_face_nodes = self
-            .boundary_faces
-            .iter()
-            .map(|face| (face.face_id, face.node_ids.as_slice()))
-            .collect::<BTreeMap<_, _>>();
-        let mut face_identities = BTreeSet::new();
+        let mut face_identities = reserve(self.boundary_faces.len(), cancellation)?;
         for face in &self.boundary_faces {
             validation_checkpoint(cancellation)?;
             if face.node_ids.len() != face.order.node_count()
-                || face.node_ids.iter().collect::<BTreeSet<_>>().len() != face.node_ids.len()
+                || !unique(&face.node_ids)
                 || !all_references_exist(&face.node_ids, node_ids)
                 || !(1..=2).contains(&face.adjacent_volume_element_ids.len())
                 || !strictly_increasing(&face.adjacent_volume_element_ids)
                 || !all_references_exist(&face.adjacent_volume_element_ids, element_ids)
                 || face.adjacent_volume_element_ids.iter().any(|element| {
-                    !face
+                    !face.node_ids.iter().all(|node| {
+                        self.volume_elements[element_ids
+                            .binary_search(element)
+                            .expect("validated element")]
                         .node_ids
-                        .iter()
-                        .all(|node| element_nodes[element].contains(node))
+                        .contains(node)
+                    })
                 })
                 || match face.role {
                     super::BoundaryFaceRole::ConformalInterface => {
@@ -190,32 +181,39 @@ impl SolverMeshTopology {
                     "connectivity or adjacency is inconsistent",
                 ));
             }
-            let corners = std::array::from_fn(|index| node_identities[&face.node_ids[index]]);
-            if face.stable_identity != solver_boundary_face_identity(corners)
-                || !face_identities.insert(face.stable_identity)
-            {
+            let corners = std::array::from_fn(|index| self.node_identity(face.node_ids[index]));
+            if face.stable_identity != solver_boundary_face_identity(corners) {
                 return Err(MeshingContractError::invalid(
                     "boundary face stable identity",
                     "identity must be unique and derive from the stable corner nodes",
                 ));
             }
+            face_identities.push(face.stable_identity);
             validate_provenance("boundary face", &face.provenance)?;
         }
-        let mut edge_identities = BTreeSet::new();
+        validate_stable_identities(
+            "boundary face stable identity",
+            &mut face_identities,
+            cancellation,
+        )?;
+        drop(face_identities);
+        let mut edge_identities = reserve(self.boundary_edges.len(), cancellation)?;
         for edge in &self.boundary_edges {
             validation_checkpoint(cancellation)?;
             if edge.node_ids.len() != edge.order.node_count()
                 || edge.node_ids[0] >= edge.node_ids[1]
-                || edge.node_ids.iter().collect::<BTreeSet<_>>().len() != edge.node_ids.len()
+                || !unique(&edge.node_ids)
                 || !all_references_exist(&edge.node_ids, node_ids)
                 || edge.adjacent_boundary_face_ids.is_empty()
                 || !strictly_increasing(&edge.adjacent_boundary_face_ids)
                 || !all_references_exist(&edge.adjacent_boundary_face_ids, face_ids)
                 || edge.adjacent_boundary_face_ids.iter().any(|face_id| {
-                    !edge
+                    !edge.node_ids.iter().all(|node| {
+                        self.boundary_faces
+                            [face_ids.binary_search(face_id).expect("validated face")]
                         .node_ids
-                        .iter()
-                        .all(|node| boundary_face_nodes[face_id].contains(node))
+                        .contains(node)
+                    })
                 })
             {
                 return Err(MeshingContractError::invalid(
@@ -223,23 +221,34 @@ impl SolverMeshTopology {
                     "connectivity or adjacency is inconsistent",
                 ));
             }
-            let endpoints = std::array::from_fn(|index| node_identities[&edge.node_ids[index]]);
-            if edge.stable_identity != solver_boundary_edge_identity(endpoints)
-                || !edge_identities.insert(edge.stable_identity)
-            {
+            let endpoints = std::array::from_fn(|index| self.node_identity(edge.node_ids[index]));
+            if edge.stable_identity != solver_boundary_edge_identity(endpoints) {
                 return Err(MeshingContractError::invalid(
                     "boundary edge stable identity",
                     "identity must be unique and derive from the stable endpoint nodes",
                 ));
             }
+            edge_identities.push(edge.stable_identity);
             validate_provenance("boundary edge", &edge.provenance)?;
         }
-        Ok(())
+        validate_stable_identities(
+            "boundary edge stable identity",
+            &mut edge_identities,
+            cancellation,
+        )
+    }
+
+    fn node_identity(&self, id: u64) -> StableDigest {
+        self.nodes[self
+            .nodes
+            .binary_search_by_key(&id, |node| node.node_id)
+            .expect("validated node")]
+        .stable_identity
     }
 
     fn validate_neighbors(
         &self,
-        element_ids: &BTreeSet<u64>,
+        element_ids: &[u64],
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
         if self.volume_elements.len().checked_mul(4) != Some(self.neighbors.len()) {
@@ -249,15 +258,15 @@ impl SolverMeshTopology {
             ));
         }
         let mut previous = None;
-        let mut directed_adjacencies = BTreeSet::new();
+        let mut directed_adjacencies = reserve(self.neighbors.len(), cancellation)?;
         for neighbor in &self.neighbors {
             validation_checkpoint(cancellation)?;
             let key = (neighbor.element_id, neighbor.local_face_index);
             if neighbor.local_face_index >= 4
-                || !element_ids.contains(&neighbor.element_id)
-                || neighbor
-                    .adjacent_element_id
-                    .is_some_and(|id| id == neighbor.element_id || !element_ids.contains(&id))
+                || element_ids.binary_search(&neighbor.element_id).is_err()
+                || neighbor.adjacent_element_id.is_some_and(|id| {
+                    id == neighbor.element_id || element_ids.binary_search(&id).is_err()
+                })
                 || previous.is_some_and(|prior| prior >= key)
             {
                 return Err(MeshingContractError::invalid(
@@ -266,13 +275,18 @@ impl SolverMeshTopology {
                 ));
             }
             if let Some(adjacent_element_id) = neighbor.adjacent_element_id {
-                directed_adjacencies.insert((neighbor.element_id, adjacent_element_id));
+                directed_adjacencies.push((neighbor.element_id, adjacent_element_id));
             }
             previous = Some(key);
         }
+        validation_checkpoint(cancellation)?;
+        directed_adjacencies.sort_unstable();
         for &(element_id, adjacent_element_id) in &directed_adjacencies {
             validation_checkpoint(cancellation)?;
-            if !directed_adjacencies.contains(&(adjacent_element_id, element_id)) {
+            if directed_adjacencies
+                .binary_search(&(adjacent_element_id, element_id))
+                .is_err()
+            {
                 return Err(MeshingContractError::invalid(
                     "mesh neighbors",
                     "interior adjacency must be reciprocal",
@@ -284,38 +298,34 @@ impl SolverMeshTopology {
 
     fn validate_field_topologies(
         &self,
-        node_ids: &BTreeSet<u64>,
-        element_ids: &BTreeSet<u64>,
-        face_ids: &BTreeSet<u64>,
-        edge_ids: &BTreeSet<u64>,
+        node_ids: &[u64],
+        element_ids: &[u64],
+        face_ids: &[u64],
+        edge_ids: &[u64],
         cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<(), MeshingContractError> {
-        let expected = BTreeMap::from([
+        let expected = [
             (FieldTopologyLocation::Node, node_ids),
             (FieldTopologyLocation::VolumeElement, element_ids),
             (FieldTopologyLocation::BoundaryFace, face_ids),
             (FieldTopologyLocation::BoundaryEdge, edge_ids),
-        ]);
+        ];
         if self.field_topologies.len() != expected.len() {
             return Err(MeshingContractError::invalid(
                 "field topologies",
                 "exactly one map is required for every mesh entity domain",
             ));
         }
-        let mut locations = BTreeSet::new();
+        let mut locations = [false; 4];
         for topology in &self.field_topologies {
             validation_checkpoint(cancellation)?;
             validate_token("field topology id", &topology.topology_id, 256)?;
-            if !locations.insert(topology.location)
-                || &topology
-                    .ordered_entity_ids
-                    .iter()
-                    .copied()
-                    .collect::<BTreeSet<_>>()
-                    != *expected
-                        .get(&topology.location)
-                        .expect("all locations mapped")
-                || !strictly_increasing(&topology.ordered_entity_ids)
+            let index = expected
+                .iter()
+                .position(|(location, _)| *location == topology.location)
+                .expect("all locations mapped");
+            if std::mem::replace(&mut locations[index], true)
+                || topology.ordered_entity_ids.as_slice() != expected[index].1
             {
                 return Err(MeshingContractError::invalid(
                     "field topology",
@@ -329,11 +339,14 @@ impl SolverMeshTopology {
 
 fn validate_stable_identities(
     field: &str,
-    identities: impl Iterator<Item = StableDigest>,
+    identities: &mut [StableDigest],
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), MeshingContractError> {
-    let identities = identities.collect::<Vec<_>>();
-    if identities.contains(&StableDigest::ZERO)
-        || identities.iter().copied().collect::<BTreeSet<_>>().len() != identities.len()
+    validation_checkpoint(cancellation)?;
+    identities.sort_unstable();
+    validation_checkpoint(cancellation)?;
+    if identities.first() == Some(&StableDigest::ZERO)
+        || identities.windows(2).any(|pair| pair[0] == pair[1])
     {
         return Err(MeshingContractError::invalid(
             field,
@@ -405,15 +418,21 @@ fn validate_provenance(
 fn ordered_ids(
     field: &str,
     ids: impl Iterator<Item = u64>,
-) -> Result<BTreeSet<u64>, MeshingContractError> {
-    let values: Vec<_> = ids.collect();
-    if values.contains(&0) || !strictly_increasing(&values) {
-        return Err(MeshingContractError::invalid(
-            field,
-            "identifiers must be non-zero, unique, and canonically ordered",
-        ));
+    count: usize,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Vec<u64>, MeshingContractError> {
+    let mut values = reserve(count, cancellation)?;
+    for id in ids {
+        validation_checkpoint(cancellation)?;
+        if values.len() == count || id == 0 || values.last().is_some_and(|prior| *prior >= id) {
+            return Err(MeshingContractError::invalid(
+                field,
+                "identifiers must be non-zero, unique, and canonically ordered",
+            ));
+        }
+        values.push(id);
     }
-    Ok(values.into_iter().collect())
+    Ok(values)
 }
 
 fn require_nonempty<T>(field: &str, values: &[T]) -> Result<(), MeshingContractError> {
@@ -423,10 +442,15 @@ fn require_nonempty<T>(field: &str, values: &[T]) -> Result<(), MeshingContractE
     Ok(())
 }
 
-fn all_references_exist<T: Ord>(values: &[T], valid: &BTreeSet<T>) -> bool {
-    values.iter().all(|value| valid.contains(value))
+fn all_references_exist<T: Ord>(values: &[T], valid: &[T]) -> bool {
+    values
+        .iter()
+        .all(|value| valid.binary_search(value).is_ok())
 }
 
 fn strictly_increasing<T: Ord>(values: &[T]) -> bool {
     values.windows(2).all(|pair| pair[0] < pair[1])
 }
+
+#[cfg(test)]
+mod tests;

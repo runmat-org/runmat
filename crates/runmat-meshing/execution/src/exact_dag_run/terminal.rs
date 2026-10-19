@@ -118,16 +118,17 @@ fn decode_serialized_artifact(
     let [stream] = streams.as_slice() else {
         return Err(invalid_terminal());
     };
-    let [record] = stream.records.as_slice() else {
+    let [_record] = stream.records.as_slice() else {
         return Err(invalid_terminal());
     };
     if stream.media_type != MeshingChunkMediaType::SolverMeshArtifact {
         return Err(invalid_terminal());
     }
-    Ok((
-        runmat_meshing_core::SolverMeshArtifact::canonical_decode(record)?,
-        record.clone(),
-    ))
+    let bytes =
+        crate::controlled_streams::take_single_record(streams, 0).ok_or_else(invalid_terminal)?;
+    drop(publication);
+    let artifact = runmat_meshing_core::SolverMeshArtifact::canonical_decode(&bytes)?;
+    Ok((artifact, bytes))
 }
 
 fn decode_terminal_publication(

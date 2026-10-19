@@ -24,6 +24,24 @@ impl Digest {
         Self(hash.finalize().into())
     }
 
+    /// Hash the same ordered byte stream while probing between bounded blocks.
+    /// The caller owns cancellation and resource errors; no partial digest is returned.
+    pub fn sha256_parts_with_checkpoint<E>(
+        parts: impl IntoIterator<Item = impl AsRef<[u8]>>,
+        mut checkpoint: impl FnMut() -> Result<(), E>,
+    ) -> Result<Self, E> {
+        let mut hash = Sha256::new();
+        for part in parts {
+            checkpoint()?;
+            for block in part.as_ref().chunks(1024 * 1024) {
+                checkpoint()?;
+                hash.update(block);
+            }
+        }
+        checkpoint()?;
+        Ok(Self(hash.finalize().into()))
+    }
+
     pub const fn from_bytes(bytes: [u8; 32]) -> Self {
         Self(bytes)
     }
@@ -32,6 +50,9 @@ impl Digest {
         &self.0
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 impl Display for Digest {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
@@ -74,7 +95,7 @@ impl Serialize for Digest {
     where
         S: serde::Serializer,
     {
-        serializer.serialize_str(&self.to_string())
+        super::hex::serialize::<71, S>("sha256:", &self.0, serializer)
     }
 }
 
@@ -90,29 +111,17 @@ impl<'de> Deserialize<'de> for Digest {
 }
 
 #[cfg(test)]
-mod tests {
+mod wire_tests {
     use super::Digest;
-
     #[test]
-    fn segmented_hash_is_boundary_independent_and_order_sensitive() {
-        let bytes = (0_u8..=255).collect::<Vec<_>>();
-        for width in [1, 3, 64, 255, 256, 257] {
-            assert_eq!(
-                Digest::sha256_parts(bytes.chunks(width)),
-                Digest::sha256(&bytes)
-            );
+    fn fixed_wire_encoding_preserves_every_byte_and_original_lowercase_spelling() {
+        for start in 0u8..=255 {
+            let bytes = std::array::from_fn(|i| start.wrapping_add(i as u8));
+            let digest = Digest::from_bytes(bytes);
+            let expected = format!("\"{}\"", digest);
+            let wire = serde_json::to_string(&digest).unwrap();
+            assert_eq!(wire, expected);
+            assert_eq!(serde_json::from_str::<Digest>(&wire).unwrap(), digest);
         }
-        assert_eq!(
-            Digest::sha256_parts([b"".as_slice(), b"abc", b""]),
-            Digest::sha256(b"abc")
-        );
-        assert_eq!(
-            Digest::sha256_parts(std::iter::empty::<&[u8]>()),
-            Digest::sha256(b"")
-        );
-        assert_ne!(
-            Digest::sha256_parts([b"abc", b"def"]),
-            Digest::sha256_parts([b"def", b"abc"])
-        );
     }
 }

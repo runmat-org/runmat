@@ -157,7 +157,7 @@ pub(in crate::analysis) fn complete_prestressed_modal_study(
         workload.backend(),
         modal_options.clone(),
         prepared.context.clone(),
-        Some(solver_mesh.clone()),
+        Some(&solver_mesh),
         Some(&modal_run_id),
     )?;
 

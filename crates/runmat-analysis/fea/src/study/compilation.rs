@@ -18,6 +18,8 @@ use crate::properties::{
     PropertyCompilationError, PropertyRealizationError,
 };
 
+mod storage;
+
 const STUDY_IDENTITY_PREFIX: &[u8] = b"runmat-compiled-analysis-study\0";
 const STUDY_IDENTITY_LIMITS: CanonicalLimits =
     CanonicalLimits::new(512 * 1024 * 1024, 8_000_000, 65_536, 64);

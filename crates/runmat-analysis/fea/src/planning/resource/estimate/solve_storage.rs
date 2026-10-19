@@ -92,7 +92,8 @@ pub(super) fn solve_storage(
             }
             Ok((ByteCount(0), factor_bytes_upper_bound))
         }
-        SolveResourcePolicy::NoSolve { .. }
+        SolveResourcePolicy::GeneralSparse(_)
+        | SolveResourcePolicy::NoSolve { .. }
         | SolveResourcePolicy::RestartedGmres { .. }
         | SolveResourcePolicy::ModalDenseHarmonic { .. }
         | SolveResourcePolicy::TransientBlock { .. }

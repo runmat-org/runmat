@@ -16,16 +16,11 @@ pub(super) fn reserve(
         a.checked_mul(b)
             .ok_or_else(|| invalid("fluid block byte/work overflow"))
     };
-    let authorities = input
-        .constraints
-        .iter()
-        .map(|c| c.constraint_id.as_str())
-        .chain(
-            input
-                .boundary_operators
-                .iter()
-                .map(|b| b.boundary_id.as_str()),
-        );
+    let authorities = crate::physics::cfd::canonical::potential_boundary_authorities(
+        input.constraints,
+        input.boundary_operators,
+        input.excitations,
+    );
     let output = super::super::profile::original_block_encoding_profile(
         input.topology.cells.len(),
         input.topology.faces.len(),

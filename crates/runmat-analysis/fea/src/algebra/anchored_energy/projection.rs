@@ -83,7 +83,7 @@ impl<'a> super::AnchoredEnergyCheck<'a> {
         Self::new_projected(
             matrix,
             EnergyProjection::Selection(rows),
-            admitted,
+            admitted.into(),
             std::mem::size_of_val(rows) as u64,
             0,
         )

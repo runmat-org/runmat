@@ -1,28 +1,14 @@
 use runmat_meshing_core::{MeshingCancellationSignal, NeverCancelled, StableDigest};
-use runmat_meshing_size::metric::{MetricCombinationRule, MetricFieldRequest, MetricTensor3};
+use runmat_meshing_size::metric::{MetricFieldRequest, MetricTensor3};
 
 use super::*;
 
-fn metric_request() -> MetricFieldRequest {
-    MetricFieldRequest {
-        combination: MetricCombinationRule::MostRestrictiveIntersection,
-        global_metric: MetricTensor3::isotropic_length_m(2.0).unwrap(),
-        maximum_grading_ratio: 1.5,
-        contributions: Vec::new(),
-    }
-}
+#[path = "tests/captured_fork.rs"]
+mod captured_fork;
+#[path = "tests/captured_heat.rs"]
+mod captured_heat;
 
-fn volume_options() -> DelaunayVolumeMeshOptions {
-    DelaunayVolumeMeshOptions {
-        quality: DelaunayVolumeQualityOptions {
-            maximum_metric_edge_length: 2.0,
-            maximum_radius_edge_ratio: 10.0,
-            minimum_metric_scaled_jacobian: 0.01,
-            ..DelaunayVolumeQualityOptions::default()
-        },
-        ..DelaunayVolumeMeshOptions::default()
-    }
-}
+pub(super) use crate::cdt::test_fixtures::volume::{metric_request, volume_options};
 
 #[test]
 fn exact_surface_constructs_one_seeded_validated_general_volume_mesh() {
@@ -308,5 +294,40 @@ fn unified_volume_mesh_maps_options_resources_and_cancellation() {
         .unwrap_err()
         .kind,
         DelaunayVolumeMeshErrorKind::Cancelled
+    );
+}
+
+#[test]
+fn legacy_v3_volume_artifacts_remain_independently_readable() {
+    let (topology, surface) = crate::cdt::constraints::tests::tetrahedron();
+    let options = volume_options();
+    let metric = metric_request();
+    let mesh =
+        construct_delaunay_volume_mesh(&topology, &surface, &metric, options, &NeverCancelled)
+            .unwrap();
+    let legacy = super::codec::encode_delaunay_volume_mesh_with_schema_version(&mesh, 3).unwrap();
+    assert_eq!(
+        decode_delaunay_volume_mesh(
+            &legacy,
+            &topology,
+            &surface,
+            &metric,
+            options,
+            &NeverCancelled
+        )
+        .unwrap(),
+        mesh
+    );
+    struct Cancelled;
+    impl MeshingCancellationSignal for Cancelled {
+        fn is_cancelled(&self) -> bool {
+            true
+        }
+    }
+    assert_eq!(
+        decode_delaunay_volume_mesh(&legacy, &topology, &surface, &metric, options, &Cancelled)
+            .unwrap_err()
+            .kind,
+        DelaunayVolumeMeshCodecErrorKind::Cancelled
     );
 }

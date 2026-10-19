@@ -11,6 +11,31 @@ use crate::{
 use super::*;
 
 #[test]
+fn carving_observes_cancellation_during_protected_inventory_walk() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct CancelDuringCarving(AtomicUsize);
+    impl runmat_meshing_core::MeshingCancellationSignal for CancelDuringCarving {
+        fn is_cancelled(&self) -> bool {
+            // Ignore prerequisite validators: exercise the carving operation itself.
+            std::panic::Location::caller()
+                .file()
+                .ends_with("domain/carve.rs")
+                && self.0.fetch_add(1, Ordering::Relaxed) >= 2
+        }
+    }
+    let boundary = boundary(
+        &[[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]],
+        &[vec![[-4.0, -2.0], [4.0, -2.0], [0.0, 3.0]]],
+    );
+    let (pslg, constrained, options) = constrained(&boundary);
+    let cancellation = CancelDuringCarving(AtomicUsize::new(0));
+    let failure = carve_exact_face_domain(&constrained, &pslg, &boundary, &cancellation, options)
+        .unwrap_err();
+    assert_eq!(failure.kind, crate::ExactFaceDelaunayErrorKind::Cancelled);
+    assert_eq!(cancellation.0.load(Ordering::Relaxed), 3);
+}
+
+#[test]
 fn oriented_hole_is_removed_by_protected_component_traversal() {
     let boundary = boundary(
         &[[-10.0, -10.0], [10.0, -10.0], [10.0, 10.0], [-10.0, 10.0]],

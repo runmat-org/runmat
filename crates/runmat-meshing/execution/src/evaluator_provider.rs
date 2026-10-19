@@ -14,6 +14,28 @@ impl<T> ExactMeshingGeometryEvaluation for T where T: DelaunayExactEvaluator {}
 /// The provider is a host-composition port: meshing selects which queries it needs, while the
 /// execution host selects the implementation capable of evaluating the closure's kernel ABI.
 pub trait ExactMeshingEvaluatorProvider: Send + Sync {
+    /// Resolves geometry-induced sizing without changing authored request identity or controls.
+    fn geometry_metric(
+        &self,
+        geometry: &PreparedExactGeometryObjects,
+        evaluator: &dyn ExactMeshingGeometryEvaluation,
+        control: &dyn GeometryEvaluationControl,
+        request: &runmat_meshing_core::MeshingRequest,
+    ) -> Result<
+        std::sync::Arc<runmat_meshing_core::MetricFieldRequest>,
+        runmat_meshing_curve::SharedCurveError,
+    > {
+        runmat_meshing_curve::derive_curve_geometry_metric(
+            &geometry.topology,
+            evaluator,
+            control,
+            &request.metric,
+            request.quality.curve,
+            request.quality.surface,
+        )
+        .map(std::sync::Arc::new)
+    }
+
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,
@@ -25,6 +47,18 @@ impl<T> ExactMeshingEvaluatorProvider for &T
 where
     T: ExactMeshingEvaluatorProvider + ?Sized,
 {
+    fn geometry_metric(
+        &self,
+        geometry: &PreparedExactGeometryObjects,
+        evaluator: &dyn ExactMeshingGeometryEvaluation,
+        control: &dyn GeometryEvaluationControl,
+        request: &runmat_meshing_core::MeshingRequest,
+    ) -> Result<
+        std::sync::Arc<runmat_meshing_core::MetricFieldRequest>,
+        runmat_meshing_curve::SharedCurveError,
+    > {
+        (**self).geometry_metric(geometry, evaluator, control, request)
+    }
     fn evaluator<'a>(
         &self,
         geometry: &'a PreparedExactGeometryObjects,

@@ -14,6 +14,15 @@ impl PublicationPreparation {
         input: &impl serde::Serialize,
     ) -> Result<Self, storage::AnalysisPublicationError> {
         let maximum = configuration::publication_staging_budget()?;
+        Self::capture_with_budget(definition, input, maximum)
+    }
+
+    /// Keep admission and failure diagnostics under the same captured host ceiling.
+    pub(in crate::analysis) fn capture_with_budget(
+        definition: Digest,
+        input: &impl serde::Serialize,
+        maximum: u64,
+    ) -> Result<Self, storage::AnalysisPublicationError> {
         let mut staging = storage::AnalysisPublicationBuilder::new(definition, maximum)?;
         let retained_input = staging.admit_preparation(input)?;
         Ok(Self {
@@ -22,6 +31,27 @@ impl PublicationPreparation {
             retained_input,
         })
     }
+    /// Reserve typed completion owners separately from the retained original.
+    pub(in crate::analysis) fn capture_with_completion_storage(
+        definition: Digest,
+        original_bytes: u64,
+        copy_bytes: u64,
+        maximum: u64,
+    ) -> Result<(Self, storage::publication::OwnedCopyReservation), storage::AnalysisPublicationError>
+    {
+        let mut staging = storage::AnalysisPublicationBuilder::new(definition, maximum)?;
+        let (retained_input, copies) =
+            staging.admit_completion_storage(original_bytes, copy_bytes)?;
+        Ok((
+            Self {
+                staging,
+                store: storage::capture_artifact_store()?,
+                retained_input,
+            },
+            copies,
+        ))
+    }
+
     pub(in crate::analysis) fn capture_catalog(
         definition: Digest,
         input: &impl serde::Serialize,

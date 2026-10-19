@@ -299,3 +299,34 @@ fn thermal_observation_preflight_rejects_unavailable_sources_and_events() {
     let error = ThermalObservationResourceFacts::derive(&mesh, step).unwrap_err();
     assert!(error.to_string().contains("no event detector"));
 }
+
+#[test]
+fn deferred_primary_fields_do_not_reserve_unexecuted_dynamic_histories() {
+    let mesh = runmat_meshing_core::fixtures::canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let mut input = workload();
+    // Preserve the authored dynamic cap. The native numerical task defers observation
+    // execution to separately admitted tasks; it cannot invoke an inline history.
+    input.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_samples = 1_000_000;
+    for request in &mut input.model.sequence.steps[0].observations {
+        if let runmat_analysis_core::ObservationRequest::History(spec) = request {
+            spec.sampling = runmat_analysis_core::SamplingPolicy::EveryAcceptedIncrement;
+            spec.cost = runmat_analysis_core::ObservationCostPolicy::Automatic;
+        }
+    }
+    assert!(input.prepare(&mesh).is_err());
+    let prepared = input.prepare_primary_fields(&mesh).unwrap();
+    assert!(
+        prepared.numerical_reservation_bytes().unwrap().0
+            < input.model.sequence.steps[0]
+                .accuracy
+                .resources
+                .maximum_resident_bytes
+    );
+    let original = input.identity().unwrap();
+    let result = prepared.execute_primary_fields().unwrap();
+    assert_eq!(result.source_workload, original);
+    assert!(result.run.observation_histories.is_empty());
+}

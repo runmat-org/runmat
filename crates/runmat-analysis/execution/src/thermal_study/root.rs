@@ -42,6 +42,8 @@ mod tests;
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PreparationWire {
+    #[serde(default = "runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial")]
+    local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     field_source: Option<FieldSourceWire>,
     scope: ThermalStudyScope,
     compiled: CompiledAnalysisStudy,
@@ -70,6 +72,7 @@ impl PreparationWire {
     fn new(preparation: ThermalStudyPreparation) -> Self {
         let limits = preparation.output_policy.inventory_limits();
         Self {
+            local_execution: preparation.local_execution,
             field_source: None,
             scope: preparation.scope,
             compiled: preparation.product.compiled,
@@ -119,6 +122,7 @@ impl PreparationWire {
             return Err(invalid("noncanonical thermal output chunk size"));
         }
         Ok(ThermalStudyPreparation {
+            local_execution: self.local_execution,
             field_source,
             scope: self.scope,
             product: ThermalStudyProduct {

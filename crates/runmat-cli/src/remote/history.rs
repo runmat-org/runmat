@@ -16,7 +16,7 @@ struct ManifestHistoryResponse {
 #[derive(Deserialize)]
 struct ManifestHistoryEntry {
     #[serde(rename = "versionId")]
-    version_id: Uuid,
+    version_id: runmat_server_client::ids::FsVersionId,
     #[serde(rename = "createdAt")]
     created_at: DateTime<Utc>,
     #[serde(rename = "sizeBytes")]
@@ -34,7 +34,7 @@ struct HistoryResponse {
 
 #[derive(Deserialize)]
 struct HistoryEntry {
-    id: Uuid,
+    id: runmat_server_client::ids::FsVersionId,
     path: String,
     size: i64,
     #[serde(rename = "createdAt")]
@@ -44,7 +44,7 @@ struct HistoryEntry {
 pub async fn list_manifest_history(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     path: &str,
 ) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
@@ -76,9 +76,10 @@ pub async fn list_manifest_history(
 pub async fn restore_manifest_version(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     version_id: Uuid,
 ) -> Result<()> {
+    let version_id = runmat_server_client::ids::FsVersionId::from_uuid(version_id);
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!("{}/v1/projects/{}/history/restore", base, project_id);
     let response = client
@@ -103,7 +104,7 @@ pub async fn restore_manifest_version(
 pub async fn list_history(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     path: &str,
 ) -> Result<()> {
     let (client, base) = build_http_client(server_url, token)?;
@@ -135,9 +136,10 @@ pub async fn list_history(
 pub async fn restore_version(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     version_id: Uuid,
 ) -> Result<()> {
+    let version_id = runmat_server_client::ids::FsVersionId::from_uuid(version_id);
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!("{}/v1/projects/{}/history/restore", base, project_id);
     let response = client
@@ -162,9 +164,10 @@ pub async fn restore_version(
 pub async fn delete_version(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     version_id: Uuid,
 ) -> Result<()> {
+    let version_id = runmat_server_client::ids::FsVersionId::from_uuid(version_id);
     let (client, base) = build_http_client(server_url, token)?;
     let url = format!(
         "{}/v1/projects/{}/fs/history/{}",
@@ -191,11 +194,12 @@ pub async fn delete_version(
 pub async fn update_manifest(
     server_url: &str,
     token: &str,
-    project_id: Uuid,
+    project_id: &runmat_server_client::ids::ProjectId,
     path: &str,
     base_version: Uuid,
     manifest_path: &PathBuf,
 ) -> Result<()> {
+    let base_version = runmat_server_client::ids::FsVersionId::from_uuid(base_version);
     let contents = fs::read_to_string(manifest_path)
         .with_context(|| format!("Failed to read {}", manifest_path.display()))?;
     let manifest: serde_json::Value =

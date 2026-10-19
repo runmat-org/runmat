@@ -7,7 +7,7 @@ use uuid::Uuid;
 pub enum ClusterCommand {
     /// List clusters in an organization
     List {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         #[arg(long)]
         limit: Option<u32>,
@@ -18,12 +18,12 @@ pub enum ClusterCommand {
     },
     /// Create a cluster
     Create {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         #[arg(long)]
         name: String,
-        #[arg(long)]
-        project: Option<String>,
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
+        project: Option<Uuid>,
         #[arg(long = "queue", default_value = "default")]
         queues: Vec<String>,
         #[arg(long)]
@@ -31,7 +31,7 @@ pub enum ClusterCommand {
     },
     /// Change a cluster's scheduling state
     State {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         cluster: String,
         state: ClusterStateArg,
@@ -40,7 +40,7 @@ pub enum ClusterCommand {
     },
     /// Create a single-use node enrollment token
     Enroll {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         cluster: String,
         #[arg(long, default_value = "900")]
@@ -52,7 +52,7 @@ pub enum ClusterCommand {
     },
     /// List nodes enrolled in a cluster
     Nodes {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         cluster: String,
         #[arg(long)]
@@ -64,7 +64,7 @@ pub enum ClusterCommand {
     },
     /// Change an enrolled node's lifecycle state
     NodeState {
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         cluster: String,
         node: String,

@@ -4,13 +4,19 @@
 //! projection from that physical intent onto solver topology. Assembly consumes the resulting
 //! plan; it must not reinterpret authored targets or coordinate frames.
 
+mod affine_transpose;
 mod algebra;
+pub(crate) use affine_transpose::AffineTransposeIndex;
+mod affine_support;
+pub use affine_support::{AffineSparseSupportPlan, AffineSupportBudget, AffineSupportError};
 #[path = "algebra/translation_selection.rs"]
 mod translation_selection;
 pub(crate) use translation_selection::HomogeneousTranslationSelection;
 mod compilation;
 pub use compilation::{
-    constraint_group_construction_workspace_profile, ConstraintGroupConstructionWorkspaceProfile,
+    constraint_group_construction_workspace_profile, constraint_preparation_workspace_profile,
+    ConstraintCompilation, ConstraintCompilationPhase, ConstraintCompilationWorkspace,
+    ConstraintGroupConstructionWorkspaceProfile, ConstraintPreparationWorkspaceProfile,
 };
 mod compile;
 mod contract;

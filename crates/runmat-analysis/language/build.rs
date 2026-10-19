@@ -25,7 +25,8 @@ fn collect(root: &Path, dir: &Path, entries: &mut Vec<(String, PathBuf)>) {
 }
 
 fn main() {
-    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../../docs/fea");
+    let root =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../../docs/simulation");
     let mut entries = Vec::new();
     collect(&root, &root, &mut entries);
     entries.sort_by(|a, b| a.0.cmp(&b.0));

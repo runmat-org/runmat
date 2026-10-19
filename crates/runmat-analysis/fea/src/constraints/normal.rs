@@ -21,7 +21,10 @@ pub(super) fn boundary_node_normals(
     };
     check_cancelled()?;
     let _profile = profile::constraint_normal_workspace_profile(mesh, target)?;
-    let projection = AnalysisProjection::derive(mesh).map_err(|_| unavailable())?;
+    let projection = AnalysisProjection::derive(mesh).map_err(|error| match error {
+        crate::topology::AnalysisProjectionError::Cancelled => ConstraintPlanError::Cancelled,
+        _ => unavailable(),
+    })?;
     let mut accumulated = NodeValues::derive(
         target
             .matched_node_identities

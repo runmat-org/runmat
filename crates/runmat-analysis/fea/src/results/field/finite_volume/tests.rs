@@ -59,3 +59,28 @@ fn self_consistent_owner_reversal_cannot_substitute_original_flux_orientation() 
     layout.validate().unwrap();
     assert!(layout.validate_for(&projection, &geometry).is_err());
 }
+
+#[test]
+fn counted_layout_validation_preserves_original_bytes_and_rejects_bad_references() {
+    let (projection, geometry) = source();
+    let original = FiniteVolumeFieldTopology::derive(&projection, &geometry).unwrap();
+    let bytes = original.canonical_bytes().unwrap();
+    let cold = FiniteVolumeFieldTopology::from_canonical_bytes(&bytes).unwrap();
+    cold.validate_for(&projection, &geometry).unwrap();
+    assert_eq!(cold.canonical_bytes().unwrap(), bytes);
+    for case in 0..7 {
+        let mut value = original.clone();
+        match case {
+            0 => value.node_identities[1] = value.node_identities[0],
+            1 => value.cell_identities[1] = value.cell_identities[0],
+            2 => value.oriented_faces[1].identity = value.oriented_faces[0].identity,
+            3 => value.oriented_faces[0].owner = StableDigest::from_bytes([255; 32]),
+            4 => value.oriented_faces[0].corner_identities[0] = StableDigest::ZERO,
+            5 => value.oriented_faces[0].neighbor = Some(value.oriented_faces[0].owner),
+            6 => value.node_identities[0] = StableDigest::ZERO,
+            _ => unreachable!(),
+        }
+        assert!(value.validate().is_err(), "case {case}");
+    }
+    assert!(FiniteVolumeFieldTopology::validation_workspace_bytes(usize::MAX, 1, 1).is_err());
+}

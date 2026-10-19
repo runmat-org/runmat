@@ -55,6 +55,7 @@ fn derive_for(
     .map_err(|e| invalid(&e))?;
     derive_resource_input(
         StaticResourcePreflight {
+            compilation: None,
             model: &workload.model,
             step,
             backend: crate::ComputeBackend::Cpu,

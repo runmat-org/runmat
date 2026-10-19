@@ -2,9 +2,9 @@ use runmat_analysis_core::{EntityDimension, ExpectedTopology, RegionTarget, Targ
 use runmat_meshing_core::{SolverMeshArtifact, StableDigest};
 
 use super::contract::{ConstraintPlanError, ResolvedConstraintTarget};
-use super::plan::canonical_digest;
 
-mod profile;
+pub(super) mod identity;
+pub(super) mod profile;
 mod selection;
 pub use profile::{constraint_target_workspace_profile, ConstraintTargetWorkspaceProfile};
 
@@ -37,8 +37,7 @@ pub(crate) fn resolve_nodal_target(
             actual: matched_entity_count,
         });
     }
-    let selection_digest =
-        canonical_digest("resolved-constraint-target", &(target, &entities, &nodes))?;
+    let selection_digest = identity::digest(target, &entities, &nodes)?;
     Ok(ResolvedConstraintTarget {
         authored: target.clone(),
         matched_entities: selection::clone_entities(&entities)?,
@@ -62,13 +61,10 @@ pub(super) fn validate_resolved_target(
             .windows(2)
             .all(|pair| pair[0] < pair[1])
         || target.selection_digest
-            != canonical_digest(
-                "resolved-constraint-target",
-                &(
-                    &target.authored,
-                    &target.matched_entities,
-                    &target.matched_node_identities,
-                ),
+            != identity::digest(
+                &target.authored,
+                &target.matched_entities,
+                &target.matched_node_identities,
             )?
     {
         return Err(ConstraintPlanError::Invalid(format!(

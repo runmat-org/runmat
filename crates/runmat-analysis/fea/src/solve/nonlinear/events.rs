@@ -323,6 +323,8 @@ mod tests {
         NonlinearSolveResult {
             accepted_state: super::super::AcceptedSolidState {
                 scope_identity: Digest::sha256(b"synthetic-event-test"),
+                contact: None,
+                contact_energy: None,
                 load_factor: 1.0,
                 displacement: vec![0.0; summary.dof_count],
                 constitutive: basis.zero_state(),

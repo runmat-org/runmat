@@ -3,28 +3,43 @@
 //! Domain owners supply a stable prefix, domain string, limits, and semantic validation. This
 //! crate owns only deterministic serde-value projection and hostile-input decoding rules.
 
+/// Actual package build configuration used for internal artifact reuse.
+#[doc(hidden)]
+pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
+
+mod direct_decoding;
+mod exact_vec;
+pub use exact_vec::{deserialize_exact_vec, ExactVec};
+mod direct_encoding;
 mod materialization;
 use materialization::materialization_resident_bytes_estimate;
 pub use materialization::{
     canonical_chunked_payload_materialization_resident_bytes_estimate,
     canonical_payload_materialization_resident_bytes_estimate,
+    canonical_value_materialization_resident_bytes_estimate,
     projected_canonical_materialization_resident_bytes_estimate,
+    CANONICAL_MATERIALIZATION_FIXED_BYTES_PER_CONTRACT,
 };
 
 mod json;
 pub use json::{encode_json_bounded, profile_json_bytes, write_json_bounded};
 
+mod controlled_serde;
 mod serialized_profile;
 mod value;
 
 pub use serialized_profile::{
-    profile_serialized, serialized_materialization_resident_bytes_estimate,
+    profile_canonical_encoding, profile_canonical_encoding_with_control, profile_serialized,
+    profile_serialized_shape, profile_serialized_with_control,
+    serialized_materialization_resident_bytes_estimate, CanonicalEncodingProfile,
     SerializedCanonicalProfile,
 };
 
 use serde::{de::DeserializeOwned, Serialize};
 
 pub trait CanonicalCodecControl: Send + Sync {
+    /// Retain the originating probe site through domain adapters.
+    #[track_caller]
     fn is_cancelled(&self) -> bool;
 }
 
@@ -39,7 +54,10 @@ impl CanonicalCodecControl for NeverCancelled {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CanonicalLimits {
+    /// Bound for both trusted owned encoding and hostile decoding.
     pub maximum_encoded_bytes: usize,
+    /// Shape limits for hostile decoding and preallocation profiling. Trusted
+    /// encoding preserves the established serde projection and byte ceiling.
     pub maximum_collection_items: usize,
     pub maximum_string_bytes: usize,
     pub maximum_nesting_depth: usize,
@@ -116,29 +134,22 @@ pub fn encode_contract_with_control<T: Serialize>(
     control: &dyn CanonicalCodecControl,
 ) -> Result<Vec<u8>, CanonicalCodecError> {
     validate_envelope(prefix, domain)?;
-    checkpoint(control)?;
-    let value =
-        serde_json::to_value(contract).map_err(|error| invalid("canonical encoding", error))?;
-    checkpoint(control)?;
-    let mut encoded = Vec::with_capacity(1024);
-    encoded.extend_from_slice(prefix);
-    let mut encoder = minicbor::Encoder::new(&mut encoded);
-    encoder
-        .array(2)
-        .and_then(|encoder| encoder.str(domain))
-        .map_err(encoding_error)?;
-    value::encode_value(&mut encoder, &value, control)?;
-    if encoded.len() > limits.maximum_encoded_bytes {
-        return Err(invalid(
-            "canonical encoding",
-            format!(
-                "contract `{domain}` encoded {} bytes, exceeding its {}-byte limit",
-                encoded.len(),
-                limits.maximum_encoded_bytes
-            ),
-        ));
-    }
-    Ok(encoded)
+    direct_encoding::encode(prefix, domain, contract, limits, control)
+}
+
+/// Reserve a previously profiled output bound once, avoiding geometric growth
+/// slack in retained records. The capacity is not resource or semantic authority;
+/// callers admit workspace separately and verify the returned profile bounds.
+pub fn encode_contract_with_capacity<T: Serialize>(
+    prefix: &[u8],
+    domain: &str,
+    contract: &T,
+    limits: CanonicalLimits,
+    control: &dyn CanonicalCodecControl,
+    capacity: usize,
+) -> Result<Vec<u8>, CanonicalCodecError> {
+    validate_envelope(prefix, domain)?;
+    direct_encoding::encode_with_capacity(prefix, domain, contract, limits, control, Some(capacity))
 }
 
 pub fn decode_contract<T: DeserializeOwned>(
@@ -157,6 +168,35 @@ pub fn decode_contract_with_control<T: DeserializeOwned>(
     limits: CanonicalLimits,
     control: &dyn CanonicalCodecControl,
 ) -> Result<T, CanonicalCodecError> {
+    decode_contract_with_admission(prefix, domain, bytes, limits, control, |_| Ok(()))
+}
+
+/// Validate hostile grammar and limits, then admit domain-owned materialization
+/// before the first typed visitor runs. The callback borrows only the validated
+/// contract value; decoding reuses that same grammar admission and original bytes.
+pub fn decode_contract_with_admission<T: DeserializeOwned>(
+    prefix: &[u8],
+    domain: &str,
+    bytes: &[u8],
+    limits: CanonicalLimits,
+    control: &dyn CanonicalCodecControl,
+    admit: impl FnOnce(&[u8]) -> Result<(), CanonicalCodecError>,
+) -> Result<T, CanonicalCodecError> {
+    let value = validated_contract_value(prefix, domain, bytes, limits, control)?;
+    admit(value)?;
+    direct_decoding::decode_value(value, control)
+}
+
+/// Validate canonical grammar, framing, and limits without allocating a value tree.
+/// The borrowed value is suitable for a domain-owned typed storage inventory;
+/// it grants no semantic authority and remains tied to the original immutable bytes.
+pub fn validated_contract_value<'a>(
+    prefix: &[u8],
+    domain: &str,
+    bytes: &'a [u8],
+    limits: CanonicalLimits,
+    control: &dyn CanonicalCodecControl,
+) -> Result<&'a [u8], CanonicalCodecError> {
     validate_envelope(prefix, domain)?;
     checkpoint(control)?;
     if bytes.len() > limits.maximum_encoded_bytes {
@@ -172,31 +212,7 @@ pub fn decode_contract_with_control<T: DeserializeOwned>(
     let payload = bytes
         .strip_prefix(prefix)
         .ok_or_else(|| invalid("canonical decoding", "codec domain prefix is missing"))?;
-    let mut decoder = minicbor::Decoder::new(payload);
-    require_array_length(decoder.array(), 2, "canonical envelope")?;
-    let actual_domain = decoder.str().map_err(decoding_error)?;
-    if actual_domain != domain {
-        return Err(invalid(
-            "canonical decoding domain",
-            format!("expected {domain}, received {actual_domain}"),
-        ));
-    }
-    let value = value::decode_value(&mut decoder, limits, 0, control)?;
-    if decoder.position() != payload.len() {
-        return Err(invalid("canonical decoding", "trailing data is forbidden"));
-    }
-    let canonical = encode_value_envelope(prefix, domain, &value, control)?;
-    if canonical.as_slice() != bytes {
-        return Err(invalid(
-            "canonical decoding",
-            "input is not in canonical form",
-        ));
-    }
-    checkpoint(control)?;
-    let decoded =
-        serde_json::from_value(value).map_err(|error| invalid("canonical decoding", error))?;
-    checkpoint(control)?;
-    Ok(decoded)
+    direct_decoding::validated_value(domain, payload, limits, control)
 }
 
 /// Exposed for hostile-codec conformance tests that must deliberately construct noncanonical
@@ -209,6 +225,7 @@ pub fn encode_json_value(
     value::encode_value(encoder, value, &NeverCancelled)
 }
 
+#[cfg(test)]
 fn encode_value_envelope(
     prefix: &[u8],
     domain: &str,
@@ -225,6 +242,7 @@ fn encode_value_envelope(
     Ok(encoded)
 }
 
+#[track_caller]
 pub(crate) fn checkpoint(control: &dyn CanonicalCodecControl) -> Result<(), CanonicalCodecError> {
     if control.is_cancelled() {
         return Err(CanonicalCodecError::invalid(
@@ -255,6 +273,7 @@ fn validate_envelope(prefix: &[u8], domain: &str) -> Result<(), CanonicalCodecEr
     Ok(())
 }
 
+#[cfg(test)]
 fn require_array_length(
     length: Result<Option<u64>, minicbor::decode::Error>,
     expected: u64,
@@ -273,6 +292,7 @@ pub(crate) fn encoding_error<E: std::fmt::Display>(error: E) -> CanonicalCodecEr
     invalid("canonical encoding", error)
 }
 
+#[cfg(test)]
 pub(crate) fn decoding_error<E: std::fmt::Display>(error: E) -> CanonicalCodecError {
     invalid("canonical decoding", error)
 }

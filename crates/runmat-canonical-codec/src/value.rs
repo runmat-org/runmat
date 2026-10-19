@@ -1,11 +1,14 @@
-use minicbor::data::Type;
-use minicbor::{Decoder, Encoder};
-use serde_json::{Map, Number, Value};
+use minicbor::Encoder;
+#[cfg(test)]
+use minicbor::{data::Type, Decoder};
+#[cfg(test)]
+use serde_json::Map;
+use serde_json::{Number, Value};
 
-use crate::{
-    checkpoint, decoding_error, encoding_error, CanonicalCodecControl, CanonicalCodecError,
-    CanonicalLimits,
-};
+use crate::{checkpoint, encoding_error, CanonicalCodecControl, CanonicalCodecError};
+
+#[cfg(test)]
+use crate::{decoding_error, CanonicalLimits};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct MaterializationProfile {
@@ -15,7 +18,7 @@ pub(crate) struct MaterializationProfile {
 }
 
 mod profile;
-pub(crate) use profile::{chunked_profile, materialization_profile};
+pub(crate) use profile::{chunked_profile, materialization_profile, value_profile};
 
 pub(crate) fn encode_value(
     encoder: &mut Encoder<&mut Vec<u8>>,
@@ -48,6 +51,7 @@ pub(crate) fn encode_value(
     }
 }
 
+#[cfg(test)]
 pub(crate) fn decode_value(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
@@ -118,6 +122,7 @@ fn encode_number(
     }
 }
 
+#[cfg(test)]
 fn decode_string(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
@@ -132,6 +137,7 @@ fn decode_string(
     Ok(value.to_owned())
 }
 
+#[cfg(test)]
 fn decode_array(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
@@ -150,6 +156,7 @@ fn decode_array(
     Ok(Value::Array(values))
 }
 
+#[cfg(test)]
 fn decode_object(
     decoder: &mut Decoder<'_>,
     limits: CanonicalLimits,
@@ -182,6 +189,7 @@ fn decode_object(
     Ok(Value::Object(values))
 }
 
+#[cfg(test)]
 fn bounded_length(
     length: Option<u64>,
     maximum: usize,

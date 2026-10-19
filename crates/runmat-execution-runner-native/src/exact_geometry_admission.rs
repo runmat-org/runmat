@@ -263,6 +263,8 @@ mod tests {
             executable: std::env::current_exe().unwrap(),
             worker_arguments: vec!["--execution-worker".into()],
             max_workers: 1,
+            local_cpu_capacity_millicores: None,
+            local_memory_capacity_bytes: None,
             max_message_bytes: 1024,
             max_object_bytes: 512 * 1024 * 1024,
             max_stderr_bytes: 1024,
@@ -270,6 +272,7 @@ mod tests {
             worker_scratch_bytes: 1024 * 1024 * 1024,
             worker_cpu_millicores: 1_000,
             store_root: directory.path().to_path_buf(),
+            meshing_subtask_cache_root: None,
             worker_capabilities: BTreeSet::from([Capability::ProcessIsolation]),
             worker_accelerators: Vec::new(),
         })

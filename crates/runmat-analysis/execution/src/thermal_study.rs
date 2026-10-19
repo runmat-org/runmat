@@ -59,6 +59,7 @@ pub struct CompletedThermalStudy {
 }
 
 pub struct ThermalStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub scope: ThermalStudyScope,
     pub field_source: Option<runmat_analysis_fea::execution::RetainedJouleHeatSource>,
     pub product: ThermalStudyProduct,
@@ -113,12 +114,7 @@ impl ThermalStudyCoordinator {
             .compiled
             .validate_against(&preparation.mesh)
             .map_err(|error| invalid(error.to_string()))?;
-        let expected = preparation.planned_workload()?;
-        if expected != preparation.product.workload {
-            return Err(AnalysisBridgeError::Identity(
-                "thermal workload differs from the compiled authored study",
-            ));
-        }
+        preparation.validate_workload()?;
         let definition_digest = preparation
             .product
             .compiled
@@ -147,6 +143,7 @@ impl ThermalStudyCoordinator {
     pub fn prepare_solve(&mut self) -> AnalysisBridgeResult<&PreparedThermalTask> {
         self.require(ThermalStudyPhase::ReadyForSolve)?;
         let task = prepare_thermal_task(ThermalTaskPreparation {
+            local_execution: self.preparation.local_execution,
             field_source: self.preparation.field_source.clone(),
             authored_study_digest: self.definition_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
@@ -449,6 +446,7 @@ impl ThermalStudyCoordinator {
         self.require(ThermalStudyPhase::Complete)?;
         Ok(CompletedThermalStudy {
             replay: completion::ThermalStudyReplayContext {
+                local_execution: self.preparation.local_execution,
                 field_source: self.preparation.field_source,
                 scope: self.preparation.scope,
                 mesh: self.preparation.mesh,

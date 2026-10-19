@@ -102,7 +102,11 @@ pub(super) async fn materialize_study_geometry(
         limits.inventory,
     )
     .map_err(|error| error.to_string())?;
-    let topology = exact.geometry_objects().topology.clone();
+    let components = exact
+        .into_geometry_objects()
+        .into_components()
+        .map_err(|error| error.to_string())?;
+    let topology = components.topology;
     let mapped_faces = output
         .source_face_ids
         .values()
@@ -118,13 +122,9 @@ pub(super) async fn materialize_study_geometry(
             "materialized FEA geometry face ordinals do not match its exact topology".into(),
         );
     }
-    let kernel_representation = exact
-        .geometry_objects()
-        .kernel_representation
-        .clone()
-        .ok_or_else(|| {
-            "materialized FEA geometry has no exact kernel representation".to_string()
-        })?;
+    let kernel_representation = components.kernel_representation.ok_or_else(|| {
+        "materialized FEA geometry has no exact kernel representation".to_string()
+    })?;
     Ok(MaterializedFeaGeometry {
         output,
         topology,
@@ -389,19 +389,10 @@ fn physical_source_path(
     source_root: &std::path::Path,
     logical_path: &str,
 ) -> Result<std::path::PathBuf, String> {
-    let relative = logical_path
-        .strip_prefix("project/")
-        .ok_or_else(|| "geometry source is outside the checked project root".to_string())?;
-    if relative.is_empty()
-        || relative
-            .split('/')
-            .any(|part| part.is_empty() || part == "." || part == "..")
-    {
-        return Err("geometry source path is not normalized".into());
-    }
-    Ok(relative
-        .split('/')
-        .fold(source_root.to_path_buf(), |path, part| path.join(part)))
+    let path = runmat_runtime::analysis::LogicalSourcePath::new(logical_path.to_owned())
+        .map_err(|error| error.to_string())?;
+    runmat_runtime::analysis::physical_source_path(source_root, &path)
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Default)]
@@ -410,6 +401,34 @@ struct CapturedObjectStore {
 }
 
 impl CacheImport for CapturedObjectStore {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        runmat_execution_artifact::cache::copy_verified_bounded_with_admission(
+            digest,
+            self.objects
+                .get(&digest)
+                .map(|object| object.bytes.as_slice()),
+            maximum_bytes,
+            admit,
+        )
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        crate::bounded_object_read::copy_verified(
+            digest,
+            self.objects
+                .get(&digest)
+                .map(|object| object.bytes.as_slice()),
+            maximum_bytes,
+        )
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         Ok(self.objects.get(&digest).map(|object| object.bytes.clone()))
     }

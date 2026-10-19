@@ -71,6 +71,8 @@ fn surface_converged(
     let streams = publication.stage_objects().decoded_streams()?;
     match streams.as_slice() {
         [pass] if pass.media_type == MeshingChunkMediaType::SurfacePartitions => Ok(false),
+        [surface] if surface.media_type == MeshingChunkMediaType::SurfaceMesh => Ok(true),
+        // Retained publications from the previous producer remain readable.
         [pass, surface]
             if pass.media_type == MeshingChunkMediaType::SurfacePartitions
                 && surface.media_type == MeshingChunkMediaType::SurfaceMesh =>

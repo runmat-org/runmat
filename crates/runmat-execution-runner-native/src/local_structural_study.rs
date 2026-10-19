@@ -46,7 +46,7 @@ pub async fn execute_prepared_structural_study_locally(
 }
 
 pub async fn execute_prepared_structural_study_locally_with_observers(
-    config: NativeExecutionConfig,
+    mut config: NativeExecutionConfig,
     prepared: PreparedStructuralStudyRoot,
     workers: u32,
     observers: LocalStructuralStudyObservers,
@@ -71,8 +71,14 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         crate::FilesystemObjectStore::open(composition_root, inventory.max_object_bytes)
             .map_err(protocol)?;
     prepared.write_to(&mut composition_store)?;
+    drop(prepared);
 
     let decoded = crate::decode_structural_study_root(&request, &composition_store)?;
+    config.max_workers = workers.max(1);
+    config.worker_cpu_millicores = decoded
+        .local_execution
+        .checked_cpu_millicores()
+        .map_err(|error| crate::NativeExecutionError::Configuration(error.to_string()))?;
     let crate::local_study_geometry::LocalStudyGeometry {
         output,
         meshing,
@@ -103,6 +109,9 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         mesh: &meshing.artifact,
     })
     .map_err(protocol)?;
+    // Geometry has completed compilation; numerical execution retains its bound
+    // mesh and property identities, not the original geometry materialization.
+    drop(output);
     let resolved_inputs = decoded
         .input_materializations
         .iter()
@@ -146,7 +155,7 @@ pub async fn execute_prepared_structural_study_locally_with_observers(
         frozen_project_digest: decoded.frozen_project_digest,
         compiled: Some(&compiled),
         workloads: workloads.clone(),
-        mesh: meshing.artifact.clone(),
+        mesh: &meshing.artifact,
         workers,
         local_execution: decoded.local_execution,
         admitted_accelerators: Some(&decoded.analysis_accelerator_requests),

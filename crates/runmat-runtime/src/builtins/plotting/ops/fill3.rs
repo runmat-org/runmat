@@ -381,10 +381,8 @@ pub fn fill3_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "3-D Filled Polygons",
-            x_label: "X",
-            y_label: "Y",
-            axis_equal: true,
+            // MATLAB leaves the data aspect free; `axis equal` sets it.
+            axis_equal: false,
             ..Default::default()
         },
         move |figure, axes| {

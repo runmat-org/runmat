@@ -34,6 +34,7 @@ pub(super) fn solve(
     .unwrap();
     let options = options(mesh);
     let plan = build_static_resource_plan(StaticResourcePreflight {
+        compilation: None,
         prepared_inputs: None,
         model,
         step: consumer,

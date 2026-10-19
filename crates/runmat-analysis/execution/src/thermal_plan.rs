@@ -10,7 +10,7 @@ use runmat_analysis_fea::execution::{
     AnalysisTransportProfiler, ThermalWorkload, THERMAL_RECEIPT_MAX_ENCODED_BYTES,
 };
 use runmat_analysis_fea::planning::resource::{
-    build_thermal_resource_plan, FeaResourcePlan, PreparedThermalResourceFacts,
+    build_thermal_resource_plan, FeaResourcePlan, LocalExecutionPlan, PreparedThermalResourceFacts,
 };
 use runmat_execution::Digest;
 use runmat_execution_artifact::ObjectNamespace;
@@ -33,10 +33,30 @@ pub fn rederive_thermal_resource_plan(
     inputs: &[PreparedAnalysisObjects],
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<FeaResourcePlan> {
+    let mut declarations = inputs
+        .iter()
+        .filter(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan);
+    let declaration = declarations
+        .next()
+        .filter(|_| declarations.next().is_none())
+        .ok_or_else(|| {
+            crate::AnalysisBridgeError::Invalid(
+                "thermal allocation requires exactly one resource plan".into(),
+            )
+        })?;
+    let declared = FeaResourcePlan::from_canonical_bytes(&declaration.payload())?;
+    if declaration.manifest.logical_identity != declared.identity.digest() {
+        return Err(crate::AnalysisBridgeError::Identity(
+            "thermal CPU allocation differs from its resource identity",
+        ));
+    }
+    let local_execution = LocalExecutionPlan::from_cpu_millicores(declared.request.cpu_millicores)
+        .map_err(|error| crate::AnalysisBridgeError::Invalid(error.to_string()))?;
     let field_source = source::decode(workload, mesh, inputs, true)?;
     let (result_output, receipt_output, state_profiles_output) =
         projected_thermal_outputs(workload, mesh, policy)?;
     let facts = PreparedThermalResourceFacts {
+        local_execution,
         field_source: source::facts(field_source.as_ref(), mesh, inputs)?,
         inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
         result_output,
@@ -59,7 +79,7 @@ pub fn prepare_thermal_inputs(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
 ) -> AnalysisBridgeResult<PreparedThermalInputs> {
-    prepare_thermal_inputs_with_source(workload, mesh, policy, None)
+    prepare_thermal_inputs_with_source(workload, mesh, policy, None, LocalExecutionPlan::serial())
 }
 
 pub(crate) fn prepare_thermal_inputs_with_source(
@@ -67,6 +87,7 @@ pub(crate) fn prepare_thermal_inputs_with_source(
     mesh: &SolverMeshArtifact,
     policy: AnalysisOutputPolicy,
     field_source: Option<&runmat_analysis_fea::execution::RetainedJouleHeatSource>,
+    local_execution: LocalExecutionPlan,
 ) -> AnalysisBridgeResult<PreparedThermalInputs> {
     if field_source.is_none()
         && runmat_analysis_fea::execution::RetainedJouleHeatSource::requires_binding(workload)
@@ -109,6 +130,7 @@ pub(crate) fn prepare_thermal_inputs_with_source(
         )?);
     }
     let facts = PreparedThermalResourceFacts {
+        local_execution,
         field_source: source::facts(field_source, mesh, &inputs)?,
         inputs: prepared_input_resource_facts(&inputs)?,
         result_output,
@@ -132,7 +154,7 @@ fn projected_thermal_outputs(
     runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
     runmat_analysis_fea::planning::resource::PreparedOutputResourceFacts,
 )> {
-    let numerical = workload.prepare(mesh)?;
+    let numerical = workload.prepare_primary_fields(mesh)?;
     let result = numerical.transport_profile(policy.chunk_bytes())?;
     let mut receipt = AnalysisTransportProfiler::new(policy.chunk_bytes())?;
     receipt.push(THERMAL_RECEIPT_MAX_ENCODED_BYTES)?;

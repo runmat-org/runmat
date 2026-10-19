@@ -262,7 +262,7 @@ impl NativeSurfaceRenderContext {
     }
 
     pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
-        self.renderer.theme = theme.clone();
+        self.renderer.set_theme(theme.clone());
         self.config.theme = theme;
         self.apply_background_policy();
     }
@@ -349,20 +349,33 @@ impl NativeSurfaceRenderContext {
     }
 
     /// Render a figure directly into an externally-owned texture view.
-    pub fn set_presence(&mut self, frame: crate::collaboration::PresenceFrame) -> Result<(), String> {
+    pub fn set_presence(
+        &mut self,
+        frame: crate::collaboration::PresenceFrame,
+    ) -> Result<(), String> {
         self.renderer.set_presence(frame)
     }
 
     pub fn presence_projections(&self) -> Vec<crate::collaboration::PresenceProjection> {
         #[cfg(feature = "egui-overlay")]
-        if let Some(overlay) = &self.overlay { return overlay.plot_overlay.presence_projections(&self.renderer); }
+        if let Some(overlay) = &self.overlay {
+            return overlay.plot_overlay.presence_projections(&self.renderer);
+        }
         Vec::new()
     }
 
-    pub fn capture_presence_pointer(&self, logical_pixel: [f32; 2]) -> Option<crate::collaboration::PointerPosition> {
+    pub fn capture_presence_pointer(
+        &self,
+        logical_pixel: [f32; 2],
+    ) -> Option<crate::collaboration::PointerPosition> {
         #[cfg(feature = "egui-overlay")]
         if let Some(overlay) = &self.overlay {
-            return overlay.plot_overlay.presence_projections(&self.renderer).iter().rev().find_map(|projection| projection.capture(logical_pixel));
+            return overlay
+                .plot_overlay
+                .presence_projections(&self.renderer)
+                .iter()
+                .rev()
+                .find_map(|projection| projection.capture(logical_pixel));
         }
         let _ = logical_pixel;
         None
@@ -779,18 +792,15 @@ impl NativeSurfaceRenderContext {
                     title: self
                         .renderer
                         .overlay_title()
-                        .cloned()
-                        .or(Some("Plot".to_string())),
+                        .cloned(),
                     x_label: self
                         .renderer
                         .overlay_x_label()
-                        .cloned()
-                        .or(Some("X".to_string())),
+                        .cloned(),
                     y_label: self
                         .renderer
                         .overlay_y_label()
-                        .cloned()
-                        .or(Some("Y".to_string())),
+                        .cloned(),
                     show_sidebar: false,
                     ..Default::default()
                 };
@@ -1678,20 +1688,35 @@ mod parity_tests {
                 let texture = target(&live);
                 let view = texture.create_view(&Default::default());
                 live.render_to_view_with_camera_state(
-                    &figure, &view, Some(&cameras[0]), Some(&cameras), Some(&flags),
-                ).unwrap();
-                let projection = live.presence_projections().into_iter().next().expect("2D projection");
+                    &figure,
+                    &view,
+                    Some(&cameras[0]),
+                    Some(&cameras),
+                    Some(&flags),
+                )
+                .unwrap();
+                let projection = live
+                    .presence_projections()
+                    .into_iter()
+                    .next()
+                    .expect("2D projection");
                 assert!(!projection.is_3d);
-                let position = projection.capture([
-                    projection.rect[0] + projection.rect[2] * 0.55,
-                    projection.rect[1] + projection.rect[3] * 0.45,
-                ]).expect("2D pointer");
+                let position = projection
+                    .capture([
+                        projection.rect[0] + projection.rect[2] * 0.55,
+                        projection.rect[1] + projection.rect[3] * 0.45,
+                    ])
+                    .expect("2D pointer");
                 let frame = crate::collaboration::PresenceFrame {
-                    revision: "accepted-run".into(), target: None,
+                    revision: "accepted-run".into(),
+                    target: None,
                     pointers: vec![crate::collaboration::PresencePointer {
                         position,
-                        color: [240, 110, 30], opacity: 1.0, label: Some("Jules".into()),
-                        click_progress: Some(0.35), click_position: None,
+                        color: [240, 110, 30],
+                        opacity: 1.0,
+                        label: Some("Jules".into()),
+                        click_progress: Some(0.35),
+                        click_position: None,
                     }],
                 };
                 live.set_presence(frame.clone()).unwrap();
@@ -1726,12 +1751,27 @@ mod parity_tests {
                     width,
                     height,
                 );
-                assert!(snapshot.presence_projections().iter().any(|p| p.project(&snapshot.renderer.presence().pointers[0].position).is_some()), "cursor must project: {:?}", snapshot.presence_projections());
+                assert!(
+                    snapshot.presence_projections().iter().any(|p| p
+                        .project(&snapshot.renderer.presence().pointers[0].position)
+                        .is_some()),
+                    "cursor must project: {:?}",
+                    snapshot.presence_projections()
+                );
                 snapshot.set_presence(Default::default()).unwrap();
-                let without_presence = snapshot.render_to_rgba_with_camera_state(
-                    &figure, Some(&cameras[0]), Some(&cameras), Some(&flags),
-                ).await.unwrap();
-                assert!(actual != without_presence, "2D collaborator must actually be drawn");
+                let without_presence = snapshot
+                    .render_to_rgba_with_camera_state(
+                        &figure,
+                        Some(&cameras[0]),
+                        Some(&cameras),
+                        Some(&flags),
+                    )
+                    .await
+                    .unwrap();
+                assert!(
+                    actual != without_presence,
+                    "2D collaborator must actually be drawn"
+                );
                 for mode in [
                     GeometrySceneDisplayMode::Shaded,
                     GeometrySceneDisplayMode::Edges,
@@ -1770,17 +1810,28 @@ mod parity_tests {
                     )
                     .unwrap();
                     let camera = live.camera_state().active_camera;
-                    let projection = live.presence_projections().into_iter().next().expect("geometry projection");
+                    let projection = live
+                        .presence_projections()
+                        .into_iter()
+                        .next()
+                        .expect("geometry projection");
                     assert!(projection.is_3d, "geometry pointers must be camera-bound");
-                    let position = projection.capture([
-                        projection.rect[0] + projection.rect[2] * 0.55,
-                        projection.rect[1] + projection.rect[3] * 0.45,
-                    ]).expect("geometry pointer");
+                    let position = projection
+                        .capture([
+                            projection.rect[0] + projection.rect[2] * 0.55,
+                            projection.rect[1] + projection.rect[3] * 0.45,
+                        ])
+                        .expect("geometry pointer");
                     let geometry_frame = crate::collaboration::PresenceFrame {
-                        revision: "geometry-revision".into(), target: None,
+                        revision: "geometry-revision".into(),
+                        target: None,
                         pointers: vec![crate::collaboration::PresencePointer {
-                            position, color: [240, 110, 30], opacity: 0.8,
-                            label: Some("Jules".into()), click_progress: Some(0.35), click_position: None,
+                            position,
+                            color: [240, 110, 30],
+                            opacity: 0.8,
+                            label: Some("Jules".into()),
+                            click_progress: Some(0.35),
+                            click_position: None,
                         }],
                     };
                     live.set_presence(geometry_frame.clone()).unwrap();
@@ -1811,10 +1862,18 @@ mod parity_tests {
                         height,
                     );
                     snapshot.set_presence(Default::default()).unwrap();
-                    let without_presence = snapshot.render_geometry_scene_to_rgba_with_presentation(
-                        &scene, Some(&camera), Some(&presentation),
-                    ).await.unwrap();
-                    assert!(actual != without_presence, "geometry collaborator must actually be drawn");
+                    let without_presence = snapshot
+                        .render_geometry_scene_to_rgba_with_presentation(
+                            &scene,
+                            Some(&camera),
+                            Some(&presentation),
+                        )
+                        .await
+                        .unwrap();
+                    assert!(
+                        actual != without_presence,
+                        "geometry collaborator must actually be drawn"
+                    );
                     assert_eq!(
                         retained.rgba().await.unwrap(),
                         expected,

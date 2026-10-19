@@ -27,3 +27,5 @@ fn out_of_horizon_and_nonfinite_samples_fail_closed() {
         assert!(ThermalSolveSchedule::merge(&[0.0, 1.0], &[], &[invalid], 3).is_err());
     }
 }
+
+mod resources;

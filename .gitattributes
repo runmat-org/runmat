@@ -11,3 +11,9 @@ crates/runmat-package/tests/fixtures/*.lock text eol=lf
 # Native IR snapshots are the canonical, target-independent printer output.
 # Preserve the printer's LF format so byte-for-byte review tests are portable.
 *.native-ir text eol=lf
+
+# Imported guide CAD retains its original bytes and source content identity.
+# These inputs must not change when the branch is transferred or checked out.
+docs/simulation/examples/geometry/*.step -text
+docs/simulation/examples/geometry/*.stp -text
+docs/simulation/examples/geometry/*.brep -text

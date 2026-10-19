@@ -342,6 +342,7 @@ pub(super) async fn run_worker_loop(
                                     super::worker_execution::RemoteProgramContext {
                                         project: materialized_project,
                                         environment,
+                                        resources: scheduling.task.resources.clone(),
                                     },
                                     meshing_host,
                                     objects,

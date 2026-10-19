@@ -4,12 +4,13 @@ pub(super) fn resolve_field_target(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
     topology: &ObservationTopology,
-    maximum: usize,
+    limits: ObservationLimits,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    let maximum = limits.maximum_selected_entities;
     if matches!(spec.target, ObservationTarget::Path { .. })
         || spec.output_location == FieldLocation::Point
     {
-        return resolve_interpolated_points(spec, field_domain, topology, maximum);
+        return resolve_interpolated_points(spec, field_domain, topology, limits);
     }
     match &spec.target {
         ObservationTarget::WholeModel
@@ -65,7 +66,8 @@ pub(super) fn resolve_field_target(
                                 .iter()
                                 .copied()
                         }),
-                        maximum,
+                        topology.nodes.len(),
+                        limits,
                     )?;
                     nodes_target(indices, topology, maximum)
                 }
@@ -79,6 +81,10 @@ pub(super) fn resolve_field_target(
                         ));
                     }
                     let projection = solid_projection(topology, spec)?;
+                    require_workspace(
+                        face_selection_resident_bytes(region, projection, topology, limits)?,
+                        limits,
+                    )?;
                     validate_exact_coverage(
                         region,
                         projection
@@ -86,9 +92,12 @@ pub(super) fn resolve_field_target(
                             .iter()
                             .flat_map(|f| f.provenance.iter()),
                     )?;
-                    let faces = matching_faces(region, projection)
-                        .collect::<std::collections::BTreeSet<_>>();
-                    enforce_cardinality(region.cardinality, faces.len(), spec)?;
+                    let matches = matching_faces(region, projection);
+                    enforce_cardinality(region.cardinality, matches.clone().count(), spec)?;
+                    let faces = crate::topology::storage::SortedKeys::from_entries(
+                        selected_indices(matches, usize::MAX)?,
+                    )
+                    .map_err(storage_error)?;
                     let indices = topology
                         .face_boundary_sources
                         .iter()
@@ -114,7 +123,13 @@ pub(super) fn resolve_field_target(
                             "Cell selection requires exact finite-volume topology",
                         ));
                     }
-                    let indices = matching_elements(region, field_domain, topology)?;
+                    let indices = matching_elements(
+                        region,
+                        field_domain,
+                        topology,
+                        limits,
+                        selection_output_bytes(topology.elements(field_domain)?.len(), maximum)?,
+                    )?;
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;
                     elements_target(
                         selected_indices(indices, maximum)?,
@@ -132,6 +147,8 @@ pub(super) fn resolve_field_target(
                         region,
                         RecoveredFieldEntityDomain::VolumeElements,
                         topology,
+                        limits,
+                        selection_output_bytes(topology.volume_integration_points.len(), maximum)?,
                     )?;
                     enforce_cardinality(region.cardinality, parents.clone().count(), spec)?;
                     elements_target(
@@ -147,13 +164,16 @@ pub(super) fn resolve_field_target(
                         region,
                         RecoveredFieldEntityDomain::VolumeElements,
                         topology,
+                        limits,
+                        node_union_resident_bytes(topology.nodes.len(), maximum)?,
                     )?;
                     enforce_cardinality(region.cardinality, elements.clone().count(), spec)?;
                     let indices = unique_nodes(
                         elements.flat_map(|index| {
                             projection.elements[index].node_indices.iter().copied()
                         }),
-                        maximum,
+                        topology.nodes.len(),
+                        limits,
                     )?;
                     nodes_target(indices, topology, maximum)
                 }

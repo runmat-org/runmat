@@ -415,9 +415,6 @@ pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut y_input =
         Some(StairsInput::from_value(y, BUILTIN_NAME).map_err(map_stairs_invalid_argument)?);
     let opts = PlotRenderOptions {
-        title: "Stairs",
-        x_label: "X",
-        y_label: "Y",
         ..Default::default()
     };
     let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -599,6 +596,8 @@ fn build_stairs_gpu_plot(
             x_span: 1.0,
             y_min: 0.0,
             y_span: 1.0,
+            x_log: false,
+            y_log: false,
             line_style: LineStyle::Solid,
             marker_size: marker.size.max(DEFAULT_LINE_MARKER_SIZE),
         };

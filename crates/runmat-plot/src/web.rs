@@ -545,7 +545,7 @@ impl WebRenderer {
     }
 
     pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
-        self.plot_renderer.theme = theme.clone();
+        self.plot_renderer.set_theme(theme.clone());
         self.render_config.theme = theme;
         self.apply_background_policy();
     }
@@ -589,14 +589,27 @@ impl WebRenderer {
         self.render_current_scene()
     }
 
-    pub fn set_presence(&mut self, frame: crate::collaboration::PresenceFrame) -> Result<(), WebRendererError> {
-        self.plot_renderer.set_presence(frame).map_err(WebRendererError::Render)
+    pub fn set_presence(
+        &mut self,
+        frame: crate::collaboration::PresenceFrame,
+    ) -> Result<(), WebRendererError> {
+        self.plot_renderer
+            .set_presence(frame)
+            .map_err(WebRendererError::Render)
     }
 
-    pub fn capture_presence_pointer(&self, logical_pixel: [f32; 2]) -> Option<crate::collaboration::PointerPosition> {
+    pub fn capture_presence_pointer(
+        &self,
+        logical_pixel: [f32; 2],
+    ) -> Option<crate::collaboration::PointerPosition> {
         #[cfg(feature = "egui-overlay")]
         if let Some(overlay) = &self.overlay {
-            return overlay.plot_overlay.presence_projections(&self.plot_renderer).iter().rev().find_map(|projection| projection.capture(logical_pixel));
+            return overlay
+                .plot_overlay
+                .presence_projections(&self.plot_renderer)
+                .iter()
+                .rev()
+                .find_map(|projection| projection.capture(logical_pixel));
         }
         let _ = logical_pixel;
         None
@@ -885,18 +898,15 @@ impl WebRenderer {
                         title: self
                             .plot_renderer
                             .overlay_title()
-                            .cloned()
-                            .or(Some("Plot".to_string())),
+                            .cloned(),
                         x_label: self
                             .plot_renderer
                             .overlay_x_label()
-                            .cloned()
-                            .or(Some("X".to_string())),
+                            .cloned(),
                         y_label: self
                             .plot_renderer
                             .overlay_y_label()
-                            .cloned()
-                            .or(Some("Y".to_string())),
+                            .cloned(),
                         // Disable the heavyweight sidebar in IDE surfaces for now.
                         show_sidebar: false,
                         ..Default::default()

@@ -1,5 +1,9 @@
 //! Geometry import and normalization pipeline.
 
+/// Actual package build configuration used for internal artifact reuse.
+#[doc(hidden)]
+pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
+
 pub mod ap242;
 pub mod cad;
 pub mod exact;

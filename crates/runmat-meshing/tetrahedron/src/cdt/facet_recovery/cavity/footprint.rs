@@ -253,17 +253,13 @@ fn projection_axes(
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
 ) -> Result<Option<[usize; 2]>, DelaunayFacetRecoveryError> {
-    for axes in [[0, 1], [0, 2], [1, 2]] {
-        if planar_orientation(
-            triangle.map(|point| [point[axes[0]], point[axes[1]]]),
+    work.search_step(constraint_index)?;
+    runmat_meshing_core::quality::predicate::triangle_projection_axes(triangle).map_err(|failure| {
+        invalid_topology(
             constraint_index,
-            work,
-        )? != PredicateSign::Zero
-        {
-            return Ok(Some(axes));
-        }
-    }
-    Ok(None)
+            format!("facet-footprint projection failed: {failure:?}"),
+        )
+    })
 }
 
 fn orientation(

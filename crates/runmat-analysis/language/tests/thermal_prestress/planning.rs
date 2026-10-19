@@ -39,7 +39,7 @@ fn check_planning(order: ElementOrder, consumer: Consumer) {
     // the inspection host, so only its asset reference differs from the example.
     // The native driver-replacement test uses the original box.brep and OCCT meshing.
     let mut source =
-        include_str!("../../../../../docs/fea/examples/thermal-prestress-experimental.fea")
+        include_str!("../../../../../docs/simulation/examples/thermal-prestress-experimental.fea")
             .replace("./geometry/box.brep", "./geometry/tetrahedron.step");
     if order == ElementOrder::Tet10 {
         source = source.replace("order = linear", "order = quadratic");

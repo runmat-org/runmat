@@ -1,34 +1,62 @@
+mod canonical;
 use minicbor::{Decoder, Encoder};
 use sha2::{Digest as _, Sha256};
 
 use super::{
     EncodedMeshingChunk, MeshingChunkDescriptor, MeshingChunkMediaType, MAX_RECORDS_PER_CHUNK,
 };
-use crate::contracts::canonical::{
-    MeshingCancellationSignal, MeshingContractError, NeverCancelled, StableDigest,
-};
+use crate::contracts::canonical::{MeshingCancellationSignal, MeshingContractError, StableDigest};
 
 const CHUNK_PREFIX: &[u8] = b"runmat-meshing-logical-record-chunk/v3\0";
 const CHUNK_ENVELOPE_SCHEMA_VERSION: u16 = 3;
 
-#[derive(Clone)]
-pub(super) struct MeshingRecordFragment {
-    pub bytes: Vec<u8>,
+#[derive(Clone, Copy)]
+pub(super) struct MeshingRecordFragment<'a> {
+    pub bytes: &'a [u8],
     pub completes_record: bool,
 }
 
-pub(super) struct DecodedMeshingChunk {
-    pub media_type: MeshingChunkMediaType,
-    pub schema_version: u16,
-    pub fragments: Vec<MeshingRecordFragment>,
+pub(super) struct BorrowedRecordFragment<'a> {
+    pub bytes: &'a [u8],
+    pub completes_record: bool,
 }
 
+pub(super) struct DecodedMeshingChunk<'a> {
+    pub media_type: MeshingChunkMediaType,
+    pub schema_version: u16,
+    pub fragments: BorrowedFragments<'a>,
+}
+
+/// Borrow a validated definite fragment array without allocating an index.
+#[derive(Clone, Copy)]
+pub(super) struct BorrowedFragments<'a> {
+    bytes: &'a [u8],
+    count: usize,
+}
+impl<'a> BorrowedFragments<'a> {
+    pub fn len(&self) -> usize {
+        self.count
+    }
+    pub fn iter(&self) -> impl Iterator<Item = BorrowedRecordFragment<'a>> + '_ {
+        let mut decoder = Decoder::new(self.bytes);
+        (0..self.count).map(move |_| {
+            decoder.array().expect("validated fragment array");
+            let completes_record = decoder.bool().expect("validated fragment flag");
+            let bytes = decoder.bytes().expect("validated fragment bytes");
+            BorrowedRecordFragment {
+                bytes,
+                completes_record,
+            }
+        })
+    }
+}
 pub(super) fn encode_chunk(
     ordinal: u32,
     first_logical_entity_ordinal: u64,
     media_type: MeshingChunkMediaType,
     schema_version: u16,
-    fragments: &[MeshingRecordFragment],
+    fragments: super::packing::Fragments<'_>,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<EncodedMeshingChunk, MeshingContractError> {
     let decoded_length = fragments.iter().try_fold(0_u64, |total, fragment| {
         total
@@ -37,18 +65,24 @@ pub(super) fn encode_chunk(
                 MeshingContractError::invalid("meshing chunk", "decoded length overflow")
             })
     })?;
-    let bytes = encode_bytes(
+    let bytes = encode_bytes_with_cancellation(
         ordinal,
         first_logical_entity_ordinal,
         media_type,
         schema_version,
         fragments,
+        cancellation,
     )?;
+    let mut hasher = Sha256::new();
+    for block in bytes.chunks(1024 * 1024) {
+        checkpoint(cancellation)?;
+        hasher.update(block);
+    }
     Ok(EncodedMeshingChunk {
         descriptor: MeshingChunkDescriptor {
             ordinal,
             first_logical_entity_ordinal,
-            digest: StableDigest::from_bytes(Sha256::digest(&bytes).into()),
+            digest: StableDigest::from_bytes(hasher.finalize().into()),
             media_type,
             schema_version,
             encoded_length: bytes.len() as u64,
@@ -62,10 +96,10 @@ pub(super) fn encode_chunk(
     })
 }
 
-pub(super) fn decode_chunk_with_cancellation(
-    chunk: &EncodedMeshingChunk,
+pub(super) fn decode_chunk_with_cancellation<'a>(
+    chunk: super::EncodedMeshingChunkRef<'a>,
     cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DecodedMeshingChunk, MeshingContractError> {
+) -> Result<DecodedMeshingChunk<'a>, MeshingContractError> {
     checkpoint(cancellation)?;
     if chunk.descriptor.encoded_length != chunk.bytes.len() as u64 {
         return Err(MeshingContractError::invalid(
@@ -129,7 +163,8 @@ pub(super) fn decode_chunk_with_cancellation(
             "fragment count exceeds the bounded decoder limit",
         ));
     }
-    let mut fragments = Vec::with_capacity(count);
+    let fragment_start = decoder.position();
+    let mut completed_records = 0_u64;
     let mut decoded_length = 0_u64;
     for _ in 0..count {
         checkpoint(cancellation)?;
@@ -152,15 +187,12 @@ pub(super) fn decode_chunk_with_cancellation(
                 "decoded bytes exceed the descriptor bound",
             ));
         }
-        fragments.push(MeshingRecordFragment {
-            bytes: record.to_vec(),
-            completes_record,
-        });
+        completed_records += u64::from(completes_record);
     }
-    let completed_records = fragments
-        .iter()
-        .filter(|fragment| fragment.completes_record)
-        .count() as u64;
+    let fragments = BorrowedFragments {
+        bytes: &payload[fragment_start..decoder.position()],
+        count,
+    };
     if decoded_length != chunk.descriptor.decoded_length
         || completed_records != chunk.descriptor.logical_entity_count
         || decoder.position() != payload.len()
@@ -170,15 +202,27 @@ pub(super) fn decode_chunk_with_cancellation(
             "decoded length or trailing bytes violate the descriptor",
         ));
     }
-    let canonical = encode_bytes_with_cancellation(
-        ordinal,
-        first_logical_entity_ordinal,
-        media_type,
-        schema_version,
-        &fragments,
-        cancellation,
-    )?;
-    if canonical != chunk.bytes {
+    // Re-encode into a comparing sink: canonicality needs no second payload.
+    let mut canonical = canonical::CompareBytes::new(payload);
+    let mut encoder = Encoder::new(&mut canonical);
+    encoder
+        .array(6)
+        .and_then(|encoder| encoder.u16(CHUNK_ENVELOPE_SCHEMA_VERSION))
+        .and_then(|encoder| encoder.str(media_type.media_type()))
+        .and_then(|encoder| encoder.u16(schema_version))
+        .and_then(|encoder| encoder.u32(ordinal))
+        .and_then(|encoder| encoder.u64(first_logical_entity_ordinal))
+        .and_then(|encoder| encoder.array(fragments.len() as u64))
+        .map_err(encoding_error)?;
+    for fragment in fragments.iter() {
+        checkpoint(cancellation)?;
+        encoder
+            .array(2)
+            .and_then(|encoder| encoder.bool(fragment.completes_record))
+            .and_then(|encoder| encoder.bytes(fragment.bytes))
+            .map_err(encoding_error)?;
+    }
+    if !canonical.complete() {
         return Err(MeshingContractError::invalid(
             "meshing chunk closure",
             "chunk bytes are not canonical",
@@ -191,33 +235,70 @@ pub(super) fn decode_chunk_with_cancellation(
     })
 }
 
-fn encode_bytes(
-    ordinal: u32,
-    first_logical_entity_ordinal: u64,
-    media_type: MeshingChunkMediaType,
-    schema_version: u16,
-    fragments: &[MeshingRecordFragment],
-) -> Result<Vec<u8>, MeshingContractError> {
-    encode_bytes_with_cancellation(
-        ordinal,
-        first_logical_entity_ordinal,
-        media_type,
-        schema_version,
-        fragments,
-        &NeverCancelled,
-    )
-}
-
 fn encode_bytes_with_cancellation(
     ordinal: u32,
     first_logical_entity_ordinal: u64,
     media_type: MeshingChunkMediaType,
     schema_version: u16,
-    fragments: &[MeshingRecordFragment],
+    fragments: super::packing::Fragments<'_>,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<Vec<u8>, MeshingContractError> {
-    let mut bytes = CHUNK_PREFIX.to_vec();
+    let length = encoded_length(
+        ordinal,
+        first_logical_entity_ordinal,
+        media_type,
+        schema_version,
+        fragments,
+        cancellation,
+    )?;
+    let mut bytes = Vec::with_capacity(length);
+    bytes.extend_from_slice(CHUNK_PREFIX);
     let mut encoder = Encoder::new(&mut bytes);
+    encode_payload(
+        &mut encoder,
+        ordinal,
+        first_logical_entity_ordinal,
+        media_type,
+        schema_version,
+        fragments,
+        cancellation,
+    )?;
+    Ok(bytes)
+}
+
+pub(super) fn encoded_length(
+    ordinal: u32,
+    first_logical_entity_ordinal: u64,
+    media_type: MeshingChunkMediaType,
+    schema_version: u16,
+    fragments: super::packing::Fragments<'_>,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<usize, MeshingContractError> {
+    let mut writer = canonical::CountBytes(CHUNK_PREFIX.len());
+    encode_payload(
+        &mut Encoder::new(&mut writer),
+        ordinal,
+        first_logical_entity_ordinal,
+        media_type,
+        schema_version,
+        fragments,
+        cancellation,
+    )?;
+    Ok(writer.0)
+}
+
+fn encode_payload<W: minicbor::encode::Write>(
+    encoder: &mut Encoder<W>,
+    ordinal: u32,
+    first_logical_entity_ordinal: u64,
+    media_type: MeshingChunkMediaType,
+    schema_version: u16,
+    fragments: super::packing::Fragments<'_>,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<(), MeshingContractError>
+where
+    W::Error: std::fmt::Display,
+{
     encoder
         .array(6)
         .and_then(|encoder| encoder.u16(CHUNK_ENVELOPE_SCHEMA_VERSION))
@@ -227,15 +308,15 @@ fn encode_bytes_with_cancellation(
         .and_then(|encoder| encoder.u64(first_logical_entity_ordinal))
         .and_then(|encoder| encoder.array(fragments.len() as u64))
         .map_err(encoding_error)?;
-    for fragment in fragments {
+    for fragment in fragments.iter() {
         checkpoint(cancellation)?;
         encoder
             .array(2)
             .and_then(|encoder| encoder.bool(fragment.completes_record))
-            .and_then(|encoder| encoder.bytes(&fragment.bytes))
+            .and_then(|encoder| encoder.bytes(fragment.bytes))
             .map_err(encoding_error)?;
     }
-    Ok(bytes)
+    Ok(())
 }
 
 fn checkpoint(cancellation: &dyn MeshingCancellationSignal) -> Result<(), MeshingContractError> {

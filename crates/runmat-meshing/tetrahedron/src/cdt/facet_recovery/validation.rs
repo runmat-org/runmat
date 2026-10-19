@@ -5,7 +5,7 @@ use runmat_meshing_core::{MeshingCancellationSignal, StableDigest};
 use super::{
     error, node_index, segment_error, validate_options, DelaunayConstraints, DelaunayFacetRecovery,
     DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
-    DelaunaySegmentRecovery, DelaunayVolumeTopology, FacetRecoveryWork,
+    DelaunaySegmentRecovery, FacetRecoveryWork,
 };
 use crate::cdt::{
     segment_recovery::validate_delaunay_segment_recovery_on_topology,
@@ -232,7 +232,7 @@ pub(super) fn validate_inputs(
 }
 
 pub(super) fn face_exists(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl crate::cdt::insertion::topology_access::TetrahedralTopology,
     identities: [StableDigest; 3],
     constraint_index: u32,
     work: &mut FacetRecoveryWork<'_>,
@@ -248,9 +248,11 @@ pub(super) fn face_exists(
     });
     let [first, second, third] = indices;
     let [first, second, third] = [first?, second?, third?];
-    for tetrahedron_index in &topology.incidence.vertex_stars[first] {
+    for tetrahedron_index in topology.vertex_star(first as u32) {
         work.search_step(constraint_index)?;
-        let tetrahedron = &topology.tetrahedra[*tetrahedron_index as usize];
+        let tetrahedron = topology
+            .tetrahedron(tetrahedron_index)
+            .expect("live facet star");
         if tetrahedron.vertex_indices.contains(&(second as u32))
             && tetrahedron.vertex_indices.contains(&(third as u32))
         {

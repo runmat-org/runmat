@@ -335,6 +335,7 @@ pub fn three_region_tetrahedron_solver_mesh_with_order(order: ElementOrder) -> S
 /// Builds valid canonical evidence bound to a solver-mesh fixture.
 pub fn canonical_tetrahedron_meshing_evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
     let stage = MeshingStageEvidence {
+        reused_from: None,
         stage: MeshingStageKind::Serialization,
         partition: MeshingPartitionDescriptor {
             kind: MeshingPartitionKind::WholeStage,

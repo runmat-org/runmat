@@ -498,9 +498,6 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut v_in =
         Some(NumericInput::from_value(v, BUILTIN_NAME).map_err(map_quiver_invalid_argument)?);
     let opts = PlotRenderOptions {
-        title: "Quiver",
-        x_label: "X",
-        y_label: "Y",
         ..Default::default()
     };
     let plot_index_out = Rc::new(RefCell::new(None));

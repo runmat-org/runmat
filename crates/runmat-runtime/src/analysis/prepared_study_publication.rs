@@ -31,7 +31,10 @@ pub trait AssessmentExecutionReceipt {
 impl PreparedStudyPublication {
     pub(super) fn new<W, N>(
         mut completion: DeferredStudyRun,
-        mut manifest: StudyResultManifest<W, N>,
+        (mut manifest, manifest_copies): (
+            StudyResultManifest<W, N>,
+            super::storage::publication::OwnedCopyReservation,
+        ),
     ) -> Result<Self, super::storage::AnalysisPublicationError>
     where
         W: serde::Serialize + Send + 'static,
@@ -48,9 +51,14 @@ impl PreparedStudyPublication {
         .map_err(failure::assessment_failure)?;
         completion
             .staging
-            .admit_manifest_copy(&(&manifest, &completion.published.data))?;
+            .admit_manifest_copy(&completion.published.data)?;
         manifest.set_public_run(completion.published.data.clone());
-        let manifest = completion.staging.serialize_manifest(&manifest)?;
+        let projection = completion.staging.serialize_retained_manifest(&manifest)?;
+        // Serialization returned the JSON owner; the typed clone no longer
+        // coexists with staging/commit. Preserve original and staged charges.
+        drop(manifest);
+        completion.staging.release_owned_copies(manifest_copies)?;
+        let manifest = projection;
         Ok(Self {
             completion,
             manifest,

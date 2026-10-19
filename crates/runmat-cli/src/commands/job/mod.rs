@@ -6,7 +6,7 @@ pub(crate) mod submit;
 
 use anyhow::{Context, Result};
 use runmat_server_client::auth::{
-    resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
+    resolve_auth_token, resolve_public_project_id, resolve_server_url, RemoteConfig,
 };
 use runmat_server_client::execution::ExecutionClient;
 
@@ -67,9 +67,15 @@ pub async fn execute(
     }
 }
 
-async fn client(project: Option<uuid::Uuid>) -> Result<(ExecutionClient, String, String)> {
+async fn client(
+    project: Option<uuid::Uuid>,
+) -> Result<(
+    ExecutionClient,
+    String,
+    runmat_server_client::ids::ProjectId,
+)> {
     let (client, server_url, config) = authenticated_context().await?;
-    let project_id = resolve_project_id(&config, project)?.to_string();
+    let project_id = resolve_public_project_id(&config, project)?;
     Ok((client, server_url, project_id))
 }
 
@@ -86,7 +92,7 @@ pub(crate) async fn cancel_remote_run(project: Option<uuid::Uuid>, run_id: &str)
     let (client, _, project_id) = client(project).await?;
     client
         .api()
-        .cancel_run(&project_id, run_id)
+        .cancel_run(project_id.as_str(), run_id)
         .await
         .map_err(runmat_server_client::execution::public_error)?;
     Ok(())

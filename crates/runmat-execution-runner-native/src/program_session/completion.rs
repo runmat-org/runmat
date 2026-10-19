@@ -63,6 +63,13 @@ impl NativeProgramCompletion {
             .as_ref()
             .map_err(|message| crate::NativeExecutionError::Protocol(message.clone()))
     }
+    /// Transfer the validated original output without cloning it again. Borrow
+    /// `delivery_result` instead when the caller also needs to retain evidence.
+    pub fn into_delivery_result(self) -> NativeExecutionResult<AttemptSuccess> {
+        self.delivery_result()?;
+        self.result.map_err(crate::NativeExecutionError::Protocol)
+    }
+
     pub(crate) fn into_parts(
         self,
     ) -> (

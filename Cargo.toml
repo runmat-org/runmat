@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/runmat-async",
+    "crates/runmat-cpu-execution",
     "crates/runmat-lexer",
     "crates/runmat-parser",
     "crates/runmat-hir",
@@ -29,7 +30,9 @@ members = [
     "crates/runmat-lsp",
     "crates/runmat-cli",
     "crates/runmat-server-client",
+    "crates/runmat-public-ids",
     "crates/runmat-core",
+    "crates/runmat-build-identity",
     "crates/runmat-time",
     "crates/runmat-wasm",
     "crates/runmat-thread-local",
@@ -59,6 +62,7 @@ members = [
     "crates/runmat-analysis/core",
     "crates/runmat-analysis/language",
     "crates/runmat-analysis/fea",
+    "crates/runmat-analysis/qualification",
     "crates/runmat-analysis/execution",
     "crates/runmat-meshing",
     "crates/runmat-meshing/core",
@@ -71,6 +75,8 @@ members = [
 resolver = "2"
 
 [workspace.dependencies]
+runmat-build-identity = { version = "=0.6.2", path = "crates/runmat-build-identity" }
+runmat-cpu-execution = { version = "=0.6.2", path = "crates/runmat-cpu-execution" }
 # External dependencies used across multiple crates
 inventory = "0.1"
 syn = { version = "1", features = ["full"] }
@@ -154,6 +160,7 @@ runmat-process-host = { version = "=0.6.2", path = "crates/runmat-process-host" 
 runmat-static-analysis = { version = "=0.6.2", path = "crates/runmat-static-analysis" }
 runmat-canonical-codec = { version = "=0.6.2", path = "crates/runmat-canonical-codec" }
 runmat-server-client = { version = "=0.6.2", path = "crates/runmat-server-client" }
+runmat-public-ids = { version = "=0.6.2", path = "crates/runmat-public-ids" }
 runmat-node-agent = { version = "=0.6.2", path = "crates/runmat-node-agent" }
 runmat-accelerate = { version = "=0.6.2", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.6.2", path = "crates/runmat-accelerate-api" }
@@ -173,3 +180,77 @@ runmat-meshing-size = { version = "=0.6.2", path = "crates/runmat-meshing/size" 
 runmat-meshing-curve = { version = "=0.6.2", path = "crates/runmat-meshing/curve" }
 runmat-meshing-surface = { version = "=0.6.2", path = "crates/runmat-meshing/surface" }
 runmat-meshing-tetrahedron = { version = "=0.6.2", path = "crates/runmat-meshing/tetrahedron" }
+
+# Large test harnesses otherwise spend minutes importing between codegen units
+# even with Cargo's default `lto = false` (local ThinLTO). Keep numerical crate
+# optimization below, but make verification builds skip that cross-unit pass.
+[profile.test]
+lto = "off"
+
+# Keep numerical development runs representative without release packaging.
+# Debug information, assertions and overflow checks retain their dev defaults.
+# Exact/adaptive predicates and their arithmetic leaves must be optimized too;
+# optimizing only their callers leaves near-degenerate CAD work prohibitively slow.
+
+[profile.dev.package.runmat-meshing-core]
+opt-level = 3
+
+[profile.dev.package.runmat-meshing-size]
+opt-level = 3
+
+[profile.dev.package.runmat-meshing-curve]
+opt-level = 3
+
+[profile.dev.package.runmat-meshing-surface]
+opt-level = 3
+
+[profile.dev.package.runmat-meshing-tetrahedron]
+opt-level = 3
+
+[profile.dev.package.runmat-geometry-core]
+opt-level = 3
+
+[profile.dev.package.runmat-geometry-io]
+opt-level = 3
+
+[profile.dev.package.runmat-geometry-ops]
+opt-level = 3
+
+[profile.dev.package.runmat-analysis-fea]
+opt-level = 3
+
+[profile.dev.package.runmat-cpu-execution]
+opt-level = 3
+
+[profile.dev.package.runmat-canonical-codec]
+opt-level = 3
+
+[profile.dev.package.robust]
+opt-level = 3
+
+[profile.dev.package.num-bigint]
+opt-level = 3
+
+[profile.dev.package.num-integer]
+opt-level = 3
+
+[profile.dev.package.num-traits]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.rayon]
+opt-level = 3
+
+[profile.dev.package.rayon-core]
+opt-level = 3
+
+[profile.dev.package.crossbeam-deque]
+opt-level = 3
+
+[profile.dev.package.crossbeam-epoch]
+opt-level = 3
+
+[profile.dev.package.crossbeam-utils]
+opt-level = 3

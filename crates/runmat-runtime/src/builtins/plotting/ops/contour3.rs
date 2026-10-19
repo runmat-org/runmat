@@ -78,10 +78,8 @@ pub async fn contour3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         line_width,
     } = parse_contour_args(BUILTIN_NAME, first, raw_args.collect())?;
     let opts = PlotRenderOptions {
-        title: "3-D Contour Plot",
-        x_label: "X",
-        y_label: "Y",
-        axis_equal: true,
+        // MATLAB leaves the data aspect free; `axis equal` sets it.
+        axis_equal: false,
         ..Default::default()
     };
     let color_map = ColorMap::Parula;

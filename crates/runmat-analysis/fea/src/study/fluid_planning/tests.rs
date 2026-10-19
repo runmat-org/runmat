@@ -101,10 +101,7 @@ fn preserves_signed_authority_and_consumes_only_relative_algebraic_criterion() {
     assert_eq!(workload.model, before.model);
     assert_eq!(study, before);
     assert_eq!(workload.policy.linear_relative_tolerance, 2e-9);
-    assert_eq!(
-        workload.policy.physical_relative_tolerance,
-        policy().numerical.physical_relative_tolerance
-    );
+    assert_eq!(workload.policy.physical_relative_tolerance, 2e-9);
 }
 
 #[test]
@@ -140,4 +137,62 @@ fn product_authenticates_exact_cell_material_without_injecting_legacy_domain() {
     let mut substituted = before;
     substituted.model.materials[0].fluid = None;
     assert!(crate::study::plan_fluid_study_product(substituted, &mesh, policy()).is_err());
+}
+
+#[test]
+fn closure_controls_follow_only_matching_relative_evidence_and_never_loosen() {
+    let (mut study, _) = study();
+    let original = study.model.sequence.steps[0].accuracy.criteria[0].clone();
+    for evidence in [
+        RequiredAccuracyEvidence::ResidualBound,
+        RequiredAccuracyEvidence::ConservationBalance,
+    ] {
+        let mut criterion = original.clone();
+        criterion.evidence = evidence;
+        criterion.tolerance = AccuracyTolerance::Relative(2e-9);
+        study.model.sequence.steps[0].accuracy.criteria = vec![criterion.clone()];
+        assert_eq!(
+            plan_fluid_study(&study, policy())
+                .unwrap()
+                .policy
+                .physical_relative_tolerance,
+            2e-9
+        );
+        let mut stricter = policy();
+        stricter.numerical.physical_relative_tolerance = 1e-10;
+        assert_eq!(
+            plan_fluid_study(&study, stricter)
+                .unwrap()
+                .policy
+                .physical_relative_tolerance,
+            1e-10
+        );
+        criterion.target = AccuracyTarget::NumericalResult;
+        study.model.sequence.steps[0].accuracy.criteria = vec![criterion];
+        assert_eq!(
+            plan_fluid_study(&study, policy())
+                .unwrap()
+                .policy
+                .physical_relative_tolerance,
+            policy().numerical.physical_relative_tolerance
+        );
+    }
+    study.model.sequence.steps[0].accuracy.criteria = vec![original.clone()];
+    let mut spatial = original;
+    spatial.criterion_id = "spatial".into();
+    spatial.target = AccuracyTarget::NumericalResult;
+    spatial.contribution = ErrorContributionKind::SpatialDiscretization;
+    spatial.evidence = RequiredAccuracyEvidence::ConvergenceStudy;
+    spatial.tolerance = AccuracyTolerance::Relative(1e-12);
+    study.model.sequence.steps[0]
+        .accuracy
+        .criteria
+        .push(spatial);
+    assert_eq!(
+        plan_fluid_study(&study, policy())
+            .unwrap()
+            .policy
+            .physical_relative_tolerance,
+        policy().numerical.physical_relative_tolerance
+    );
 }

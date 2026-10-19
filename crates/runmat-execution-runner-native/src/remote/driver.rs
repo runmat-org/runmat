@@ -338,6 +338,7 @@ pub(super) async fn run_remote_driver(
                         .map(|project| project.handoff()),
                     Some(&bundle.manifest.portable_environment),
                     None,
+                    None,
                 )
                 .await
             };

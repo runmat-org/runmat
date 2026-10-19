@@ -54,25 +54,21 @@ fn point_on_triangle_exact(point: Point3, triangle: Triangle3) -> bool {
     if orient3d([triangle[0], triangle[1], triangle[2], point]) != Ok(PredicateSign::Zero) {
         return false;
     }
-    for axes in [[0, 1], [0, 2], [1, 2]] {
-        let projected = triangle.map(|vertex| [vertex[axes[0]], vertex[axes[1]]]);
-        if orient2d(projected).is_ok_and(|sign| sign == PredicateSign::Zero) {
-            continue;
-        }
-        let query = [point[axes[0]], point[axes[1]]];
-        let signs = [
-            orient2d([projected[0], projected[1], query]),
-            orient2d([projected[1], projected[2], query]),
-            orient2d([projected[2], projected[0], query]),
-        ];
-        if signs.iter().any(Result::is_err) {
-            return false;
-        }
-        let signs = signs.map(Result::unwrap);
-        return !(signs.contains(&PredicateSign::Positive)
-            && signs.contains(&PredicateSign::Negative));
+    let Some(axes) = super::triangle_projection_axes(triangle).ok().flatten() else {
+        return false;
+    };
+    let projected = triangle.map(|vertex| [vertex[axes[0]], vertex[axes[1]]]);
+    let query = [point[axes[0]], point[axes[1]]];
+    let signs = [
+        orient2d([projected[0], projected[1], query]),
+        orient2d([projected[1], projected[2], query]),
+        orient2d([projected[2], projected[0], query]),
+    ];
+    if signs.iter().any(Result::is_err) {
+        return false;
     }
-    false
+    let signs = signs.map(Result::unwrap);
+    !(signs.contains(&PredicateSign::Positive) && signs.contains(&PredicateSign::Negative))
 }
 
 pub fn ray_has_odd_surface_intersections(

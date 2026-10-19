@@ -621,19 +621,18 @@ fn render_series(eval: QqplotEvaluation) -> BuiltinResult<Vec<f64>> {
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let render_result = render_active_plot(
         NAME,
-        PlotRenderOptions {
-            title: "Q-Q Plot",
-            x_label: match eval.mode {
-                PlotMode::Normal => "Standard Normal Quantiles",
-                PlotMode::TwoSample => "Quantiles of X",
-            },
-            y_label: match eval.mode {
-                PlotMode::Normal => "Quantiles of Input Sample",
-                PlotMode::TwoSample => "Quantiles of Y",
-            },
-            ..Default::default()
-        },
+        PlotRenderOptions::default(),
         move |figure, axes_index| {
+            // qqplot titles and labels its axes as MATLAB's does.
+            match eval.mode {
+                PlotMode::Normal => {
+                    figure.set_axes_title(axes_index, "QQ Plot of Sample Data versus Standard Normal");
+                    figure.set_axes_labels(axes_index, "Standard Normal Quantiles", "Quantiles of Input Sample");
+                }
+                PlotMode::TwoSample => {
+                    figure.set_axes_labels(axes_index, "Quantiles of X", "Quantiles of Y");
+                }
+            }
             let plots = plots_opt
                 .take()
                 .expect("qqplot series consumed exactly once");

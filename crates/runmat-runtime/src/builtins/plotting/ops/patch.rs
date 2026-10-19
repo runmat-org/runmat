@@ -436,9 +436,6 @@ pub fn patch_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Patch",
-            x_label: "X",
-            y_label: "Y",
             ..Default::default()
         },
         move |figure, axes| {

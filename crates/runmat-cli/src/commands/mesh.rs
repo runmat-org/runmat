@@ -1,23 +1,22 @@
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use runmat_execution_runner_native::{
     mesh_source_with_native_execution, native_meshing_execution_provider,
     NativeMeshingSourceRequest,
 };
 use runmat_geometry_core::UnitSystem;
 use runmat_geometry_io::ExactCadImportOptions;
-use runmat_meshing_core::{
-    CanonicalMeshingContract, ElementOrder, MeshingEvidence, MeshingRequestSettings,
-    SolverMeshArtifact,
-};
-use runmat_meshing_execution::ExactMeshingDagRunResult;
+use runmat_meshing_core::{ElementOrder, MeshingRequestSettings};
 use runmat_runtime::meshing::MeshingExecutionProvider;
 
 use crate::cli::{ExecutionTargetArgs, MeshElementOrderArg, MeshSourceUnitsArg};
 use crate::presentation;
 
+mod persistence;
 mod remote;
+pub(crate) use persistence::MeshOutputSummary;
+use persistence::{persist_completed_mesh, ExistingOutputPolicy};
 
 pub(crate) use remote::materialize_outputs as materialize_remote_outputs;
 
@@ -64,7 +63,7 @@ fn execute_local(command: MeshCommand) -> Result<()> {
         .unwrap_or_else(|| command.source.with_extension("meshing-evidence.cbor"));
     validate_output_paths(&output, &evidence, command.force)?;
 
-    let generated = mesh_source_with_native_execution(NativeMeshingSourceRequest {
+    let (artifact, mesh_evidence) = mesh_source_with_native_execution(NativeMeshingSourceRequest {
         source: command.source.clone(),
         import_options: import_options(&command),
         contact_definitions: Vec::new(),
@@ -72,27 +71,21 @@ fn execute_local(command: MeshCommand) -> Result<()> {
         settings: meshing_settings(&command),
         partition_policy: Default::default(),
     })
+    .map(|generated| (generated.dag_result.artifact, generated.dag_result.evidence))
     .map_err(anyhow::Error::new)?;
-    let result = &generated.dag_result;
 
-    let artifact_bytes = result
-        .artifact
-        .canonical_encode()
-        .context("failed to encode solver mesh")?;
-    let evidence_bytes = result
-        .evidence
-        .canonical_encode()
-        .context("failed to encode meshing evidence")?;
-    runmat_runtime::meshing::write_canonical_artifact_pair(
+    let summary = persist_completed_mesh(
         &output,
-        &artifact_bytes,
         &evidence,
-        &evidence_bytes,
-        command.force,
-    )
-    .map_err(anyhow::Error::msg)?;
-    verify_persisted_outputs(&output, &evidence, &result.artifact, &result.evidence)?;
-    print_result(&command, &output, &evidence, result)
+        artifact,
+        mesh_evidence,
+        if command.force {
+            ExistingOutputPolicy::Replace
+        } else {
+            ExistingOutputPolicy::CreateNew
+        },
+    )?;
+    print_result(&command, &output, &evidence, &summary)
 }
 
 fn meshing_settings(command: &MeshCommand) -> MeshingRequestSettings {
@@ -125,7 +118,7 @@ fn print_result(
     command: &MeshCommand,
     output: &Path,
     evidence: &Path,
-    result: &ExactMeshingDagRunResult,
+    result: &MeshOutputSummary,
 ) -> Result<()> {
     if command.json {
         println!(
@@ -133,12 +126,12 @@ fn print_result(
             serde_json::to_string_pretty(&serde_json::json!({
                 "solver_mesh_artifact_path": output,
                 "meshing_evidence_artifact_path": evidence,
-                "canonical_digest": hex_digest(result.artifact.canonical_digest.bytes()),
-                "node_count": result.artifact.topology.nodes.len(),
-                "element_count": result.artifact.topology.volume_elements.len(),
-                "boundary_face_count": result.artifact.topology.boundary_faces.len(),
-                "resource_usage": result.evidence.resources,
-                "stages": result.evidence.stages,
+                "canonical_digest": hex_digest(result.canonical_digest.bytes()),
+                "node_count": result.node_count,
+                "element_count": result.element_count,
+                "boundary_face_count": result.boundary_face_count,
+                "resource_usage": result.resources,
+                "stages": result.stages,
             }))?
         );
     } else {
@@ -157,9 +150,9 @@ fn print_result(
         println!(
             "  {} {} nodes, {} tetrahedra, {} boundary faces",
             styles.label("topology:"),
-            result.artifact.topology.nodes.len(),
-            result.artifact.topology.volume_elements.len(),
-            result.artifact.topology.boundary_faces.len()
+            result.node_count,
+            result.element_count,
+            result.boundary_face_count
         );
     }
     Ok(())
@@ -182,37 +175,6 @@ fn validate_output_paths(output: &Path, evidence: &Path, force: bool) -> Result<
                 );
             }
         }
-    }
-    Ok(())
-}
-
-fn verify_persisted_outputs(
-    output: &Path,
-    evidence_path: &Path,
-    expected_artifact: &SolverMeshArtifact,
-    expected_evidence: &MeshingEvidence,
-) -> Result<()> {
-    let artifact_bytes = std::fs::read(output).with_context(|| {
-        format!(
-            "failed to verify persisted solver mesh {}",
-            output.display()
-        )
-    })?;
-    let evidence_bytes = std::fs::read(evidence_path).with_context(|| {
-        format!(
-            "failed to verify persisted meshing evidence {}",
-            evidence_path.display()
-        )
-    })?;
-    let artifact = SolverMeshArtifact::canonical_decode(&artifact_bytes)
-        .context("persisted solver mesh failed canonical decoding")?;
-    let evidence = MeshingEvidence::canonical_decode(&evidence_bytes)
-        .context("persisted meshing evidence failed canonical decoding")?;
-    evidence
-        .validate(&artifact)
-        .context("persisted meshing outputs failed cross-validation")?;
-    if &artifact != expected_artifact || &evidence != expected_evidence {
-        anyhow::bail!("persisted meshing outputs differ from the completed canonical result");
     }
     Ok(())
 }

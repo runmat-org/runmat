@@ -1,7 +1,7 @@
 //! Raw portable-program session over the existing native scheduler and process backend.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use runmat_execution::identity::ValueId;
@@ -27,16 +27,20 @@ static NEXT_PROGRAM_SCOPE: AtomicU64 = AtomicU64::new(1);
 pub struct NativeProgramSession {
     driver: Arc<LocalDriver>,
     artifact_access: ArtifactAccess,
+    pub(crate) meshing_cache_root: std::path::PathBuf,
     values: Mutex<HashMap<ValueId, (ValueRef, ValuePayload)>>,
+    cancelled: AtomicBool,
 }
 
 impl NativeProgramSession {
     pub fn new(mut config: NativeExecutionConfig) -> NativeExecutionResult<Self> {
         let nonce = NEXT_PROGRAM_SCOPE.fetch_add(1, Ordering::Relaxed);
         let scope_id = fresh_scope_id(b"native-program-session", nonce);
-        config.store_root.push(scope_id.to_string());
+        let meshing_cache_root = config.store_root.join("meshing-stage-cache/v1");
+        config.scope_store(scope_id);
         let authorization_scope = scope_id.to_string();
         Ok(Self {
+            meshing_cache_root,
             driver: LocalDriver::new(config, scope_id)?,
             artifact_access: ArtifactAccess {
                 encryption_context: runmat_execution::Digest::sha256(
@@ -49,6 +53,7 @@ impl NativeProgramSession {
                 authorization_scope,
             },
             values: Mutex::new(HashMap::new()),
+            cancelled: AtomicBool::new(false),
         })
     }
 
@@ -179,7 +184,12 @@ impl NativeProgramSession {
         self.driver.checkpoint_evidence()
     }
 
+    pub(crate) fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
     pub fn cancel(&self, reason: CancellationReason) {
+        self.cancelled.store(true, Ordering::Release);
         self.driver.cancel_all(reason);
     }
 }

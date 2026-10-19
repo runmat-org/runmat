@@ -33,7 +33,7 @@ pub use operator::{
     apply_c, apply_k, apply_m, apply_prepared, AssembledRealSystem, CanonicalRealOperators,
     PreparedModalSystem, PreparedRealLinearSystem, RealSystemError,
 };
-pub use pattern::{SparseIndexWidth, SparsePattern, SparsePatternError};
+pub use pattern::{SparseIndexWidth, SparsePattern, SparsePatternError, SparsePatternStatistics};
 pub(crate) use reference::dot_canonical;
 pub use reference::{
     axpy_scoped, direction_update_scoped, dot_scoped, normalized_copy_scoped, residual,
@@ -46,3 +46,8 @@ pub use right_inverse::{
 };
 
 pub(crate) use operator::LinearPreparationReuse;
+
+mod normalized_vector;
+pub use normalized_vector::{
+    normalized_vector, NormalizedVectorDifferential, NormalizedVectorError,
+};

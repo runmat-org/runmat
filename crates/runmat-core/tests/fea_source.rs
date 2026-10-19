@@ -47,7 +47,7 @@ fn session_checks_a_complete_fea_source() {
         "{:#?}",
         result.diagnostics
     );
-    assert_eq!(result.root_module.as_str(), "project/study.fea");
+    assert_eq!(result.root_module.as_str(), "study.fea");
     assert_eq!(result.program.studies.len(), 1);
     assert_eq!(result.program.studies[0].study_id, "static");
 }
@@ -83,7 +83,7 @@ fn session_reports_an_unavailable_import_as_incomplete() {
         .expect("check FEA source");
 
     assert_eq!(result.status, FeaCheckStatus::Incomplete);
-    assert_eq!(result.root_module.as_str(), "project/study.fea");
+    assert_eq!(result.root_module.as_str(), "study.fea");
     assert!(result.program.studies.is_empty());
     assert!(!result.diagnostics.is_empty());
 }

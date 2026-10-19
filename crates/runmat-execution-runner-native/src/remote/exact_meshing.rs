@@ -1,5 +1,7 @@
 //! Driver-owned composition of worker-side CAD admission and the meshing-owned exact DAG.
 
+mod policy;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -96,10 +98,7 @@ pub(super) async fn execute_geometry_for_composition(
         &decoded.artifact_access,
     )
     .map_err(protocol)?;
-    let execution_policy = MeshingExecutionPolicy {
-        deadline_unix_millis: Some(super::pool_resources::task_deadline_unix_millis(resources)?),
-        ..MeshingExecutionPolicy::default()
-    };
+    let execution_policy = policy::execution_policy(resources)?;
     let (task_id, completion) = submit_root_task(
         &pool,
         &decoded.geometry,
@@ -231,10 +230,7 @@ pub(super) async fn execute_for_composition(
     resources: &AllocationResources,
 ) -> NativeExecutionResult<RemoteExactMeshingComposition> {
     let decoded = crate::decode_exact_meshing_root(request, pool.as_ref())?;
-    let execution_policy = MeshingExecutionPolicy {
-        deadline_unix_millis: Some(super::pool_resources::task_deadline_unix_millis(resources)?),
-        ..MeshingExecutionPolicy::default()
-    };
+    let execution_policy = policy::execution_policy(resources)?;
     let (task_id, completion) = submit_root_task(
         &pool,
         request,

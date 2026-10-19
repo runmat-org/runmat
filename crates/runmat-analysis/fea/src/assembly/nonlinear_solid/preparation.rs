@@ -6,10 +6,27 @@ impl CanonicalNonlinearSolidBasis {
         mesh: &SolverMeshArtifact,
         initial: &AssemblySummary,
     ) -> Result<Self, NonlinearSolidError> {
+        Self::prepare_composed(model, mesh, initial, None)
+    }
+
+    pub(crate) fn prepare_composed(
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
+        initial: &AssemblySummary,
+        contact: Option<&crate::physics::structural::contact::CanonicalContactOperator<'_>>,
+    ) -> Result<Self, NonlinearSolidError> {
+        if crate::progress::is_cancelled() {
+            return Err(NonlinearSolidError::Cancelled);
+        }
         let plan =
             CanonicalSolidIntegrationPlan::derive(mesh, CanonicalSolidIntegrationRule::Keast15)
                 .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?;
-        Self::prepare_with_integration(model, mesh, initial, &plan)
+        match contact {
+            Some(contact) => {
+                Self::prepare_with_integration_composed(model, mesh, initial, &plan, Some(contact))
+            }
+            None => Self::prepare_with_integration(model, mesh, initial, &plan),
+        }
     }
 
     pub(crate) fn prepare_with_integration(
@@ -18,9 +35,22 @@ impl CanonicalNonlinearSolidBasis {
         initial: &AssemblySummary,
         plan: &CanonicalSolidIntegrationPlan,
     ) -> Result<Self, NonlinearSolidError> {
+        Self::prepare_with_integration_composed(model, mesh, initial, plan, None)
+    }
+
+    fn prepare_with_integration_composed(
+        model: &AnalysisModel,
+        mesh: &SolverMeshArtifact,
+        initial: &AssemblySummary,
+        plan: &CanonicalSolidIntegrationPlan,
+        contact: Option<&crate::physics::structural::contact::CanonicalContactOperator<'_>>,
+    ) -> Result<Self, NonlinearSolidError> {
+        if crate::progress::is_cancelled() {
+            return Err(NonlinearSolidError::Cancelled);
+        }
         plan.validate(mesh, plan.rule())
             .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?;
-        if model.structural.is_some() || !model.connectors.is_empty() || !model.interfaces.is_empty()
+        if model.structural.is_some() || !model.connectors.is_empty() || (contact.is_none() && !model.interfaces.is_empty())
             || model.thermo_mechanical.is_some() || model.electro_thermal.is_some() || model.thermal.is_some()
             || model.electromagnetic.is_some() || model.cfd.is_some()
             || initial.thermo_mechanical.is_some() || initial.electro_thermal.is_some()
@@ -31,8 +61,14 @@ impl CanonicalNonlinearSolidBasis {
             || initial.structural_formulations.iter().any(|f| !matches!(f.operator,runmat_analysis_core::StructuralOperatorImplementation::Tet4LinearElasticity|runmat_analysis_core::StructuralOperatorImplementation::Tet10LinearElasticity)) {
             return Err(NonlinearSolidError::Unsupported("only uncoupled canonical isotropic Tet4/Tet10 solids; no explicit/mixed/contact/connectors or thermal input".into()));
         }
-        let projection = AnalysisProjection::derive(mesh)
-            .map_err(|e| NonlinearSolidError::Authority(e.to_string()))?;
+        let projection = AnalysisProjection::derive(mesh).map_err(NonlinearSolidError::from)?;
+        if let Some(contact) = contact {
+            if !contact.matches_sources(&projection, &model.interfaces) {
+                return Err(NonlinearSolidError::Authority(
+                    "contact operator differs from full authored interface/geometry source".into(),
+                ));
+            }
+        }
         let constraints = crate::constraints::CanonicalStructuralConstraintPlan::compile_for_model(
             model,
             Some(mesh),
@@ -227,6 +263,7 @@ impl CanonicalNonlinearSolidBasis {
                 "solid elements do not cover the physical node layout".into(),
             ));
         }
+        let nodes = super::contact_layout::prepare_nodes(&projection, &canonical_nodes, initial)?;
         let authority = super::authority::BasisAuthority {
             integration_identity: plan.identity(),
             tangent_pattern_identity: tangent_pattern
@@ -253,6 +290,7 @@ impl CanonicalNonlinearSolidBasis {
             property_identity: properties.identity,
             dof_count: initial.dof_count,
             tangent_pattern,
+            nodes,
             elements,
         })
     }

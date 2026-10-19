@@ -481,7 +481,12 @@ pub(super) async fn run() {
                 "authored fluid lifecycle: cells={}, all_faces={}, admitted_state_heap={}B",
                 expected.result.original().velocity_m_per_s.len(),
                 expected.result.original().face_volume_flux_m3_per_s.len(),
-                closure.accounting.resources.allocation.memory_bytes
+                closure
+                    .execution
+                    .winning_accounting()
+                    .resources
+                    .allocation
+                    .memory_bytes
             );
         }
         replay::check(&reopened, &cold);

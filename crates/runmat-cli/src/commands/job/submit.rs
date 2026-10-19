@@ -152,8 +152,8 @@ pub async fn submit(
         .cloned()
         .context("compiled bundle has no program artifact")?;
     let descriptor = serde_json::to_vec(&ProgramExecutionDescriptor {
-        environment: runmat_execution::EnvironmentSnapshot::default(),
         console: None,
+        environment: runmat_execution::EnvironmentSnapshot::default(),
         schema_version: PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
         recipe,
         artifact,
@@ -267,7 +267,7 @@ where
     let (client, server_url, project_id) = super::client(options.project).await?;
     let recovery_recipient = client
         .api()
-        .get_project_execution_policy(&project_id)
+        .get_project_execution_policy(project_id.as_str())
         .await
         .map_err(public_error)?
         .into_inner()
@@ -292,7 +292,7 @@ where
     let run = client
         .api()
         .submit_run(
-            &project_id,
+            project_id.as_str(),
             &idempotency_key,
             &types::SubmitRunRequest {
                 cluster_id: options.cluster.clone(),
@@ -352,7 +352,7 @@ where
     {
         bail!("run-scoped execution content changed its admitted revision or bundle size class");
     }
-    let admission = wait_for_admission(&client, &project_id, &run.id).await?;
+    let admission = wait_for_admission(&client, project_id.as_str(), &run.id).await?;
     let identity = admission
         .endpoint_identity
         .context("allocation did not publish endpoint identity")?;
@@ -373,7 +373,7 @@ where
     client
         .api()
         .confirm_run_admission(
-            &project_id,
+            project_id.as_str(),
             &run.id,
             &types::ConfirmEndpointIdentityRequest {
                 endpoint_fingerprint: recipient.fingerprint.clone(),
@@ -399,7 +399,7 @@ where
     )?;
     let bundle_id = upload(
         &client,
-        &project_id,
+        project_id.as_str(),
         &endpoint_fingerprint,
         types::ArtifactKindRequest::Bundle,
         bundle,
@@ -407,7 +407,7 @@ where
     .await?;
     let program_id = upload(
         &client,
-        &project_id,
+        project_id.as_str(),
         &endpoint_fingerprint,
         types::ArtifactKindRequest::Program,
         program,
@@ -424,7 +424,7 @@ where
         let ciphertext = seal(&run_key, &run.id, EncryptionPurpose::Input, &object.bytes)?;
         let artifact_id = upload(
             &client,
-            &project_id,
+            project_id.as_str(),
             &endpoint_fingerprint,
             types::ArtifactKindRequest::Input,
             ciphertext,
@@ -445,7 +445,7 @@ where
     let input = seal(&run_key, &run.id, EncryptionPurpose::Input, &encoded_inputs)?;
     let input_id = upload(
         &client,
-        &project_id,
+        project_id.as_str(),
         &endpoint_fingerprint,
         types::ArtifactKindRequest::Input,
         input,
@@ -480,7 +480,7 @@ where
     let committed = client
         .api()
         .commit_run_content(
-            &project_id,
+            project_id.as_str(),
             &run.id,
             &types::CommitRunContentRequest {
                 bundle_artifact_id: bundle_id,
@@ -496,7 +496,7 @@ where
     secret::save(&SavedRemoteRun::new(
         committed.id.clone(),
         server_url,
-        project_id,
+        project_id.to_string(),
         endpoint_fingerprint,
         &run_key,
         options.output_intent,

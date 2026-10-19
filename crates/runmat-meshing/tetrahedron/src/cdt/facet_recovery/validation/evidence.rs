@@ -8,7 +8,7 @@ use runmat_meshing_core::{
 };
 
 use super::super::{
-    error, face_exists, facet_support, node_index, DelaunayConstraints, DelaunayFacetRecovery,
+    error, face_exists, node_index, DelaunayConstraints, DelaunayFacetRecovery,
     DelaunayFacetRecoveryError, DelaunayFacetRecoveryErrorKind, DelaunayFacetRecoveryOptions,
     DelaunayRecoveredFacetTriangle, FacetRecoveryWork,
 };
@@ -33,8 +33,12 @@ pub(super) fn validate_recovered_facets(
                 "recovered facet does not bind to its ordered nonempty constraint evidence",
             ));
         }
-        let expected_support =
-            facet_support(effective_segments, constraints, constraint_index, &mut work)?;
+        let expected_support = super::super::support::facet_support(
+            effective_segments,
+            constraints,
+            constraint_index,
+            &mut work,
+        )?;
         let expected_boundary = boundary_edges(&expected_support, constraint_index)?;
         let source = constraints.facets[constraint_index as usize]
             .vertex_indices

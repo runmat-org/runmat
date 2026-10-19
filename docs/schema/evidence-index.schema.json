@@ -1,0 +1,97 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "records": {
+      "type": "array",
+      "items": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "obligation": {
+            "type": "string",
+            "minLength": 1
+          },
+          "scope": {
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "formulation": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mesh": {
+                "type": "string",
+                "minLength": 1
+              },
+              "execution": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "formulation",
+              "mesh",
+              "execution"
+            ]
+          },
+          "decision": {
+            "enum": [
+              "passed",
+              "failed",
+              "indeterminate",
+              "unassessed",
+              "missing",
+              "stale"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reference": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tested_identity": {
+            "type": "string",
+            "minLength": 1
+          },
+          "record_url": {
+            "type": "string",
+            "pattern": "^https://"
+          },
+          "limits": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "requirement",
+          "obligation",
+          "scope",
+          "decision",
+          "summary",
+          "reference",
+          "tested_identity",
+          "record_url",
+          "limits"
+        ]
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "records"
+  ]
+}

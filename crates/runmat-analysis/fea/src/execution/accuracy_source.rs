@@ -286,7 +286,7 @@ impl AccuracySourceReceipt {
                 {
                     Some((
                         receipt.receipt().maximum_relative_linear_residual,
-                        "maximum accepted thermal linear-system residual norm divided by max(load-vector Euclidean norm, 1) over solved samples; measures algebraic equation satisfaction, not spatial or temporal discretization error",
+                        "maximum accepted shared-solver relative residual in the original prepared equation space over solved samples; normalized by the prepared right-hand-side norm, or initial residual norm for a homogeneous warm solve; a balanced zero equation has zero error; measures algebraic equation satisfaction, not spatial or temporal discretization error",
                     ))
                 }
                 Self::Thermal(receipt)

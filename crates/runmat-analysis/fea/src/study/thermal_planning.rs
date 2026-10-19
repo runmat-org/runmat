@@ -12,6 +12,7 @@ use crate::{execution::ThermalWorkload, ComputeBackend, ThermalProcedureControl}
 
 mod initial_selection;
 mod sources;
+mod validation;
 pub use initial_selection::thermal_step_initial_selection_supported;
 #[cfg(test)]
 mod tests;
@@ -42,16 +43,7 @@ pub fn plan_thermal_study_with_fields(
     if policy.formulation_requirement != study.formulation_requirement {
         return Err(ThermalStudyPlanningError::FormulationRequirementMismatch);
     }
-    let sequence = &study.model.sequence;
-    let [step] = sequence.steps.as_slice() else {
-        return Err(ThermalStudyPlanningError::UnsupportedSequence);
-    };
-    if !sequence.dependencies.is_empty()
-        || !sequence.transitions.is_empty()
-        || !sequence.branches.is_empty()
-    {
-        return Err(ThermalStudyPlanningError::UnsupportedSequence);
-    }
+    let step = validation::standalone_step(study)?;
     plan_selected(study, &step.step_id.0, policy, false, initial_fields)
 }
 
@@ -232,6 +224,8 @@ fn validate_sources(
 pub enum ThermalStudyPlanningError {
     #[error("thermal planning policy differs from the compiled formulation requirement")]
     FormulationRequirementMismatch,
+    #[error("thermal workload differs from the compiled authored intent")]
+    WorkloadMismatch,
     #[error("thermal planning requires a fresh independent step with only authored physical thermal initial selection; standalone planning additionally requires a single-step sequence")]
     UnsupportedSequence,
     #[error("thermal step selection must identify exactly one authored step: {0}")]

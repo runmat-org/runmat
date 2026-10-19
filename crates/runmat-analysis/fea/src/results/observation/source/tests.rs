@@ -237,3 +237,73 @@ fn thermal_selection_roundtrip_and_authority_substitution() {
             .is_err());
     }
 }
+
+#[test]
+fn one_thermal_authority_preserves_every_original_sample_and_rejects_foreign_history() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mut workload = workload();
+        workload.procedure = crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 17 };
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let result = workload.execute(&mesh).unwrap();
+        let manifest = ThermalSolverResultManifest::from_result(&result).unwrap();
+        let authority = ThermalFieldSourceAuthority::new(&workload, &manifest, &mesh).unwrap();
+        let bound = authority.construction_resident_bytes();
+        let planned = thermal::resources::construction_resident_bytes_admitted(
+            &workload,
+            &manifest,
+            &mesh,
+            u64::MAX,
+        )
+        .unwrap();
+        assert!(planned >= bound);
+        assert_eq!(
+            thermal::resources::construction_resident_bytes_admitted(
+                &workload, &manifest, &mesh, planned
+            )
+            .unwrap(),
+            planned
+        );
+        assert!(thermal::resources::construction_resident_bytes_admitted(
+            &workload,
+            &manifest,
+            &mesh,
+            planned - 1
+        )
+        .is_err());
+        let admitted =
+            ThermalFieldSourceAuthority::new_admitted(&workload, &manifest, &mesh, bound).unwrap();
+        assert!(
+            ThermalFieldSourceAuthority::new_admitted(&workload, &manifest, &mesh, bound - 1)
+                .is_err()
+        );
+        assert!(bound >= AnalysisProjection::derivation_resident_bytes_estimate(&mesh).unwrap());
+        for (ordinal, entries) in manifest.fields.iter().enumerate() {
+            let fields = entries.iter().map(|entry| entry.field).collect::<Vec<_>>();
+            let selected = authority.selection(ordinal, fields.clone()).unwrap();
+            assert_eq!(
+                selected,
+                ObservationFieldSelection::thermal(&workload, &manifest, &mesh, ordinal, fields,)
+                    .unwrap()
+            );
+            authority.validate_selection(&selected).unwrap();
+            assert_eq!(
+                admitted
+                    .selection(ordinal, entries.iter().map(|entry| entry.field).collect())
+                    .unwrap(),
+                selected
+            );
+            let mut forged = selected.clone();
+            if let ObservationFieldSource::ThermalResult { sample_ordinal, .. } = &mut forged.source
+            {
+                *sample_ordinal = (ordinal + 1) % manifest.fields.len();
+            }
+            forged.identity = forged.derive_identity().unwrap();
+            assert!(authority.validate_selection(&forged).is_err());
+        }
+        let mut different_schedule = workload.clone();
+        different_schedule.procedure =
+            crate::ThermalProcedureControl::BackwardEuler { snapshot_count: 16 };
+        assert!(ThermalFieldSourceAuthority::new(&different_schedule, &manifest, &mesh).is_err());
+        assert!(authority.selection(manifest.fields.len(), vec![]).is_err());
+    }
+}

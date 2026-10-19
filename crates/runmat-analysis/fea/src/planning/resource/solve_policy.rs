@@ -46,6 +46,8 @@ impl SolverAdmissionResourcePolicy {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SolveResourcePolicy {
+    /// Serial real GENERAL solve with its complete independent uniqueness work.
+    GeneralSparse(super::GeneralSparseSolveResourceDemand),
     NoSolve {
         workspace_bytes_upper_bound: ByteCount,
     },
@@ -117,7 +119,8 @@ impl SolveResourcePolicy {
         match self {
             Self::Iterative { vector_count, .. }
             | Self::DirectFactorization { vector_count, .. } => Some(vector_count.0),
-            Self::NoSolve { .. }
+            Self::GeneralSparse(_)
+            | Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
             | Self::SaddlePointGmres { .. }
             | Self::ModalDenseHarmonic { .. }
@@ -129,7 +132,8 @@ impl SolveResourcePolicy {
     pub(crate) fn scalar_bytes(&self) -> u64 {
         let scalar = match self {
             Self::Iterative { scalar, .. } | Self::DirectFactorization { scalar, .. } => scalar,
-            Self::NoSolve { .. }
+            Self::GeneralSparse(_)
+            | Self::NoSolve { .. }
             | Self::RestartedGmres { .. }
             | Self::SaddlePointGmres { .. }
             | Self::ModalDenseHarmonic { .. }
@@ -144,6 +148,7 @@ impl SolveResourcePolicy {
 
     pub(crate) const fn explicit_workspace_bytes(&self) -> Option<ByteCount> {
         match self {
+            Self::GeneralSparse(demand) => Some(demand.workspace_bytes()),
             Self::NoSolve {
                 workspace_bytes_upper_bound,
             }

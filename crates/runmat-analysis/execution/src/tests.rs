@@ -21,6 +21,8 @@ use runmat_execution_artifact::{ArtifactAccess, ObjectNamespace, ProgramExecutio
 use super::*;
 use crate::response::prepare_analysis_output_set;
 
+#[path = "tests/accuracy_import.rs"]
+mod accuracy_import;
 #[path = "tests/host_transport.rs"]
 mod host_transport;
 #[path = "tests/observation_history_checkpoint.rs"]
@@ -748,6 +750,23 @@ fn semantic_sequence_compiles_to_deterministic_parallel_scheduler_tasks() {
 struct MemoryObjects(BTreeMap<Digest, Vec<u8>>);
 
 impl runmat_execution_artifact::cache::CacheImport for MemoryObjects {
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        if self
+            .0
+            .get(&digest)
+            .is_some_and(|bytes| bytes.len() as u64 > maximum)
+        {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "memory object exceeds bounded read".into(),
+            ));
+        }
+        Ok(self.0.get(&digest).cloned())
+    }
+
     fn read_verified(
         &self,
         digest: Digest,
@@ -2515,6 +2534,7 @@ fn prepared_structural_study_closes_and_revalidates_its_real_result() {
     )
     .unwrap();
     assert_eq!(imported_accuracy.artifact, accuracy_artifact);
+    accuracy_import::assert_original_evidence(&accuracy_prepared);
     assert_eq!(
         imported_accuracy.artifact.gate().decision,
         runmat_analysis_fea::results::accuracy::PublicationDecision::Allow
@@ -4022,3 +4042,9 @@ fn structural_transient_objects_round_trip_and_one_segment_sample_imports_indepe
 
 mod phase_execution;
 pub(crate) use phase_execution::phase_execution;
+
+#[path = "tests/reservation.rs"]
+mod reservation_tests;
+
+#[path = "tests/input_admission.rs"]
+mod input_admission_tests;

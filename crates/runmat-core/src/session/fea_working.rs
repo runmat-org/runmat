@@ -94,7 +94,7 @@ impl RunMatSession {
                     return Err("working-source capture exceeds 32 MiB".into());
                 }
                 let logical =
-                    LogicalSourcePath::new(format!("project/{}", relative.to_string_lossy()))
+                    LogicalSourcePath::new(relative.to_string_lossy().into_owned())
                         .map_err(|error| error.to_string())?;
                 files.insert(logical.clone(), captured(logical, bytes));
             }

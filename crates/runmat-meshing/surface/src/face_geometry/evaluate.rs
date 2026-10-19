@@ -3,7 +3,7 @@ use runmat_meshing_core::MetricFieldRequest;
 
 use crate::{
     ExactFaceChartParameterization, ExactFaceMetricError, ExactFaceMetricEvaluation, ExactFacePslg,
-    ExactFaceTrimmedDelaunay, ParametricMetricTensor, ResolvedFaceMetricField,
+    ExactFaceTrimmedDelaunay, ParametricMetricTensor,
 };
 
 use super::{
@@ -34,7 +34,27 @@ pub fn evaluate_exact_face_geometry_in_parameterization(
     context: ExactFaceGeometryContext<'_>,
 ) -> Result<ExactFaceGeometry, ExactFaceGeometryError> {
     validate_inventory(trimmed, pslg)?;
-    let field = ResolvedFaceMetricField::new(context.topology, context.metric_request)
+    let buffer_bytes = super::storage::buffer_bytes(pslg.vertices.len(), trimmed.triangles.len())
+        .ok_or_else(|| {
+        invalid(
+            &pslg.source_face_id,
+            "face geometry buffer inventory overflow",
+        )
+    })?;
+    context
+        .control
+        .consume_allocation_bytes(buffer_bytes)
+        .map_err(|failure| {
+            ExactFaceGeometryError::new(
+                ExactFaceGeometryErrorKind::Metric(
+                    crate::ExactFaceMetricErrorKind::GeometryEvaluation(failure.kind),
+                ),
+                &pslg.source_face_id,
+                failure.reason,
+            )
+        })?;
+    let field = context
+        .resolve_metric()
         .map_err(|error| map_metric(&pslg.source_face_id, error))?;
     let mut vertices = Vec::with_capacity(pslg.vertices.len());
     for (index, vertex) in pslg.vertices.iter().enumerate() {
@@ -59,6 +79,7 @@ pub fn evaluate_exact_face_geometry_in_parameterization(
         let unit_normal = surface_normal(&evaluation)?;
         vertices.push(ExactFaceGeometryVertex {
             pslg_vertex_index: index as u32,
+            point_m: context.realize(&pslg.source_face_id, vertex.node_id, evaluation.point_m)?,
             evaluation,
             unit_normal,
         });
@@ -79,22 +100,24 @@ pub fn evaluate_exact_face_geometry_in_parameterization(
             .vertex_indices
             .map(|index| &vertices[index as usize]);
         let corner_uv = corners.map(|vertex| vertex.evaluation.uv);
-        let deviation_samples = triangle_sample_uv(corner_uv)
-            .into_iter()
-            .map(|uv| {
-                field
-                    .evaluate_parameterized(
-                        &pslg.source_face_id,
-                        uv,
-                        parameterization,
-                        context.evaluator,
-                        context.control,
-                    )
-                    .map_err(|error| map_metric(&pslg.source_face_id, error))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .try_into()
-            .expect("four triangle deviation samples");
+        let sample_uv = triangle_sample_uv(corner_uv);
+        let evaluate = |uv| {
+            field
+                .evaluate_parameterized(
+                    &pslg.source_face_id,
+                    uv,
+                    parameterization,
+                    context.evaluator,
+                    context.control,
+                )
+                .map_err(|error| map_metric(&pslg.source_face_id, error))
+        };
+        let deviation_samples = [
+            evaluate(sample_uv[0])?,
+            evaluate(sample_uv[1])?,
+            evaluate(sample_uv[2])?,
+            evaluate(sample_uv[3])?,
+        ];
         triangles.push(evaluate_triangle(*triangle, corners, deviation_samples)?);
     }
     let geometry = ExactFaceGeometry {
@@ -131,15 +154,15 @@ fn evaluate_triangle(
     corners: [&ExactFaceGeometryVertex; 3],
     deviation_samples: [ExactFaceMetricEvaluation; 4],
 ) -> Result<ExactFaceTriangleGeometry, ExactFaceGeometryError> {
-    let face_id = deviation_samples[3].source_face_id.clone();
-    let points = corners.map(|vertex| vertex.evaluation.point_m);
+    let face_id = &deviation_samples[3].provenance.source_face_id;
+    let points = corners.map(|vertex| vertex.point_m);
     let first = subtract(points[1], points[0]);
     let second = subtract(points[2], points[0]);
     let area_vector = cross(first, second);
     let double_area = norm(area_vector);
     if !double_area.is_finite() || double_area <= 0.0 {
         return Err(invalid(
-            &face_id,
+            face_id,
             "triangle has zero or invalid physical area",
         ));
     }
@@ -153,7 +176,7 @@ fn evaluate_triangle(
         .iter()
         .any(|length| !length.is_finite() || *length <= 0.0)
     {
-        return Err(invalid(&face_id, "triangle has an invalid physical edge"));
+        return Err(invalid(face_id, "triangle has an invalid physical edge"));
     }
     let perimeter = edge_lengths.iter().sum::<f64>();
     let physical_area_m2 = double_area * 0.5;
@@ -165,11 +188,13 @@ fn evaluate_triangle(
         metric_edge(&corners[1].evaluation, &corners[2].evaluation)?,
         metric_edge(&corners[2].evaluation, &corners[0].evaluation)?,
     ];
-    let minimum_metric_angle_rad = (0..3)
-        .map(|corner| metric_angle(corners, corner))
-        .collect::<Result<Vec<_>, _>>()?
-        .into_iter()
-        .fold(f64::INFINITY, f64::min);
+    let minimum_metric_angle_rad = [
+        metric_angle(corners, 0)?,
+        metric_angle(corners, 1)?,
+        metric_angle(corners, 2)?,
+    ]
+    .into_iter()
+    .fold(f64::INFINITY, f64::min);
     let sample_weights = triangle_sample_weights();
     let mut chordal_deviation_m = 0.0_f64;
     let mut chordal_deviation_uv = deviation_samples[3].uv;
@@ -189,6 +214,11 @@ fn evaluate_triangle(
         }
     }
     for corner in corners {
+        let corner_deviation = norm(subtract(corner.evaluation.point_m, corner.point_m));
+        if corner_deviation > chordal_deviation_m {
+            chordal_deviation_m = corner_deviation;
+            chordal_deviation_uv = corner.evaluation.uv;
+        }
         let normal = normal_angle(unit_normal, corner.unit_normal);
         if normal > normal_deviation_rad {
             normal_deviation_rad = normal;
@@ -220,7 +250,7 @@ fn evaluate_triangle(
     .any(|value| !value.is_finite())
     {
         return Err(invalid(
-            &face_id,
+            &result.deviation_samples[3].provenance.source_face_id,
             "triangle geometry evidence is not finite",
         ));
     }
@@ -265,7 +295,7 @@ fn metric_edge(
     average
         .squared_length(delta)
         .map(f64::sqrt)
-        .map_err(|reason| invalid(&left.source_face_id, reason))
+        .map_err(|reason| invalid(&left.provenance.source_face_id, reason))
 }
 
 fn metric_angle(
@@ -280,10 +310,10 @@ fn metric_angle(
     let tensor = origin.sizing_metric;
     let first_squared = tensor
         .squared_length(first)
-        .map_err(|reason| invalid(&origin.source_face_id, reason))?;
+        .map_err(|reason| invalid(&origin.provenance.source_face_id, reason))?;
     let second_squared = tensor
         .squared_length(second)
-        .map_err(|reason| invalid(&origin.source_face_id, reason))?;
+        .map_err(|reason| invalid(&origin.provenance.source_face_id, reason))?;
     let product = tensor.uu * first[0] * second[0]
         + tensor.uv * (first[0] * second[1] + first[1] * second[0])
         + tensor.vv * first[1] * second[1];
@@ -299,7 +329,7 @@ fn surface_normal(
     let length = norm(vector);
     if !length.is_finite() || length <= 0.0 {
         return Err(invalid(
-            &evaluation.source_face_id,
+            &evaluation.provenance.source_face_id,
             "surface chart is singular at an evaluated point",
         ));
     }

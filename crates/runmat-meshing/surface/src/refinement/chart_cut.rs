@@ -17,29 +17,15 @@ use super::{
     ExactFaceRefinementErrorKind,
 };
 
+/// Direct cancellation-controlled operation. Governed callers supply allocation authority.
 pub fn split_exact_face_chart_cut(
     current: &ExactFaceRefinedTopology,
     split: &ExactChartCutSplit,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceRefinedTopology, ExactFaceRefinementError> {
-    validate_current(current, cancellation, options)?;
-    let pslg = apply_split(&current.pslg, split)?;
-    let delaunay =
-        triangulate_validated_face_pslg(&pslg, cancellation, options).map_err(map_delaunay)?;
-    let constrained = recover_validated_face_segments(&delaunay, &pslg, cancellation, options)
-        .map_err(map_delaunay)?;
-    let trimmed = carve_validated_face_domain(&constrained, &pslg, cancellation, options)
-        .map_err(map_delaunay)?;
-    let result = ExactFaceRefinedTopology {
-        pslg,
-        constrained,
-        trimmed,
-    };
-    validate_exact_face_chart_cut_split_result(&result, current, split, cancellation, options)?;
-    Ok(result)
+    split_exact_face_chart_cut_with_control(current, split, cancellation, options, None)
 }
-
 pub fn validate_exact_face_chart_cut_split_result(
     result: &ExactFaceRefinedTopology,
     previous: &ExactFaceRefinedTopology,
@@ -47,7 +33,50 @@ pub fn validate_exact_face_chart_cut_split_result(
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
 ) -> Result<(), ExactFaceRefinementError> {
-    validate_current(previous, cancellation, options)?;
+    validate_split_result_with_control(result, previous, split, cancellation, options, None)
+}
+pub(crate) fn split_exact_face_chart_cut_with_control(
+    current: &ExactFaceRefinedTopology,
+    split: &ExactChartCutSplit,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
+) -> Result<ExactFaceRefinedTopology, ExactFaceRefinementError> {
+    validate_current(current, cancellation, options, geometry_control)?;
+    let pslg = apply_split(&current.pslg, split)?;
+    let delaunay =
+        triangulate_validated_face_pslg(&pslg, cancellation, options).map_err(map_delaunay)?;
+    let constrained =
+        recover_validated_face_segments(&delaunay, &pslg, cancellation, options, geometry_control)
+            .map_err(map_delaunay)?;
+    let trimmed =
+        carve_validated_face_domain(&constrained, &pslg, cancellation, options, geometry_control)
+            .map_err(map_delaunay)?;
+    let result = ExactFaceRefinedTopology {
+        pslg,
+        constrained,
+        trimmed,
+    };
+    validate_split_result_with_control(
+        &result,
+        current,
+        split,
+        cancellation,
+        options,
+        geometry_control,
+    )?;
+    Ok(result)
+}
+
+fn validate_split_result_with_control(
+    result: &ExactFaceRefinedTopology,
+    previous: &ExactFaceRefinedTopology,
+    split: &ExactChartCutSplit,
+    cancellation: &dyn MeshingCancellationSignal,
+    options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
+) -> Result<(), ExactFaceRefinementError> {
+    validate_current(previous, cancellation, options, geometry_control)?;
     let expected = apply_split(&previous.pslg, split)?;
     if result.pslg != expected {
         return Err(invalid(
@@ -55,14 +84,21 @@ pub fn validate_exact_face_chart_cut_split_result(
             "chart-cut split PSLG differs from canonical reconstruction",
         ));
     }
-    validate_face_constrained_topology(&result.constrained, &result.pslg, cancellation, options)
-        .map_err(map_delaunay)?;
+    validate_face_constrained_topology(
+        &result.constrained,
+        &result.pslg,
+        cancellation,
+        options,
+        geometry_control,
+    )
+    .map_err(map_delaunay)?;
     validate_face_trimmed_topology(
         &result.trimmed,
         &result.constrained,
         &result.pslg,
         cancellation,
         options,
+        geometry_control,
     )
     .map_err(map_delaunay)
 }
@@ -185,15 +221,23 @@ fn validate_current(
     current: &ExactFaceRefinedTopology,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
 ) -> Result<(), ExactFaceRefinementError> {
-    validate_face_constrained_topology(&current.constrained, &current.pslg, cancellation, options)
-        .map_err(map_delaunay)?;
+    validate_face_constrained_topology(
+        &current.constrained,
+        &current.pslg,
+        cancellation,
+        options,
+        geometry_control,
+    )
+    .map_err(map_delaunay)?;
     validate_face_trimmed_topology(
         &current.trimmed,
         &current.constrained,
         &current.pslg,
         cancellation,
         options,
+        geometry_control,
     )
     .map_err(map_delaunay)
 }

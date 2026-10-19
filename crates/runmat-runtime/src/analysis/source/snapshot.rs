@@ -32,7 +32,7 @@ pub struct FeaSourceSnapshotBuilder {
 
 impl FeaSourceSnapshotBuilder {
     pub fn new(physical_root: impl Into<PathBuf>, root: SourceModule) -> Result<Self, String> {
-        let logical_root = LogicalSourcePath::new("project").map_err(|error| error.to_string())?;
+        let logical_root = LogicalSourcePath::root();
         if !logical_path_is_within(&logical_root, &root.logical_path) {
             return Err(format!(
                 "root FEA module `{}` is outside logical source root `{logical_root}`",
@@ -166,7 +166,7 @@ impl PreparedFeaSourceSnapshot {
         logical_path: LogicalSourcePath,
         bytes: impl Into<Vec<u8>>,
     ) -> Result<(), String> {
-        let logical_root = LogicalSourcePath::new("project").map_err(|error| error.to_string())?;
+        let logical_root = LogicalSourcePath::root();
         if !logical_path_is_within(&logical_root, &logical_path) {
             return Err(format!(
                 "geometry input `{logical_path}` is outside logical source root `{logical_root}`"

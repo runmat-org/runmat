@@ -76,6 +76,7 @@ pub fn run_nonlinear_with_options(
         &options,
         crate::solve::nonlinear::NonlinearExecution {
             backend,
+            contact: None,
             solver_admission: Some(solver_admission),
         },
         prepared.load_factor_start,

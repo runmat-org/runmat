@@ -23,6 +23,7 @@ use crate::{
 
 /// Placement-neutral inputs for an authored modal-extraction -> modal-transient study.
 pub struct StructuralModalTransientStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub workloads: StructuralStudyWorkloads,
@@ -84,6 +85,7 @@ impl StructuralModalTransientStudyCoordinator {
         };
         let producer =
             StructuralModalProducerCoordinator::new(StructuralModalProducerPreparation {
+                local_execution: preparation.local_execution,
                 authored_study_digest: preparation.authored_study_digest,
                 frozen_project_digest: preparation.frozen_project_digest,
                 workload: (**workload).clone(),

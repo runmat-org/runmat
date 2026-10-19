@@ -1,4 +1,5 @@
 //! Actual admitted solve -> observations -> checkpoints -> terminal History publication.
+mod source_budget;
 use super::{execute, planning_policy, preparation};
 use runmat_analysis_core::*;
 use runmat_analysis_execution::*;
@@ -107,6 +108,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
     let chunk_bytes = setup.output_policy.chunk_bytes();
     let output_policy = setup.output_policy;
     let solve = prepare_thermal_task(ThermalTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         authored_study_digest: Digest::sha256("thermal-native-history-finalization"),
         frozen_project_digest: None,
@@ -483,6 +485,7 @@ fn check_history_chain(order: ElementOrder, partial_access: PartialAccessPolicy)
     assert!(prepare_accuracy(different_declarations).is_err());
     let accuracy = prepare_accuracy(accuracy_preparation()).unwrap();
     assert_worker_rejects_omitted_authored_observations(&accuracy, output_policy);
+    source_budget::reject_understated_constructor(&accuracy, output_policy);
     let (response, accounting) = execute(
         &mut store,
         &accuracy.host,

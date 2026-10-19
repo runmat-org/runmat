@@ -82,6 +82,9 @@ impl ObservationFieldSource {
     }
 }
 
+mod thermal;
+pub(super) use thermal::ThermalFieldSourceAuthority;
+
 mod finite_volume;
 mod sampled;
 pub(crate) use finite_volume::validate_finite_volume_authority;
@@ -131,6 +134,13 @@ impl TryFrom<SelectionWire> for ObservationFieldSelection {
         };
         selection.validate()?;
         Ok(selection)
+    }
+}
+
+pub(super) fn observation_error(error: super::ObservationError) -> AnalysisExecutionError {
+    match error {
+        super::ObservationError::Limit(resource) => AnalysisExecutionError::Limit(resource),
+        error => invalid(error),
     }
 }
 
@@ -197,46 +207,8 @@ impl ObservationFieldSelection {
         sample_ordinal: usize,
         selected: Vec<RecoveredFieldIdentity>,
     ) -> AnalysisExecutionResult<Self> {
-        workload.validate()?;
-        manifest.validate()?;
-        let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
-        let schedule = workload.solve_schedule().map_err(invalid)?;
-        let step = workload
-            .model
-            .sequence
-            .steps
-            .iter()
-            .find(|step| step.step_id == workload.step_id)
-            .ok_or_else(|| invalid("thermal producing step is absent"))?;
-        let sequence =
-            crate::execution::SequenceIdentity::from_solver_contract(&workload.model.sequence)?;
-        let producer = StepIdentity::from_solver_contract(sequence, step)?;
-        if manifest.source_workload != workload.identity()?
-            || manifest.numerical_intent != workload.numerical_intent_identity()?
-            || manifest.producer != producer
-            || manifest.topology_digest != Digest::from_bytes(*projection.mesh_digest.bytes())
-            || manifest.time_points_s != schedule.points_s()
-            || !manifest
-                .ordered_node_ids
-                .iter()
-                .copied()
-                .eq(projection.nodes.iter().map(|node| node.node_id))
-            || !manifest
-                .ordered_element_ids
-                .iter()
-                .copied()
-                .eq(projection.elements.iter().map(|element| element.element_id))
-        {
-            return Err(invalid(
-                "thermal catalog differs from workload, mesh, producer, or schedule",
-            ));
-        }
-        Self::thermal_metadata(
-            manifest,
-            projection.projection_digest,
-            sample_ordinal,
-            selected,
-        )
+        ThermalFieldSourceAuthority::new(workload, manifest, mesh)?
+            .selection(sample_ordinal, selected)
     }
 
     /// Reconstruct selection metadata only. The supplied projection identity must be
@@ -248,6 +220,15 @@ impl ObservationFieldSelection {
         selected: Vec<RecoveredFieldIdentity>,
     ) -> AnalysisExecutionResult<Self> {
         manifest.validate()?;
+        Self::thermal_validated_metadata(manifest, projection_digest, sample_ordinal, selected)
+    }
+
+    fn thermal_validated_metadata(
+        manifest: &ThermalSolverResultManifest,
+        projection_digest: Digest,
+        sample_ordinal: usize,
+        selected: Vec<RecoveredFieldIdentity>,
+    ) -> AnalysisExecutionResult<Self> {
         let catalog = manifest
             .fields
             .get(sample_ordinal)
@@ -298,20 +279,7 @@ impl ObservationFieldSelection {
         manifest: &ThermalSolverResultManifest,
         mesh: &SolverMeshArtifact,
     ) -> AnalysisExecutionResult<()> {
-        let ObservationFieldSource::ThermalResult { sample_ordinal, .. } = self.source else {
-            return Err(invalid("selection is not thermal"));
-        };
-        let expected = Self::thermal(
-            workload,
-            manifest,
-            mesh,
-            sample_ordinal,
-            self.fields.iter().map(|entry| entry.field).collect(),
-        )?;
-        if self != &expected {
-            return Err(invalid("selection differs from thermal authority"));
-        }
-        Ok(())
+        ThermalFieldSourceAuthority::new(workload, manifest, mesh)?.validate_selection(self)
     }
 
     pub const fn identity(&self) -> ObservationFieldSelectionIdentity {

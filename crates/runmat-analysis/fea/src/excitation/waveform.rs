@@ -27,20 +27,33 @@ pub(super) fn sample<Q>(
     )
 }
 
-pub(super) fn breakpoints<Q>(waveform: &StandardWaveform<Q>, start: f64, end: f64) -> Vec<f64> {
-    let mut points = vec![waveform.start_seconds];
+pub(super) fn breakpoints<Q>(
+    waveform: &StandardWaveform<Q>,
+    start: f64,
+    end: f64,
+) -> impl Iterator<Item = f64> {
+    let mut points = [waveform.start_seconds, 0.0, 0.0];
+    let mut count = 1;
     if let Some(duration) = waveform.duration_seconds {
-        points.push(waveform.start_seconds + duration);
+        points[count] = waveform.start_seconds + duration;
+        count += 1;
         if waveform.kind == StandardWaveformKind::RectangularPulse {
             if let Some(duty) = waveform.duty_cycle {
-                points.push(waveform.start_seconds + duty * duration);
+                points[count] = waveform.start_seconds + duty * duration;
+                count += 1;
             }
         }
     }
-    points.retain(|point| *point > start && *point <= end);
-    points.sort_by(f64::total_cmp);
-    points.dedup_by(|left, right| left.to_bits() == right.to_bits());
-    points
+    points[..count].sort_by(f64::total_cmp);
+    let mut previous = None;
+    points.into_iter().take(count).filter(move |point| {
+        if !(*point > start && *point <= end) {
+            return false;
+        }
+        let unique = previous != Some(point.to_bits());
+        previous = Some(point.to_bits());
+        unique
+    })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,15 +270,18 @@ mod tests {
     #[test]
     fn waveform_breakpoints_include_every_piecewise_boundary_once_in_range() {
         let ramp = waveform(StandardWaveformKind::Ramp);
-        assert_eq!(breakpoints(&ramp, 0.0, 4.0), [1.0, 3.0]);
+        assert_eq!(breakpoints(&ramp, 0.0, 4.0).collect::<Vec<_>>(), [1.0, 3.0]);
 
         let mut rectangular = waveform(StandardWaveformKind::RectangularPulse);
         rectangular.duty_cycle = Some(0.25);
-        assert_eq!(breakpoints(&rectangular, 1.0, 3.0), [1.5, 3.0]);
+        assert_eq!(
+            breakpoints(&rectangular, 1.0, 3.0).collect::<Vec<_>>(),
+            [1.5, 3.0]
+        );
 
         let mut sine = waveform(StandardWaveformKind::Sine);
         sine.duration_seconds = None;
         sine.frequency_hz = Some(1.0);
-        assert_eq!(breakpoints(&sine, 0.0, 4.0), [1.0]);
+        assert_eq!(breakpoints(&sine, 0.0, 4.0).collect::<Vec<_>>(), [1.0]);
     }
 }

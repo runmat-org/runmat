@@ -23,8 +23,12 @@ pub(crate) fn register(
         .checked_mul(config.worker_scratch_bytes)
         .ok_or_else(|| invalid("native pool scratch inventory overflowed"))?;
     let resources = ResourceInventory {
-        cpu_millicores: cpu,
-        memory_bytes: memory,
+        cpu_millicores: config
+            .local_cpu_capacity_millicores
+            .map_or(cpu, |capacity| cpu.min(capacity)),
+        memory_bytes: config
+            .local_memory_capacity_bytes
+            .map_or(memory, |capacity| memory.min(capacity)),
         scratch_bytes: scratch,
         accelerators: config.worker_accelerators.clone(),
         capabilities: config.worker_capabilities.clone(),

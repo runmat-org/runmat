@@ -86,7 +86,31 @@ fn scalar_modal_source_is_explicit_identity_bound_and_missing_inventory_rejects(
     let FeaResourceDemand::StructuralModalExtraction(demand) = &plan.input.demand else {
         panic!("modal demand")
     };
-    assert_eq!(demand.original_energy_source_bytes.0, expected);
+    let facts = super::super::structural_facts::derive_structural_resource_facts(
+        workload.model(),
+        Some(&mesh),
+        &constraints,
+    )
+    .unwrap();
+    let reduction = facts.constraint_matrix.affine_reduction().unwrap();
+    let pattern = reduction
+        .reduce_sparse_pattern(facts.symbolic.stiffness_upper_bound())
+        .unwrap();
+    let proof = crate::algebra::anchored_energy::SourceEnergyDemand::derive(
+        crate::algebra::CoercivityWorkEnvelope::derive(&pattern).unwrap(),
+        mesh.topology.nodes.len(),
+        std::mem::size_of::<Option<usize>>() as u64 * mesh.topology.nodes.len() as u64,
+        mesh.topology
+            .volume_elements
+            .iter()
+            .map(|element| element.node_ids.len()),
+    )
+    .unwrap();
+    assert_eq!(
+        demand.original_energy_source_bytes.0,
+        expected.max(proof.additional_resident_bytes())
+    );
+    assert!(demand.original_energy_source_bytes.0 >= expected);
     assert!(demand.operator.phase_resources.resident_bytes_upper_bound.0 >= expected);
     let mut changed = plan.input.clone();
     let FeaResourceDemand::StructuralModalExtraction(demand) = &mut changed.demand else {

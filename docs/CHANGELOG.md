@@ -190,7 +190,7 @@ _June 26, 2026_
 - Add MAT-file save/load coverage, including append workflows, and expand spreadsheet/text import/export paths through provider-backed filesystems
 - Add resident GPU execution paths for complex math, signal, communication, modulation, Hilbert, gradient, reshape, meshgrid, polynomial integration, gamma, sinc, sign, and trigonometric workflows
 - Add generalized eigenvalue support through [`eig(A, B)`](https://runmat.com/docs/reference/builtins/eig)
-- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](https://runmat.com/docs/fea) for details. We will share more details as this work matures.
+- Added geometry loading, meshing, and FEA solver support (early alpha). See [PR #399](https://github.com/runmat-org/runmat/pull/399) and [FEA docs](https://runmat.com/docs/simulation) for details. We will share more details as this work matures.
 
 #### Changed
 - Expand GPU acceleration plumbing with dedicated WGPU shader modules for signal and communications workloads, complex tensor residency, and shared provider APIs

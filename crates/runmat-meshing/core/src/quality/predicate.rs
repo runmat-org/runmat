@@ -2,8 +2,11 @@ mod adaptive_metric;
 mod adaptive_planar;
 mod adaptive_spatial;
 mod circumsphere;
+mod coordinate_bounds;
 mod distance;
 mod exact_dyadic;
+mod lifting;
+mod radial;
 mod ray;
 mod simplex;
 mod solve;
@@ -19,12 +22,16 @@ pub use adaptive_planar::{
 pub use adaptive_spatial::{
     compose_dyadic_point, insphere3d, insphere3d_constructed, insphere3d_symbolic, orient3d,
     orient3d_constructed, orient3d_symbolic, points_collinear_constructed,
-    triangle_normal_alignment_constructed, Point3Construction, SpatialPredicateError,
-    SpatialPredicatePoint,
+    projected_orient2d_constructed, triangle_normal_alignment_constructed,
+    triangle_projection_axes, triangle_projection_axes_constructed, Point3Construction,
+    SpatialPredicateError, SpatialPredicatePoint,
 };
 pub use circumsphere::{tetrahedron_circumsphere, tetrahedron_circumsphere_contains_point};
+pub use coordinate_bounds::constructed_point_bounds;
 pub use distance::{closest_point_on_triangle, point_triangle_distance};
 pub use exact_dyadic::ExactDyadic;
+pub use lifting::tetrahedral_lifting_change;
+pub use radial::compare_radial_distances_constructed;
 pub use ray::ray_triangle_intersection;
 pub use simplex::{
     orient_tetrahedron_node_ids, tetrahedron_centroid, tetrahedron_edge_aspect_ratio,

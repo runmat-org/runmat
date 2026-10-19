@@ -180,7 +180,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
         .topology
         .instances
         .iter()
-        .find(|instance| instance.transform.0[3] == 10.0)
+        .find(|instance| instance.transform.0[3] == 0.010)
         .expect("one part occurrence must retain its translation");
     assert_eq!(translated.transform.0[7], 0.0);
     assert_eq!(translated.transform.0[11], 0.0);
@@ -192,7 +192,7 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
             .filter(|vertex| vertex.id.assembly_path == translated.id.assembly_path)
             .map(|vertex| vertex.point_m[0])
             .max_by(f64::total_cmp),
-        Some(1.0),
+        Some(0.001),
         "definition-local geometry must not absorb occurrence placement",
     );
 
@@ -211,7 +211,10 @@ fn step_assembly_preserves_shared_definitions_occurrences_and_body_evaluation() 
             .centroid_m
         })
         .collect::<Vec<_>>();
-    assert_eq!(centroids, vec![[0.5, 1.0, 1.5], [0.5, 1.0, 1.5]]);
+    assert_eq!(
+        centroids,
+        vec![[0.0005, 0.001, 0.0015], [0.0005, 0.001, 0.0015]]
+    );
 
     let definition_limited = ExactCadImportOptions {
         max_representation_bytes: imported.representation.len() as u64,
@@ -428,7 +431,7 @@ fn independent_coincident_faces_require_explicit_contact_authoring() {
                 .iter()
                 .find(|instance| instance.id.assembly_path == face.id.assembly_path)
                 .map(|instance| instance.transform.0[3])?;
-            ((point[0] + translation_x - 1.0).abs() < 1.0e-12).then(|| face.id.clone())
+            ((point[0] + translation_x - 0.001).abs() < 1.0e-12).then(|| face.id.clone())
         })
         .collect::<Vec<_>>();
     coincident_faces.sort();
@@ -1499,3 +1502,5 @@ fn imported_curve_queries_are_exact_scaled_and_digest_bound() {
         GeometryEvaluationErrorKind::InconsistentGeometry
     );
 }
+
+mod surface_session;

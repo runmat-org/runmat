@@ -1,12 +1,10 @@
 use runmat_execution::identity::ValueId;
 use runmat_execution::schema::VALUE_PAYLOAD_SCHEMA_V1;
-use runmat_execution::value::{
-    artifact_object_value_id, ValueLimits, ValuePayload, ValueRef, ValueRefKind,
-};
+use runmat_execution::value::{artifact_object_value_id, ValueLimits, ValueRef, ValueRefKind};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-use crate::{ArtifactError, ArtifactResult, LogicalObject};
+use crate::{ArtifactError, ArtifactResult, LogicalObject, ObjectDescriptor};
 
 /// Authorization and encryption identity used to project immutable logical objects into portable
 /// execution value references. Content identity remains independent of this access context.
@@ -49,21 +47,48 @@ impl ArtifactAccess {
         kind: ValueRefKind,
         value_schema: impl Into<String>,
     ) -> ArtifactResult<ValueRef> {
-        self.validate()?;
         object.validate()?;
+        self.reference_descriptor(&object.descriptor, kind, value_schema)
+    }
+
+    /// Requested string bytes in a newly constructed reference. Inline/boxed
+    /// ValueRef slots are the enclosing publication owner's separate inventory.
+    pub fn reference_text_bytes(
+        &self,
+        media_type: &str,
+        value_schema: &str,
+    ) -> ArtifactResult<u64> {
+        media_type
+            .len()
+            .checked_add(value_schema.len())
+            .and_then(|bytes| bytes.checked_add(self.authorization_scope.len()))
+            .and_then(|bytes| u64::try_from(bytes).ok())
+            .ok_or_else(|| ArtifactError::Limit("artifact reference text storage overflow".into()))
+    }
+
+    /// Project an immutable descriptor into an access-bound reference. This
+    /// constructs a content claim; providers still verify the referenced bytes.
+    pub fn reference_descriptor(
+        &self,
+        descriptor: &ObjectDescriptor,
+        kind: ValueRefKind,
+        value_schema: impl Into<String>,
+    ) -> ArtifactResult<ValueRef> {
+        self.validate()?;
+        descriptor.validate()?;
         let reference = ValueRef {
             schema_version: VALUE_PAYLOAD_SCHEMA_V1,
-            id: self.value_id(object.descriptor.digest),
-            logical_digest: object.descriptor.digest,
-            encoded_length: object.descriptor.encoded_length,
-            media_type: object.descriptor.media_type.clone(),
+            id: self.value_id(descriptor.digest),
+            logical_digest: descriptor.digest,
+            encoded_length: descriptor.encoded_length,
+            media_type: descriptor.media_type.clone(),
             value_schema: value_schema.into(),
             encryption_context: self.encryption_context,
             kind,
             authorization_scope: self.authorization_scope.clone(),
             resident_fence: None,
         };
-        ValuePayload::Object(Box::new(reference.clone()))
+        reference
             .validate(ValueLimits::default())
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         Ok(reference)
@@ -77,7 +102,7 @@ impl ArtifactAccess {
         value_schema: &str,
     ) -> ArtifactResult<()> {
         self.validate()?;
-        ValuePayload::Object(Box::new(reference.clone()))
+        reference
             .validate(ValueLimits::default())
             .map_err(|error| ArtifactError::Invalid(error.to_string()))?;
         if reference.id != self.value_id(reference.logical_digest)
@@ -144,5 +169,46 @@ mod tests {
                 "runmat.test.v1",
             )
             .is_err());
+    }
+    #[test]
+    fn borrowed_reference_validation_matches_payload_limits_without_copying() {
+        use runmat_execution::value::ValuePayload;
+        let access = ArtifactAccess {
+            authorization_scope: "study".into(),
+            encryption_context: Digest::sha256("key"),
+        };
+        let object = LogicalObject::new(
+            ObjectNamespace::ResultValue,
+            "result/value",
+            "application/test",
+            vec![1],
+        )
+        .unwrap();
+        let reference = access
+            .reference(&object, ValueRefKind::ResultObject, "schema.v1")
+            .unwrap();
+        assert_eq!(
+            access
+                .reference_text_bytes(&reference.media_type, &reference.value_schema)
+                .unwrap(),
+            (reference.media_type.capacity()
+                + reference.value_schema.capacity()
+                + reference.authorization_scope.capacity()) as u64
+        );
+        for case in 0..5 {
+            let mut reference = reference.clone();
+            let mut limits = ValueLimits::default();
+            match case {
+                0 => {}
+                1 => limits.max_nodes = 0,
+                2 => limits.max_text_bytes = 1,
+                3 => reference.schema_version += 1,
+                _ => reference.kind = ValueRefKind::ResidentObject,
+            }
+            assert_eq!(
+                reference.validate(limits),
+                ValuePayload::Object(Box::new(reference.clone())).validate(limits)
+            );
+        }
     }
 }

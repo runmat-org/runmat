@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn project_host_resolves_only_exact_frozen_facts() {
         let temporary = tempfile::tempdir().unwrap();
-        let module_path = LogicalSourcePath::new("project/design_curve.m").unwrap();
+        let module_path = LogicalSourcePath::new("design_curve.m").unwrap();
         let symbol = SourceSymbol::new("designCurve").unwrap();
         let function = FunctionFacts {
             module_path: module_path.clone(),
@@ -170,7 +170,7 @@ mod tests {
         assert!(RunMatFunctionSource::resolve(
             &host,
             &FunctionRequest {
-                module_path: LogicalSourcePath::new("project/other.m").unwrap(),
+                module_path: LogicalSourcePath::new("other.m").unwrap(),
                 symbol: SourceSymbol::new("other").unwrap(),
             },
         )

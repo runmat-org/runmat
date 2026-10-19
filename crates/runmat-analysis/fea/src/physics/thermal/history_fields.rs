@@ -23,8 +23,7 @@ pub(crate) fn snapshot_definition(
     index: usize,
     ordinal: usize,
 ) -> Result<RecoveredFieldDefinition, RecoveredFieldError> {
-    let definitions = definitions()?;
-    let template = definitions
+    let template = TEMPLATES
         .get(index)
         .ok_or(RecoveredFieldError::StorageShapeMismatch)?;
     let ids = [
@@ -35,56 +34,102 @@ pub(crate) fn snapshot_definition(
     ];
     RecoveredFieldDefinition::new_derived(
         ids[index](ordinal),
-        template.quantity(),
-        template.location(),
-        template.entity_domain(),
-        template.value_shape().clone(),
-        template.numeric_representation(),
-        template.derivation(),
+        template.1,
+        template.2,
+        template.3,
+        template.4.clone(),
+        RecoveredFieldNumericRepresentation::Real,
+        crate::results::field::RecoveredFieldDerivation::Native,
     )
 }
 
+static TEMPLATES: [(
+    &str,
+    ObservationQuantity,
+    FieldLocation,
+    RecoveredFieldEntityDomain,
+    ObservationValueShape,
+); 4] = [
+    (
+        "thermal.temperature",
+        ObservationQuantity::Temperature,
+        FieldLocation::Node,
+        RecoveredFieldEntityDomain::Nodes,
+        ObservationValueShape::Scalar,
+    ),
+    (
+        "thermal.temperature_gradient",
+        ObservationQuantity::TemperatureGradient,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::VolumeElements,
+        ObservationValueShape::Vector3,
+    ),
+    (
+        "thermal.heat_flux",
+        ObservationQuantity::HeatFlux,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::VolumeElements,
+        ObservationValueShape::Vector3,
+    ),
+    (
+        "thermal.energy_storage_rate",
+        ObservationQuantity::ThermalEnergyStorageRateDensity,
+        FieldLocation::Element,
+        RecoveredFieldEntityDomain::VolumeElements,
+        ObservationValueShape::Scalar,
+    ),
+];
+
 pub(crate) fn definitions() -> Result<Vec<RecoveredFieldDefinition>, RecoveredFieldError> {
-    [
-        (
-            "thermal.temperature",
-            ObservationQuantity::Temperature,
-            FieldLocation::Node,
-            RecoveredFieldEntityDomain::Nodes,
-            ObservationValueShape::Scalar,
-        ),
-        (
-            "thermal.temperature_gradient",
-            ObservationQuantity::TemperatureGradient,
-            FieldLocation::Element,
-            RecoveredFieldEntityDomain::VolumeElements,
-            ObservationValueShape::Vector3,
-        ),
-        (
-            "thermal.heat_flux",
-            ObservationQuantity::HeatFlux,
-            FieldLocation::Element,
-            RecoveredFieldEntityDomain::VolumeElements,
-            ObservationValueShape::Vector3,
-        ),
-        (
-            "thermal.energy_storage_rate",
-            ObservationQuantity::ThermalEnergyStorageRateDensity,
-            FieldLocation::Element,
-            RecoveredFieldEntityDomain::VolumeElements,
-            ObservationValueShape::Scalar,
-        ),
-    ]
-    .into_iter()
-    .map(|(id, quantity, location, domain, shape)| {
-        RecoveredFieldDefinition::new(
-            id,
-            quantity,
-            location,
-            domain,
-            shape,
-            RecoveredFieldNumericRepresentation::Real,
-        )
-    })
-    .collect()
+    TEMPLATES
+        .iter()
+        .map(|(id, quantity, location, domain, shape)| {
+            RecoveredFieldDefinition::new(
+                *id,
+                *quantity,
+                *location,
+                *domain,
+                shape.clone(),
+                RecoveredFieldNumericRepresentation::Real,
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn snapshot_matches_original_catalog_template_with_less_requested_heap() {
+        let ids = [
+            crate::contracts::fea_thermal_temperature_field_id,
+            crate::contracts::fea_thermal_temperature_gradient_field_id,
+            crate::contracts::fea_thermal_heat_flux_field_id,
+            crate::contracts::fea_thermal_energy_storage_rate_field_id,
+        ];
+        for ordinal in [0, 16, usize::MAX] {
+            for (index, id) in ids.iter().enumerate() {
+                let (actual, _, peak) = crate::topology::measure_test_allocations(|| {
+                    snapshot_definition(index, ordinal).unwrap()
+                });
+                let (expected, _, old_peak) = crate::topology::measure_test_allocations(|| {
+                    let catalog = definitions().unwrap();
+                    let template = &catalog[index];
+                    RecoveredFieldDefinition::new_derived(
+                        id(ordinal),
+                        template.quantity(),
+                        template.location(),
+                        template.entity_domain(),
+                        template.value_shape().clone(),
+                        template.numeric_representation(),
+                        template.derivation(),
+                    )
+                    .unwrap()
+                });
+                assert_eq!(actual, expected);
+                assert!(peak < old_peak);
+            }
+        }
+        assert!(snapshot_definition(4, 0).is_err());
+    }
 }

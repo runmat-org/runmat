@@ -30,6 +30,7 @@ use crate::{
 };
 
 pub struct StructuralRandomResponseStudyPreparation {
+    pub local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan,
     pub authored_study_digest: Digest,
     pub frozen_project_digest: Option<Digest>,
     pub workloads: StructuralStudyWorkloads,
@@ -153,6 +154,7 @@ impl StructuralRandomResponseStudyCoordinator {
             ));
         }
         let task = prepare_structural_modal_task(StructuralModalTaskPreparation {
+            local_execution: self.preparation.local_execution,
             authored_study_digest: self.preparation.authored_study_digest,
             frozen_project_digest: self.preparation.frozen_project_digest,
             program_revision: self.preparation.program_revision.clone(),

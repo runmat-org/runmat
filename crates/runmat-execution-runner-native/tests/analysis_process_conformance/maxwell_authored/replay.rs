@@ -3,7 +3,6 @@ use runmat_analysis_execution::{
     import_maxwell_study_completion, CompletedMaxwellStudy, MaxwellStudyResultPhase,
 };
 use runmat_analysis_fea::{properties::compile_property_map, study::plan_maxwell_study};
-use runmat_execution::resource::ResourceAccounting;
 use runmat_execution_artifact::cache::CacheImport;
 
 pub(super) fn check(completed: &CompletedMaxwellStudy, source: &impl CacheImport) {
@@ -27,27 +26,11 @@ pub(super) fn check(completed: &CompletedMaxwellStudy, source: &impl CacheImport
             .is_err()
     );
 
-    // Keep scheduler accounting internally valid but change its reserved allocation.
-    // The replay must bind it to the original immutable task's exact resource plan.
-    let mut foreign_accounting = closures.to_vec();
-    let accounting = &mut foreign_accounting[later].accounting;
-    let mut allocation = accounting.resources.allocation.clone();
-    allocation.memory_bytes += 1;
-    accounting.resources = ResourceAccounting::for_reserved_interval(
-        allocation,
-        accounting.resources.usage.wall_millis,
-        accounting.resources.artifact_bytes,
-        accounting.resources.usage.egress_bytes,
-        accounting.resources.usage.relay_bytes,
-    )
-    .unwrap();
-    accounting.validate().unwrap();
-    assert!(import_maxwell_study_completion(
-        source,
-        completed.preparation().unwrap(),
-        foreign_accounting,
-    )
-    .is_err());
+    // Even internally valid scalar accounting cannot replace the original
+    // immutable scheduler association through construction or cold decoding.
+    crate::phase_execution_support::assert_foreign_allocation_cannot_be_sealed(
+        &closures[later].execution,
+    );
 
     // A coherent new compiled constitutive intent does not own the old task/result chain.
     let mut changed = completed.preparation().unwrap();

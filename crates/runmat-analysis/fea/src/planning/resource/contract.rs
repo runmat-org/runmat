@@ -30,6 +30,8 @@ pub use fluid_demand::{
     FluidTransientBlockResourceDemand,
 };
 mod magnetic_recovery_demand;
+mod structural_recovery_demand;
+pub use structural_recovery_demand::StructuralFieldRecoveryResourceDemand;
 mod nonlinear_recovery_demand;
 pub use nonlinear_recovery_demand::NonlinearFieldRecoveryResourceDemand;
 mod maxwell_recovery_demand;
@@ -89,7 +91,7 @@ pub use super::solve_policy::{
 const RESOURCE_PREFIX: &[u8] = b"runmat-fea-resource-plan/v1\0";
 pub const RESOURCE_PLAN_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const RESOURCE_LIMITS: CanonicalLimits = CanonicalLimits::new(64 * 1024, 8_192, 65_536, 64);
-pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 81;
+pub const RESOURCE_ESTIMATION_MODEL_REVISION: u16 = 109;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -253,54 +255,6 @@ pub enum PartitioningPolicy {
     },
 }
 
-/// Canonical numerical phase governed by one exact resource request.
-///
-/// Task request identities prevent a plan estimated for one frequency entry or observation task
-/// from authorizing another. The linear-pipeline variant preserves the existing whole-step
-/// envelope until that path is decomposed into independently scheduled phases.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "request")]
-pub enum FeaResourcePhase {
-    AcousticFrequencyAssembly(AnalysisWorkloadIdentity),
-    FluidSteadySolve(AnalysisWorkloadIdentity),
-    FluidTransientBlock(AnalysisWorkloadIdentity),
-    FluidFieldRecovery(FieldRecoveryRequestIdentity),
-    AcousticHarmonic(AnalysisWorkloadIdentity),
-    ElectricalStatic(AnalysisWorkloadIdentity),
-    Magnetostatic(AnalysisWorkloadIdentity),
-    MaxwellHarmonic(AnalysisWorkloadIdentity),
-    MagneticFieldRecovery(FieldRecoveryRequestIdentity),
-    NonlinearFieldRecovery(FieldRecoveryRequestIdentity),
-    MaxwellFieldRecovery(FieldRecoveryRequestIdentity),
-    ResultPublication(crate::execution::PublicationRequestIdentity),
-    SemanticStatePublication(Digest),
-    AccuracyEvaluation(AccuracyEvaluationRequestIdentity),
-    ThermalSolve(AnalysisWorkloadIdentity),
-    StructuralLinearPipeline,
-    StructuralNonlinearPipeline,
-    StructuralNonlinearRecovery,
-    StructuralModalExtraction(StructuralModalWorkloadIdentity),
-    StructuralBuckling(StructuralBucklingWorkloadIdentity),
-    StructuralFrequencyEntry(StructuralFrequencyEntryRequestIdentity),
-    StructuralFrequencyFieldRecovery(FieldRecoveryRequestIdentity),
-    StructuralObservationPartition(ObservationPartitionEvaluationRequestIdentity),
-    StructuralObservationReduction(ObservationPartitionReductionRequestIdentity),
-    StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointRequestIdentity),
-    ObservationHistoryFinalization(ObservationHistoryFinalizationRequestIdentity),
-    StructuralObservationAssembly(ObservationAssemblyRequestIdentity),
-    StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyRequestIdentity),
-    StructuralTransientScopePreparation(Digest),
-    StructuralTransientBlock(StructuralTransientBlockRequestIdentity),
-    StructuralTransientFieldRecovery(SolverResultIdentity),
-    StructuralTransientResultAssembly(StructuralTransientResultAssemblyRequestIdentity),
-    StructuralModalResponseSpectrumDirection(
-        StructuralModalResponseSpectrumDirectionRequestIdentity,
-    ),
-    StructuralModalResponseSpectrumAssembly(StructuralModalResponseSpectrumAssemblyRequestIdentity),
-    StructuralRandomResponseInterval(StructuralRandomResponseIntervalRequestIdentity),
-    StructuralRandomResponseAssembly(StructuralRandomResponseAssemblyRequestIdentity),
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExcitationWorkspaceResourceFacts {
@@ -350,6 +304,8 @@ pub struct StructuralBucklingResourceDemand {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralFrequencyOperatorResourceDemand {
+    /// Fresh original constraint construction, rederived by workers.
+    pub constraint_compilation_peak_bytes: ByteCount,
     pub operator: StructuralOperatorResourceDemand,
     pub inputs: PreparedInputResourceFacts,
     pub output: PreparedOutputResourceFacts,
@@ -362,48 +318,8 @@ pub use observation_demand::{
     ObservationPartitionResourceDemand, ObservationReductionResourceDemand,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind", content = "demand")]
-pub enum FeaResourceDemand {
-    AcousticFrequencyAssembly(AcousticFrequencyAssemblyResourceDemand),
-    FluidSteadySolve(FluidSteadySolveResourceDemand),
-    FluidTransientBlock(FluidTransientBlockResourceDemand),
-    FluidFieldRecovery(FluidFieldRecoveryResourceDemand),
-    AcousticHarmonic(AcousticHarmonicResourceDemand),
-    ElectricalStatic(ElectricalStaticResourceDemand),
-    Magnetostatic(MagnetostaticResourceDemand),
-    MaxwellHarmonic(MaxwellHarmonicResourceDemand),
-    MagneticFieldRecovery(MagneticFieldRecoveryResourceDemand),
-    NonlinearFieldRecovery(NonlinearFieldRecoveryResourceDemand),
-    MaxwellFieldRecovery(MaxwellFieldRecoveryResourceDemand),
-    ResultPublication(ResultPublicationResourceDemand),
-    SemanticStatePublication(SemanticStatePublicationResourceDemand),
-    AccuracyEvaluation(AccuracyEvaluationResourceDemand),
-    ThermalSolve(ThermalSolveResourceDemand),
-    StructuralLinearPipeline(StructuralLinearPipelineResourceDemand),
-    StructuralNonlinearPipeline(StructuralNonlinearPipelineResourceDemand),
-    StructuralNonlinearRecovery(StructuralNonlinearRecoveryResourceDemand),
-    StructuralModalExtraction(StructuralModalResourceDemand),
-    StructuralBuckling(StructuralBucklingResourceDemand),
-    StructuralFrequencyEntry(StructuralFrequencyOperatorResourceDemand),
-    StructuralFrequencyFieldRecovery(StructuralFrequencyOperatorResourceDemand),
-    StructuralObservationPartition(ObservationPartitionResourceDemand),
-    StructuralObservationReduction(ObservationReductionResourceDemand),
-    StructuralObservationHistoryCheckpoint(ObservationHistoryCheckpointResourceDemand),
-    ObservationHistoryFinalization(ObservationHistoryFinalizationResourceDemand),
-    StructuralObservationAssembly(ObservationAssemblyResourceDemand),
-    StructuralFrequencyResultAssembly(StructuralFrequencyResultAssemblyResourceDemand),
-    StructuralTransientScopePreparation(StructuralTransientScopeResourceDemand),
-    StructuralTransientBlock(StructuralTransientBlockResourceDemand),
-    StructuralTransientFieldRecovery(StructuralTransientFieldRecoveryResourceDemand),
-    StructuralTransientResultAssembly(StructuralTransientResultAssemblyResourceDemand),
-    StructuralModalResponseSpectrumDirection(
-        StructuralModalResponseSpectrumDirectionResourceDemand,
-    ),
-    StructuralModalResponseSpectrumAssembly(StructuralModalResponseSpectrumAssemblyResourceDemand),
-    StructuralRandomResponseInterval(StructuralRandomResponseIntervalResourceDemand),
-    StructuralRandomResponseAssembly(StructuralRandomResponseAssemblyResourceDemand),
-}
+mod phases;
+pub use phases::{FeaResourceDemand, FeaResourcePhase};
 
 mod output_facts;
 

@@ -68,6 +68,22 @@ pub struct SerialExactMeshingExecutor<'a, S> {
 }
 
 impl<S: CacheImport> CacheImport for SerialExactMeshingExecutor<'_, S> {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: runmat_execution::Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> runmat_execution_artifact::ArtifactResult<()>,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.store
+            .read_verified_bounded_with_admission(digest, maximum_bytes, admit)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: runmat_execution::Digest,
+        maximum_bytes: u64,
+    ) -> runmat_execution_artifact::ArtifactResult<Option<Vec<u8>>> {
+        self.store.read_verified_bounded(digest, maximum_bytes)
+    }
     fn read_verified(
         &self,
         digest: runmat_execution::Digest,

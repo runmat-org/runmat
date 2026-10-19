@@ -64,6 +64,7 @@ pub(crate) fn preparation() -> ThermalStudyPreparation {
     )
     .unwrap();
     ThermalStudyPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         scope: ThermalStudyScope::Standalone,
         product: ThermalStudyProduct { compiled, workload },
@@ -236,4 +237,73 @@ fn selected_lifecycle_rejects_false_standalone_and_foreign_selection() {
         input.product.workload.step_id.0 = selected.into();
         assert!(ThermalStudyCoordinator::new(input).is_err());
     }
+}
+
+#[test]
+fn original_temperature_fields_survive_borrowed_authored_intent_validation() {
+    use runmat_analysis_fea::{
+        execution::ThermalSolverResultManifest, physics::thermal::qualification as f,
+        results::field::RecoveredField, study::plan_thermal_study_with_fields,
+    };
+    let mesh = f::mesh(false);
+    let producer = f::initial::linear_profile().execute(&mesh).unwrap();
+    let manifest = ThermalSolverResultManifest::from_result(&producer).unwrap();
+    let entry = manifest.terminal_temperature().unwrap();
+    let field = RecoveredField::new(
+        entry.definition.clone(),
+        entry.sample,
+        producer.temperature_snapshots[0].clone(),
+    )
+    .unwrap();
+    let binding = f::initial::temperature_binding(&manifest, field, &mesh);
+    let mut input = f::cooling::manufactured(8, binding);
+    input.model.sequence.steps[0].accuracy.criteria[0].tolerance =
+        runmat_analysis_core::AccuracyTolerance::Relative(f::TARGET);
+    let mut p = preparation();
+    p.mesh = mesh;
+    p.product.compiled.model = input.model;
+    p.product.compiled.properties =
+        compile_property_map(&p.product.compiled.model, Some(&p.mesh)).unwrap();
+    p.product.compiled.solver_mesh_digest = p.mesh.canonical_digest;
+    p.product.workload = plan_thermal_study_with_fields(
+        &p.product.compiled,
+        ThermalStudyPlanningPolicy {
+            backend: ComputeBackend::Cpu,
+            formulation_requirement: FormulationRequirement::Experimental,
+        },
+        input.initial_fields,
+    )
+    .unwrap();
+    let copy = || {
+        let mut copied = preparation();
+        copied.scope = p.scope;
+        copied.product = p.product.clone();
+        copied.mesh = p.mesh.clone();
+        copied
+    };
+    ThermalStudyCoordinator::new(copy()).unwrap();
+    for scope in [
+        ThermalStudyScope::Standalone,
+        ThermalStudyScope::SelectedStep,
+    ] {
+        let mut selected = copy();
+        selected.scope = scope;
+        let mut valid = copy();
+        valid.scope = scope;
+        ThermalStudyCoordinator::new(valid).unwrap();
+        selected.product.workload.initial_fields.clear();
+        assert!(ThermalStudyCoordinator::new(selected).is_err());
+    }
+    let mut foreign = copy();
+    foreign.product.workload.residual_target *= 0.5;
+    assert!(ThermalStudyCoordinator::new(foreign).is_err());
+    let mut bounded = p;
+    bounded.product.compiled.model.sequence.steps[0]
+        .accuracy
+        .resources
+        .maximum_resident_bytes = 1;
+    bounded.product.workload.model = bounded.product.compiled.model.clone();
+    bounded.product.compiled.properties =
+        compile_property_map(&bounded.product.compiled.model, Some(&bounded.mesh)).unwrap();
+    assert!(ThermalStudyCoordinator::new(bounded).is_err());
 }

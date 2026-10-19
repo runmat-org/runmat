@@ -1,4 +1,6 @@
 //! Adversarial checks use the real solve/observation fixture and freshly rehashed requests.
+#[path = "accuracy_source_context/admission.rs"]
+mod admission;
 use crate::{validate_accuracy_source_context, PreparedAccuracy};
 use runmat_analysis_fea::{
     execution::{
@@ -22,6 +24,7 @@ pub(super) fn reject_substituted_structural_authority(
             .payload(),
     )
     .unwrap();
+    admission::verify_original_source_admission(prepared, catalog, &receipt);
     let context: Vec<_> = prepared
         .inputs
         .iter()

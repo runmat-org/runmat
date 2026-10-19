@@ -23,8 +23,11 @@ use crate::{
 pub struct ImportedExactCad {
     pub source_digest: GeometryDigest,
     pub source_format: GeometrySourceFormat,
+    /// Authored fallback for unitless source formats; exchange declarations take precedence.
     pub source_units: UnitSystem,
     pub kernel_version: String,
+    /// Scale of the retained kernel representation, independent of the authored fallback.
+    /// STEP and IGES are retained in millimetres; unitless BREP uses `source_units`.
     pub meters_per_source_unit: f64,
     /// Canonical OCCT B-rep with all derived polygonal caches removed.
     pub representation: Vec<u8>,

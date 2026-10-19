@@ -9,33 +9,79 @@ impl AnalysisProjection {
     /// Locate a physical point in the canonical solid topology and derive the exact interpolation
     /// weights used by its element formulation. Points on a shared face use the lowest stable
     /// element identity, making ownership independent of traversal and partition layout.
-    pub fn locate_volume_point(&self, position_m: [f64; 3]) -> Option<VolumePointLocation> {
+    pub fn locate_volume_point(
+        &self,
+        position_m: [f64; 3],
+    ) -> Result<Option<VolumePointLocation>, super::AnalysisProjectionError> {
+        use super::storage::{check_cancelled, reserve};
         if position_m.iter().any(|coordinate| !coordinate.is_finite()) {
-            return None;
+            return Ok(None);
         }
-        let mut matches = self
+        let mut owner = None;
+        for (element_index, element) in self.elements.iter().enumerate() {
+            check_cancelled()?;
+            // Ownership is by stable identity. Equal identities preserve original first-hit order.
+            if owner
+                .as_ref()
+                .is_some_and(|(_, identity, _)| *identity <= element.stable_identity)
+            {
+                continue;
+            }
+            let Some(shape_values) = locate_in_element(self, element, position_m) else {
+                continue;
+            };
+            if element
+                .node_indices
+                .iter()
+                .any(|index| self.nodes.get(*index).is_none())
+            {
+                continue;
+            }
+            owner = Some((element_index, element.stable_identity, shape_values));
+        }
+        let Some((element_index, element_identity, shape_values)) = owner else {
+            return Ok(None);
+        };
+        let element = &self.elements[element_index];
+        let count = element.node_indices.len();
+        let mut node_indices = reserve(count)?;
+        node_indices.extend_from_slice(&element.node_indices);
+        let mut node_identities = reserve(count)?;
+        node_identities.extend(
+            element
+                .node_indices
+                .iter()
+                .map(|index| self.nodes[*index].stable_identity),
+        );
+        let mut weights = reserve(count)?;
+        weights.extend_from_slice(&shape_values[..count]);
+        Ok(Some(VolumePointLocation {
+            element_index,
+            element_identity,
+            position_m,
+            node_indices,
+            node_identities,
+            shape_values: weights,
+        }))
+    }
+    /// Requested output heap; trial geometry and ownership use fixed stack storage.
+    pub fn volume_point_location_resident_bytes(
+        &self,
+    ) -> Result<u64, super::AnalysisProjectionError> {
+        use super::storage::{add, slots};
+        let count = self
             .elements
             .iter()
-            .enumerate()
-            .filter_map(|(element_index, element)| {
-                let shape_values = locate_in_element(self, element, position_m)?;
-                let node_identities = element
-                    .node_indices
-                    .iter()
-                    .map(|index| self.nodes.get(*index).map(|node| node.stable_identity))
-                    .collect::<Option<Vec<_>>>()?;
-                Some(VolumePointLocation {
-                    element_index,
-                    element_identity: element.stable_identity,
-                    position_m,
-                    node_indices: element.node_indices.clone(),
-                    node_identities,
-                    shape_values,
-                })
-            })
-            .collect::<Vec<_>>();
-        matches.sort_by_key(|location| location.element_identity);
-        matches.into_iter().next()
+            .map(|element| element.node_indices.len())
+            .max()
+            .unwrap_or(0);
+        Ok(add(
+            add(
+                slots::<usize>(count)?,
+                slots::<runmat_meshing_core::StableDigest>(count)?,
+            )?,
+            slots::<f64>(count)?,
+        )?)
     }
 }
 
@@ -43,7 +89,7 @@ fn locate_in_element(
     projection: &AnalysisProjection,
     element: &ProjectedElement,
     position_m: [f64; 3],
-) -> Option<Vec<f64>> {
+) -> Option<[f64; 10]> {
     let expected = match element.order {
         ElementOrder::Tet4 => 4,
         ElementOrder::Tet10 => 10,
@@ -51,11 +97,11 @@ fn locate_in_element(
     if element.node_indices.len() != expected {
         return None;
     }
-    let coordinates = element
-        .node_indices
-        .iter()
-        .map(|index| projection.nodes.get(*index).map(|node| node.coordinates_m))
-        .collect::<Option<Vec<_>>>()?;
+    let mut coordinates = [[0.0; 3]; 10];
+    for (coordinate, index) in coordinates.iter_mut().zip(&element.node_indices) {
+        *coordinate = projection.nodes.get(*index)?.coordinates_m;
+    }
+    let coordinates = &coordinates[..expected];
     let coordinate_scale = coordinates
         .iter()
         .flatten()
@@ -95,7 +141,7 @@ fn locate_in_element(
     starts.into_iter().flatten().find_map(|reference| {
         invert_isoparametric_point(
             element.order,
-            &coordinates,
+            coordinates,
             position_m,
             physical_tolerance,
             reference,
@@ -109,7 +155,7 @@ fn invert_isoparametric_point(
     position_m: [f64; 3],
     physical_tolerance: f64,
     mut reference: [f64; 3],
-) -> Option<Vec<f64>> {
+) -> Option<[f64; 10]> {
     let expected = coordinates.len();
     for _ in 0..MAXIMUM_NEWTON_ITERATIONS {
         let barycentric = [
@@ -125,7 +171,7 @@ fn invert_isoparametric_point(
             if barycentric.iter().all(|coordinate| {
                 *coordinate >= -REFERENCE_TOLERANCE && *coordinate <= 1.0 + REFERENCE_TOLERANCE
             }) {
-                return Some(shape_values[..expected].to_vec());
+                return Some(shape_values);
             }
             return None;
         }
@@ -219,86 +265,4 @@ fn solve_3x3(matrix: [[f64; 3]; 3], right: [f64; 3]) -> Option<[f64; 3]> {
 }
 
 #[cfg(test)]
-mod tests {
-    use runmat_meshing_core::{fixtures::canonical_tetrahedron_solver_mesh, ElementOrder};
-
-    use super::{solve_3x3, volume_shape, AnalysisProjection};
-
-    #[test]
-    fn locates_linear_and_quadratic_tetrahedron_points_with_partition_neutral_weights() {
-        for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
-            let projection =
-                AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(order)).unwrap();
-            let location = projection
-                .locate_volume_point([0.2, 0.3, 0.1])
-                .expect("interior point should resolve");
-            assert_eq!(location.element_index, 0);
-            assert_eq!(
-                location.node_indices.len(),
-                match order {
-                    ElementOrder::Tet4 => 4,
-                    ElementOrder::Tet10 => 10,
-                }
-            );
-            assert!((location.shape_values.iter().sum::<f64>() - 1.0).abs() < 1.0e-12);
-            let recovered = std::array::from_fn::<_, 3, _>(|axis| {
-                location
-                    .node_indices
-                    .iter()
-                    .zip(&location.shape_values)
-                    .map(|(node, weight)| projection.nodes[*node].coordinates_m[axis] * weight)
-                    .sum::<f64>()
-            });
-            for (actual, expected) in recovered.into_iter().zip([0.2, 0.3, 0.1]) {
-                assert!((actual - expected).abs() < 1.0e-11);
-            }
-        }
-    }
-
-    #[test]
-    fn rejects_points_outside_the_solid_projection() {
-        let projection =
-            AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
-                .unwrap();
-        assert!(projection.locate_volume_point([0.5, 0.5, 0.5]).is_none());
-    }
-
-    #[test]
-    fn reference_solve_is_scale_aware_for_small_physical_elements() {
-        let scale = 1.0e-8;
-        let solution = solve_3x3(
-            [[scale, 0.0, 0.0], [0.0, scale, 0.0], [0.0, 0.0, scale]],
-            [0.2 * scale, 0.3 * scale, 0.1 * scale],
-        )
-        .expect("well-conditioned small element Jacobian must remain invertible");
-        for (actual, expected) in solution.into_iter().zip([0.2, 0.3, 0.1]) {
-            assert!((actual - expected).abs() < 1.0e-14);
-        }
-    }
-
-    #[test]
-    fn quadratic_location_inverts_a_curved_isoparametric_map() {
-        let mut projection =
-            AnalysisProjection::derive(&canonical_tetrahedron_solver_mesh(ElementOrder::Tet10))
-                .unwrap();
-        projection.nodes[4].coordinates_m[1] = 0.2;
-        projection.nodes[5].coordinates_m[2] = 0.15;
-        projection.nodes[7].coordinates_m[0] = 0.12;
-        let expected_barycentric = [0.4, 0.2, 0.3, 0.1];
-        let (expected_weights, _) = volume_shape(ElementOrder::Tet10, expected_barycentric);
-        let position = std::array::from_fn(|axis| {
-            projection.elements[0]
-                .node_indices
-                .iter()
-                .zip(expected_weights)
-                .map(|(node, weight)| projection.nodes[*node].coordinates_m[axis] * weight)
-                .sum::<f64>()
-        });
-        let location = projection
-            .locate_volume_point(position)
-            .expect("curved Tet10 point should resolve through the isoparametric map");
-        for (actual, expected) in location.shape_values.iter().zip(expected_weights) {
-            assert!((actual - expected).abs() < 1.0e-10);
-        }
-    }
-}
+mod tests;

@@ -96,7 +96,10 @@ fn prepare_for<'a>(
             "nonlinear structural execution requires an authoritative canonical solid mesh".into(),
         ));
     }
-    if backend != ComputeBackend::Cpu || options.contact_context.is_some() {
+    if backend != ComputeBackend::Cpu
+        || options.contact_context.is_some()
+        || !model.interfaces.is_empty()
+    {
         return Err(FeaRunError::InvalidModel(
             "canonical J2 solids require CPU and do not implement contact".into(),
         ));

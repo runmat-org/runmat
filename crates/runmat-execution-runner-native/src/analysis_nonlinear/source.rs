@@ -26,6 +26,30 @@ struct OriginalSource<S> {
     store: S,
 }
 impl<S: CacheImport> CacheImport for OriginalSource<S> {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        let reference = self
+            .catalog
+            .objects
+            .iter()
+            .find(|r| r.logical_digest == digest)
+            .ok_or_else(|| {
+                runmat_execution_artifact::ArtifactError::Identity(
+                    "nonlinear read outside original catalog".into(),
+                )
+            })?;
+        if reference.encoded_length > maximum_bytes {
+            return Err(runmat_execution_artifact::ArtifactError::Limit(
+                "original nonlinear object exceeds caller read allowance".into(),
+            ));
+        }
+        self.store
+            .read_verified_bounded_with_admission(digest, reference.encoded_length, admit)
+    }
     fn read_verified_bounded(
         &self,
         digest: Digest,

@@ -87,7 +87,8 @@ impl MeshingRequestSettings {
 pub fn production_algorithm_versions() -> AlgorithmVersionSet {
     AlgorithmVersionSet {
         geometry: "geometry/exact-brep".into(),
-        curve: "curve/exact-metric".into(),
+        // Geometry-derived sizing is shared by curves, surfaces and volume consumers.
+        curve: "curve/exact-metric-v4".into(),
         surface: "surface/exact-cdt".into(),
         plc: "plc/canonical".into(),
         tetrahedron: "tetrahedron/constrained-delaunay".into(),

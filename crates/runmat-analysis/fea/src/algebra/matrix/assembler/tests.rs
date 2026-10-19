@@ -103,3 +103,39 @@ fn planned_support_fails_closed_and_handles_empty_patterns() {
     assert_eq!(empty.pattern().row_offsets(), &[0]);
     assert!(empty.values().is_empty());
 }
+
+#[test]
+fn shared_planned_support_survives_unchanged_and_compacted_assemblies() {
+    let source = SparsePattern::try_new(2, 2, vec![0, 2, 4], vec![0, 1, 0, 1]).unwrap();
+    let mut full = RealSparseAssembler::with_pattern(
+        source.clone(),
+        OperatorRole::Conductivity,
+        MatrixProperties::GENERAL,
+    )
+    .unwrap();
+    let mut compacted = RealSparseAssembler::with_pattern(
+        source.clone(),
+        OperatorRole::Conductivity,
+        MatrixProperties::GENERAL,
+    )
+    .unwrap();
+    for row in 0..2 {
+        for column in 0..2 {
+            full.add(row, column, (row + column + 1) as f64);
+            if row != column {
+                compacted.add(row, column, 1.0);
+            }
+        }
+    }
+    let full = full.finish().unwrap();
+    assert_eq!(
+        full.pattern().column_indices().as_ptr(),
+        source.column_indices().as_ptr()
+    );
+    let compacted = compacted.finish().unwrap();
+    assert_eq!(compacted.pattern().row_offsets(), &[0, 1, 2]);
+    assert_eq!(compacted.pattern().column_indices(), &[1, 0]);
+    assert_eq!(source.row_offsets(), &[0, 2, 4]);
+    assert_eq!(source.column_indices(), &[0, 1, 0, 1]);
+    assert_eq!(full.pattern(), &source);
+}

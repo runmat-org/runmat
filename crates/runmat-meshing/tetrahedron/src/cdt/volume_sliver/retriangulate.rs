@@ -27,227 +27,131 @@ use crate::{
     },
 };
 
-/// Replaces an interior vertex by deleting its complete star, filling the resulting closed
-/// cavity without that vertex, and inserting the replacement through protected Bowyer-Watson.
-/// Connectivity is therefore rebuilt around the moved point instead of being frozen in place.
-pub(super) fn retriangulate_relocated_vertex(
-    topology: &DelaunayVolumeTopology,
+mod preparation;
+
+pub(super) struct PreparedVertexRemoval<'a> {
+    topology: &'a DelaunayVolumeTopology,
     source_index: usize,
-    replacement: DelaunayVolumeNode,
-    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
     insertion_options: crate::cdt::DelaunayInsertionOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Option<DelaunayVolumeTopology>, DelaunayVolumeSliverError> {
-    let Some(topology) = retriangulate_without_vertex(
-        topology,
-        source_index,
-        Some(replacement),
-        protected_faces,
-        insertion_options,
-        cancellation,
-    )?
-    else {
-        return Ok(None);
-    };
-    match insert_delaunay_volume_node_locally_with_barriers(
-        topology,
-        replacement,
-        protected_faces,
-        insertion_options,
-        cancellation,
-    ) {
-        Ok(topology) => Ok(Some(topology)),
-        Err(failure) => insertion_result(failure.kind, failure.to_string()),
+    selected: BTreeSet<usize>,
+    region: runmat_geometry_core::PersistentEntityId,
+    refill_tetrahedra: Vec<[u32; 4]>,
+}
+impl<'a> PreparedVertexRemoval<'a> {
+    pub(super) fn prepare(
+        topology: &'a DelaunayVolumeTopology,
+        source_index: usize,
+        insertion_options: crate::cdt::DelaunayInsertionOptions,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<Option<Self>, DelaunayVolumeSliverError> {
+        preparation::prepare(topology, source_index, insertion_options, cancellation)
+    }
+    pub(super) fn relocate(
+        &self,
+        replacement: DelaunayVolumeNode,
+        protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<Option<DelaunayVolumeTopology>, DelaunayVolumeSliverError> {
+        let insertion_options = self.insertion_options;
+        if self.topology.nodes.iter().enumerate().any(|(index, node)| {
+            index != self.source_index
+                && (node.identity == replacement.identity
+                    || node.coordinates_m == replacement.coordinates_m)
+        }) {
+            return Ok(None);
+        }
+        let Some(topology) = self.materialize(protected_faces, cancellation)? else {
+            return Ok(None);
+        };
+        match insert_delaunay_volume_node_locally_with_barriers(
+            topology,
+            replacement,
+            protected_faces,
+            insertion_options,
+            cancellation,
+        ) {
+            Ok(topology) => Ok(Some(topology)),
+            Err(failure) => insertion_result(failure.kind, failure.to_string()),
+        }
+    }
+    pub(super) fn materialize(
+        &self,
+        protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<Option<DelaunayVolumeTopology>, DelaunayVolumeSliverError> {
+        let insertion_options = self.insertion_options;
+        let topology = self.topology;
+        let source_index = self.source_index;
+        let region = &self.region;
+        let refill_tetrahedra = &self.refill_tetrahedra;
+        let source_identity = topology.nodes[source_index].identity;
+        let nodes = topology
+            .nodes
+            .iter()
+            .copied()
+            .filter(|node| node.identity != source_identity)
+            .collect::<Vec<_>>();
+        // Canonical nodes are ordered by unique identity. Removing one entry
+        // preserves that order, so its index shift is exact and needs no map.
+        let remap = |vertices| remap_without_vertex(vertices, source_index);
+        let removed = &self.selected;
+        let mut tetrahedra = topology
+            .tetrahedra
+            .iter()
+            .enumerate()
+            .filter(|(index, _)| !removed.contains(index))
+            .map(|(_, tetrahedron)| {
+                Ok((
+                    remap(tetrahedron.vertex_indices)?,
+                    tetrahedron.region_id.clone(),
+                ))
+            })
+            .collect::<Result<Vec<_>, DelaunayVolumeSliverError>>()?;
+        for tetrahedron in refill_tetrahedra {
+            let remapped = remap(*tetrahedron)?;
+            tetrahedra.push((remapped, Some(region.clone())));
+        }
+        let rebuilt = match build_delaunay_volume_topology_with_regions(
+            nodes,
+            tetrahedra,
+            insertion_options.topology,
+            cancellation,
+        ) {
+            Ok(topology) => topology,
+            Err(failure) => return topology_result(failure.kind, failure.to_string()),
+        };
+        match legalize_delaunay_volume_topology_with_barriers(
+            rebuilt,
+            protected_faces,
+            insertion_options,
+            cancellation,
+        ) {
+            Ok(topology) => Ok(Some(topology)),
+            Err(failure) => insertion_result(failure.kind, failure.to_string()),
+        }
     }
 }
 
-pub(super) fn retriangulate_deleted_vertex(
-    topology: &DelaunayVolumeTopology,
+fn remap_without_vertex(
+    vertices: [u32; 4],
     source_index: usize,
-    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
-    insertion_options: crate::cdt::DelaunayInsertionOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Option<DelaunayVolumeTopology>, DelaunayVolumeSliverError> {
-    retriangulate_without_vertex(
-        topology,
-        source_index,
-        None,
-        protected_faces,
-        insertion_options,
-        cancellation,
-    )
-}
-
-fn retriangulate_without_vertex(
-    topology: &DelaunayVolumeTopology,
-    source_index: usize,
-    replacement: Option<DelaunayVolumeNode>,
-    protected_faces: &[[runmat_meshing_core::StableDigest; 3]],
-    insertion_options: crate::cdt::DelaunayInsertionOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<Option<DelaunayVolumeTopology>, DelaunayVolumeSliverError> {
-    if source_index >= topology.nodes.len()
-        || topology.nodes.iter().enumerate().any(|(index, node)| {
-            index != source_index
-                && replacement.is_some_and(|replacement| {
-                    node.identity == replacement.identity
-                        || node.coordinates_m == replacement.coordinates_m
-                })
-        })
-    {
-        return Ok(None);
-    }
-
-    let selected = topology.incidence.vertex_stars[source_index]
-        .iter()
-        .map(|index| *index as usize)
-        .collect::<Vec<_>>();
-    if selected.is_empty() {
-        return Ok(None);
-    }
-    let regions = selected
-        .iter()
-        .filter_map(|index| topology.tetrahedra[*index].region_id.clone())
-        .collect::<BTreeSet<_>>();
-    if regions.len() != 1 {
-        return Ok(None);
-    }
-    let region = regions
-        .into_iter()
-        .next()
-        .expect("one region was established");
-
-    let cavity_tetrahedra = topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .map(|(index, tetrahedron)| {
-            let points = tetrahedron
-                .vertex_indices
-                .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
-            CavityTetrahedron {
-                tetrahedron_id: index as u32,
-                component_id: 0,
-                node_ids: tetrahedron.vertex_indices,
-                source_surface_element_id: 0,
-                region_ids: tetrahedron
-                    .region_id
-                    .iter()
-                    .map(|region| region.source_topology_id.clone())
-                    .collect(),
-                volume_m3: tetrahedron_volume(points),
-                aspect_ratio: tetrahedron_edge_aspect_ratio(points),
-                exact_scaled_jacobian: tetrahedron_scaled_jacobian(points),
-            }
-        })
-        .collect::<Vec<_>>();
-    let cavity = match constrained_cavity_from_selected_tetrahedra(
-        &cavity_tetrahedra,
-        &selected,
-        Vec::new(),
-    ) {
-        Ok(cavity) => cavity,
-        Err(ConstrainedCavityExtractionError::Validation(_)) => return Ok(None),
-        Err(failure) => {
+) -> Result<[u32; 4], DelaunayVolumeSliverError> {
+    let remap = |vertex: u32| {
+        let index = vertex as usize;
+        if index == source_index {
             return Err(error(
                 DelaunayVolumeSliverErrorKind::InvalidTopology,
-                format!("interior vertex-star cavity extraction failed: {failure:?}"),
-            ))
+                "interior vertex-star cavity remap referenced the removed node",
+            ));
         }
+        Ok(vertex - u32::from(index > source_index))
     };
-    let boundary_node_ids = constrained_cavity_boundary_node_ids(&cavity);
-    let mut star_refill = None;
-    for apex in &boundary_node_ids {
-        if let Some(tetrahedra) = constrained_cavity_star_refill_for_apex(&cavity, *apex, |index| {
-            topology
-                .nodes
-                .get(index as usize)
-                .map(|node| node.coordinates_m)
-        }) {
-            star_refill = Some(tetrahedra);
-            break;
-        }
-    }
-    let refill_tetrahedra = match star_refill.or(convex_delaunay_refill(
-        topology,
-        &cavity,
-        &boundary_node_ids,
-        insertion_options,
-        cancellation,
-    )?) {
-        Some(tetrahedra) => tetrahedra,
-        None => return Ok(None),
-    };
-
-    let source_identity = topology.nodes[source_index].identity;
-    let nodes = topology
-        .nodes
-        .iter()
-        .copied()
-        .filter(|node| node.identity != source_identity)
-        .collect::<Vec<_>>();
-    let indices = nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.identity, index as u32))
-        .collect::<BTreeMap<_, _>>();
-    let remap = |old: u32| -> Result<u32, DelaunayVolumeSliverError> {
-        indices
-            .get(&topology.nodes[old as usize].identity)
-            .copied()
-            .ok_or_else(|| {
-                error(
-                    DelaunayVolumeSliverErrorKind::InvalidTopology,
-                    "interior vertex-star cavity remap referenced the removed node",
-                )
-            })
-    };
-    let removed = selected.into_iter().collect::<BTreeSet<_>>();
-    let mut tetrahedra = topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .filter(|(index, _)| !removed.contains(index))
-        .map(|(_, tetrahedron)| {
-            Ok((
-                tetrahedron
-                    .vertex_indices
-                    .map(remap)
-                    .into_iter()
-                    .collect::<Result<Vec<_>, _>>()?
-                    .try_into()
-                    .expect("tetrahedron remap retains four vertices"),
-                tetrahedron.region_id.clone(),
-            ))
-        })
-        .collect::<Result<Vec<_>, DelaunayVolumeSliverError>>()?;
-    for tetrahedron in refill_tetrahedra {
-        let remapped = tetrahedron
-            .map(remap)
-            .into_iter()
-            .collect::<Result<Vec<_>, _>>()?
-            .try_into()
-            .expect("cavity refill retains four vertices");
-        tetrahedra.push((remapped, Some(region.clone())));
-    }
-    let rebuilt = match build_delaunay_volume_topology_with_regions(
-        nodes,
-        tetrahedra,
-        insertion_options.topology,
-        cancellation,
-    ) {
-        Ok(topology) => topology,
-        Err(failure) => return topology_result(failure.kind, failure.to_string()),
-    };
-    match legalize_delaunay_volume_topology_with_barriers(
-        rebuilt,
-        protected_faces,
-        insertion_options,
-        cancellation,
-    ) {
-        Ok(topology) => Ok(Some(topology)),
-        Err(failure) => insertion_result(failure.kind, failure.to_string()),
-    }
+    Ok([
+        remap(vertices[0])?,
+        remap(vertices[1])?,
+        remap(vertices[2])?,
+        remap(vertices[3])?,
+    ])
 }
 
 /// Most interior vertex stars are convex. For those, the canonical Delaunay fill of the star is
@@ -288,11 +192,11 @@ fn convex_delaunay_refill(
             _ => return Ok(None),
         },
     };
-    let old_indices = topology
-        .nodes
+    // Only the deleted star's boundary participates in its local point set.
+    // Do not rebuild an identity map for every unrelated node in the volume.
+    let old_indices = boundary_node_ids
         .iter()
-        .enumerate()
-        .map(|(index, node)| (node.identity, index as u32))
+        .map(|index| (topology.nodes[*index as usize].identity, *index))
         .collect::<BTreeMap<_, _>>();
     let expected_boundary = cavity
         .boundary_faces

@@ -88,7 +88,12 @@ pub(super) fn insert_delaunay_volume_refinement_candidate_from_admitted_input(
         )
         .map_err(quality_error)?;
     let step = DelaunayVolumeRefinementStep { topology, quality };
-    validate_delaunay_volume_refinement_step_from_admitted_input(input, candidate, &step)?;
+    validate_delaunay_volume_refinement_step_from_admitted_input(
+        input,
+        candidate,
+        &step,
+        cancellation,
+    )?;
     Ok(step)
 }
 
@@ -135,13 +140,19 @@ pub fn validate_delaunay_volume_refinement_step(
         cancellation,
     )
     .map_err(quality_error)?;
-    validate_delaunay_volume_refinement_step_from_admitted_input(input, candidate, step)
+    validate_delaunay_volume_refinement_step_from_admitted_input(
+        input,
+        candidate,
+        step,
+        cancellation,
+    )
 }
 
 fn validate_delaunay_volume_refinement_step_from_admitted_input(
     input: DelaunayVolumeRefinementInput<'_>,
     candidate: &DelaunayVolumeRefinementCandidate,
     step: &DelaunayVolumeRefinementStep,
+    cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<(), DelaunayVolumeRefinementStepError> {
     if step.topology.nodes.len() != input.topology.nodes.len() + 1
         || step
@@ -175,49 +186,14 @@ fn validate_delaunay_volume_refinement_step_from_admitted_input(
             "refinement candidate has no incident tetrahedron after insertion",
         ));
     }
-    let source_quality = input
-        .quality
-        .tetrahedra
-        .iter()
-        .find(|tetrahedron| tetrahedron.node_identities == candidate.source_node_identities)
-        .expect("validated refinement source belongs to input quality");
-    let candidate_incident_violation = step
-        .quality
-        .tetrahedra
-        .iter()
-        .filter(|tetrahedron| {
-            tetrahedron
-                .node_identities
-                .contains(&candidate.node.identity)
-        })
-        .map(|tetrahedron| tetrahedron.refinement_violation_ratio)
-        .max_by(f64::total_cmp)
-        .expect("validated refinement candidate has an incident tetrahedron");
-    let prior_worst_violation = input
-        .quality
-        .tetrahedra
-        .iter()
-        .map(|tetrahedron| tetrahedron.refinement_violation_ratio)
-        .max_by(f64::total_cmp)
-        .unwrap_or(0.0);
-    let resulting_worst_violation = step
-        .quality
-        .tetrahedra
-        .iter()
-        .map(|tetrahedron| tetrahedron.refinement_violation_ratio)
-        .max_by(f64::total_cmp)
-        .unwrap_or(0.0);
-    let priority = crate::cdt::volume_quality::violation_priority_key;
-    if priority(candidate_incident_violation) > priority(source_quality.refinement_violation_ratio)
-        || priority(resulting_worst_violation) > priority(prior_worst_violation)
-        || prior_worst_violation == f64::MAX && resulting_worst_violation == f64::MAX
-    {
+    if !super::admission::canonical_single_step_nonregression(
+        input.quality,
+        &step.quality,
+        cancellation,
+    )? {
         return Err(error(
             DelaunayVolumeRefinementStepErrorKind::InvalidQuality,
-            format!(
-                "refinement insertion regresses canonical aggregate quality: source violation {}, candidate-star violation {candidate_incident_violation}, prior worst violation {prior_worst_violation}, resulting worst violation {resulting_worst_violation}",
-                source_quality.refinement_violation_ratio,
-            ),
+            "refinement insertion regresses the complete changed-neighborhood quality ceiling",
         ));
     }
     let exact_boundary_nodes = input

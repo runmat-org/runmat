@@ -6,9 +6,9 @@ use crate::{
 };
 use runmat_analysis_core::{
     validate_model, AnalysisConstraint, AnalysisModel, AnalysisProcedure, CoordinateFrame,
-    ExcitationAction, ExcitationCaseActivation, ExcitationCaseSelection, FormulationRequirement,
-    IndependentDomain, PhysicalSignal, PhysicsFamily, ProcedureSettings, ProcedureStepId,
-    RestartPolicy, SolutionSpace, StateCompleteness, StateKind, StatePersistence,
+    ExcitationCaseActivation, ExcitationCaseSelection, FormulationRequirement, IndependentDomain,
+    PhysicsFamily, ProcedureSettings, ProcedureStepId, RestartPolicy, SolutionSpace,
+    StateCompleteness, StateKind, StatePersistence,
 };
 use runmat_canonical_codec::{
     decode_contract, encode_contract, serialized_materialization_resident_bytes_estimate,
@@ -86,7 +86,7 @@ impl FluidSteadyWorkload {
                 .model
                 .excitations
                 .iter()
-                .any(|a| !matches!(a, ExcitationAction::BodyForce(_)))
+                .any(|a| !crate::physics::cfd::canonical::supports_action(a))
         {
             return Err(invalid(
                 "steady fluid has no scheduled/alternate excitation-case authority",
@@ -128,14 +128,11 @@ impl FluidSteadyWorkload {
                 .constraints
                 .iter()
                 .any(|c| !matches!(c, AnalysisConstraint::Fluid(_)))
-            || self.model.signals.iter().any(|s| {
-                !matches!(
-                    s,
-                    PhysicalSignal::Velocity(_)
-                        | PhysicalSignal::Pressure(_)
-                        | PhysicalSignal::BodyForceDensity(_)
-                )
-            })
+            || self
+                .model
+                .signals
+                .iter()
+                .any(|s| !crate::physics::cfd::canonical::supports_signal(s))
         {
             return Err(invalid(
                 "unsupported standalone experimental CPU steady fluid authority",

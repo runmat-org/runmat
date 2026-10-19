@@ -1,30 +1,45 @@
 //! Count-only admission estimate beside the authoritative projection constructor.
-use std::{collections::BTreeSet, mem::size_of};
-
 use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
-use runmat_meshing_core::{BoundaryTriangleOrder, SolverMeshArtifact};
-use serde::{Serialize, Serializer};
+use runmat_meshing_core::{BoundaryTriangleOrder, PersistentEntityId, SolverMeshArtifact};
 
 use super::{
     AnalysisProjection, AnalysisProjectionError, AnalysisProjectionPolicy, BoundaryQuadraturePoint,
     ProjectedBoundaryFace, ProjectedElement, ProjectedNode,
 };
 
+mod retained;
+
 const PROFILE_LIMITS: CanonicalLimits =
     CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64);
 
 impl AnalysisProjection {
-    /// Checked ordered identity-set scratch, shared with native field validation.
-    pub fn identity_set_resident_bytes_estimate(
-        count: usize,
+    /// Shared curved-boundary moment construction scratch, excluding source and allocator overhead.
+    pub fn boundary_quadrature_scratch_resident_bytes(
+        order: BoundaryTriangleOrder,
     ) -> Result<u64, AnalysisProjectionError> {
-        index::<runmat_meshing_core::StableDigest>(count)
+        let mut total = 0;
+        if order == BoundaryTriangleOrder::Tri6 {
+            for size in [
+                super::quadrature::GAUSS_LEGENDRE_EIGHT_UNIT.len(),
+                super::quadrature::GAUSS_LEGENDRE_TWELVE_UNIT.len(),
+                super::quadrature::GAUSS_LEGENDRE_SIXTEEN_UNIT.len(),
+            ] {
+                add(
+                    &mut total,
+                    slots::<BoundaryQuadraturePoint>(
+                        size.checked_mul(size).ok_or_else(overflow)?,
+                        1,
+                    )?,
+                )?;
+            }
+        }
+        Ok(total)
     }
     /// Analytic requested-heap bound for an owned clone, including the actual
     /// private lookup inventories and nested provenance/connectivity payloads.
     /// This is not allocator bookkeeping or measured RSS.
     pub fn clone_resident_bytes_estimate(&self) -> Result<u64, AnalysisProjectionError> {
-        let mut total = size_of::<Self>() as u64;
+        let mut total = 0;
         add(&mut total, vector::<ProjectedNode>(self.nodes.len())?)?;
         add(&mut total, vector::<ProjectedElement>(self.elements.len())?)?;
         add(
@@ -32,21 +47,24 @@ impl AnalysisProjection {
             vector::<ProjectedBoundaryFace>(self.boundary_faces.len())?,
         )?;
         add(&mut total, vector::<Vec<usize>>(self.node_neighbors.len())?)?;
-        add(&mut total, index::<(u64, usize)>(self.node_by_id.len())?)?;
-        add(&mut total, index::<(u64, usize)>(self.element_by_id.len())?)?;
+        add(&mut total, slots::<(u64, usize)>(self.node_by_id.len(), 1)?)?;
+        add(
+            &mut total,
+            slots::<(u64, usize)>(self.element_by_id.len(), 1)?,
+        )?;
         for neighbors in &self.node_neighbors {
             add(&mut total, vector::<usize>(neighbors.len())?)?;
         }
         for element in &self.elements {
             add(&mut total, vector::<usize>(element.node_indices.len())?)?;
+            add(&mut total, entity_payload_bytes(&element.region_id)?)?;
             add(
                 &mut total,
-                serialized_materialization_resident_bytes_estimate(
-                    &(&element.region_id, &element.provenance),
-                    PROFILE_LIMITS,
-                )
-                .map_err(resource)?,
+                vector::<PersistentEntityId>(element.provenance.len())?,
             )?;
+            for entity in &element.provenance {
+                add(&mut total, entity_payload_bytes(entity)?)?;
+            }
         }
         for face in &self.boundary_faces {
             add(&mut total, vector::<usize>(face.node_indices.len())?)?;
@@ -56,12 +74,11 @@ impl AnalysisProjection {
             )?;
             add(
                 &mut total,
-                serialized_materialization_resident_bytes_estimate(
-                    &face.provenance,
-                    PROFILE_LIMITS,
-                )
-                .map_err(resource)?,
+                vector::<PersistentEntityId>(face.provenance.len())?,
             )?;
+            for entity in &face.provenance {
+                add(&mut total, entity_payload_bytes(entity)?)?;
+            }
         }
         Ok(total)
     }
@@ -77,98 +94,28 @@ impl AnalysisProjection {
         let mut total = mesh
             .validation_resident_bytes_estimate()
             .map_err(resource)?;
-        // Retained projected records and lookup indexes.
-        add(&mut total, vector::<ProjectedNode>(topology.nodes.len())?)?;
-        add(
-            &mut total,
-            vector::<ProjectedElement>(topology.volume_elements.len())?,
+        add(&mut total, Self::retained_resident_bytes_upper_bound(mesh)?)?;
+        let neighbor_references = super::neighbors::occurrence_count(
+            topology
+                .volume_elements
+                .iter()
+                .map(|element| element.node_ids.len()),
         )?;
-        add(
-            &mut total,
-            vector::<ProjectedBoundaryFace>(topology.boundary_faces.len())?,
-        )?;
-        add(&mut total, index::<(u64, usize)>(topology.nodes.len())?)?;
-        add(
-            &mut total,
-            index::<(u64, usize)>(topology.volume_elements.len())?,
-        )?;
-
-        let mut neighbor_references = 0_u64;
-        let mut largest_element = 0_usize;
-        for element in &topology.volume_elements {
-            let count = element.node_ids.len();
-            add(&mut total, vector::<usize>(count)?)?;
-            add(
-                &mut total,
-                vector::<runmat_meshing_core::PersistentEntityId>(element.provenance.len())?,
-            )?;
-            largest_element = largest_element.max(count);
-            let count = u64::try_from(count).map_err(resource)?;
-            add(
-                &mut neighbor_references,
-                count
-                    .checked_mul(count.saturating_sub(1))
-                    .ok_or_else(overflow)?,
-            )?;
-        }
-        let mut largest_face = 0_usize;
-        for face in &topology.boundary_faces {
-            add(&mut total, vector::<usize>(face.node_ids.len())?)?;
-            add(
-                &mut total,
-                vector::<usize>(face.adjacent_volume_element_ids.len())?,
-            )?;
-            add(
-                &mut total,
-                vector::<runmat_meshing_core::PersistentEntityId>(face.provenance.len())?,
-            )?;
-            largest_face = largest_face.max(face.node_ids.len());
-        }
-        // Construction neighbor sets coexist with already-converted neighbor vectors. Each
-        // element contributes at most k*(k-1) directed references; sharing can only reduce this.
-        add(&mut total, vector::<BTreeSet<usize>>(topology.nodes.len())?)?;
-        add(&mut total, index_count::<usize>(neighbor_references)?)?;
-        add(&mut total, vector::<Vec<usize>>(topology.nodes.len())?)?;
-        add(
-            &mut total,
-            scale(neighbor_references, 2 * size_of::<usize>() as u64)?,
-        )?;
-        add(&mut total, slots::<usize>(topology.nodes.len(), 4)?)?;
-
-        // Coordinate lists are local to one element/face. Quadrature values themselves use
-        // stack arrays except curved Tri6 boundaries, which retain/refine product-rule vectors.
-        add(&mut total, vector::<[f64; 3]>(largest_element)?)?;
-        add(&mut total, vector::<[f64; 3]>(largest_face)?)?;
+        // Sorted edge candidates coexist with retained adjacency; duplicate occurrences remain
+        // in this exact-reserved scratch capacity until construction finishes.
+        add(&mut total, slots::<(usize, usize)>(neighbor_references, 1)?)?;
+        // Element/face coordinate arrays are bounded stack storage. Curved Tri6 moments
+        // retain and refine the original shared quadrature rules below.
         if topology
             .boundary_faces
             .iter()
             .any(|face| face.order == BoundaryTriangleOrder::Tri6)
         {
-            // Actual peak retains the 12x12 rule while building 16x16. Include the preceding
-            // 8x8 rule too so this remains conservative over the convergence branch sequence.
-            for rule_size in [
-                super::quadrature::GAUSS_LEGENDRE_EIGHT_UNIT.len(),
-                super::quadrature::GAUSS_LEGENDRE_TWELVE_UNIT.len(),
-                super::quadrature::GAUSS_LEGENDRE_SIXTEEN_UNIT.len(),
-            ] {
-                add(
-                    &mut total,
-                    slots::<BoundaryQuadraturePoint>(
-                        rule_size.checked_mul(rule_size).ok_or_else(overflow)?,
-                        1,
-                    )?,
-                )?;
-            }
+            add(
+                &mut total,
+                Self::boundary_quadrature_scratch_resident_bytes(BoundaryTriangleOrder::Tri6)?,
+            )?;
         }
-        // These are exactly the authored metadata families cloned by derive/project_boundary_face.
-        add(
-            &mut total,
-            serialized_materialization_resident_bytes_estimate(
-                &(ElementRegions(mesh), FaceProvenance(mesh)),
-                PROFILE_LIMITS,
-            )
-            .map_err(resource)?,
-        )?;
         // Projection identity is a small mesh-digest/policy contract; profile the same borrowed
         // shape rather than encoding it merely to count its temporary tree and byte buffer.
         add(
@@ -183,58 +130,23 @@ impl AnalysisProjection {
     }
 }
 
-struct ElementRegions<'a>(&'a SolverMeshArtifact);
-impl Serialize for ElementRegions<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(
-            self.0
-                .topology
-                .volume_elements
-                .iter()
-                .map(|element| (&element.region_id, &element.provenance)),
-        )
+// Records contain the scalar kind and string/vector headers already. Count only the
+// borrowed original UTF-8 and path buffers copied by their standard Clone implementations.
+fn entity_payload_bytes(entity: &PersistentEntityId) -> Result<u64, AnalysisProjectionError> {
+    let mut bytes = vector::<String>(entity.assembly_path.len())?;
+    add(&mut bytes, vector::<u8>(entity.source_topology_id.len())?)?;
+    for path in &entity.assembly_path {
+        add(&mut bytes, vector::<u8>(path.len())?)?;
     }
-}
-struct FaceProvenance<'a>(&'a SolverMeshArtifact);
-impl Serialize for FaceProvenance<'_> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_seq(
-            self.0
-                .topology
-                .boundary_faces
-                .iter()
-                .map(|face| &face.provenance),
-        )
-    }
+    Ok(bytes)
 }
 
 fn vector<T>(count: usize) -> Result<u64, AnalysisProjectionError> {
-    if count == 0 {
-        return Ok(0);
-    }
-    let count = u64::try_from(count).map_err(resource)?;
-    scale(
-        count
-            .checked_mul(2)
-            .and_then(|count| count.checked_add(4))
-            .ok_or_else(overflow)?,
-        size_of::<T>() as u64,
-    )
+    slots::<T>(count, 1)
 }
 fn slots<T>(count: usize, copies: u64) -> Result<u64, AnalysisProjectionError> {
-    scale(
-        u64::try_from(count).map_err(resource)?,
-        (size_of::<T>() as u64)
-            .checked_mul(copies)
-            .ok_or_else(overflow)?,
-    )
-}
-fn index<T>(count: usize) -> Result<u64, AnalysisProjectionError> {
-    index_count::<T>(u64::try_from(count).map_err(resource)?)
-}
-fn index_count<T>(count: u64) -> Result<u64, AnalysisProjectionError> {
-    // Partial BTree nodes and construction scratch; fixed profiler allowances cover tiny roots.
-    scale(count, 3 * (size_of::<T>() + 4 * size_of::<usize>()) as u64)
+    let bytes = super::storage::slots::<T>(count)?;
+    scale(bytes, copies)
 }
 fn scale(count: u64, width: u64) -> Result<u64, AnalysisProjectionError> {
     count.checked_mul(width).ok_or_else(overflow)
@@ -252,3 +164,6 @@ fn resource(error: impl std::fmt::Display) -> AnalysisProjectionError {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) use tests::allocation::measured;

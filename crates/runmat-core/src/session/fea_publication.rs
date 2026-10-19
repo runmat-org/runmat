@@ -33,16 +33,10 @@ impl PreparedFeaWorkspacePublication {
 }
 
 fn relative(path: &LogicalSourcePath) -> Result<PathBuf, String> {
-    let path = Path::new(path.as_str())
-        .strip_prefix("project")
-        .map_err(|_| "source edit is outside the project")?;
-    if path.as_os_str().is_empty()
-        || path
-            .components()
-            .any(|part| !matches!(part, std::path::Component::Normal(_)))
-    {
-        return Err("source edit is outside the project".into());
+    if path.is_root() {
+        return Err("source edit path must name a workspace-relative file".into());
     }
+    let path = Path::new(path.as_str());
     if !matches!(
         path.extension().and_then(|value| value.to_str()),
         Some("fea" | "m")
@@ -140,7 +134,7 @@ impl RunMatSession {
                     .to_str()
                     .ok_or("captured source path is not UTF-8")?;
                 Ok(FeaWorkspaceFile {
-                    path: LogicalSourcePath::new(format!("project/{path}"))
+                    path: LogicalSourcePath::new(path.to_owned())
                         .map_err(|error| error.to_string())?,
                     version: file.version,
                     bytes: file.bytes,
@@ -149,13 +143,26 @@ impl RunMatSession {
             .collect::<Result<Vec<_>, String>>()?;
         // Retain only changed source originals for bounded review, from the exact
         // capture used by the compiler. Reading live files later would mislead review.
-        let changed = edits.iter().flat_map(|edit| match edit {
-            FeaWorkspaceEdit::Write { path, .. } | FeaWorkspaceEdit::Remove { path } => vec![path],
-            FeaWorkspaceEdit::Rename { from, to } => vec![from, to],
-        }).collect::<std::collections::BTreeSet<_>>();
-        let original_sources = files.iter().filter(|file| changed.contains(&file.path))
-            .map(|file| Ok((file.path.clone(), std::str::from_utf8(&file.bytes)
-                .map_err(|_| "FEA source review requires UTF-8 source")?.to_owned())))
+        let changed = edits
+            .iter()
+            .flat_map(|edit| match edit {
+                FeaWorkspaceEdit::Write { path, .. } | FeaWorkspaceEdit::Remove { path } => {
+                    vec![path]
+                }
+                FeaWorkspaceEdit::Rename { from, to } => vec![from, to],
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        let original_sources = files
+            .iter()
+            .filter(|file| changed.contains(&file.path))
+            .map(|file| {
+                Ok((
+                    file.path.clone(),
+                    std::str::from_utf8(&file.bytes)
+                        .map_err(|_| "FEA source review requires UTF-8 source")?
+                        .to_owned(),
+                ))
+            })
             .collect::<Result<std::collections::BTreeMap<_, _>, String>>()?;
         let mut dependencies = Vec::new();
         if let Some(handoff) = &self.project_handoff {

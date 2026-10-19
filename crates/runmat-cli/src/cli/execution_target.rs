@@ -8,7 +8,7 @@ pub struct ExecutionTargetArgs {
     #[arg(long)]
     pub cluster: Option<String>,
     /// Remote project; defaults to the active project
-    #[arg(long)]
+    #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
     pub project: Option<Uuid>,
     /// Remote scheduler queue
     #[arg(long)]

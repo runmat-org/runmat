@@ -1,37 +1,56 @@
 use super::CanonicalFluidError as Error;
 use crate::topology::{AnalysisProjection, FiniteVolumeTopology};
 use runmat_analysis_core::{
-    AnalysisBoundary, BoundaryOperator, EntityDimension, ExpectedTopology, FluidConstraint,
-    FluidConstraintKind, PhysicalSignal, RegionTarget, SignalProvenance,
+    AnalysisBoundary, BoundaryOperator, EntityDimension, ExcitationAction, ExpectedTopology,
+    FluidConstraint, FluidConstraintKind, PhysicalSignal, RegionTarget, SignalProvenance,
 };
 
-#[derive(Clone, Debug, serde::Serialize)]
-pub(super) enum FaceBoundary {
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub(super) enum FaceBoundary<'a> {
     Interior,
     Velocity {
-        authority_id: String,
+        authority_id: &'a str,
         value: [f64; 3],
         moving_wall: bool,
     },
     PressureOutlet {
-        authority_id: String,
+        authority_id: &'a str,
         pressure: f64,
     },
 }
 
-pub(super) fn compile(
-    source: &AnalysisProjection,
-    t: &FiniteVolumeTopology,
-    constraints: &[FluidConstraint],
-    operators: &[AnalysisBoundary],
-    signals: &[PhysicalSignal],
-    sample: crate::excitation::ExcitationSamplePoint<'_>,
-) -> Result<Vec<FaceBoundary>, Error> {
+mod mass_flow;
+
+pub(super) struct BoundaryInput<'a, 's> {
+    pub source: &'a AnalysisProjection,
+    pub topology: &'a FiniteVolumeTopology,
+    pub constraints: &'a [FluidConstraint],
+    pub operators: &'a [AnalysisBoundary],
+    pub signals: &'a [PhysicalSignal],
+    pub excitations: &'a [ExcitationAction],
+    pub density: f64,
+    pub sample: crate::excitation::ExcitationSamplePoint<'s>,
+}
+
+pub(super) fn compile<'a>(input: BoundaryInput<'a, '_>) -> Result<Vec<FaceBoundary<'a>>, Error> {
+    let BoundaryInput {
+        source,
+        topology: t,
+        constraints,
+        operators,
+        signals,
+        sample,
+        ..
+    } = input;
     let mut ids = std::collections::BTreeSet::new();
     for id in constraints
         .iter()
         .map(|c| c.constraint_id.as_str())
         .chain(operators.iter().map(|b| b.boundary_id.as_str()))
+        .chain(input.excitations.iter().filter_map(|a| match a {
+            ExcitationAction::MassFlow(a) => Some(a.excitation_id.0.as_str()),
+            _ => None,
+        }))
     {
         if id.is_empty() || id.trim() != id || id.chars().any(char::is_control) || !ids.insert(id) {
             return Err(Error::Invalid("duplicate or malformed fluid authority ID"));
@@ -59,7 +78,7 @@ pub(super) fn compile(
                 (
                     target,
                     FaceBoundary::Velocity {
-                        authority_id: c.constraint_id.clone(),
+                        authority_id: c.constraint_id.as_str(),
                         value: v.real,
                         moving_wall: matches!(&c.kind, FluidConstraintKind::MovingWall { .. }),
                     },
@@ -68,7 +87,7 @@ pub(super) fn compile(
             FluidConstraintKind::NoSlipWall { target } => (
                 target,
                 FaceBoundary::Velocity {
-                    authority_id: c.constraint_id.clone(),
+                    authority_id: c.constraint_id.as_str(),
                     value: [0.0; 3],
                     moving_wall: false,
                 },
@@ -104,11 +123,12 @@ pub(super) fn compile(
             &mut out,
             &b.target,
             FaceBoundary::PressureOutlet {
-                authority_id: b.boundary_id.clone(),
+                authority_id: b.boundary_id.as_str(),
                 pressure: p.real,
             },
         )?;
     }
+    mass_flow::compile(&input, &mut out)?;
     for (i, f) in t.faces.iter().enumerate() {
         if f.neighbor.is_none() && matches!(out[i], FaceBoundary::Interior) {
             return Err(Error::Invalid("incomplete exterior boundary coverage"));
@@ -117,12 +137,12 @@ pub(super) fn compile(
     Ok(out)
 }
 
-fn bind(
+fn bind<'a>(
     source: &AnalysisProjection,
     t: &FiniteVolumeTopology,
-    out: &mut [FaceBoundary],
+    out: &mut [FaceBoundary<'a>],
     target: &RegionTarget,
-    law: FaceBoundary,
+    law: FaceBoundary<'a>,
 ) -> Result<(), Error> {
     let finite = match &law {
         FaceBoundary::Velocity { value, .. } => value.iter().all(|x| x.is_finite()),
@@ -133,26 +153,37 @@ fn bind(
         return Err(Error::Invalid("boundary value"));
     }
     for i in select_faces(source, t, target)? {
-        let f = &t.faces[i];
-        if let FaceBoundary::Velocity {
-            value,
-            moving_wall: true,
-            ..
-        } = &law
-        {
-            let normal = super::geometry_ops::dot(*value, f.owner_area_vector_m2).abs();
-            let roundoff = 128.0 * f64::EPSILON * super::geometry_ops::norm(*value) * f.area_m2;
-            if normal > roundoff {
-                return Err(Error::Unsupported(
-                    "normal moving-wall motion requires ALE geometry",
-                ));
-            }
-        }
-        if !matches!(out[i], FaceBoundary::Interior) {
-            return Err(Error::Invalid("overlapping fluid boundary authorities"));
-        }
-        out[i] = law.clone();
+        bind_face(t, out, i, law)?;
     }
+    Ok(())
+}
+
+fn bind_face<'a>(
+    t: &FiniteVolumeTopology,
+    out: &mut [FaceBoundary<'a>],
+    i: usize,
+    law: FaceBoundary<'a>,
+) -> Result<(), Error> {
+    let f = &t.faces[i];
+    if let FaceBoundary::Velocity {
+        value,
+        moving_wall: true,
+        ..
+    } = &law
+    {
+        let normal = super::geometry_ops::dot(*value, f.owner_area_vector_m2).abs();
+        let roundoff = 128.0 * f64::EPSILON * super::geometry_ops::norm(*value) * f.area_m2;
+        if normal > roundoff {
+            return Err(Error::Unsupported(
+                "normal moving-wall motion requires ALE geometry",
+            ));
+        }
+    }
+    if !matches!(out[i], FaceBoundary::Interior) {
+        return Err(Error::Invalid("overlapping fluid boundary authorities"));
+    }
+    out[i] = law;
+
     Ok(())
 }
 

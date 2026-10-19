@@ -145,25 +145,15 @@ impl AcousticHarmonicSolverResult {
                 ))
             }
         }
-        if d.formulation.family() != PhysicsFamily::Acoustic
-            || d.formulation.procedure() != AnalysisProcedure::HarmonicResponse
-            || d.iterations as usize > d.solver.maximum_iterations
-            || !d.power_tolerance.is_finite()
-            || d.power_tolerance <= 0.0
-            || d.power_tolerance >= 1.0
-            || !d.relative_residual.is_finite()
-            || d.relative_residual < 0.0
-            || d.relative_residual > d.solver.relative_tolerance
-            || !d.power_relative_error.is_finite()
-            || d.power_relative_error < 0.0
-            || d.power_relative_error > d.power_tolerance
-            || !d.mean_input_power_w.is_finite()
-            || !d.mean_impedance_loss_w.is_finite()
-            || d.mean_impedance_loss_w < 0.0
-        {
-            return Err(invalid(
-                "acoustic result has incompatible formulation or failed closure",
-            ));
+        if let Some(reason) = closure_rejection_reason(d) {
+            return Err(invalid(format!(
+                "acoustic result rejected: {reason}; family={:?} procedure={:?} mesh={:?} frequency_hz={} iterations={} maximum_iterations={} relative_residual={:e} solver_relative_tolerance={:e} power_relative_error={:e} power_relative_tolerance={:e} mean_input_power_w={:e} mean_impedance_loss_w={:e}",
+                d.formulation.family(), d.formulation.procedure(), d.mesh_digest,
+                d.frequency.hertz, d.iterations, d.solver.maximum_iterations,
+                d.relative_residual, d.solver.relative_tolerance,
+                d.power_relative_error, d.power_tolerance,
+                d.mean_input_power_w, d.mean_impedance_loss_w,
+            )));
         }
         let nodes = d.ordered_node_ids.len();
         let elements = d.ordered_element_ids.len();
@@ -311,5 +301,32 @@ impl AcousticHarmonicSolverResult {
     }
     pub(super) fn publication_declaration(&self) -> Option<&runmat_analysis_core::StateOutput> {
         self.data.publication_declaration.as_ref()
+    }
+}
+
+fn closure_rejection_reason(d: &ResultData) -> Option<&'static str> {
+    if d.formulation.family() != PhysicsFamily::Acoustic
+        || d.formulation.procedure() != AnalysisProcedure::HarmonicResponse
+    {
+        Some("incompatible family or procedure")
+    } else if d.iterations as usize > d.solver.maximum_iterations {
+        Some("iteration count exceeds solver maximum")
+    } else if !d.power_tolerance.is_finite() || d.power_tolerance <= 0.0 || d.power_tolerance >= 1.0
+    {
+        Some("invalid power tolerance")
+    } else if !d.relative_residual.is_finite() || d.relative_residual < 0.0 {
+        Some("invalid algebraic residual")
+    } else if d.relative_residual > d.solver.relative_tolerance {
+        Some("algebraic residual exceeds tolerance")
+    } else if !d.power_relative_error.is_finite() || d.power_relative_error < 0.0 {
+        Some("invalid power error")
+    } else if d.power_relative_error > d.power_tolerance {
+        Some("power closure exceeds tolerance")
+    } else if !d.mean_input_power_w.is_finite() {
+        Some("nonfinite input power")
+    } else if !d.mean_impedance_loss_w.is_finite() || d.mean_impedance_loss_w < 0.0 {
+        Some("invalid impedance loss")
+    } else {
+        None
     }
 }

@@ -7,7 +7,7 @@ use runmat_runtime::analysis::LogicalSourcePath;
 use std::{path::Path, sync::Arc};
 
 fn logical(value: &str) -> LogicalSourcePath {
-    LogicalSourcePath::new(format!("project/{value}")).unwrap()
+    LogicalSourcePath::new(format!("{value}")).unwrap()
 }
 fn proposal() -> FeaChangeSetRequest {
     FeaChangeSetRequest { base: None, changes: vec![
@@ -18,6 +18,39 @@ fn proposal() -> FeaChangeSetRequest {
 fn initial(provider: &dyn FsProvider) {
     block_on(provider.write(Path::new("/main.fea"), b"import model supports from \"./supports.fea\"\nmodel assembly { include model.supports }\n")).unwrap();
     block_on(provider.write(Path::new("/supports.fea"), b"model supports {}\n")).unwrap();
+}
+
+#[test]
+fn workspace_relative_staging_does_not_confuse_a_real_project_directory() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(MemoryFsProvider::with_current_dir("/"));
+    runmat_filesystem::with_provider_override(provider.clone(), || {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        for invalid in ["/bracket.fea", "../outside.fea", "project/../outside.fea"] {
+            let request = serde_json::json!({ "base": null, "changes": [{ "type": "write", "path": invalid, "source": "model bracket {}\n" }] });
+            assert!(serde_json::from_value::<FeaChangeSetRequest>(request).is_err());
+        }
+        for path in ["bracket.fea", "project/bracket.fea"] {
+            let staged = block_on(session.stage_fea_changes(FeaChangeSetRequest {
+                base: None,
+                changes: vec![FeaSourceChange::Write {
+                    path: logical(path),
+                    source: "model bracket {}\n".into(),
+                }],
+            }))
+            .unwrap();
+            assert!(staged.publication_valid);
+            assert!(provider.read_project_path(&format!("/{path}")).is_err());
+            assert!(matches!(
+                block_on(session.publish_fea_changes(staged.id)).unwrap(),
+                FeaChangeSetPublication::Published { .. }
+            ));
+            assert_eq!(
+                provider.read_project_path(&format!("/{path}")).unwrap(),
+                b"model bracket {}\n"
+            );
+        }
+    });
 }
 
 #[test]
@@ -37,6 +70,10 @@ fn durable_proposal_rechecks_after_restart_and_recovers_a_lost_rename_acknowledg
     let restarted = Arc::new(SandboxFsProvider::new(root.path().to_path_buf()).unwrap());
     runmat_filesystem::with_provider_override(restarted.clone(), || {
         let mut session = RunMatSession::with_options(false, false).unwrap();
+        let preview = block_on(session.inspect_fea_changes(id)).unwrap();
+        assert!(preview.publication_valid);
+        assert_eq!(preview.id, id);
+        assert!(!root.path().join("shared.fea").exists());
         let published = block_on(session.publish_fea_changes(id)).unwrap();
         assert!(matches!(
             published,
@@ -144,45 +181,164 @@ fn stage_identity_does_not_turn_modified_persisted_data_into_a_compiler_attestat
 #[test]
 fn source_review_uses_the_staged_original_after_a_collaborator_changes_the_live_file() {
     let _lock = runmat_filesystem::provider_override_lock();
-    let provider=Arc::new(MemoryFsProvider::with_current_dir("/"));
+    let provider = Arc::new(MemoryFsProvider::with_current_dir("/"));
     initial(provider.as_ref());
     runmat_filesystem::with_provider_override(provider.clone(), || {
-        let mut session=RunMatSession::with_options(false,false).unwrap();
-        let staged=block_on(session.stage_fea_changes(proposal())).unwrap();
-        provider.write_project_path("/main.fea",b"model collaborator {}\n").unwrap();
-        let review=block_on(session.review_fea_changes(runmat_fea_source::FeaChangeSetReviewRequest {
-            id:staged.id,change_index:1,before_offset:0,after_offset:0,
-        })).unwrap();
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let staged = block_on(session.stage_fea_changes(proposal())).unwrap();
+        provider
+            .write_project_path("/main.fea", b"model collaborator {}\n")
+            .unwrap();
+        assert!(block_on(session.inspect_fea_changes(staged.id))
+            .unwrap_err()
+            .contains("workspace changed"));
+        let review = block_on(session.review_fea_changes(
+            runmat_fea_source::FeaChangeSetReviewRequest {
+                id: staged.id,
+                change_index: 1,
+                before_offset: 0,
+                after_offset: 0,
+            },
+        ))
+        .unwrap();
         assert!(review.before.unwrap().text.contains("supports.fea"));
         assert!(review.after.unwrap().text.contains("shared.fea"));
-        assert_eq!(review.change_count,2);
-        assert!(matches!(block_on(session.publish_fea_changes(staged.id)).unwrap(),FeaChangeSetPublication::Conflict {..}));
-        assert!(block_on(session.review_fea_changes(runmat_fea_source::FeaChangeSetReviewRequest {
-            id:staged.id,change_index:2,before_offset:0,after_offset:0,
-        })).is_err());
+        assert_eq!(review.change_count, 2);
+        assert!(matches!(
+            block_on(session.publish_fea_changes(staged.id)).unwrap(),
+            FeaChangeSetPublication::Conflict { .. }
+        ));
+        assert!(block_on(session.review_fea_changes(
+            runmat_fea_source::FeaChangeSetReviewRequest {
+                id: staged.id,
+                change_index: 2,
+                before_offset: 0,
+                after_offset: 0,
+            }
+        ))
+        .is_err());
     });
 }
 #[test]
 fn source_review_is_bounded_and_preserves_multibyte_character_boundaries() {
     let _lock = runmat_filesystem::provider_override_lock();
-    let provider=Arc::new(MemoryFsProvider::with_current_dir("/"));
+    let provider = Arc::new(MemoryFsProvider::with_current_dir("/"));
     runmat_filesystem::with_provider_override(provider.clone(), || {
-        let mut session=RunMatSession::with_options(false,false).unwrap();
-        let source=format!("model part {{}}\n// {}\n", "界".repeat(32_000));
-        let staged=block_on(session.stage_fea_changes(FeaChangeSetRequest {base:None,
-            changes:vec![FeaSourceChange::Write {path:logical("part.fea"),source:source.clone()}]})).unwrap();
-        let mut offset=0; let mut reconstructed=String::new();
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let source = format!("model part {{}}\n// {}\n", "界".repeat(32_000));
+        let staged = block_on(session.stage_fea_changes(FeaChangeSetRequest {
+            base: None,
+            changes: vec![FeaSourceChange::Write {
+                path: logical("part.fea"),
+                source: source.clone(),
+            }],
+        }))
+        .unwrap();
+        let mut offset = 0;
+        let mut reconstructed = String::new();
         loop {
-            let review=block_on(session.review_fea_changes(runmat_fea_source::FeaChangeSetReviewRequest {
-                id:staged.id,change_index:0,before_offset:0,after_offset:offset,
-            })).unwrap();
+            let review = block_on(session.review_fea_changes(
+                runmat_fea_source::FeaChangeSetReviewRequest {
+                    id: staged.id,
+                    change_index: 0,
+                    before_offset: 0,
+                    after_offset: offset,
+                },
+            ))
+            .unwrap();
             assert!(review.before.is_none());
-            let after=review.after.unwrap();
-            assert!(after.text.len()<=32*1024);
-            assert_eq!(after.total_bytes,source.len() as u32);
+            let after = review.after.unwrap();
+            assert!(after.text.len() <= 32 * 1024);
+            assert_eq!(after.total_bytes, source.len() as u32);
             reconstructed.push_str(&after.text);
-            match after.next_offset {Some(next)=>offset=next,None=>break}
+            match after.next_offset {
+                Some(next) => offset = next,
+                None => break,
+            }
         }
-        assert_eq!(reconstructed,source);
+        assert_eq!(reconstructed, source);
+    });
+}
+
+#[test]
+fn legacy_source_records_migrate_only_their_declared_identity_format() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let root = tempfile::tempdir().unwrap();
+    let provider = Arc::new(SandboxFsProvider::new(root.path().to_path_buf()).unwrap());
+    initial(provider.as_ref());
+    runmat_filesystem::with_provider_override(provider.clone(), || {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let stage = block_on(session.stage_fea_changes(proposal())).unwrap();
+        let file = root
+            .path()
+            .join(".artifacts/fea-change-sets")
+            .join(format!("{}.json", uuid::Uuid::from_bytes(stage.id.0)));
+        let mut record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        record
+            .as_object_mut()
+            .unwrap()
+            .remove("path_format_version");
+        let originals = record["original_sources"]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(path, bytes)| (format!("project/{path}"), bytes.clone()))
+            .collect();
+        record["original_sources"] = serde_json::Value::Object(originals);
+        std::fs::write(&file, serde_json::to_vec(&record).unwrap()).unwrap();
+        let review = block_on(session.review_fea_changes(
+            runmat_fea_source::FeaChangeSetReviewRequest {
+                id: stage.id,
+                change_index: 0,
+                before_offset: 0,
+                after_offset: 0,
+            },
+        ))
+        .unwrap();
+        assert!(review.before.is_some());
+        assert!(matches!(
+            block_on(session.publish_fea_changes(stage.id)).unwrap(),
+            FeaChangeSetPublication::Published { .. }
+        ));
+        assert!(root.path().join("shared.fea").exists());
+    });
+}
+
+#[test]
+fn inspect_retains_incomplete_draft_and_replaces_it_without_writing_source() {
+    let _lock = runmat_filesystem::provider_override_lock();
+    let provider = Arc::new(MemoryFsProvider::with_current_dir("/"));
+    runmat_filesystem::with_provider_override(provider.clone(), || {
+        let mut session = RunMatSession::with_options(false, false).unwrap();
+        let first = block_on(session.stage_fea_changes(FeaChangeSetRequest {
+            base: None,
+            changes: vec![FeaSourceChange::Write {
+                path: logical("bracket.fea"),
+                source: "model bracket {\n// Load still unresolved\n".into(),
+            }],
+        }))
+        .unwrap();
+        assert!(!first.publication_valid);
+        let inspected = block_on(session.inspect_fea_changes(first.id)).unwrap();
+        assert!(!inspected.publication_valid);
+        assert_eq!(inspected.roots.len(), 1);
+        assert!(provider.read_project_path("/bracket.fea").is_err());
+        let second = block_on(session.stage_fea_changes(FeaChangeSetRequest {
+            base: Some(first.id),
+            changes: vec![FeaSourceChange::Write {
+                path: logical("bracket.fea"),
+                source: "model bracket {}\n".into(),
+            }],
+        }))
+        .unwrap();
+        let repaired = block_on(session.inspect_fea_changes(second.id)).unwrap();
+        assert!(repaired.publication_valid);
+        assert!(provider.read_project_path("/bracket.fea").is_err());
+        assert!(
+            !block_on(session.inspect_fea_changes(first.id))
+                .unwrap()
+                .publication_valid
+        );
     });
 }

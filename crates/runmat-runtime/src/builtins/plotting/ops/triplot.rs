@@ -324,9 +324,6 @@ pub async fn triplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Triangulation",
-            x_label: "X",
-            y_label: "Y",
             ..Default::default()
         },
         move |figure, axes| {

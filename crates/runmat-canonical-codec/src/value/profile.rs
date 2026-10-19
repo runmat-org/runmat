@@ -20,24 +20,43 @@ pub(crate) fn chunked_profile<'a>(
     chunks: impl IntoIterator<Item = &'a [u8]>,
     control: &dyn CanonicalCodecControl,
 ) -> Result<(MaterializationProfile, u64), CanonicalCodecError> {
+    scan(chunks, control, Representation::Envelope)
+}
+pub(crate) fn value_profile(
+    encoded: &[u8],
+    control: &dyn CanonicalCodecControl,
+) -> Result<(MaterializationProfile, u64), CanonicalCodecError> {
+    scan(std::iter::once(encoded), control, Representation::Value)
+}
+enum Representation {
+    Envelope,
+    Value,
+}
+fn scan<'a>(
+    chunks: impl IntoIterator<Item = &'a [u8]>,
+    control: &dyn CanonicalCodecControl,
+    representation: Representation,
+) -> Result<(MaterializationProfile, u64), CanonicalCodecError> {
     let mut reader = Reader {
         chunks: chunks.into_iter(),
         current: &[],
         position: 0,
         control,
     };
-    while reader.byte()? != Some(0) {
-        if reader.current.is_empty() && reader.peek_end()? {
-            return Err(invalid("domain prefix terminator is missing"));
+    if matches!(representation, Representation::Envelope) {
+        while reader.byte()? != Some(0) {
+            if reader.current.is_empty() && reader.peek_end()? {
+                return Err(invalid("domain prefix terminator is missing"));
+            }
         }
+        let (major, length, _) = reader.header()?;
+        if major != 4 || length != Some(2) {
+            return Err(invalid(
+                "canonical envelope must contain a domain and value",
+            ));
+        }
+        reader.string()?;
     }
-    let (major, length, _) = reader.header()?;
-    if major != 4 || length != Some(2) {
-        return Err(invalid(
-            "canonical envelope must contain a domain and value",
-        ));
-    }
-    reader.string()?;
     let mut profile = MaterializationProfile::default();
     reader.value(0, &mut profile)?;
     if reader.byte()?.is_some() {

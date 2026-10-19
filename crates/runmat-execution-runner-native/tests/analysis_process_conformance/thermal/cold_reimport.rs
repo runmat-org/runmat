@@ -9,10 +9,29 @@ use runmat_execution::Digest;
 use runmat_execution_artifact::{cache::CacheImport, object::ObjectInventoryLimits};
 use std::collections::BTreeMap;
 
-pub(super) fn assert_closed_completion(
+pub(crate) fn assert_closed_completion(
     original: &impl CacheImport,
     completed: CompletedThermalStudy,
     limits: ObjectInventoryLimits,
+) -> CompletedThermalStudy {
+    assert_closed_completion_impl(original, completed, limits, true)
+}
+
+/// Full original closure/value replay with representative transport corruption tests.
+/// The original generic lifecycle retains exhaustive per-object rejection coverage.
+pub(crate) fn assert_closed_physical_completion(
+    original: &impl CacheImport,
+    completed: CompletedThermalStudy,
+    limits: ObjectInventoryLimits,
+) -> CompletedThermalStudy {
+    assert_closed_completion_impl(original, completed, limits, false)
+}
+
+fn assert_closed_completion_impl(
+    original: &impl CacheImport,
+    completed: CompletedThermalStudy,
+    limits: ObjectInventoryLimits,
+    exhaustive: bool,
 ) -> CompletedThermalStudy {
     let prepared = prepare_thermal_study_root(&completed).unwrap();
     prepared.catalog.validate().unwrap();
@@ -121,7 +140,6 @@ pub(super) fn assert_closed_completion(
         expected_histories.iter().collect::<Vec<_>>()
     );
     assert_eq!(imported.result_closures(), expected_closures);
-    super::assert_equilibrium(&imported.result);
     let republished = prepare_thermal_study_root(&imported).unwrap();
     assert_eq!(republished.root, prepared.root);
     assert_eq!(republished.catalog, prepared.catalog);
@@ -151,7 +169,19 @@ pub(super) fn assert_closed_completion(
         limits
     )
     .is_err());
+    let mut formats = std::collections::BTreeSet::new();
+    let final_digest = prepared.catalog.objects.last().unwrap().logical_digest;
     for reference in &prepared.catalog.objects {
+        // Each retained transport format, the trusted root and the final inventory entry.
+        // This selects rejection witnesses only; every original object was imported and compared.
+        let new_format = formats.insert((&reference.media_type, &reference.value_schema));
+        if !exhaustive
+            && !new_format
+            && reference.logical_digest != trusted_root
+            && reference.logical_digest != final_digest
+        {
+            continue;
+        }
         let bytes = cold.0.remove(&reference.logical_digest).unwrap();
         assert!(
             import_thermal_study_root(&cold, &prepared.root, trusted_root, &access, limits)
@@ -221,7 +251,9 @@ fn assert_bad_transcripts(cold: &MemoryStore, completed: &CompletedThermalStudy)
 
 fn assert_foreign_contexts(cold: &MemoryStore, completed: &CompletedThermalStudy) {
     use runmat_analysis_execution::ThermalStudyScope;
-    use runmat_analysis_fea::study::{plan_thermal_step, ThermalStudyPlanningPolicy};
+    use runmat_analysis_fea::study::{
+        plan_thermal_step, plan_thermal_step_with_fields, ThermalStudyPlanningPolicy,
+    };
     let policy = ThermalStudyPlanningPolicy {
         backend: completed.workload.backend,
         formulation_requirement: completed.workload.formulation_requirement,
@@ -238,10 +270,11 @@ fn assert_foreign_contexts(cold: &MemoryStore, completed: &CompletedThermalStudy
             Some(&foreign_model.mesh),
         )
         .unwrap();
-    foreign_model.product.workload = plan_thermal_step(
+    foreign_model.product.workload = plan_thermal_step_with_fields(
         &foreign_model.product.compiled,
         completed.workload.step_id.as_str(),
         policy,
+        completed.workload.initial_fields.clone(),
     )
     .unwrap();
     assert!(

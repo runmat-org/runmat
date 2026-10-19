@@ -10,7 +10,37 @@ use crate::cdt::{
     DelaunayVolumeMeshStage, DelaunayVolumeNode, DelaunayVolumeTopology,
 };
 
+/// Visibility proves a conforming star, not empty circumspheres. Only an
+/// independently admitted star may replace the general point-set provider.
 pub(super) fn try_build_constraint_star(
+    region: &PersistentEntityId,
+    constraints: &DelaunayConstraints,
+    options: crate::cdt::DelaunayInsertionOptions,
+    cancellation: &dyn MeshingCancellationSignal,
+) -> Result<Option<DelaunayVolumeTopology>, DelaunayVolumeMeshError> {
+    let Some(topology) =
+        build_visible_constraint_star(region, constraints, options.topology, cancellation)?
+    else {
+        return Ok(None);
+    };
+    match crate::cdt::insertion::validate_locally_delaunay_volume_topology(
+        &topology,
+        options,
+        cancellation,
+    ) {
+        Ok(()) => Ok(Some(topology)),
+        Err(failure) if failure.kind == crate::cdt::DelaunayInsertionErrorKind::InvalidTopology => {
+            tracing::info!(reason = %failure, "visible constraint star rejected by physical Delaunay admission");
+            Ok(None)
+        }
+        Err(failure) => Err(super::coordinate_topology_error(
+            failure,
+            "constraint-star admission",
+        )),
+    }
+}
+
+fn build_visible_constraint_star(
     region: &PersistentEntityId,
     constraints: &DelaunayConstraints,
     options: DelaunayTopologyOptions,
@@ -122,3 +152,6 @@ fn invalid(reason: impl Into<String>) -> DelaunayVolumeMeshError {
         reason: reason.into(),
     }
 }
+
+#[cfg(test)]
+mod tests;

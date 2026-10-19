@@ -12,27 +12,9 @@ pub(super) fn execute(
     let observations =
         optional_unique_input(&invocation, AnalysisNumericalObjectKind::ObservationCatalog)?;
     let resource_plan_input = unique_input(&invocation, AnalysisNumericalObjectKind::ResourcePlan)?;
-    let source_context: Vec<_> = invocation
-        .inputs
-        .iter()
-        .filter(|input| {
-            // Phase-owned inputs are authenticated above. Pass every remaining
-            // object to the shared source validator, which owns each physics
-            // family's exact closed inventory; do not duplicate its solver list.
-            !matches!(
-                input.manifest.kind,
-                AnalysisNumericalObjectKind::AccuracyEvaluationRequest
-                    | AnalysisNumericalObjectKind::NumericalReceipt
-                    | AnalysisNumericalObjectKind::ObservationCatalog
-                    | AnalysisNumericalObjectKind::ResourcePlan
-            )
-        })
-        .collect();
-    if invocation.inputs.len() != 3 + usize::from(observations.is_some()) + source_context.len()
-        || invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::AccuracyReport]
-    {
+    if invocation.host.workload.outputs != vec![AnalysisNumericalObjectKind::AccuracyReport] {
         return Err(AnalysisBridgeError::Invalid(
-            "accuracy evaluation inputs or report output differ from the workload contract".into(),
+            "accuracy report output differs from the workload contract".into(),
         ));
     }
     let request_manifest_identity = request.manifest.logical_identity;
@@ -60,11 +42,6 @@ pub(super) fn execute(
         let observations =
             runmat_analysis_fea::results::observation::ObservationPublicationCatalog::from_canonical_bytes(&observations.payload())
                 .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-        observations.validate_source_result(
-            request.producer,
-            request.source_kind,
-            request.source_result,
-        )?;
         if observations.identity().digest() != manifest_identity
             || Some(observations.identity()) != request.source_observations
         {
@@ -88,25 +65,17 @@ pub(super) fn execute(
             "accuracy numerical receipt differs from its admitted source result",
         ));
     }
-    let expected_plan = runmat_analysis_execution::build_prepared_accuracy_resource_plan(
-        &request,
-        &numerical_receipt,
-        invocation.inputs,
-    )?;
-    if resource_plan_input.manifest.logical_identity != admitted_plan.identity.digest()
-        || admitted_plan != expected_plan
-    {
+    if resource_plan_input.manifest.logical_identity != admitted_plan.identity.digest() {
         return Err(AnalysisBridgeError::Identity(
-            "accuracy resource plan differs from admitted inputs",
+            "accuracy resource identity differs from admitted inputs",
         ));
     }
-    // Authenticate the exact admitted resource plan before reconstructing source topology
-    // and constraints. The authored source checks remain mandatory after admission.
-    runmat_analysis_execution::validate_accuracy_source_context(
+    runmat_analysis_execution::validate_admitted_accuracy_source(
         &request,
         &numerical_receipt,
         observations.as_ref(),
-        &source_context,
+        invocation.inputs,
+        &admitted_plan,
     )?;
     let evidence = numerical_receipt.evidence(&request)?;
     let artifact =

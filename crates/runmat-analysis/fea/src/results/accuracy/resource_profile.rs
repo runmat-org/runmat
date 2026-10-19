@@ -2,7 +2,7 @@
 
 use std::mem::size_of;
 
-use runmat_canonical_codec::profile_serialized;
+use runmat_canonical_codec::profile_serialized_shape;
 use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Serialize, Serializer};
 
@@ -28,9 +28,9 @@ pub fn accuracy_evaluation_resource_profile(
     evidence: &[AccuracyEvidence],
 ) -> Result<AccuracyEvaluationResourceProfile, AccuracyEvaluationError> {
     let projection = Projection { request, evidence };
-    let output = profile_serialized(&projection, ACCURACY_REPORT_LIMITS)
+    let output = profile_serialized_shape(&projection, ACCURACY_REPORT_LIMITS)
         .map_err(|error| AccuracyEvaluationError::IdentityEncoding(error.to_string()))?;
-    let input = profile_serialized(&(&request.plan, evidence), ACCURACY_REPORT_LIMITS)
+    let input = profile_serialized_shape(&(&request.plan, evidence), ACCURACY_REPORT_LIMITS)
         .map_err(|error| AccuracyEvaluationError::IdentityEncoding(error.to_string()))?;
     let contributions = bytes::<AccuracyContribution>(request.plan.criteria.len())?;
     let matching = bytes::<&AccuracyEvidence>(evidence.len())?;
@@ -264,7 +264,7 @@ mod tests {
         let artifact = evaluate_accuracy_artifact(request, evidence.to_vec()).unwrap();
         let encoded = artifact.canonical_bytes().unwrap();
         assert!(profile.output_encoded_bytes_upper_bound >= encoded.len() as u64);
-        let actual_profile = profile_serialized(&artifact, ACCURACY_REPORT_LIMITS).unwrap();
+        let actual_profile = profile_serialized_shape(&artifact, ACCURACY_REPORT_LIMITS).unwrap();
         assert!(
             profile.output_encoded_bytes_upper_bound >= actual_profile.encoded_bytes_upper_bound
         );

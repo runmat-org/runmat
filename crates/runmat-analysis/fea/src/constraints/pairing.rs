@@ -16,7 +16,7 @@ mod tests;
 
 mod geometry;
 use geometry::{closest_triangle_point, identity, rotation_matrix, transform_position};
-mod profile;
+pub(in crate::constraints) mod profile;
 use crate::topology::storage::{solver_node_identities, CanonicalNodeValues as NodeValues};
 type NodeCoordinates = NodeValues<[f64; 3]>;
 use super::workspace::{check_cancelled, multiply, reserve};

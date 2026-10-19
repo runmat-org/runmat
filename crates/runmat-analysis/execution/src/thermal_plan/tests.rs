@@ -5,6 +5,7 @@ use runmat_analysis_core::*;
 fn preparation() -> ThermalTaskPreparation {
     let p = crate::thermal_study::tests::preparation();
     ThermalTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         authored_study_digest: p.product.compiled.definition_digest().unwrap(),
         frozen_project_digest: p.frozen_project_digest,
         program_revision: p.program_revision,
@@ -162,4 +163,35 @@ fn source_closure_rejects_extra_duplicate_and_malformed_typed_objects() {
     assert!(validate_thermal_task_source(&workload, &mesh, &malformed).is_err());
     malformed.push(fake);
     assert!(rederive_thermal_resource_plan(&workload, &mesh, &malformed, policy).is_err());
+}
+
+#[test]
+fn cpu_allocation_is_bound_by_resource_identity_and_rederived_after_cold_decode() {
+    use runmat_analysis_fea::planning::resource::{LocalExecutionPlan, LocalThreadCount};
+    let serial = prepare_thermal_task(preparation()).unwrap();
+    let mut requested = preparation();
+    requested.local_execution =
+        LocalExecutionPlan::fixed(LocalThreadCount::new(4).unwrap()).unwrap();
+    let workload = requested.workload.clone();
+    let mesh = requested.mesh.clone();
+    let parallel = prepare_thermal_task(requested).unwrap();
+    assert_eq!(parallel.resource_plan.request.cpu_millicores, 4_000);
+    assert_ne!(
+        parallel.resource_plan.identity,
+        serial.resource_plan.identity
+    );
+    assert!(
+        parallel.resource_plan.request.memory_bytes
+            >= serial.resource_plan.request.memory_bytes
+                + 4 * runmat_analysis_fea::planning::resource::CPU_POOL_STACK_BYTES_PER_THREAD
+    );
+    assert_eq!(
+        rederive_thermal_resource_plan(&workload, &mesh, &parallel.inputs, parallel.output_policy)
+            .unwrap(),
+        parallel.resource_plan
+    );
+    let cold =
+        FeaResourcePlan::from_canonical_bytes(&parallel.resource_plan.canonical_bytes().unwrap())
+            .unwrap();
+    assert_eq!(cold, parallel.resource_plan);
 }

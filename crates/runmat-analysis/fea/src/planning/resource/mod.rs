@@ -64,6 +64,7 @@ pub use contract::{
     StructuralNonlinearPipelineResourceDemand, StructuralNonlinearRecoveryResourceDemand,
 };
 mod nonlinear;
+mod numeric_profile;
 pub(crate) use nonlinear::{
     build_nonlinear_recovery_resource_plan, build_nonlinear_resource_plan_with_output_limit,
 };
@@ -105,12 +106,14 @@ pub use observation_history_finalization::{
     observation_history_finalization_payload_bytes_upper_bound,
     observation_history_series_reduction_payload_bytes_upper_bound,
 };
+mod general_solve;
 mod preflight;
 mod random_response;
 mod reconciliation;
 mod response_spectrum;
 mod scoped_execution;
 mod solve_policy;
+pub use general_solve::{GeneralSolveResourceControls, GeneralSparseSolveResourceDemand};
 mod structural_facts;
 mod symbolic;
 mod thermal;
@@ -182,7 +185,9 @@ pub use contract::{
 pub use estimate::build_resource_plan;
 pub use frequency::{
     build_structural_frequency_entry_resource_plan,
+    build_structural_frequency_entry_resource_plan_from_compilation,
     build_structural_frequency_recovery_resource_plan,
+    build_structural_frequency_recovery_resource_plan_from_compilation,
     structural_frequency_entry_payload_bytes_upper_bound,
     structural_frequency_recovery_payload_bytes_upper_bound,
     StructuralFrequencyEntryResourceProjection, StructuralFrequencyRecoveryResourceInput,
@@ -192,7 +197,9 @@ pub use local_execution::{
     CPU_MILLICORES_PER_LOCAL_THREAD, MAX_LOCAL_EXECUTION_THREADS,
 };
 pub use modal::{
-    build_structural_modal_resource_plan, structural_modal_receipt_payload_bytes_upper_bound,
+    build_structural_modal_resource_plan, build_structural_modal_resource_plan_from_compilation,
+    structural_modal_receipt_payload_bytes_upper_bound,
+    structural_modal_result_output_resource_facts,
     structural_modal_result_payload_bytes_upper_bound,
 };
 mod acoustic_frequency_assembly;
@@ -209,7 +216,10 @@ pub use post_process::{
     structural_frequency_result_payload_bytes_upper_bound, ObservationPartitionResourcePlanning,
 };
 pub(crate) use preflight::{build_static_resource_plan, StaticResourcePreflight};
-pub use preflight::{build_structural_resource_plan, require_executable_static_backend};
+pub use preflight::{
+    build_structural_resource_plan, build_structural_resource_plan_from_compilation,
+    require_executable_static_backend,
+};
 pub use random_response::{
     structural_random_response_assembly_payload_bytes_upper_bound,
     structural_random_response_interval_payload_bytes_upper_bound,
@@ -253,6 +263,12 @@ mod modal_tests;
 #[cfg(test)]
 mod tests;
 
+mod structural_recovery;
+pub use contract::StructuralFieldRecoveryResourceDemand;
+pub use structural_recovery::{
+    build_structural_field_recovery_resource_plan, structural_field_recovery_shape,
+    StructuralFieldRecoveryPlanning,
+};
 mod nonlinear_recovery;
 mod recovered_field_shape;
 pub use contract::NonlinearFieldRecoveryResourceDemand;
@@ -260,3 +276,12 @@ pub use nonlinear_recovery::{
     build_nonlinear_field_recovery_resource_plan, nonlinear_field_recovery_shape,
     nonlinear_recovery_workspace,
 };
+
+mod constraint_compilation;
+pub use constraint_compilation::constraint_compilation_available_bytes;
+
+#[cfg(test)]
+mod compiler_test_support;
+
+/// Persistent CPU worker stack reservation shared with the execution provider.
+pub const CPU_POOL_STACK_BYTES_PER_THREAD: u64 = runmat_cpu_execution::WORKER_STACK_BYTES;

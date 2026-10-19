@@ -62,10 +62,14 @@ fn block_admission_binds_inputs_output_and_cumulative_history() {
         assert_eq!(demand.maximum_retained_output_increments.0, 1);
         let mut cumulative = workload.clone();
         cumulative.controls.max_accepted_increments = 4096;
-        let cumulative_request = NonlinearSolidBlockRequest::initial(&cumulative,
-            request.topology, 1).unwrap();
+        let cumulative_request =
+            NonlinearSolidBlockRequest::initial(&cumulative, request.topology, 1).unwrap();
         let cumulative_bytes = nonlinear_solid_block_payload_bytes_upper_bound(
-            &cumulative, &mesh, &cumulative_request).unwrap();
+            &cumulative,
+            &mesh,
+            &cumulative_request,
+        )
+        .unwrap();
         // The cumulative controller cap changes identity/work, not this task's live fields.
         assert_eq!(cumulative_bytes, bytes);
         assert_ne!(cumulative_request.workload, request.workload);

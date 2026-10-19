@@ -1,3 +1,4 @@
+mod wire_widths;
 use std::collections::BTreeMap;
 
 use serde::ser::{SerializeMap, SerializeSeq};
@@ -59,7 +60,7 @@ fn combined_profile_visits_a_borrowed_source_once() {
     assert_eq!(visits.get(), 1);
     assert_eq!(
         profile.encoded_bytes_upper_bound,
-        ENVELOPE_BYTES + 9 + 4096 * 9
+        ENVELOPE_BYTES + 3 + 4096 * 9
     );
     assert!(profile.materialization_resident_bytes_estimate > profile.encoded_bytes_upper_bound);
 }
@@ -267,11 +268,20 @@ fn strings_depth_bytes_and_unsupported_values_fail_closed() {
     assert!(serialized_materialization_resident_bytes_estimate(
         &0,
         CanonicalLimits {
-            maximum_encoded_bytes: ENVELOPE_BYTES as usize + 8,
+            maximum_encoded_bytes: ENVELOPE_BYTES as usize,
             ..LIMITS
         }
     )
     .is_err());
+    // Zero uses one CBOR byte; exact scalar admission succeeds, one byte less fails.
+    assert!(serialized_materialization_resident_bytes_estimate(
+        &0,
+        CanonicalLimits {
+            maximum_encoded_bytes: ENVELOPE_BYTES as usize + 1,
+            ..LIMITS
+        }
+    )
+    .is_ok());
     assert!(serialized_materialization_resident_bytes_estimate(&f64::NAN, LIMITS).is_err());
     assert!(serialized_materialization_resident_bytes_estimate(&f64::INFINITY, LIMITS).is_err());
     assert!(serialized_materialization_resident_bytes_estimate(&i128::MIN, LIMITS).is_err());
@@ -323,6 +333,9 @@ fn bad_map_protocol_and_declared_lengths_are_rejected() {
 #[test]
 fn all_counter_arithmetic_is_checked() {
     let mut counter = Counter {
+        integer_value_bounds: false,
+        live_map_metadata: 0,
+        peak_map_metadata: 0,
         profile: MaterializationProfile::default(),
         encoded_bytes: u64::MAX,
         limits: LIMITS,
@@ -348,3 +361,82 @@ fn all_counter_arithmetic_is_checked() {
             .is_err()
     );
 }
+
+#[test]
+fn json_projection_separates_wire_workspace_and_bounds_materialized_numeric_capacity() {
+    let limits = CanonicalLimits::new(16 << 20, 1_000_000, 65_536, 64);
+    for count in [0, 1, 32, 4096, 65536] {
+        let original = vec![1.25_f64; count];
+        let profile = profile_serialized(&original, limits).unwrap();
+        let projection = profile.json_projection_resident_bytes_estimate().unwrap();
+        let value = serde_json::to_value(&original).unwrap();
+        let serde_json::Value::Array(items) = &value else {
+            panic!("array projection");
+        };
+        let requested = (std::mem::size_of::<serde_json::Value>()
+            + items.capacity() * std::mem::size_of::<serde_json::Value>())
+            as u64;
+        assert!(projection >= requested);
+        assert_eq!(
+            projection + 2 * profile.encoded_bytes_upper_bound,
+            profile.materialization_resident_bytes_estimate
+        );
+    }
+    assert!(SerializedCanonicalProfile {
+        encoded_bytes_upper_bound: u64::MAX,
+        materialization_resident_bytes_estimate: u64::MAX,
+    }
+    .json_projection_resident_bytes_estimate()
+    .is_none());
+    assert!(SerializedCanonicalProfile {
+        encoded_bytes_upper_bound: 1,
+        materialization_resident_bytes_estimate: 1,
+    }
+    .json_projection_resident_bytes_estimate()
+    .is_none());
+}
+
+#[test]
+fn cooperative_encoding_profile_preserves_counts_and_interrupts_nested_inventory() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    struct Control {
+        calls: AtomicUsize,
+        maximum: usize,
+    }
+    impl crate::CanonicalCodecControl for Control {
+        fn is_cancelled(&self) -> bool {
+            self.calls.fetch_add(1, Ordering::Relaxed) >= self.maximum
+        }
+    }
+    let values = vec![vec![1u64, 2, 3, 4]; 1000];
+    let limits = crate::CanonicalLimits::new(1024 * 1024, 10000, 1024, 64);
+    let complete = Control {
+        calls: AtomicUsize::new(0),
+        maximum: usize::MAX,
+    };
+    assert_eq!(
+        super::profile_canonical_encoding(&values, limits).unwrap(),
+        super::profile_canonical_encoding_with_control(&values, limits, &complete).unwrap()
+    );
+    assert_eq!(
+        super::profile_serialized(&values, limits).unwrap(),
+        super::profile_serialized_with_control(&values, limits, &complete).unwrap()
+    );
+    let cancelled_materialization = Control {
+        calls: AtomicUsize::new(0),
+        maximum: 50,
+    };
+    let error = super::profile_serialized_with_control(&values, limits, &cancelled_materialization)
+        .unwrap_err();
+    assert!(error.to_string().contains("cancel"));
+    assert!(cancelled_materialization.calls.load(Ordering::Relaxed) < 100);
+    let cancel = Control {
+        calls: AtomicUsize::new(0),
+        maximum: 50,
+    };
+    let error =
+        super::profile_canonical_encoding_with_control(&values, limits, &cancel).unwrap_err();
+    assert!(error.to_string().contains("cancel"));
+    assert!(cancel.calls.load(Ordering::Relaxed) < 100);
+}
+mod shape;

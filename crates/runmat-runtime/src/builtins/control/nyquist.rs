@@ -446,29 +446,71 @@ fn trim_leading_zeros(values: Vec<Complex64>) -> Vec<Complex64> {
 }
 
 async fn render_nyquist_plot(response: &NyquistResponse) -> BuiltinResult<()> {
-    let mut args = vec![response.re_value()?, response.im_value()?];
-    if response.mirror_negative_frequency {
-        let negative_im = response.im.iter().map(|value| -*value).collect::<Vec<_>>();
-        args.push(response.re_value()?);
-        args.push(column_tensor(negative_im)?);
-    }
-
-    if let Some((&re0, &im0)) = response.re.first().zip(response.im.first()) {
-        args.push(column_tensor(vec![re0])?);
-        args.push(column_tensor(vec![im0])?);
-        args.push(Value::from("x"));
-        if response.mirror_negative_frequency {
-            args.push(column_tensor(vec![re0])?);
-            args.push(column_tensor(vec![-im0])?);
-            args.push(Value::from("o"));
+    // MATLAB draws both frequency halves of one system in one color and marks the critical
+    // point -1 with a red plus, the point the encirclements are counted around.
+    use crate::builtins::plotting::state;
+    let color = if state::current_hold_enabled() {
+        state::next_line_color_for_axes(state::current_axes_state().active_index)
+    } else {
+        state::line_color_for_series_index(0)
+    };
+    let color = Tensor::new(vec![color.x as f64, color.y as f64, color.z as f64], vec![1, 3])
+        .map(Value::Tensor)
+        .map_err(|err| nyquist_error(format!("nyquist: failed to build color value: {err}")))?;
+    let colored = |args: &mut Vec<Value>, x: Value, y: Value, marker: Option<&str>| {
+        args.push(x);
+        args.push(y);
+        if let Some(marker) = marker {
+            args.push(Value::from(marker));
         }
-    }
+        args.push(Value::from("Color"));
+        args.push(color.clone());
+    };
 
+    // The positive-frequency half is the system's one legend entry; the mirrored half, the
+    // start markers and the critical point are drawn hidden from the legend, so
+    // legend('K = 1', 'K = 4') labels one entry per system as in MATLAB.
+    let mut args = Vec::new();
+    colored(&mut args, response.re_value()?, response.im_value()?, None);
     if let Err(err) = crate::call_builtin_async("plot", &args).await {
         if super::is_nonfatal_plot_setup_error(&err) {
             return Ok(());
         }
         return Err(err);
+    }
+
+    // One plot call per hidden piece: a trailing option on a multi-series call does not reach
+    // every series yet (DEF-196).
+    let mut hidden: Vec<Vec<Value>> = Vec::new();
+    let mut piece = |x: Value, y: Value, marker: Option<&str>| {
+        let mut call = Vec::new();
+        colored(&mut call, x, y, marker);
+        hidden.push(call);
+    };
+    if response.mirror_negative_frequency {
+        let negative_im = response.im.iter().map(|value| -*value).collect::<Vec<_>>();
+        piece(response.re_value()?, column_tensor(negative_im)?, None);
+    }
+    if let Some((&re0, &im0)) = response.re.first().zip(response.im.first()) {
+        piece(column_tensor(vec![re0])?, column_tensor(vec![im0])?, Some("x"));
+        if response.mirror_negative_frequency {
+            piece(column_tensor(vec![re0])?, column_tensor(vec![-im0])?, Some("o"));
+        }
+    }
+    hidden.push(vec![
+        column_tensor(vec![-1.0])?,
+        column_tensor(vec![0.0])?,
+        Value::from("r+"),
+    ]);
+    let was_held = state::current_hold_enabled();
+    let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
+    for mut call in hidden {
+        call.push(Value::from("HandleVisibility"));
+        call.push(Value::from("off"));
+        let _ = crate::call_builtin_async("plot", &call).await;
+    }
+    if !was_held {
+        let _ = crate::call_builtin_async("hold", &[Value::from("off")]).await;
     }
     let _ = crate::call_builtin_async("title", &[Value::from("Nyquist Diagram")]).await;
     let _ = crate::call_builtin_async("xlabel", &[Value::from("Real Axis")]).await;

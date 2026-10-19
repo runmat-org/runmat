@@ -448,9 +448,6 @@ pub fn errorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut n_in = Some(errorbar_numeric_input(y_neg).map_err(map_errorbar_invalid)?);
     let mut p_in = Some(errorbar_numeric_input(y_pos).map_err(map_errorbar_invalid)?);
     let opts = PlotRenderOptions {
-        title: "Error Bars",
-        x_label: "X",
-        y_label: "Y",
         ..Default::default()
     };
     let plot_indices_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -892,6 +889,8 @@ fn build_errorbar_gpu_plot(
                 x_span: 1.0,
                 y_min: 0.0,
                 y_span: 1.0,
+                x_log: false,
+                y_log: false,
                 line_style: runmat_plot::plots::LineStyle::Solid,
                 marker_size: marker.size,
             },

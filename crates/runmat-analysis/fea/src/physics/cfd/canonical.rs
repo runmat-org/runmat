@@ -12,7 +12,12 @@ mod flux_evidence;
 mod forcing;
 mod geometry_ops;
 mod initial;
+mod input_authority;
+pub(crate) use input_authority::{
+    potential_boundary_authorities, supports_action, supports_signal,
+};
 mod iterate;
+pub mod qualification;
 pub use initial::CanonicalFluidInitialState;
 mod linear;
 mod momentum;
@@ -123,8 +128,12 @@ pub enum CanonicalFluidError {
     Operator(String),
     #[error("canonical fluid execution cancelled")]
     Cancelled,
-    #[error("canonical fluid iteration did not converge")]
-    NotConverged,
+    #[error("canonical fluid linear correction did not converge: iterations={iterations}, relative_residual={relative_residual:?}, breakdown={breakdown}")]
+    LinearNotConverged {
+        iterations: u32,
+        relative_residual: Option<f64>,
+        breakdown: bool,
+    },
     #[error("canonical fluid exhausted outer={outer_iterations}, linear={linear_iterations}, momentum={momentum_relative}, continuity={continuity_relative}, flux={flux_constitutive_relative}, global_momentum={global_momentum_relative}, maximum_cell_momentum={maximum_cell_momentum_relative}")]
     IterationExhausted {
         outer_iterations: usize,
@@ -143,7 +152,7 @@ pub struct CanonicalFluidProblem<'a> {
     topology: &'a FiniteVolumeTopology,
     density: f64,
     viscosity: f64,
-    boundaries: Vec<boundary::FaceBoundary>,
+    boundaries: Vec<boundary::FaceBoundary<'a>>,
     boundary_balance_plan: boundary_balances::BoundaryBalancePlan,
     body_force_n_per_m3: Vec<[f64; 3]>,
     policy: CanonicalFluidPolicy,
@@ -233,11 +242,12 @@ impl<'a> CanonicalFluidProblem<'a> {
             add_entities(boundary.target.resolved_entities().len())?;
         }
         for excitation in excitations {
-            let ExcitationAction::BodyForce(action) = excitation else {
+            if !supports_action(excitation) {
                 return Err(CanonicalFluidError::Unsupported(
-                    "non-bodyforce fluid excitation",
+                    "unsupported fluid excitation",
                 ));
-            };
+            }
+            let action = excitation.excitation();
             if let ExcitationTarget::Region(target) = &action.target {
                 add_entities(target.resolved_entities().len())?;
             }
@@ -295,14 +305,16 @@ impl<'a> CanonicalFluidProblem<'a> {
         }
         let body_force_n_per_m3 =
             forcing::compile(source, topology, excitations, signals, sample_point)?;
-        let boundaries = boundary::compile(
+        let boundaries = boundary::compile(boundary::BoundaryInput {
             source,
             topology,
             constraints,
-            boundary_operators,
+            operators: boundary_operators,
             signals,
-            sample_point,
-        )?;
+            excitations,
+            density,
+            sample: sample_point,
+        })?;
         let boundary_balance_plan = boundary_balances::BoundaryBalancePlan::derive(&boundaries);
         let (pressure_reference_plan, pressure_reference_pa) =
             pressure_reference::PressureReferencePlan::derive(
@@ -316,7 +328,7 @@ impl<'a> CanonicalFluidProblem<'a> {
         let pressure_stencils = pressure_gradient::derive(topology, &boundaries)?;
         let velocity_stencils = velocity_gradient::derive(topology, &boundaries)?;
         let numerical_input_identity = identity(
-            "fea-fluid-numerical-input/v6",
+            "fea-fluid-numerical-input/v7",
             &(
                 topology.mesh_digest,
                 topology.projection_digest,

@@ -1,20 +1,6 @@
 //! Numeric history uses structural codec profiling, not the worst-density map
 //! multiplier applied to already over-reserved typed heap capacity.
 use super::ResourcePlanningError;
-use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
-use serde::{ser::SerializeSeq, Serialize, Serializer};
-
-struct ScalarInventory(usize);
-impl Serialize for ScalarInventory {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut seq = serializer.serialize_seq(Some(self.0))?;
-        for _ in 0..self.0 {
-            seq.serialize_element(&0.0_f64)?;
-        }
-        seq.end()
-    }
-}
-
 pub(super) fn projection(
     dofs: usize,
     elements: usize,
@@ -38,11 +24,9 @@ pub(super) fn projection(
         .and_then(|n| n.checked_add(elements))
         .and_then(|n| n.checked_add(128))
         .ok_or_else(overflow)?;
-    let profile = profile_serialized(
-        &ScalarInventory(count),
-        CanonicalLimits::new(1024 * 1024 * 1024, 100_000_000, 65_536, 32),
-    )
-    .map_err(|e| ResourcePlanningError::Invalid(e.to_string()))?;
+    let profile = super::super::numeric_profile::numeric_inventory_profile(
+        u64::try_from(count).map_err(|_| overflow())?,
+    )?;
     // Point histories contain typed identity maps rather than pure numeric arrays.
     // Keep their conservative wire/materialization allowance, plus fixed source
     // keys and solver metadata. This does not profile diagnostics/public UI fields.
@@ -80,6 +64,7 @@ mod tests {
         ComputeBackend,
     };
     use runmat_analysis_core::FormulationRequirement;
+    use runmat_canonical_codec::{profile_serialized, CanonicalLimits};
 
     #[test]
     fn output_projection_covers_actual_complete_driver_content_for_both_orders() {

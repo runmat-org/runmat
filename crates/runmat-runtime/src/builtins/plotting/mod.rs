@@ -272,13 +272,12 @@ use std::sync::{Mutex, OnceLock};
 use web::present_figure_on_surface as web_present_figure_on_surface;
 use web::present_geometry_scene_on_surface as web_present_geometry_scene_on_surface;
 pub use web::{
-    bind_surface_to_figure, clear_closed_figure_surfaces, detach_surface, fit_surface_extents,
-    get_surface_camera_state, install_surface, invalidate_surface_revisions,
+    bind_surface_to_figure, capture_surface_pointer, clear_closed_figure_surfaces, detach_surface,
+    fit_surface_extents, get_surface_camera_state, install_surface, invalidate_surface_revisions,
     pick_geometry_scene_region, present_surface, render_current_scene, reset_surface_camera,
     resize_surface, set_geometry_scene_presentation, set_plot_theme_config,
-    set_surface_presence, capture_surface_pointer,
-    set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
-    PlotSurfaceCameraState,
+    set_surface_camera_state, set_surface_presence, web_renderer_ready, PlotCameraProjection,
+    PlotCameraState, PlotSurfaceCameraState,
 };
 
 #[doc(hidden)]
@@ -740,7 +739,7 @@ pub use engine::{
     render_figure_png_bytes_with_camera, render_figure_rgba_bytes,
     render_figure_rgba_bytes_with_axes_cameras, render_figure_rgba_bytes_with_camera,
     render_figure_snapshot, render_figure_snapshot_with_camera_state,
-    render_geometry_scene_snapshot,
+    render_geometry_scene_snapshot, render_geometry_scene_snapshot_with_camera_state,
 };
 
 pub mod ops {

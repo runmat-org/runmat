@@ -313,15 +313,25 @@ async fn plot_root_locus_statement(first_sys: Value, rest: Vec<Value>) -> Builti
 
     let mut first = true;
     let mut hold_guard = HoldOffGuard::new();
+    let mut focus = Vec::new();
     for (system, style) in systems {
         let model = DynamicModel::from_value_async(system).await?;
         let eval = RootLocus::compute(&model.tf, gains.clone())?;
         render_root_locus_plot(&eval, style.as_ref()).await?;
+        if gains.is_none() {
+            focus.extend(eval.focus_points(&model.tf));
+        }
         if first {
             first = false;
             let _ = crate::call_builtin_async("hold", &[Value::from("on")]).await;
             hold_guard.arm();
         }
+    }
+    // With default gains the locus runs four decades past the interesting region; frame the
+    // poles, zeros, breakaway points and imaginary-axis crossings instead, as MATLAB does.
+    // A caller-supplied gain vector keeps the full extent of what was asked for.
+    if !focus.is_empty() {
+        super::frame_complex_plane(&focus, 0.5).await;
     }
     Ok(())
 }
@@ -539,6 +549,38 @@ impl RootLocus {
             poles,
             zeros,
         })
+    }
+
+    /// Open-loop poles and zeros, breakaway points (double roots at the critical gains) and the
+    /// points where a branch crosses the imaginary axis.
+    fn focus_points(&self, model: &TfModel) -> Vec<Complex64> {
+        let mut points: Vec<Complex64> = self.poles.iter().chain(self.zeros.iter()).copied().collect();
+        let scale = points.iter().map(|p| p.norm()).fold(1.0_f64, f64::max);
+        for gain in critical_gains(model) {
+            let Ok(roots) = roots_for_gain(model, gain, self.branches) else {
+                continue;
+            };
+            for (idx, root) in roots.iter().enumerate() {
+                let double = roots
+                    .iter()
+                    .enumerate()
+                    .any(|(other, r)| other != idx && (r - root).norm() <= 1.0e-3 * scale);
+                if double {
+                    points.push(*root);
+                }
+            }
+        }
+        for branch in 0..self.branches {
+            for gain_idx in 1..self.gains.len() {
+                let a = self.root(branch, gain_idx - 1);
+                let b = self.root(branch, gain_idx);
+                if a.re.is_finite() && b.re.is_finite() && a.re.signum() != b.re.signum() && a.re != b.re {
+                    let t = a.re / (a.re - b.re);
+                    points.push(Complex64::new(0.0, a.im + t * (b.im - a.im)));
+                }
+            }
+        }
+        points
     }
 
     fn outputs(&self) -> BuiltinResult<Vec<Value>> {

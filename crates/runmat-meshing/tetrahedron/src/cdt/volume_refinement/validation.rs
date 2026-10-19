@@ -60,35 +60,21 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
     if !source_quality.requires_refinement() {
         return Err(invalid("candidate source does not require refinement"));
     }
-    let topology_index = input
-        .topology
-        .tetrahedra
-        .iter()
-        .position(|tetrahedron| {
-            tetrahedron
-                .vertex_indices
-                .map(|vertex| input.topology.nodes[vertex as usize].identity)
-                == source_identity
-        })
-        .ok_or_else(|| invalid("candidate source is absent from topology"))?;
+    let topology_index =
+        crate::cdt::topology::queries::find_oriented_tetrahedron(input.topology, source_identity)
+            .map(|(index, _)| index)
+            .ok_or_else(|| invalid("candidate source is absent from topology"))?;
     let mut points = input.topology.tetrahedra[topology_index]
         .vertex_indices
         .map(|vertex| input.topology.nodes[vertex as usize].coordinates_m);
     points.sort_by(compare_points);
     let mut work = CandidateWork::new(options, cancellation);
     work.evaluate()?;
-    let (construction_index, construction) = input
-        .topology
-        .tetrahedra
-        .iter()
-        .enumerate()
-        .find(|tetrahedron| {
-            tetrahedron
-                .1
-                .vertex_indices
-                .map(|vertex| input.topology.nodes[vertex as usize].identity)
-                == observed.construction_node_identities
-        })
+    let (construction_index, construction) =
+        crate::cdt::topology::queries::find_oriented_tetrahedron(
+            input.topology,
+            observed.construction_node_identities,
+        )
         .ok_or_else(|| invalid("candidate construction tetrahedron is absent from topology"))?;
     if construction.region_id.as_ref() != Some(&source_quality.region_id) {
         return Err(invalid(
@@ -116,6 +102,7 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
                 construction_index,
                 &source_quality.region_id,
                 center,
+                cancellation,
             )? {
                 return Err(invalid(
                     "metric circumcenter is outside its admitted domain",
@@ -137,6 +124,7 @@ pub(super) fn validate_delaunay_volume_refinement_candidate_from_admitted_input(
                 &source_quality.region_id,
                 points,
                 center,
+                cancellation,
             )?
             .get(observed.construction_point_index as usize)
             .copied()

@@ -3,9 +3,9 @@
 //! Stage evidence is deliberately outside the stage-manifest closure: measured resource use and
 //! elapsed time must not affect the scheduling-independent geometric result identity.
 
-use runmat_execution::value::{ValuePayload, ValueRef, ValueRefKind};
+use runmat_execution::value::{ValueRef, ValueRefKind};
 use runmat_execution_artifact::cache::CacheImport;
-use runmat_execution_artifact::object::{validate_inventory, ObjectInventoryLimits};
+use runmat_execution_artifact::object::ObjectInventoryLimits;
 use runmat_execution_artifact::{LogicalObject, ObjectNamespace};
 use runmat_meshing_core::{CanonicalMeshingContract, MeshingStageEvidence};
 
@@ -26,17 +26,24 @@ pub(crate) struct PreparedStageEvidenceObservation {
 
 pub(crate) fn prepare_stage_evidence_observation(
     host: &MeshingHostWorkload,
-    evidence: MeshingStageEvidence,
+    evidence: &MeshingStageEvidence,
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<PreparedStageEvidenceObservation> {
-    validate_evidence(host, &evidence)?;
+    validate_evidence(host, evidence)?;
     let object = logical_object(
         "meshing/stage-evidence",
         ObjectNamespace::ResultValue,
         STAGE_EVIDENCE_MEDIA_TYPE,
         evidence.canonical_encode()?,
     )?;
-    validate_inventory(std::slice::from_ref(&object), limits)?;
+    enforce_object_length(
+        "meshing stage evidence",
+        object.descriptor.encoded_length,
+        limits,
+    )?;
+    if limits.max_objects == 0 || object.descriptor.encoded_length > limits.max_total_bytes {
+        return Err(limit("meshing stage evidence exceeds its inventory bound"));
+    }
     let reference =
         result_object_reference(&object, &host.artifact_access, STAGE_EVIDENCE_VALUE_SCHEMA)?;
     Ok(PreparedStageEvidenceObservation { object, reference })
@@ -83,6 +90,22 @@ pub fn import_stage_evidence_observation(
     result_objects: &[ValueRef],
     limits: ObjectInventoryLimits,
 ) -> MeshingExecutionResult<MeshingStageEvidence> {
+    import_stage_evidence_observation_with_access(
+        source,
+        host,
+        &host.artifact_access,
+        result_objects,
+        limits,
+    )
+}
+
+pub(crate) fn import_stage_evidence_observation_with_access(
+    source: &impl CacheImport,
+    host: &MeshingHostWorkload,
+    access: &crate::ArtifactAccess,
+    result_objects: &[ValueRef],
+    limits: ObjectInventoryLimits,
+) -> MeshingExecutionResult<MeshingStageEvidence> {
     let matches = result_objects
         .iter()
         .filter(|reference| {
@@ -95,7 +118,7 @@ pub fn import_stage_evidence_observation(
             "completed meshing stage requires exactly one externalized stage observation".into(),
         ));
     };
-    validate_reference(host, reference)?;
+    validate_reference_for_access(access, reference)?;
     enforce_object_length("meshing stage evidence", reference.encoded_length, limits)?;
     if limits.max_objects == 0 || reference.encoded_length > limits.max_total_bytes {
         return Err(runmat_execution_artifact::ArtifactError::Limit(
@@ -149,18 +172,11 @@ pub(crate) fn validate_stage_evidence_result(
     Ok(())
 }
 
-fn validate_reference(
-    host: &MeshingHostWorkload,
-    reference: &ValueRef,
-) -> MeshingExecutionResult<()> {
-    validate_reference_for_access(&host.artifact_access, reference)
-}
-
 fn validate_reference_for_access(
     access: &crate::ArtifactAccess,
     reference: &ValueRef,
 ) -> MeshingExecutionResult<()> {
-    ValuePayload::Object(Box::new(reference.clone()))
+    reference
         .validate(runmat_execution::value::ValueLimits::default())
         .map_err(|_| MeshingExecutionError::Identity("invalid stage-evidence reference"))?;
     if reference.kind != ValueRefKind::ResultObject

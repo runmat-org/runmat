@@ -95,11 +95,11 @@ impl PreparedFluidTransient<'_> {
         let model = &self.workload.model;
         let schedule =
             super::super::FluidTransientSchedule::derive(model, self.workload.selected_step()?)?;
-        let authorities = source
-            .constraints
-            .iter()
-            .map(|c| c.constraint_id.as_str())
-            .chain(model.boundaries.iter().map(|b| b.boundary_id.as_str()));
+        let authorities = crate::physics::cfd::canonical::potential_boundary_authorities(
+            &source.constraints,
+            &model.boundaries,
+            &model.excitations,
+        );
         let original = super::super::profile::original_block_profile(
             source.topology.cells.len(),
             source.topology.faces.len(),

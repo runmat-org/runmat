@@ -15,14 +15,14 @@ pub(super) fn project_boundary_face(
     nodes: &[ProjectedNode],
     elements: &[ProjectedElement],
 ) -> Result<ProjectedBoundaryFace, AnalysisProjectionError> {
-    let coordinates = node_indices
-        .iter()
-        .map(|index| nodes[*index].coordinates_m)
-        .collect::<Vec<_>>();
+    let mut coordinates = [[0.0; 3]; 6];
+    for (coordinate, index) in coordinates.iter_mut().zip(&node_indices) {
+        *coordinate = nodes[*index].coordinates_m;
+    }
     let mut area = 0.0;
     let mut first_moment_m3 = [0.0; 3];
     let mut area_vector = [0.0; 3];
-    visit_boundary_quadrature(face.order, &coordinates, |point| {
+    visit_boundary_quadrature(face.order, &coordinates[..node_indices.len()], |point| {
         area += point.area_weight_m2;
         for axis in 0..3 {
             first_moment_m3[axis] += point.position_m[axis] * point.area_weight_m2;

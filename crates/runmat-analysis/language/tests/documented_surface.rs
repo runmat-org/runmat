@@ -37,16 +37,16 @@ fn fea_examples(document: &str) -> String {
 #[test]
 fn physics_guides_cover_every_checked_family_and_procedure() {
     let docs = combined(&[
-        include_str!("../../../../docs/fea/physics/index.md"),
-        include_str!("../../../../docs/fea/physics/structural.md"),
-        include_str!("../../../../docs/fea/physics/thermal.md"),
-        include_str!("../../../../docs/fea/physics/electromagnetic.md"),
-        include_str!("../../../../docs/fea/physics/acoustic.md"),
-        include_str!("../../../../docs/fea/physics/fluid.md"),
-        include_str!("../../../../docs/fea/physics/thermomechanical.md"),
-        include_str!("../../../../docs/fea/physics/electrothermal.md"),
-        include_str!("../../../../docs/fea/physics/conjugate-heat-transfer.md"),
-        include_str!("../../../../docs/fea/physics/fluid-structure-interaction.md"),
+        include_str!("../../../../docs/simulation/physics/index.md"),
+        include_str!("../../../../docs/simulation/physics/structural.md"),
+        include_str!("../../../../docs/simulation/physics/thermal.md"),
+        include_str!("../../../../docs/simulation/physics/electromagnetic.md"),
+        include_str!("../../../../docs/simulation/physics/acoustic.md"),
+        include_str!("../../../../docs/simulation/physics/fluid.md"),
+        include_str!("../../../../docs/simulation/physics/thermomechanical.md"),
+        include_str!("../../../../docs/simulation/physics/electrothermal.md"),
+        include_str!("../../../../docs/simulation/physics/conjugate-heat-transfer.md"),
+        include_str!("../../../../docs/simulation/physics/fluid-structure-interaction.md"),
     ]);
     for term in [
         "structural static",
@@ -82,14 +82,14 @@ fn physics_guides_cover_every_checked_family_and_procedure() {
 #[test]
 fn constraint_guides_cover_every_closed_constraint_and_interface_kind() {
     let docs = combined(&[
-        include_str!("../../../../docs/fea/constraints/structural.md"),
-        include_str!("../../../../docs/fea/constraints/thermal.md"),
-        include_str!("../../../../docs/fea/constraints/electromagnetic.md"),
-        include_str!("../../../../docs/fea/constraints/acoustic.md"),
-        include_str!("../../../../docs/fea/constraints/fluid.md"),
-        include_str!("../../../../docs/fea/constraints/connectors.md"),
-        include_str!("../../../../docs/fea/constraints/interfaces.md"),
-        include_str!("../../../../docs/fea/constraints/initial-conditions.md"),
+        include_str!("../../../../docs/simulation/constraints/structural.md"),
+        include_str!("../../../../docs/simulation/constraints/thermal.md"),
+        include_str!("../../../../docs/simulation/constraints/electromagnetic.md"),
+        include_str!("../../../../docs/simulation/constraints/acoustic.md"),
+        include_str!("../../../../docs/simulation/constraints/fluid.md"),
+        include_str!("../../../../docs/simulation/constraints/connectors.md"),
+        include_str!("../../../../docs/simulation/constraints/interfaces.md"),
+        include_str!("../../../../docs/simulation/constraints/initial-conditions.md"),
     ]);
     for term in [
         "structural.fixed",
@@ -154,11 +154,11 @@ fn constraint_guides_cover_every_closed_constraint_and_interface_kind() {
 #[test]
 fn load_guides_cover_every_closed_excitation_and_natural_boundary_kind() {
     let docs = combined(&[
-        include_str!("../../../../docs/fea/loads/structural.md"),
-        include_str!("../../../../docs/fea/loads/thermal.md"),
-        include_str!("../../../../docs/fea/loads/electromagnetic.md"),
-        include_str!("../../../../docs/fea/loads/acoustic.md"),
-        include_str!("../../../../docs/fea/loads/fluid.md"),
+        include_str!("../../../../docs/simulation/loads/structural.md"),
+        include_str!("../../../../docs/simulation/loads/thermal.md"),
+        include_str!("../../../../docs/simulation/loads/electromagnetic.md"),
+        include_str!("../../../../docs/simulation/loads/acoustic.md"),
+        include_str!("../../../../docs/simulation/loads/fluid.md"),
     ]);
     for term in [
         "force",
@@ -238,14 +238,14 @@ fn load_guides_cover_every_closed_excitation_and_natural_boundary_kind() {
 #[test]
 fn constraint_guides_show_every_closed_kind_in_fea_syntax() {
     let docs = combined(&[
-        include_str!("../../../../docs/fea/constraints/structural.md"),
-        include_str!("../../../../docs/fea/constraints/thermal.md"),
-        include_str!("../../../../docs/fea/constraints/electromagnetic.md"),
-        include_str!("../../../../docs/fea/constraints/acoustic.md"),
-        include_str!("../../../../docs/fea/constraints/fluid.md"),
-        include_str!("../../../../docs/fea/constraints/connectors.md"),
-        include_str!("../../../../docs/fea/constraints/interfaces.md"),
-        include_str!("../../../../docs/fea/constraints/initial-conditions.md"),
+        include_str!("../../../../docs/simulation/constraints/structural.md"),
+        include_str!("../../../../docs/simulation/constraints/thermal.md"),
+        include_str!("../../../../docs/simulation/constraints/electromagnetic.md"),
+        include_str!("../../../../docs/simulation/constraints/acoustic.md"),
+        include_str!("../../../../docs/simulation/constraints/fluid.md"),
+        include_str!("../../../../docs/simulation/constraints/connectors.md"),
+        include_str!("../../../../docs/simulation/constraints/interfaces.md"),
+        include_str!("../../../../docs/simulation/constraints/initial-conditions.md"),
     ]);
     let examples = fea_examples(&docs);
     for term in [
@@ -313,31 +313,31 @@ fn load_and_constraint_guides_retain_task_depth_and_runmat_examples() {
     let load_guides = [
         (
             "structural",
-            include_str!("../../../../docs/fea/loads/structural.md"),
+            include_str!("../../../../docs/simulation/loads/structural.md"),
             38,
             15,
         ),
         (
             "thermal",
-            include_str!("../../../../docs/fea/loads/thermal.md"),
+            include_str!("../../../../docs/simulation/loads/thermal.md"),
             35,
             12,
         ),
         (
             "electromagnetic",
-            include_str!("../../../../docs/fea/loads/electromagnetic.md"),
+            include_str!("../../../../docs/simulation/loads/electromagnetic.md"),
             36,
             11,
         ),
         (
             "acoustic",
-            include_str!("../../../../docs/fea/loads/acoustic.md"),
+            include_str!("../../../../docs/simulation/loads/acoustic.md"),
             31,
             12,
         ),
         (
             "fluid",
-            include_str!("../../../../docs/fea/loads/fluid.md"),
+            include_str!("../../../../docs/simulation/loads/fluid.md"),
             33,
             9,
         ),
@@ -356,49 +356,49 @@ fn load_and_constraint_guides_retain_task_depth_and_runmat_examples() {
     let constraint_guides = [
         (
             "structural",
-            include_str!("../../../../docs/fea/constraints/structural.md"),
+            include_str!("../../../../docs/simulation/constraints/structural.md"),
             41,
             17,
         ),
         (
             "thermal",
-            include_str!("../../../../docs/fea/constraints/thermal.md"),
+            include_str!("../../../../docs/simulation/constraints/thermal.md"),
             27,
             9,
         ),
         (
             "electromagnetic",
-            include_str!("../../../../docs/fea/constraints/electromagnetic.md"),
+            include_str!("../../../../docs/simulation/constraints/electromagnetic.md"),
             21,
             13,
         ),
         (
             "acoustic",
-            include_str!("../../../../docs/fea/constraints/acoustic.md"),
+            include_str!("../../../../docs/simulation/constraints/acoustic.md"),
             21,
             9,
         ),
         (
             "fluid",
-            include_str!("../../../../docs/fea/constraints/fluid.md"),
+            include_str!("../../../../docs/simulation/constraints/fluid.md"),
             27,
             9,
         ),
         (
             "connectors",
-            include_str!("../../../../docs/fea/constraints/connectors.md"),
+            include_str!("../../../../docs/simulation/constraints/connectors.md"),
             26,
             5,
         ),
         (
             "interfaces",
-            include_str!("../../../../docs/fea/constraints/interfaces.md"),
+            include_str!("../../../../docs/simulation/constraints/interfaces.md"),
             20,
             10,
         ),
         (
             "initial conditions",
-            include_str!("../../../../docs/fea/constraints/initial-conditions.md"),
+            include_str!("../../../../docs/simulation/constraints/initial-conditions.md"),
             21,
             14,
         ),
@@ -419,7 +419,7 @@ fn load_and_constraint_guides_retain_task_depth_and_runmat_examples() {
 fn load_guides_answer_recognizable_engineering_tasks() {
     let required = [
         (
-            include_str!("../../../../docs/fea/loads/structural.md"),
+            include_str!("../../../../docs/simulation/loads/structural.md"),
             [
                 "How do I load a pressure vessel correctly?",
                 "How do I apply a harmonic load with amplitude and phase?",
@@ -428,7 +428,7 @@ fn load_guides_answer_recognizable_engineering_tasks() {
             ],
         ),
         (
-            include_str!("../../../../docs/fea/loads/thermal.md"),
+            include_str!("../../../../docs/simulation/loads/thermal.md"),
             [
                 "How do I model a thermal soak followed by cooldown?",
                 "How do I model heat from a chip, winding, battery cell, or resistor?",
@@ -437,7 +437,7 @@ fn load_guides_answer_recognizable_engineering_tasks() {
             ],
         ),
         (
-            include_str!("../../../../docs/fea/loads/electromagnetic.md"),
+            include_str!("../../../../docs/simulation/loads/electromagnetic.md"),
             [
                 "How do I excite a capacitor or electrostatic actuator?",
                 "How do I excite a resistive conductor and compute Joule loss?",
@@ -446,7 +446,7 @@ fn load_guides_answer_recognizable_engineering_tasks() {
             ],
         ),
         (
-            include_str!("../../../../docs/fea/loads/acoustic.md"),
+            include_str!("../../../../docs/simulation/loads/acoustic.md"),
             [
                 "How do I choose between pressure and normal-velocity excitation?",
                 "How do I drive a speaker diaphragm from measured motion?",
@@ -455,7 +455,7 @@ fn load_guides_answer_recognizable_engineering_tasks() {
             ],
         ),
         (
-            include_str!("../../../../docs/fea/loads/fluid.md"),
+            include_str!("../../../../docs/simulation/loads/fluid.md"),
             [
                 "How do I choose a well-posed inlet and outlet combination?",
                 "How do I model pipe or duct flow from a known flow rate?",
@@ -477,14 +477,14 @@ fn load_guides_answer_recognizable_engineering_tasks() {
 #[test]
 fn constraint_guides_answer_recognizable_engineering_tasks() {
     let guides = combined(&[
-        include_str!("../../../../docs/fea/constraints/structural.md"),
-        include_str!("../../../../docs/fea/constraints/thermal.md"),
-        include_str!("../../../../docs/fea/constraints/electromagnetic.md"),
-        include_str!("../../../../docs/fea/constraints/acoustic.md"),
-        include_str!("../../../../docs/fea/constraints/fluid.md"),
-        include_str!("../../../../docs/fea/constraints/connectors.md"),
-        include_str!("../../../../docs/fea/constraints/interfaces.md"),
-        include_str!("../../../../docs/fea/constraints/initial-conditions.md"),
+        include_str!("../../../../docs/simulation/constraints/structural.md"),
+        include_str!("../../../../docs/simulation/constraints/thermal.md"),
+        include_str!("../../../../docs/simulation/constraints/electromagnetic.md"),
+        include_str!("../../../../docs/simulation/constraints/acoustic.md"),
+        include_str!("../../../../docs/simulation/constraints/fluid.md"),
+        include_str!("../../../../docs/simulation/constraints/connectors.md"),
+        include_str!("../../../../docs/simulation/constraints/interfaces.md"),
+        include_str!("../../../../docs/simulation/constraints/initial-conditions.md"),
     ]);
     for task in [
         "How do I choose the minimum constraints for a 3D solid?",

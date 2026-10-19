@@ -1,4 +1,6 @@
+mod ties;
 use std::collections::{BTreeSet, VecDeque};
+pub(super) use ties::{circumsphere_relation, materialized_relation};
 
 use runmat_meshing_core::{
     quality::predicate::{orient2d, PredicateSign},
@@ -275,17 +277,20 @@ fn projection_axes(
     triangle: [[f64; 3]; 3],
     work: &mut InsertionWork<'_>,
 ) -> Result<[usize; 2], DelaunayInsertionError> {
-    for axes in [[0, 1], [0, 2], [1, 2]] {
-        if planar_orientation(triangle.map(|point| [point[axes[0]], point[axes[1]]]), work)?
-            != PredicateSign::Zero
-        {
-            return Ok(axes);
-        }
-    }
-    Err(error(
-        DelaunayInsertionErrorKind::InvalidTopology,
-        "tetrahedron face is exactly collinear",
-    ))
+    work.predicate()?;
+    runmat_meshing_core::quality::predicate::triangle_projection_axes(triangle)
+        .map_err(|failure| {
+            error(
+                DelaunayInsertionErrorKind::InvalidNode,
+                format!("triangle projection failed: {failure:?}"),
+            )
+        })?
+        .ok_or_else(|| {
+            error(
+                DelaunayInsertionErrorKind::InvalidTopology,
+                "tetrahedron face is exactly collinear",
+            )
+        })
 }
 
 fn planar_orientation(
@@ -347,94 +352,11 @@ fn in_circumsphere(
     node: DelaunayVolumeNode,
     work: &mut InsertionWork<'_>,
 ) -> Result<bool, DelaunayInsertionError> {
-    work.predicate()?;
-    let points = vertices.map(|vertex| topology.nodes()[vertex as usize]);
-    topology
-        .insphere_nodes([points[0], points[1], points[2], points[3], node])
-        .map(|sign| matches!(sign, PredicateSign::Positive | PredicateSign::Zero))
-        .map_err(predicate_error)
-}
-
-pub(super) fn circumsphere_relation(
-    topology: &impl TetrahedralTopology,
-    vertices: [u32; 4],
-    node: DelaunayVolumeNode,
-    work: &mut InsertionWork<'_>,
-) -> Result<PredicateSign, DelaunayInsertionError> {
-    work.predicate()?;
-    let points = vertices.map(|vertex| topology.nodes()[vertex as usize]);
-    let relation = topology
-        .insphere_nodes([points[0], points[1], points[2], points[3], node])
-        .map_err(predicate_error)?;
-    if relation != PredicateSign::Zero {
-        return Ok(relation);
-    }
-    symbolic_circumsphere_relation(topology, vertices, node)
-}
-
-fn symbolic_circumsphere_relation(
-    topology: &impl TetrahedralTopology,
-    vertices: [u32; 4],
-    node: DelaunayVolumeNode,
-) -> Result<PredicateSign, DelaunayInsertionError> {
-    let mut points = vertices
-        .map(|vertex| topology.nodes()[vertex as usize])
-        .to_vec();
-    points.push(node);
-    let mut inversions = 0_u8;
-    for left in 0..points.len() {
-        for right in (left + 1)..points.len() {
-            inversions ^= u8::from(
-                compare_symbolic_nodes(&points[left], &points[right])
-                    == std::cmp::Ordering::Greater,
-            );
-        }
-    }
-    points.sort_unstable_by(compare_symbolic_nodes);
-    let parity_is_odd = inversions != 0;
-    let leading = topology
-        .orient_nodes([points[1], points[2], points[3], points[4]])
-        .map_err(predicate_error)?;
-    if leading != PredicateSign::Zero {
-        return Ok(if parity_is_odd {
-            reverse_sign(leading)
-        } else {
-            leading
-        });
-    }
-    let trailing = topology
-        .orient_nodes([points[0], points[2], points[3], points[4]])
-        .map_err(predicate_error)?;
-    if trailing == PredicateSign::Zero {
-        return Err(error(
-            DelaunayInsertionErrorKind::InvalidTopology,
-            "symbolic circumsphere perturbation encountered five affinely degenerate nodes",
-        ));
-    }
-    Ok(if parity_is_odd {
-        trailing
-    } else {
-        reverse_sign(trailing)
-    })
-}
-
-fn compare_symbolic_nodes(
-    left: &DelaunayVolumeNode,
-    right: &DelaunayVolumeNode,
-) -> std::cmp::Ordering {
-    left.coordinates_m
-        .iter()
-        .zip(right.coordinates_m.iter())
-        .find_map(|(left, right)| (left != right).then(|| left.total_cmp(right)))
-        .unwrap_or_else(|| left.identity.cmp(&right.identity))
-}
-
-fn reverse_sign(sign: PredicateSign) -> PredicateSign {
-    match sign {
-        PredicateSign::Negative => PredicateSign::Positive,
-        PredicateSign::Zero => PredicateSign::Zero,
-        PredicateSign::Positive => PredicateSign::Negative,
-    }
+    // Expanding through every physical zero independently of legalization's
+    // symbolic choice destroys valid tied edges and enlarges conflict cavities.
+    // On-face traversal remains forced above to prevent zero-volume cells.
+    circumsphere_relation(topology, vertices, node, work)
+        .map(|sign| sign == PredicateSign::Positive)
 }
 
 #[cfg(test)]

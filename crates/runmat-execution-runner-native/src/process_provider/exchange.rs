@@ -22,11 +22,14 @@ pub(super) async fn exchange(
     let limits = FrameLimits {
         max_message_bytes: provider.config.max_message_bytes,
     };
-    let payload = serde_json::to_vec(request).map_err(|error| error.to_string())?;
+    let payload =
+        runmat_canonical_codec::encode_json_bounded(request, u64::from(limits.max_message_bytes))
+            .map_err(|error| error.to_string())?;
     write_payload(&mut writer, &payload, limits)
         .await
         .map_err(|error| error.to_string())?;
     let mut receiver = request
+        .request()
         .console
         .map(runmat_execution::console::ConsoleReceiver::new)
         .transpose()
@@ -35,7 +38,7 @@ pub(super) async fn exchange(
     let response = read_response(
         &mut reader,
         limits,
-        request,
+        request.request(),
         control,
         &mut receiver,
         &mut receipt,
@@ -50,7 +53,7 @@ pub(super) async fn exchange(
     // then is parent death to domain workers, and would cancel healthy execution.
     drop(writer);
     response
-        .validate_against(request)
+        .validate_against(request.request())
         .map_err(|error| error.to_string())?;
     Ok(response)
 }
@@ -58,7 +61,7 @@ pub(super) async fn exchange(
 async fn read_response(
     reader: &mut (impl tokio::io::AsyncRead + Unpin),
     limits: FrameLimits,
-    request: &WorkerRequest,
+    request: &runmat_execution_artifact::ProgramExecutionRequest,
     control: &dyn ProcessControl,
     receiver: &mut Option<runmat_execution::console::ConsoleReceiver>,
     receipt: &mut Option<runmat_execution::console::ConsoleReceipt>,

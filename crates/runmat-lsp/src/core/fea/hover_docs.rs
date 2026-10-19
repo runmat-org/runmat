@@ -19,6 +19,18 @@ pub(super) fn fallback_authoring_doc() -> AuthoringDoc {
 
 pub(super) fn authoring_doc(name: &str) -> Option<AuthoringDoc> {
     let (summary, detail) = match name {
+        "assessment" => (
+            "Engineering acceptance rule for a declared scalar study output.",
+            "The comparison is checked for compatible physical dimensions. Its result is separate from solver convergence and publication quality.",
+        ),
+        "authored_samples" => (
+            "Compare the scalar output at its declared sample coordinates.",
+            "A sampled maximum does not certify the continuous peak between samples.",
+        ),
+        "certified_bound" => (
+            "Require a certified absolute error bound to establish acceptance.",
+            "Missing evidence or an uncertainty interval crossing the threshold yields an indeterminate assessment.",
+        ),
         "mass_density" => (
             "Mass per unit volume used to assemble inertia, gravity, and other body-force terms.",
             "Required by dynamic structural procedures and any formulation whose coefficients depend on material density. The value must be finite and positive.",

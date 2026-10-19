@@ -9,6 +9,9 @@ pub(in crate::cdt) struct OptimizationWork<'a> {
     maximum_evaluations: u64,
     cancellation_check_interval: u64,
     cancellation: &'a dyn MeshingCancellationSignal,
+    global_candidates: u64,
+    global_node_inventory: u64,
+    global_cell_inventory: u64,
 }
 
 impl<'a> OptimizationWork<'a> {
@@ -22,7 +25,44 @@ impl<'a> OptimizationWork<'a> {
             maximum_evaluations,
             cancellation_check_interval,
             cancellation,
+            global_candidates: 0,
+            global_node_inventory: 0,
+            global_cell_inventory: 0,
         }
+    }
+
+    /// Input inventory offered to explicit complete candidates, not measured
+    /// allocator bytes, primitive operations or a claim of localized work.
+    pub(super) fn global_candidate(
+        &mut self,
+        nodes: usize,
+        cells: usize,
+    ) -> Result<(), DelaunayVolumeSliverError> {
+        self.global_candidates = self.global_candidates.checked_add(1).ok_or_else(|| {
+            error(
+                DelaunayVolumeSliverErrorKind::ResourceLimit,
+                "global candidate count overflow",
+            )
+        })?;
+        self.global_node_inventory = self
+            .global_node_inventory
+            .checked_add(nodes as u64)
+            .ok_or_else(|| {
+                error(
+                    DelaunayVolumeSliverErrorKind::ResourceLimit,
+                    "global node inventory overflow",
+                )
+            })?;
+        self.global_cell_inventory = self
+            .global_cell_inventory
+            .checked_add(cells as u64)
+            .ok_or_else(|| {
+                error(
+                    DelaunayVolumeSliverErrorKind::ResourceLimit,
+                    "global cell inventory overflow",
+                )
+            })?;
+        Ok(())
     }
 
     pub(in crate::cdt) fn evaluate(&mut self) -> Result<(), DelaunayVolumeSliverError> {
@@ -47,6 +87,18 @@ impl<'a> OptimizationWork<'a> {
         }
         self.evaluations += 1;
         Ok(())
+    }
+}
+
+impl Drop for OptimizationWork<'_> {
+    fn drop(&mut self) {
+        tracing::info!(
+            candidate_evaluations = self.evaluations,
+            global_candidate_attempts = self.global_candidates,
+            global_candidate_node_inventory = self.global_node_inventory,
+            global_candidate_cell_inventory = self.global_cell_inventory,
+            "volume optimization work inventory"
+        );
     }
 }
 

@@ -305,9 +305,6 @@ pub async fn polarhistogram_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Polar Histogram",
-            x_label: "",
-            y_label: "",
             axis_equal: true,
             grid: true,
         },

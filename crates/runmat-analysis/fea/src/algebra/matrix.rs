@@ -122,12 +122,12 @@ impl std::error::Error for RealSparseMatrixError {}
 #[serde(try_from = "RealSparseMatrixData")]
 pub struct RealSparseMatrix {
     pattern: SparsePattern,
-    values: Vec<f64>,
+    values: std::sync::Arc<Vec<f64>>,
     scalar_domain: ScalarDomain,
     precision: ScalarPrecision,
     role: OperatorRole,
     properties: MatrixProperties,
-    contributions: Vec<ContributionProvenance>,
+    contributions: std::sync::Arc<Vec<ContributionProvenance>>,
 }
 
 #[derive(Deserialize)]
@@ -177,12 +177,12 @@ impl RealSparseMatrix {
         }
         Ok(Self {
             pattern,
-            values,
+            values: std::sync::Arc::new(values),
             scalar_domain: ScalarDomain::Real,
             precision: ScalarPrecision::F64,
             role,
             properties,
-            contributions,
+            contributions: std::sync::Arc::new(contributions),
         })
     }
 
@@ -259,7 +259,7 @@ impl RealSparseMatrix {
         &self.contributions
     }
     pub fn with_contribution(mut self, provenance: ContributionProvenance) -> Self {
-        self.contributions.push(provenance);
+        std::sync::Arc::make_mut(&mut self.contributions).push(provenance);
         self
     }
     pub fn pattern_identity(&self) -> Result<Digest, CanonicalCodecError> {
@@ -362,7 +362,7 @@ impl RealSparseMatrix {
             .map(|(reduced, original)| (*original, reduced))
             .collect::<BTreeMap<_, _>>();
         let mut assembler = RealSparseAssembler::square(retained.len(), self.role, self.properties);
-        for contribution in &self.contributions {
+        for contribution in self.contributions.iter() {
             assembler.add_contribution(contribution.clone());
         }
         for (reduced_row, original_row) in retained.iter().copied().enumerate() {
@@ -414,7 +414,7 @@ impl RealSparseMatrix {
             }
             offsets.push(values.len() as u64);
         }
-        let mut contributions = self.contributions.clone();
+        let mut contributions = self.contributions.as_ref().clone();
         contributions.push(ContributionProvenance {
             domain: ContributionDomain::Constraint,
             contribution_id: ContributionId("essential_elimination".to_string()),
@@ -442,7 +442,7 @@ impl RealSparseMatrix {
             if matrix.rows() != first.rows() || matrix.columns() != first.columns() {
                 return Err(RealSparseMatrixError::ShapeMismatch);
             }
-            for contribution in &matrix.contributions {
+            for contribution in matrix.contributions.iter() {
                 if !assembler.contributions.contains(contribution) {
                     assembler.add_contribution(contribution.clone());
                 }

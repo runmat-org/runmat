@@ -125,13 +125,14 @@ pub fn prepare_fluid_study_publication(
         run: super::structural_study::CompletedStudyStepRun::Standard(Box::new(run)),
         resolved_solver_options: super::AnalysisSolverOptions::IncompressibleFlow(options.clone()),
     };
-    let published = crate::analysis::structural_study::publication::complete_study_run_prepared(
-        prepared,
-        vec![step],
-        completed.states.clone(),
-        completed.frozen_project_digest,
-        preparation,
-    )?;
+    let mut published =
+        crate::analysis::structural_study::publication::complete_study_run_prepared(
+            prepared,
+            vec![step],
+            completed.states.clone(),
+            completed.frozen_project_digest,
+            preparation,
+        )?;
     let manifest = super::study_result_manifest::StudyResultManifest::new(
         &completed.compiled,
         completed
@@ -148,7 +149,7 @@ pub fn prepare_fluid_study_publication(
             layout: completed.layout.clone(),
             object_artifact_paths,
         },
-        &published,
+        &mut published,
     )
     .map_err(|error| {
         crate::analysis::prepared_study_publication::publication_failure(error, &context, invalid)

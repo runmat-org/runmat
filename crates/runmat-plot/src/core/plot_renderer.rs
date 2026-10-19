@@ -161,6 +161,9 @@ pub struct PlotRenderer {
     /// Last surface extent (in pixels) that was used to build viewport-dependent geometry.
     /// Used so we can rebuild the scene after the canvas is resized (common on wasm).
     last_scene_viewport_px: Option<(u32, u32)>,
+    /// Per-axes tick step and length of each 3-D origin axis, as last drawn, so the overlay
+    /// labels the same ticks.
+    world_axis_triads: std::collections::HashMap<usize, ([f64; 3], [f32; 3])>,
     /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
     last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
     /// Last per-axes orthographic view bounds used for viewport-dependent 2D stroke geometry.
@@ -375,6 +378,7 @@ impl PlotRenderer {
             geometry_node_owner_ids: HashMap::new(),
             geometry_hidden_owner_node_ids: BTreeSet::new(),
             last_scene_viewport_px: None,
+            world_axis_triads: std::collections::HashMap::new(),
             last_axes_plot_sizes_px: None,
             last_axes_view_bounds: None,
             last_axes_view_contract: None,
@@ -411,6 +415,11 @@ impl PlotRenderer {
     }
 
     pub fn axes_has_3d_content(&self, axes_index: usize) -> bool {
+        // Geometry scenes own one spatial axes without a backing Figure. Camera
+        // fitting, interaction, and overlays must use the same 3D classification.
+        if self.last_geometry_scene.is_some() {
+            return axes_index == 0;
+        }
         self.last_figure
             .as_ref()
             .map(|figure| {
@@ -731,6 +740,8 @@ impl PlotRenderer {
     ) {
         use crate::core::SceneNode;
 
+        // Lines with an automatic color take the theme's axes color.
+        figure.resolve_auto_reference_line_colors(self.theme.build_theme().get_axis_color());
         let (rows, cols) = figure.axes_grid();
 
         // Convert figure to render data first, then create scene nodes.
@@ -1026,15 +1037,8 @@ impl PlotRenderer {
                     y_min = yl;
                     y_max = yr;
                 }
-                if meta.axis_equal || meta.data_aspect_ratio_mode == "manual" {
-                    (x_min, x_max, y_min, y_max) = data_aspect_adjusted_bounds(
-                        x_min,
-                        x_max,
-                        y_min,
-                        y_max,
-                        meta.data_aspect_ratio,
-                    );
-                }
+                // A fixed data aspect (`axis equal`) keeps these limits; the overlay layout
+                // shrinks the plot box to the aspect instead (see `overlay_plot_box_aspect_for_axes`).
             }
         }
         if let Some(meta) = self
@@ -1120,6 +1124,47 @@ impl PlotRenderer {
         self.current_3d_display_bounds_for_axes(axes_index)
     }
 
+    /// A tick step per data axis for the 3-D origin triad: a nice value near `target_px` on
+    /// screen along that axis.
+    pub(crate) fn world_axis_steps(
+        project_to_px: &dyn Fn(Vec3) -> Option<(f32, f32)>,
+        center: Vec3,
+        nice_step: &dyn Fn(f64) -> f64,
+    ) -> [f64; 3] {
+        let target_px = 96.0_f64;
+        [Vec3::X, Vec3::Y, Vec3::Z].map(|axis| {
+            let px = match (project_to_px(center), project_to_px(center + axis)) {
+                (Some((ax, ay)), Some((bx, by))) => ((bx - ax).hypot(by - ay) as f64).max(1e-6),
+                _ => 1.0,
+            };
+            nice_step((target_px / px).max(1e-9))
+        })
+    }
+
+    /// The 3-D axis scale: each axis stretched to fill a cube (MATLAB's default plot box),
+    /// or one scale for all axes under `axis equal`, a set data aspect, or a geometry mesh.
+    fn axes_3d_axis_scale(&self, axes_index: usize, bounds: BoundingBox) -> Vec3 {
+        let size = (bounds.max - bounds.min).abs();
+        let largest = size.x.max(size.y).max(size.z);
+        if !(largest.is_finite() && largest > 0.0) {
+            return Vec3::ONE;
+        }
+        let figure = self.last_figure.as_ref();
+        let meta = figure.and_then(|f| f.axes_metadata(axes_index));
+        let has_geometry_mesh = figure.is_some_and(|f| {
+            f.plots().enumerate().any(|(idx, plot)| {
+                f.plot_axes_indices().get(idx).copied().unwrap_or(0) == axes_index
+                    && matches!(plot, crate::plots::PlotElement::Mesh(_))
+            })
+        });
+        let fixed_aspect = meta.is_some_and(|m| m.axis_equal || m.data_aspect_ratio_mode == "manual");
+        if fixed_aspect || has_geometry_mesh {
+            return Vec3::splat(1.0 / largest);
+        }
+        let axis = |extent: f32| if extent > largest * 1.0e-6 { 1.0 / extent } else { 1.0 / largest };
+        Vec3::new(axis(size.x), axis(size.y), axis(size.z))
+    }
+
     fn axes_model_matrix(&self, _axes_index: usize) -> Mat4 {
         Mat4::IDENTITY
     }
@@ -1133,9 +1178,10 @@ impl PlotRenderer {
                 };
                 let center = (bounds.min + bounds.max) * 0.5;
                 let mut cam = Camera::new();
-                cam.target = center;
+                cam.axis_scale = self.axes_3d_axis_scale(idx, bounds);
+                cam.target = center * cam.axis_scale;
                 cam.up = Vec3::Z;
-                cam.position = center + Vec3::new(1.0, -1.0, 1.0);
+                cam.position = cam.target + Vec3::new(1.0, -1.0, 1.0);
                 cam.fit_bounds(bounds.min, bounds.max);
                 self.axes_cameras[idx] = cam;
                 applied = true;
@@ -1233,9 +1279,10 @@ impl PlotRenderer {
             };
             let center = (bounds.min + bounds.max) * 0.5;
             let mut cam = Camera::new();
-            cam.target = center;
+            cam.axis_scale = self.axes_3d_axis_scale(0, bounds);
+            cam.target = center * cam.axis_scale;
             cam.up = Vec3::Z;
-            cam.position = center + Vec3::new(1.0, -1.0, 1.0);
+            cam.position = cam.target + Vec3::new(1.0, -1.0, 1.0);
             cam.fit_bounds(bounds.min, bounds.max);
             if let Some(axis_cam) = self.axes_cameras.get_mut(0) {
                 *axis_cam = cam;
@@ -1347,7 +1394,7 @@ impl PlotRenderer {
         camera.up = up;
 
         if let Some(bounds) = bounds {
-            let center = (bounds.min + bounds.max) * 0.5;
+            let center = (bounds.min + bounds.max) * 0.5 * camera.axis_scale;
             camera.target = center;
             camera.position = center + direction;
             camera.fit_bounds(bounds.min, bounds.max);
@@ -2319,6 +2366,11 @@ impl PlotRenderer {
         if !is_2d && self.overlay_show_grid_for_axes(axes_index) {
             let view_proj = view_proj_matrix;
             let inv_view_proj = view_proj.inverse();
+            // The camera lives in axis-scaled space (3-D axes stretch to a cube); this helper is
+            // built in data units, so read the camera's target and position back in data units.
+            let axis_scale = cam.axis_scale.max(Vec3::splat(1.0e-12));
+            let target_data = cam.target / axis_scale;
+            let position_data = cam.position / axis_scale;
             let scene_bounds = self
                 .scene
                 .get_visible_nodes()
@@ -2333,7 +2385,7 @@ impl PlotRenderer {
                 .or(scene_bounds)
                 .filter(|bounds| bounds.min.is_finite() && bounds.max.is_finite())
                 .map(|bounds| bounds.min.z - bounds.size().length().max(1.0) * 0.001)
-                .unwrap_or(cam.target.z);
+                .unwrap_or(target_data.z);
 
             let on_grid = |x: f32, y: f32| -> Vec3 { Vec3::new(x, y, plane_level) };
 
@@ -2395,10 +2447,10 @@ impl PlotRenderer {
             {
                 let dist = (cam.position - cam.target).length().max(1e-3);
                 let extent = (dist * (0.5 * fov).tan() * 1.25).max(0.5);
-                min_x = cam.target.x - extent;
-                max_x = cam.target.x + extent;
-                min_y = cam.target.y - extent;
-                max_y = cam.target.y + extent;
+                min_x = target_data.x - extent / axis_scale.x;
+                max_x = target_data.x + extent / axis_scale.x;
+                min_y = target_data.y - extent / axis_scale.y;
+                max_y = target_data.y + extent / axis_scale.y;
             }
 
             // Expand a bit so grid lines don't pop at edges.
@@ -2445,7 +2497,7 @@ impl PlotRenderer {
 
             // Use the more visible ground direction for spacing. A nearly
             // edge-on X or Y axis should not make every major cell enormous.
-            let center = on_grid(cam.target.x, cam.target.y);
+            let center = on_grid(target_data.x, target_data.y);
             let px_per_world = {
                 let a = project_to_px(center);
                 let bx = project_to_px(center + Vec3::X);
@@ -2515,9 +2567,9 @@ impl PlotRenderer {
                         minor_step: minor_step as f32,
                         fade_start: (0.85 * dx.max(dy)).max(major_step as f32),
                         fade_end: (1.40 * dx.max(dy)).max((major_step as f32) * 2.0),
-                        camera_pos: cam.position.to_array(),
+                        camera_pos: position_data.to_array(),
                         _pad0: 0.0,
-                        target_pos: [cam.target.x, cam.target.y, plane_level],
+                        target_pos: [target_data.x, target_data.y, plane_level],
                         _pad1: 0.0,
                         major_color: [major_rgb[0], major_rgb[1], major_rgb[2], major_alpha],
                         minor_color: [minor_rgb[0], minor_rgb[1], minor_rgb[2], minor_alpha],
@@ -2536,31 +2588,49 @@ impl PlotRenderer {
                 grid_plane_buffers = Some((vb, ib));
             }
 
-            // World-axis helper for spatial awareness at model scale.
-            let axis_len = (major_step as f32 * 5.0).clamp(0.5, (dx.max(dy) * 0.6).max(0.5));
+            // World-axis helper for spatial awareness at model scale. Each axis has its own
+            // tick step, since 3-D axes may scale each data axis differently.
+            // Each axis reaches the far edge of the data from the origin, with about four
+            // ticks; without data bounds, the step follows the on-screen scale instead.
+            let (axis_steps, axis_lens) = match scene_bounds {
+                Some(bounds) if bounds.min.is_finite() && bounds.max.is_finite() => {
+                    let reach = bounds.min.abs().max(bounds.max.abs());
+                    let reach = [reach.x, reach.y, reach.z];
+                    let steps = reach.map(|r| nice_step((r as f64 / 4.0).max(1e-9)));
+                    let lens = [0, 1, 2].map(|k| reach[k].max(steps[k] as f32));
+                    (steps, lens)
+                }
+                _ => {
+                    let steps = Self::world_axis_steps(&project_to_px, center, &nice_step);
+                    let lens = steps.map(|step| {
+                        (step as f32 * 5.0)
+                            .clamp((step as f32).min(0.5), (dx.max(dy) * 0.6).max(step as f32))
+                    });
+                    (steps, lens)
+                }
+            };
             let origin = Vec3::new(0.0, 0.0, 0.0);
             let col_x = Vec4::new(0.92, 0.25, 0.25, 0.85);
             let col_y = Vec4::new(0.35, 0.90, 0.45, 0.85);
             let col_z = Vec4::new(0.35, 0.62, 0.98, 0.85);
-            push_line(origin, origin + Vec3::new(axis_len, 0.0, 0.0), col_x);
-            push_line(origin, origin + Vec3::new(0.0, axis_len, 0.0), col_y);
-            push_line(origin, origin + Vec3::new(0.0, 0.0, axis_len), col_z);
+            push_line(origin, origin + Vec3::new(axis_lens[0], 0.0, 0.0), col_x);
+            push_line(origin, origin + Vec3::new(0.0, axis_lens[1], 0.0), col_y);
+            push_line(origin, origin + Vec3::new(0.0, 0.0, axis_lens[2]), col_z);
 
             // Dynamic tick marks on the origin triad (major step only). Labels are drawn in the
             // overlay so they stay crisp; these marks provide a depth-correct anchor in the scene.
-            // NOTE: `f32::clamp` panics if min > max. When zoomed very far in, `major_step` can
-            // be tiny, making `major_step * 0.25` smaller than a fixed minimum like 0.01.
-            // Keep the min <= max by adapting the minimum to the current step size.
-            let tick_max = (major_step as f32 * 0.25).max(1.0e-6);
-            let tick_min = 0.01_f32.min(tick_max);
-            let tick_len = (axis_len * 0.04).clamp(tick_min, tick_max);
+            self.world_axis_triads.insert(axes_index, (axis_steps, axis_lens));
             let max_ticks = 6usize;
-            let mut add_ticks = |axis: Vec3, perp: Vec3, col: Vec4| {
-                if major_step <= 0.0 {
+            let mut add_ticks = |axis: Vec3, perp: Vec3, step: f64, axis_len: f32, col: Vec4| {
+                if step <= 0.0 {
                     return;
                 }
+                // `f32::clamp` panics if min > max; keep the minimum below the maximum.
+                let tick_max = (step as f32 * 0.25).max(1.0e-6);
+                let tick_min = 0.01_f32.min(tick_max);
+                let tick_len = (axis_len * 0.04).clamp(tick_min, tick_max);
                 for i in 1..=max_ticks {
-                    let t = (i as f32) * (major_step as f32);
+                    let t = (i as f32) * (step as f32);
                     if t >= axis_len * 0.999 {
                         break;
                     }
@@ -2572,9 +2642,9 @@ impl PlotRenderer {
                     );
                 }
             };
-            add_ticks(Vec3::X, Vec3::Y, col_x);
-            add_ticks(Vec3::Y, Vec3::X, col_y);
-            add_ticks(Vec3::Z, Vec3::X, col_z);
+            add_ticks(Vec3::X, Vec3::Y, axis_steps[0], axis_lens[0], col_x);
+            add_ticks(Vec3::Y, Vec3::X, axis_steps[1], axis_lens[1], col_y);
+            add_ticks(Vec3::Z, Vec3::X, axis_steps[2], axis_lens[2], col_z);
 
             if !helper_vertices.is_empty() {
                 let rd = Box::new(crate::core::RenderData {
@@ -2687,7 +2757,7 @@ impl PlotRenderer {
         let show_major_grid = self.overlay_show_grid_for_axes(axes_index);
         let show_minor_grid = self.overlay_show_minor_grid_for_axes(axes_index);
         let log_flags = self.direct_log_flags_for_axes(axes_index);
-        if is_2d && log_flags == [0, 0] && (show_major_grid || show_minor_grid) {
+        if is_2d && (show_major_grid || show_minor_grid) {
             if let Some((mut l, mut r, mut b, mut t)) = self.view_bounds_for_axes(axes_index) {
                 if self.overlay_axes_kind_for_axes(axes_index) == AxesKind::Polar {
                     let radius = l.abs().max(r.abs()).max(b.abs()).max(t.abs()).max(1e-6);
@@ -2715,6 +2785,19 @@ impl PlotRenderer {
                 let x_step = plot_utils::calculate_tick_interval(x_range);
                 let y_step = plot_utils::calculate_tick_interval(y_range);
                 let mut grid_vertices: Vec<Vertex> = Vec::new();
+                // Custom ticks (xticks/yticks) set where the overlay draws tick labels, so major
+                // grid lines must use the same values; the evenly spaced minor grid is skipped.
+                let explicit_x_ticks = self.overlay_x_ticks_for_axes(axes_index);
+                let explicit_y_ticks = self.overlay_y_ticks_for_axes(axes_index);
+                // Log axes are labeled at whole decades; the grid follows those, with minor
+                // lines at 2..9 times each decade. Even spacing in data units would bunch up.
+                let (x_log, y_log) = (log_flags[0] != 0, log_flags[1] != 0);
+                let log_major_x = (x_log && explicit_x_ticks.is_none())
+                    .then(|| Self::log_grid_values(l, r, false));
+                let log_major_y = (y_log && explicit_y_ticks.is_none())
+                    .then(|| Self::log_grid_values(b, t, false));
+                let explicit_x_ticks = explicit_x_ticks.or(log_major_x);
+                let explicit_y_ticks = explicit_y_ticks.or(log_major_y);
                 let g = 80.0_f32 / 255.0_f32;
                 let major_col = Vec4::new(g, g, g, 1.0);
                 let minor_col = Vec4::new(g, g, g, 0.42);
@@ -2731,7 +2814,19 @@ impl PlotRenderer {
                         minor_col,
                     );
                 } else {
-                    if show_minor_grid && x_step.is_finite() && x_step > 0.0 {
+                    if show_minor_grid && x_log {
+                        Self::push_vertical_grid_lines_at(
+                            &mut grid_vertices,
+                            &Self::log_grid_values(l, r, true),
+                            (l, r),
+                            (b, t),
+                            minor_col,
+                        );
+                    } else if show_minor_grid
+                        && explicit_x_ticks.is_none()
+                        && x_step.is_finite()
+                        && x_step > 0.0
+                    {
                         let minor_step = (x_step / 5.0).max(f64::EPSILON);
                         Self::push_vertical_grid_lines(
                             &mut grid_vertices,
@@ -2742,7 +2837,19 @@ impl PlotRenderer {
                             Some((x_step, minor_step * 0.25)),
                         );
                     }
-                    if show_minor_grid && y_step.is_finite() && y_step > 0.0 {
+                    if show_minor_grid && y_log {
+                        Self::push_horizontal_grid_lines_at(
+                            &mut grid_vertices,
+                            &Self::log_grid_values(b, t, true),
+                            (b, t),
+                            (l, r),
+                            minor_col,
+                        );
+                    } else if show_minor_grid
+                        && explicit_y_ticks.is_none()
+                        && y_step.is_finite()
+                        && y_step > 0.0
+                    {
                         let minor_step = (y_step / 5.0).max(f64::EPSILON);
                         Self::push_horizontal_grid_lines(
                             &mut grid_vertices,
@@ -2753,7 +2860,15 @@ impl PlotRenderer {
                             Some((y_step, minor_step * 0.25)),
                         );
                     }
-                    if show_major_grid && x_step.is_finite() && x_step > 0.0 {
+                    if let (true, Some(ticks)) = (show_major_grid, explicit_x_ticks.as_ref()) {
+                        Self::push_vertical_grid_lines_at(
+                            &mut grid_vertices,
+                            ticks,
+                            (l, r),
+                            (b, t),
+                            major_col,
+                        );
+                    } else if show_major_grid && x_step.is_finite() && x_step > 0.0 {
                         Self::push_vertical_grid_lines(
                             &mut grid_vertices,
                             (l, r),
@@ -2763,7 +2878,15 @@ impl PlotRenderer {
                             None,
                         );
                     }
-                    if show_major_grid && y_step.is_finite() && y_step > 0.0 {
+                    if let (true, Some(ticks)) = (show_major_grid, explicit_y_ticks.as_ref()) {
+                        Self::push_horizontal_grid_lines_at(
+                            &mut grid_vertices,
+                            ticks,
+                            (b, t),
+                            (l, r),
+                            major_col,
+                        );
+                    } else if show_major_grid && y_step.is_finite() && y_step > 0.0 {
                         Self::push_horizontal_grid_lines(
                             &mut grid_vertices,
                             (b, t),
@@ -3370,13 +3493,20 @@ impl PlotRenderer {
     // Removed simple data_bounds getter in favor of overlay-aware bounds below
 
     /// Get the primary (axes 0) camera.
-    pub fn set_presence(&mut self, frame: crate::collaboration::PresenceFrame) -> Result<(), String> {
-        if !frame.validate() { return Err("invalid presence frame".into()); }
+    pub fn set_presence(
+        &mut self,
+        frame: crate::collaboration::PresenceFrame,
+    ) -> Result<(), String> {
+        if !frame.validate() {
+            return Err("invalid presence frame".into());
+        }
         self.presence = frame;
         Ok(())
     }
 
-    pub fn presence(&self) -> &crate::collaboration::PresenceFrame { &self.presence }
+    pub fn presence(&self) -> &crate::collaboration::PresenceFrame {
+        &self.presence
+    }
 
     pub fn camera(&self) -> &Camera {
         self.axes_cameras
@@ -3500,6 +3630,77 @@ impl PlotRenderer {
                 vertices.push(Vertex::new(Vec3::new(x1, y, 0.0), color));
             }
         });
+    }
+
+    /// Vertical grid lines at explicit tick values inside `x_bounds`.
+    /// Grid values on a log axis spanning `lo..hi`: whole decades, or the 2..9 multiples
+    /// between them when `minor` is set. Empty unless both limits are positive.
+    fn log_grid_values(lo: f64, hi: f64, minor: bool) -> Vec<f64> {
+        let (lo, hi) = (lo.min(hi), lo.max(hi));
+        if !(lo > 0.0 && hi.is_finite()) {
+            return Vec::new();
+        }
+        let first = lo.log10().floor() as i32;
+        let last = hi.log10().ceil() as i32;
+        let multiples: &[f64] = if minor {
+            &[2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+        } else {
+            &[1.0]
+        };
+        (first..=last)
+            .flat_map(|decade| {
+                let base = 10f64.powi(decade);
+                multiples.iter().map(move |m| m * base)
+            })
+            .filter(|value| *value >= lo && *value <= hi)
+            .collect()
+    }
+
+    fn push_vertical_grid_lines_at(
+        vertices: &mut Vec<Vertex>,
+        ticks: &[f64],
+        x_bounds: (f64, f64),
+        y_bounds: (f64, f64),
+        color: Vec4,
+    ) {
+        let (lo, hi) = (x_bounds.0.min(x_bounds.1), x_bounds.0.max(x_bounds.1));
+        for &x in ticks
+            .iter()
+            .filter(|x| x.is_finite() && **x >= lo && **x <= hi)
+        {
+            vertices.push(Vertex::new(
+                Vec3::new(x as f32, y_bounds.0 as f32, 0.0),
+                color,
+            ));
+            vertices.push(Vertex::new(
+                Vec3::new(x as f32, y_bounds.1 as f32, 0.0),
+                color,
+            ));
+        }
+    }
+
+    /// Horizontal grid lines at explicit tick values inside `y_bounds`.
+    fn push_horizontal_grid_lines_at(
+        vertices: &mut Vec<Vertex>,
+        ticks: &[f64],
+        y_bounds: (f64, f64),
+        x_bounds: (f64, f64),
+        color: Vec4,
+    ) {
+        let (lo, hi) = (y_bounds.0.min(y_bounds.1), y_bounds.0.max(y_bounds.1));
+        for &y in ticks
+            .iter()
+            .filter(|y| y.is_finite() && **y >= lo && **y <= hi)
+        {
+            vertices.push(Vertex::new(
+                Vec3::new(x_bounds.0 as f32, y as f32, 0.0),
+                color,
+            ));
+            vertices.push(Vertex::new(
+                Vec3::new(x_bounds.1 as f32, y as f32, 0.0),
+                color,
+            ));
+        }
     }
 
     fn push_polar_grid_lines(
@@ -3753,6 +3954,22 @@ impl PlotRenderer {
         self.rebuild_geometry_scene_nodes(geometry_scene);
     }
 
+    /// Sets the plot theme. Scene line colors depend on whether the background is light, so a
+    /// loaded geometry scene is rebuilt when that changes.
+    pub fn set_theme(&mut self, theme: crate::styling::PlotThemeConfig) {
+        let was_light = self.theme_background_is_light();
+        self.theme = theme;
+        if was_light != self.theme_background_is_light() {
+            if let Some(scene) = self.last_geometry_scene.clone() {
+                self.rebuild_geometry_scene_nodes(&scene);
+            }
+        }
+    }
+
+    fn theme_background_is_light(&self) -> bool {
+        relative_luminance(self.theme.build_theme().get_background_color()) > 0.5
+    }
+
     fn rebuild_geometry_scene_nodes(&mut self, geometry_scene: &GeometryScene) {
         self.scene.clear();
         self.scene_buffer_cache.borrow_mut().clear();
@@ -3765,7 +3982,13 @@ impl PlotRenderer {
             }
         }
         self.apply_geometry_presentation_visibility();
-        for node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
+        let light_background = self.theme_background_is_light();
+        for mut node in geometry_scene.nodes_with_presentation(&self.geometry_presentation) {
+            if light_background {
+                if let Some(render_data) = node.render_data.as_mut() {
+                    darken_pale_lines_for_light_background(render_data);
+                }
+            }
             self.scene.add_node_preserving_id(node);
         }
         self.apply_geometry_xray_to_nodes();
@@ -3960,6 +4183,31 @@ impl PlotRenderer {
             .collect()
     }
 
+    pub fn reference_line_labels_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(crate::plots::ReferenceLineOrientation, f64, String, Option<glam::Vec4>)> {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.reference_line_labels_for_axes(axes_index))
+            .unwrap_or_default()
+    }
+
+    /// The tick step and length of each 3-D origin axis (x, y, z) as last drawn.
+    pub fn world_axis_triad_for_axes(&self, axes_index: usize) -> Option<([f64; 3], [f32; 3])> {
+        self.world_axis_triads.get(&axes_index).copied()
+    }
+
+    pub fn cell_label_marks_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(glam::Vec3, String, glam::Vec4)> {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.cell_label_marks_for_axes(axes_index))
+            .unwrap_or_default()
+    }
+
     pub fn world_text_annotations_for_axes(
         &self,
         axes_index: usize,
@@ -4046,6 +4294,19 @@ impl PlotRenderer {
     pub fn overlay_x_log(&self) -> bool {
         self.figure_x_log
     }
+    /// Width over height of the 2-D plot box when the axes fix their data aspect
+    /// (`axis equal`, `daspect`); `None` when the box stretches to fill.
+    pub fn overlay_plot_box_aspect_for_axes(&self, axes_index: usize) -> Option<f64> {
+        let meta = self.last_figure.as_ref()?.axes_metadata(axes_index)?;
+        if !(meta.axis_equal || meta.data_aspect_ratio_mode == "manual") || meta.x_log || meta.y_log {
+            return None;
+        }
+        let (x_min, x_max, y_min, y_max) = self.display_bounds_for_axes(axes_index)?;
+        let x_units = (x_max - x_min).abs() / meta.data_aspect_ratio[0].abs().max(1.0e-12);
+        let y_units = (y_max - y_min).abs() / meta.data_aspect_ratio[1].abs().max(1.0e-12);
+        let aspect = x_units / y_units;
+        (aspect.is_finite() && aspect > 0.0).then_some(aspect)
+    }
     pub fn overlay_x_log_for_axes(&self, axes_index: usize) -> bool {
         self.last_figure
             .as_ref()
@@ -4065,6 +4326,25 @@ impl PlotRenderer {
     }
     pub fn overlay_colormap(&self) -> ColorMap {
         self.figure_colormap.clone()
+    }
+    pub fn overlay_colorbar_enabled_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.colorbar_enabled)
+            .unwrap_or(self.figure_colorbar_enabled)
+    }
+    pub fn overlay_colormap_for_axes(&self, axes_index: usize) -> ColorMap {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.colormap.clone())
+            .unwrap_or_else(|| self.figure_colormap.clone())
+    }
+    pub fn overlay_color_range_for_axes(&self, axes_index: usize) -> Option<(f64, f64)> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_color_range(axes_index))
     }
     pub fn overlay_colorbar_enabled(&self) -> bool {
         self.figure_colorbar_enabled
@@ -4308,30 +4588,6 @@ fn geometry_scene_view_preset_to_camera(preset: GeometrySceneViewPreset) -> Came
     }
 }
 
-fn data_aspect_adjusted_bounds(
-    x_min: f64,
-    x_max: f64,
-    y_min: f64,
-    y_max: f64,
-    ratio: [f64; 3],
-) -> (f64, f64, f64, f64) {
-    let x_ratio = ratio[0].abs().max(1.0e-12);
-    let y_ratio = ratio[1].abs().max(1.0e-12);
-    let cx = (x_min + x_max) * 0.5;
-    let cy = (y_min + y_max) * 0.5;
-    let x_span = (x_max - x_min).abs().max(0.1);
-    let y_span = (y_max - y_min).abs().max(0.1);
-    let units = (x_span / x_ratio).max(y_span / y_ratio).max(0.1);
-    let next_x = units * x_ratio;
-    let next_y = units * y_ratio;
-    (
-        cx - next_x * 0.5,
-        cx + next_x * 0.5,
-        cy - next_y * 0.5,
-        cy + next_y * 0.5,
-    )
-}
-
 fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec3, Vec3) {
     let aspect = Vec3::new(
         ratio[0].abs().max(1.0e-12) as f32,
@@ -4348,10 +4604,83 @@ fn data_aspect_adjusted_bounds_3d(min: Vec3, max: Vec3, ratio: [f64; 3]) -> (Vec
     (center - next * 0.5, center + next * 0.5)
 }
 
+fn relative_luminance(color: Vec4) -> f32 {
+    0.2126 * color.x + 0.7152 * color.y + 0.0722 * color.z
+}
+
+/// Scene line colors are stored with the scene, independent of theme. Near-white lines (such
+/// as the undeformed outline) read well on a dark background but vanish on a light one, so on
+/// a light background they are darkened to a slate of the same hue and made a little more opaque.
+fn darken_pale_lines_for_light_background(render_data: &mut crate::core::RenderData) {
+    const PALE: f32 = 0.8;
+    const TARGET: f32 = 0.38;
+    // GPU-resident vertices can't be recolored here; scene lines are CPU data.
+    if render_data.gpu_vertices.is_some()
+        || !matches!(
+            render_data.pipeline_type,
+            crate::core::PipelineType::Lines | crate::core::PipelineType::LinesNoDepth
+        )
+    {
+        return;
+    }
+    for vertex in &mut render_data.vertices {
+        let color = Vec4::from_array(vertex.color);
+        let luminance = relative_luminance(color);
+        if luminance <= PALE || color.w <= 0.0 {
+            continue;
+        }
+        let scale = TARGET / luminance;
+        vertex.color = [
+            color.x * scale,
+            color.y * scale,
+            color.z * scale,
+            color.w.max(0.5),
+        ];
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::core::DrawCall;
+
+    #[test]
+    fn pale_scene_lines_darken_on_light_background_only() {
+        let line = |color: [f32; 4]| Vertex::new(Vec3::ZERO, Vec4::from_array(color));
+        let mut render_data = crate::core::RenderData {
+            pipeline_type: crate::core::PipelineType::Lines,
+            vertices: vec![
+                line([0.92, 0.92, 1.0, 0.35]),
+                line([0.58, 0.72, 0.88, 0.95]),
+            ],
+            indices: None,
+            gpu_vertices: None,
+            bounds: None,
+            material: crate::core::Material::default(),
+            draw_calls: Vec::new(),
+            image: None,
+        };
+        darken_pale_lines_for_light_background(&mut render_data);
+        let outline = Vec4::from_array(render_data.vertices[0].color);
+        assert!((relative_luminance(outline) - 0.38).abs() < 1e-3);
+        assert!(outline.z > outline.x, "keeps its blue tint");
+        assert_eq!(outline.w, 0.5);
+        // Mid-tone wireframe edges already contrast with white and stay as saved.
+        assert_eq!(render_data.vertices[1].color, [0.58, 0.72, 0.88, 0.95]);
+    }
+
+    #[test]
+    fn log_grid_values_follow_decades_inside_limits() {
+        assert_eq!(
+            PlotRenderer::log_grid_values(10.0, 1000.0, false),
+            vec![10.0, 100.0, 1000.0]
+        );
+        assert_eq!(
+            PlotRenderer::log_grid_values(15.0, 45.0, true),
+            vec![20.0, 30.0, 40.0]
+        );
+        assert!(PlotRenderer::log_grid_values(-1.0, 100.0, false).is_empty());
+    }
     use crate::plots::{figure::PlotElement, Figure, PatchPlot};
 
     #[test]
@@ -4531,18 +4860,8 @@ pub mod plot_utils {
             }
         }
 
-        let endpoint_tol = step * 0.18;
-        let near_min = ticks.iter().any(|t| (*t - min).abs() <= endpoint_tol);
-        let near_max = ticks.iter().any(|t| (*t - max).abs() <= endpoint_tol);
-        if !near_min {
-            ticks.insert(0, min);
-        }
-        if !near_max {
-            ticks.push(max);
-        }
-
-        ticks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        ticks.dedup_by(|a, b| (*a - *b).abs() <= endpoint_tol * 0.5);
+        // Only the nice values are ticks; MATLAB does not label an axis limit that falls
+        // between them.
         ticks
     }
 
@@ -4582,17 +4901,17 @@ pub mod plot_utils {
             }
         }
 
-        if value.abs() < 0.001 {
-            "0".to_string()
-        } else if value.abs() >= 1000.0 || value.fract().abs() < 0.0005 {
-            format!("{value:.0}")
-        } else if value.abs() < 0.1 {
-            trim_fixed(format!("{value:.3}"))
-        } else if value.abs() < 10.0 {
-            trim_fixed(format!("{value:.2}"))
-        } else {
-            trim_fixed(format!("{value:.1}"))
+        // Tick values are multiples of a nice step, so ten significant digits show each one
+        // exactly (12.65, 0.0002) while trimming the floating-point tail (0.30000000000000004).
+        if !value.is_finite() {
+            return format!("{value}");
         }
+        if value.abs() < 1.0e-12 {
+            return "0".to_string();
+        }
+        let magnitude = value.abs().log10().floor() as i32;
+        let decimals = (9 - magnitude).clamp(0, 15) as usize;
+        trim_fixed(format!("{value:.decimals$}"))
     }
 
     pub fn canonical_tick_label_format(format: &str) -> String {

@@ -43,6 +43,7 @@ fn fixture(
     let bytes =
         (workload.canonical_bytes().unwrap().len() + mesh.canonical_encode().unwrap().len()) as u64;
     let facts = PreparedThermalResourceFacts {
+        local_execution: crate::planning::resource::LocalExecutionPlan::serial(),
         field_source: None,
         inputs: PreparedInputResourceFacts {
             encoded_payload_bytes: ByteCount(bytes),

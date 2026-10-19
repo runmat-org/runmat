@@ -17,9 +17,13 @@ pub mod transient;
 
 mod activation;
 mod admission;
+mod constraint_preparation;
 pub(crate) mod homogeneous_static;
 mod observation_history;
-pub(crate) use observation_history::required_bounded_time_history_samples;
+pub(crate) use observation_history::{
+    history_schedule_construction_resident_bytes, required_bounded_time_history_samples,
+    required_bounded_time_history_samples_admitted,
+};
 pub(crate) mod structural_nodal;
 
 use runmat_analysis_core::{

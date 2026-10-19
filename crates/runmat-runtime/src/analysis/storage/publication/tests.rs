@@ -250,6 +250,7 @@ fn competing_publications_cannot_split_a_shared_run_identity() {
 mod retention;
 
 mod resources;
+mod run_admission;
 
 mod access;
 

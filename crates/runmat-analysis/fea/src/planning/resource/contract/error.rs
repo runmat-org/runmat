@@ -37,3 +37,14 @@ impl From<runmat_canonical_codec::CanonicalCodecError> for ResourcePlanningError
         Self::Encoding(value.to_string())
     }
 }
+
+impl ResourcePlanningError {
+    /// Preparation can reject a resource envelope before a complete plan exists.
+    /// Keep that typed rejection and its original counts across the planning boundary.
+    pub(crate) fn from_preparation_error(error: crate::FeaRunError) -> Self {
+        match error {
+            crate::FeaRunError::Resource(error) => error,
+            other => Self::Invalid(other.to_string()),
+        }
+    }
+}

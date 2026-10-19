@@ -141,7 +141,7 @@ study static {
         panic!("expected markdown hover");
     };
     assert!(material_hover.value.contains("material.steel"));
-    assert!(material_hover.value.contains("project/materials.fea"));
+    assert!(material_hover.value.contains("materials.fea"));
 
     let quantity_offset = source.find("0.1 m").unwrap() + 1;
     let quantity_hover = analysis

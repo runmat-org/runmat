@@ -47,6 +47,8 @@ pub(crate) fn visit(
             }
             let weight = wr * ws * (1.0 - r);
             visit(BoundaryQuadraturePoint {
+                reference_barycentric: barycentric,
+                reference_weight: weight,
                 position_m,
                 area_vector_weight_m2: area_vector.map(|value| value * weight),
                 area_weight_m2: jacobian * weight,

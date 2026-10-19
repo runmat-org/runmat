@@ -157,7 +157,12 @@ fn finish_planned(
 ) -> Result<(SparsePattern, Vec<f64>), RealSparseMatrixError> {
     let rows = pattern.rows();
     let columns = pattern.columns();
-    let (mut offsets, mut indices) = pattern.into_index_buffers();
+    // Unchanged support remains shared. Compaction owns its buffers and must
+    // not mutate another logical operator's canonical support.
+    if values.iter().all(|value| *value != 0.0) {
+        return Ok((pattern, values));
+    }
+    let (mut offsets, mut indices) = pattern.into_index_buffers()?;
     let mut read_start = 0;
     let mut write = 0;
     for row in 0..rows {

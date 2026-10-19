@@ -109,6 +109,13 @@ pub enum AnalysisValidationError {
         "ANALYSIS_VALIDATION_INVALID_ACCURACY_PLAN: accuracy plan `{plan_id}` is invalid: {detail}"
     )]
     InvalidAccuracyPlan { plan_id: String, detail: String },
+    #[error("ANALYSIS_DEPENDENCY_GRAPH_RESOURCE_LIMIT: requested {requested_bytes} bytes exceeds {maximum_bytes}")]
+    DependencyGraphResourceLimit {
+        requested_bytes: u64,
+        maximum_bytes: u64,
+    },
+    #[error("ANALYSIS_DEPENDENCY_GRAPH_RESOURCE_OVERFLOW: dependency index inventory overflows")]
+    DependencyGraphResourceOverflow,
     #[error(
         "ANALYSIS_VALIDATION_UNIT_MISMATCH: model units {model:?} do not match geometry units {geometry:?}"
     )]
@@ -126,7 +133,7 @@ pub enum AnalysisValidationError {
 }
 
 pub fn validate_model(model: &AnalysisModel) -> Result<(), AnalysisValidationError> {
-    validate_model_sequence(model).map(drop)
+    validated_model_graph(model).map(drop)
 }
 
 /// Validates solver-independent procedure, dependency, and state-transfer semantics before an
@@ -161,13 +168,26 @@ pub fn validate_material_definitions(
 pub fn validate_model_sequence(
     model: &AnalysisModel,
 ) -> Result<ValidatedAnalysisSequence, AnalysisValidationError> {
+    let graph = validated_model_graph(model)?;
+    Ok(crate::validate_sequence::graph::owned_topology(
+        &model.sequence,
+        &graph,
+    ))
+}
+
+// Both public boundaries check the original model through this one semantic authority.
+// Validation-only callers do not materialize or clone an execution-planning sequence.
+fn validated_model_graph(
+    model: &AnalysisModel,
+) -> Result<crate::validate_sequence::graph::ValidatedGraph<'_>, AnalysisValidationError> {
     if model.materials.is_empty() {
         return Err(AnalysisValidationError::MissingMaterials);
     }
     if model.constraints.is_empty() && model.boundaries.is_empty() {
         return Err(AnalysisValidationError::MissingConstraintsOrBoundaries);
     }
-    crate::validate_authored::validate_authored_model(model)
+    crate::validate_authored::validate_authored_model(model)?;
+    crate::validate_sequence::validate_sequence(model)
 }
 
 pub fn validate_model_against_geometry(
@@ -190,4 +210,27 @@ pub fn validate_model_against_geometry(
         });
     }
     Ok(())
+}
+
+/// Additional flat dependency-index construction and ancestry-query workspace.
+/// Excludes borrowed model storage, other semantic validators, error strings and owned planning.
+pub fn dependency_graph_resident_bytes_upper_bound(
+    sequence: &crate::AnalysisSequence,
+) -> Result<u64, AnalysisValidationError> {
+    crate::validate_sequence::graph::resident_bytes(sequence)
+}
+/// Validate the original model after admitting its dependency-index workspace.
+/// This is a component budget, not full model-validation or whole-task resource admission.
+pub fn validate_model_with_dependency_graph_budget(
+    model: &AnalysisModel,
+    maximum_bytes: u64,
+) -> Result<(), AnalysisValidationError> {
+    let requested_bytes = dependency_graph_resident_bytes_upper_bound(&model.sequence)?;
+    if requested_bytes > maximum_bytes {
+        return Err(AnalysisValidationError::DependencyGraphResourceLimit {
+            requested_bytes,
+            maximum_bytes,
+        });
+    }
+    validate_model(model)
 }

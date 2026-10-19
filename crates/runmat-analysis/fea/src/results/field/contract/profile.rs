@@ -1,6 +1,6 @@
 //! Whole catalog shape projection using the actual manifest and entry serializers.
 use super::*;
-use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
+use runmat_canonical_codec::{profile_serialized_shape, SerializedCanonicalProfile};
 
 impl RecoveredFieldArtifactManifest {
     /// Header and all final-sample entries, without numerical arrays or hypothetical descriptors.
@@ -44,7 +44,7 @@ impl RecoveredFieldArtifactManifest {
             },
             fields: vec![],
         };
-        let profile = profile_serialized(&header, FIELD_LIMITS)
+        let profile = profile_serialized_shape(&header, FIELD_LIMITS)
             .map_err(|error| RecoveredFieldError::Encoding(error.to_string()))?;
         Ok(SerializedCanonicalProfile {
             encoded_bytes_upper_bound: profile

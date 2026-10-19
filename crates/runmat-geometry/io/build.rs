@@ -2,6 +2,7 @@
 use std::{env, path::PathBuf};
 
 fn main() {
+    runmat_build_identity::emit_configuration();
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_ROOT");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=RUNMAT_OCCT_LIB_DIR");
@@ -114,6 +115,7 @@ fn build_occt_backend() {
     println!("cargo:rerun-if-changed=src/occt/exact_feature_internal.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_feature_operations.cc");
     println!("cargo:rerun-if-changed=src/occt/exact_evaluator_internal.hxx");
+    println!("cargo:rerun-if-changed=src/occt/exact_surface_bounds.hxx");
     println!("cargo:rerun-if-changed=src/occt/exact_surface_evaluator.cc");
 }
 

@@ -11,7 +11,7 @@ use super::{
     DelaunayInsertionError, DelaunayInsertionErrorKind, DelaunayInsertionOptions,
     DelaunayVolumeNode, InsertionWork, PreparedInsertion, TopologyMutation,
 };
-use crate::cdt::topology::orient_volume_nodes;
+use crate::cdt::topology::orient_materialized_volume_nodes as orient_volume_nodes;
 use crate::reconnect::two_to_three_geometry_is_admissible;
 
 pub(in crate::cdt) fn insert_delaunay_volume_node_into_mutation(
@@ -97,7 +97,17 @@ pub(in crate::cdt) fn insert_delaunay_volume_node_into_mutation_with_prepared_ba
         protect_region_boundaries,
         hint,
         &mut work,
-    )?;
+    )
+    .map_err(|mut failure| {
+        failure.reason = format!(
+            "{}; insertion preparation coordinates={:?}, nodes={}, work={:?}",
+            failure.reason,
+            node.coordinates_m,
+            topology.nodes.len(),
+            work.inventory()
+        );
+        failure
+    })?;
     apply_prepared_delaunay_volume_node_insertion_with_work(
         topology,
         prepared,
@@ -105,6 +115,16 @@ pub(in crate::cdt) fn insert_delaunay_volume_node_into_mutation_with_prepared_ba
         protect_region_boundaries,
         &mut work,
     )
+    .map_err(|mut failure| {
+        failure.reason = format!(
+            "{}; insertion application coordinates={:?}, nodes={}, work={:?}",
+            failure.reason,
+            node.coordinates_m,
+            topology.nodes.len(),
+            work.inventory()
+        );
+        failure
+    })
 }
 
 pub(in crate::cdt) fn apply_prepared_delaunay_volume_node_insertion(
@@ -130,13 +150,19 @@ pub(in crate::cdt) fn apply_prepared_delaunay_volume_node_insertion(
     )
 }
 
-fn apply_prepared_delaunay_volume_node_insertion_with_work(
+pub(super) fn apply_prepared_delaunay_volume_node_insertion_with_work(
     topology: &mut TopologyMutation,
     prepared: PreparedInsertion,
     protected_faces: &BTreeSet<[StableDigest; 3]>,
     protect_region_boundaries: bool,
     work: &mut InsertionWork<'_>,
 ) -> Result<(), DelaunayInsertionError> {
+    require_mutation_capacity(
+        topology,
+        prepared.removed.len(),
+        prepared.boundary.len(),
+        work.options,
+    )?;
     let inserted = topology
         .append_node(prepared.node)
         .map_err(mutation_topology_error)?;
@@ -159,7 +185,42 @@ fn apply_prepared_delaunay_volume_node_insertion_with_work(
         protected_faces,
         protect_region_boundaries,
         work,
-    )
+    )?;
+    // A construction-verified physical prefix must carry forward the changed
+    // neighborhood, rather than accumulating every earlier insertion until a
+    // later recovery operation asks for admission. The shared repair owner
+    // discharges only exactly verified faces. An unrepairable neighborhood
+    // retains its dirty inventory for the independent complete fallback.
+    if protected_faces.is_empty() && topology.physical_dirty_faces().is_some() {
+        super::legalization::mutable_repair::restore_admitted(topology, work)?;
+    }
+    Ok(())
+}
+
+pub(super) fn require_mutation_capacity(
+    topology: &TopologyMutation,
+    removed: usize,
+    created: usize,
+    options: DelaunayInsertionOptions,
+) -> Result<(), DelaunayInsertionError> {
+    if topology.nodes.len() as u64 >= options.topology.maximum_nodes
+        || topology.nodes.len() >= u32::MAX as usize
+    {
+        return Err(super::resource(
+            "mutable insertion node inventory limit exceeded",
+        ));
+    }
+    let result = topology
+        .active_tetrahedron_count()
+        .checked_sub(removed)
+        .and_then(|count| count.checked_add(created))
+        .ok_or_else(|| super::resource("mutable insertion tetrahedron count overflow"))?;
+    if result as u64 > options.topology.maximum_tetrahedra || result > u32::MAX as usize {
+        return Err(super::resource(
+            "mutable insertion tetrahedron inventory limit exceeded",
+        ));
+    }
+    Ok(())
 }
 
 fn legalize_inserted_node(
@@ -187,6 +248,11 @@ fn legalize_inserted_node(
             return Err(error(
                 DelaunayInsertionErrorKind::ResourceLimit,
                 "mutable legalization flip limit exceeded",
+            ));
+        }
+        if topology.active_tetrahedron_count() as u64 >= work.options.topology.maximum_tetrahedra {
+            return Err(super::resource(
+                "mutable legalization tetrahedron inventory limit exceeded",
             ));
         }
         apply_two_to_three_flip(topology, flip).map_err(mutation_topology_error)?;

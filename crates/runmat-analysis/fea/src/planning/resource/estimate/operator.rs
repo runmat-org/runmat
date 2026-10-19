@@ -199,9 +199,44 @@ pub(super) fn build_operator_resource_plan_with_persistent_storage(
         solve_phase,
         recovery_phase,
     )?;
-    let total_memory = add(
-        input.worker.fixed_memory_bytes.0,
-        numerical_memory,
+    let input_transport = sum(
+        &[
+            inputs.map_or(0, |facts| facts.transport_closure_bytes.0),
+            resource_plan_input.transport_closure_bytes.0,
+        ],
+        "retained original input transport",
+    )?;
+    let compiler_peak = super::constraint_compilation::original_compiler_peak(&input)?;
+    let compiler_memory = if compiler_peak == 0 {
+        0
+    } else {
+        sum(
+            &[
+                compiler_peak,
+                input_decoded_resident_bytes.0,
+                resource_plan_input
+                    .decoded_resident_bytes_admission_budget
+                    .0,
+            ],
+            "original compiler and retained decoded inputs",
+        )?
+    };
+    let task_peak = add(
+        numerical_memory.max(compiler_memory),
+        input_transport,
+        "original inputs and sequential operator phases",
+    )?;
+    let pool_stacks = mul(
+        u64::from(if input.worker.cpu_millicores > 1_000 {
+            input.worker.cpu_millicores / 1_000
+        } else {
+            0
+        }),
+        runmat_cpu_execution::WORKER_STACK_BYTES,
+        "persistent CPU pool stacks",
+    )?;
+    let total_memory = sum(
+        &[input.worker.fixed_memory_bytes.0, task_peak, pool_stacks],
         "worker peak memory",
     )?;
     let phase_scratch = assembly_scratch_bytes
@@ -244,14 +279,37 @@ pub(super) fn build_operator_resource_plan_with_persistent_storage(
         });
     }
     validate_accuracy_demand(&input, &demand.accuracy_demand, &demand.observations)?;
-    let partition = partition_facts(
+    let retained_decoded = add(
+        input_decoded_resident_bytes.0,
+        resource_plan_input
+            .decoded_resident_bytes_admission_budget
+            .0,
+        "partition original decoded inputs",
+    )?;
+    let mut partition = partition_facts(
         &input,
         &demand.partitioning,
-        numerical_memory,
+        numerical_memory - retained_decoded,
         total_memory,
         phase_scratch,
         total_scratch,
     )?;
+    // Compilation uses the complete original inputs before operator partitioning.
+    // Reserve it per worker; partitioning cannot divide a full-source construction.
+    if matches!(
+        demand.partitioning,
+        PartitioningPolicy::OperatorDomain { .. }
+    ) {
+        partition.fixed_memory = sum(
+            &[
+                partition.fixed_memory,
+                compiler_peak,
+                retained_decoded,
+                input_transport,
+            ],
+            "partition original compiler and transport",
+        )?;
+    }
     let request = ResourceRequest {
         cpu_millicores: input.worker.cpu_millicores,
         memory_bytes: total_memory,

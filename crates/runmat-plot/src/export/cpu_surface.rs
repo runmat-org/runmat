@@ -1697,7 +1697,14 @@ fn draw_legend_for_axes(canvas: &mut Canvas, figure: &Figure, axes: &AxesView) {
     let max_entries = entries.len().min(8);
     let pad = 10i32;
     let row_h = 20i32;
-    let legend_w = ((axes.viewport.2 as f32 * 0.30).clamp(92.0, 148.0)).round() as i32;
+    // Fit the longest label (drawn after a 34 px swatch column), within the axes.
+    let widest_label = entries
+        .iter()
+        .take(max_entries)
+        .map(|entry| bitmap_text_size(if entry.label.is_empty() { "Series" } else { &entry.label }, 1).0)
+        .max()
+        .unwrap_or(0);
+    let legend_w = (34 + widest_label + pad).max(92).min((axes.viewport.2 as i32 - 2 * pad).max(92));
     let legend_h = row_h * max_entries as i32 + 10;
     let x = (axes.viewport.0 + axes.viewport.2) as i32 - legend_w - pad;
     let y = axes.viewport.1 as i32 + 12;

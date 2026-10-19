@@ -15,8 +15,13 @@ use runmat_execution::resource::AcceleratorRequest;
 use runmat_meshing_core::SolverMeshArtifact;
 
 mod backend;
+mod compilation;
+pub use compilation::build_structural_resource_plan_from_compilation;
 mod linearization;
+mod solve_workspace;
 pub use backend::require_executable_static_backend;
+pub(super) use solve_workspace::saddle_gmres_workspace_bytes;
+use solve_workspace::{affine_transpose_index_peak_bytes, solve_policy};
 
 use super::{
     assembly_sizing::{
@@ -51,7 +56,8 @@ const STRUCTURAL_RECOVERY_VALUES_PER_NODE: usize = 7;
 /// Builds the canonical resource plan from authoritative post-projection numerical inputs.
 ///
 /// This function does no assembly and accepts no caller-supplied topology, sparse, constraint, or
-/// observation counts. It is therefore safe to run before allocations and expensive kernels.
+/// observation counts. It validates original bounded compilation before physical assembly;
+/// callers with a fresh construction carrier can reuse it through the companion entry point.
 /// Portable callers must independently derive `prepared_inputs` from the authenticated input
 /// closure, excluding the resource-plan object itself. `None` is for direct numerical execution;
 /// these transport reservations supplement, rather than replace, thermal alignment/work storage.
@@ -71,6 +77,7 @@ pub fn build_structural_resource_plan(
         .procedure_step()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     build_static_resource_plan(StaticResourcePreflight {
+        compilation: None,
         model: &workload.model,
         step,
         backend: workload.backend,
@@ -95,6 +102,7 @@ pub(crate) struct StaticResourcePreflight<'a> {
     pub observation_execution: ObservationExecutionPolicy,
     pub mesh: Option<&'a SolverMeshArtifact>,
     pub constraints: &'a CanonicalStructuralConstraintPlan,
+    pub compilation: Option<&'a crate::constraints::ConstraintCompilation<'a>>,
     pub observations: &'a ResolvedObservationPlan,
     pub accelerator_requests: &'a [AcceleratorRequest],
     pub local_execution: LocalExecutionPlan,
@@ -110,7 +118,9 @@ pub(crate) fn build_static_resource_plan(
 pub(super) fn build_static_resource_input(
     input: StaticResourcePreflight<'_>,
 ) -> Result<FeaResourcePlanningInput, ResourcePlanningError> {
+    let compiler_peak = compilation::original_peak(&input)?;
     let StaticResourcePreflight {
+        compilation: _,
         model,
         step,
         backend,
@@ -271,6 +281,7 @@ pub(super) fn build_static_resource_input(
         phase: FeaResourcePhase::StructuralLinearPipeline,
         demand: FeaResourceDemand::StructuralLinearPipeline(
             StructuralLinearPipelineResourceDemand {
+                constraint_compilation_peak_bytes: compiler_peak,
                 inputs: prepared_inputs.cloned(),
                 state_profiles_output,
                 operator: StructuralOperatorResourceDemand {
@@ -358,149 +369,6 @@ fn structural_accelerator_requirements(
     }])
 }
 
-fn solve_policy(
-    preconditioner: SpdPreconditionerKind,
-    dofs: u64,
-    constraint_rows: u64,
-    enforcement: ConstraintEnforcement,
-    stiffness_nonzeros: u64,
-    admission: SolverAdmissionResourcePolicy,
-    transpose_index_bytes: u64,
-) -> Result<SolveResourcePolicy, ResourcePlanningError> {
-    if enforcement == ConstraintEnforcement::LagrangeMultiplier {
-        let saddle = dofs
-            .checked_add(constraint_rows)
-            .ok_or(ResourcePlanningError::Overflow("saddle dimension"))?;
-        let restart = saddle.min(32);
-        let maximum_iterations = saddle
-            .checked_mul(8)
-            .ok_or(ResourcePlanningError::Overflow(
-                "saddle GMRES iteration bound",
-            ))?
-            .max(256);
-        let workspace_bytes = saddle_gmres_workspace_bytes(dofs, constraint_rows)?;
-        return Ok(SolveResourcePolicy::SaddlePointGmres {
-            block_dimension: Count(saddle),
-            restart: Count(restart),
-            maximum_iterations: Count(maximum_iterations),
-            workspace_bytes_upper_bound: ByteCount(workspace_bytes),
-            admission,
-        });
-    }
-    let storage = match preconditioner {
-        SpdPreconditionerKind::Jacobi => PreconditionerStorage::Diagonal,
-        SpdPreconditionerKind::Ilu0 => {
-            let row_offsets = checked_bytes(
-                dofs.checked_add(1)
-                    .ok_or(ResourcePlanningError::Overflow("ILU row offsets"))?,
-                8,
-                "ILU row offsets",
-            )?;
-            let entries = checked_bytes(stiffness_nonzeros, 16, "ILU columns and values")?;
-            PreconditionerStorage::SparseCsr {
-                nonzero_upper_bound: Count(stiffness_nonzeros),
-                resident_bytes_upper_bound: ByteCount(checked_add(
-                    row_offsets,
-                    entries,
-                    "ILU resident bytes",
-                )?),
-            }
-        }
-    };
-    Ok(SolveResourcePolicy::Iterative {
-        vector_count: Count(structural_solve_vector_count(
-            dofs,
-            constraint_rows,
-            enforcement,
-        )?),
-        scalar: NumericalScalar::RealF64,
-        preconditioner: storage,
-        admission,
-        transpose_index_bytes_upper_bound: ByteCount(transpose_index_bytes),
-    })
-}
-
-pub(super) fn saddle_gmres_workspace_bytes(
-    dofs: u64,
-    constraint_rows: u64,
-) -> Result<u64, ResourcePlanningError> {
-    let vector_count = structural_solve_vector_count(
-        dofs,
-        constraint_rows,
-        ConstraintEnforcement::LagrangeMultiplier,
-    )?;
-    checked_bytes(
-        vector_count
-            .checked_mul(dofs)
-            .ok_or(ResourcePlanningError::Overflow(
-                "saddle GMRES workspace values",
-            ))?,
-        8,
-        "saddle GMRES workspace bytes",
-    )
-}
-
-/// Bounds the retained restarted-GMRES basis and saddle work in units of full physical vectors.
-/// The sixteen auxiliary saddle vectors cover RHS/initial/solution/residual, an in-flight
-/// Arnoldi vector, operator output, constraint transforms and temporary reductions. Two full
-/// physical vectors cover scoped CSR chunk output plus its ordered merge. Hessenberg, Givens,
-/// and projected-RHS scalars are charged separately before rounding up to physical vectors.
-fn structural_solve_vector_count(
-    dofs: u64,
-    constraint_rows: u64,
-    enforcement: ConstraintEnforcement,
-) -> Result<u64, ResourcePlanningError> {
-    if enforcement != ConstraintEnforcement::LagrangeMultiplier {
-        return Ok(STRUCTURAL_SOLVE_VECTOR_COUNT);
-    }
-    if dofs == 0 {
-        return Err(ResourcePlanningError::Invalid(
-            "multiplier solve requires physical DOFs".into(),
-        ));
-    }
-    let saddle = dofs
-        .checked_add(constraint_rows)
-        .ok_or(ResourcePlanningError::Overflow("saddle dimension"))?;
-    let restart = saddle.min(32);
-    let basis_and_auxiliary =
-        saddle
-            .checked_mul(restart + 17)
-            .ok_or(ResourcePlanningError::Overflow(
-                "GMRES basis and work vectors",
-            ))?;
-    let scalar_work = (restart + 1)
-        .checked_mul(restart + 6)
-        .ok_or(ResourcePlanningError::Overflow("GMRES Hessenberg work"))?;
-    let spmv_work = dofs
-        .checked_mul(2)
-        .ok_or(ResourcePlanningError::Overflow("scoped saddle SpMV work"))?;
-    let values = basis_and_auxiliary
-        .checked_add(scalar_work)
-        .and_then(|sum| sum.checked_add(spmv_work))
-        .ok_or(ResourcePlanningError::Overflow("multiplier solve values"))?;
-    Ok(values.div_ceil(dofs).max(STRUCTURAL_SOLVE_VECTOR_COUNT))
-}
-
-fn affine_transpose_index_peak_bytes(
-    reduction: &AffineConstraintReduction,
-) -> Result<u64, ResourcePlanningError> {
-    let entries = u64::try_from(reduction.recovery_column_indices.len())
-        .map_err(|_| ResourcePlanningError::Overflow("affine transpose entries"))?;
-    let columns = u64::try_from(reduction.reduced_dof_count)
-        .map_err(|_| ResourcePlanningError::Overflow("affine transpose columns"))?;
-    checked_add(
-        checked_bytes(entries, 16, "affine transpose row-entry pairs")?,
-        checked_bytes(
-            columns
-                .checked_add(1)
-                .ok_or(ResourcePlanningError::Overflow("affine transpose offsets"))?,
-            16,
-            "affine transpose offsets and construction cursors",
-        )?,
-        "affine transpose index peak bytes",
-    )
-}
-
 fn checked_bytes(
     count: u64,
     width: u64,
@@ -514,82 +382,4 @@ fn checked_bytes(
 fn checked_add(left: u64, right: u64, label: &'static str) -> Result<u64, ResourcePlanningError> {
     left.checked_add(right)
         .ok_or(ResourcePlanningError::Overflow(label))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn multiplier_preflight_names_gmres_without_charging_an_unused_preconditioner() {
-        let admission = SolverAdmissionResourcePolicy {
-            dimension: Count(8),
-            factor_nonzero_upper_bound: Count(36),
-            update_count_upper_bound: Count(100),
-            resident_bytes_upper_bound: ByteCount(1_000),
-        };
-        let policy = solve_policy(
-            SpdPreconditionerKind::Ilu0,
-            12,
-            7,
-            ConstraintEnforcement::LagrangeMultiplier,
-            144,
-            admission.clone(),
-            0,
-        )
-        .unwrap();
-        let SolveResourcePolicy::SaddlePointGmres {
-            block_dimension,
-            restart,
-            maximum_iterations,
-            workspace_bytes_upper_bound,
-            admission: planned_admission,
-        } = policy
-        else {
-            panic!("multiplier solve must have a saddle GMRES policy");
-        };
-        assert_eq!(block_dimension, Count(19));
-        assert_eq!(restart, Count(19));
-        assert_eq!(maximum_iterations, Count(256));
-        assert_eq!(planned_admission, admission);
-        assert!(workspace_bytes_upper_bound.0 >= 19 * 20 * 8);
-    }
-
-    #[test]
-    fn multiplier_gmres_basis_is_charged_above_scoped_pcg() {
-        assert_eq!(
-            structural_solve_vector_count(12, 7, ConstraintEnforcement::LagrangeMultiplier)
-                .unwrap(),
-            101
-        );
-        assert_eq!(
-            structural_solve_vector_count(12, 7, ConstraintEnforcement::AffineReduction).unwrap(),
-            STRUCTURAL_SOLVE_VECTOR_COUNT
-        );
-        assert!(structural_solve_vector_count(
-            u64::MAX,
-            1,
-            ConstraintEnforcement::LagrangeMultiplier
-        )
-        .is_err());
-    }
-
-    #[test]
-    fn affine_transpose_index_charges_entries_offsets_and_build_cursors() {
-        let reduction = AffineConstraintReduction {
-            full_dof_count: 4,
-            reduced_dof_count: 2,
-            free_dof_indices: vec![0, 1],
-            pivot_dof_indices: vec![2, 3],
-            recovery_row_offsets: vec![0, 1, 2, 4, 5],
-            recovery_column_indices: vec![0, 1, 0, 1, 1],
-            recovery_coefficients: vec![1.0; 5],
-            offset: vec![0.0; 4],
-        };
-        reduction.validate().unwrap();
-        assert_eq!(
-            affine_transpose_index_peak_bytes(&reduction).unwrap(),
-            5 * 16 + 3 * 16
-        );
-    }
 }

@@ -44,12 +44,12 @@ impl ThermalPreassemblyResourceFacts {
         model: &AnalysisModel,
         fields: &[crate::execution::InitialFieldBinding],
     ) -> Result<ByteCount, ResourcePlanningError> {
-        let model_bytes =
-            runmat_canonical_codec::serialized_materialization_resident_bytes_estimate(
-                model,
-                crate::execution::THERMAL_WORKLOAD_LIMITS,
-            )
-            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        let model_bytes = runmat_canonical_codec::profile_serialized_shape(
+            model,
+            crate::execution::THERMAL_WORKLOAD_LIMITS,
+        )
+        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?
+        .materialization_resident_bytes_estimate;
         let bytes = model_bytes
             .checked_mul(2)
             .ok_or(ResourcePlanningError::Overflow(
@@ -78,6 +78,26 @@ impl ThermalPreassemblyResourceFacts {
         mesh: &SolverMeshArtifact,
         schedule: &ThermalSolveSchedule,
         identity: &crate::admission::AnalysisRunIdentity,
+    ) -> Result<Self, ResourcePlanningError> {
+        Self::derive_with_observations(
+            initial_fields,
+            model,
+            step,
+            mesh,
+            schedule,
+            identity,
+            crate::pipeline::thermal::ThermalObservationExecution::Inline,
+        )
+    }
+
+    pub(crate) fn derive_with_observations(
+        initial_fields: &[crate::execution::InitialFieldBinding],
+        model: &AnalysisModel,
+        step: &ProcedureStep,
+        mesh: &SolverMeshArtifact,
+        schedule: &ThermalSolveSchedule,
+        identity: &crate::admission::AnalysisRunIdentity,
+        observations: crate::pipeline::thermal::ThermalObservationExecution,
     ) -> Result<Self, ResourcePlanningError> {
         if identity.family() != runmat_analysis_core::PhysicsFamily::Thermal
             || identity.procedure() != step.procedure
@@ -111,7 +131,14 @@ impl ThermalPreassemblyResourceFacts {
         let operators = ThermalOperatorResourceFacts::derive(mesh)?;
         operators.require_fits(&history, step.accuracy.resources.maximum_resident_bytes)?;
         let sources = ThermalSourceEvidenceResourceFacts::derive(model, step, schedule)?;
-        let observations = ThermalObservationResourceFacts::derive(mesh, step)?;
+        let observations = match observations {
+            crate::pipeline::thermal::ThermalObservationExecution::Inline => {
+                ThermalObservationResourceFacts::derive(mesh, step)?
+            }
+            crate::pipeline::thermal::ThermalObservationExecution::Deferred => {
+                ThermalObservationResourceFacts::derive_deferred(mesh, step)?
+            }
+        };
         let realization = ThermalRealizationResourceFacts::derive(model, step)?;
         let metadata = ThermalMetadataResourceFacts::derive(model, step, schedule)?;
         let field_construction = ThermalFieldConstructionResourceFacts::derive(mesh, schedule)?;

@@ -45,6 +45,14 @@ impl NonlinearWorkLimits {
         })
     }
 
+    /// At most two block-prefix/end proofs per accepted step and two accepted
+    /// state proofs per advance. Uncoupled limits remain unchanged.
+    pub(crate) fn derive_contact(options: &NonlinearSolveOptions) -> Result<Self, FeaRunError> {
+        let mut limits = Self::derive(options)?;
+        limits.linear_solves = add(limits.linear_solves, multiply(limits.accepted, 4)?)?;
+        Ok(limits)
+    }
+
     pub fn total_evaluations(self) -> Result<usize, FeaRunError> {
         add(self.tangent_evaluations, self.controller_evaluations)
     }

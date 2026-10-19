@@ -41,15 +41,30 @@ pub(crate) fn verify_authored_observations(
     plan.validate_identity()
 }
 
-pub(crate) fn verify_observation_plan(
+pub(crate) fn verify_observation_plan<'a, I>(
     step: &ProcedureStep,
     projection: &AnalysisProjection,
-    fields: &[RecoveredFieldDefinition],
+    fields: I,
     plan: &ResolvedObservationPlan,
-) -> Result<(), ObservationError> {
+) -> Result<(), ObservationError>
+where
+    I: IntoIterator<Item = &'a RecoveredFieldDefinition>,
+    I::IntoIter: Clone,
+{
     verify_authored_observations(step, plan)?;
-    let topology = ObservationTopology::from_projection(projection);
-    verify_for_topology(step, &topology, None, None, fields, plan)
+    let (topology, remaining) = ObservationTopology::from_projection_admitted(
+        projection,
+        step.accuracy.resources.maximum_resident_bytes,
+    )?;
+    verify_for_topology(
+        step,
+        &topology,
+        None,
+        None,
+        fields.into_iter(),
+        plan,
+        remaining,
+    )
 }
 
 pub(crate) fn verify_sampled_observation_plan(
@@ -62,7 +77,15 @@ pub(crate) fn verify_sampled_observation_plan(
     super::super::sampled::validate_sampled_requests(step)?;
     verify_authored_observations(step, plan)?;
     let topology = ObservationTopology::from_sampled(sampling, mesh)?;
-    verify_for_topology(step, &topology, None, None, fields, plan)
+    verify_for_topology(
+        step,
+        &topology,
+        None,
+        None,
+        fields.iter(),
+        plan,
+        step.accuracy.resources.maximum_resident_bytes,
+    )
 }
 
 pub(crate) fn verify_structural_observation_plan(
@@ -83,34 +106,40 @@ pub(crate) fn verify_structural_observation_plan(
         &topology,
         Some(constraint_plan),
         Some(&connectors),
-        fields,
+        fields.iter(),
         plan,
+        step.accuracy.resources.maximum_resident_bytes,
     )
 }
 
-fn verify_for_topology(
+fn verify_for_topology<'a>(
     step: &ProcedureStep,
     topology: &ObservationTopology,
     constraints: Option<&CanonicalStructuralConstraintPlan>,
     connectors: Option<&CanonicalStructuralConnectorPlan>,
-    fields: &[RecoveredFieldDefinition],
+    fields: impl Iterator<Item = &'a RecoveredFieldDefinition> + Clone,
     plan: &ResolvedObservationPlan,
+    maximum_resident_bytes: u64,
 ) -> Result<(), ObservationError> {
     if plan.topology_digest != topology.digest() {
         return Err(ObservationError::Identity(
             "observation plan differs from authoritative topology",
         ));
     }
-    validate_field_catalog(fields)?;
+    validate_field_catalog(fields.clone(), maximum_resident_bytes)?;
     for (request, expected) in step.observations.iter().zip(&plan.observations) {
-        let limits = verification_limits(expected)?;
+        let limits = ObservationLimits {
+            // Declared mathematical observation cost is not construction admission.
+            maximum_peak_resident_bytes: maximum_resident_bytes,
+            ..verification_limits(expected)?
+        };
         let actual = resolve_request(
             step,
             request,
             topology,
             constraints,
             connectors,
-            fields,
+            fields.clone(),
             limits,
         )?;
         if &actual != expected {
@@ -130,7 +159,15 @@ pub(crate) fn verify_finite_volume_observation_plan_for_topology(
     plan: &ResolvedObservationPlan,
 ) -> Result<(), ObservationError> {
     verify_authored_observations(step, plan)?;
-    verify_for_topology(step, topology, None, None, fields, plan)
+    verify_for_topology(
+        step,
+        topology,
+        None,
+        None,
+        fields.iter(),
+        plan,
+        step.accuracy.resources.maximum_resident_bytes,
+    )
 }
 
 fn verification_limits(

@@ -187,15 +187,16 @@ pub(super) fn recover(
     let bound = profile::complete_profile(p, &scope)?;
     profile::require_complete_budget(p, &scope)?;
     let d = &checkpoint.data;
-    if d.schema_version != 1
-        || d.scope != scope
-        || actual.encoded_bytes_upper_bound > bound.encoded_bytes_upper_bound
+    if d.schema_version != 1 || d.scope != scope {
+        return Err(invalid("fluid checkpoint original scope differs"));
+    }
+    if actual.encoded_bytes_upper_bound > bound.encoded_bytes_upper_bound
         || actual.materialization_resident_bytes_estimate
             > bound.materialization_resident_bytes_estimate
     {
-        return Err(invalid(
-            "fluid checkpoint original scope or complete payload differs",
-        ));
+        return Err(invalid(format!("fluid checkpoint complete payload exceeds admitted profile: encoded={}/{}, resident={}/{}",
+            actual.encoded_bytes_upper_bound, bound.encoded_bytes_upper_bound,
+            actual.materialization_resident_bytes_estimate, bound.materialization_resident_bytes_estimate)));
     }
     let mut recovery_resident_bytes = 0;
     let mut recovery_work = 0;

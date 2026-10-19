@@ -117,6 +117,31 @@ impl ThermalObservationResourceFacts {
         })
     }
 
+    /// Only selector validation occurs in the numerical task. Observation execution has its
+    /// own source-bound task/resource plan and must retain the original authored dynamic cap.
+    pub(crate) fn derive_deferred(
+        mesh: &SolverMeshArtifact,
+        step: &ProcedureStep,
+    ) -> Result<Self, ResourcePlanningError> {
+        if step.observations.iter().any(|r| matches!(r, ObservationRequest::History(s) if matches!(s.sampling, SamplingPolicy::Event(_)))) { return Err(invalid("thermal history pipeline has no event detector")); }
+        if !step.observations.is_empty() {
+            let projection = AnalysisProjection::derive(mesh).map_err(invalid)?;
+            let definitions = history_fields::definitions().map_err(invalid)?;
+            resolve_observation_plan(
+                step,
+                &projection,
+                &definitions,
+                ObservationLimits::default(),
+            )
+            .map_err(invalid)?;
+        }
+        Ok(Self {
+            shared: None,
+            catalog_copy_bytes: ByteCount(0),
+            evaluation_peak_bytes: ByteCount(0),
+        })
+    }
+
     /// Conservative composition of shared stored-history cost and evaluation peak; not total RSS.
     pub fn reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
         self.shared

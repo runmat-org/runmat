@@ -1,4 +1,5 @@
 use super::*;
+mod contact;
 use crate::{
     assembly::{dofs::StructuralDofKind, nonlinear_solid::tests::fixture},
     constraints::ResolvedConstraintMatrix,
@@ -252,4 +253,28 @@ fn failed_newton_and_cutback_do_not_commit_caller_history() {
     let problem = SolidNewtonProblem::prepare(&basis, &summary, with_cutback).unwrap();
     assert!(problem.advance(&accepted, 1.0).is_err());
     assert_eq!(accepted, before);
+}
+
+#[test]
+fn cancelled_point_evaluation_reaches_newton_without_mutating_history() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let (model, mesh, summary) = fixture(order, true);
+        let summary = anchored_uniaxial_summary(&mesh, summary, 20.0);
+        let basis = CanonicalNonlinearSolidBasis::prepare(&model, &mesh, &summary).unwrap();
+        let problem = SolidNewtonProblem::prepare(&basis, &summary, policy()).unwrap();
+        let state = problem.initial_state().unwrap();
+        let before = state.clone();
+        let context = crate::progress::FeaProgressContext::default();
+        context.cancellation.cancel();
+        let guard = crate::progress::replace_fea_progress_context(context);
+        assert!(matches!(
+            problem.evaluate(&state.displacement, &state.constitutive),
+            Err(SolidNewtonError::Cancelled)
+        ));
+        assert_eq!(state, before);
+        drop(guard);
+        assert!(problem
+            .evaluate(&state.displacement, &state.constitutive)
+            .is_ok());
+    }
 }

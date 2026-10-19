@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 pub use runmat_execution_artifact::{
-    ProgramExecutionRequest as WorkerRequest, ProgramExecutionResponse as WorkerResponse,
+    ProgramExecutionResponse as WorkerResponse, ReservedProgramExecutionRequest as WorkerRequest,
     PROGRAM_EXECUTION_REQUEST_SCHEMA_V3,
 };
 

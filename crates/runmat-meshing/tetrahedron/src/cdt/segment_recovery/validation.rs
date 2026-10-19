@@ -4,13 +4,11 @@ use runmat_meshing_core::MeshingCancellationSignal;
 
 use super::{
     coordinates_share_representable_location, edge_exists, error, find_node, interpolate,
-    validate_delaunay_constraints, validate_delaunay_volume_topology, validate_options,
-    DelaunayConstraints, DelaunaySegmentRecovery, DelaunaySegmentRecoveryError,
-    DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions, DelaunayVolumeTopology,
-    RecoveryWork,
+    validate_delaunay_constraints, validate_options, DelaunayConstraints, DelaunaySegmentRecovery,
+    DelaunaySegmentRecoveryError, DelaunaySegmentRecoveryErrorKind, DelaunaySegmentRecoveryOptions,
+    DelaunayVolumeTopology, RecoveryWork,
 };
 use crate::cdt::insertion::validate_constrained_delaunay_volume_topology;
-use crate::cdt::insertion::validate_locally_delaunay_volume_topology;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum SegmentRecoveryInputContract {
@@ -141,31 +139,33 @@ pub(in crate::cdt) fn validate_delaunay_segment_recovery_on_topology(
 }
 
 pub(super) fn validate_inputs(
-    topology: &DelaunayVolumeTopology,
+    topology: DelaunayVolumeTopology,
     constraints: &DelaunayConstraints,
     options: DelaunaySegmentRecoveryOptions,
     cancellation: &dyn MeshingCancellationSignal,
     input_contract: SegmentRecoveryInputContract,
-) -> Result<(), DelaunaySegmentRecoveryError> {
+) -> Result<crate::cdt::insertion::AdmittedPhysicalTopology, DelaunaySegmentRecoveryError> {
     validate_delaunay_constraints(constraints, options.constraints, cancellation)
         .map_err(super::constraint_error)?;
-    match input_contract {
+    let admitted = match input_contract {
         SegmentRecoveryInputContract::ExternalUnconstrainedTopology => {
-            validate_delaunay_volume_topology(topology, options.insertion, cancellation)
+            crate::cdt::insertion::AdmittedPhysicalTopology::verify_global(
+                topology,
+                options.insertion,
+                cancellation,
+            )
         }
         SegmentRecoveryInputContract::CertifiedPointSet => {
-            validate_locally_delaunay_volume_topology(topology, options.insertion, cancellation)
+            crate::cdt::insertion::AdmittedPhysicalTopology::verify(
+                topology,
+                options.insertion,
+                cancellation,
+            )
         }
     }
     .map_err(|validation| super::insertion_error(validation, 0))?;
-    if !topology.incidence.regions.is_empty() {
-        return Err(error(
-            DelaunaySegmentRecoveryErrorKind::InvalidTopology,
-            None,
-            "segment recovery must precede region assignment",
-        ));
-    }
-    validate_constraint_nodes(topology, constraints)
+    validate_constraint_nodes(admitted.topology(), constraints)?;
+    Ok(admitted)
 }
 
 fn validate_constraint_nodes(

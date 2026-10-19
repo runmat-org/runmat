@@ -12,6 +12,8 @@ use runmat_meshing_core::{MeshingEvidence, SolverMeshArtifact};
 mod admission;
 #[path = "thermal_study_publication/materialization.rs"]
 pub(in crate::analysis) mod materialization;
+#[path = "thermal_study_publication/preparation.rs"]
+mod preparation;
 
 /// Authenticate the source-bound definition, numerical result and meshing provenance before
 /// admitting it through the same study artifact and cold-query contracts as other physics.
@@ -58,16 +60,16 @@ pub fn prepare_thermal_study_publication(
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<crate::analysis::PreparedStudyPublication, OperationErrorEnvelope> {
     let invalid = |message| publication_error(&context, &completed.compiled.study_id, message);
-    let mut preparation =
-        crate::analysis::study_publication::preparation::PublicationPreparation::capture(
-            study_definition_digest,
-            &(completed, mesh, meshing_evidence, options),
-        )
-        .map_err(|error| {
-            crate::analysis::prepared_study_publication::publication_failure(
-                error, &context, invalid,
-            )
-        })?;
+    let (mut preparation, completion_copies) = preparation::capture(
+        study_definition_digest,
+        completed,
+        mesh,
+        meshing_evidence,
+        options,
+    )
+    .map_err(|error| {
+        crate::analysis::prepared_study_publication::publication_failure(error, &context, invalid)
+    })?;
     source
         .admit_publication(completed, &mut preparation.staging)
         .map_err(|error| {
@@ -113,6 +115,20 @@ pub fn prepare_thermal_study_publication(
         study_definition_digest,
         &completed.workload.step_id,
     );
+    // Persist borrowed geometry before constructing retained field histories, so
+    // mesh encoding and complete public-run materialization do not coexist.
+    preparation
+        .staging
+        .admit_mesh_persistence(mesh, meshing_evidence)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
+    let persisted =
+        super::meshing::persist_mesh_borrowed(mesh, meshing_evidence, &Default::default())
+            .map_err(invalid)?;
+
     // Reconstruct only retained partitions; the shared owner also validates accuracy/resource
     // closure and projects catalog-backed observations without gathering or evaluating them.
     let object_artifact_paths = source
@@ -131,12 +147,6 @@ pub fn prepare_thermal_study_publication(
         materialization::admit(completed, source, mesh, options, &run_id, &context)
             .map_err(invalid)?
     };
-    let persisted = super::meshing::persist_mesh_output(&crate::meshing::MeshingExecutionOutput {
-        artifact: mesh.clone(),
-        evidence: meshing_evidence.clone(),
-        region_aliases: Default::default(),
-    })
-    .map_err(invalid)?;
     let mut resolved_options = options.clone();
     resolved_options.solver_mesh_artifact_path = persisted.artifact_path.clone();
     let prepared = super::structural_study::standalone_thermal_completion(
@@ -148,13 +158,23 @@ pub fn prepare_thermal_study_publication(
         resolved_options,
         persisted,
     );
-    let published = crate::analysis::structural_study::publication::complete_study_run_prepared(
-        prepared,
-        Vec::new(),
-        Vec::new(),
-        completed.frozen_project_digest,
-        preparation,
-    )?;
+    let mut published =
+        crate::analysis::structural_study::publication::complete_study_run_prepared(
+            prepared,
+            Vec::new(),
+            Vec::new(),
+            completed.frozen_project_digest,
+            preparation,
+        )?;
+    // The completed family call has dropped its owned completion/model/options.
+    published
+        .staging
+        .release_owned_copies(completion_copies)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error, &context, invalid,
+            )
+        })?;
     let evidence = ThermalStudyNumericalEvidence::Thermal {
         root: completed.root.clone(),
         catalog: completed.catalog.clone(),
@@ -171,7 +191,7 @@ pub fn prepare_thermal_study_publication(
         mesh,
         meshing_evidence,
         evidence,
-        &published,
+        &mut published,
     )
     .map_err(|error| {
         crate::analysis::prepared_study_publication::publication_failure(error, &context, invalid)

@@ -1,3 +1,4 @@
+mod sparse_operator;
 use std::collections::{BTreeMap, BTreeSet};
 
 use runmat_analysis_core::{StructuralRotationDof, StructuralTranslationDof};
@@ -359,8 +360,12 @@ impl AffineConstraintReduction {
 
     pub fn validate(&self) -> Result<(), ConstraintAlgebraError> {
         if self.reduced_dof_count != self.free_dof_indices.len()
-            || self.pivot_dof_indices.len() + self.reduced_dof_count != self.full_dof_count
-            || self.recovery_row_offsets.len() != self.full_dof_count + 1
+            || self
+                .pivot_dof_indices
+                .len()
+                .checked_add(self.reduced_dof_count)
+                != Some(self.full_dof_count)
+            || Some(self.recovery_row_offsets.len()) != self.full_dof_count.checked_add(1)
             || self.recovery_row_offsets.first() != Some(&0)
             || self.recovery_row_offsets.last().copied() != Some(self.recovery_coefficients.len())
             || self.recovery_column_indices.len() != self.recovery_coefficients.len()
@@ -379,10 +384,31 @@ impl AffineConstraintReduction {
                 "affine recovery shape or numerical content is inconsistent".into(),
             ));
         }
-        let mut partition = self.free_dof_indices.clone();
-        partition.extend(&self.pivot_dof_indices);
+        if self
+            .recovery_row_offsets
+            .windows(2)
+            .any(|r| r[0] > r[1] || r[1] > self.recovery_coefficients.len())
+        {
+            return Err(ConstraintAlgebraError::InvalidMatrix(
+                "affine recovery offsets are unordered or out of bounds".into(),
+            ));
+        }
+        let mut partition = Vec::new();
+        partition
+            .try_reserve_exact(self.full_dof_count)
+            .map_err(|_| {
+                ConstraintAlgebraError::InvalidMatrix(
+                    "affine partition allocation unavailable".into(),
+                )
+            })?;
+        partition.extend_from_slice(&self.free_dof_indices);
+        partition.extend_from_slice(&self.pivot_dof_indices);
         partition.sort_unstable();
-        if partition != (0..self.full_dof_count).collect::<Vec<_>>() {
+        if partition
+            .iter()
+            .enumerate()
+            .any(|(row, value)| row != *value)
+        {
             return Err(ConstraintAlgebraError::InvalidMatrix(
                 "free and pivot DOFs do not partition the full space".into(),
             ));
@@ -445,45 +471,18 @@ impl AffineConstraintReduction {
         if operator.rows() != self.full_dof_count || operator.columns() != self.full_dof_count {
             return Err(ConstraintAlgebraError::OperatorDimensionMismatch);
         }
-        let mut rows = vec![BTreeSet::<usize>::new(); self.reduced_dof_count];
-        for full_row in 0..self.full_dof_count {
-            let left = self.recovery_row_offsets[full_row]..self.recovery_row_offsets[full_row + 1];
-            for operator_entry in operator.row_range(full_row) {
-                let full_column = operator.column(operator_entry);
-                let right = self.recovery_row_offsets[full_column]
-                    ..self.recovery_row_offsets[full_column + 1];
-                for left_entry in left.clone() {
-                    for right_entry in right.clone() {
-                        rows[self.recovery_column_indices[left_entry]]
-                            .insert(self.recovery_column_indices[right_entry]);
-                    }
-                }
-            }
-        }
-        let mut offsets = Vec::with_capacity(rows.len() + 1);
-        let mut columns = Vec::new();
-        offsets.push(0_u64);
-        for row in rows {
-            for column in row {
-                columns.push(u64::try_from(column).map_err(|_| {
-                    ConstraintAlgebraError::InvalidMatrix(
-                        "reduced sparse column exceeds canonical index width".into(),
-                    )
-                })?);
-            }
-            offsets.push(u64::try_from(columns.len()).map_err(|_| {
-                ConstraintAlgebraError::InvalidMatrix(
-                    "reduced sparse offset exceeds canonical index width".into(),
-                )
-            })?);
-        }
-        let reduced_dof_count = u64::try_from(self.reduced_dof_count).map_err(|_| {
-            ConstraintAlgebraError::InvalidMatrix(
-                "reduced sparse dimension exceeds canonical index width".into(),
-            )
-        })?;
-        SparsePattern::try_new(reduced_dof_count, reduced_dof_count, offsets, columns)
-            .map_err(|error| ConstraintAlgebraError::InvalidMatrix(error.to_string()))
+        let plan = super::AffineSparseSupportPlan::prepare(
+            self,
+            operator,
+            operator,
+            super::AffineSupportBudget {
+                maximum_resident_bytes: u64::MAX,
+                maximum_scalar_operations: u64::MAX,
+            },
+        )
+        .map_err(|e| ConstraintAlgebraError::InvalidMatrix(e.to_string()))?;
+        plan.materialize()
+            .map_err(|e| ConstraintAlgebraError::InvalidMatrix(e.to_string()))
     }
 
     pub fn reduce_dense_operator(
@@ -551,46 +550,6 @@ impl AffineConstraintReduction {
             .collect::<Vec<_>>();
         let reduced_rhs = self.transpose_apply(&shifted_rhs)?;
         Ok((self.reduce_sparse_operator(operator)?, reduced_rhs))
-    }
-
-    pub fn reduce_sparse_operator(
-        &self,
-        operator: &RealSparseMatrix,
-    ) -> Result<RealSparseMatrix, ConstraintAlgebraError> {
-        self.validate()?;
-        if operator.rows() != self.full_dof_count || operator.columns() != self.full_dof_count {
-            return Err(ConstraintAlgebraError::OperatorDimensionMismatch);
-        }
-        let mut reduced = RealSparseAssembler::square(
-            self.reduced_dof_count,
-            operator.role(),
-            operator.properties(),
-        );
-        for contribution in operator.contributions() {
-            reduced.add_contribution(contribution.clone());
-        }
-        for full_row in 0..self.full_dof_count {
-            let left_start = self.recovery_row_offsets[full_row];
-            let left_end = self.recovery_row_offsets[full_row + 1];
-            for operator_entry in operator.pattern().row_range(full_row) {
-                let full_column = operator.pattern().column(operator_entry);
-                let value = operator.values()[operator_entry];
-                let right_start = self.recovery_row_offsets[full_column];
-                let right_end = self.recovery_row_offsets[full_column + 1];
-                for left in left_start..left_end {
-                    for right in right_start..right_end {
-                        reduced.add(
-                            self.recovery_column_indices[left],
-                            self.recovery_column_indices[right],
-                            self.recovery_coefficients[left]
-                                * value
-                                * self.recovery_coefficients[right],
-                        );
-                    }
-                }
-            }
-        }
-        reduced.finish().map_err(sparse_reduction_error)
     }
 }
 

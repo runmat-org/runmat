@@ -12,7 +12,7 @@ use runmat_geometry_io::import::{LabeledSubshapeRemapConflict, LabeledSubshapeRe
 fn two_box_preview_picks_vertical_edge_near_top_corner() {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../docs/fea/examples/geometry/two-box-assembly.step"
+        "/../../docs/simulation/examples/geometry/two-box-assembly.step"
     );
     let bytes = std::fs::read(path).unwrap();
     let asset = geometry_load(path, &bytes).unwrap();

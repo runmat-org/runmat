@@ -216,6 +216,7 @@ fn authored_random_response_study_runs_the_complete_governed_lifecycle() {
     .unwrap();
     let mut coordinator =
         StructuralRandomResponseStudyCoordinator::new(StructuralRandomResponseStudyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("authored-random-response-study"),
             frozen_project_digest: None,
             workloads,

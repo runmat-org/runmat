@@ -5,6 +5,8 @@ use super::*;
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralNonlinearPipelineResourceDemand {
+    /// Fresh original compiler phase; cold values are claims rederived by execution.
+    pub constraint_compilation_peak_bytes: super::ByteCount,
     pub operator: StructuralOperatorResourceDemand,
     pub integration_identity: Digest,
     pub point_count: Count,
@@ -41,6 +43,8 @@ pub struct PreparedNonlinearSolidBlockResourceFacts {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StructuralNonlinearRecoveryResourceDemand {
+    /// Fresh original compiler phase; cold values are claims rederived by execution.
+    pub constraint_compilation_peak_bytes: super::ByteCount,
     pub operator: StructuralOperatorResourceDemand,
     pub integration_identity: Digest,
     pub point_count: Count,

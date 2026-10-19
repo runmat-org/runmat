@@ -19,6 +19,7 @@ runmat-mir = { workspace = true }
 runmat-vm = { workspace = true }
 runmat-config = { workspace = true }
 runmat-execution = { workspace = true }
+runmat-execution-artifact = { workspace = true }
 runmat-package = { workspace = true }
 runmat-static-analysis = { workspace = true }
 runmat-test = { workspace = true }
@@ -64,7 +65,6 @@ runmat-runtime = { workspace = true, features = ["plot-web"] }
 futures = "0.3"
 wasm-bindgen-test = "0.3"
 tempfile = "3"
-runmat-execution-artifact = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 runmat-runtime = { workspace = true, features = ["interaction-test-hooks", "plot-core"] }

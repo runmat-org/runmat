@@ -2,6 +2,7 @@ use super::*;
 use runmat_meshing_core::{
     fixtures::canonical_tetrahedron_solver_mesh, ElementOrder, StableDigest,
 };
+use std::mem::size_of;
 
 #[test]
 fn estimate_covers_retained_projection_and_validation_for_both_orders() {
@@ -31,7 +32,7 @@ fn estimate_covers_retained_projection_and_validation_for_both_orders() {
                 .iter()
                 .map(Vec::capacity)
                 .sum::<usize>();
-        // Lower-bound payload assertion, not an allocator-exact measurement of the tree indexes.
+        // Retained counted buffers; this remains a payload lower bound, not measured RSS.
         assert!(estimate >= validation + (record_slots + references * size_of::<usize>()) as u64);
         assert_eq!(mesh, original);
         assert_eq!(
@@ -80,7 +81,7 @@ fn resource_arithmetic_is_checked_and_malformed_serialization_fails_closed() {
     let mut total = u64::MAX;
     assert!(add(&mut total, 1).is_err());
     assert!(scale(u64::MAX, 2).is_err());
-    assert!(index_count::<usize>(u64::MAX).is_err());
+    assert!(slots::<usize>(usize::MAX, 2).is_err());
     if usize::BITS == 64 {
         assert!(vector::<ProjectedElement>(usize::MAX).is_err());
         assert!(slots::<ProjectedElement>(usize::MAX, 2).is_err());
@@ -91,4 +92,30 @@ fn resource_arithmetic_is_checked_and_malformed_serialization_fails_closed() {
         AnalysisProjection::derivation_resident_bytes_estimate(&mesh),
         Err(AnalysisProjectionError::ResourceEstimate(_))
     ));
+}
+
+pub(super) mod allocation;
+
+#[test]
+fn counted_retained_bound_covers_original_geometry_without_constructing_or_validating_it() {
+    for mesh in [
+        canonical_tetrahedron_solver_mesh(ElementOrder::Tet4),
+        canonical_tetrahedron_solver_mesh(ElementOrder::Tet10),
+        runmat_meshing_core::fixtures::slab_mesh(2),
+        runmat_meshing_core::fixtures::quadratic_slab_mesh(2),
+    ] {
+        let (bound, live, peak) =
+            measured(|| AnalysisProjection::retained_resident_bytes_upper_bound(&mesh).unwrap());
+        assert_eq!((live, peak), (0, 0));
+        let (projection, live, _) = measured(|| AnalysisProjection::derive(&mesh).unwrap());
+        assert!(live as u64 <= bound);
+        assert!(projection.clone_resident_bytes_estimate().unwrap() <= bound);
+        let mut foreign = mesh.clone();
+        foreign.canonical_digest = StableDigest::ZERO;
+        assert_eq!(
+            AnalysisProjection::retained_resident_bytes_upper_bound(&foreign).unwrap(),
+            bound
+        );
+        assert!(AnalysisProjection::derive(&foreign).is_err());
+    }
 }

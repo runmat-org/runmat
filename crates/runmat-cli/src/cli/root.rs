@@ -402,10 +402,10 @@ pub enum Commands {
         #[arg(long, default_value = "file")]
         credential_store: CredentialStoreMode,
         /// Default organization id
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_org_id_input)]
         org: Option<Uuid>,
         /// Default project id
-        #[arg(long)]
+        #[arg(long, value_parser = runmat_server_client::auth::parse_project_id_input)]
         project: Option<Uuid>,
     },
     /// Organization management
@@ -500,6 +500,23 @@ mod tests {
         AotPolicy, BatchCommand, ClusterCommand, ClusterStateArg, FeaCommand, MeshSourceUnitsArg,
     };
     use clap::Parser;
+
+    #[test]
+    fn public_namespace_ids_parse_and_foreign_namespaces_are_rejected() {
+        let org = "org_0000000000000000000000000000002a";
+        let project = "proj_0000000000000000000000000000002a";
+        let parsed = Cli::try_parse_from(["runmat", "cluster", "list", "--org", org]).unwrap();
+        let Some(Commands::Cluster {
+            cluster_command: ClusterCommand::List { org: Some(id), .. },
+        }) = parsed.command
+        else {
+            panic!("expected cluster list with organization");
+        };
+        assert_eq!(id, uuid::Uuid::from_u128(42));
+        assert!(Cli::try_parse_from(["runmat", "cluster", "list", "--org", project]).is_err());
+        assert!(Cli::try_parse_from(["runmat", "run", "main.fea", "--project", project]).is_ok());
+        assert!(Cli::try_parse_from(["runmat", "run", "main.fea", "--project", org]).is_err());
+    }
 
     #[test]
     fn removed_startup_snapshot_flag_is_rejected() {
@@ -640,6 +657,54 @@ mod tests {
                 detach: true,
             })
         );
+    }
+
+    #[test]
+    fn typed_fea_reassessment_requires_an_original_publication_identity() {
+        let digest = runmat_execution::Digest::sha256("original-study");
+        let encoded = digest.to_string();
+        let cli = Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "reassess",
+            "revised.fea",
+            "--study",
+            "response",
+            "--original-definition",
+            &encoded,
+            "--result-manifest",
+            "saved.json",
+            "--json",
+        ])
+        .unwrap();
+        let Some(Commands::Fea {
+            fea_command:
+                FeaCommand::Reassess {
+                    original_definition,
+                    result_manifest,
+                    study,
+                    json,
+                    ..
+                },
+        }) = cli.command
+        else {
+            panic!("expected reassessment command")
+        };
+        assert_eq!(original_definition, digest);
+        assert_eq!(result_manifest, PathBuf::from("saved.json"));
+        assert_eq!(study.as_deref(), Some("response"));
+        assert!(json);
+        assert!(Cli::try_parse_from([
+            "runmat",
+            "fea",
+            "reassess",
+            "revised.fea",
+            "--original-definition",
+            "not-a-digest",
+            "--result-manifest",
+            "saved.json",
+        ])
+        .is_err());
     }
 
     #[test]

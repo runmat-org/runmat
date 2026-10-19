@@ -8,10 +8,10 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 #[cfg(test)]
 mod tests;
+mod validation;
 
 const PREFIX: &[u8] = b"runmat-finite-volume-field-layout/v1\0";
 const LIMITS: CanonicalLimits = CanonicalLimits::new(1024 * 1024 * 1024, 4_000_000, 65_536, 64);
@@ -113,37 +113,7 @@ impl FiniteVolumeFieldTopology {
 
     /// Internal wire integrity is not original-source admission.
     pub fn validate(&self) -> Result<(), RecoveredFieldError> {
-        let unique = |ids: &[StableDigest]| {
-            !ids.is_empty()
-                && !ids.contains(&StableDigest::ZERO)
-                && ids.iter().collect::<BTreeSet<_>>().len() == ids.len()
-        };
-        if !self.identity().has_valid_identity()
-            || self.projection_digest == Digest::from_bytes([0; 32])
-            || self.projection_digest == Digest::sha256([])
-            || !unique(&self.node_identities)
-            || !unique(&self.cell_identities)
-            || self.oriented_faces.is_empty()
-        {
-            return Err(invalid("invalid native finite-volume layout"));
-        }
-        let nodes: BTreeSet<_> = self.node_identities.iter().copied().collect();
-        let cells: BTreeSet<_> = self.cell_identities.iter().copied().collect();
-        let mut seen = BTreeSet::new();
-        for face in &self.oriented_faces {
-            if !seen.insert(face.identity)
-                || !face.corner_identities.windows(2).all(|w| w[0] < w[1])
-                || face.corner_identities.iter().any(|n| !nodes.contains(n))
-                || !cells.contains(&face.owner)
-                || face
-                    .neighbor
-                    .is_some_and(|n| n == face.owner || !cells.contains(&n))
-                || face.identity
-                    != face_identity(face.corner_identities, face.owner, face.neighbor)?
-            {
-                return Err(invalid("invalid exact owner-oriented face inventory"));
-            }
-        }
+        validation::validate(self)?;
         self.entity_counts().validate()
     }
     pub fn validate_for(

@@ -107,7 +107,7 @@ fn shared_shell_boundary() -> (AnalysisModel, SolverMeshArtifact) {
     (model, mesh)
 }
 
-fn cases() -> Vec<(&'static str, AnalysisModel, Option<SolverMeshArtifact>)> {
+pub(super) fn cases() -> Vec<(&'static str, AnalysisModel, Option<SolverMeshArtifact>)> {
     let (tet4, mesh4) = solid(ElementOrder::Tet4);
     let (tet10, mesh10) = solid(ElementOrder::Tet10);
     let mixed_mesh = mesh(ElementOrder::Tet4);

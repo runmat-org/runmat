@@ -1,7 +1,6 @@
 //! Path-free numerical intent for one explicitly selected thermal procedure.
 use runmat_analysis_core::{
-    validate_model, AnalysisModel, FormulationRequirement, PhysicsFamily, ProcedureStep,
-    ProcedureStepId,
+    AnalysisModel, FormulationRequirement, PhysicsFamily, ProcedureStep, ProcedureStepId,
 };
 use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
@@ -13,7 +12,12 @@ use crate::{ComputeBackend, FeaRunError, FeaThermalRunResult, ThermalProcedureCo
 use super::{AnalysisExecutionError, AnalysisExecutionResult, AnalysisWorkloadIdentity};
 
 const PREFIX: &[u8] = b"runmat-thermal-workload/v1\0";
+#[cfg(test)]
+mod identity_tests;
+mod source_identity;
 mod state_profiles;
+#[cfg(test)]
+mod validation_tests;
 pub(crate) const LIMITS: CanonicalLimits =
     CanonicalLimits::new(64 * 1024 * 1024, 1_000_000, 65_536, 64);
 
@@ -36,9 +40,30 @@ impl ThermalWorkload {
         self.validated_step().map(|_| ())
     }
 
-    fn validated_step(&self) -> AnalysisExecutionResult<&ProcedureStep> {
+    pub(crate) fn validated_step(&self) -> AnalysisExecutionResult<&ProcedureStep> {
+        self.validated_step_with_dependency_graph_budget(u64::MAX)
+    }
+
+    pub(crate) fn validated_step_with_dependency_graph_budget(
+        &self,
+        maximum: u64,
+    ) -> AnalysisExecutionResult<&ProcedureStep> {
         let invalid = |message: String| AnalysisExecutionError::Invalid(message);
-        validate_model(&self.model).map_err(|error| invalid(error.to_string()))?;
+        let maximum = self
+            .model
+            .sequence
+            .steps
+            .iter()
+            .filter(|step| step.step_id == self.step_id)
+            .map(|step| step.accuracy.resources.maximum_resident_bytes)
+            .fold(maximum, u64::min);
+        runmat_analysis_core::validate_model_with_dependency_graph_budget(&self.model, maximum)
+            .map_err(|error| match error {
+                runmat_analysis_core::AnalysisValidationError::DependencyGraphResourceLimit {
+                    ..
+                } => AnalysisExecutionError::Limit("thermal dependency graph workspace"),
+                _ => invalid(error.to_string()),
+            })?;
         crate::pipeline::thermal::validate_controls(self.procedure, self.residual_target)
             .map_err(|error| invalid(error.to_string()))?;
         let mut matching = self
@@ -154,12 +179,13 @@ impl ThermalWorkload {
         residual_target: f64,
         initial_fields: &[super::InitialFieldBinding],
     ) -> AnalysisExecutionResult<super::ThermalNumericalIntentIdentity> {
-        // The shared solver view excludes display/import provenance. Its borrowed selection
-        // vectors and canonical encoding are identity scratch, not allocation-free streaming.
+        // The shared solver view excludes display/import provenance. Its borrowed collection
+        // views do not copy inventories; canonical encoding still requires admitted scratch.
         let bytes = encode_contract(
             PREFIX,
             "thermal-numerical-intent",
             &(
+                "shared-solver-relative-residual/v2",
                 model.solver_identity_contract(),
                 step_id,
                 procedure,
@@ -181,6 +207,23 @@ impl ThermalWorkload {
         super::ThermalSolveSchedule::derive(&self.model, step, self.procedure)
     }
 
+    /// Construct the original schedule within a caller's remaining source workspace.
+    /// The authored ceiling remains an additional upper bound.
+    pub fn solve_schedule_admitted(
+        &self,
+        maximum_resident_bytes: u64,
+    ) -> Result<super::ThermalSolveSchedule, FeaRunError> {
+        let step = self
+            .validated_step()
+            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+        super::ThermalSolveSchedule::derive_admitted(
+            &self.model,
+            step,
+            self.procedure,
+            maximum_resident_bytes,
+        )
+    }
+
     /// Executes the selected step without rewriting the authored sequence or its producer identity.
     /// Resource planning and portable worker task admission must surround this numerical entry.
     pub fn execute(&self, mesh: &SolverMeshArtifact) -> Result<FeaThermalRunResult, FeaRunError> {
@@ -193,6 +236,26 @@ impl ThermalWorkload {
         &'a self,
         mesh: &'a SolverMeshArtifact,
     ) -> Result<super::PreparedThermalSolve<'a>, FeaRunError> {
+        let (step, options) = self.admitted_controls()?;
+        crate::pipeline::thermal::prepare_selected(&self.model, self.backend, options, mesh, step)
+    }
+    /// Admit numerical fields and original selectors; published-field tasks admit observation execution.
+    pub fn prepare_primary_fields<'a>(
+        &'a self,
+        mesh: &'a SolverMeshArtifact,
+    ) -> Result<super::PreparedThermalPrimarySolve<'a>, FeaRunError> {
+        let (step, options) = self.admitted_controls()?;
+        crate::pipeline::thermal::prepare_selected_primary(
+            &self.model,
+            self.backend,
+            options,
+            mesh,
+            step,
+        )
+    }
+    fn admitted_controls(
+        &self,
+    ) -> Result<(&ProcedureStep, crate::ThermalSolveOptions), FeaRunError> {
         let step = self
             .validated_step()
             .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
@@ -201,9 +264,8 @@ impl ThermalWorkload {
             &self.initial_fields,
             step.accuracy.resources.maximum_resident_bytes,
         )?;
-        crate::pipeline::thermal::prepare_selected(
-            &self.model,
-            self.backend,
+        Ok((
+            step,
             crate::ThermalSolveOptions {
                 formulation_requirement: self.formulation_requirement,
                 procedure: self.procedure,
@@ -211,9 +273,7 @@ impl ThermalWorkload {
                 solver_mesh: None,
                 initial_fields: self.initial_fields.clone(),
             },
-            mesh,
-            step,
-        )
+        ))
     }
 }
 

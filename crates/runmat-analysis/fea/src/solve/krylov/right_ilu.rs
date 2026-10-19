@@ -3,7 +3,9 @@
 //! This is genuine `L U`, not the positive-pivot `L D Lᵀ` PCG preconditioner.
 //! No fill, permutation, pivot modification, dimensional floor or fallback is used.
 
+mod envelope;
 use crate::algebra::RealSparseMatrix;
+pub(crate) use envelope::SparseRightIluEnvelope;
 use thiserror::Error;
 
 #[derive(Clone, Debug, PartialEq)]

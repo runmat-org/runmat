@@ -48,3 +48,31 @@ fn overflowing_native_inventory_is_rejected_before_any_registration() {
         assert_eq!(driver.snapshot(), before);
     }
 }
+
+#[test]
+fn worker_slots_share_one_aggregate_machine_budget() {
+    let mut config = NativeExecutionConfig::for_current_executable().unwrap();
+    config.max_workers = 8;
+    config.worker_cpu_millicores = 8_000;
+    config.worker_memory_bytes = 8_000;
+    config.local_cpu_capacity_millicores = Some(8_000);
+    config.local_memory_capacity_bytes = Some(12_000);
+    let mut driver = Driver::new(DriverConfig::default(), 1).unwrap();
+    let pool = register(
+        &mut driver,
+        &config,
+        ExecutionScopeId::derive(&[b"machine-budget"]),
+    )
+    .unwrap();
+    let snapshot = driver.snapshot();
+    assert_eq!(
+        snapshot.pools[&pool].spec.resource_limit.cpu_millicores,
+        8_000
+    );
+    assert_eq!(
+        snapshot.pools[&pool].spec.resource_limit.memory_bytes,
+        12_000
+    );
+    assert_eq!(snapshot.pools[&pool].workers.len(), 8);
+    snapshot.validate().unwrap();
+}

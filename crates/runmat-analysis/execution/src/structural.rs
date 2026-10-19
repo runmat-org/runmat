@@ -10,8 +10,8 @@ use runmat_analysis_fea::execution::{
     StructuralLinearWorkloadResult, StudyIdentity,
 };
 use runmat_analysis_fea::planning::resource::{
-    build_structural_resource_plan, require_executable_static_backend, FeaResourcePlan,
-    LocalExecutionPlan,
+    build_structural_resource_plan_from_compilation, require_executable_static_backend,
+    FeaResourcePlan, LocalExecutionPlan,
 };
 use runmat_analysis_fea::post::fields::structural_static_observable_field_definitions;
 use runmat_analysis_fea::results::observation::{
@@ -161,11 +161,18 @@ pub fn prepare_structural_linear_program(
         ));
     }
 
-    let constraint_plan = CanonicalStructuralConstraintPlan::compile_for_model(
+    let compilation = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
         &preparation.workload.model,
         preparation.mesh.as_ref(),
+        preparation
+            .workload
+            .procedure_step()?
+            .accuracy
+            .resources
+            .maximum_resident_bytes,
     )
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let constraint_plan = compilation.plan();
     let property_map = runmat_analysis_fea::properties::compile_property_map(
         &preparation.workload.model,
         preparation.mesh.as_ref(),
@@ -183,7 +190,7 @@ pub fn prepare_structural_linear_program(
         preparation.workload.procedure_step()?,
         &preparation.workload.model,
         preparation.mesh.as_ref(),
-        &constraint_plan,
+        constraint_plan,
         &field_definitions,
         ObservationLimits::default(),
     )
@@ -323,9 +330,9 @@ pub fn prepare_structural_linear_program(
     let input_facts = crate::object::prepared_input_resource_facts_from_refs(
         inputs.iter().map(|(objects, _)| objects),
     )?;
-    let resource_plan = build_structural_resource_plan(
+    let resource_plan = build_structural_resource_plan_from_compilation(
         preparation.mesh.as_ref(),
-        &constraint_plan,
+        &compilation,
         &observation_plan,
         &preparation.workload,
         &preparation.accelerator_requests,
@@ -428,9 +435,17 @@ fn structural_topology_digest(
     workload: &StructuralLinearWorkload,
     mesh: Option<&SolverMeshArtifact>,
 ) -> AnalysisBridgeResult<Digest> {
-    CanonicalStructuralConstraintPlan::compile_for_model(&workload.model, mesh)
-        .map(|plan| plan.topology.discretization_digest())
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
+    CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
+        &workload.model,
+        mesh,
+        workload
+            .procedure_step()?
+            .accuracy
+            .resources
+            .maximum_resident_bytes,
+    )
+    .map(|compiled| compiled.plan().topology.discretization_digest())
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))
 }
 
 fn derive_identities(

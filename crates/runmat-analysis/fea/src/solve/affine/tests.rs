@@ -25,7 +25,7 @@ fn scoped_affine_forward_projection_and_lift_preserve_serial_bits() {
     let reduced = [0.75, -2.0, 1.25];
     let serial_linear = expand_linear(&reduction, &reduced, None).unwrap();
     let serial_full = expand(&reduction, &reduced, None).unwrap();
-    let transpose_index = AffineTransposeIndex::new(&reduction);
+    let transpose_index = AffineTransposeIndex::try_new(&reduction).unwrap();
     for threads in [2, 3, 7, 8] {
         let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(threads).unwrap()).unwrap();
         assert_eq!(
@@ -61,7 +61,7 @@ fn scoped_affine_projection_rejects_nested_execution_and_cancellation() {
     let reduction = coupled_reduction();
     let reduced = [0.75, -2.0, 1.25];
     let plan = LocalExecutionPlan::fixed(LocalThreadCount::new(3).unwrap()).unwrap();
-    let transpose_index = AffineTransposeIndex::new(&reduction);
+    let transpose_index = AffineTransposeIndex::try_new(&reduction).unwrap();
     let full = expand_linear(&reduction, &reduced, None).unwrap();
     let nested = execute_scoped_chunks(LocalExecutionPlan::serial(), 1, |_| {
         Ok::<_, ()>(transpose_index.apply(&reduction, &full, plan))

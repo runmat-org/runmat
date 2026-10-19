@@ -612,9 +612,6 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
-            title: "Area",
-            x_label: "X",
-            y_label: "Y",
             ..Default::default()
         },
         move |figure, axes| {

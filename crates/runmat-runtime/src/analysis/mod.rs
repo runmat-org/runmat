@@ -8,9 +8,9 @@ use std::time::Instant;
 use chrono::Utc;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisConstraint, AnalysisField, AnalysisInterfaceKind,
-    AnalysisModel, AnalysisProcedure, AnalysisValidationError, BoundaryOperator, ContactFriction,
-    CoordinateFrame, CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, ProcedureStepId,
-    StateKind, StateOutput, ThermalInterfaceTransfer,
+    AnalysisModel, AnalysisProcedure, BoundaryOperator, ContactFriction, CoordinateFrame,
+    CoupledPhysicsFamily, ExcitationAction, PhysicsFamily, ProcedureStepId, StateKind, StateOutput,
+    ThermalInterfaceTransfer,
 };
 use runmat_analysis_fea::execution::{
     CanonicalSemanticState, CanonicalSemanticStateInput, CanonicalSemanticStatePayload,
@@ -53,6 +53,10 @@ use policy::{
 };
 
 mod artifact_root;
+mod modal_run_admission;
+mod render_topology;
+use modal_run_admission::analysis_admit_modal_run_with_id;
+use render_topology::render_topology_from_solver_mesh;
 pub mod assessment;
 mod fsi_result;
 mod nonlinear_result;
@@ -65,6 +69,8 @@ mod contracts;
 mod excitation_authoring;
 mod execution_dispatch;
 mod execution_error;
+mod validation_error;
+use validation_error::map_validate_error;
 #[cfg(feature = "plot-core")]
 pub mod field_scene;
 pub(crate) mod field_selection;
@@ -96,7 +102,7 @@ pub use prepared_study_publication::{
     assessment_evidence_identity, AssessmentExecutionReceipt, PreparedStudyPublication,
 };
 mod study_result;
-mod study_result_manifest;
+pub mod study_result_manifest;
 mod study_sweep;
 mod thermal_execution;
 pub use response_study_result::{
@@ -2015,172 +2021,14 @@ fn execute_modal_with_options(
     )
     .map_err(|err| map_fea_run_error(AnalysisOperation::Modal, model, &context, err))?;
 
-    analysis_admit_modal_run_with_id(modal_run, backend, options, context, solver_mesh, None)
-}
-
-fn analysis_admit_modal_run_with_id(
-    modal_run: runmat_analysis_fea::FeaModalRunResult,
-    backend: ComputeBackend,
-    options: AnalysisModalRunOptions,
-    context: OperationContext,
-    solver_mesh: Option<SolverMeshArtifact>,
-    assigned_run_id: Option<&str>,
-) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    let basis = modal_run.basis;
-    let run = modal_run.run;
-    let mode_shapes = modal_run.mode_shapes;
-    let mut fallback_events = Vec::new();
-    if backend == ComputeBackend::Gpu && run.execution_backend != ExecutionBackend::Accelerator {
-        fallback_events.push(FallbackEvent::solver_backend());
-    }
-    let solver_convergence = if run.diagnostics.iter().any(|item| {
-        item.code == "FEA_MODAL_CONVERGENCE"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
-    }) {
-        QualityGate::Pass
-    } else {
-        QualityGate::Warn
-    };
-    let result_quality = if basis.modes().is_empty() {
-        QualityGate::Fail
-    } else if basis
-        .modes()
-        .iter()
-        .map(|mode| mode.residual_norm())
-        .fold(0.0_f64, f64::max)
-        > options.convergence.relative_residual_tolerance()
-    {
-        QualityGate::Warn
-    } else {
-        QualityGate::Pass
-    };
-    let modal_orthogonality_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_MODAL_ORTHOGONALITY"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
-    let modal_separation_warn = run.diagnostics.iter().any(|item| {
-        item.code == "FEA_MODAL_SEPARATION"
-            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
-    });
-
-    let mut quality_reasons = Vec::new();
-    if solver_convergence == QualityGate::Warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverNotConverged,
-            detail: "modal solver convergence gate is warning".to_string(),
-        });
-    }
-    if result_quality == QualityGate::Warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ModalResidualExceeded,
-            detail: format!(
-                "modal residual exceeds threshold {}",
-                options.convergence.relative_residual_tolerance()
-            ),
-        });
-    }
-    if modal_orthogonality_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ModalOrthogonalityExceeded,
-            detail: "modal M-orthogonality off-diagonal threshold exceeded".to_string(),
-        });
-    }
-    if modal_separation_warn {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::ModalSeparationLow,
-            detail: "modal frequency separation threshold is low".to_string(),
-        });
-    }
-    if fallback_events
-        .iter()
-        .any(FallbackEvent::is_solver_backend_fallback)
-    {
-        quality_reasons.push(QualityReason {
-            code: QualityReasonCode::SolverBackendFallback,
-            detail: "solver backend fell back from accelerator to cpu_reference".to_string(),
-        });
-    }
-
-    let frequency_basis = ModalFrequencyBasis::NativeEigenSolve;
-
-    let numerically_acceptable = match options.quality_policy {
-        QualityPolicy::Strict => {
-            solver_convergence == QualityGate::Pass
-                && result_quality == QualityGate::Pass
-                && quality_reasons.is_empty()
-        }
-        QualityPolicy::Balanced => {
-            solver_convergence == QualityGate::Pass
-                && result_quality == QualityGate::Pass
-                && !quality_reasons.iter().any(|r| {
-                    matches!(
-                        r.code,
-                        QualityReasonCode::ModalOrthogonalityExceeded
-                            | QualityReasonCode::ModalSeparationLow
-                    )
-                })
-        }
-        QualityPolicy::Exploratory => {
-            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
-        }
-    };
-    let (production_publishable, production_publication_reasons) =
-        evaluate_production_publication(&run, numerically_acceptable);
-    let run_status = classify_run_status(result_quality, numerically_acceptable);
-    let solver_backend = run.solver_backend;
-    let execution_backend = run.execution_backend;
-    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
-    let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method;
-    let selected_preconditioner = run.preconditioner;
-
-    let result = AnalysisRunResult {
-        observation_scalars: Vec::new(),
-        run_id: assigned_run_id
-            .map(str::to_string)
-            .unwrap_or_else(storage::next_run_id),
-        run,
-        render_topology: render_topology_from_solver_mesh(solver_mesh.as_ref()),
-        modal_results: Some(ModalResultsData {
-            mode_indices: (0..basis.modes().len()).collect(),
-            mode_shapes,
-            basis,
-            mode_units: ModalFrequencyUnits::Hz,
-            frequency_basis,
-        }),
-        buckling_results: None,
-        thermal_results: None,
-        transient_results: None,
-        nonlinear_results: None,
-        model_validity: QualityGate::Pass,
-        solver_convergence,
-        result_quality,
-        run_status,
-        numerically_acceptable,
-        production_publishable,
-        quality_reasons,
-        production_publication_reasons,
-        provenance: RunProvenance {
-            requested_backend: backend,
-            execution_backend,
-            solver_backend,
-            solver_device_apply_k_ratio,
-            solver_host_sync_count,
-            precision_mode: contracts::format_precision_mode(options.precision_mode),
-            deterministic_mode: options.deterministic_mode,
-            solver_method,
-            preconditioner: selected_preconditioner,
-            quality_policy: contracts::format_quality_policy(options.quality_policy),
-            fallback_events,
-        },
-    };
-
-    Ok(OperationEnvelope::new(
-        AnalysisOperation::Modal.name(),
-        AnalysisOperation::Modal.version(),
-        &context,
-        result,
-    ))
+    analysis_admit_modal_run_with_id(
+        modal_run,
+        backend,
+        options,
+        context,
+        solver_mesh.as_ref(),
+        None,
+    )
 }
 
 fn analysis_admit_buckling_run_with_id(
@@ -4745,128 +4593,6 @@ fn fs_remove_file(path: impl Into<PathBuf>) -> std::io::Result<()> {
     }
 }
 
-fn render_topology_from_solver_mesh(
-    mesh: Option<&SolverMeshArtifact>,
-) -> Option<AnalysisRenderTopology> {
-    let mesh = mesh?;
-    if mesh.topology.nodes.is_empty() || mesh.topology.boundary_faces.is_empty() {
-        return None;
-    }
-
-    let node_index_by_id = mesh
-        .topology
-        .nodes
-        .iter()
-        .enumerate()
-        .map(|(index, node)| (node.node_id, index as u32))
-        .collect::<HashMap<_, _>>();
-    let volume_index_by_id = mesh
-        .topology
-        .volume_elements
-        .iter()
-        .enumerate()
-        .map(|(index, element)| (element.element_id, index))
-        .collect::<HashMap<_, _>>();
-    let face_entries = mesh
-        .topology
-        .boundary_faces
-        .iter()
-        .filter(|face| matches!(face.node_ids.len(), 3 | 6))
-        .filter_map(|face| {
-            let triangle = [
-                *node_index_by_id.get(&face.node_ids[0])?,
-                *node_index_by_id.get(&face.node_ids[1])?,
-                *node_index_by_id.get(&face.node_ids[2])?,
-            ];
-            let volume_element_index = face
-                .adjacent_volume_element_ids
-                .iter()
-                .find_map(|element_id| volume_index_by_id.get(element_id).copied());
-            let region_ids: Vec<String> = face
-                .provenance
-                .iter()
-                .flat_map(|entity| {
-                    std::iter::once(entity.source_topology_id.clone())
-                        .chain(entity.analysis_selection_id().ok())
-                })
-                .collect();
-            Some((triangle, volume_element_index, region_ids))
-        })
-        .collect::<Vec<_>>();
-    let mut triangles = Vec::with_capacity(face_entries.len());
-    let mut triangle_volume_element_indices = Vec::with_capacity(face_entries.len());
-    let mut region_triangles = BTreeMap::<String, Vec<u32>>::new();
-    for (triangle_index, (triangle, volume_element_index, region_ids)) in
-        face_entries.into_iter().enumerate()
-    {
-        triangles.push(triangle);
-        triangle_volume_element_indices.push(volume_element_index);
-        for region_id in region_ids {
-            region_triangles
-                .entry(region_id)
-                .or_default()
-                .push(triangle_index as u32);
-        }
-    }
-    if triangles.is_empty() {
-        return None;
-    }
-    let regions = render_regions_from_triangle_indices(region_triangles);
-
-    Some(AnalysisRenderTopology {
-        schema_version: "analysis_render_topology/v1".to_string(),
-        source: AnalysisRenderTopologySource::AnalysisMesh,
-        volume_element_count: mesh.topology.volume_elements.len(),
-        meshes: vec![AnalysisRenderMesh {
-            mesh_id: "solver_mesh_boundary".to_string(),
-            vertices: mesh
-                .topology
-                .nodes
-                .iter()
-                .map(|node| node.coordinates_m)
-                .collect(),
-            triangles,
-            regions,
-            vertex_volume_node_indices: (0..mesh.topology.nodes.len()).map(Some).collect(),
-            triangle_volume_element_indices,
-        }],
-    })
-}
-
-fn render_regions_from_triangle_indices(
-    region_triangles: BTreeMap<String, Vec<u32>>,
-) -> Vec<AnalysisRenderRegion> {
-    region_triangles
-        .into_iter()
-        .filter_map(|(region_id, mut triangle_indices)| {
-            triangle_indices.sort_unstable();
-            triangle_indices.dedup();
-            let mut ranges = Vec::<AnalysisRenderTriangleRange>::new();
-            for triangle_index in triangle_indices {
-                if let Some(last) = ranges.last_mut() {
-                    if last.start.saturating_add(last.count) == triangle_index {
-                        last.count = last.count.saturating_add(1);
-                        continue;
-                    }
-                }
-                ranges.push(AnalysisRenderTriangleRange {
-                    start: triangle_index,
-                    count: 1,
-                });
-            }
-            if ranges.is_empty() {
-                return None;
-            }
-            Some(AnalysisRenderRegion {
-                region_id,
-                label: None,
-                tag: Some("boundary".to_string()),
-                triangle_ranges: ranges,
-            })
-        })
-        .collect()
-}
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ResolvedContactOptions {
     penalty_stiffness_scale: f64,
@@ -5086,272 +4812,6 @@ fn diagnostic_metric_bool(
                 .find_map(|token| token.strip_prefix(&format!("{key}=")))
         })
         .and_then(|value| value.parse::<bool>().ok())
-}
-
-fn map_validate_error(
-    error: AnalysisValidationError,
-    model: &AnalysisModel,
-    context: &OperationContext,
-) -> OperationErrorEnvelope {
-    let (error_code, message, mut error_context) = match error {
-        AnalysisValidationError::MissingMaterials => (
-            "RM.FEA.VALIDATE.MISSING_MATERIALS",
-            "FEA model must include at least one material".to_string(),
-            BTreeMap::new(),
-        ),
-        AnalysisValidationError::MissingConstraintsOrBoundaries => (
-            "RM.FEA.VALIDATE.MISSING_CONDITIONS",
-            "FEA model must include at least one constraint or natural boundary".to_string(),
-            BTreeMap::new(),
-        ),
-        AnalysisValidationError::InvalidId { kind } => (
-            "RM.FEA.VALIDATE.INVALID_ID",
-            format!("{kind} id must be non-empty"),
-            BTreeMap::from([("kind".to_string(), kind.to_string())]),
-        ),
-        AnalysisValidationError::DuplicateId { kind, id } => (
-            "RM.FEA.VALIDATE.DUPLICATE_ID",
-            format!("duplicate {kind} id `{id}`"),
-            BTreeMap::from([
-                ("kind".to_string(), kind.to_string()),
-                ("id".to_string(), id),
-            ]),
-        ),
-        AnalysisValidationError::InvalidTarget { owner_id, detail } => (
-            "RM.FEA.VALIDATE.INVALID_TARGET",
-            format!("{owner_id} has an invalid target: {detail}"),
-            BTreeMap::from([
-                ("owner_id".to_string(), owner_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidFrame => (
-            "RM.FEA.VALIDATE.INVALID_FRAME",
-            "coordinate frame must be finite and non-degenerate".to_string(),
-            BTreeMap::new(),
-        ),
-        AnalysisValidationError::InvalidMaterial {
-            material_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_MATERIAL",
-            format!("material `{material_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("material_id".to_string(), material_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidMaterialAssignment { region_id, detail } => (
-            "RM.FEA.VALIDATE.INVALID_MATERIAL_ASSIGNMENT",
-            format!("material assignment for region `{region_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("region_id".to_string(), region_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidConstraint {
-            constraint_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_CONSTRAINT",
-            format!("constraint `{constraint_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("constraint_id".to_string(), constraint_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidBoundary {
-            boundary_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_BOUNDARY",
-            format!("boundary `{boundary_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("boundary_id".to_string(), boundary_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidConnector {
-            connector_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_CONNECTOR",
-            format!("connector `{connector_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("connector_id".to_string(), connector_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidInterface {
-            interface_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_INTERFACE",
-            format!("interface `{interface_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("interface_id".to_string(), interface_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidSignal { signal_id, detail } => (
-            "RM.FEA.VALIDATE.INVALID_SIGNAL",
-            format!("signal `{signal_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("signal_id".to_string(), signal_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidDomain { domain, detail } => (
-            "RM.FEA.VALIDATE.INVALID_DOMAIN",
-            format!("{domain} domain is invalid: {detail}"),
-            BTreeMap::from([
-                ("domain".to_string(), domain.to_string()),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidExcitation {
-            excitation_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_EXCITATION",
-            format!("excitation `{excitation_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("excitation_id".to_string(), excitation_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidExcitationCase { case_id, detail } => (
-            "RM.FEA.VALIDATE.INVALID_EXCITATION_CASE",
-            format!("excitation case `{case_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("case_id".to_string(), case_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidInitialCondition {
-            initial_condition_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_INITIAL_CONDITION",
-            format!("initial condition `{initial_condition_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("initial_condition_id".to_string(), initial_condition_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidResponseSpectrum {
-            spectrum_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_RESPONSE_SPECTRUM",
-            format!("response spectrum `{spectrum_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("spectrum_id".to_string(), spectrum_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidRandomExcitation {
-            excitation_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_RANDOM_EXCITATION",
-            format!("random excitation `{excitation_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("excitation_id".to_string(), excitation_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidSequence {
-            sequence_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_SEQUENCE",
-            format!("analysis sequence `{sequence_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("sequence_id".to_string(), sequence_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidProcedureStep { step_id, detail } => (
-            "RM.FEA.VALIDATE.INVALID_PROCEDURE_STEP",
-            format!("procedure step `{step_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("step_id".to_string(), step_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidStateTransition {
-            transition_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_STATE_TRANSITION",
-            format!("state transition `{transition_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("transition_id".to_string(), transition_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidObservation {
-            observation_id,
-            detail,
-        } => (
-            "RM.FEA.VALIDATE.INVALID_OBSERVATION",
-            format!("observation `{observation_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("observation_id".to_string(), observation_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidMonitor { monitor_id, detail } => (
-            "RM.FEA.VALIDATE.INVALID_MONITOR",
-            format!("monitor `{monitor_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("monitor_id".to_string(), monitor_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::InvalidAccuracyPlan { plan_id, detail } => (
-            "RM.FEA.VALIDATE.INVALID_ACCURACY_PLAN",
-            format!("accuracy plan `{plan_id}` is invalid: {detail}"),
-            BTreeMap::from([
-                ("plan_id".to_string(), plan_id),
-                ("detail".to_string(), detail),
-            ]),
-        ),
-        AnalysisValidationError::UnitMismatch { model, geometry } => (
-            "RM.FEA.VALIDATE.UNIT_MISMATCH",
-            format!("model units {model:?} do not match geometry units {geometry:?}"),
-            BTreeMap::from([
-                ("model_units".to_string(), format!("{model:?}")),
-                ("geometry_units".to_string(), format!("{geometry:?}")),
-            ]),
-        ),
-        AnalysisValidationError::FrameMismatch { model, geometry } => (
-            "RM.FEA.VALIDATE.FRAME_MISMATCH",
-            format!("model frame {model:?} does not match geometry frame {geometry:?}"),
-            BTreeMap::from([
-                ("model_frame".to_string(), model.context_label()),
-                ("geometry_frame".to_string(), geometry.context_label()),
-            ]),
-        ),
-    };
-
-    error_context.insert("analysis_model_id".to_string(), model.model_id.0.clone());
-    error_context.insert("geometry_id".to_string(), model.geometry_id.clone());
-
-    operation_error(
-        ANALYSIS_VALIDATE_OPERATION,
-        ANALYSIS_VALIDATE_OP_VERSION,
-        context,
-        OperationErrorSpec {
-            error_code,
-            error_type: OperationErrorType::Validation,
-            retryable: false,
-            severity: OperationErrorSeverity::Error,
-        },
-        message,
-        error_context,
-    )
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

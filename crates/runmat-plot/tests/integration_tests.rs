@@ -42,7 +42,8 @@ fn test_complete_2d_plotting_pipeline() {
     assert_eq!(figure.len(), 2);
     assert!(figure.title.is_some());
     assert!(figure.grid_enabled);
-    assert!(figure.legend_enabled);
+    // No legend until one is asked for, as in MATLAB.
+    assert!(!figure.legend_enabled);
 
     // Test statistics
     let stats = figure.statistics();

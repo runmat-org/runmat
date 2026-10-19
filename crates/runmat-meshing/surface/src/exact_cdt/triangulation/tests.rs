@@ -91,7 +91,7 @@ fn independent_validation_rejects_orientation_tampering() {
     assert_eq!(error.kind, ExactFaceDelaunayErrorKind::InvalidTopology);
 }
 
-fn fixture() -> (crate::ExactFaceBoundary, crate::ExactFacePslg) {
+pub(super) fn fixture() -> (crate::ExactFaceBoundary, crate::ExactFacePslg) {
     let (document, topology, registry) = runmat_geometry_fixtures::exact_circle();
     let runmat_geometry_core::GeometryModel::ExactBRep { model } = &document.model else {
         panic!("fixture must be exact")

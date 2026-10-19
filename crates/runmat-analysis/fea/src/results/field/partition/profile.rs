@@ -1,4 +1,4 @@
-use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
+use runmat_canonical_codec::{profile_serialized_shape, SerializedCanonicalProfile};
 
 use super::*;
 
@@ -48,7 +48,7 @@ impl RecoveredFieldPartition {
         // Transparent digest identities always serialize to fixed-width hexadecimal strings.
         // These are profile-only placeholders; no artifact or semantic identity is published.
         let placeholder = Digest::sha256([]);
-        profile_serialized(
+        profile_serialized_shape(
             &PartitionSerialization {
                 schema_version: 1,
                 identity: placeholder,

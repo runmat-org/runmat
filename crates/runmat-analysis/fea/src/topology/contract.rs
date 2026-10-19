@@ -1,5 +1,4 @@
-use std::collections::BTreeMap;
-
+use super::storage::SortedValues;
 use runmat_execution::Digest;
 use runmat_meshing_core::{
     BoundaryFaceRole, BoundaryTriangleOrder, ElementOrder, PersistentEntityId, StableDigest,
@@ -7,7 +6,7 @@ use runmat_meshing_core::{
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AnalysisProjection {
     pub schema_version: u16,
     pub mesh_digest: StableDigest,
@@ -19,8 +18,8 @@ pub struct AnalysisProjection {
     pub node_neighbors: Vec<Vec<usize>>,
     pub bounds_m: [[f64; 2]; 3],
     pub characteristic_length_m: f64,
-    pub(super) node_by_id: BTreeMap<u64, usize>,
-    pub(super) element_by_id: BTreeMap<u64, usize>,
+    pub(super) node_by_id: SortedValues<u64, usize>,
+    pub(super) element_by_id: SortedValues<u64, usize>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,10 +45,10 @@ impl AnalysisProjection {
         rule: &[(f64, f64)],
         mut visit: impl FnMut(BoundaryQuadraturePoint),
     ) -> Result<(), AnalysisProjectionError> {
-        let (coordinates, orientation) = self.boundary_coordinates_and_orientation(face)?;
+        let (coordinates, count, orientation) = self.boundary_coordinates_and_orientation(face)?;
         super::quadrature::visit_boundary_tensor_rule(
             face.order,
-            &coordinates,
+            &coordinates[..count],
             rule,
             |mut point| {
                 point.area_vector_weight_m2 = point.area_vector_weight_m2.map(|v| v * orientation);
@@ -136,13 +135,17 @@ impl AnalysisProjection {
         face: &ProjectedBoundaryFace,
         mut visit: impl FnMut(BoundaryQuadraturePoint),
     ) -> Result<(), AnalysisProjectionError> {
-        let (coordinates, orientation) = self.boundary_coordinates_and_orientation(face)?;
-        super::quadrature::visit_boundary_quadrature(face.order, &coordinates, |mut point| {
-            point.area_vector_weight_m2 = point
-                .area_vector_weight_m2
-                .map(|component| component * orientation);
-            visit(point);
-        })
+        let (coordinates, count, orientation) = self.boundary_coordinates_and_orientation(face)?;
+        super::quadrature::visit_boundary_quadrature(
+            face.order,
+            &coordinates[..count],
+            |mut point| {
+                point.area_vector_weight_m2 = point
+                    .area_vector_weight_m2
+                    .map(|component| component * orientation);
+                visit(point);
+            },
+        )
         .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
             face_id: face.face_id,
         })
@@ -152,8 +155,8 @@ impl AnalysisProjection {
         &self,
         face: &ProjectedBoundaryFace,
     ) -> Result<Vec<[f64; 3]>, AnalysisProjectionError> {
-        let (coordinates, orientation) = self.boundary_coordinates_and_orientation(face)?;
-        super::quadrature::boundary_nodal_area_vectors(face.order, &coordinates)
+        let (coordinates, count, orientation) = self.boundary_coordinates_and_orientation(face)?;
+        super::quadrature::boundary_nodal_area_vectors(face.order, &coordinates[..count])
             .map(|vectors| {
                 vectors
                     .into_iter()
@@ -168,7 +171,7 @@ impl AnalysisProjection {
     fn boundary_coordinates_and_orientation(
         &self,
         face: &ProjectedBoundaryFace,
-    ) -> Result<(Vec<[f64; 3]>, f64), AnalysisProjectionError> {
+    ) -> Result<([[f64; 3]; 6], usize, f64), AnalysisProjectionError> {
         let expected_node_count = match face.order {
             BoundaryTriangleOrder::Tri3 => 3,
             BoundaryTriangleOrder::Tri6 => 6,
@@ -178,14 +181,16 @@ impl AnalysisProjection {
                 face_id: face.face_id,
             });
         }
-        let coordinates = face
-            .node_indices
-            .iter()
-            .map(|&index| self.nodes.get(index).map(|node| node.coordinates_m))
-            .collect::<Option<Vec<_>>>()
-            .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
-                face_id: face.face_id,
-            })?;
+        let mut coordinates = [[0.0; 3]; 6];
+        for (coordinate, &index) in coordinates.iter_mut().zip(&face.node_indices) {
+            *coordinate = self
+                .nodes
+                .get(index)
+                .ok_or(AnalysisProjectionError::InvalidBoundaryGeometry {
+                    face_id: face.face_id,
+                })?
+                .coordinates_m;
+        }
         let raw_normal = super::element::cross(
             super::element::subtract(coordinates[1], coordinates[0]),
             super::element::subtract(coordinates[2], coordinates[0]),
@@ -195,18 +200,18 @@ impl AnalysisProjection {
         } else {
             -1.0
         };
-        Ok((coordinates, orientation))
+        Ok((coordinates, expected_node_count, orientation))
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedNode {
     pub node_id: u64,
     pub stable_identity: StableDigest,
     pub coordinates_m: [f64; 3],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedElement {
     pub element_id: u64,
     pub stable_identity: StableDigest,
@@ -252,7 +257,7 @@ impl VolumeQuadraturePoint {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProjectedBoundaryFace {
     pub face_id: u64,
     pub stable_identity: StableDigest,
@@ -274,9 +279,19 @@ pub struct BoundaryQuadraturePoint {
     pub area_weight_m2: f64,
     pub(super) shape_values: [f64; 6],
     pub(super) node_count: usize,
+    pub(super) reference_barycentric: [f64; 3],
+    pub(super) reference_weight: f64,
 }
 
 impl BoundaryQuadraturePoint {
+    /// Original reference coordinates, never recovered from world position or nodal averages.
+    pub fn reference_barycentric(&self) -> [f64; 3] {
+        self.reference_barycentric
+    }
+    pub fn reference_weight(&self) -> f64 {
+        self.reference_weight
+    }
+
     pub fn shape_values(&self) -> &[f64] {
         &self.shape_values[..self.node_count]
     }
@@ -290,6 +305,8 @@ pub enum BoundaryNormalOrientation {
 
 #[derive(Debug, Error, Clone, PartialEq)]
 pub enum AnalysisProjectionError {
+    #[error("analysis projection construction cancelled")]
+    Cancelled,
     #[error("edge space does not match canonical projection: {0}")]
     InvalidEdgeSpace(&'static str),
     #[error("analysis projection resource estimate failed: {0}")]

@@ -5,8 +5,9 @@ pub(super) fn resolve_reduction_target(
     field_domain: RecoveredFieldEntityDomain,
     topology: &ObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
-    maximum: usize,
+    limits: ObservationLimits,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
+    let maximum = limits.maximum_selected_entities;
     if field_domain == RecoveredFieldEntityDomain::ConstraintGroups {
         if spec.source_location != FieldLocation::Constraint
             || !matches!(
@@ -95,6 +96,8 @@ pub(super) fn resolve_reduction_target(
                         region,
                         RecoveredFieldEntityDomain::VolumeElements,
                         topology,
+                        limits,
+                        selection_output_bytes(projection.elements.len(), maximum)?,
                     )?;
                     enforce_cardinality(region.cardinality, indices.clone().count(), spec)?;
                     volume_target(selected_indices(indices, maximum)?, projection)

@@ -1,5 +1,4 @@
 use runmat_geometry_core::PersistentEntityId;
-use runmat_meshing_core::predicate::tetrahedron_scaled_jacobian;
 use runmat_meshing_size::metric::ResolvedMetricEvaluation;
 
 use super::{
@@ -29,6 +28,23 @@ pub(super) fn evaluate_tetrahedron(
     context: TetrahedronEvaluationContext,
     options: DelaunayVolumeQualityOptions,
 ) -> Result<DelaunayTetrahedronQuality, DelaunayVolumeQualityError> {
+    let tetrahedron = &topology.tetrahedra[tetrahedron_index];
+    evaluate_tetrahedron_nodes(
+        tetrahedron
+            .vertex_indices
+            .map(|vertex| topology.nodes[vertex as usize]),
+        tetrahedron_index,
+        context,
+        options,
+    )
+}
+
+pub(super) fn evaluate_tetrahedron_nodes(
+    nodes: [crate::cdt::DelaunayVolumeNode; 4],
+    tetrahedron_index: usize,
+    context: TetrahedronEvaluationContext,
+    options: DelaunayVolumeQualityOptions,
+) -> Result<DelaunayTetrahedronQuality, DelaunayVolumeQualityError> {
     let TetrahedronEvaluationContext {
         region_id,
         incident_metric_entity_ids,
@@ -36,13 +52,8 @@ pub(super) fn evaluate_tetrahedron(
         boundary_node_count,
         protected_facet_count,
     } = context;
-    let tetrahedron = &topology.tetrahedra[tetrahedron_index];
-    let points = tetrahedron
-        .vertex_indices
-        .map(|vertex| topology.nodes[vertex as usize].coordinates_m);
-    let identities = tetrahedron
-        .vertex_indices
-        .map(|vertex| topology.nodes[vertex as usize].identity);
+    let points = nodes.map(|node| node.coordinates_m);
+    let identities = nodes.map(|node| node.identity);
     let geometry = evaluate_tetrahedron_geometry(points, metric.metric).ok_or_else(|| {
         error(
             DelaunayVolumeQualityErrorKind::NumericalFailure,
@@ -50,31 +61,13 @@ pub(super) fn evaluate_tetrahedron(
             "metric tetrahedron geometry must be finite, nondegenerate, and positively oriented",
         )
     })?;
-    let size_violation_ratio = saturated_ratio(
+    let (refinement_violation_ratio, optimization_violation_ratio) = violation_ratios(
         geometry.maximum_metric_edge_length,
-        options.maximum_metric_edge_length,
-    );
-    let radius_edge_violation_ratio = saturated_ratio(
         geometry.metric_radius_edge_ratio,
-        options.maximum_radius_edge_ratio,
-    );
-    let jacobian_violation_ratio = saturated_ratio(
-        options.minimum_metric_scaled_jacobian,
         geometry.metric_scaled_jacobian,
+        boundary_node_count,
+        options,
     );
-    // Radius-edge refinement is a volumetric Delaunay criterion whose repair
-    // point is the circumcenter. A cell touching the immutable published PLC
-    // can have that point outside the admitted solid; repairing it would first
-    // require a surface-feature split owned by the surface stage. Such cells
-    // remain subject to metric size and scaled-Jacobian shape quality. Only a
-    // wholly interior cell receives the volume circumcenter criterion here.
-    let interior_radius_violation = if radius_edge_is_refinement_owned(boundary_node_count) {
-        radius_edge_violation_ratio
-    } else {
-        0.0
-    };
-    let refinement_violation_ratio = size_violation_ratio.max(interior_radius_violation);
-    let optimization_violation_ratio = jacobian_violation_ratio;
 
     Ok(DelaunayTetrahedronQuality {
         node_identities: identities,
@@ -97,27 +90,53 @@ pub(super) fn evaluate_tetrahedron(
     })
 }
 
+pub(in crate::cdt) fn violation_ratios(
+    maximum_metric_edge_length: f64,
+    metric_radius_edge_ratio: f64,
+    metric_scaled_jacobian: f64,
+    boundary_node_count: u8,
+    options: DelaunayVolumeQualityOptions,
+) -> (f64, f64) {
+    let size_violation_ratio = saturated_ratio(
+        maximum_metric_edge_length,
+        options.maximum_metric_edge_length,
+    );
+    let radius_edge_violation_ratio =
+        saturated_ratio(metric_radius_edge_ratio, options.maximum_radius_edge_ratio);
+    let jacobian_violation_ratio = saturated_ratio(
+        options.minimum_metric_scaled_jacobian,
+        metric_scaled_jacobian,
+    );
+    // Radius-edge refinement is a volumetric Delaunay criterion whose repair
+    // point is the circumcenter. A cell touching the immutable published PLC
+    // can have that point outside the admitted solid; repairing it would first
+    // require a surface-feature split owned by the surface stage. Such cells
+    // remain subject to metric size and scaled-Jacobian shape quality. Only a
+    // wholly interior cell receives the volume circumcenter criterion here.
+    let interior_radius_violation = if radius_edge_is_refinement_owned(boundary_node_count) {
+        radius_edge_violation_ratio
+    } else {
+        0.0
+    };
+    let refinement_violation_ratio = size_violation_ratio.max(interior_radius_violation);
+    let optimization_violation_ratio = jacobian_violation_ratio;
+
+    (refinement_violation_ratio, optimization_violation_ratio)
+}
+
 pub(super) const fn radius_edge_is_refinement_owned(boundary_node_count: u8) -> bool {
     boundary_node_count == 0
 }
 
 pub(in crate::cdt) fn evaluate_tetrahedron_geometry(
-    mut points: [[f64; 3]; 4],
+    points: [[f64; 3]; 4],
     metric: runmat_meshing_size::metric::MetricTensor3,
 ) -> Option<DelaunayTetrahedronGeometryQuality> {
-    // Published topology is identity-ordered, while metric geometry must be
-    // invariant under source-revision identity changes. A fixed operand order
-    // also makes the translated metric transform and circumsphere arithmetic
-    // reproducible for the same canonical simplex.
-    points.sort_by(|left, right| {
-        left.iter()
-            .zip(right.iter())
-            .find_map(|(left, right)| (left != right).then(|| left.total_cmp(right)))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let transformed = transform_points(points, metric)?;
-    let (minimum_metric_edge_length, maximum_metric_edge_length) = edge_extrema(transformed)?;
-    let metric_scaled_jacobian = tetrahedron_scaled_jacobian(transformed);
+    let geometry = super::jacobian::PreparedJacobian::new(metric)?.geometry(points)?;
+    let transformed = geometry.points;
+    let minimum_metric_edge_length = geometry.minimum_edge;
+    let maximum_metric_edge_length = geometry.maximum_edge;
+    let metric_scaled_jacobian = geometry.jacobian;
     // Exact orientation has already admitted canonical topology. Once the
     // shape is too ill-conditioned for a reproducible floating circumsphere,
     // retain deterministic worst-case evidence while scaled-Jacobian repair
@@ -148,58 +167,12 @@ fn saturated_ratio(numerator: f64, denominator: f64) -> f64 {
     }
 }
 
+#[cfg(test)]
 fn transform_points(
     points: [[f64; 3]; 4],
     metric: runmat_meshing_size::metric::MetricTensor3,
 ) -> Option<[[f64; 3]; 4]> {
-    let l00 = metric.xx.sqrt();
-    let l10 = metric.xy / l00;
-    let l20 = metric.xz / l00;
-    let l11 = (metric.yy - l10 * l10).sqrt();
-    let l21 = (metric.yz - l20 * l10) / l11;
-    let l22 = (metric.zz - l20 * l20 - l21 * l21).sqrt();
-    [l00, l10, l20, l11, l21, l22]
-        .into_iter()
-        .all(f64::is_finite)
-        .then(|| {
-            points.map(|point| {
-                let relative = [
-                    point[0] - points[0][0],
-                    point[1] - points[0][1],
-                    point[2] - points[0][2],
-                ];
-                [
-                    l00 * relative[0] + l10 * relative[1] + l20 * relative[2],
-                    l11 * relative[1] + l21 * relative[2],
-                    l22 * relative[2],
-                ]
-            })
-        })
-}
-
-fn edge_extrema(points: [[f64; 3]; 4]) -> Option<(f64, f64)> {
-    let mut minimum = f64::INFINITY;
-    let mut maximum = 0.0_f64;
-    for left in 0..4 {
-        for right in (left + 1)..4 {
-            let squared = (0..3)
-                .map(|axis| (points[right][axis] - points[left][axis]).powi(2))
-                .sum::<f64>();
-            let mut length = squared.sqrt();
-            if !length.is_finite() {
-                return None;
-            }
-            if length == 0.0 && points[right] != points[left] {
-                length = f64::MIN_POSITIVE;
-            }
-            if length == 0.0 {
-                return None;
-            }
-            minimum = minimum.min(length);
-            maximum = maximum.max(length);
-        }
-    }
-    Some((minimum, maximum))
+    super::jacobian::PreparedJacobian::new(metric).map(|prepared| prepared.transform(points))
 }
 
 fn circumradius(points: [[f64; 3]; 4]) -> Option<f64> {

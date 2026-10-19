@@ -1,4 +1,6 @@
+mod resources;
 use super::*;
+pub(super) use resources::*;
 
 pub(super) fn require_selected(count: usize, maximum: usize) -> Result<(), ObservationError> {
     if count > maximum {
@@ -8,11 +10,7 @@ pub(super) fn require_selected(count: usize, maximum: usize) -> Result<(), Obser
 }
 
 pub(super) fn reserved<T>(count: usize) -> Result<Vec<T>, ObservationError> {
-    let mut values = Vec::new();
-    values
-        .try_reserve_exact(count)
-        .map_err(|_| ObservationError::Limit("observation target allocation"))?;
-    Ok(values)
+    crate::topology::storage::reserve(count).map_err(storage_error)
 }
 
 pub(super) fn selected_indices(
@@ -30,24 +28,24 @@ pub(super) fn selected_indices(
 /// only previously unseen indices, and reject before inserting the first over-limit index.
 pub(super) fn unique_nodes(
     indices: impl Iterator<Item = usize>,
-    maximum: usize,
+    domain: usize,
+    limits: ObservationLimits,
 ) -> Result<Vec<usize>, ObservationError> {
-    let mut unique = std::collections::HashSet::new();
-    for index in indices {
-        if !unique.contains(&index) {
-            if unique.len() >= maximum {
-                return Err(ObservationError::Limit("selected topology entities"));
+    use crate::topology::storage::{DenseIndexUnion, DenseUnionError};
+    require_workspace(
+        node_union_resident_bytes(domain, limits.maximum_selected_entities)?,
+        limits,
+    )?;
+    DenseIndexUnion::new(domain, limits.maximum_selected_entities)
+        .map_err(storage_error)?
+        .collect(indices)
+        .map_err(|error| match error {
+            DenseUnionError::Storage(error) => storage_error(error),
+            DenseUnionError::Domain => {
+                ObservationError::Identity("resolved node target exceeds structural topology")
             }
-            unique
-                .try_reserve(1)
-                .map_err(|_| ObservationError::Limit("observation target allocation"))?;
-            unique.insert(index);
-        }
-    }
-    let mut values = reserved(unique.len())?;
-    values.extend(unique);
-    values.sort_unstable();
-    Ok(values)
+            DenseUnionError::Limit => ObservationError::Limit("selected topology entities"),
+        })
 }
 
 pub(super) fn nodes_target(
@@ -93,13 +91,19 @@ pub(super) fn matching_elements<'a>(
     target: &'a runmat_analysis_core::RegionTarget,
     domain: RecoveredFieldEntityDomain,
     topology: &'a ObservationTopology,
+    limits: ObservationLimits,
+    target_bytes: u64,
 ) -> Result<impl Iterator<Item = usize> + Clone + 'a, ObservationError> {
     let elements = topology.elements(domain)?;
     let projection = if domain == RecoveredFieldEntityDomain::VolumeElements {
-        topology.solid_projection.as_ref()
+        topology.solid_projection.as_deref()
     } else {
         None
     };
+    require_workspace(
+        element_selection_resident_bytes(target, topology, projection, target_bytes)?,
+        limits,
+    )?;
     if let Some(projection) = projection {
         if topology.finite_volume.is_some() || !target.resolved_entities().is_empty() {
             validate_exact_coverage(
@@ -112,24 +116,21 @@ pub(super) fn matching_elements<'a>(
     }
     let source_indices =
         if let (Some(layout), Some(projection)) = (&topology.finite_volume, projection) {
-            let by_identity = projection
-                .elements
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (e.stable_identity, i))
-                .collect::<std::collections::BTreeMap<_, _>>();
-            let indices = layout
-                .cell_identities()
-                .iter()
-                .map(|identity| {
-                    by_identity
-                        .get(identity)
-                        .copied()
-                        .ok_or(ObservationError::Identity(
-                            "native cell identity absent from source projection",
-                        ))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
+            let by_identity = crate::topology::storage::SortedValues::derive(
+                projection
+                    .elements
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| (e.stable_identity, i)),
+                projection.elements.len(),
+            )
+            .map_err(storage_error)?;
+            let mut indices = reserved(layout.cell_identities().len())?;
+            for identity in layout.cell_identities() {
+                indices.push(*by_identity.get(identity).ok_or(ObservationError::Identity(
+                    "native cell identity absent from source projection",
+                ))?);
+            }
             Some(std::sync::Arc::new(indices))
         } else {
             None
@@ -164,7 +165,8 @@ pub(super) fn validate_exact_coverage<'a>(
             "native observation requires exact resolved entities".into(),
         ));
     }
-    let mut covered = vec![false; target.resolved_entities().len()];
+    let mut covered = reserved(target.resolved_entities().len())?;
+    covered.resize(target.resolved_entities().len(), false);
     for entity in original {
         if let Ok(i) = target.resolved_entities().binary_search(entity) {
             covered[i] = true;
@@ -198,7 +200,7 @@ pub(super) fn solid_projection<'a>(
     topology: &'a ObservationTopology,
     spec: &ObservationSpec,
 ) -> Result<&'a AnalysisProjection, ObservationError> {
-    topology.solid_projection.as_ref().ok_or_else(|| {
+    topology.solid_projection.as_deref().ok_or_else(|| {
         target_error(
             spec,
             "volume and boundary observations require admitted solid topology",
@@ -264,7 +266,7 @@ mod tests {
         let projection = AnalysisProjection::derive(&mesh).unwrap();
         assert_eq!(projection.elements[0].region_id, region);
         assert!(projection.elements[0].provenance.contains(&solid));
-        let topology = ObservationTopology::from_projection(&projection);
+        let topology = ObservationTopology::from_projection(&projection).unwrap();
         let mut target = RegionTarget::new(
             "body",
             EntityDimension::Volume,
@@ -276,7 +278,9 @@ mod tests {
             matching_elements(
                 &target,
                 RecoveredFieldEntityDomain::VolumeElements,
-                &topology
+                &topology,
+                ObservationLimits::default(),
+                0,
             )
             .unwrap()
             .collect::<Vec<_>>(),
@@ -291,7 +295,9 @@ mod tests {
             matching_elements(
                 &target,
                 RecoveredFieldEntityDomain::VolumeElements,
-                &topology
+                &topology,
+                ObservationLimits::default(),
+                0,
             ),
             Err(ObservationError::Identity(
                 "native observation target contains an absent original entity"

@@ -64,21 +64,6 @@ double admitted_parameter(double value,
   return std::clamp(value, start, end);
 }
 
-void require_parameters(const BRepAdaptor_Surface& surface, double& u, double& v) {
-  u = admitted_parameter(u,
-                         surface.FirstUParameter(),
-                         surface.LastUParameter(),
-                         surface.IsUPeriodic(),
-                         surface.IsUPeriodic() ? surface.UPeriod() : 0.0,
-                         "U parameter");
-  v = admitted_parameter(v,
-                         surface.FirstVParameter(),
-                         surface.LastVParameter(),
-                         surface.IsVPeriodic(),
-                         surface.IsVPeriodic() ? surface.VPeriod() : 0.0,
-                         "V parameter");
-}
-
 double parameter_tolerance(double resolution) {
   require_finite(resolution, "projection parameter tolerance");
   if (resolution <= 0.0) {
@@ -163,9 +148,18 @@ OcctSurfaceDerivativesPayload exact_surface_derivatives(std::uint64_t session_id
                                                         double u,
                                                         double v) {
   const detail::ExactFaceContext context = detail::exact_face_context(session_id, face_key);
-  const BRepAdaptor_Surface surface(context.face, Standard_True);
-  require_bounds(surface);
-  require_parameters(surface, u, v);
+  // Unrestricted adaptation avoids recomputing the trimmed wire domain. Admit
+  // parameters against the identical bounds captured with this session face.
+  const BRepAdaptor_Surface surface(context.face, Standard_False);
+  const auto& bounds = context.parameter_bounds;
+  for (const double bound : bounds) require_finite(bound, "cached parameter bound");
+  if (bounds[0] > bounds[1] || bounds[2] > bounds[3]) {
+    throw std::runtime_error("OCCT exact surface has a reversed parameter domain");
+  }
+  u = admitted_parameter(u, bounds[0], bounds[1], surface.IsUPeriodic(),
+                         surface.IsUPeriodic() ? surface.UPeriod() : 0.0, "U parameter");
+  v = admitted_parameter(v, bounds[2], bounds[3], surface.IsVPeriodic(),
+                         surface.IsVPeriodic() ? surface.VPeriod() : 0.0, "V parameter");
   gp_Pnt point;
   gp_Vec du;
   gp_Vec dv;

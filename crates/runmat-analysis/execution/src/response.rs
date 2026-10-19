@@ -154,14 +154,19 @@ pub fn import_analysis_output_set(
     response: ProgramExecutionResponse,
     host: &AnalysisHostWorkload,
 ) -> AnalysisBridgeResult<ImportedAnalysisOutputSet> {
-    let ProgramExecutionResponse::ExternalizedSuccess {
-        outputs,
-        result_objects,
-    } = response
-    else {
-        return Err(AnalysisBridgeError::Invalid(
-            "analysis host did not return an externalized success".into(),
-        ));
+    let (outputs, result_objects) = match response {
+        ProgramExecutionResponse::ExternalizedSuccess {
+            outputs,
+            result_objects,
+        } => (outputs, result_objects),
+        ProgramExecutionResponse::Failure { message } => {
+            return Err(AnalysisBridgeError::HostExecution(message))
+        }
+        ProgramExecutionResponse::Success { .. } => {
+            return Err(AnalysisBridgeError::Invalid(
+                "analysis host did not return an externalized success".into(),
+            ))
+        }
     };
     let [ValuePayload::Object(root)] = outputs.as_slice() else {
         return Err(AnalysisBridgeError::Invalid(

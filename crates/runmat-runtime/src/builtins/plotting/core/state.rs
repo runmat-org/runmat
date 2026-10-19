@@ -4529,10 +4529,13 @@ pub fn set_heatmap_display_labels(
         }
         state.active_axes = axes_index;
         state.figure.set_active_axes_index(axes_index);
+        // Heatmaps draw their first row at the top, so the y tick labels run bottom-up reversed.
+        let mut drawn_y_labels = current_y_labels;
+        drawn_y_labels.reverse();
         state.figure.set_axes_tick_labels(
             axes_index,
             Some(current_x_labels),
-            Some(current_y_labels),
+            Some(drawn_y_labels),
         );
         state.revision = state.revision.wrapping_add(1);
         state.figure.clone()
@@ -5618,20 +5621,16 @@ pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
 }
 
 #[derive(Clone)]
-pub struct PlotRenderOptions<'a> {
-    pub title: &'a str,
-    pub x_label: &'a str,
-    pub y_label: &'a str,
+/// Axes state a plotting builtin sets as it draws. Titles and labels are not part of it: plots
+/// never write them, as in MATLAB (see `render_active_plot`).
+pub struct PlotRenderOptions {
     pub grid: bool,
     pub axis_equal: bool,
 }
 
-impl<'a> Default for PlotRenderOptions<'a> {
+impl Default for PlotRenderOptions {
     fn default() -> Self {
         Self {
-            title: "",
-            x_label: "X",
-            y_label: "Y",
             grid: true,
             axis_equal: false,
         }
@@ -5716,7 +5715,7 @@ pub fn prepare_plotyy_axes() -> Result<(FigureHandle, usize, usize, f64, f64), F
 
 pub fn render_active_plot<F>(
     builtin: &'static str,
-    opts: PlotRenderOptions<'_>,
+    opts: PlotRenderOptions,
     mut apply: F,
 ) -> BuiltinResult<String>
 where
@@ -5734,6 +5733,7 @@ where
             state.figure.set_active_axes_index(axes_index);
             if should_clear {
                 state.figure.clear_axes(axes_index);
+                state.figure.reset_axes_text(axes_index);
                 state.figure.set_axes_kind(axes_index, AxesKind::Cartesian);
                 state.figure.set_axes_limits(axes_index, None, None);
                 state.figure.set_axes_z_limits(axes_index, None);
@@ -5745,20 +5745,17 @@ where
         }
         {
             let state = get_state_mut(&mut reg, handle);
-            if !opts.title.is_empty() {
-                state.figure.set_axes_title(axes_index, opts.title);
-            }
-            if !opts.x_label.is_empty() || !opts.y_label.is_empty() {
-                state
-                    .figure
-                    .set_axes_labels(axes_index, opts.x_label, opts.y_label);
-            }
+            // Plotting never writes a title or axis labels, as in MATLAB: a replacing plot has
+            // cleared them above and a held plot keeps the user's.
             state.figure.set_grid(opts.grid);
             state.figure.set_axis_equal(opts.axis_equal);
 
+            let first_new_plot = state.figure.plots().count();
             let _axes_context = AxesContextGuard::install(state, axes_index);
             apply(&mut state.figure, axes_index)
                 .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+            // New colormapped graphics use their axes' colormap, as in MATLAB.
+            state.figure.apply_axes_colormaps_from(first_new_plot);
 
             // Increment revision after a successful mutation so surfaces can avoid
             // re-rendering unchanged figures when "presenting" an already-loaded handle.
@@ -5785,7 +5782,7 @@ where
 
 pub fn append_active_plot<F>(
     builtin: &'static str,
-    opts: PlotRenderOptions<'_>,
+    opts: PlotRenderOptions,
     mut apply: F,
 ) -> BuiltinResult<String>
 where
@@ -5800,20 +5797,16 @@ where
         {
             let state = get_state_mut(&mut reg, handle);
             state.figure.set_active_axes_index(axes_index);
-            if !opts.title.is_empty() {
-                state.figure.set_axes_title(axes_index, opts.title);
-            }
-            if !opts.x_label.is_empty() || !opts.y_label.is_empty() {
-                state
-                    .figure
-                    .set_axes_labels(axes_index, opts.x_label, opts.y_label);
-            }
+            // Appending keeps the axes' title and labels (see render_active_plot).
             state.figure.set_grid(opts.grid);
             state.figure.set_axis_equal(opts.axis_equal);
 
+            let first_new_plot = state.figure.plots().count();
             let _axes_context = AxesContextGuard::install(state, axes_index);
             apply(&mut state.figure, axes_index)
                 .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+            // New colormapped graphics use their axes' colormap, as in MATLAB.
+            state.figure.apply_axes_colormaps_from(first_new_plot);
             state.revision = state.revision.wrapping_add(1);
         }
         let figure_clone = reg
@@ -5978,6 +5971,19 @@ pub fn next_line_color_for_axes(axes_index: usize) -> Vec4 {
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
     state.color_cycle_for_axes_mut(axes_index).next()
+}
+
+/// After a plot that replaced the axes' contents, continue the color order
+/// past the `series_count` series it drew, so a later `hold on` plot takes the
+/// next color instead of repeating the first one.
+pub fn continue_line_color_cycle_after(axes_index: usize, series_count: usize) {
+    if with_active_color_cycle(axes_index, |cycle| cycle.cursor = series_count).is_some() {
+        return;
+    }
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    state.color_cycle_for_axes_mut(axes_index).cursor = series_count;
 }
 
 #[cfg(test)]

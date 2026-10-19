@@ -454,3 +454,58 @@ fn matching_model(
     );
     model
 }
+
+#[test]
+fn clones_share_original_validated_properties_without_changing_cold_wire_authority() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = canonical_tetrahedron_solver_mesh(order);
+        let compiled = compile_solid_property_map(&matching_model(&mesh), &mesh).unwrap();
+        let shared = compiled.clone();
+        assert!(std::ptr::eq(
+            compiled.solid_materials().next().unwrap(),
+            shared.solid_materials().next().unwrap(),
+        ));
+        assert_eq!(compiled.audit().as_ptr(), shared.audit().as_ptr());
+        let encoded = serde_json::to_vec(&compiled).unwrap();
+        assert_eq!(encoded, serde_json::to_vec(&shared).unwrap());
+        let cold: CompiledPropertyMap = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(cold, compiled);
+        cold.validate_integrity().unwrap();
+        assert!(!std::ptr::eq(
+            compiled.solid_materials().next().unwrap(),
+            cold.solid_materials().next().unwrap(),
+        ));
+        drop(compiled);
+        shared.validate_integrity().unwrap();
+    }
+}
+
+#[test]
+fn original_property_storage_charges_retained_materials_and_audit_once_per_owner() {
+    let mesh = canonical_tetrahedron_solver_mesh(ElementOrder::Tet4);
+    let model = matching_model(&mesh);
+    let properties = compile_solid_property_map(&model, &mesh).unwrap();
+    let limits = runmat_canonical_codec::CanonicalLimits::new(16 << 20, 1_000_000, 65_536, 64);
+    let original = properties.retained_storage_bytes_estimate(limits).unwrap();
+    assert!(original > properties.shared_clone_storage_bytes().unwrap());
+    let mut larger = model.clone();
+    larger.materials[0].name = "display label".repeat(2048);
+    let larger = compile_solid_property_map(&larger, &mesh).unwrap();
+    assert_eq!(
+        properties.identity.semantic_digest,
+        larger.identity.semantic_digest
+    );
+    assert!(larger.retained_storage_bytes_estimate(limits).unwrap() > original);
+    assert!(properties
+        .retained_storage_bytes_estimate(runmat_canonical_codec::CanonicalLimits::new(
+            1024, 1_000_000, 65_536, 64
+        ))
+        .is_err());
+    let wire = serde_json::to_vec(&properties).unwrap();
+    let cold: CompiledPropertyMap = serde_json::from_slice(&wire).unwrap();
+    cold.validate_integrity().unwrap();
+    assert!(
+        cold.retained_storage_bytes_estimate(limits).unwrap()
+            > cold.shared_clone_storage_bytes().unwrap()
+    );
+}

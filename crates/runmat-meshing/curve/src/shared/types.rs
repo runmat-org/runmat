@@ -23,6 +23,19 @@ pub struct SharedCurveBatch {
 }
 
 impl SharedCurveMesh {
+    /// Validate the original incidence and point inventory cooperatively.
+    pub fn validate_against_with_cancellation(
+        &self,
+        topology: &runmat_geometry_core::ExactBRepTopology,
+        cancellation: &dyn runmat_meshing_core::MeshingCancellationSignal,
+    ) -> Result<(), SharedCurveError> {
+        super::validation::validate_shared_curve_mesh_with_cancellation(
+            self,
+            topology,
+            Some(cancellation),
+        )
+    }
+
     pub fn validate_against(
         &self,
         topology: &runmat_geometry_core::ExactBRepTopology,

@@ -216,14 +216,14 @@ fn metadata_resident_bytes<T: serde::Serialize>(value: &T) -> Result<u64, Observ
         ))
 }
 
-impl ObservationTopology {
+impl<'a> ObservationTopology<'a> {
     pub(super) fn from_finite_volume(
         layout: &FiniteVolumeFieldTopology,
-        projection: &AnalysisProjection,
+        projection: &'a AnalysisProjection,
         geometry: &FiniteVolumeTopology,
     ) -> Result<Self, ObservationError> {
         layout.validate_for(projection, geometry).map_err(invalid)?;
-        let mut result = Self::from_projection(projection);
+        let mut result = Self::from_projection(projection)?;
         result.identity = None;
         result.set_finite_volume_digest(layout.identity().discretization_digest());
         result.volume_integration_points.clear();

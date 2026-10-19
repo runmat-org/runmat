@@ -220,6 +220,7 @@ pub(super) fn evidence(artifact: &SolverMeshArtifact) -> MeshingEvidence {
             .take(MeshingStageKind::ALL.len() - 1)
             .enumerate()
             .map(|(index, stage)| MeshingStageEvidence {
+                reused_from: None,
                 stage,
                 partition: MeshingPartitionDescriptor {
                     kind: MeshingPartitionKind::WholeStage,

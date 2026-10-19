@@ -1,0 +1,20 @@
+[package]
+name = "runmat-analysis-qualification"
+version = "0.6.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "FEA requirement register and qualification evidence links"
+
+[features]
+default = []
+docs-export = ["dep:serde", "dep:serde_json"]
+
+[[bin]]
+name = "export_docs"
+path = "src/bin/export_docs.rs"
+required-features = ["docs-export"]
+
+[dependencies]
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }

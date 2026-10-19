@@ -61,6 +61,7 @@ fn prepared_thermal_solve_selects_each_static_consumer_and_preserves_admission()
             )
             .unwrap();
             let plan = build_static_resource_plan(StaticResourcePreflight {
+                compilation: None,
                 prepared_inputs: None,
                 model: &model,
                 step: consumer,

@@ -1,4 +1,5 @@
 mod digest;
+mod hex;
 mod program;
 mod typed;
 

@@ -178,7 +178,7 @@ pub fn resolve_org_id(config: &RemoteConfig, override_value: Option<Uuid>) -> Re
     }
     if let Ok(value) = env::var("RUNMAT_ORG_ID") {
         if !value.is_empty() {
-            return Uuid::parse_str(&value).context("RUNMAT_ORG_ID must be a UUID");
+            return parse_org_id_input(&value).context("Invalid RUNMAT_ORG_ID");
         }
     }
     config.org_id.context(
@@ -192,12 +192,69 @@ pub fn resolve_project_id(config: &RemoteConfig, override_value: Option<Uuid>) -
     }
     if let Ok(value) = env::var("RUNMAT_PROJECT_ID") {
         if !value.is_empty() {
-            return Uuid::parse_str(&value).context("RUNMAT_PROJECT_ID must be a UUID");
+            return parse_project_id_input(&value).context("Invalid RUNMAT_PROJECT_ID");
         }
     }
     config.project_id.context(
         "Project id not configured. Use --project, set RUNMAT_PROJECT_ID, or run `runmat login --project <id>`."
     )
+}
+
+/// Accept canonical public IDs and the existing UUID CLI/config shorthand.
+pub fn parse_org_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::OrgId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn parse_project_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::ProjectId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn parse_fs_version_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::FsVersionId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn parse_snapshot_id_input(value: &str) -> Result<Uuid> {
+    if let Ok(value) = Uuid::parse_str(value) {
+        return Ok(value);
+    }
+    crate::ids::SnapshotId::parse(value)?
+        .as_uuid()
+        .map_err(Into::into)
+}
+
+pub fn resolve_public_org_id(
+    config: &RemoteConfig,
+    override_value: Option<Uuid>,
+) -> Result<crate::ids::OrgId> {
+    Ok(crate::ids::OrgId::from_uuid(resolve_org_id(
+        config,
+        override_value,
+    )?))
+}
+
+pub fn resolve_public_project_id(
+    config: &RemoteConfig,
+    override_value: Option<Uuid>,
+) -> Result<crate::ids::ProjectId> {
+    Ok(crate::ids::ProjectId::from_uuid(resolve_project_id(
+        config,
+        override_value,
+    )?))
 }
 
 pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> Result<String> {
@@ -890,4 +947,32 @@ async fn refresh_access_token(
         token_endpoint: Some(token_endpoint.to_string()),
         client_id: Some(client_id.to_string()),
     })
+}
+
+#[cfg(test)]
+mod public_id_tests {
+    use super::*;
+    #[test]
+    fn canonical_namespace_and_legacy_config_have_one_wire_identity() {
+        let uuid = Uuid::from_u128(42);
+        let org = crate::ids::OrgId::from_uuid(uuid);
+        let project = crate::ids::ProjectId::from_uuid(uuid);
+        assert_eq!(parse_org_id_input(org.as_str()).unwrap(), uuid);
+        assert_eq!(parse_project_id_input(project.as_str()).unwrap(), uuid);
+        assert_eq!(parse_project_id_input(&uuid.to_string()).unwrap(), uuid);
+        assert!(parse_project_id_input(org.as_str()).is_err());
+        assert!(parse_org_id_input(project.as_str()).is_err());
+        let version = crate::ids::FsVersionId::from_uuid(uuid);
+        let snapshot = crate::ids::SnapshotId::from_uuid(uuid);
+        assert_eq!(parse_fs_version_id_input(version.as_str()).unwrap(), uuid);
+        assert_eq!(parse_snapshot_id_input(snapshot.as_str()).unwrap(), uuid);
+        assert!(parse_snapshot_id_input(version.as_str()).is_err());
+        assert!(parse_fs_version_id_input(snapshot.as_str()).is_err());
+        let config = RemoteConfig::default();
+        assert_eq!(resolve_public_org_id(&config, Some(uuid)).unwrap(), org);
+        assert_eq!(
+            resolve_public_project_id(&config, Some(uuid)).unwrap(),
+            project
+        );
+    }
 }

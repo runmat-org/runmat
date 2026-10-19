@@ -62,19 +62,17 @@ pub(super) fn prepare_static_preassembly(
             solver_admission: None,
         });
     }
-    let compiled_constraints = prepared_constraints
-        .is_none()
-        .then(|| {
-            CanonicalStructuralConstraintPlan::compile_for_model(
-                model,
-                options.solver_mesh.as_ref(),
-            )
-            .map_err(|error| FeaRunError::Assembly(error.to_string()))
-        })
-        .transpose()?;
-    let constraints = prepared_constraints
-        .or(compiled_constraints.as_ref())
-        .expect("CPU physical preassembly has compiled or prepared constraints");
+    let compilation = crate::pipeline::constraint_preparation::compile_inventory(
+        model,
+        options.solver_mesh.as_ref(),
+        step,
+    )?;
+    if prepared_constraints.is_some_and(|plan| plan != compilation.plan()) {
+        return Err(FeaRunError::Assembly(
+            "prepared constraints differ from original compilation".into(),
+        ));
+    }
+    let constraints = compilation.plan();
     let properties =
         crate::properties::compile_structural_property_map(model, options.solver_mesh.as_ref())
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
@@ -102,6 +100,7 @@ pub(super) fn prepare_static_preassembly(
     )
     .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
     let resource_plan = build_static_resource_plan(StaticResourcePreflight {
+        compilation: Some(&compilation),
         model,
         step,
         backend,
@@ -135,7 +134,11 @@ pub(super) fn prepare_static_preassembly(
         _ => None,
     };
     Ok(StaticPreassembly {
-        constraints: compiled_constraints,
+        constraints: if prepared_constraints.is_none() {
+            Some(compilation.into_plan())
+        } else {
+            None
+        },
         connectors: Some(connectors),
         solver_admission,
     })
@@ -312,6 +315,7 @@ mod tests {
             decoded_resident_bytes_admission_budget: crate::planning::resource::ByteCount(8192),
         };
         let plan = build_static_resource_plan(StaticResourcePreflight {
+            compilation: None,
             prepared_inputs: Some(&facts),
             model: &model,
             step,
@@ -412,6 +416,34 @@ mod tests {
     }
 
     #[test]
+    fn direct_physical_static_applies_authored_compilation_ceiling_before_lowering() {
+        let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
+        model.constraints.push(model.constraints[0].clone());
+        model.sequence.steps[0]
+            .accuracy
+            .resources
+            .maximum_resident_bytes = 1;
+        let error = prepare_static_preassembly(
+            &model,
+            &model.sequence.steps[0],
+            ComputeBackend::Cpu,
+            &LinearStaticSolveOptions::default(),
+            None,
+            None,
+        )
+        .err()
+        .expect("direct preparation must reject before duplicate-source lowering");
+        assert!(matches!(
+            error,
+            FeaRunError::Resource(ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                required,
+                maximum: 1,
+            }) if required > 1
+        ));
+    }
+
+    #[test]
     fn prepared_physical_static_rejects_memory_ceiling_before_assembly() {
         let mut model = fixture_model(FixtureId::StructuralBeamCantileverEndMomentReference);
         model.sequence.steps[0]
@@ -435,10 +467,10 @@ mod tests {
             FeaRunError::Resource(
                 crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
                     resource: "resident memory bytes",
+                    required,
                     maximum: 1,
-                    ..
                 }
-            )
+            ) if required > 1
         ));
     }
 }

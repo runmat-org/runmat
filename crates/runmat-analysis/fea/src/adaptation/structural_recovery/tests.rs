@@ -76,7 +76,23 @@ fn recovery_estimator_marks_stress_discontinuity_by_stable_identity() {
     .unwrap();
     assert_eq!(estimate.solver_artifact_digest, artifact.canonical_digest);
     assert_eq!(estimate.indicators.len(), 2);
-    assert!((estimate.total_error - 0.5).abs() < 1.0e-12);
+    // Shared nodes recover 4/3; the private nodes retain 0 and 2.
+    // With cell volumes 1/6 and 1/3, ∫(1−λ)^2/V = 3/5 gives 8/45 + 4/45.
+    assert!((estimate.total_error - (4.0_f64 / 15.0).sqrt()).abs() < 1.0e-12);
+    assert!((estimate.reference_norm - (4.0_f64 / 3.0).sqrt()).abs() < 1.0e-12);
+    for (element, expected_squared) in artifact
+        .topology
+        .volume_elements
+        .iter()
+        .zip([8.0 / 45.0, 4.0 / 45.0])
+    {
+        let indicator = estimate
+            .indicators
+            .iter()
+            .find(|i| i.element_stable_identity == element.stable_identity)
+            .unwrap();
+        assert!((indicator.error.powi(2) - expected_squared).abs() < 1.0e-12);
+    }
     assert!(estimate.statistics.maximum_error > 0.0);
     assert_eq!(
         estimate.marked_element_identities,
@@ -251,3 +267,46 @@ fn tetrahedron10_integration_point_estimator_preserves_linear_recovery() {
 }
 
 mod rotation;
+
+#[test]
+fn tet4_constant_point_and_element_stress_have_the_same_physical_norm() {
+    let mesh = two_tetrahedron_artifact();
+    let rows = [[0.0; 6], [2.0, 0.0, 0.0, 0.0, 0.0, 0.0]];
+    let evaluate = |points: bool| {
+        let count = if points { 4 } else { 1 };
+        let values = rows
+            .iter()
+            .flat_map(|row| (0..count).flat_map(move |_| *row))
+            .collect();
+        let field = AnalysisField::host_f64(
+            if points {
+                FEA_FIELD_STRUCTURAL_INTEGRATION_POINT_STRESS
+            } else {
+                FEA_FIELD_STRUCTURAL_STRESS
+            },
+            vec![2 * count, 6],
+            values,
+        );
+        estimate_structural_recovery_error(
+            &mesh,
+            "elements",
+            &field,
+            StructuralRecoveryEstimatorOptions::default(),
+        )
+        .unwrap()
+    };
+    let element = evaluate(false);
+    let point = evaluate(true);
+    assert!((element.total_error - point.total_error).abs() < 1.0e-12);
+    assert!((element.reference_norm - point.reference_norm).abs() < 1.0e-12);
+    assert_eq!(
+        element.marked_element_identities,
+        point.marked_element_identities
+    );
+    for (a, b) in element.indicators.iter().zip(point.indicators) {
+        assert_eq!(a.element_stable_identity, b.element_stable_identity);
+        assert!((a.error - b.error).abs() < 1.0e-12);
+    }
+}
+
+mod region_identity;

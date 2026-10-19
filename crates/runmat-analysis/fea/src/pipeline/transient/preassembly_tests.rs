@@ -199,15 +199,19 @@ fn transient_block_checks_scope_residency_before_its_initial_assembly() {
         observation_cursors: Vec::new(),
     })
     .unwrap_err();
-    assert!(matches!(
-        error,
-        FeaRunError::Resource(
-            crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
-                resource: "resident memory bytes",
-                ..
-            }
-        )
-    ));
+    assert!(
+        matches!(
+            &error,
+            FeaRunError::Resource(
+                crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                    resource: "resident memory bytes",
+                    required,
+                    maximum: 1,
+                }
+            ) if *required > 1
+        ),
+        "{error:?}"
+    );
 }
 
 #[test]

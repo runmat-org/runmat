@@ -16,7 +16,7 @@ use crate::cdt::{
     DelaunayTopologyOptions,
 };
 
-fn region() -> PersistentEntityId {
+pub(super) fn region() -> PersistentEntityId {
     PersistentEntityId {
         kind: PersistentEntityKind::Region,
         source_topology_id: "solid".to_owned(),
@@ -75,7 +75,7 @@ fn topology(points: [[f64; 3]; 4]) -> DelaunayVolumeTopology {
     .unwrap()
 }
 
-fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
+pub(super) fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
     DelaunayVolumeProvenance {
         nodes: Vec::new(),
         segments: Vec::new(),
@@ -83,7 +83,7 @@ fn context(_topology: &DelaunayVolumeTopology) -> DelaunayVolumeProvenance {
     }
 }
 
-fn metric() -> MetricFieldRequest {
+pub(super) fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
@@ -108,7 +108,7 @@ fn anisotropic_metric() -> MetricFieldRequest {
     }
 }
 
-fn quality(
+pub(super) fn quality(
     topology: &DelaunayVolumeTopology,
     provenance: &DelaunayVolumeProvenance,
     maximum_edge: f64,
@@ -169,51 +169,13 @@ fn batch_admission_requires_lexicographic_quality_progress() {
 
 #[test]
 fn batch_refinement_applies_separated_cavities_in_one_transaction() {
-    let coordinates = [
-        [0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
-        [10.0, 0.0, 0.0],
-        [11.0, 0.0, 0.0],
-        [10.0, 1.0, 0.0],
-        [10.0, 0.0, 1.0],
-    ];
-    let nodes = coordinates
-        .into_iter()
-        .enumerate()
-        .map(|(index, coordinates_m)| {
-            DelaunayVolumeNode::explicit(
-                StableDigest::from_bytes([(index + 1) as u8; 32]),
-                coordinates_m,
-            )
-        })
-        .collect();
-    let topology = build_delaunay_volume_topology(
-        nodes,
-        vec![[0, 1, 2, 3], [4, 5, 6, 7]],
-        DelaunayTopologyOptions::default(),
-        &NeverCancelled,
-    )
-    .unwrap();
-    let topology = assign_delaunay_volume_regions(
+    let batch_scheduler::Fixture {
         topology,
-        vec![region(), region()],
-        DelaunayTopologyOptions::default(),
-        &NeverCancelled,
-    )
-    .unwrap();
-    let provenance = context(&topology);
-    let metric_request = metric();
-    let (mut quality, quality_options) = quality(&topology, &provenance, 0.75);
-    for tetrahedron in &mut quality.tetrahedra {
-        tetrahedron.refinement_violation_ratio = 100.0;
-    }
-    quality.worst_refinement_tetrahedron = quality
-        .tetrahedra
-        .iter()
-        .map(|tetrahedron| tetrahedron.node_identities)
-        .min();
+        provenance,
+        metric_request,
+        quality,
+        quality_options,
+    } = batch_scheduler::fixture();
     let mut excluded = BTreeSet::new();
 
     let outcome = super::batch::insert_independent_refinement_batch(
@@ -224,9 +186,13 @@ fn batch_refinement_applies_separated_cavities_in_one_transaction() {
             &quality,
             quality_options,
         ),
-        DelaunayVolumeRefinementStepOptions::default(),
+        &CandidateQueries::new(&topology, &NeverCancelled).unwrap(),
+        super::batch::RefinementBatchOptions {
+            step: DelaunayVolumeRefinementStepOptions::default(),
+            maximum_insertions: 8,
+            frontier: &mut Default::default(),
+        },
         &mut excluded,
-        8,
         &NeverCancelled,
     )
     .unwrap();
@@ -1243,3 +1209,9 @@ fn marked_adaptation_is_local_deterministic_replayable_and_bounded() {
         DelaunayAdaptiveRefinementErrorKind::Cancelled
     );
 }
+
+#[path = "tests/owned_state.rs"]
+mod owned_state;
+
+#[path = "tests/batch_scheduler.rs"]
+mod batch_scheduler;

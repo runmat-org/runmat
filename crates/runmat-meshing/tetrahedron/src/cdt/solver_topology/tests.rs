@@ -1,3 +1,8 @@
+#[path = "tests/cold_projection.rs"]
+mod cold_projection;
+#[path = "tests/metric_authority.rs"]
+mod metric_authority;
+
 use runmat_meshing_core::{
     AlgorithmVersionSet, CancellationPolicy, CurveQualityTargets, ElementOrder,
     GeometryTolerancePolicy, MeshingCancellationSignal, MeshingQualityTargets, MeshingRequest,
@@ -103,6 +108,7 @@ fn validated_tet4_projects_to_one_canonical_solver_topology() {
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
+        volume_metric: &request.metric,
         request: &request,
         exact_evaluation: None,
     };
@@ -215,6 +221,7 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
             exact_surface: &exact_surface,
             volume_mesh: &volume_mesh,
             volume_options,
+            volume_metric: &request.metric,
             request: &request,
             exact_evaluation: None,
         },
@@ -260,6 +267,7 @@ fn projection_retains_chart_aware_exact_surface_parameters() {
             exact_surface: &conflicting_surface,
             volume_mesh: &volume_mesh,
             volume_options,
+            volume_metric: &request.metric,
             request: &request,
             exact_evaluation: None,
         },
@@ -297,6 +305,7 @@ fn deterministic_tet10_elevation_shares_exact_boundary_midpoints() {
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
+        volume_metric: &request.metric,
         request: &request,
         exact_evaluation: Some(DelaunayExactEvaluation {
             evaluator: &super::test_evaluator::EVALUATOR,
@@ -392,6 +401,7 @@ fn curved_tet10_nodes_optimize_deterministically() {
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
+        volume_metric: &request.metric,
         request: &request,
         exact_evaluation: Some(DelaunayExactEvaluation {
             evaluator: &super::test_evaluator::WARPED_EVALUATOR,
@@ -467,7 +477,7 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
         side_a_orientation: TopologicalOrientation::Forward,
         side_b_orientation: TopologicalOrientation::Reversed,
     }];
-    let index = super::classification::ClassificationIndex::new(&topology);
+    let index = super::classification::ClassificationIndex::new(&topology, None).unwrap();
     let mut regions = vec![region_a.clone(), region_b];
     regions.sort();
     let interface = index
@@ -477,8 +487,9 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
         interface.role,
         runmat_meshing_core::BoundaryFaceRole::ConformalInterface
     );
-    assert_eq!(interface.outward_region_id, region_a);
+    assert_eq!(interface.outward_region_id, &region_a);
 
+    drop(index);
     topology.interfaces.clear();
     let contact_id = PersistentEntityId {
         kind: PersistentEntityKind::Contact,
@@ -492,15 +503,14 @@ fn exact_interface_and_contact_classification_preserve_typed_sides() {
         pairing_schema_version: 1,
         pairing_contract_digest: [1; 32],
     }];
-    let index = super::classification::ClassificationIndex::new(&topology);
+    let index = super::classification::ClassificationIndex::new(&topology, None).unwrap();
+    let primary_entities = [face_a, contact_id.clone()];
     let primary = index
-        .classify(
-            &[face_a, contact_id.clone()],
-            std::slice::from_ref(&region_a),
-        )
+        .classify(&primary_entities, std::slice::from_ref(&region_a))
         .unwrap();
+    let secondary_entities = [face_b, contact_id];
     let secondary = index
-        .classify(&[face_b, contact_id], std::slice::from_ref(&region_a))
+        .classify(&secondary_entities, std::slice::from_ref(&region_a))
         .unwrap();
     assert_eq!(
         primary.role,
@@ -531,6 +541,7 @@ fn projection_rejects_unsupported_order_and_resource_limit() {
         exact_surface: &exact_surface,
         volume_mesh: &volume_mesh,
         volume_options,
+        volume_metric: &linear_request.metric,
         request,
         exact_evaluation: None,
     };
@@ -586,6 +597,7 @@ fn projection_preserves_cancellation() {
             exact_surface: &exact_surface,
             volume_mesh: &volume_mesh,
             volume_options,
+            volume_metric: &request.metric,
             request: &request,
             exact_evaluation: None,
         },

@@ -143,3 +143,35 @@ impl PreparedThermalSolve<'_> {
         )
     }
 }
+
+#[derive(Clone, Copy)]
+pub(crate) enum ThermalObservationExecution {
+    Inline,
+    Deferred,
+}
+/// Numerical fields with observations deferred to their separately admitted published-field tasks.
+/// This opaque carrier cannot execute an inline history under a fields-only reservation.
+pub struct PreparedThermalPrimarySolve<'a>(PreparedThermalSolve<'a>);
+impl<'a> PreparedThermalPrimarySolve<'a> {
+    pub(super) fn new(prepared: PreparedThermalSolve<'a>) -> Self {
+        Self(prepared)
+    }
+    pub fn numerical_reservation_bytes(&self) -> Result<ByteCount, ResourcePlanningError> {
+        self.0.numerical_reservation_bytes()
+    }
+    pub fn require_output_reservation(
+        &self,
+        output: ByteCount,
+    ) -> Result<ByteCount, ResourcePlanningError> {
+        self.0.require_output_reservation(output)
+    }
+    pub fn transport_profile(
+        &self,
+        chunk_bytes: usize,
+    ) -> Result<AnalysisTransportProfile, FeaRunError> {
+        self.0.transport_profile(chunk_bytes)
+    }
+    pub fn execute_primary_fields(self) -> Result<FeaThermalRunResult, FeaRunError> {
+        self.0.execute_primary_fields()
+    }
+}

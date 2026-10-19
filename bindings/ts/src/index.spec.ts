@@ -235,38 +235,10 @@ describe("initRunMat wiring", () => {
 
   it("delegates FEA source checks to the typed WASM API", async () => {
     const checkResult: FeaSourceCheckResult = {
-      status: "valid",
-      rootModule: "models/bracket.fea",
-      roots: [{ kind: "study", id: "static_response" }],
-      studies: [{
-        id: "static_response",
-        geometryId: "bracket",
-        geometryPath: "models/bracket.step",
-        geometryUnits: "millimeter",
-        meshId: "volume",
-        modelId: "structure",
-        procedures: [{
-          stepId: "solve",
-          physicsFamily: "structural",
-          analysisProcedure: "static",
-        }],
-        counts: {
-          materials: 1,
-          materialAssignments: 1,
-          constraints: 1,
-          boundaries: 0,
-          connectors: 0,
-          interfaces: 0,
-          signals: 0,
-          excitationCases: 0,
-          excitations: 1,
-          initialConditions: 0,
-          responseSpectra: 0,
-          sequenceSteps: 1,
-          outputs: 1,
-        },
-      }],
-      diagnostics: [],
+      contract: "assessments_v1",
+      revision: Array(32).fill(0), status: "valid", rootModule: "models/bracket.fea",
+      program: { studies: [], sweeps: [], executionPolicies: [], executionBindings: [], materials: [], geometries: [], meshes: [], models: [] },
+      sourceIndex: { entries: [] }, diagnostics: [],
     };
     const checkFeaSource = vi.fn(async () => checkResult);
     __internals.setNativeModuleOverride({
@@ -281,6 +253,27 @@ describe("initRunMat wiring", () => {
     const inputManifest = { snapshotId: "captured", entries: [] };
     await expect(session.checkFeaSource("models/bracket.fea", inputManifest)).resolves.toEqual(checkResult);
     expect(checkFeaSource).toHaveBeenLastCalledWith("models/bracket.fea", inputManifest);
+    const study: FeaSourceCheckResult["program"]["studies"][number] = {
+      module_path: "models/bracket.fea", study_id: "response",
+      geometry: { definition: { module_path: "models/bracket.fea", geometry_id: "part" }, arguments: [] },
+      mesh: { module_path: "models/bracket.fea", mesh_id: "part" },
+      model: { model: { module_path: "models/bracket.fea", model_id: "structure" }, arguments: [] },
+      formulation_requirement: "production", inputs: [], outputs: [], assessments: [],
+      sequence: { sequence_id: "response", steps: [], dependencies: [], transitions: [], branches: [] },
+    };
+    const current = { ...checkResult, program: { ...checkResult.program, studies: [study] } };
+    checkFeaSource.mockResolvedValueOnce(current);
+    await expect(session.checkFeaSource("models/bracket.fea")).resolves.toEqual(current);
+    // Empty inventories may be omitted by canonical serde without weakening admission.
+    const stale = { ...study };
+    Reflect.deleteProperty(stale, "assessments");
+    checkFeaSource.mockResolvedValueOnce({ ...current, program: { ...current.program, studies: [stale] } });
+    await expect(session.checkFeaSource("models/bracket.fea")).resolves.toMatchObject({ contract: "assessments_v1" });
+    // An older binary lacks the contract marker even when its program shape looks valid.
+    const incompatible = { ...current };
+    Reflect.deleteProperty(incompatible, "contract");
+    checkFeaSource.mockResolvedValueOnce(incompatible);
+    await expect(session.checkFeaSource("models/bracket.fea")).rejects.toThrow("incompatible study format");
   });
 
   it("forwards dynamic language policy and error namespace updates", async () => {

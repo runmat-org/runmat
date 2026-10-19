@@ -1,3 +1,7 @@
+/// Actual package build configuration used for internal artifact reuse.
+#[doc(hidden)]
+pub const BUILD_CONFIGURATION: &str = env!("RUNMAT_BUILD_CONFIGURATION");
+
 extern crate self as runmat_meshing_core;
 
 pub mod contracts;
@@ -5,42 +9,48 @@ pub mod fixtures;
 pub mod interpolation;
 pub mod quality;
 pub use contracts::canonical::{
-    build_chunked_stage_payload, build_closed_stage_manifest, decode_stage_manifest_streams,
+    build_chunked_stage_payload, build_chunked_stage_payload_with_cancellation,
+    build_closed_stage_manifest, close_stage_payload_with_admission, decode_stage_manifest_streams,
+    decode_stage_manifest_streams_borrowed, decode_stage_manifest_streams_borrowed_with_admission,
     decode_stage_manifest_streams_with_cancellation, production_algorithm_versions,
-    resolve_meshing_request, solver_boundary_edge_identity, solver_boundary_face_identity,
-    solver_midside_node_identity, solver_volume_element_identity,
+    profile_chunked_stage_payload, resolve_meshing_request, solver_boundary_edge_identity,
+    solver_boundary_face_identity, solver_midside_node_identity, solver_volume_element_identity,
     sort_solver_node_exact_parameters, validate_solver_mesh_topology,
     validate_solver_mesh_topology_with_cancellation, verify_stage_manifest_closure,
+    verify_stage_manifest_closure_borrowed, verify_stage_manifest_closure_borrowed_with_admission,
     AlgorithmVersionSet, BoundaryEdgeOrder, BoundaryFaceRole, BoundaryTriangleOrder,
     CacheAdmissionDecision, CancellationPolicy, CanonicalEntityRange, CanonicalMeshingContract,
-    ConformalInterface, ContactPair, CurveQualityTargets, ElementOrder, EncodedMeshingChunk,
-    ErrorDistribution, FieldTopologyLocation, FieldTopologyMap, GeometricWitness,
-    GeometryRevisionRef, GeometryTolerancePolicy, InvariantEvidence, MeshDefinition, MeshNeighbor,
-    MeshRegion, MeshingCancellationSignal, MeshingCanonicalLimits, MeshingCapabilityRequirement,
-    MeshingChunkDescriptor, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStream,
-    MeshingChunkedPayload, MeshingContractError, MeshingDiagnosticEntry, MeshingDiagnosticValue,
-    MeshingEvidence, MeshingFailure, MeshingFailureCategory, MeshingInputKind, MeshingInputRef,
-    MeshingJoinIdentity, MeshingManifestDisposition, MeshingOperation, MeshingPartitionDescriptor,
+    ClosedMeshingStage, ConformalInterface, ContactPair, CurveQualityTargets, ElementOrder,
+    EncodedMeshingChunk, EncodedMeshingChunkRef, ErrorDistribution, FieldTopologyLocation,
+    FieldTopologyMap, GeometricWitness, GeometryRevisionRef, GeometryTolerancePolicy,
+    InvariantEvidence, MeshDefinition, MeshNeighbor, MeshRegion, MeshingCancellationSignal,
+    MeshingCanonicalCodecControl, MeshingCanonicalLimits, MeshingCapabilityRequirement,
+    MeshingChunkDescriptor, MeshingChunkMediaType, MeshingChunkPolicy, MeshingChunkStorageProfile,
+    MeshingChunkStream, MeshingChunkedPayload, MeshingContractError, MeshingDiagnosticEntry,
+    MeshingDiagnosticValue, MeshingEvidence, MeshingFailure, MeshingFailureCategory,
+    MeshingInputKind, MeshingInputRef, MeshingJoinIdentity, MeshingManifestDisposition,
+    MeshingManifestMetadata, MeshingOperation, MeshingPartitionDescriptor,
     MeshingPartitionIdentity, MeshingPartitionKind, MeshingPartitionResultRef, MeshingProgress,
     MeshingQualityTargets, MeshingRequest, MeshingRequestSettings, MeshingResourceBudget,
     MeshingResourceUsage, MeshingStageEvidence, MeshingStageIdentity, MeshingStageKind,
     MeshingStageManifest, MeshingStageResultIdentity, MeshingStageResultKind,
-    MeshingValidationIdentity, MeshingWorkloadRequest, MeshingWorkloadResult,
-    MetricCombinationRule, MetricContribution, MetricContributionScope, MetricFieldRequest,
-    MetricSourceKind, MetricTensor3, NeverCancelled, PersistentEntityId, PersistentEntityKind,
-    PlatformBuildIdentity, SizingResolutionEvidence, SolverBoundaryEdge, SolverBoundaryFace,
-    SolverEntityTransfer, SolverMeshAdaptationCell, SolverMeshAdaptationKind,
-    SolverMeshAdaptationLineage, SolverMeshAdaptationMark, SolverMeshAdaptationMutation,
-    SolverMeshArtifact, SolverMeshNode, SolverMeshProjection, SolverMeshTopology,
-    SolverMeshTransferMap, SolverMeshValidation, SolverNodeExactParameter, SolverTransferMethod,
-    SolverTransferSource, SolverVolumeElement, StableDigest, SurfaceQualityTargets,
-    VolumeQualityTargets, MESHING_EVIDENCE_SCHEMA_VERSION, MESHING_FAILURE_SCHEMA_VERSION,
-    MESHING_IDENTITY_SCHEMA_VERSION, MESHING_PROGRESS_SCHEMA_VERSION,
-    MESHING_REQUEST_SCHEMA_VERSION, MESHING_STAGE_MANIFEST_SCHEMA_VERSION,
-    MESHING_WORKLOAD_SCHEMA_VERSION, SOLVER_MESH_ADAPTATION_LINEAGE_SCHEMA_VERSION,
-    SOLVER_MESH_ARTIFACT_SCHEMA_VERSION, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
-    SOLVER_MESH_TRANSFER_SCHEMA_VERSION, SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
-    TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
+    MeshingStreamStorageProfile, MeshingValidationIdentity, MeshingWorkloadRequest,
+    MeshingWorkloadResult, MetricCombinationRule, MetricContribution, MetricContributionScope,
+    MetricFieldRequest, MetricSourceKind, MetricTensor3, NeverCancelled, PersistentEntityId,
+    PersistentEntityKind, PlatformBuildIdentity, ReusedMeshingStageObservation,
+    SizingResolutionEvidence, SolverBoundaryEdge, SolverBoundaryFace, SolverEntityTransfer,
+    SolverMeshAdaptationCell, SolverMeshAdaptationKind, SolverMeshAdaptationLineage,
+    SolverMeshAdaptationMark, SolverMeshAdaptationMutation, SolverMeshArtifact, SolverMeshNode,
+    SolverMeshProjection, SolverMeshTopology, SolverMeshTransferMap, SolverMeshValidation,
+    SolverNodeExactParameter, SolverTransferMethod, SolverTransferSource, SolverVolumeElement,
+    StableDigest, SurfaceQualityTargets, ValidatedSolverMeshProjection,
+    ValidatedSolverMeshTopology, VolumeQualityTargets, MESHING_EVIDENCE_SCHEMA_VERSION,
+    MESHING_FAILURE_SCHEMA_VERSION, MESHING_IDENTITY_SCHEMA_VERSION,
+    MESHING_PROGRESS_SCHEMA_VERSION, MESHING_REQUEST_SCHEMA_VERSION,
+    MESHING_STAGE_MANIFEST_SCHEMA_VERSION, MESHING_WORKLOAD_SCHEMA_VERSION,
+    SOLVER_MESH_ADAPTATION_LINEAGE_SCHEMA_VERSION, SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
+    SOLVER_MESH_PROJECTION_SCHEMA_VERSION, SOLVER_MESH_TRANSFER_SCHEMA_VERSION,
+    SOLVER_MESH_VALIDATION_SCHEMA_VERSION, TETRAHEDRON_MIDSIDE_EDGE_CORNERS,
 };
 pub use contracts::{
     validate_meshing_stage_order, CadEdgeContract, CadEvaluatorCapabilities, CadFaceContract,
@@ -80,5 +90,17 @@ pub use runmat_meshing_size::field::{
     SizingFieldService, SizingQueryResult, SizingQuerySource, SizingSample,
     SizingSampleApplication, SizingSampleRejection,
 };
-pub use spatial_index::{Aabb3, LinearSpatialIndex, SpatialEntry, UniformGridSpatialIndex};
+pub use spatial_index::{
+    Aabb3, BoundsSpatialIndex, LinearSpatialIndex, PointSpatialIndex, SpatialEntry, SpatialPoint,
+    UniformGridSpatialIndex,
+};
 pub use tolerance::MeshingTolerance;
+
+/// Build settings of the shared metric and canonical-codec dependencies.
+#[doc(hidden)]
+pub fn numerical_dependency_build_configuration() -> [&'static str; 2] {
+    [
+        runmat_meshing_size::BUILD_CONFIGURATION,
+        runmat_canonical_codec::BUILD_CONFIGURATION,
+    ]
+}

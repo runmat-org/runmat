@@ -33,6 +33,7 @@ fn complete_point_history_and_accepted_cap_have_their_own_resource_authority() {
         let integration =
             CanonicalSolidIntegrationPlan::derive(&mesh, CanonicalSolidIntegrationRule::Keast15)
                 .unwrap();
+        assert!(demand.constraint_compilation_peak_bytes.0 > 0);
         assert_eq!(demand.integration_identity, integration.identity());
         assert_eq!(demand.point_count.0, integration.total_point_count() as u64);
         assert_eq!(demand.maximum_accepted_increments.0, 8);
@@ -166,6 +167,15 @@ fn readonly_recovery_has_distinct_identity_and_rejects_forged_solve_or_work() {
         let FeaResourceDemand::StructuralNonlinearRecovery(demand) = &recovery.input.demand else {
             panic!("missing readonly authority")
         };
+        let FeaResourceDemand::StructuralNonlinearPipeline(solve_demand) = &solve.input.demand
+        else {
+            unreachable!()
+        };
+        assert!(demand.constraint_compilation_peak_bytes.0 > 0);
+        assert_eq!(
+            demand.constraint_compilation_peak_bytes,
+            solve_demand.constraint_compilation_peak_bytes
+        );
         assert_eq!(demand.physical_evaluation_limit.0, 2);
         assert!(matches!(
             demand.operator.solve,

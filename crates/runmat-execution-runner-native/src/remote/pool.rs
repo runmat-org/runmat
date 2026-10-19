@@ -5,9 +5,7 @@ use std::sync::{Arc, Mutex};
 use runmat_execution::{CancellationReason, Digest, ExecutionScopeId, PoolId, TaskId};
 use runmat_execution_artifact::archive::{read_bundle, ArchiveLimits};
 use runmat_execution_artifact::cache::CacheImport;
-use runmat_execution_artifact::{
-    ArtifactError, ArtifactResult, ProgramExecutionRequest, ProjectRevisionRecord,
-};
+use runmat_execution_artifact::{ArtifactResult, ProgramExecutionRequest, ProjectRevisionRecord};
 use runmat_execution_runner::pool::ResizeRequest;
 use runmat_execution_runner::port::BackendReport;
 use runmat_execution_runner::{
@@ -98,10 +96,26 @@ pub struct RemotePoolDriver {
 }
 
 impl CacheImport for RemotePoolDriver {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.execution_objects
+            .get_by_digest_admitted(digest, maximum_bytes, admit)
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        self.execution_objects
+            .get_by_digest_bounded(digest, maximum_bytes)
+    }
+
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
-        self.execution_object_by_digest(digest)
-            .map(|bytes| bytes.map(|bytes| bytes.as_ref().to_vec()))
-            .map_err(|error| ArtifactError::Invalid(error.to_string()))
+        self.read_verified_bounded(digest, u64::MAX)
     }
 }
 

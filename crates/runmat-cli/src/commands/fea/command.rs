@@ -80,6 +80,19 @@ pub(super) async fn execute(
             let selected = resolve_root(&checked, &root)?;
             super::run::execute(file, checked, selected, execution, cli, config, json).await
         }
+        FeaCommand::Snapshot { file, study, out } => {
+            let file = resolve_script_input(file)?;
+            let checked = super::source::check_source(&file, cli, config).await?;
+            require_valid(&checked, true)?;
+            let selected = resolve_root(&checked, &FeaRootArgs { study, sweep: None })?;
+            super::snapshot::capture(&checked, selected, &out).await
+        }
+        FeaCommand::RenderSnapshot { snapshot, out } => {
+            super::snapshot::render::render_saved(&snapshot, &out).await
+        }
+        FeaCommand::VerifySnapshot { snapshot, out } => {
+            super::snapshot::verify::verify_saved_fields(&snapshot, &out)
+        }
         FeaCommand::Reassess {
             file,
             study,

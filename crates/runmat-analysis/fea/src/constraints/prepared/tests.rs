@@ -94,3 +94,87 @@ fn empty_explicit_equation_rejects_without_dispatching_to_missing_solid_mesh() {
             .is_err()
     );
 }
+
+#[test]
+fn preparation_inventory_composes_original_occurrences_and_explicit_identity_copies() {
+    for order in [ElementOrder::Tet4, ElementOrder::Tet10] {
+        let mesh = crate::constraints::compilation_tests::mesh(order);
+        let constraint = equation();
+        let profile = profile::derive(&constraint, Some(&mesh), None).unwrap();
+        assert_eq!(profile.target_occurrences, 2);
+        assert_eq!(
+            profile.occurrence_bytes,
+            (2 * std::mem::size_of::<(&RegionTarget, PreparedTarget)>()) as u64
+        );
+        assert_eq!(
+            profile.total_requested_bytes,
+            profile.occurrence_bytes + profile.selection_bytes
+        );
+        let prepared = PreparedTargets::derive(&constraint, Some(&mesh), None).unwrap();
+        assert_eq!(prepared.selections.len(), profile.target_occurrences);
+    }
+    let model = crate::fixtures::fixture_model(
+        crate::fixtures::FixtureId::StructuralBeamCantileverEndMomentReference,
+    );
+    let structural = model.structural.as_ref().unwrap();
+    let constraint = model
+        .constraints
+        .iter()
+        .find_map(|c| c.structural())
+        .unwrap();
+    let topology = CanonicalStructuralNodeSpace::derive_explicit(structural).unwrap();
+    let profile = profile::derive(constraint, None, Some(structural)).unwrap();
+    let prepared =
+        PreparedTargets::derive(constraint, None, Some((structural, &topology))).unwrap();
+    assert_eq!(prepared.selections.len(), profile.target_occurrences);
+    let retained: usize = prepared
+        .selections
+        .as_slice()
+        .iter()
+        .map(|(_, selection)| {
+            selection.nodes.capacity() * std::mem::size_of::<usize>()
+                + selection.resolved.matched_node_identities.capacity()
+                    * std::mem::size_of::<runmat_meshing_core::StableDigest>()
+        })
+        .sum();
+    assert!(profile.selection_bytes >= retained as u64);
+    let token = crate::progress::FeaCancellationToken::new();
+    token.cancel();
+    let _guard =
+        crate::progress::replace_fea_progress_context(crate::progress::FeaProgressContext {
+            cancellation: token,
+            ..Default::default()
+        });
+    assert_eq!(
+        profile::derive(constraint, None, Some(structural)).unwrap_err(),
+        ConstraintPlanError::Cancelled
+    );
+}
+
+#[test]
+fn mixed_selection_inventory_bounds_original_ownership_without_materializing_for_counting() {
+    use crate::physics::structural::topology::target::{
+        mixed_target_workspace_profile, resolve_mixed_structural_target,
+    };
+    let mesh = crate::constraints::compilation_tests::mesh(ElementOrder::Tet4);
+    let model = crate::fixtures::mixed_solid_beam_model(mesh.topology.nodes[0].coordinates_m);
+    let structural = model.structural.as_ref().unwrap();
+    let topology = CanonicalStructuralNodeSpace::derive(&mesh, structural).unwrap();
+    for target in [
+        RegionTarget::point("node:1"),
+        RegionTarget::point("node:102"),
+        RegionTarget::boundary("root"),
+    ] {
+        let profile = mixed_target_workspace_profile(&target, &mesh, structural).unwrap();
+        let selected =
+            resolve_mixed_structural_target(&target, &mesh, structural, &topology).unwrap();
+        assert!(
+            profile.solid_candidate_slots + profile.explicit_candidate_slots
+                >= selected.canonical_nodes().len()
+        );
+        assert!(
+            profile.total_requested_bytes
+                >= std::mem::size_of_val(selected.canonical_nodes()) as u64
+        );
+    }
+}

@@ -8,7 +8,11 @@ use runmat_analysis_core::AnalysisModel;
 mod admission;
 pub(crate) use admission::require_fixed_structural_nonlinear;
 mod block;
+#[cfg(test)]
+pub(crate) use block::NonlinearLoadBlockResult;
+mod contact;
 mod continuation;
+pub(crate) use contact::ContactBlockExecution;
 mod original_result;
 mod output;
 pub(crate) use original_result::validate_original_terminal_result;
@@ -19,6 +23,7 @@ pub(crate) use block::{
 pub use continuation::{NonlinearLoadContinuation, NonlinearLoadWork};
 pub(crate) struct NonlinearExecution<'a> {
     pub backend: ComputeBackend,
+    pub contact: Option<ContactBlockExecution<'a>>,
     pub solver_admission: Option<&'a crate::planning::resource::SolverAdmissionResourcePolicy>,
 }
 #[cfg(test)]
@@ -39,6 +44,7 @@ pub(crate) fn solve_nonlinear_system(
         options,
         NonlinearExecution {
             backend,
+            contact: None,
             solver_admission: None,
         },
         0.0,
@@ -82,5 +88,12 @@ fn map_error(error: SolidNewtonError) -> FeaRunError {
         SolidNewtonError::Cancelled => FeaRunError::Cancelled,
         SolidNewtonError::Invalid(reason) => FeaRunError::InvalidModel(reason),
         other => FeaRunError::Solve(other.to_string()),
+    }
+}
+
+fn map_assembly_error(error: crate::assembly::nonlinear_solid::NonlinearSolidError) -> FeaRunError {
+    match error {
+        crate::assembly::nonlinear_solid::NonlinearSolidError::Cancelled => FeaRunError::Cancelled,
+        other => FeaRunError::Assembly(other.to_string()),
     }
 }

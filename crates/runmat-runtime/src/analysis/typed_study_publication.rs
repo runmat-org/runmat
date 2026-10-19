@@ -7,6 +7,10 @@
 use runmat_analysis_core::ProcedureStepId;
 use runmat_execution::Digest;
 
+#[path = "typed_study_publication/preparation_facts.rs"]
+mod preparation_facts;
+#[path = "typed_study_publication/preparation_storage.rs"]
+mod preparation_storage;
 #[path = "typed_study_publication/publication_options.rs"]
 mod publication_options;
 
@@ -49,16 +53,30 @@ pub fn prepare_structural_study_publication(
     context: OperationContext,
     publication_identity: AnalysisStudyCompletionIdentity,
 ) -> Result<crate::analysis::PreparedStudyPublication, OperationErrorEnvelope> {
-    let mut preparation =
-        crate::analysis::study_publication::preparation::PublicationPreparation::capture(
+    let maximum =
+        crate::analysis::configuration::publication_staging_budget().map_err(|error| {
+            typed_publication_error(&context, &result.compiled().study_id, error.to_string())
+        })?;
+    let (original_bytes, copy_bytes) =
+        preparation_storage::inventory(result, maximum).map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &context,
+                |message| typed_publication_error(&context, &result.compiled().study_id, message),
+            )
+        })?;
+    let (mut preparation, completion_copies) =
+        crate::analysis::study_publication::preparation::PublicationPreparation::capture_with_completion_storage(
             result.definition_digest().map_err(|message| {
                 typed_publication_error(&context, &result.compiled().study_id, message)
             })?,
-            result,
+            original_bytes,
+            copy_bytes,
+            maximum,
         )
         .map_err(|error| {
             crate::analysis::prepared_study_publication::publication_failure(
-                error,
+                error.context(&preparation_facts::describe(result, maximum)),
                 &context,
                 |message| typed_publication_error(&context, &result.compiled().study_id, message),
             )
@@ -128,7 +146,7 @@ pub fn prepare_structural_study_publication(
     intent.intent_digest = intent
         .semantic_digest()
         .map_err(|message| typed_publication_error(&intent.context, &intent.study_id, message))?;
-    let published = prepare_structural_study_intent_completion(
+    let mut published = prepare_structural_study_intent_completion(
         intent,
         crate::meshing::MeshingExecutionOutput {
             artifact: result.mesh().clone(),
@@ -145,6 +163,18 @@ pub fn prepare_structural_study_publication(
     );
     let invalid =
         |message| typed_publication_error(&published_context, &compiled.study_id, message);
+    // Family completion consumed and dropped its owned mesh, model, workloads,
+    // and numerical result. Its staged output remains charged independently.
+    published
+        .staging
+        .release_owned_copies(completion_copies)
+        .map_err(|error| {
+            crate::analysis::prepared_study_publication::publication_failure(
+                error,
+                &published_context,
+                invalid,
+            )
+        })?;
     let result_manifest = StudyResultManifest::new(
         result.compiled(),
         result
@@ -155,7 +185,7 @@ pub fn prepare_structural_study_publication(
         result.mesh(),
         result.meshing_evidence(),
         numerical_evidence,
-        &published,
+        &mut published,
     )
     .map_err(|error| {
         crate::analysis::prepared_study_publication::publication_failure(

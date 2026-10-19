@@ -275,8 +275,15 @@ fn sweep_concurrency(
         })
         .unwrap_or(1)
         .max(1) as usize;
+    let threads_per_worker = sweep
+        .study
+        .execution_policy
+        .as_ref()
+        .map_or(available, |policy| {
+            policy.resources.cpu_threads_per_worker as usize
+        });
     requested
-        .min(available / workers_per_case)
+        .min(available / workers_per_case.saturating_mul(threads_per_worker))
         .max(1)
         .min(case_count)
 }

@@ -51,6 +51,7 @@ enum ConsumerPhase {
 
 /// Binds prestressed-modal extraction only to the state published by its exact preload task.
 pub struct StructuralPrestressedModalStudyCoordinator {
+    local_execution: LocalExecutionPlan,
     authored_study_digest: Digest,
     frozen_project_digest: Option<Digest>,
     mesh: SolverMeshArtifact,
@@ -130,6 +131,7 @@ impl StructuralPrestressedModalStudyCoordinator {
             thermal_source,
         )?;
         Ok(Self {
+            local_execution: preparation.local_execution,
             authored_study_digest: preparation.authored_study_digest,
             frozen_project_digest: preparation.frozen_project_digest,
             mesh: preparation.mesh,
@@ -210,6 +212,7 @@ impl StructuralPrestressedModalStudyCoordinator {
         let workload = self.template.clone().bind(transition)?;
         self.bound_modal_workload = Some(workload.clone());
         let prepared = prepare_structural_modal_task(StructuralModalTaskPreparation {
+            local_execution: self.local_execution,
             authored_study_digest: self.authored_study_digest,
             frozen_project_digest: self.frozen_project_digest,
             program_revision: self.program_revision.clone(),

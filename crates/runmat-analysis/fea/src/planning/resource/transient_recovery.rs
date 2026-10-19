@@ -129,7 +129,7 @@ pub fn build_structural_transient_recovery_resource_plan(
         .validate_for_result(result)
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
     let prepared = prepare_transient_preassembly(&workload.model, workload.into())
-        .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
+        .map_err(ResourcePlanningError::from_preparation_error)?;
     let scope_plan = build_structural_transient_scope_resource_plan(
         workload,
         mesh,

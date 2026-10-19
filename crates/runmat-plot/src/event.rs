@@ -1,3 +1,5 @@
+mod geometry_lines;
+pub use geometry_lines::GeometryLines;
 use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
     AreaPlot, AxesKind, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar,
@@ -47,6 +49,10 @@ pub struct FigureSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FigureScene {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry_overlay: Option<crate::geometry_scene::GeometrySceneOverlay>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geometry_lines: Vec<GeometryLines>,
     pub schema_version: u32,
     pub layout: FigureLayout,
     pub metadata: FigureMetadata,
@@ -56,7 +62,11 @@ pub struct FigureScene {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "dtype", content = "values", rename_all = "lowercase")]
 pub enum SceneNumericStorage {
+    // JSON has no NaN: serde_json writes NaN as null, so float storage reads null back as NaN
+    // (NaN marks gaps, e.g. holes in a surf).
+    #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
     F64(Vec<f64>),
+    #[serde(deserialize_with = "deserialize_vec_f32_lossy")]
     F32(Vec<f32>),
     I8(Vec<i8>),
     I16(Vec<i16>),
@@ -243,6 +253,19 @@ pub enum ScenePlot {
         color_rgba: [f32; 4],
         line_width: f32,
         line_style: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marker_style: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marker_size: Option<f32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marker_face_color: Option<[f32; 4]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marker_edge_color: Option<[f32; 4]>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        marker_filled: Option<bool>,
+        /// "off" for a line hidden from the legend; omitted when "on".
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        handle_visibility: Option<String>,
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -259,6 +282,8 @@ pub enum ScenePlot {
         label_orientation: String,
         axes_index: u32,
         visible: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        color_auto: bool,
     },
     Scatter {
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
@@ -436,6 +461,9 @@ pub enum ScenePlot {
         flatten_z: bool,
         #[serde(default)]
         image_mode: bool,
+        /// Heatmap: the text printed in each cell, indexed like `z`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell_labels: Option<Vec<Vec<String>>>,
         #[serde(default)]
         color_grid_rgba: Option<Vec<Vec<[f32; 4]>>>,
         #[serde(default, deserialize_with = "deserialize_option_pair_f64_lossy")]
@@ -556,6 +584,8 @@ pub enum ScenePlot {
         visible: bool,
         #[serde(default)]
         force_3d: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_range: Option<[f64; 2]>,
     },
     ContourFill {
         vertices: Vec<SerializedVertex>,
@@ -564,12 +594,16 @@ pub enum ScenePlot {
         axes_index: u32,
         label: Option<String>,
         visible: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value_range: Option<[f64; 2]>,
     },
     Pie {
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         values: Vec<f64>,
         colors_rgba: Vec<[f32; 4]>,
         slice_labels: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        legend_labels: Vec<String>,
         label_format: Option<String>,
         explode: Vec<bool>,
         axes_index: u32,
@@ -628,7 +662,7 @@ impl FigureSnapshot {
 }
 
 impl FigureScene {
-    pub const SCHEMA_VERSION: u32 = 4;
+    pub const SCHEMA_VERSION: u32 = 5;
 
     pub fn capture(figure: &Figure) -> Self {
         let snapshot = FigureSnapshot::capture(figure);
@@ -640,6 +674,8 @@ impl FigureScene {
 
         Self {
             schema_version: Self::SCHEMA_VERSION,
+            geometry_overlay: None,
+            geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
@@ -663,6 +699,8 @@ impl FigureScene {
 
         Ok(Self {
             schema_version: Self::SCHEMA_VERSION,
+            geometry_overlay: None,
+            geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots,
@@ -688,6 +726,8 @@ impl FigureScene {
 
         Self {
             schema_version: Self::SCHEMA_VERSION,
+            geometry_overlay: scene.overlay.clone(),
+            geometry_lines: scene.chunks.iter().filter_map(GeometryLines::capture).collect(),
             layout: FigureLayout {
                 axes_rows: 1,
                 axes_cols: 1,
@@ -762,14 +802,15 @@ impl FigureScene {
         for (plot_index, plot) in self.plots.into_iter().enumerate() {
             append_geometry_scene_chunks(&scene_id, plot_index, plot, &mut chunks)?;
         }
+        for (index, lines) in self.geometry_lines.into_iter().enumerate() {
+            chunks.push(lines.restore(format!("{scene_id}:lines:{index}"))?);
+        }
         if chunks.is_empty() {
             return Err("figure scene does not contain renderable mesh plots".to_string());
         }
-        let mut scene = crate::GeometryScene::new(scene_id, revision, chunks).with_title(
-            self.metadata
-                .title
-                .unwrap_or_else(|| "Geometry Preview".to_string()),
-        );
+        let mut scene = crate::GeometryScene::new(scene_id, revision, chunks);
+        scene.title = self.metadata.title;
+        scene.overlay = self.geometry_overlay;
         scene.show_grid = self.metadata.grid_enabled;
         scene.axis_equal = self.metadata.axis_equal;
         Ok(scene)
@@ -976,7 +1017,7 @@ fn scene_chunk_to_mesh_plot(
         edge_width: 0.0,
         edge_mode: "none".to_string(),
         feature_edge_groups: Vec::new(),
-        vertex_colors_rgba: Vec::new(),
+        vertex_colors_rgba: chunk.vertices.iter().map(|vertex| vertex.color).collect(),
         triangle_colors_rgba: Vec::new(),
         axes_index: 0,
         label: chunk.label.clone(),
@@ -1137,6 +1178,10 @@ pub struct SerializedTextStyle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interpreter: Option<String>,
     pub visible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub horizontal_alignment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vertical_alignment: Option<String>,
 }
 
 impl Default for SerializedTextStyle {
@@ -1154,6 +1199,8 @@ impl From<TextStyle> for SerializedTextStyle {
             font_angle: value.font_angle,
             interpreter: value.interpreter,
             visible: value.visible,
+            horizontal_alignment: value.horizontal_alignment,
+            vertical_alignment: value.vertical_alignment,
         }
     }
 }
@@ -1167,6 +1214,8 @@ impl From<SerializedTextStyle> for TextStyle {
             font_angle: value.font_angle,
             interpreter: value.interpreter,
             visible: value.visible,
+            horizontal_alignment: value.horizontal_alignment,
+            vertical_alignment: value.vertical_alignment,
         }
     }
 }
@@ -1955,6 +2004,13 @@ impl ScenePlot {
                     color_rgba: vec4_to_rgba(line.color),
                     line_width: line.line_width,
                     line_style: format!("{:?}", line.line_style),
+                    marker_style: line.marker.as_ref().map(|m| format!("{:?}", m.kind)),
+                    marker_size: line.marker.as_ref().map(|m| m.size),
+                    marker_face_color: line.marker.as_ref().map(|m| vec4_to_rgba(m.face_color)),
+                    marker_edge_color: line.marker.as_ref().map(|m| vec4_to_rgba(m.edge_color)),
+                    marker_filled: line.marker.as_ref().map(|m| m.filled),
+                    handle_visibility: (!line.handle_visibility.eq_ignore_ascii_case("on"))
+                        .then(|| line.handle_visibility.clone()),
                     axes_index,
                     label: line.label.clone(),
                     visible: line.visible,
@@ -2193,6 +2249,7 @@ impl ScenePlot {
                     alpha: surface.alpha,
                     flatten_z: surface.flatten_z,
                     image_mode: surface.image_mode,
+                    cell_labels: surface.cell_labels.clone(),
                     color_grid_rgba: color_grid.as_ref().map(|grid| {
                         grid.iter()
                             .map(|row| row.iter().map(|color| vec4_to_rgba(*color)).collect())
@@ -2295,6 +2352,7 @@ impl ScenePlot {
                     label: contour.label.clone(),
                     visible: contour.visible,
                     force_3d: contour.force_3d,
+                    value_range: contour.value_range.map(|(a, b)| [a, b]),
                 }
             }
             PlotElement::ContourFill(fill) => {
@@ -2314,6 +2372,7 @@ impl ScenePlot {
                     axes_index,
                     label: fill.label.clone(),
                     visible: fill.visible,
+                    value_range: fill.value_range.map(|(a, b)| [a, b]),
                 }
             }
         };
@@ -2566,6 +2625,13 @@ impl ScenePlot {
                     color_rgba: vec4_to_rgba(line.color),
                     line_width: line.line_width,
                     line_style: format!("{:?}", line.line_style),
+                    marker_style: line.marker.as_ref().map(|m| format!("{:?}", m.kind)),
+                    marker_size: line.marker.as_ref().map(|m| m.size),
+                    marker_face_color: line.marker.as_ref().map(|m| vec4_to_rgba(m.face_color)),
+                    marker_edge_color: line.marker.as_ref().map(|m| vec4_to_rgba(m.edge_color)),
+                    marker_filled: line.marker.as_ref().map(|m| m.filled),
+                    handle_visibility: (!line.handle_visibility.eq_ignore_ascii_case("on"))
+                        .then(|| line.handle_visibility.clone()),
                     axes_index,
                     label: line.label.clone(),
                     visible: line.visible,
@@ -2586,6 +2652,7 @@ impl ScenePlot {
                 label_orientation: line.label_orientation.clone(),
                 axes_index,
                 visible: line.visible,
+                color_auto: line.color_auto,
             },
             PlotElement::Scatter(scatter) => {
                 let (x, y) = scatter.host_xy_f64().ok().flatten().unwrap_or_default();
@@ -2728,6 +2795,7 @@ impl ScenePlot {
                 alpha: surface.alpha,
                 flatten_z: surface.flatten_z,
                 image_mode: surface.image_mode,
+                cell_labels: surface.cell_labels.clone(),
                 color_grid_rgba: surface.color_grid.as_ref().map(|grid| {
                     grid.iter()
                         .map(|row| row.iter().map(|color| vec4_to_rgba(*color)).collect())
@@ -2864,6 +2932,7 @@ impl ScenePlot {
                 label: contour.label.clone(),
                 visible: contour.visible,
                 force_3d: contour.force_3d,
+                value_range: contour.value_range.map(|(a, b)| [a, b]),
             },
             PlotElement::ContourFill(fill) => Self::ContourFill {
                 vertices: fill
@@ -2878,11 +2947,13 @@ impl ScenePlot {
                 axes_index,
                 label: fill.label.clone(),
                 visible: fill.visible,
+                value_range: fill.value_range.map(|(a, b)| [a, b]),
             },
             PlotElement::Pie(pie) => Self::Pie {
                 values: pie.values.clone(),
                 colors_rgba: pie.colors.iter().map(|c| vec4_to_rgba(*c)).collect(),
                 slice_labels: pie.slice_labels.clone(),
+                legend_labels: pie.legend_labels.clone(),
                 label_format: pie.label_format.clone(),
                 explode: pie.explode.clone(),
                 axes_index,
@@ -2902,6 +2973,12 @@ impl ScenePlot {
                 color_rgba,
                 line_width,
                 line_style,
+                marker_style,
+                marker_size,
+                marker_face_color,
+                marker_edge_color,
+                marker_filled,
+                handle_visibility,
                 axes_index,
                 label,
                 visible,
@@ -2916,6 +2993,22 @@ impl ScenePlot {
                 line.set_color(rgba_to_vec4(color_rgba));
                 line.set_line_width(line_width);
                 line.set_line_style(parse_line_style(&line_style));
+                if let Some(visibility) = handle_visibility {
+                    line.handle_visibility = visibility;
+                }
+                if let Some(size) = marker_size {
+                    line.set_marker(Some(crate::plots::line::LineMarkerAppearance {
+                        kind: parse_marker_style(marker_style.as_deref().unwrap_or("Circle")),
+                        size,
+                        edge_color: marker_edge_color
+                            .map(rgba_to_vec4)
+                            .unwrap_or(rgba_to_vec4(color_rgba)),
+                        face_color: marker_face_color
+                            .map(rgba_to_vec4)
+                            .unwrap_or(rgba_to_vec4(color_rgba)),
+                        filled: marker_filled.unwrap_or(false),
+                    }));
+                }
                 line.label = label;
                 line.set_visible(visible);
                 figure.add_line_plot_on_axes(line, axes_index as usize);
@@ -2931,6 +3024,7 @@ impl ScenePlot {
                 label_orientation,
                 axes_index,
                 visible,
+                color_auto,
             } => {
                 let orientation = parse_reference_line_orientation(&orientation)?;
                 let mut line = ReferenceLine::new(orientation, value)?.with_style(
@@ -2942,6 +3036,7 @@ impl ScenePlot {
                 line.display_name = display_name;
                 line.label_orientation = label_orientation;
                 line.visible = visible;
+                line.color_auto = color_auto;
                 figure.add_reference_line_on_axes(line, axes_index as usize);
             }
             ScenePlot::Scatter {
@@ -3224,6 +3319,7 @@ impl ScenePlot {
                 alpha,
                 flatten_z,
                 image_mode,
+                cell_labels,
                 color_grid_rgba,
                 color_limits,
                 axes_index,
@@ -3259,6 +3355,7 @@ impl ScenePlot {
                 surface.alpha = alpha.clamp(0.0, 1.0);
                 surface.flatten_z = flatten_z;
                 surface.image_mode = image_mode;
+                surface.cell_labels = cell_labels;
                 surface.color_grid = color_grid_rgba.map(|grid| {
                     grid.into_iter()
                         .map(|row| row.into_iter().map(rgba_to_vec4).collect())
@@ -3462,6 +3559,7 @@ impl ScenePlot {
                 label,
                 visible,
                 force_3d,
+                value_range,
             } => {
                 let mut contour = ContourPlot::from_vertices(
                     vertices.into_iter().map(Into::into).collect(),
@@ -3469,7 +3567,8 @@ impl ScenePlot {
                     serialized_bounds(bounds_min, bounds_max),
                 )
                 .with_line_width(line_width)
-                .with_force_3d(force_3d);
+                .with_force_3d(force_3d)
+                .with_value_range(value_range.map(|[a, b]| (a, b)));
                 contour.label = label;
                 contour.set_visible(visible);
                 figure.add_contour_plot_on_axes(contour, axes_index as usize);
@@ -3481,11 +3580,13 @@ impl ScenePlot {
                 axes_index,
                 label,
                 visible,
+                value_range,
             } => {
                 let mut fill = ContourFillPlot::from_vertices(
                     vertices.into_iter().map(Into::into).collect(),
                     serialized_bounds(bounds_min, bounds_max),
-                );
+                )
+                .with_value_range(value_range.map(|[a, b]| (a, b)));
                 fill.label = label;
                 fill.set_visible(visible);
                 figure.add_contour_fill_plot_on_axes(fill, axes_index as usize);
@@ -3494,6 +3595,7 @@ impl ScenePlot {
                 values,
                 colors_rgba,
                 slice_labels,
+                legend_labels,
                 label_format,
                 explode,
                 axes_index,
@@ -3510,6 +3612,7 @@ impl ScenePlot {
                     pie = pie.with_label_format(fmt);
                 }
                 pie.label = label;
+                pie.set_legend_labels(legend_labels);
                 pie.set_visible(visible);
                 figure.add_pie_chart_on_axes(pie, axes_index as usize);
             }
@@ -3842,6 +3945,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numeric_storage_reads_null_as_nan() {
+        let data: SceneNumericData = serde_json::from_str(
+            r#"{"storage":{"dtype":"f64","values":[1.0,null]},"shape":[1,2]}"#,
+        )
+        .expect("null decodes as NaN");
+        let SceneNumericStorage::F64(values) = data.storage else {
+            panic!("expected f64 storage")
+        };
+        assert_eq!(values[0], 1.0);
+        assert!(values[1].is_nan());
+    }
     use crate::plots::{
         AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Figure, Line3Plot, LinePlot,
         MeshPlot, NumericPlotData, PatchPlot, PieChart, PolarHistogramDisplayStyle, QuiverPlot,
@@ -4037,6 +4153,7 @@ mod tests {
             alpha: 1.0,
             flatten_z: false,
             image_mode: false,
+            cell_labels: None,
             color_grid_rgba: Some(vec![
                 vec![[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0]],
                 vec![[0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]],
@@ -4064,6 +4181,7 @@ mod tests {
             alpha: 1.0,
             flatten_z: false,
             image_mode: false,
+            cell_labels: None,
             color_grid_rgba: None,
             color_limits: None,
             axes_index: 0,
@@ -4081,6 +4199,8 @@ mod tests {
         let snapshot = FigureSnapshot::capture(&Figure::new());
         let scene = FigureScene {
             schema_version: FigureScene::SCHEMA_VERSION,
+            geometry_overlay: None,
+            geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots: vec![ScenePlot::Surface {
@@ -4098,6 +4218,7 @@ mod tests {
                 alpha: 1.0,
                 flatten_z: true,
                 image_mode: true,
+                cell_labels: None,
                 color_grid_rgba: Some(vec![
                     vec![
                         [1.0, 0.0, 0.0, 1.0],
@@ -4407,6 +4528,54 @@ mod tests {
     }
 
     #[test]
+    fn line_markers_survive_figure_scene_roundtrip() {
+        let mut figure = Figure::new();
+        let mut line = LinePlot::new(vec![0.0, 1.0, 2.0], vec![1.0, 3.0, 2.0]).unwrap();
+        line.set_line_style(crate::plots::line::LineStyle::None);
+        line.set_marker(Some(crate::plots::line::LineMarkerAppearance {
+            kind: MarkerStyle::Square,
+            size: 7.0,
+            edge_color: Vec4::new(0.1, 0.2, 0.3, 1.0),
+            face_color: Vec4::new(0.4, 0.5, 0.6, 1.0),
+            filled: true,
+        }));
+        figure.add_line_plot(line);
+
+        let scene = FigureScene::capture(&figure);
+        let json = serde_json::to_string(&scene).unwrap();
+        let rebuilt: FigureScene = serde_json::from_str(&json).unwrap();
+        let rebuilt = rebuilt.into_figure().expect("figure");
+        let PlotElement::Line(line) = rebuilt.plots().next().unwrap() else {
+            panic!("expected line")
+        };
+        let marker = line.marker.as_ref().expect("marker kept");
+        assert_eq!(marker.kind, MarkerStyle::Square);
+        assert_eq!(marker.size, 7.0);
+        assert!(marker.filled);
+        assert_eq!(marker.face_color, Vec4::new(0.4, 0.5, 0.6, 1.0));
+    }
+
+    #[test]
+    fn hidden_lines_stay_out_of_the_legend_after_scene_roundtrip() {
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![0.0, 1.0]).unwrap().with_label("shown"));
+        let mut hidden = LinePlot::new(vec![0.0, 1.0], vec![1.0, 0.0]).unwrap().with_label("[1 0]");
+        hidden.handle_visibility = "off".to_string();
+        figure.add_line_plot(hidden);
+
+        let json = serde_json::to_string(&FigureScene::capture(&figure)).unwrap();
+        let rebuilt: FigureScene = serde_json::from_str(&json).unwrap();
+        let labels: Vec<String> = rebuilt
+            .into_figure()
+            .expect("figure")
+            .legend_entries()
+            .into_iter()
+            .map(|e| e.label)
+            .collect();
+        assert_eq!(labels, vec!["shown".to_string()]);
+    }
+
+    #[test]
     fn figure_scene_rejects_unknown_reference_line_orientation() {
         let mut scene = FigureScene::capture(&Figure::new());
         scene.plots.push(ScenePlot::ReferenceLine {
@@ -4420,6 +4589,7 @@ mod tests {
             label_orientation: "horizontal".into(),
             axes_index: 0,
             visible: true,
+            color_auto: false,
         });
 
         let rebuilt = scene.clone().into_figure().expect("valid orientation");
@@ -5010,6 +5180,8 @@ mod tests {
         let snapshot = FigureSnapshot::capture(&Figure::new());
         let scene = FigureScene {
             schema_version: FigureScene::SCHEMA_VERSION,
+            geometry_overlay: None,
+            geometry_lines: Vec::new(),
             layout: snapshot.layout,
             metadata: snapshot.metadata,
             plots: vec![ScenePlot::Surface {
@@ -5027,6 +5199,7 @@ mod tests {
                 alpha: 1.0,
                 flatten_z: false,
                 image_mode: false,
+                cell_labels: None,
                 color_grid_rgba: None,
                 color_limits: None,
                 axes_index: 0,

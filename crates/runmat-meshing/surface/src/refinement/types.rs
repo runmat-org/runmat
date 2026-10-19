@@ -17,6 +17,7 @@ pub enum ExactFaceRefinementReason {
     MetricEdgeLength,
     MetricAngle,
     PhysicalAspectRatio,
+    BoundaryMetricSupport,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -98,11 +99,13 @@ pub struct ExactFaceRefinementPolicy {
 
 #[derive(Clone, Copy)]
 pub struct ExactFaceRefinementContext<'a> {
+    pub(crate) metric_field: Option<&'a crate::ResolvedFaceMetricField>,
     pub topology: &'a ExactBRepTopology,
     pub metric_request: &'a MetricFieldRequest,
     pub evaluator: &'a dyn ExactSurfaceEvaluator,
     pub geometry_control: &'a dyn GeometryEvaluationControl,
     pub cancellation: &'a dyn MeshingCancellationSignal,
+    pub boundary_coordinates: Option<&'a crate::ExactBoundaryNodeCoordinates<'a>>,
 }
 
 impl<'a> ExactFaceRefinementContext<'a> {
@@ -114,11 +117,30 @@ impl<'a> ExactFaceRefinementContext<'a> {
         cancellation: &'a dyn MeshingCancellationSignal,
     ) -> Self {
         Self {
+            metric_field: None,
             topology,
             metric_request,
             evaluator,
             geometry_control,
             cancellation,
+            boundary_coordinates: None,
+        }
+    }
+    pub fn with_boundary_coordinates(
+        mut self,
+        coordinates: &'a crate::ExactBoundaryNodeCoordinates<'a>,
+    ) -> Self {
+        self.boundary_coordinates = Some(coordinates);
+        self
+    }
+    pub(crate) fn geometry_context(self) -> crate::ExactFaceGeometryContext<'a> {
+        crate::ExactFaceGeometryContext {
+            metric_field: self.metric_field,
+            topology: self.topology,
+            metric_request: self.metric_request,
+            evaluator: self.evaluator,
+            control: self.geometry_control,
+            boundary_coordinates: self.boundary_coordinates,
         }
     }
 }

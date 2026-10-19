@@ -17,7 +17,7 @@ pub async fn execute_host_program_request_with_project(
     request: ProgramExecutionRequest,
     project: Option<&runmat_package::FrozenProjectHandoff>,
 ) -> ProgramExecutionResponse {
-    execute_host_program_request_in_context(request, project, None, None).await
+    execute_host_program_request_in_context(request, project, None, None, None).await
 }
 
 pub(crate) async fn execute_host_program_request_in_context(
@@ -25,6 +25,7 @@ pub(crate) async fn execute_host_program_request_in_context(
     project: Option<&runmat_package::FrozenProjectHandoff>,
     environment: Option<&[(String, String)]>,
     cancellation: Option<Arc<AtomicBool>>,
+    resources: Option<&runmat_execution::resource::ResourceRequest>,
 ) -> ProgramExecutionResponse {
     if let Err(error) = request.validate_for_portable_host() {
         return ProgramExecutionResponse::Failure {
@@ -37,6 +38,18 @@ pub(crate) async fn execute_host_program_request_in_context(
         };
     }
     if request.artifact.form == ExecutableForm::AnalysisWorkload {
+        // This branch is synchronous: the thread-affine context remains installed
+        // throughout the physical solve. Local process cancellation remains owned
+        // by the parent guard; callers that supply a token also reach the solver.
+        let _progress = crate::analysis_progress::install(
+            cancellation
+                .as_ref()
+                .map(|flag| {
+                    runmat_analysis_fea::FeaCancellationToken::from_shared(Arc::clone(flag))
+                })
+                .unwrap_or_default(),
+            None,
+        );
         let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
             return ProgramExecutionResponse::Failure {
                 message: "analysis worker object store is not configured".into(),
@@ -55,12 +68,21 @@ pub(crate) async fn execute_host_program_request_in_context(
                 }
             }
         };
-        return crate::execute_analysis_program_request(
-            &request,
-            &mut store,
-            &crate::NativeAnalysisKernel,
-            crate::NativeAnalysisHostLimits::default(),
-        );
+        return match resources {
+            Some(resources) => crate::execute_reserved_analysis_program_request(
+                &request,
+                &mut store,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+                resources,
+            ),
+            None => crate::execute_analysis_program_request(
+                &request,
+                &mut store,
+                &crate::NativeAnalysisKernel,
+                crate::NativeAnalysisHostLimits::default(),
+            ),
+        };
     }
     if request.artifact.form == ExecutableForm::GeometryWorkload {
         let Some(root) = std::env::var_os(crate::NATIVE_OBJECT_STORE_ROOT_ENV) else {
@@ -216,6 +238,7 @@ mod tests {
                 request.clone(),
                 None,
                 Some(&conflicting),
+                None,
                 None
             )
             .await,

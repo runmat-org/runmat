@@ -14,12 +14,15 @@ use super::{
     initial_condition::InitialCondition,
     interfaces::AnalysisInterface,
     material_assignment::MaterialAssignment,
-    materials::{MaterialModel, SolverMaterialModel},
+    materials::MaterialModel,
     random_vibration::RandomExcitationSpectrum,
     response_spectrum::ResponseSpectrum,
     signal::PhysicalSignal,
     structure::StructuralModel,
 };
+mod solver_items;
+pub use solver_items::{SolverMaterialAssignments, SolverMaterials, SolverSteps};
+
 use crate::{
     AnalysisSequence, IndependentDomain, PhysicsFamily, ProcedureStep, ProcedureStepId,
     RestartPolicy, SequenceBranch, SequenceDependency, SolutionSpace, StateInput, StateTransition,
@@ -83,14 +86,14 @@ pub struct SolverProcedureStep<'a> {
     pub activations: &'a [StepObjectActivation],
     pub excitation_case_selection: &'a crate::ExcitationCaseSelection,
     pub state_inputs: &'a [StateInput],
-    pub restart: RestartPolicy,
+    pub restart: &'a RestartPolicy,
 }
 
 /// Canonical solver semantics of an authored procedure graph.
 #[derive(Serialize)]
 pub struct SolverAnalysisSequence<'a> {
     pub sequence_id: &'a str,
-    pub steps: Vec<SolverProcedureStep<'a>>,
+    pub steps: SolverSteps<'a>,
     pub dependencies: &'a [SequenceDependency],
     pub transitions: &'a [StateTransition],
     pub branches: &'a [SequenceBranch],
@@ -104,8 +107,8 @@ pub struct SolverAnalysisModel<'a> {
     pub geometry_revision: u32,
     pub units: UnitSystem,
     pub frame: &'a CoordinateFrame,
-    pub materials: Vec<SolverMaterialModel<'a>>,
-    pub material_assignments: Vec<SolverMaterialAssignment<'a>>,
+    pub materials: SolverMaterials<'a>,
+    pub material_assignments: SolverMaterialAssignments<'a>,
     pub structural: &'a Option<StructuralModel>,
     pub thermal: &'a Option<ThermalDomain>,
     pub thermo_mechanical: &'a Option<ThermoMechanicalDomain>,
@@ -140,19 +143,8 @@ impl AnalysisModel {
             geometry_revision: self.geometry_revision,
             units: self.units,
             frame: &self.frame,
-            materials: self
-                .materials
-                .iter()
-                .map(MaterialModel::solver_identity_contract)
-                .collect(),
-            material_assignments: self
-                .material_assignments
-                .iter()
-                .map(|assignment| SolverMaterialAssignment {
-                    target: &assignment.target,
-                    assigned_material_id: &assignment.assigned_material_id,
-                })
-                .collect(),
+            materials: SolverMaterials(&self.materials),
+            material_assignments: SolverMaterialAssignments(&self.material_assignments),
             structural: &self.structural,
             thermal: &self.thermal,
             thermo_mechanical: &self.thermo_mechanical,
@@ -178,11 +170,7 @@ impl AnalysisSequence {
     pub fn solver_identity_contract(&self) -> SolverAnalysisSequence<'_> {
         SolverAnalysisSequence {
             sequence_id: &self.sequence_id,
-            steps: self
-                .steps
-                .iter()
-                .map(ProcedureStep::solver_identity_contract)
-                .collect(),
+            steps: SolverSteps(&self.steps),
             dependencies: &self.dependencies,
             transitions: &self.transitions,
             branches: &self.branches,
@@ -201,7 +189,7 @@ impl crate::ProcedureStep {
             independent_domain: &self.independent_domain,
             activations: &self.activations,
             state_inputs: &self.state_inputs,
-            restart: self.restart.clone(),
+            restart: &self.restart,
         }
     }
 }

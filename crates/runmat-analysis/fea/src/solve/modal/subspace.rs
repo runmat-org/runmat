@@ -2,6 +2,7 @@ use crate::algebra::{apply_k, apply_m, AssembledRealSystem};
 use crate::solve::symmetric_eigen::symmetric_eigendecomposition;
 
 use super::math::{dot, orthonormalize_mass_block};
+mod inverse;
 
 const EIGENVALUE_STABILITY_TOLERANCE: f64 = 1.0e-9;
 
@@ -43,7 +44,8 @@ where
         let mut filtered = Vec::with_capacity(dimension);
         for vector in &basis {
             let rhs = apply_m(system, vector);
-            let Some(solution) = solve_stiffness(&rhs, None) else {
+            let initial_guess = inverse::rayleigh_start(system, vector, &rhs);
+            let Some(solution) = solve_stiffness(&rhs, initial_guess.as_deref()) else {
                 return BlockSubspaceResult {
                     candidates,
                     converged: false,
@@ -82,6 +84,14 @@ where
                     let scale = previous.abs().max(current.abs()).max(1.0);
                     (previous - current).abs() / scale <= EIGENVALUE_STABILITY_TOLERANCE
                 });
+        crate::progress::emit_phase(
+            "Modal eigenspace",
+            crate::progress::FeaProgressPhase::Solve,
+            crate::progress::FeaProgressStatus::Advanced,
+            format!("iteration={iteration} dimension={dimension} qualified_dimension={qualified_dimension} maximum_relative_residual={maximum_residual:.8e} eigenvalues_stable={eigenvalues_stable}"),
+            Some(iteration as u64),
+            None,
+        );
         if maximum_residual <= residual_tolerance && eigenvalues_stable {
             return BlockSubspaceResult {
                 candidates,
@@ -204,7 +214,7 @@ mod tests {
         CanonicalRealOperators, MatrixProperties, OperatorRole, RealSparseMatrix,
     };
 
-    fn diagonal_system(stiffness: Vec<f64>, mass: Vec<f64>) -> AssembledRealSystem {
+    pub(super) fn diagonal_system(stiffness: Vec<f64>, mass: Vec<f64>) -> AssembledRealSystem {
         let dimension = stiffness.len();
         let damping = vec![0.0; dimension];
         AssembledRealSystem::try_new(
@@ -240,7 +250,8 @@ mod tests {
         let stiffness = vec![4.0, 6.0, 36.0, 80.0];
         let mass = vec![2.0, 3.0, 4.0, 5.0];
         let system = diagonal_system(stiffness.clone(), mass);
-        let result = solve_lowest_eigenspace(&system, 4, 3, 1.0e-12, 8, |rhs, _| {
+        let result = solve_lowest_eigenspace(&system, 4, 3, 1.0e-12, 8, |rhs, initial| {
+            assert!(initial.is_some_and(|values| values.iter().all(|value| value.is_finite())));
             Some(
                 rhs.iter()
                     .zip(&stiffness)

@@ -231,11 +231,15 @@ async fn plot_pole_zero_map_statement(first_sys: Value, rest: Vec<Value>) -> Bui
     }
 
     let mut args = Vec::new();
+    let mut points = Vec::new();
     for (idx, (system, style)) in systems.into_iter().enumerate() {
         let eval = PoleZeroMap::from_value_async(system).await?;
         push_pole_zero_map_series(&mut args, &eval, style.as_ref(), idx)?;
+        points.extend(eval.poles.iter().chain(eval.zeros.iter()).copied());
     }
-    render_pole_zero_map_args(args).await
+    render_pole_zero_map_args(args).await?;
+    super::frame_complex_plane(&points, 0.15).await;
+    Ok(())
 }
 
 fn is_dynamic_model_object(value: &Value) -> bool {
@@ -313,7 +317,10 @@ async fn render_pole_zero_map(
 ) -> BuiltinResult<()> {
     let mut args = Vec::new();
     push_pole_zero_map_series(&mut args, eval, style, series_index)?;
-    render_pole_zero_map_args(args).await
+    render_pole_zero_map_args(args).await?;
+    let points: Vec<Complex64> = eval.poles.iter().chain(eval.zeros.iter()).copied().collect();
+    super::frame_complex_plane(&points, 0.15).await;
+    Ok(())
 }
 
 fn push_pole_zero_map_series(

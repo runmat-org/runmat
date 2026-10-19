@@ -209,6 +209,14 @@ impl AnalysisHostWorkload {
         request: &ProgramExecutionRequest,
         store: &impl CacheImport,
     ) -> AnalysisBridgeResult<Self> {
+        Self::from_program_request_admitted(request, store, None)
+    }
+
+    pub(crate) fn from_program_request_admitted(
+        request: &ProgramExecutionRequest,
+        store: &impl CacheImport,
+        admission: Option<&crate::object::AnalysisInputAdmission>,
+    ) -> AnalysisBridgeResult<Self> {
         request.validate_for_portable_host()?;
         if request.artifact.form != ExecutableForm::AnalysisWorkload
             || request.recipe.execution_mode != ANALYSIS_HOST_EXECUTION_MODE
@@ -240,11 +248,15 @@ impl AnalysisHostWorkload {
                 "analysis host invocation reference is malformed".into(),
             ));
         }
-        let bytes = store
-            .read_verified(descriptor_root.logical_digest)?
-            .ok_or_else(|| {
-                AnalysisBridgeError::Invalid("analysis host invocation is unavailable".into())
-            })?;
+        let bytes = crate::object::read_input(
+            store,
+            descriptor_root.logical_digest,
+            descriptor_root.encoded_length,
+            admission,
+        )?
+        .ok_or_else(|| {
+            AnalysisBridgeError::Invalid("analysis host invocation is unavailable".into())
+        })?;
         if bytes.len() as u64 != descriptor_root.encoded_length
             || runmat_execution::Digest::sha256(&bytes) != descriptor_root.logical_digest
         {
@@ -256,6 +268,9 @@ impl AnalysisHostWorkload {
             authorization_scope: descriptor_root.authorization_scope.clone(),
             encryption_context: descriptor_root.encryption_context,
         };
+        if let Some(admission) = admission {
+            admission.admit_canonical_decode(&bytes)?;
+        }
         let host = Self::from_canonical_bytes(&bytes, artifact_access)?;
         host.artifact_access.validate_reference(
             descriptor_root,

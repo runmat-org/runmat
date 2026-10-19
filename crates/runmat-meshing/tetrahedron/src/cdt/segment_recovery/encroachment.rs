@@ -1,3 +1,7 @@
+mod broad_phase;
+mod clearance;
+mod placement;
+use broad_phase::DiametralRegion;
 use runmat_meshing_core::{
     quality::predicate::{diametral_sphere_position_constructed, distance, PredicateSign},
     StableDigest,
@@ -33,40 +37,79 @@ pub(super) fn encroaching_point(
         topology.nodes()[right_index as usize],
     ];
     let endpoints = endpoint_nodes.map(|node| node.coordinates_m);
-    let broad_phase = diametral_broad_phase(endpoints);
+    let region = DiametralRegion::new(endpoints);
     let mut best = None::<(f64, StableDigest, u32, PredicateSign)>;
-    for (vertex, node) in topology.nodes().iter().enumerate() {
-        work.search_step(constraint_index)?;
-        if vertex == left_index as usize || vertex == right_index as usize {
-            continue;
-        }
-        // The sphere is contained by this deliberately conservative cube.
-        // Candidates admitted by the broad phase still receive the exact
-        // constructed predicate below.
-        if broad_phase.is_some_and(|[minimum, maximum]| {
-            (0..3).any(|axis| {
-                node.coordinates_m[axis] < minimum[axis] || node.coordinates_m[axis] > maximum[axis]
-            })
-        }) {
-            continue;
-        }
-        let relation = diametral_sphere_position_constructed(
-            endpoint_nodes.map(|node| {
-                crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
-                    .predicate_point()
-            }),
-            crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
-                .predicate_point(),
+    let bounds = region.as_ref().map(|region| region.bounds);
+    let candidates = topology
+        .node_candidates_in_region(
+            bounds,
+            &|bounds| {
+                region
+                    .as_ref()
+                    .is_none_or(|region| region.intersects(bounds))
+            },
+            &mut || work.search_point_index_step(constraint_index),
         )
-        .map_err(|failure| {
-            invalid_topology(
-                constraint_index,
-                format!("diametral-sphere predicate failed: {failure:?}"),
-            )
+        .map_err(|mut failure| {
+            failure.reason = format!(
+                "{}; point-query nodes={}, endpoints={endpoints:?}, bounds={bounds:?}",
+                failure.reason,
+                topology.nodes().len()
+            );
+            failure
         })?;
-        if matches!(relation, PredicateSign::Negative | PredicateSign::Zero) {
-            let rank = circumradius_rank(endpoints, node.coordinates_m);
-            let candidate = (rank, node.identity, vertex as u32, relation);
+    // Reserve the unchanged predicate work before dispatch, then borrow only nodes.
+    // Mutable topology indexes and recovery counters never cross worker boundaries.
+    for _ in &candidates {
+        work.search_encroachment_step(constraint_index)?;
+    }
+    let nodes = topology.nodes();
+    let cancellation = work.cancellation;
+    for wave in candidates.chunks(256) {
+        let evaluate = |&vertex: &u32| {
+            if cancellation.is_cancelled() {
+                return Err(error(
+                    DelaunaySegmentRecoveryErrorKind::Cancelled,
+                    Some(constraint_index),
+                    "cancelled",
+                ));
+            }
+            if vertex == left_index || vertex == right_index {
+                return Ok(None);
+            }
+            let node = nodes[vertex as usize];
+            let relation = diametral_sphere_position_constructed(
+                endpoint_nodes.map(|node| {
+                    crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
+                        .predicate_point()
+                }),
+                crate::cdt::DelaunayVolumeNode::explicit(node.identity, node.coordinates_m)
+                    .predicate_point(),
+            )
+            .map_err(|failure| {
+                invalid_topology(
+                    constraint_index,
+                    format!("diametral-sphere predicate failed: {failure:?}"),
+                )
+            })?;
+            Ok(
+                matches!(relation, PredicateSign::Negative | PredicateSign::Zero).then(|| {
+                    (
+                        circumradius_rank(endpoints, node.coordinates_m),
+                        node.identity,
+                        vertex,
+                        relation,
+                    )
+                }),
+            )
+        };
+        let outcomes = if wave.len() >= 32 {
+            runmat_cpu_execution::ordered_map(wave, evaluate)
+        } else {
+            wave.iter().map(evaluate).collect()
+        };
+        for candidate in outcomes.into_iter().filter_map(|result| result.transpose()) {
+            let candidate = candidate?;
             if best.as_ref().is_none_or(|current| {
                 candidate.0 > current.0 || candidate.0 == current.0 && candidate.1 < current.1
             }) {
@@ -77,28 +120,6 @@ pub(super) fn encroaching_point(
     Ok(best.map(|(_, _, vertex, relation)| EncroachingPoint { vertex, relation }))
 }
 
-fn diametral_broad_phase(endpoints: [[f64; 3]; 2]) -> Option<[[f64; 3]; 2]> {
-    let center = std::array::from_fn(|axis| 0.5 * endpoints[0][axis] + 0.5 * endpoints[1][axis]);
-    // Half the L1 endpoint distance is an upper bound for the Euclidean
-    // diametral radius. Round it outward again to absorb arithmetic error in
-    // both the radius and center construction.
-    let radius = 0.5
-        * (0..3)
-            .map(|axis| (endpoints[1][axis] - endpoints[0][axis]).abs())
-            .sum::<f64>();
-    let scale = center
-        .into_iter()
-        .map(f64::abs)
-        .fold(radius.max(1.0), f64::max);
-    let radius = radius + 16.0 * f64::EPSILON * scale;
-    radius.is_finite().then(|| {
-        [
-            center.map(|coordinate| coordinate - radius),
-            center.map(|coordinate| coordinate + radius),
-        ]
-    })
-}
-
 pub(super) fn split_parameter(
     topology: &impl TetrahedralTopology,
     context: SegmentContext,
@@ -106,6 +127,7 @@ pub(super) fn split_parameter(
     right: DyadicNode,
     witness: u32,
     acute_lineage: [bool; 2],
+    work: &mut RecoveryWork<'_>,
 ) -> Result<DyadicNode, DelaunaySegmentRecoveryError> {
     let left_coordinates = find_node(topology, left.identity)
         .ok_or_else(|| invalid_topology(context.constraint_index, "left split node is missing"))?
@@ -113,55 +135,68 @@ pub(super) fn split_parameter(
     let right_coordinates = find_node(topology, right.identity)
         .ok_or_else(|| invalid_topology(context.constraint_index, "right split node is missing"))?
         .coordinates_m;
-    let witness_coordinates = topology
+    let witness_node = topology
         .nodes()
         .get(witness as usize)
-        .ok_or_else(|| invalid_topology(context.constraint_index, "split witness is missing"))?
-        .coordinates_m;
-    let total_length = distance(context.first_coordinates, context.last_coordinates);
-    let left_parameter = left.parameter()?;
-    let right_parameter = right.parameter()?;
-    let [left_is_acute, right_is_acute] = acute_lineage;
-    if left_is_acute && right_is_acute {
+        .ok_or_else(|| invalid_topology(context.constraint_index, "split witness is missing"))?;
+    // A later pass must reuse an existing point on this exact authored segment.
+    // Reprojecting and rounding it as a new off-centre choice can produce a
+    // succession of nearby points instead of recovering the original chain.
+    if let Some(parameter) = retained_segment_parameter(witness_node, context, left, right) {
+        return Ok(parameter);
+    }
+    if acute_lineage == [true, true] {
         return left.midpoint(right, context);
     }
-    let left_distance = distance(left_coordinates, witness_coordinates);
-    let right_distance = distance(right_coordinates, witness_coordinates);
-    let projected = if left_is_acute {
-        distance(context.first_coordinates, witness_coordinates) / total_length
-    } else if right_is_acute {
-        1.0 - distance(context.last_coordinates, witness_coordinates) / total_length
-    } else if 2.0 * left_distance < distance(left_coordinates, right_coordinates) {
-        left_parameter + left_distance / total_length
-    } else if 2.0 * right_distance < distance(left_coordinates, right_coordinates) {
-        right_parameter - right_distance / total_length
-    } else {
-        left_parameter + 0.5 * (right_parameter - left_parameter)
+    let preferred = placement::preferred(
+        [left_coordinates, right_coordinates],
+        witness_node.coordinates_m,
+        context,
+        [left.parameter()?, right.parameter()?],
+        acute_lineage,
+    );
+    clearance::choose(
+        [
+            *find_node(topology, left.identity).expect("original split endpoint"),
+            *find_node(topology, right.identity).expect("original split endpoint"),
+        ],
+        *witness_node,
+        context,
+        [left, right],
+        preferred.parameters,
+        preferred.radial_origin,
+        work,
+    )
+}
+
+fn retained_segment_parameter(
+    witness: &crate::cdt::DelaunayVolumeNode,
+    context: SegmentContext,
+    left: DyadicNode,
+    right: DyadicNode,
+) -> Option<DyadicNode> {
+    let runmat_meshing_core::quality::predicate::Point3Construction::Segment {
+        endpoints,
+        parameter_numerator,
+        parameter_exponent,
+    } = witness.construction
+    else {
+        return None;
     };
-    let interval = right_parameter - left_parameter;
-    let mut guarded = if projected.is_finite()
-        && projected > left_parameter + 0.2 * interval
-        && projected < right_parameter - 0.2 * interval
+    if endpoints != [context.first_coordinates, context.last_coordinates]
+        || parameter_exponent >= 63
     {
-        projected
-    } else {
-        left_parameter + 0.5 * interval
-    };
-    if left_is_acute || right_is_acute {
-        let projected_coordinates =
-            interpolate(context.first_coordinates, context.last_coordinates, guarded);
-        let nonacute_coordinates = if left_is_acute {
-            right_coordinates
-        } else {
-            left_coordinates
-        };
-        if distance(projected_coordinates, nonacute_coordinates)
-            < distance(projected_coordinates, witness_coordinates)
-        {
-            guarded = left_parameter + 0.5 * interval;
-        }
+        return None;
     }
-    left.near_parameter(right, guarded, context)
+    let exponent = parameter_exponent.max(left.exponent).max(right.exponent);
+    let parameter = u128::from(parameter_numerator) << (exponent - parameter_exponent);
+    let lower = u128::from(left.numerator) << (exponent - left.exponent);
+    let upper = u128::from(right.numerator) << (exponent - right.exponent);
+    (lower < parameter && parameter < upper).then_some(DyadicNode {
+        identity: witness.identity,
+        numerator: parameter_numerator,
+        exponent: parameter_exponent,
+    })
 }
 
 fn circumradius_rank(endpoints: [[f64; 3]; 2], point: [f64; 3]) -> f64 {
@@ -265,10 +300,57 @@ mod tests {
             DyadicNode::endpoint(context.last_identity, true),
             witness.vertex,
             [false, false],
+            &mut work,
         )
         .unwrap()
         .parameter()
         .unwrap();
         assert!((0.22..0.23).contains(&split));
+    }
+    #[test]
+    fn later_pass_reuses_the_original_segment_point_and_exact_parameter() {
+        use runmat_meshing_core::quality::predicate::Point3Construction;
+        let endpoints = [[0., 0., 0.], [10., 0., 0.]];
+        let mut witness = node(30, [10. * 333. / 1024., 0., 0.]);
+        witness.construction = Point3Construction::Segment {
+            endpoints,
+            parameter_numerator: 333,
+            parameter_exponent: 10,
+        };
+        let topology = build_delaunay_volume_topology(
+            vec![
+                node(10, endpoints[0]),
+                node(20, endpoints[1]),
+                witness,
+                node(40, [0., 1., 0.]),
+                node(50, [0., 0., 1.]),
+            ],
+            vec![[0, 2, 3, 4], [1, 2, 3, 4]],
+            DelaunayTopologyOptions::default(),
+            &NeverCancelled,
+        )
+        .unwrap();
+        let context = SegmentContext {
+            constraint_index: 0,
+            first_identity: topology.nodes[0].identity,
+            last_identity: topology.nodes[1].identity,
+            first_coordinates: endpoints[0],
+            last_coordinates: endpoints[1],
+        };
+        let left = DyadicNode::endpoint(context.first_identity, false);
+        let right = DyadicNode::endpoint(context.last_identity, true);
+        let mut work = RecoveryWork::new(Default::default(), &NeverCancelled);
+        let split =
+            split_parameter(&topology, context, left, right, 2, [true, true], &mut work).unwrap();
+        assert_eq!(
+            (split.identity, split.numerator, split.exponent),
+            (witness.identity, 333, 10)
+        );
+        let foreign = SegmentContext {
+            last_coordinates: [20., 0., 0.],
+            ..context
+        };
+        assert!(retained_segment_parameter(&witness, foreign, left, right).is_none());
+        assert!(retained_segment_parameter(&witness, context, split, right).is_none());
     }
 }

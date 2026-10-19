@@ -163,19 +163,17 @@ fn in_bounds(uv: [f64; 2], bounds: [ParameterRange; 2]) -> bool {
 pub(super) fn uniform_surface_seeds(
     bounds: [ParameterRange; 2],
     intervals_per_axis: usize,
-) -> Vec<[f64; 2]> {
+) -> Result<Vec<[f64; 2]>, GeometryEvaluationError> {
     let intervals = intervals_per_axis.clamp(1, 999);
     let mut seeds = Vec::with_capacity((intervals + 1).saturating_mul(intervals + 1));
     for u_index in 0..=intervals {
-        let u =
-            bounds[0].start + (bounds[0].end - bounds[0].start) * u_index as f64 / intervals as f64;
+        let u = bounds[0].parameter_at_fraction(u_index as f64 / intervals as f64)?;
         for v_index in 0..=intervals {
-            let v = bounds[1].start
-                + (bounds[1].end - bounds[1].start) * v_index as f64 / intervals as f64;
+            let v = bounds[1].parameter_at_fraction(v_index as f64 / intervals as f64)?;
             seeds.push([u, v]);
         }
     }
-    seeds
+    Ok(seeds)
 }
 
 fn budget(reason: &str) -> GeometryEvaluationError {

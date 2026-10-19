@@ -1,3 +1,4 @@
+pub(super) use legalization::local::legalize_delaunay_volume_topology_locally_with_barriers;
 use std::collections::BTreeSet;
 
 use runmat_geometry_core::PersistentEntityId;
@@ -13,10 +14,20 @@ use super::{
 };
 
 mod cavity;
+mod conforming;
+pub(in crate::cdt) use conforming::insert_conforming_volume_node_into_mutation_with_barriers;
+pub(in crate::cdt) mod cospherical;
+mod exterior;
+pub(in crate::cdt) mod local_admission;
+pub(in crate::cdt) use exterior::UnconstrainedHull;
 mod legalization;
 mod location;
 mod materialization;
 mod mutable;
+mod physical_admission;
+mod repair;
+pub(in crate::cdt) use physical_admission::{restore_admitted_mutation, AdmittedPhysicalTopology};
+pub(super) use repair::restore_constrained_delaunay_topology;
 pub(super) mod topology_access;
 mod validation;
 mod work;
@@ -30,8 +41,11 @@ use materialization::representable_nodes;
 pub(in crate::cdt) use mutable::{
     apply_prepared_delaunay_volume_node_insertion, insert_delaunay_volume_node_into_mutation,
     insert_delaunay_volume_node_into_mutation_with_barriers,
+    insert_delaunay_volume_node_into_mutation_with_prepared_barriers_from_hint,
 };
 use topology_access::TetrahedralTopology;
+#[cfg(test)]
+pub(super) use validation::validate_canonical_conforming_volume_topology;
 pub use validation::validate_delaunay_volume_topology;
 pub(super) use validation::{
     validate_conforming_volume_topology, validate_constrained_delaunay_volume_topology,
@@ -39,7 +53,8 @@ pub(super) use validation::{
 };
 use work::InsertionWork;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayInsertionOptions {
     pub topology: DelaunayTopologyOptions,
     pub maximum_protected_faces: u64,
@@ -124,8 +139,10 @@ pub(super) fn insert_delaunay_volume_node_locally_with_barriers(
         options,
         cancellation,
     )?;
+    // This provider returns the canonical state and never uses its working
+    // indexes again. Consume them before independent output reconstruction.
     mutation
-        .snapshot(options.topology, cancellation)
+        .freeze(options.topology, cancellation)
         .map_err(mutation_topology_error)
 }
 
@@ -215,7 +232,7 @@ pub(in crate::cdt) struct PreparedInsertion {
 }
 
 pub(in crate::cdt) fn prepare_delaunay_volume_node_insertion_with_prepared_barriers_from_hint(
-    topology: &DelaunayVolumeTopology,
+    topology: &impl TetrahedralTopology,
     node: DelaunayVolumeNode,
     protected_faces: &BTreeSet<[runmat_meshing_core::StableDigest; 3]>,
     protect_region_boundaries: bool,
@@ -546,9 +563,9 @@ fn validate_new_node(
     node: DelaunayVolumeNode,
 ) -> Result<(), DelaunayInsertionError> {
     validate_node_values(node)?;
-    if topology.nodes().iter().any(|existing| {
-        existing.identity == node.identity || existing.coordinates_m == node.coordinates_m
-    }) {
+    if topology.node_index(node.identity).is_some()
+        || topology.contains_position(node.coordinates_m)
+    {
         return Err(error(
             DelaunayInsertionErrorKind::InvalidNode,
             "node identity and geometric position must both be unique",

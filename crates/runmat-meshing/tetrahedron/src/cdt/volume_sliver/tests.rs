@@ -25,7 +25,7 @@ fn node(identity: u8, coordinates_m: [f64; 3]) -> DelaunayVolumeNode {
     DelaunayVolumeNode::explicit(StableDigest::from_bytes([identity; 32]), coordinates_m)
 }
 
-fn metric() -> MetricFieldRequest {
+pub(super) fn metric() -> MetricFieldRequest {
     MetricFieldRequest {
         combination: MetricCombinationRule::MostRestrictiveIntersection,
         global_metric: MetricTensor3::isotropic_length_m(1.0).unwrap(),
@@ -34,7 +34,7 @@ fn metric() -> MetricFieldRequest {
     }
 }
 
-fn quality_options() -> DelaunayVolumeQualityOptions {
+pub(super) fn quality_options() -> DelaunayVolumeQualityOptions {
     DelaunayVolumeQualityOptions {
         maximum_metric_edge_length: 1.0e12,
         maximum_radius_edge_ratio: 1.0e12,
@@ -43,7 +43,7 @@ fn quality_options() -> DelaunayVolumeQualityOptions {
     }
 }
 
-fn interior_sliver_fixture() -> (DelaunayVolumeTopology, DelaunayVolumeProvenance) {
+pub(super) fn interior_sliver_fixture() -> (DelaunayVolumeTopology, DelaunayVolumeProvenance) {
     let nodes = vec![
         node(1, [0.0, 0.0, 0.0]),
         node(2, [1.0, 0.0, 0.0]),
@@ -89,7 +89,7 @@ fn interior_sliver_fixture() -> (DelaunayVolumeTopology, DelaunayVolumeProvenanc
     )
 }
 
-fn quality(
+pub(super) fn quality(
     topology: &DelaunayVolumeTopology,
     provenance: &DelaunayVolumeProvenance,
 ) -> DelaunayVolumeQuality {

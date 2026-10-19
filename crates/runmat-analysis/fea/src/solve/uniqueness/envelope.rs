@@ -1,7 +1,7 @@
 use super::{SparseUniquenessError as Error, SparseUniquenessPolicy};
 use crate::{
     algebra::{RealSparseMatrix, RightInverseWorkEnvelope},
-    solve::krylov::GmresWorkEnvelope,
+    solve::krylov::{right_ilu::SparseRightIluEnvelope, GmresWorkEnvelope},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -63,13 +63,17 @@ impl SparseUniquenessEnvelope {
             GmresWorkEnvelope::derive(dimension, policy.krylov()).map_err(|_| Error::Invalid)?;
         // Actual fixed-support ILU elimination scans each retained lower entry
         // against at most max_row upper entries, with <=64 search comparisons.
-        let factor_work = mul(mul(z, width)?, 128)?;
-        let application_work = add(mul(z, 8)?, mul(n, 16)?)?;
+        let ilu = SparseRightIluEnvelope::for_counts(n, z, width).ok_or(Error::Overflow)?;
+        let factor_work = ilu.factor_scalar_operations;
+        let application_work = ilu.application_scalar_operations;
         let column_work = add(
-            mul(gmres.operator_applications_upper_bound, application_work)?,
             mul(
-                add(gmres.dot_calls_upper_bound, gmres.axpy_calls_upper_bound)?,
-                mul(n, 8)?,
+                gmres.operator_applications_upper_bound,
+                add(application_work, mul(z, 4)?)?,
+            )?,
+            add(
+                mul(gmres.dot_calls_upper_bound, mul(n, 8)?)?,
+                gmres.recurrence_scalar_operations_upper_bound,
             )?,
         )?;
         let work = add(
@@ -80,7 +84,10 @@ impl SparseUniquenessEnvelope {
         // basis/zero and coexisting recovered/apply vectors, doubled payload allowances.
         let bytes = add(
             add(check.resident_bytes, gmres.resident_bytes_upper_bound)?,
-            add(mul(z, 32)?, add(mul(add(n, 1)?, 32)?, mul(n, 96)?)?)?,
+            add(
+                ilu.resident_bytes_upper_bound,
+                add(mul(add(n, 1)?, 16)?, mul(n, 80)?)?,
+            )?,
         )?;
         if bytes > isize::MAX as u64 {
             return Err(Error::Overflow);

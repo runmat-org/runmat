@@ -10,7 +10,9 @@ mod maxwell_recovery;
 mod nonlinear_recovery;
 mod result_publication;
 mod state_publication;
+mod structural_recovery;
 use common::validate_common;
+mod constraint_compilation;
 mod demand_validation;
 mod host_phase;
 mod operator;
@@ -99,6 +101,10 @@ pub fn build_resource_plan(
         ) if *workload == demand.workload => {
             maxwell_harmonic::build_maxwell_harmonic_plan(input.clone(), demand)
         }
+        (
+            FeaResourcePhase::StructuralFieldRecovery(request),
+            FeaResourceDemand::StructuralFieldRecovery(demand),
+        ) if *request == demand.request => structural_recovery::build(input.clone(), demand),
         (
             FeaResourcePhase::NonlinearFieldRecovery(request),
             FeaResourceDemand::NonlinearFieldRecovery(demand),

@@ -461,7 +461,8 @@ fn exposes_deterministic_parallel_sequence_topology() {
         },
     ];
 
-    let validated = validate_sequence(&model).expect("diamond sequence should validate");
+    let graph = validate_sequence(&model).expect("diamond sequence should validate");
+    let validated = super::graph::owned_topology(&model.sequence, &graph);
     let ids = |values: &[ProcedureStepId]| {
         values
             .iter()

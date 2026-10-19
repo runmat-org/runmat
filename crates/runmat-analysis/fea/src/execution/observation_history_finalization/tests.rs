@@ -1,3 +1,4 @@
+mod resources;
 use super::*;
 use crate::results::field::{RecoveredField, RecoveredFieldCatalog};
 use crate::results::observation::{
@@ -38,6 +39,20 @@ fn fixture(
     ObservationFieldCatalog,
     ObservationHistoryCheckpoint,
 ) {
+    fixture_with_ties(retention, series, ExtremaTiePolicy::FirstCanonical)
+}
+
+fn fixture_with_ties(
+    retention: RetentionPolicy,
+    series: SeriesReduction,
+    ties: ExtremaTiePolicy,
+) -> (
+    ThermalWorkload,
+    SolverMeshArtifact,
+    ResolvedObservationPlan,
+    ObservationFieldCatalog,
+    ObservationHistoryCheckpoint,
+) {
     let mut model =
         crate::fixtures::fixture_model(crate::fixtures::FixtureId::CantileverLinearStatic);
     model.thermal = Some(ThermalDomain {
@@ -61,7 +76,7 @@ fn fixture(
         reduction: (series != SeriesReduction::None).then_some(ReductionPolicy {
             spatial: SpatialReduction::None,
             series,
-            extrema_ties: ExtremaTiePolicy::FirstCanonical,
+            extrema_ties: ties,
         }),
         storage: ObservationStoragePolicy {
             precision: SignalPrecision::Real64,

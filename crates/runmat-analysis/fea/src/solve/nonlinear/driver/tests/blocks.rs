@@ -16,6 +16,7 @@ fn block(
         options,
         execution: NonlinearExecution {
             backend: ComputeBackend::Cpu,
+            contact: None,
             solver_admission: None,
         },
         start: 0.0,

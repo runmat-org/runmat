@@ -13,3 +13,6 @@ delaunator = "1"
 runmat-geometry-core = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
+
+[build-dependencies]
+runmat-build-identity = { workspace = true }

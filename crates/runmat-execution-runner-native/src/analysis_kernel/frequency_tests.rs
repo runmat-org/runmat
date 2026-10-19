@@ -46,6 +46,8 @@ use super::NativeAnalysisKernel;
 
 #[path = "frequency_tests/cold_history.rs"]
 mod cold_history;
+#[path = "frequency_tests/compiler.rs"]
+mod compiler;
 
 struct OversizedSecondOutputKernel {
     second_payload_bytes: usize,
@@ -269,13 +271,15 @@ fn execute_frequency(
     let mut recovered = Vec::new();
     let mut recovery_sources = Vec::new();
     for task in fanout {
+        compiler::reject_understated(&task.host, &task.inputs, &task.resource_plan, false, limits);
         task.program.write_to(&mut store).unwrap();
-        let completed = execute_serial_analysis(
+        let completed = runmat_analysis_execution::execute_reserved_serial_analysis(
             &task.program.request,
             &mut store,
             &NativeAnalysisKernel,
             256,
             limits,
+            &task.resource_plan.request,
         )
         .unwrap();
         let response = AnalysisHostResponse::completed(&task.host, &completed)
@@ -298,6 +302,13 @@ fn execute_frequency(
                 },
             )
             .unwrap();
+            compiler::reject_understated(
+                &recovery.host,
+                &recovery.inputs,
+                &recovery.resource_plan,
+                true,
+                limits,
+            );
             assert!(recovery
                 .host
                 .workload
@@ -333,12 +344,13 @@ fn execute_frequency(
                 )
             );
             recovery.program.write_to(&mut store).unwrap();
-            let completed = execute_serial_analysis(
+            let completed = runmat_analysis_execution::execute_reserved_serial_analysis(
                 &recovery.program.request,
                 &mut store,
                 &NativeAnalysisKernel,
                 256,
                 limits,
+                &recovery.resource_plan.request,
             )
             .unwrap();
             let response = AnalysisHostResponse::completed(&recovery.host, &completed)
@@ -765,6 +777,7 @@ fn modal_frequency_coordinator_publishes_and_binds_the_exact_basis() {
     .unwrap();
     let mut coordinator =
         StructuralModalFrequencyStudyCoordinator::new(StructuralModalFrequencyStudyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("modal-frequency-study"),
             frozen_project_digest: None,
             workloads,

@@ -28,6 +28,12 @@ use super::contract::{
 use super::history::resolve_history_sample_bounds;
 use super::topology::ObservationTopology;
 
+mod projection;
+pub use projection::resolve_observation_plan;
+
+mod field_catalog;
+use field_catalog::{bind_field, validate_field_catalog};
+
 mod connectors;
 use connectors::{compile_connector_observation_plan, resolve_connector_target};
 mod targets;
@@ -41,17 +47,6 @@ pub(crate) use verification::{
     verify_authored_observations, verify_finite_volume_observation_plan_for_topology,
     verify_observation_plan, verify_sampled_observation_plan, verify_structural_observation_plan,
 };
-
-pub fn resolve_observation_plan(
-    step: &ProcedureStep,
-    projection: &AnalysisProjection,
-    fields: &[RecoveredFieldDefinition],
-    limits: ObservationLimits,
-) -> Result<ResolvedObservationPlan, ObservationError> {
-    validate_request_counts(step, limits)?;
-    let topology = ObservationTopology::from_projection(projection);
-    resolve_observation_plan_for_topology(step, &topology, None, None, fields, limits)
-}
 
 pub fn resolve_structural_observation_plan(
     step: &ProcedureStep,
@@ -161,7 +156,7 @@ pub(super) fn resolve_observation_plan_for_topology(
     if step.observations.len() > limits.maximum_observations {
         return Err(ObservationError::Limit("observation count"));
     }
-    validate_field_catalog(fields)?;
+    validate_field_catalog(fields.iter(), limits.maximum_peak_resident_bytes)?;
     let observations = step
         .observations
         .iter()
@@ -172,7 +167,7 @@ pub(super) fn resolve_observation_plan_for_topology(
                 topology,
                 constraint_plan,
                 connector_plan,
-                fields,
+                fields.iter(),
                 limits,
             )
         })
@@ -190,41 +185,13 @@ pub(super) fn resolve_observation_plan_for_topology(
     Ok(plan)
 }
 
-fn validate_field_catalog(fields: &[RecoveredFieldDefinition]) -> Result<(), ObservationError> {
-    let mut identities = std::collections::BTreeSet::new();
-    for field in fields {
-        if !identities.insert(field.identity()) {
-            return Err(ObservationError::Invalid(
-                "recovered-field declarations require unique identities".into(),
-            ));
-        }
-        if !matches!(
-            field.location(),
-            FieldLocation::Node
-                | FieldLocation::Element
-                | FieldLocation::Cell
-                | FieldLocation::Face
-                | FieldLocation::IntegrationPoint
-                | FieldLocation::Connector
-                | FieldLocation::Constraint
-                | FieldLocation::Edge
-        ) {
-            return Err(ObservationError::Unsupported(
-                "this evaluator accepts only recovered nodal, element, integration-point, connector, and constraint-group fields",
-            ));
-        }
-        shape_component_count(field.value_shape())?;
-    }
-    Ok(())
-}
-
-fn resolve_request(
+fn resolve_request<'a>(
     step: &ProcedureStep,
     request: &ObservationRequest,
     topology: &ObservationTopology,
     constraint_plan: Option<&CanonicalStructuralConstraintPlan>,
     connector_plan: Option<&CanonicalStructuralConnectorPlan>,
-    fields: &[RecoveredFieldDefinition],
+    fields: impl Iterator<Item = &'a RecoveredFieldDefinition> + Clone,
     limits: ObservationLimits,
 ) -> Result<ResolvedObservation, ObservationError> {
     runmat_analysis_core::validate_observation_sampling(step, request)
@@ -247,7 +214,7 @@ fn resolve_request(
     }
     validate_supported_spec(request, spec)?;
     let source_field = bind_field(spec, fields)?;
-    validate_numeric_representation(spec, &source_field)?;
+    validate_numeric_representation(spec, source_field)?;
     let target = resolve_target(
         request,
         spec,
@@ -255,10 +222,10 @@ fn resolve_request(
         topology,
         constraint_plan,
         connector_plan,
-        limits.maximum_selected_entities,
+        limits,
     )?;
-    validate_resolved_spatial_reduction(spec, &source_field, &target)?;
-    let component = resolve_component(spec, &source_field)?;
+    validate_resolved_spatial_reduction(spec, source_field, &target)?;
+    let component = resolve_component(spec, source_field)?;
     let result_value_shape = spec.result_value_shape();
     let result_component_count = shape_component_count(&result_value_shape)?;
     let spatial_extrema = spec.reduction.as_ref().is_some_and(|reduction| {
@@ -400,38 +367,6 @@ fn resolve_request(
         sample_bounds,
         resolved_cost,
     })
-}
-
-fn bind_field(
-    spec: &ObservationSpec,
-    fields: &[RecoveredFieldDefinition],
-) -> Result<RecoveredFieldDefinition, ObservationError> {
-    let mut matches = fields.iter().filter(|field| {
-        let derivation_matches = if spec.recovery == RecoveryPolicy::ShapeFunctionInterpolation
-            && spec.output_location == FieldLocation::Point
-        {
-            field.derivation() == RecoveredFieldDerivation::Native
-                && field.location() == spec.source_location
-        } else {
-            field.satisfies_recovery(spec.source_location, spec.output_location, spec.recovery)
-        };
-        field.quantity() == spec.quantity
-            && derivation_matches
-            && field.value_shape() == &spec.value_shape
-    });
-    match (matches.next(), matches.next()) {
-        (Some(field), None) => Ok(field.clone()),
-        (None, _) => Err(ObservationError::Field {
-            observation_id: spec.observation_id.0.clone(),
-            reason: "no declaration matches quantity, location, and value shape".into(),
-        }),
-        _ => Err(ObservationError::Field {
-            observation_id: spec.observation_id.0.clone(),
-            reason:
-                "multiple declarations match; recovery must provide an unambiguous field catalog"
-                    .into(),
-        }),
-    }
 }
 
 fn resolve_component(

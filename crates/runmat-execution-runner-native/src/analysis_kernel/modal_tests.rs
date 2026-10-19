@@ -5,7 +5,7 @@ use runmat_analysis_core::{
     StructuralConstraint, StructuralConstraintKind, StructuralTranslationDof, TranslationDofValue,
 };
 use runmat_analysis_execution::{
-    execute_serial_analysis, import_structural_modal_result, prepare_analysis_objects,
+    execute_reserved_serial_analysis, import_structural_modal_result, prepare_analysis_objects,
     prepare_structural_modal_task, AnalysisHostResponse, AnalysisKernel, AnalysisKernelInvocation,
     AnalysisOutputPolicy, StructuralModalTaskPreparation,
 };
@@ -74,6 +74,11 @@ fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_
         .unwrap();
         let limits = ObjectInventoryLimits::default();
         let prepared = prepare_structural_modal_task(StructuralModalTaskPreparation {
+            local_execution:
+                runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                    4_000,
+                )
+                .unwrap(),
             authored_study_digest: Digest::sha256(b"scalar-modal-study"),
             frozen_project_digest: None,
             program_revision: ProgramRevision::new(
@@ -102,45 +107,86 @@ fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_
             accelerator_requests: Vec::new(),
         })
         .unwrap();
-        let mut input = prepared.resource_plan.input.clone();
-        let FeaResourceDemand::StructuralModalExtraction(demand) = &mut input.demand else {
-            panic!("modal demand")
-        };
-        assert!(demand.original_energy_source_bytes.0 > 0);
-        demand.original_energy_source_bytes.0 = 0;
-        let understated = build_resource_plan(input).unwrap();
-        let mut substituted = prepared.inputs.clone();
-        let resource = substituted
-            .iter_mut()
-            .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+        // Original modal closures include the plan itself. Preserve the exact compiler
+        // plan at the combined retained-input/construction boundary, rejecting minus one.
+        let facts =
+            runmat_analysis_execution::prepared_input_resource_facts(&prepared.inputs).unwrap();
+        let retained = facts.transport_closure_bytes.0
+            + facts.decoded_resident_bytes_admission_budget.0
+            + prepared.resource_plan.input.worker.fixed_memory_bytes.0;
+        let compiler = runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
+            workload.model(), Some(&mesh), u64::MAX,
+        ).unwrap();
+        let required = compiler.workspace().peak_requested_bytes();
+        for extra in [required, required - 1] {
+            let available =
+                runmat_analysis_fea::planning::resource::constraint_compilation_available_bytes(
+                    retained + extra,
+                    &facts,
+                    prepared.resource_plan.input.worker.fixed_memory_bytes,
+                )
+                .unwrap();
+            let result = runmat_analysis_fea::constraints::CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
+                workload.model(), Some(&mesh), available,
+            );
+            if extra == required {
+                assert_eq!(result.unwrap().into_plan(), *compiler.plan());
+            } else {
+                assert!(matches!(
+                    result,
+                    Err(
+                        runmat_analysis_fea::constraints::ConstraintPlanError::WorkspaceLimit { .. }
+                    )
+                ));
+            }
+        }
+        for compiler_substitution in [false, true] {
+            let mut input = prepared.resource_plan.input.clone();
+            let FeaResourceDemand::StructuralModalExtraction(demand) = &mut input.demand else {
+                panic!("modal demand")
+            };
+            if compiler_substitution {
+                assert!(demand.constraint_compilation_peak_bytes.0 > 1);
+                demand.constraint_compilation_peak_bytes.0 -= 1;
+            } else {
+                assert!(demand.original_energy_source_bytes.0 > 0);
+                demand.original_energy_source_bytes.0 = 0;
+            }
+            let understated = build_resource_plan(input).unwrap();
+            let mut substituted = prepared.inputs.clone();
+            let resource = substituted
+                .iter_mut()
+                .find(|input| input.manifest.kind == AnalysisNumericalObjectKind::ResourcePlan)
+                .unwrap();
+            *resource = prepare_analysis_objects(
+                AnalysisNumericalObjectKind::ResourcePlan,
+                understated.identity.digest(),
+                &understated.canonical_bytes().unwrap(),
+                256,
+                ObjectNamespace::InputValue,
+                limits,
+            )
             .unwrap();
-        *resource = prepare_analysis_objects(
-            AnalysisNumericalObjectKind::ResourcePlan,
-            understated.identity.digest(),
-            &understated.canonical_bytes().unwrap(),
-            256,
-            ObjectNamespace::InputValue,
-            limits,
-        )
-        .unwrap();
-        assert!(NativeAnalysisKernel
-            .execute(AnalysisKernelInvocation {
-                output_policy: AnalysisOutputPolicy::new(256, limits).unwrap(),
-                kind: AnalysisWorkKind::ExtractStructuralModes,
-                host: &prepared.host,
-                inputs: &substituted,
-            })
-            .is_err());
+            assert!(NativeAnalysisKernel
+                .execute(AnalysisKernelInvocation {
+                    output_policy: AnalysisOutputPolicy::new(256, limits).unwrap(),
+                    kind: AnalysisWorkKind::ExtractStructuralModes,
+                    host: &prepared.host,
+                    inputs: &substituted,
+                })
+                .is_err());
+        }
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("objects");
         let mut store = FilesystemObjectStore::open(&path, limits.max_object_bytes).unwrap();
         prepared.program.write_to(&mut store).unwrap();
-        let completed = execute_serial_analysis(
+        let completed = execute_reserved_serial_analysis(
             &prepared.program.request,
             &mut store,
             &NativeAnalysisKernel,
             256,
             limits,
+            &prepared.resource_plan.request,
         )
         .unwrap();
         let response = AnalysisHostResponse::completed(&prepared.host, &completed)
@@ -159,6 +205,42 @@ fn native_scalar_modal_preserves_cold_basis_receipts_fields_and_rejects_missing_
             hot.state_publication_profiles
         );
         assert_eq!(cold.result.basis().modes().len(), 1);
+        let FeaResourceDemand::StructuralModalExtraction(demand) =
+            &prepared.resource_plan.input.demand
+        else {
+            panic!("modal demand")
+        };
+        let actual = runmat_canonical_codec::profile_serialized(
+            &cold.result,
+            runmat_canonical_codec::CanonicalLimits::new(
+                1024 * 1024 * 1024,
+                20_000_000,
+                65_536,
+                64,
+            ),
+        )
+        .unwrap();
+        assert!(
+            demand.result_output.encoded_payload_bytes_upper_bound.0
+                >= actual.encoded_bytes_upper_bound
+        );
+        assert!(
+            demand
+                .result_output
+                .construction_resident_bytes_admission_budget
+                .0
+                >= actual.materialization_resident_bytes_estimate
+                    + demand.result_output.transport_closure_bytes_upper_bound.0
+        );
+        let mut understated = prepared.resource_plan.input.clone();
+        let FeaResourceDemand::StructuralModalExtraction(changed) = &mut understated.demand else {
+            unreachable!()
+        };
+        changed
+            .result_output
+            .construction_resident_bytes_admission_budget
+            .0 -= 1;
+        assert!(build_resource_plan(understated).is_err());
         assert!(cold.result.basis().modes()[0].frequency_hz() > 0.);
         cold.numerical_receipt
             .validate_against(cold.identity, &cold.result)

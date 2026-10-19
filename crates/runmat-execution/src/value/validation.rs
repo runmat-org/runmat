@@ -15,6 +15,21 @@ pub(super) fn validate(payload: &ValuePayload, limits: ValueLimits) -> Result<()
     .payload(payload, 0)
 }
 
+pub(super) fn validate_reference(
+    reference: &ValueRef,
+    limits: ValueLimits,
+) -> Result<(), ContractError> {
+    let mut budget = ValidationBudget {
+        limits,
+        nodes: 0,
+        inline_bytes: 0,
+        elements: 0,
+        text_bytes: 0,
+    };
+    budget.node(0)?;
+    budget.reference(reference)
+}
+
 struct ValidationBudget {
     limits: ValueLimits,
     nodes: u64,

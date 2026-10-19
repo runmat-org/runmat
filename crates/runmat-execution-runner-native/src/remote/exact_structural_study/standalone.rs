@@ -29,6 +29,7 @@ pub(super) async fn modal(
     let completion = match crate::execute_structural_modal_remotely(
         Arc::clone(&pool),
         runmat_analysis_execution::StructuralModalTaskPreparation {
+            local_execution: decoded.local_execution,
             authored_study_digest: decoded.authored_study_digest,
             frozen_project_digest: decoded.frozen_project_digest,
             program_revision: request.recipe.program_revision.clone(),

@@ -96,7 +96,7 @@ pub(crate) fn prepare_transient_preassembly(
     required_history_samples.dedup_by(|left, right| left.to_bits() == right.to_bits());
     let discontinuities =
         time_breakpoints(&active_model, &execution_step, start_time_s, end_time_s)
-            .map_err(|error| FeaRunError::InvalidModel(error.to_string()))?;
+            .map_err(|error| error.into_fea_error())?;
     let step_boundaries = canonical_transient_step_boundaries(
         &discontinuities,
         &required_history_samples,

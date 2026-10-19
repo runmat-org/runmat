@@ -11,11 +11,17 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 sha2 = { workspace = true }
+minicbor = { workspace = true }
+tracing = "0.1"
 runmat-geometry-core = { workspace = true }
 runmat-canonical-codec = { workspace = true }
 runmat-meshing-core = { workspace = true }
+runmat-cpu-execution = { workspace = true }
 runmat-meshing-curve = { workspace = true }
 runmat-meshing-size = { workspace = true }
 
 [dev-dependencies]
 runmat-geometry-fixtures = { workspace = true }
+
+[build-dependencies]
+runmat-build-identity = { workspace = true }

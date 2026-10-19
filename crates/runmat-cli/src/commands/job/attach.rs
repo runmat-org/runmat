@@ -7,7 +7,7 @@ use runmat_execution_artifact::{
     ProgramExecutionObject, ProgramExecutionOutputs, ProgramExecutionResponse,
 };
 use runmat_server_client::auth::{
-    resolve_auth_token, resolve_project_id, resolve_server_url, RemoteConfig,
+    resolve_auth_token, resolve_public_project_id, resolve_server_url, RemoteConfig,
 };
 use runmat_server_client::execution::{public_error, ExecutionClient};
 
@@ -25,7 +25,7 @@ pub async fn list(
         .transpose()?;
     let response = client
         .api()
-        .list_runs(&project_id, cursor.as_deref(), limit)
+        .list_runs(project_id.as_str(), cursor.as_deref(), limit)
         .await
         .map_err(public_error)?
         .into_inner();
@@ -431,7 +431,7 @@ fn print_materialized_mesh(
     run: &runmat_server_client::execution::RunResponse,
     solver_mesh_path: &std::path::Path,
     evidence_path: &std::path::Path,
-    result: &runmat_meshing_execution::ExactMeshingDagRunResult,
+    result: &crate::commands::mesh::MeshOutputSummary,
     json: bool,
 ) -> Result<()> {
     if json {
@@ -442,11 +442,11 @@ fn print_materialized_mesh(
                 "solverMeshArtifactPath": solver_mesh_path,
                 "meshingEvidenceArtifactPath": evidence_path,
                 "canonicalDigest": crate::commands::mesh::hex_digest(
-                    result.artifact.canonical_digest.bytes()
+                    result.canonical_digest.bytes()
                 ),
-                "nodeCount": result.artifact.topology.nodes.len(),
-                "elementCount": result.artifact.topology.volume_elements.len(),
-                "boundaryFaceCount": result.artifact.topology.boundary_faces.len(),
+                "nodeCount": result.node_count,
+                "elementCount": result.element_count,
+                "boundaryFaceCount": result.boundary_face_count,
                 "materialized": true,
             }))?
         );
@@ -460,7 +460,7 @@ fn print_materialized_mesh(
 }
 
 async fn saved_client(run_id: &str) -> Result<(ExecutionClient, secret::SavedRemoteRun)> {
-    let saved = secret::load(run_id)?;
+    let mut saved = secret::load(run_id)?;
     let mut config = RemoteConfig::load()?;
     let current_server = resolve_server_url(&config, None)?;
     if current_server.trim_end_matches('/') != saved.server_url.trim_end_matches('/') {
@@ -470,8 +470,12 @@ async fn saved_client(run_id: &str) -> Result<(ExecutionClient, secret::SavedRem
             current_server
         );
     }
-    let selected = resolve_project_id(&config, None)?;
-    if selected.to_string() != saved.project_id {
+    let selected = resolve_public_project_id(&config, None)?;
+    let saved_project = runmat_server_client::ids::ProjectId::from_uuid(
+        runmat_server_client::auth::parse_project_id_input(&saved.project_id)
+            .context("saved run contains an invalid project identity")?,
+    );
+    if selected != saved_project {
         bail!(
             "saved run belongs to project {}, but the active project is {}",
             saved.project_id,
@@ -479,6 +483,9 @@ async fn saved_client(run_id: &str) -> Result<(ExecutionClient, secret::SavedRem
         );
     }
     let token = resolve_auth_token(&mut config, &current_server).await?;
+    // Legacy persisted UUID shorthand and current public IDs denote the same project.
+    // Normalize only the transport representation after checking server/project ownership.
+    saved.project_id = saved_project.to_string();
     Ok((ExecutionClient::new(&current_server, &token)?, saved))
 }
 

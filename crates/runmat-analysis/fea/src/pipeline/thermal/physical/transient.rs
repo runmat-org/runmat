@@ -139,7 +139,6 @@ pub(super) fn solve_transient(
                 &reference_temperature_k,
             )
             .map_err(|error| FeaRunError::Assembly(error.to_string()))?;
-        let rhs_norm = rhs_norm(&operator.linear_rhs());
         let mut solve = solve_checked(
             &operator,
             input.requested_solver_backend,
@@ -209,7 +208,7 @@ pub(super) fn solve_transient(
             balance = recover_balance(&refined.solution)?;
             solve = refined;
         }
-        residual_norms.push(solve.residual_norm / rhs_norm);
+        residual_norms.push(linear_residual(&solve)?);
         energy_balances.push(balance);
         push_recovered_snapshot(
             &assembly,

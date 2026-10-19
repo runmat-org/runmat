@@ -1,6 +1,5 @@
 use super::*;
 use crate::{
-    constraints::CanonicalStructuralConstraintPlan,
     planning::resource::{
         build_nonlinear_recovery_resource_plan, build_nonlinear_resource_plan_with_output_limit,
         FeaResourcePlan, LocalExecutionPlan, StaticResourcePreflight,
@@ -75,16 +74,19 @@ fn prepare_for(
     recovery: bool,
 ) -> Result<FeaResourcePlan, FeaRunError> {
     crate::solve::nonlinear::require_fixed_structural_nonlinear(model)?;
-    let constraints =
-        CanonicalStructuralConstraintPlan::compile_for_model(model, options.solver_mesh.as_ref())
-            .map_err(|e| FeaRunError::Assembly(e.to_string()))?;
+    let compilation = crate::pipeline::constraint_preparation::compile_inventory(
+        model,
+        options.solver_mesh.as_ref(),
+        step,
+    )?;
+    let constraints = compilation.plan();
     let fields = structural_static_observable_field_definitions()
         .map_err(|e| FeaRunError::Assembly(e.to_string()))?;
     let observations = resolve_structural_observation_plan(
         step,
         model,
         options.solver_mesh.as_ref(),
-        &constraints,
+        constraints,
         &fields,
         ObservationLimits::default(),
     )
@@ -96,13 +98,14 @@ fn prepare_for(
     };
     Ok(build(
         StaticResourcePreflight {
+            compilation: Some(&compilation),
             model,
             step,
             backend,
             preconditioner: SpdPreconditionerKind::Jacobi,
             observation_execution: ObservationExecutionPolicy::serial(),
             mesh: options.solver_mesh.as_ref(),
-            constraints: &constraints,
+            constraints,
             observations: &observations,
             accelerator_requests: &[],
             local_execution: LocalExecutionPlan::serial(),

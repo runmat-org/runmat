@@ -613,9 +613,6 @@ fn render_histogram2(
     let render_result = render_active_plot(
         NAME,
         PlotRenderOptions {
-            title: "Histogram2",
-            x_label: "X",
-            y_label: "Y",
             ..Default::default()
         },
         move |figure, axes| {

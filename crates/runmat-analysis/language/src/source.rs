@@ -17,7 +17,7 @@ macro_rules! source_identity {
             pub fn new(value: impl Into<String>) -> Result<Self, SourceIdentityError> {
                 let value = value.into();
                 if value.trim().is_empty() {
-                    return Err(SourceIdentityError($error));
+                    return Err(SourceIdentityError::Empty($error));
                 }
                 Ok(Self(value))
             }
@@ -45,13 +45,57 @@ macro_rules! source_identity {
     };
 }
 
-source_identity!(LogicalSourcePath, "logical source path");
+/// A portable source path relative to the host-bound source root.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]
+#[serde(transparent)]
+pub struct LogicalSourcePath(runmat_types::NormalizedRelativePath);
+impl LogicalSourcePath {
+    pub fn new(value: impl Into<String>) -> Result<Self, SourceIdentityError> {
+        let value = value.into();
+        if value.trim().is_empty() {
+            return Err(SourceIdentityError::Empty("logical source path"));
+        }
+        runmat_types::NormalizedRelativePath::new(value)
+            .map(Self)
+            .map_err(Into::into)
+    }
+    pub fn file(value: impl Into<String>) -> Result<Self, SourceIdentityError> {
+        let value = value.into();
+        runmat_types::NormalizedRelativePath::file(value)
+            .map(Self)
+            .map_err(Into::into)
+    }
+    pub fn root() -> Self {
+        Self(runmat_types::NormalizedRelativePath::new(".").expect("source root"))
+    }
+    pub fn is_root(&self) -> bool {
+        self.0.is_root()
+    }
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+impl fmt::Display for LogicalSourcePath {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+impl<'de> Deserialize<'de> for LogicalSourcePath {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
 source_identity!(SourceSymbol, "source symbol");
 source_identity!(ExecutionProfileIdentity, "execution profile");
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0} must not be empty")]
-pub struct SourceIdentityError(&'static str);
+pub enum SourceIdentityError {
+    #[error("{0} must not be empty")]
+    Empty(&'static str),
+    #[error(transparent)]
+    InvalidPath(#[from] runmat_types::RelativePathError),
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[cfg_attr(feature = "tool-schema", derive(schemars::JsonSchema))]

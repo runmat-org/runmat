@@ -68,7 +68,7 @@ pub(super) fn admit_prestressed_modal_reduction(
         modal_workload.backend(),
         input.modal_options.clone(),
         input.prepared.context.clone(),
-        Some(input.solver_mesh.clone()),
+        Some(input.solver_mesh),
         Some(input.run_id),
     )?;
     input.basis_state.validate().map_err(|error| {

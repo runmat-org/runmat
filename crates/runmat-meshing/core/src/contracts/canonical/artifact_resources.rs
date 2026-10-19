@@ -1,20 +1,49 @@
-//! Allocation estimates owned alongside the artifact validators, not by numerical consumers.
-use std::collections::BTreeSet;
-use std::mem::size_of;
-
+//! Requested scratch owned alongside artifact validation, not by numerical consumers.
+use super::{
+    artifact_workspace::slots, ElementOrder, MeshingContractError, SolverMeshArtifact,
+    SolverMeshTopology, StableDigest,
+};
 use runmat_canonical_codec::{serialized_materialization_resident_bytes_estimate, CanonicalLimits};
 
-use super::{MeshingContractError, SolverMeshArtifact, StableDigest};
+impl SolverMeshTopology {
+    /// Requested temporary flat buffers for independent topology validation.
+    /// Original topology/request storage, allocator bookkeeping and RSS are separate.
+    pub fn validation_scratch_bytes(
+        &self,
+        order: ElementOrder,
+    ) -> Result<u64, MeshingContractError> {
+        validation_scratch_bytes(self, order)
+    }
+}
 
 impl SolverMeshArtifact {
-    /// Conservative additional requested-heap estimate for `validate_canonical`, excluding the
-    /// borrowed artifact, allocator bookkeeping and native/RSS usage. Does not validate or encode.
-    /// Payload validation releases its indexes before canonical identity encoding. The validator's
-    /// index phases are summed conservatively; the encoding phase uses the shared codec profiler.
-    /// Profiling can reject malformed serialization (e.g. nonfinite coordinates) before admission.
+    /// Maximum requested scratch for encoding an already owned artifact, including
+    /// independent topology validation and its borrowed identity projection.
+    /// Validation scratch is released before identity/output encoding. Unlike cold
+    /// decode admission, this path constructs no JSON value tree. Original typed
+    /// buffers, allocator bookkeeping and other live owners are charged separately.
+    pub fn canonical_encoding_resident_bytes_estimate(&self) -> Result<u64, MeshingContractError> {
+        let encoding = runmat_canonical_codec::profile_canonical_encoding(
+            self,
+            CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
+        )
+        .map_err(|error| {
+            MeshingContractError::invalid("mesh validation resources", error.to_string())
+        })?
+        .resident_workspace_bytes_estimate;
+        Ok(
+            validation_scratch_bytes(&self.topology, self.resolved_request.element_order)?
+                .max(encoding),
+        )
+    }
+
+    /// Additional requested heap for validation, excluding the borrowed artifact, stack,
+    /// allocator bookkeeping, diagnostic error strings and RSS. Counts the actual flat-buffer
+    /// reservations; sorting is in place and authored lookup inventories stay borrowed.
+    /// Payload scratch is released before canonical identity encoding. The identity projection
+    /// only zeroes two fixed-width digests and has this artifact's serialization widths.
+    /// Profiling is not validation and can reject malformed serialization before admission.
     pub fn validation_resident_bytes_estimate(&self) -> Result<u64, MeshingContractError> {
-        // The identity projection only zeroes two fixed-width digests. Its shape/serialized widths
-        // equal this artifact, so no second identity schema is needed for resource accounting.
         let encoding = serialized_materialization_resident_bytes_estimate(
             self,
             CanonicalLimits::new(usize::MAX, usize::MAX, usize::MAX, 64),
@@ -22,109 +51,52 @@ impl SolverMeshArtifact {
         .map_err(|error| {
             MeshingContractError::invalid("mesh validation resources", error.to_string())
         })?;
-        let t = &self.topology;
-        let mut scratch = 64 * 1024_u64;
-        // Ordered ID vectors/sets, node identity vector/set/map, element identity set.
-        for count in [
-            t.nodes.len(),
-            t.volume_elements.len(),
-            t.boundary_faces.len(),
-            t.boundary_edges.len(),
-        ] {
-            add(&mut scratch, index::<u64>(count)?)?;
-            add(&mut scratch, slots::<u64>(count, 2)?)?;
-        }
-        add(&mut scratch, index::<(u64, StableDigest)>(t.nodes.len())?)?;
-        add(&mut scratch, index::<StableDigest>(t.nodes.len())?)?;
-        add(&mut scratch, slots::<StableDigest>(t.nodes.len(), 2)?)?;
-        add(
-            &mut scratch,
-            index::<StableDigest>(t.volume_elements.len())?,
-        )?;
-        // Boundary validation retains a per-element connectivity set and face slice index.
-        add(
-            &mut scratch,
-            index::<(u64, BTreeSet<u64>)>(t.volume_elements.len())?,
-        )?;
-        for element in &t.volume_elements {
-            add(&mut scratch, index::<u64>(element.node_ids.len())?)?;
-            add(&mut scratch, index::<&u64>(element.node_ids.len())?)?;
-        }
-        add(
-            &mut scratch,
-            index::<(u64, &[u64])>(t.boundary_faces.len())?,
-        )?;
-        add(&mut scratch, index::<StableDigest>(t.boundary_faces.len())?)?;
-        add(&mut scratch, index::<StableDigest>(t.boundary_edges.len())?)?;
-        for count in t
-            .boundary_faces
-            .iter()
-            .map(|face| face.node_ids.len())
-            .chain(t.boundary_edges.iter().map(|edge| edge.node_ids.len()))
-        {
-            add(&mut scratch, index::<&u64>(count)?)?;
-        }
-        // Tet4 referenced nodes; Tet10 corner/midpoint/union sets, identity/node maps, six
-        // volume edges per tetrahedron, and boundary-face corner lookup. Count both orders.
-        for _ in 0..4 {
-            add(&mut scratch, index::<u64>(t.nodes.len())?)?;
-        }
-        add(&mut scratch, index::<(u64, StableDigest)>(t.nodes.len())?)?;
-        add(
-            &mut scratch,
-            index::<(u64, &super::SolverMeshNode)>(t.nodes.len())?,
-        )?;
-        let edges = t
-            .volume_elements
-            .len()
-            .checked_mul(6)
-            .ok_or_else(overflow)?;
-        add(&mut scratch, index::<([u64; 2], u64)>(edges)?)?;
-        add(
-            &mut scratch,
-            index::<(u64, &[u64])>(t.volume_elements.len())?,
-        )?;
-        for count in t
-            .boundary_faces
-            .iter()
-            .map(|face| face.provenance.len())
-            .chain(t.boundary_edges.iter().map(|edge| edge.provenance.len()))
-        {
-            add(&mut scratch, index::<&super::PersistentEntityId>(count)?)?;
-        }
-        // Region/contact/interface classification, neighbors and field topology comparisons.
-        add(
-            &mut scratch,
-            index::<&super::PersistentEntityId>(t.regions.len())?,
-        )?;
-        add(&mut scratch, index::<u64>(t.volume_elements.len())?)?;
-        add(&mut scratch, index::<u64>(t.boundary_faces.len())?)?;
-        add(
-            &mut scratch,
-            index::<(u64, &super::SolverBoundaryFace)>(t.boundary_faces.len())?,
-        )?;
-        add(&mut scratch, index::<(u64, u64)>(t.neighbors.len())?)?;
-        for field in &t.field_topologies {
-            add(&mut scratch, index::<u64>(field.ordered_entity_ids.len())?)?;
-        }
-        // Fixed four-domain lookup/location sets and bounded diagnostics fit the fixed allowance.
-        Ok(scratch.max(encoding))
+        Ok(
+            validation_scratch_bytes(&self.topology, self.resolved_request.element_order)?
+                .max(encoding),
+        )
     }
 }
 
-fn index<T>(count: usize) -> Result<u64, MeshingContractError> {
-    let width = size_of::<T>() + 4 * size_of::<usize>();
-    u64::try_from(count)
-        .ok()
-        .and_then(|n| n.checked_mul(3 * width as u64))
-        .ok_or_else(overflow)
+/// Exact requested flat-buffer inventory for the maximum live validation phase.
+/// Invalid connectivity/provenance/field lists are checked in place without allocating copies.
+/// Counts are derived from supplied inventories, never their claimed canonical identities.
+pub(super) fn validation_scratch_bytes(
+    topology: &SolverMeshTopology,
+    order: ElementOrder,
+) -> Result<u64, MeshingContractError> {
+    let nodes = topology.nodes.len();
+    let elements = topology.volume_elements.len();
+    let faces = topology.boundary_faces.len();
+    let edges = topology.boundary_edges.len();
+    let mut retained_ids = 0;
+    for count in [nodes, elements, faces, edges] {
+        add(&mut retained_ids, slots::<u64>(count)?)?;
+    }
+    let identity = slots::<StableDigest>(nodes.max(elements).max(faces).max(edges))?;
+    let neighbors = slots::<(u64, u64)>(topology.neighbors.len())?;
+    let order = match order {
+        ElementOrder::Tet4 => slots::<u8>(nodes)?,
+        ElementOrder::Tet10 => {
+            let mut bytes = slots::<u8>(nodes)?;
+            add(&mut bytes, slots::<u8>(nodes)?)?;
+            add(
+                &mut bytes,
+                slots::<([u64; 2], u64)>(volume_edge_occurrences(elements)?)?,
+            )?;
+            bytes
+        }
+    };
+    let classification = slots::<u8>(elements.max(faces))?;
+    add(
+        &mut retained_ids,
+        identity.max(neighbors).max(order).max(classification),
+    )?;
+    Ok(retained_ids)
 }
-fn slots<T>(count: usize, growth: u64) -> Result<u64, MeshingContractError> {
-    u64::try_from(count)
-        .ok()
-        .and_then(|n| n.checked_mul(size_of::<T>() as u64))
-        .and_then(|n| n.checked_mul(growth))
-        .ok_or_else(overflow)
+
+pub(super) fn volume_edge_occurrences(elements: usize) -> Result<usize, MeshingContractError> {
+    elements.checked_mul(6).ok_or_else(overflow)
 }
 fn add(total: &mut u64, bytes: u64) -> Result<(), MeshingContractError> {
     *total = total.checked_add(bytes).ok_or_else(overflow)?;
@@ -133,7 +105,7 @@ fn add(total: &mut u64, bytes: u64) -> Result<(), MeshingContractError> {
 fn overflow() -> MeshingContractError {
     MeshingContractError::invalid(
         "mesh validation resources",
-        "resident byte estimate overflow",
+        "requested scratch byte inventory overflow",
     )
 }
 

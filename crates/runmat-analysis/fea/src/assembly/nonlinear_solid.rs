@@ -24,6 +24,7 @@ use crate::{
 };
 
 mod authority;
+mod contact_layout;
 mod evaluation;
 mod history;
 mod preparation;
@@ -33,6 +34,8 @@ pub(crate) mod tests;
 
 #[derive(Debug, Error)]
 pub(crate) enum NonlinearSolidError {
+    #[error("nonlinear solid operation cancelled")]
+    Cancelled,
     #[error("unsupported nonlinear solid envelope: {0}")]
     Unsupported(String),
     #[error("invalid nonlinear solid authority: {0}")]
@@ -43,6 +46,15 @@ pub(crate) enum NonlinearSolidError {
     Constitutive(String),
     #[error("nonlinear sparse tangent failed: {0}")]
     Tangent(String),
+}
+
+impl From<crate::topology::AnalysisProjectionError> for NonlinearSolidError {
+    fn from(error: crate::topology::AnalysisProjectionError) -> Self {
+        match error {
+            crate::topology::AnalysisProjectionError::Cancelled => Self::Cancelled,
+            other => Self::Authority(other.to_string()),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +117,12 @@ struct PreparedPoint {
     gradients: Vec<[f64; 3]>,
 }
 
+struct PreparedBodyNode {
+    identity: StableDigest,
+    coordinates_m: [f64; 3],
+    rows: [usize; 3],
+}
+
 struct PreparedElement {
     identity: StableDigest,
     element_id: u64,
@@ -120,6 +138,7 @@ pub(crate) struct CanonicalNonlinearSolidBasis {
     property_identity: CompiledPropertyMapIdentity,
     dof_count: usize,
     tangent_pattern: SparsePattern,
+    nodes: Vec<PreparedBodyNode>,
     elements: Vec<PreparedElement>,
 }
 

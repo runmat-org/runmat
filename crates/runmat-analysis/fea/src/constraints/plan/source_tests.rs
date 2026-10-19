@@ -4,6 +4,7 @@ use runmat_analysis_core::{
     CoordinateFrame, Displacement, RegionTarget, StructuralConstraint,
     StructuralConstraintEquation, StructuralConstraintEquationTerm, StructuralTranslationDof,
 };
+use runmat_canonical_codec::encode_contract;
 use runmat_meshing_core::{PersistentEntityId, PersistentEntityKind};
 #[test]
 fn borrowed_equation_source_preserves_stable_ties_and_owned_reference_digest() {

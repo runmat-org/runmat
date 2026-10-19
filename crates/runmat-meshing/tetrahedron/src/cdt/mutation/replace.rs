@@ -7,10 +7,10 @@ use super::storage::{error, MutableTetrahedron, TopologyMutation, TopologyMutati
 type ExternalBoundary = BTreeMap<[u32; 3], Option<(u32, usize)>>;
 type ReplacementNeighbors = (Vec<[Option<u32>; 4]>, Vec<(u32, usize, u32)>);
 
-struct ReplacementPlan {
+pub(super) struct ReplacementPlan {
     removed: BTreeSet<u32>,
-    created: Vec<u32>,
-    tetrahedra: Vec<(u32, MutableTetrahedron)>,
+    pub(super) created: Vec<u32>,
+    pub(super) tetrahedra: Vec<(u32, MutableTetrahedron)>,
     external_neighbors: Vec<(u32, usize, u32)>,
     final_len: usize,
 }
@@ -21,18 +21,33 @@ impl TopologyMutation {
         removed: &BTreeSet<u32>,
         created: Vec<([u32; 4], Option<PersistentEntityId>)>,
     ) -> Result<Vec<u32>, TopologyMutationError> {
-        let plan = self.prepare_cavity_replacement(removed, created)?;
+        let plan = self.prepare_cavity_replacement(removed, created, &BTreeSet::new())?;
         let created = plan.created.clone();
         self.commit_cavity_replacement(plan);
         Ok(created)
     }
 
-    fn prepare_cavity_replacement(
+    /// Grow the unconstrained hull through explicitly named retained hull faces.
+    /// Ordinary cavity replacement cannot alter this external interface.
+    pub(in crate::cdt) fn replace_hull_cavity(
+        &mut self,
+        removed: &BTreeSet<u32>,
+        created: Vec<([u32; 4], Option<PersistentEntityId>)>,
+        attachments: &BTreeSet<[u32; 3]>,
+    ) -> Result<Vec<u32>, TopologyMutationError> {
+        let plan = self.prepare_cavity_replacement(removed, created, attachments)?;
+        let created = plan.created.clone();
+        self.commit_cavity_replacement(plan);
+        Ok(created)
+    }
+
+    pub(super) fn prepare_cavity_replacement(
         &self,
         removed: &BTreeSet<u32>,
         created: Vec<([u32; 4], Option<PersistentEntityId>)>,
+        attachments: &BTreeSet<[u32; 3]>,
     ) -> Result<ReplacementPlan, TopologyMutationError> {
-        if removed.is_empty() || created.is_empty() {
+        if (removed.is_empty() && attachments.is_empty()) || created.is_empty() {
             return Err(error(
                 "cavity replacement requires removed and created tetrahedra",
             ));
@@ -43,7 +58,19 @@ impl TopologyMutation {
             }
         }
 
-        let external = self.external_boundary(removed)?;
+        let mut external = self.external_boundary(removed)?;
+        for face in attachments {
+            let &(index, opposite) = self
+                .boundary_faces
+                .get(face)
+                .ok_or_else(|| error("hull attachment is not a current boundary face"))?;
+            if removed.contains(&index) || external.insert(*face, Some((index, opposite))).is_some()
+            {
+                return Err(error(
+                    "hull attachment conflicts with the removed cavity interface",
+                ));
+            }
+        }
         let expected_interface = external
             .iter()
             .filter_map(|(face, outside)| outside.is_some().then_some(*face))
@@ -64,7 +91,15 @@ impl TopologyMutation {
         }
         self.reject_duplicate_tetrahedra(removed, &oriented)?;
 
-        let mut available = self.free_tetrahedra.clone();
+        // Only the first created_len free slots can be among the first
+        // created_len members of the union. Retain the original lowest-slot
+        // assignment without copying unrelated free storage on every cavity.
+        let mut available = self
+            .free_tetrahedra
+            .iter()
+            .take(created_len)
+            .copied()
+            .collect::<BTreeSet<_>>();
         available.extend(removed.iter().copied());
         let appended = created_len.saturating_sub(available.len());
         let final_len = self
@@ -88,7 +123,7 @@ impl TopologyMutation {
             })
             .collect::<Vec<_>>();
         let (neighbors, external_neighbors) =
-            replacement_neighbors(&oriented, &assigned, &external)?;
+            replacement_neighbors(self, &oriented, &assigned, &external)?;
         let tetrahedra = oriented
             .into_iter()
             .zip(assigned.iter().copied())
@@ -171,11 +206,18 @@ impl TopologyMutation {
         Ok(boundary)
     }
 
-    fn commit_cavity_replacement(&mut self, plan: ReplacementPlan) {
+    pub(super) fn commit_cavity_replacement(&mut self, plan: ReplacementPlan) {
+        let journal_keys =
+            self.record_trial_cavity(&plan.removed, &plan.tetrahedra, &plan.external_neighbors);
         for tetrahedron_index in &plan.removed {
+            self.record_cell_removal(*tetrahedron_index);
             let tetrahedron = self.tetrahedra[*tetrahedron_index as usize]
                 .take()
                 .expect("prepared cavity tetrahedron must remain active");
+            self.record_physical_cell_change(tetrahedron.vertex_indices);
+            if let Some(state) = self.connectivity_state.get_mut() {
+                state.remove(tetrahedron.vertex_indices);
+            }
             self.tetrahedron_indices
                 .remove(&sorted_tetrahedron(tetrahedron.vertex_indices));
             self.remove_face_uses(*tetrahedron_index, tetrahedron.vertex_indices);
@@ -186,6 +228,10 @@ impl TopologyMutation {
         }
         self.tetrahedra.resize(plan.final_len, None);
         for (index, tetrahedron) in plan.tetrahedra {
+            self.record_physical_cell_change(tetrahedron.vertex_indices);
+            if let Some(state) = self.connectivity_state.get_mut() {
+                state.insert(tetrahedron.vertex_indices);
+            }
             self.tetrahedron_indices
                 .insert(sorted_tetrahedron(tetrahedron.vertex_indices), index);
             for vertex in tetrahedron.vertex_indices {
@@ -193,6 +239,7 @@ impl TopologyMutation {
             }
             self.insert_face_uses(index, tetrahedron.vertex_indices);
             self.tetrahedra[index as usize] = Some(tetrahedron);
+            self.record_cell_insertion(index);
             self.free_tetrahedra.remove(&index);
         }
         for (neighbor, opposite, replacement) in plan.external_neighbors {
@@ -201,10 +248,14 @@ impl TopologyMutation {
                 .expect("prepared external neighbor must remain active")
                 .neighbors[opposite] = Some(replacement);
         }
+        if let Some(keys) = journal_keys {
+            keys.compact(self);
+        }
     }
 }
 
 fn replacement_neighbors(
+    topology: &TopologyMutation,
     tetrahedra: &[([u32; 4], Option<PersistentEntityId>)],
     assigned: &[u32],
     external: &ExternalBoundary,
@@ -223,11 +274,26 @@ fn replacement_neighbors(
         match face_uses.as_slice() {
             [(created, opposite)] => {
                 if let Some(Some((neighbor, neighbor_opposite))) = external.get(&face) {
+                    super::interface::require_opposite_sides(
+                        tetrahedra[*created].0,
+                        *opposite,
+                        topology
+                            .tetrahedron(*neighbor)
+                            .expect("prepared retained neighbor remains active")
+                            .vertex_indices,
+                        *neighbor_opposite,
+                    )?;
                     neighbors[*created][*opposite] = Some(*neighbor);
                     external_neighbors.push((*neighbor, *neighbor_opposite, assigned[*created]));
                 }
             }
             [(left, left_opposite), (right, right_opposite)] => {
+                super::interface::require_opposite_sides(
+                    tetrahedra[*left].0,
+                    *left_opposite,
+                    tetrahedra[*right].0,
+                    *right_opposite,
+                )?;
                 neighbors[*left][*left_opposite] = Some(assigned[*right]);
                 neighbors[*right][*right_opposite] = Some(assigned[*left]);
             }

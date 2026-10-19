@@ -164,7 +164,7 @@ pub use problem::materials::{
 };
 pub use problem::model::{
     AnalysisModel, AnalysisModelId, SolverAnalysisModel, SolverAnalysisSequence,
-    SolverProcedureStep,
+    SolverMaterialAssignments, SolverMaterials, SolverProcedureStep, SolverSteps,
 };
 pub use problem::model_authoring::{
     AuthoredMaterialAssignment, AuthoredMaterialRef, AuthoredMaterialSource, AuthoredModel,
@@ -258,8 +258,9 @@ pub use study::{
     StructuralRecoveryImplementation, TemporalImplementation, TopologyImplementation,
 };
 pub use validate::{
-    validate_analysis_sequence, validate_material_definitions, validate_model,
-    validate_model_against_geometry, validate_model_sequence, AnalysisValidationError,
+    dependency_graph_resident_bytes_upper_bound, validate_analysis_sequence,
+    validate_material_definitions, validate_model, validate_model_against_geometry,
+    validate_model_sequence, validate_model_with_dependency_graph_budget, AnalysisValidationError,
 };
 
 #[cfg(test)]

@@ -1,15 +1,22 @@
 //! Shared scoped PCG execution, admission, and stopping policy.
 use crate::planning::resource::{LocalExecutionPlan, SolverAdmissionResourcePolicy};
 
-pub(super) const DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-8;
+pub(crate) const DEFAULT_RELATIVE_TOLERANCE: f64 = 1.0e-8;
 
-pub(super) fn iteration_limit(
+pub(crate) fn iteration_limit(
     operator: &crate::algebra::AssembledRealSystem,
     base_max_iters: usize,
 ) -> usize {
     base_max_iters
         .max(operator.dof_count().saturating_mul(2))
         .max(256)
+}
+
+pub(crate) fn accelerator_iteration_limit(
+    operator: &crate::algebra::AssembledRealSystem,
+    base_max_iters: usize,
+) -> u32 {
+    u32::try_from(iteration_limit(operator, base_max_iters)).unwrap_or(u32::MAX)
 }
 
 /// Execution/admission and numerical stopping policy for the scoped shared PCG path.

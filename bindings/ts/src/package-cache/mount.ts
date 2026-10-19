@@ -1,4 +1,6 @@
 import type { RunMatPackageCacheProvider } from "./provider-types.js";
+import { normalizePath } from "../fs/path.js";
+import type { WorkspaceCaptureRequest, WorkspacePublicationRequest } from "../generated/fea-workspace-contracts.js";
 import type {
   RunMatFilesystemDirEntry,
   RunMatFilesystemMetadata,
@@ -155,6 +157,32 @@ export class BrowserPackageMountFilesystem implements RunMatFilesystemProvider {
   >();
 
   constructor(private readonly workspace: RunMatFilesystemProvider) {}
+
+  async captureWorkspace(request: WorkspaceCaptureRequest) {
+    this.assertMutable(request.root);
+    if (!this.workspace.captureWorkspace) throw new Error("Workspace capture is unavailable");
+    return this.workspace.captureWorkspace(request);
+  }
+
+  async lookupWorkspacePublication(request: WorkspacePublicationRequest) {
+    this.assertMutablePublication(request);
+    if (!this.workspace.lookupWorkspacePublication) throw new Error("Workspace receipt lookup is unavailable");
+    return this.workspace.lookupWorkspacePublication(request);
+  }
+
+  async publishWorkspace(request: WorkspacePublicationRequest) {
+    this.assertMutablePublication(request);
+    if (!this.workspace.publishWorkspace) throw new Error("Conditional workspace publication is unavailable");
+    return this.workspace.publishWorkspace(request);
+  }
+
+  private assertMutablePublication(request: WorkspacePublicationRequest): void {
+    this.assertMutable(request.root);
+    for (const edit of request.edits) {
+      const paths = edit.type === "rename" ? [edit.from, edit.to] : [edit.path];
+      for (const path of paths) this.assertMutable(normalizePath(`${request.root}/${path}`));
+    }
+  }
 
   clear(): void {
     for (const value of this.mounts.values()) {

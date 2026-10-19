@@ -16,6 +16,7 @@ fn prepare(
 ) -> PreparedThermalTask {
     let digest = Digest::sha256("native-retained-joule-source");
     prepare_thermal_task(ThermalTaskPreparation {
+        local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
         field_source: source,
         authored_study_digest: digest,
         frozen_project_digest: None,

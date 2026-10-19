@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::{ExactFaceDelaunayError, ExactFaceDelaunayTriangle, ExactFacePslg};
 
 use super::{ear::triangulate_polygon, recover::RecoveryControl};
-use crate::exact_cdt::topology::{edge_uses, properly_crosses, sorted_edge};
+use crate::exact_cdt::topology::{edge_uses_with_checkpoint, properly_crosses, sorted_edge};
 
 /// Replaces the triangle strip intersected by `target` with two deterministic
 /// polygon triangulations sharing `target`. Returning `false` means that the
@@ -16,7 +16,7 @@ pub(super) fn recover_segment_cavity(
     control: &mut RecoveryControl<'_>,
 ) -> Result<bool, ExactFaceDelaunayError> {
     control.checkpoint()?;
-    let uses = edge_uses(triangles);
+    let uses = edge_uses_with_checkpoint(triangles, || control.checkpoint())?;
     let mut selected = BTreeSet::new();
     for (edge, edge_uses) in &uses {
         control.consume_predicates(4)?;
@@ -87,7 +87,7 @@ pub(super) fn recover_segment_cavity(
         return Ok(false);
     }
 
-    let replacement_edges = edge_uses(&replacement);
+    let replacement_edges = edge_uses_with_checkpoint(&replacement, || control.checkpoint())?;
     if !replacement_edges.contains_key(&target)
         || protected
             .iter()

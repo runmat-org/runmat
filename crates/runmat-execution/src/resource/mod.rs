@@ -1,3 +1,5 @@
+mod reservation;
+
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
@@ -71,8 +73,15 @@ impl ResourceRequest {
                 limit: 16,
             });
         }
+        let mut classes = BTreeSet::new();
         for accelerator in &self.accelerators {
             accelerator.validate()?;
+            if !classes.insert(&accelerator.class) {
+                return Err(ContractError::invalid(
+                    "accelerators",
+                    "each requested class must occur once",
+                ));
+            }
         }
         Ok(())
     }

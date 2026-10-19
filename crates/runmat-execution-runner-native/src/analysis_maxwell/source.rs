@@ -21,6 +21,32 @@ struct RetainedMaxwellSource<S> {
 }
 
 impl<S: CacheImport> CacheImport for RetainedMaxwellSource<S> {
+    fn read_verified_bounded_with_admission(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+        admit: &mut dyn FnMut(u64) -> ArtifactResult<()>,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        crate::bounded_object_read::read_overlay_admitted(
+            &self.store,
+            digest,
+            self.objects.get(&digest).map(Vec::as_slice),
+            maximum_bytes,
+            admit,
+        )
+    }
+    fn read_verified_bounded(
+        &self,
+        digest: Digest,
+        maximum_bytes: u64,
+    ) -> ArtifactResult<Option<Vec<u8>>> {
+        crate::bounded_object_read::read_overlay(
+            &self.store,
+            digest,
+            self.objects.get(&digest).map(Vec::as_slice),
+            maximum_bytes,
+        )
+    }
     fn read_verified(&self, digest: Digest) -> ArtifactResult<Option<Vec<u8>>> {
         if let Some(bytes) = self.objects.get(&digest) {
             return Ok(Some(bytes.clone()));

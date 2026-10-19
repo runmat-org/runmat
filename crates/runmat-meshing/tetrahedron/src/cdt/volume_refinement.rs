@@ -9,15 +9,18 @@ use super::{
     DelaunayVolumeQualityErrorKind, DelaunayVolumeQualityOptions, DelaunayVolumeTopology,
 };
 
+mod admission;
 mod batch;
 mod candidate;
+pub(in crate::cdt) mod context;
 mod insertion;
 pub(in crate::cdt) mod iteration;
 mod metric_circumcenter;
 mod validation;
 mod work;
+pub(in crate::cdt) mod working;
 
-use candidate::construct_candidate;
+use candidate::{construct_candidate, CandidateQueries};
 pub use insertion::{
     insert_delaunay_volume_refinement_candidate, validate_delaunay_volume_refinement_step,
 };
@@ -63,13 +66,15 @@ pub struct DelaunayVolumeRefinementInput<'a> {
     pub fixed_node_identities: &'a [StableDigest],
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeRefinementCandidateOptions {
     pub maximum_candidate_evaluations: u64,
     pub cancellation_check_interval: u64,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeRefinementStepOptions {
     pub candidate: DelaunayVolumeRefinementCandidateOptions,
     pub insertion: super::DelaunayInsertionOptions,
@@ -99,7 +104,8 @@ pub struct DelaunayVolumeRefinementStepError {
     pub reason: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeRefinementOptions {
     pub step: DelaunayVolumeRefinementStepOptions,
     pub maximum_insertions: u64,
@@ -201,11 +207,16 @@ fn select_delaunay_volume_refinement_candidate_excluding(
         cancellation,
     )
     .map_err(quality_error)?;
+    if input.quality.worst_refinement_tetrahedron.is_none() {
+        return Ok(None);
+    }
+    let queries = CandidateQueries::new(input.topology, cancellation)?;
     select_delaunay_volume_refinement_candidate_excluding_from_admitted_input(
         input,
         options,
         excluded_node_identities,
         cancellation,
+        &queries,
     )
 }
 
@@ -214,6 +225,7 @@ fn select_delaunay_volume_refinement_candidate_excluding_from_admitted_input(
     options: DelaunayVolumeRefinementCandidateOptions,
     excluded_node_identities: &std::collections::BTreeSet<StableDigest>,
     cancellation: &dyn MeshingCancellationSignal,
+    queries: &CandidateQueries,
 ) -> Result<Option<DelaunayVolumeRefinementCandidate>, DelaunayVolumeRefinementCandidateError> {
     if input.quality.worst_refinement_tetrahedron.is_none() {
         return Ok(None);
@@ -241,6 +253,7 @@ fn select_delaunay_volume_refinement_candidate_excluding_from_admitted_input(
     for source in sources {
         match construct_candidate(
             input.topology,
+            queries,
             source,
             input.quality_options,
             input.fixed_node_identities,

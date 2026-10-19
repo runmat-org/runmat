@@ -4,7 +4,7 @@ pub(super) fn resolve_interpolated_points(
     spec: &ObservationSpec,
     field_domain: RecoveredFieldEntityDomain,
     topology: &ObservationTopology,
-    maximum: usize,
+    limits: ObservationLimits,
 ) -> Result<ResolvedObservationTarget, ObservationError> {
     if spec.source_location != FieldLocation::Node
         || spec.output_location != FieldLocation::Point
@@ -25,17 +25,23 @@ pub(super) fn resolve_interpolated_points(
             ))
         }
     };
-    require_selected(positions.len(), maximum)?;
+    require_selected(positions.len(), limits.maximum_selected_entities)?;
     let projection = topology
         .solid_projection
         .as_ref()
         .ok_or(ObservationError::Unsupported(
             "point and path interpolation require admitted solid topology",
         ))?;
+    let bytes = resources::interpolated_points_resident_bytes(projection, positions.len())?;
+    if bytes > limits.maximum_peak_resident_bytes {
+        return Err(ObservationError::Limit(
+            "point target construction residency",
+        ));
+    }
     let mut samples = reserved(positions.len())?;
     for (ordinal, position) in positions.iter().enumerate() {
         let location = projection
-            .locate_volume_point(position.meters)
+            .locate_volume_point(position.meters)?
             .ok_or_else(|| target_error(spec, "point lies outside the admitted solid topology"))?;
         let ordinal =
             u64::try_from(ordinal).map_err(|_| ObservationError::Limit("path sample ordinal"))?;
@@ -118,3 +124,5 @@ pub(super) fn resolve_probe(
         )),
     }
 }
+
+mod resources;

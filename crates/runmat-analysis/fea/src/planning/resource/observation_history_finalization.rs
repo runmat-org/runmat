@@ -64,16 +64,57 @@ pub fn observation_history_series_reduction_payload_bytes_upper_bound(
     if request.series_reduction.is_none() {
         return Ok(None);
     }
-    // Envelope and AllCanonical ties can retain every sample's extrema evidence.
-    // Budget each value as a record as well as numeric payload, without evaluating it.
     let retained_values = values(checkpoint)?;
-    let records = add(
-        add(
-            count(checkpoint.samples().len())?,
-            multiply(retained_values, 2)?,
-        )?,
-        1,
-    )?;
+    let samples = count(checkpoint.samples().len())?;
+    let lanes = retained_values
+        .checked_div(samples)
+        .ok_or_else(|| invalid("series output has no retained samples"))?;
+    if lanes == 0 || retained_values % samples != 0 {
+        return Err(invalid(
+            "series output samples have inconsistent value widths",
+        ));
+    }
+    // Statistical reductions emit one field and no extrema locations. Their original
+    // contributions still retain every source/value, covered by the input envelope.
+    // Extrema additionally retain actual governing locations, including all ties if requested.
+    let operation = request
+        .series_reduction
+        .ok_or_else(|| invalid("series operation absent"))?;
+    let extrema_lanes = match operation {
+        runmat_analysis_core::SeriesReduction::Mean { .. }
+        | runmat_analysis_core::SeriesReduction::RootMeanSquare { .. }
+        | runmat_analysis_core::SeriesReduction::Variance { .. } => 0,
+        runmat_analysis_core::SeriesReduction::None => {
+            return Err(invalid("series operation absent"))
+        }
+        runmat_analysis_core::SeriesReduction::Minimum
+        | runmat_analysis_core::SeriesReduction::Maximum
+        | runmat_analysis_core::SeriesReduction::AbsoluteMaximum
+        | runmat_analysis_core::SeriesReduction::Envelope => {
+            let locations = if request
+                .plan
+                .observations
+                .iter()
+                .find(|o| o.spec.observation_id == request.observation_id)
+                .and_then(|o| o.spec.reduction.as_ref())
+                .ok_or_else(|| invalid("series observation absent"))?
+                .extrema_ties
+                == runmat_analysis_core::ExtremaTiePolicy::AllLocations
+            {
+                retained_values
+            } else {
+                lanes
+            };
+            // Envelope emits minimum and maximum. Other extrema emit one location inventory.
+            if operation == runmat_analysis_core::SeriesReduction::Envelope {
+                multiply(locations, 2)?
+            } else {
+                locations
+            }
+        }
+    };
+    let records = add(add(samples, extrema_lanes)?, 1)?;
+    // Covers the complete contribution values and either one or both terminal fields.
     derived_output_payload_bytes_upper_bound(inputs, records, multiply(retained_values, 2)?)
         .map(Some)
 }

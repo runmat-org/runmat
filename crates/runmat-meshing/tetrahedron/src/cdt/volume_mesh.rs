@@ -7,19 +7,36 @@ use serde::{Deserialize, Serialize};
 use super::segment_recovery::recover_delaunay_segments_from_point_set;
 use super::topology::build_delaunay_volume_topology_with_regions;
 use super::{
-    build_delaunay_constraints, build_delaunay_volume_point_set, build_delaunay_volume_provenance,
-    carve_delaunay_volume, evaluate_delaunay_volume_quality, recover_delaunay_facets,
-    DelaunayCarvingOptions, DelaunayConstraintOptions, DelaunayFacetSteinerInsertion,
-    DelaunayPointSetOptions, DelaunayVolumeNode, DelaunayVolumeProvenance,
-    DelaunayVolumeProvenanceOptions, DelaunayVolumeQuality, DelaunayVolumeQualityOptions,
-    DelaunayVolumeRefinementOptions, DelaunayVolumeSliverMutation, DelaunayVolumeSliverOptions,
-    DelaunayVolumeTopology,
+    build_delaunay_constraints, build_delaunay_volume_provenance, carve_delaunay_volume,
+    evaluate_delaunay_volume_quality, recover_delaunay_facets, DelaunayCarvingOptions,
+    DelaunayConstraintOptions, DelaunayFacetSteinerInsertion, DelaunayPointSetOptions,
+    DelaunayVolumeNode, DelaunayVolumeProvenance, DelaunayVolumeProvenanceOptions,
+    DelaunayVolumeQuality, DelaunayVolumeQualityOptions, DelaunayVolumeRefinementOptions,
+    DelaunayVolumeSliverMutation, DelaunayVolumeSliverOptions, DelaunayVolumeTopology,
 };
+
+#[cfg(test)]
+use super::build_delaunay_volume_point_set;
 
 mod centroid;
 mod codec;
+pub(in crate::cdt) use codec::admission::decode as decode_delaunay_volume_mesh_admitted;
 mod components;
+#[cfg(test)]
+pub(in crate::cdt) use components::assemble as assemble_completed_components;
 mod constraint_star;
+mod construction;
+mod quality_replay;
+mod representation;
+pub use construction::{
+    construct_delaunay_volume_mesh, construct_delaunay_volume_mesh_with_quality_observer,
+};
+pub use quality_replay::{
+    encode_volume_quality_snapshot, prepare_volume_quality_snapshot,
+    profile_volume_quality_snapshot, replay_volume_quality, replay_volume_quality_observed,
+    volume_quality_snapshot_preparation_storage_bytes, PreparedVolumeQualitySnapshot,
+    VolumeQualityBinding, VolumeQualityObserver, VolumeQualityReplayResult, VolumeQualitySnapshot,
+};
 mod error;
 mod frame;
 mod quality_convergence;
@@ -28,7 +45,8 @@ mod validation;
 
 pub use codec::{
     decode_delaunay_volume_mesh, encode_delaunay_volume_mesh, DelaunayVolumeMeshCodecError,
-    DelaunayVolumeMeshCodecErrorKind, DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
+    DelaunayVolumeMeshCodecErrorKind, ValidatedDelaunayVolumeMesh, VolumeMeshEncoding,
+    DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
 };
 use error::{
     carving_error, constraint_error, facet_error, point_set_error, provenance_error, quality_error,
@@ -36,7 +54,8 @@ use error::{
 };
 pub use validation::validate_delaunay_volume_mesh;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DelaunayVolumeMeshOptions {
     pub constraints: DelaunayConstraintOptions,
     pub carving: DelaunayCarvingOptions,
@@ -102,175 +121,19 @@ impl std::fmt::Display for DelaunayVolumeMeshError {
 
 impl std::error::Error for DelaunayVolumeMeshError {}
 
-/// Constructs one checked general CDT volume from the authoritative exact surface closure.
-/// Scheduling and artifact publication remain outside this geometry-kernel boundary.
-pub fn construct_delaunay_volume_mesh(
-    topology: &ExactBRepTopology,
-    surface: &ExactSurfaceMesh,
-    metric_request: &MetricFieldRequest,
-    options: DelaunayVolumeMeshOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
-    validate_option_consistency(options)?;
-    let result = construct_delaunay_volume_mesh_unvalidated(
-        topology,
-        surface,
-        metric_request,
-        options,
-        cancellation,
-    )?;
-    validate_delaunay_volume_mesh(
-        topology,
-        surface,
-        metric_request,
-        &result,
-        options,
-        cancellation,
-    )?;
-    Ok(result)
-}
-
-pub(super) fn construct_delaunay_volume_mesh_unvalidated(
-    topology: &ExactBRepTopology,
-    surface: &ExactSurfaceMesh,
-    metric_request: &MetricFieldRequest,
-    options: DelaunayVolumeMeshOptions,
-    cancellation: &dyn MeshingCancellationSignal,
-) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
-    validate_option_consistency(options)?;
-    trace_surface_contract(surface);
-    let physical_constraints =
-        build_delaunay_constraints(topology, surface, options.constraints, cancellation)
-            .map_err(constraint_error)?;
-    let frame =
-        frame::CanonicalVolumeFrame::from_constraints(&physical_constraints).ok_or_else(|| {
-            error(
-                DelaunayVolumeMeshStage::PointSet,
-                DelaunayVolumeMeshErrorKind::InvalidGeometry,
-                "solid boundary cannot define a nondegenerate canonical volume frame",
-            )
-        })?;
-    let constraints = frame.canonicalize_constraints(&physical_constraints);
-    let canonical_metric_request =
-        frame
-            .canonicalize_metric_request(metric_request)
-            .map_err(|failure| {
-                error(
-                    DelaunayVolumeMeshStage::Quality,
-                    DelaunayVolumeMeshErrorKind::InvalidMetric,
-                    failure.to_string(),
-                )
-            })?;
-    let components = components::partition_constraints(&constraints)?;
-    let mut meshes = Vec::with_capacity(components.len());
-    let mut remaining_insertions = options.refinement.maximum_insertions;
-    for component in components {
-        let mut component_options = options;
-        component_options.refinement.maximum_insertions = remaining_insertions;
-        let mut mesh = construct_component_mesh(
-            &component.region,
-            &component.constraints,
-            &canonical_metric_request,
-            component_options,
-            cancellation,
-        )?;
-        let insertion_count = mesh.refinement_insertions.len() as u64;
-        remaining_insertions = remaining_insertions.saturating_sub(insertion_count);
-        components::remap_facet_insertions(
-            &mut mesh.facet_recovery_insertions,
-            &component.global_facet_indices,
-        )?;
-        meshes.push(mesh);
-    }
-    let assembled_topology = components::assemble_topology(
-        &meshes,
-        options.refinement.step.insertion.topology,
-        cancellation,
-    )?;
-    let provenance = components::assemble_provenance(&meshes);
-    let quality = evaluate_delaunay_volume_quality(
-        &assembled_topology,
-        &canonical_metric_request,
-        &provenance,
-        options.quality,
-        cancellation,
-    )
-    .map_err(quality_error)?;
-    let mut result = DelaunayVolumeMesh {
-        topology: assembled_topology,
-        provenance,
-        quality,
-        facet_recovery_insertions: components::assemble_insertions(&meshes),
-        refinement_insertions: components::assemble_refinement_insertions(&meshes),
-        sliver_mutations: components::assemble_sliver_mutations(&meshes),
-    };
-    frame.restore_mesh(&mut result, &physical_constraints);
-    let restored_topology = result.topology;
-    result.topology = build_delaunay_volume_topology_with_regions(
-        restored_topology.nodes,
-        restored_topology
-            .tetrahedra
-            .into_iter()
-            .map(|tetrahedron| (tetrahedron.vertex_indices, tetrahedron.region_id))
-            .collect(),
-        options.refinement.step.insertion.topology,
-        cancellation,
-    )
-    .map_err(|failure| {
-        error(
-            DelaunayVolumeMeshStage::CoordinateMaterialization,
-            DelaunayVolumeMeshErrorKind::InvalidTopology,
-            format!("canonical volume frame could not restore solver coordinates: {failure}"),
-        )
-    })?;
-    result.quality = evaluate_delaunay_volume_quality(
-        &result.topology,
-        metric_request,
-        &result.provenance,
-        options.quality,
-        cancellation,
-    )
-    .map_err(quality_error)?;
-    Ok(result)
-}
-
-fn trace_surface_contract(surface: &ExactSurfaceMesh) {
-    let minimum_metric_edge = surface
-        .triangles
-        .iter()
-        .flat_map(|triangle| triangle.metric_edge_lengths)
-        .fold(f64::INFINITY, f64::min);
-    let minimum_metric_angle_degrees = surface
-        .triangles
-        .iter()
-        .map(|triangle| triangle.minimum_metric_angle_rad.to_degrees())
-        .fold(f64::INFINITY, f64::min);
-    let maximum_physical_aspect_ratio = surface
-        .triangles
-        .iter()
-        .map(|triangle| triangle.physical_aspect_ratio)
-        .fold(0.0_f64, f64::max);
-    let span = tracing::info_span!(
-        "meshing.tetrahedron.surface_contract",
-        surface_node_count = surface.nodes.len(),
-        surface_triangle_count = surface.triangles.len(),
-        minimum_metric_edge,
-        minimum_metric_angle_degrees,
-        maximum_physical_aspect_ratio,
-    );
-    span.in_scope(|| {});
-}
-
 fn construct_component_mesh(
     component_region: &runmat_geometry_core::PersistentEntityId,
-    constraints: &super::DelaunayConstraints,
+    owned_constraints: super::DelaunayConstraints,
     metric_request: &MetricFieldRequest,
+    frame: &frame::CanonicalVolumeFrame,
     options: DelaunayVolumeMeshOptions,
     cancellation: &dyn MeshingCancellationSignal,
+    observer: &dyn quality_replay::VolumeQualityObserver,
 ) -> Result<DelaunayVolumeMesh, DelaunayVolumeMeshError> {
+    let constraints = &owned_constraints;
     let component_span = tracing::info_span!(
         "meshing.tetrahedron.component",
-        constraint_nodes = constraints.volume_nodes().len(),
+        constraint_nodes = constraints.nodes.len(),
     );
     let _component_guard = component_span.enter();
     let point_set_options = point_set_options(options);
@@ -278,7 +141,7 @@ fn construct_component_mesh(
         if let Some(star) = constraint_star::try_build_constraint_star(
             component_region,
             constraints,
-            options.refinement.step.insertion.topology,
+            options.refinement.step.insertion,
             cancellation,
         )? {
             let mut barriers = constraints
@@ -296,9 +159,14 @@ fn construct_component_mesh(
             barriers.dedup();
             return Ok((star, barriers));
         }
-        build_delaunay_volume_point_set(constraints.volume_nodes(), point_set_options, cancellation)
-            .map_err(point_set_error)
-            .map(|topology| (topology, Vec::new()))
+        super::point_set::build_delaunay_volume_point_set_with_order(
+            constraints.volume_nodes(),
+            point_set_options,
+            cancellation,
+            |left, right| frame.compare_nodes(left, right),
+        )
+        .map_err(point_set_error)
+        .map(|topology| (topology, Vec::new()))
     })?;
     let initial = traced_substage("point_set_coordinate_normalization", || {
         normalize_point_set_coordinates(
@@ -308,6 +176,7 @@ fn construct_component_mesh(
             cancellation,
         )
     })?;
+    drop(point_set_barriers);
     let segments = traced_substage("segment_recovery", || {
         recover_delaunay_segments_from_point_set(
             initial,
@@ -317,7 +186,7 @@ fn construct_component_mesh(
         )
         .map_err(segment_error)
     })?;
-    let facets = traced_substage("facet_recovery", || {
+    let mut facets = traced_substage("facet_recovery", || {
         recover_delaunay_facets(
             segments,
             constraints,
@@ -341,6 +210,10 @@ fn construct_component_mesh(
         )
         .map_err(provenance_error)
     })?;
+    // Provenance owns the durable boundary evidence. Recovery's prerequisite and
+    // working topologies have no remaining consumer during volume optimization.
+    let facet_recovery_insertions = std::mem::take(&mut facets.steiner_insertions);
+    drop(facets);
     let protected_faces = provenance
         .facets
         .iter()
@@ -362,6 +235,7 @@ fn construct_component_mesh(
             cancellation,
         )
     })?;
+    drop(protected_faces);
     let quality = traced_substage("quality", || {
         evaluate_delaunay_volume_quality(
             &materialized,
@@ -392,8 +266,7 @@ fn construct_component_mesh(
             .node_identities
             .iter()
             .filter(|identity| {
-                facets
-                    .steiner_insertions
+                facet_recovery_insertions
                     .iter()
                     .any(|insertion| insertion.node_identity == **identity)
             })
@@ -408,6 +281,15 @@ fn construct_component_mesh(
             "initial volume defect lineage"
         );
     }
+    // Durable provenance and seeded identities now carry every remaining consumer.
+    drop(owned_constraints);
+    observer.observe(quality_replay::VolumeQualitySnapshot {
+        topology: &materialized,
+        provenance: &provenance,
+        metric: metric_request,
+        fixed_nodes: &seeded.node_identities,
+        options,
+    })?;
     let optimized = traced_substage("quality_convergence", || {
         quality_convergence::converge_volume_quality(
             materialized,
@@ -416,14 +298,17 @@ fn construct_component_mesh(
             provenance,
             &seeded.node_identities,
             options,
-            cancellation,
+            quality_convergence::QualityExecution {
+                cancellation,
+                observer,
+            },
         )
     })?;
     Ok(DelaunayVolumeMesh {
         topology: optimized.topology,
         provenance: optimized.provenance,
         quality: optimized.quality,
-        facet_recovery_insertions: facets.steiner_insertions,
+        facet_recovery_insertions,
         refinement_insertions: optimized.refinement_insertions,
         sliver_mutations: optimized.optimization_mutations,
     })
@@ -440,6 +325,9 @@ fn materialize_recovered_coordinates(
     options: super::DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayVolumeMeshError> {
+    // The recovered incidence is obsolete; release it before building the
+    // independently checked incidence at materialized solver coordinates.
+    drop(topology.incidence);
     let nodes = topology
         .nodes
         .into_iter()
@@ -474,7 +362,7 @@ fn materialize_recovered_coordinates(
             format!("recovered topology is invalid at materialized solver coordinates: {failure}"),
         )
     })?;
-    super::insertion::legalize_delaunay_volume_topology_completely_with_barriers(
+    super::insertion::restore_constrained_delaunay_topology(
         topology,
         protected_faces,
         options,
@@ -489,7 +377,7 @@ fn normalize_point_set_coordinates(
     options: super::DelaunayInsertionOptions,
     cancellation: &dyn MeshingCancellationSignal,
 ) -> Result<DelaunayVolumeTopology, DelaunayVolumeMeshError> {
-    super::insertion::legalize_delaunay_volume_topology_completely_with_barriers(
+    super::insertion::restore_constrained_delaunay_topology(
         topology,
         protected_faces,
         options,

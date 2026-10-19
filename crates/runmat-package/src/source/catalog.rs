@@ -209,14 +209,14 @@ pub(crate) enum CatalogAssemblyError {
 fn source_relative_path(
     source: &ProjectSourceFile,
 ) -> Result<NormalizedRelativePath, IdentityError> {
-    NormalizedRelativePath::new(source.source_root.join(&source.relative_path))
+    NormalizedRelativePath::new(source.source_root.join(&source.relative_path)).map_err(Into::into)
 }
 
 fn logical_mount_root(identity: &ContentDigest) -> Result<NormalizedRelativePath, IdentityError> {
     NormalizedRelativePath::new(format!(
         "packages/{}",
         identity.to_string().replace(':', "_")
-    ))
+    )).map_err(Into::into)
 }
 
 mod stable_source_path_map {

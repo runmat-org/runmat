@@ -9,7 +9,7 @@ use runmat_canonical_codec::{decode_contract, encode_contract, CanonicalLimits};
 use runmat_execution::Digest;
 use serde::{Deserialize, Serialize};
 
-const PREFIX: &[u8] = b"runmat-thermal-numerical-receipt/v1\0";
+const PREFIX: &[u8] = b"runmat-thermal-numerical-receipt/v2\0";
 pub const THERMAL_RECEIPT_MAX_ENCODED_BYTES: u64 = 64 * 1024;
 const LIMITS: CanonicalLimits =
     CanonicalLimits::new(THERMAL_RECEIPT_MAX_ENCODED_BYTES as usize, 4096, 4096, 32);
@@ -100,7 +100,7 @@ impl ThermalNumericalReceiptArtifact {
         let source_workload = workload.identity()?;
         let receipt = evidence(workload, metadata)?;
         let artifact = Self {
-            schema_version: 1,
+            schema_version: 2,
             identity: receipt_identity(source_workload, source_result, &receipt)?,
             source_workload,
             source_result,
@@ -121,7 +121,7 @@ impl ThermalNumericalReceiptArtifact {
 
     pub fn validate(&self) -> AnalysisExecutionResult<()> {
         let r = self.receipt;
-        if self.schema_version != 1
+        if self.schema_version != 2
             || r.accepted_sample_count == 0
             || !r.first_sample_time_s.is_finite()
             || !r.terminal_sample_time_s.is_finite()

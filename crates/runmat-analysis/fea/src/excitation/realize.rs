@@ -19,21 +19,45 @@ pub(crate) fn realize_step_excitations(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RealizationError {
-    message: String,
+pub(crate) enum RealizationError {
+    Invalid(String),
+    ResidentCeiling {
+        message: &'static str,
+        required: u64,
+        maximum: u64,
+    },
 }
-
 impl RealizationError {
     pub(super) fn new(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
+        Self::Invalid(message.into())
+    }
+    pub(super) fn resident_ceiling(message: &'static str, required: u64, maximum: u64) -> Self {
+        Self::ResidentCeiling {
+            message,
+            required,
+            maximum,
+        }
+    }
+    pub(crate) fn into_fea_error(self) -> crate::FeaRunError {
+        match self {
+            Self::ResidentCeiling {
+                required, maximum, ..
+            } => crate::planning::resource::ResourcePlanningError::AccuracyCeiling {
+                resource: "resident memory bytes",
+                required,
+                maximum,
+            }
+            .into(),
+            Self::Invalid(message) => crate::FeaRunError::InvalidModel(message),
         }
     }
 }
-
 impl fmt::Display for RealizationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.message.fmt(formatter)
+        match self {
+            Self::Invalid(message) => message.fmt(formatter),
+            Self::ResidentCeiling { message, .. } => message.fmt(formatter),
+        }
     }
 }
 

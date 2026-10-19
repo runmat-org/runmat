@@ -4,6 +4,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
 use serde::{Deserialize, Serialize};
 
+mod directional;
+mod exact_faces;
+pub use exact_faces::ExactFaceMetricResolutionError;
+mod subspace;
+pub use subspace::DirectionalMetricEnvelope;
+mod index;
+mod intersection;
+mod uniform;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MetricContractError {
     pub field: String,
@@ -91,17 +100,21 @@ impl MetricTensor3 {
         Ok(())
     }
 
-    pub fn conservative_minimum_length_m(&self) -> Result<f64, MetricContractError> {
-        self.validate()?;
-        // The maximum absolute row sum bounds the largest eigenvalue from above. Its reciprocal
-        // square root is therefore a conservative lower bound on the finest directional length.
-        let maximum_density = [
+    pub(crate) fn maximum_row_density(&self) -> f64 {
+        [
             self.xx + self.xy.abs() + self.xz.abs(),
             self.yy + self.xy.abs() + self.yz.abs(),
             self.zz + self.xz.abs() + self.yz.abs(),
         ]
         .into_iter()
-        .fold(0.0_f64, f64::max);
+        .fold(0.0_f64, f64::max)
+    }
+
+    pub fn conservative_minimum_length_m(&self) -> Result<f64, MetricContractError> {
+        self.validate()?;
+        // The maximum absolute row sum bounds the largest eigenvalue from above. Its reciprocal
+        // square root is therefore a conservative lower bound on the finest directional length.
+        let maximum_density = self.maximum_row_density();
         let length = maximum_density.sqrt().recip();
         if !length.is_finite() || length <= 0.0 {
             return Err(MetricContractError::invalid(
@@ -287,6 +300,7 @@ pub struct ResolvedMetricEvaluation {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedMetricField {
     request: MetricFieldRequest,
+    index: index::ContributionIndex,
 }
 
 impl ResolvedMetricField {
@@ -294,6 +308,7 @@ impl ResolvedMetricField {
         request.validate()?;
         Ok(Self {
             request: request.clone(),
+            index: index::ContributionIndex::new(request),
         })
     }
 
@@ -301,28 +316,19 @@ impl ResolvedMetricField {
         &self,
         incident_entities: &BTreeSet<PersistentEntityId>,
     ) -> Result<ResolvedMetricEvaluation, MetricContractError> {
-        let mut metric = self.request.global_metric;
+        let mut applicable = self.index.applicable(&self.request, incident_entities);
         let mut sources = BTreeMap::from([(
             MetricSourceKind::Global.canonical_rank(),
             MetricSourceKind::Global,
         )]);
         let mut applied_contribution_count = 0u32;
-        for contribution in &self.request.contributions {
-            let entity_id = match &contribution.scope {
-                MetricContributionScope::Region { region_id } => region_id,
-                MetricContributionScope::Entity { entity_id } => entity_id,
-            };
-            if incident_entities.contains(entity_id) {
-                metric = add_metric(metric, contribution.metric).ok_or_else(|| {
-                    MetricContractError::invalid(
-                        "resolved metric intersection",
-                        "applicable tensors overflow their conservative intersection",
-                    )
-                })?;
-                sources.insert(contribution.source.canonical_rank(), contribution.source);
-                applied_contribution_count = applied_contribution_count.saturating_add(1);
-            }
+        for &index in &applicable {
+            let contribution = &self.request.contributions[index];
+            sources.insert(contribution.source.canonical_rank(), contribution.source);
+            applied_contribution_count = applied_contribution_count.saturating_add(1);
         }
+        intersection::deduplicate(&self.request, &mut applicable);
+        let metric = intersection::combine(&self.request, &applicable)?;
         metric.validate()?;
         Ok(ResolvedMetricEvaluation {
             metric,
@@ -332,28 +338,6 @@ impl ResolvedMetricField {
             rejected_contribution_count: 0,
         })
     }
-}
-
-fn add_metric(left: MetricTensor3, right: MetricTensor3) -> Option<MetricTensor3> {
-    let values = [
-        left.xx + right.xx,
-        left.yy + right.yy,
-        left.zz + right.zz,
-        left.xy + right.xy,
-        left.xz + right.xz,
-        left.yz + right.yz,
-    ];
-    values
-        .iter()
-        .all(|value| value.is_finite())
-        .then_some(MetricTensor3 {
-            xx: values[0],
-            yy: values[1],
-            zz: values[2],
-            xy: values[3],
-            xz: values[4],
-            yz: values[5],
-        })
 }
 
 fn compare_contributions(left: &MetricContribution, right: &MetricContribution) -> Ordering {

@@ -1,19 +1,20 @@
 use std::collections::BTreeMap;
+mod error;
+mod storage;
+use error::{failure, invalid_inputs, map_solver_error};
 
-use runmat_execution::Digest;
-use runmat_geometry_core::GeometryEvaluationControl;
 use runmat_meshing_core::{
-    CanonicalMeshingContract, MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry,
+    MeshingCancellationSignal, MeshingChunkMediaType, MeshingChunkStream, MeshingDiagnosticEntry,
     MeshingDiagnosticValue, MeshingFailure, MeshingFailureCategory, MeshingPartitionKind,
-    MeshingStageKind, MeshingStageResultKind, SolverMeshProjection, StableDigest,
-    MESHING_FAILURE_SCHEMA_VERSION, SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
+    MeshingStageKind, MeshingStageResultKind, StableDigest, MESHING_FAILURE_SCHEMA_VERSION,
+    SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
 };
 use runmat_meshing_surface::{
-    decode_published_exact_surface_mesh, ExactSurfaceJoinOptions, ExactSurfaceMesh,
+    decode_published_exact_surface_mesh_admitted, ExactSurfaceJoinOptions, ExactSurfaceMesh,
 };
 use runmat_meshing_tetrahedron::cdt::{
-    build_delaunay_solver_topology, decode_delaunay_volume_mesh, DelaunayExactEvaluation,
-    DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind, DelaunaySolverTopologyInput,
+    decode_delaunay_solver_topology, DelaunayExactEvaluation, DelaunaySolverProjectionError,
+    DelaunaySolverProjectionInput, DelaunaySolverTopologyError, DelaunaySolverTopologyErrorKind,
     DelaunaySolverTopologyOptions, DELAUNAY_VOLUME_MESH_SCHEMA_VERSION,
 };
 
@@ -61,59 +62,113 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
         invocation
             .control
             .checkpoint(MeshingStageCheckpoint::default())?;
-        let surface = sources.surface(&invocation)?;
+        let control = invocation.control.geometry_evaluation_control();
+        let (surface, surface_storage) = sources.surface(&invocation, &control)?;
         phase_checkpoint(
             invocation.control,
             "exact surface artifact decoding and validation",
         )?;
-        let control = invocation.control.geometry_evaluation_control();
-        let volume = decode_delaunay_volume_mesh(
-            &sources.volume_record()?,
-            &sources.geometry.topology,
-            &surface,
-            &invocation.host.resolved_request.metric,
-            volume_options(&invocation.host.resolved_request),
-            &control,
-        )
-        .map_err(|error| failure(MeshingFailureCategory::InvalidGeometry, &error.to_string()))?;
-        geometry_phase_checkpoint(&control, "volume artifact decoding and validation")?;
+
         let evaluator = self
             .evaluator_provider
             .evaluator(sources.geometry, &control)
             .map_err(|error| {
                 failure(MeshingFailureCategory::InvalidGeometry, &error.to_string())
             })?;
-        let topology = build_delaunay_solver_topology(
-            DelaunaySolverTopologyInput {
+        let metric = self
+            .evaluator_provider
+            .geometry_metric(
+                sources.geometry,
+                evaluator.as_ref(),
+                &control,
+                &invocation.host.resolved_request,
+            )
+            .map_err(crate::curve_kernel::map_curve_error)?;
+        let retained = runmat_geometry_core::GeometryAllocationScope::new(&control);
+        let codec = crate::codec_control::CodecControl::new(&retained);
+        let reconstruction = runmat_geometry_core::GeometryAllocationScope::new(&codec);
+        let volume_bytes = sources
+            .volume_record(&codec, &reconstruction)
+            .map_err(|failure| error::map_record_error(failure, &codec))?;
+        let topology = decode_delaunay_solver_topology(
+            volume_bytes,
+            DelaunaySolverProjectionInput {
                 exact_topology: &sources.geometry.topology,
                 exact_surface: &surface,
-                volume_mesh: &volume,
+                volume_metric: &metric,
                 volume_options: volume_options(&invocation.host.resolved_request),
                 request: &invocation.host.resolved_request,
                 exact_evaluation: Some(DelaunayExactEvaluation {
                     evaluator: evaluator.as_ref(),
-                    control: &control,
+                    control: &codec,
                 }),
             },
             solver_options(&invocation.host.resolved_request),
-            &control,
+            &codec,
         )
-        .map_err(map_solver_error)?;
+        .map_err(|error| match error {
+            DelaunaySolverProjectionError::Control(error) => {
+                failure(crate::geometry_failure::category(error.kind), &error.reason)
+            }
+            DelaunaySolverProjectionError::Decode(error) => {
+                error::map_volume_codec_error(error, &codec)
+            }
+            DelaunaySolverProjectionError::Projection(error) => {
+                if let Some(original) = codec.take_failure() {
+                    failure(
+                        crate::geometry_failure::category(original.kind),
+                        &original.reason,
+                    )
+                } else {
+                    map_solver_error(error)
+                }
+            }
+        })?;
+        drop(reconstruction);
+        drop(metric);
+        drop(evaluator);
+        drop(surface);
+        drop(surface_storage);
         phase_checkpoint(
             invocation.control,
             "solver topology construction and validation",
         )?;
-        let projection = SolverMeshProjection {
-            schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
-            geometry: invocation.host.stage_identity.geometry.clone(),
-            resolved_request: invocation.host.resolved_request.clone(),
-            topology,
-        };
-        let encoded = projection.canonical_encode().map_err(|error| {
+        let projection = topology
+            .into_projection(invocation.host.stage_identity.geometry.clone())
+            .map_err(|error| {
+                failure(
+                    MeshingFailureCategory::InternalInvariantViolation,
+                    &error.to_string(),
+                )
+            })?;
+        let projection = storage::admit(projection, &retained, &codec)?;
+        drop(codec);
+        drop(retained);
+        let codec = crate::codec_control::CodecControl::new(&control);
+        let retained_bytes = projection.retained_bytes();
+        let encoding_profile = projection.encoding_profile(&codec).map_err(|error| {
             failure(
                 MeshingFailureCategory::InternalInvariantViolation,
                 &error.to_string(),
             )
+        })?;
+        let mut encoding_reservation = runmat_geometry_core::GeometryAllocationReservation::new(
+            &control,
+            encoding_profile.resident_workspace_bytes_estimate,
+        )
+        .map_err(|error| failure(crate::geometry_failure::category(error.kind), &error.reason))?;
+        let encoded = projection.encode(&codec).map_err(|error| {
+            if let Some(original) = codec.take_failure() {
+                failure(
+                    crate::geometry_failure::category(original.kind),
+                    &original.reason,
+                )
+            } else {
+                failure(
+                    MeshingFailureCategory::InternalInvariantViolation,
+                    &error.to_string(),
+                )
+            }
         })?;
         phase_checkpoint(invocation.control, "solver projection canonical encoding")?;
         let node_count = projection.topology.nodes.len() as u64;
@@ -129,8 +184,20 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             estimated_work: completed_work,
             node_count,
             element_count,
-            peak_memory_bytes: encoded.len() as u64,
+            // Requested workspace and wire bytes are not measured whole-process residency.
+            peak_memory_bytes: 0,
             entity_counts: BTreeMap::from([
+                ("construction_memory_measurement_unavailable".into(), 1),
+                ("projection_retained_requested_bytes".into(), retained_bytes),
+                ("encoded_projection_bytes".into(), encoded.len() as u64),
+                (
+                    "encoding_workspace_requested_bytes".into(),
+                    encoding_profile.resident_workspace_bytes_estimate,
+                ),
+                (
+                    "admitted_geometry_storage_peak_bytes".into(),
+                    control.usage().allocation_bytes,
+                ),
                 ("solver_nodes".into(), node_count),
                 ("solver_volume_elements".into(), element_count),
                 (
@@ -145,8 +212,16 @@ impl<P: ExactMeshingEvaluatorProvider> MeshingStageKernel for ExactSolverProject
             ..MeshingStageCheckpoint::default()
         };
         invocation.control.checkpoint(checkpoint.clone())?;
+        drop(projection);
+        encoding_reservation.retain_bytes(encoded.capacity() as u64);
+        drop(encoding_reservation);
         Ok(ValidatedMeshingStageOutput {
-            invariant_summary_digest: validation_digest(&encoded),
+            invariant_summary_digest: crate::publication_digest::record(
+                b"runmat-solver-projection-validation/v1\0",
+                &encoded,
+                invocation.control,
+                &checkpoint,
+            )?,
             streams: vec![MeshingChunkStream {
                 media_type: MeshingChunkMediaType::SolverMeshProjection,
                 schema_version: SOLVER_MESH_PROJECTION_SCHEMA_VERSION,
@@ -167,22 +242,6 @@ fn phase_checkpoint(
             failure.remediation = format!("{}; phase: {phase}", failure.remediation);
             failure
         })
-}
-
-fn geometry_phase_checkpoint(
-    control: &dyn GeometryEvaluationControl,
-    phase: &'static str,
-) -> Result<(), Box<MeshingFailure>> {
-    control.checkpoint().map_err(|error| {
-        let mut failure = failure(
-            MeshingFailureCategory::InternalInvariantViolation,
-            &format!("solver projection phase checkpoint failed after {phase}: {error}"),
-        );
-        failure.remediation = format!(
-            "reduce work inside the phase between mandatory cancellation checkpoints; phase: {phase}"
-        );
-        failure
-    })
 }
 
 struct SolverProjectionSources<'a> {
@@ -253,12 +312,27 @@ impl<'a> SolverProjectionSources<'a> {
         Ok(self)
     }
 
-    fn surface(
+    fn surface<'storage>(
         &self,
         invocation: &MeshingStageInvocation<'_, '_>,
-    ) -> Result<ExactSurfaceMesh, Box<MeshingFailure>> {
-        let bytes = crate::volume_kernel::surface_record(self.geometry, self.surface)?;
-        decode_published_exact_surface_mesh(
+        allocations: &'storage dyn runmat_geometry_core::GeometryEvaluationControl,
+    ) -> Result<
+        (
+            ExactSurfaceMesh,
+            runmat_geometry_core::GeometryAllocationReservation<'storage>,
+        ),
+        Box<MeshingFailure>,
+    > {
+        let reconstruction = runmat_geometry_core::GeometryAllocationScope::new(allocations);
+        let codec = crate::codec_control::CodecControl::new(&reconstruction);
+        let bytes = crate::volume_kernel::surface_record(
+            self.geometry,
+            self.surface,
+            &codec,
+            &reconstruction,
+        )
+        .map_err(|failure| error::map_record_error(failure, &codec))?;
+        let surface = decode_published_exact_surface_mesh_admitted(
             &bytes,
             &self.geometry.topology,
             ExactSurfaceJoinOptions {
@@ -271,32 +345,72 @@ impl<'a> SolverProjectionSources<'a> {
                     .resources
                     .maximum_elements,
             },
+            &codec,
+            &codec,
         )
-        .map_err(|error| failure(MeshingFailureCategory::InvalidGeometry, &error.to_string()))
+        .map_err(|error| {
+            if let Some(original) = codec.take_failure() {
+                return failure(
+                    crate::geometry_failure::category(original.kind),
+                    &original.reason,
+                );
+            }
+            failure(
+                if error.kind == runmat_meshing_surface::ExactSurfaceMeshErrorKind::Cancelled {
+                    MeshingFailureCategory::Cancelled
+                } else {
+                    MeshingFailureCategory::InvalidGeometry
+                },
+                &error.to_string(),
+            )
+        })?;
+        let retained = surface
+            .retained_storage_bytes(&reconstruction)
+            .map_err(|error| {
+                failure(
+                    crate::geometry_failure::category(error.kind),
+                    &error.to_string(),
+                )
+            })?;
+        let storage = reconstruction
+            .transfer_reservation(retained)
+            .map_err(|error| {
+                failure(
+                    crate::geometry_failure::category(error.kind),
+                    &error.to_string(),
+                )
+            })?;
+        Ok((surface, storage))
     }
 
-    fn volume_record(&self) -> Result<Vec<u8>, Box<MeshingFailure>> {
+    fn volume_record(
+        &self,
+        control: &dyn MeshingCancellationSignal,
+        allocations: &dyn runmat_geometry_core::GeometryEvaluationControl,
+    ) -> Result<Vec<u8>, Box<MeshingFailure>> {
         let stage = self.volume.stage_objects();
         if stage.result_identity.stage != MeshingStageKind::Tetrahedralization
             || stage.result_identity.result_kind != MeshingStageResultKind::WholeStage
         {
             return Err(invalid_inputs());
         }
-        let streams = stage.decoded_streams().map_err(|error| {
-            failure(MeshingFailureCategory::InvalidGeometry, &error.to_string())
-        })?;
+        let streams = crate::controlled_streams::decode_admitted(stage, control, allocations)
+            .map_err(|error| failure(error.category, &error.detail))?;
         let [stream] = streams.as_slice() else {
             return Err(invalid_inputs());
         };
         if stream.media_type != MeshingChunkMediaType::VolumeTopology
-            || stream.schema_version != DELAUNAY_VOLUME_MESH_SCHEMA_VERSION
+            || !matches!(
+                stream.schema_version,
+                3 | DELAUNAY_VOLUME_MESH_SCHEMA_VERSION
+            )
         {
             return Err(invalid_inputs());
         }
-        let [record] = stream.records.as_slice() else {
+        let [_record] = stream.records.as_slice() else {
             return Err(invalid_inputs());
         };
-        Ok(record.clone())
+        Ok(crate::controlled_streams::take_single_record(streams, 0).expect("one admitted record"))
     }
 }
 
@@ -320,107 +434,5 @@ fn solver_options(request: &runmat_meshing_core::MeshingRequest) -> DelaunaySolv
     }
 }
 
-fn map_solver_error(error: DelaunaySolverTopologyError) -> Box<MeshingFailure> {
-    let category = match error.kind {
-        DelaunaySolverTopologyErrorKind::InvalidOptions => {
-            MeshingFailureCategory::InternalInvariantViolation
-        }
-        DelaunaySolverTopologyErrorKind::InvalidGeometry => MeshingFailureCategory::InvalidGeometry,
-        DelaunaySolverTopologyErrorKind::InvalidMesh => {
-            MeshingFailureCategory::QualityTargetUnreachable
-        }
-        DelaunaySolverTopologyErrorKind::ResourceLimit => resource_category(&error.reason),
-        DelaunaySolverTopologyErrorKind::Cancelled => MeshingFailureCategory::Cancelled,
-    };
-    failure(category, &error.to_string())
-}
-
-fn resource_category(reason: &str) -> MeshingFailureCategory {
-    if reason.contains("IterationBudgetExceeded") || reason.contains("round limit") {
-        MeshingFailureCategory::IterationBudgetExceeded
-    } else if reason.contains("TimeBudgetExceeded") {
-        MeshingFailureCategory::TimeBudgetExceeded
-    } else if reason.contains("AllocationBudgetExceeded") {
-        MeshingFailureCategory::MemoryBudgetExceeded
-    } else if reason.contains("node inventory") {
-        MeshingFailureCategory::NodeBudgetExceeded
-    } else if reason.contains("boundary face") || reason.contains("boundary edge") {
-        MeshingFailureCategory::ElementBudgetExceeded
-    } else {
-        MeshingFailureCategory::SearchWorkBudgetExceeded
-    }
-}
-
-fn invalid_inputs() -> Box<MeshingFailure> {
-    failure(
-        MeshingFailureCategory::InvalidGeometry,
-        "solver projection requires one exact geometry, final surface, and final volume",
-    )
-}
-
-fn failure(category: MeshingFailureCategory, detail: &str) -> Box<MeshingFailure> {
-    let detail = crate::diagnostic::bounded_diagnostic_text(detail, "solver projection failed");
-    Box::new(MeshingFailure {
-        schema_version: MESHING_FAILURE_SCHEMA_VERSION,
-        category,
-        stage: MeshingStageKind::OrderElevation,
-        operation: MeshingStageKind::OrderElevation.operation(),
-        entity_ids: Vec::new(),
-        witnesses: Vec::new(),
-        request_values: Vec::new(),
-        achieved_values: vec![MeshingDiagnosticEntry {
-            name: "solver_projection_failure".into(),
-            value: MeshingDiagnosticValue::Text(detail),
-            unit: None,
-        }],
-        remediation:
-            "regenerate terminal inputs, increase the exhausted budget, or repair exact geometry"
-                .into(),
-    })
-}
-
-fn validation_digest(encoded: &[u8]) -> StableDigest {
-    let mut bytes = b"runmat-solver-projection-validation/v1\0".to_vec();
-    bytes.extend_from_slice(encoded);
-    StableDigest::from_bytes(*Digest::sha256(&bytes).bytes())
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resource_failures_keep_their_specific_budget_category() {
-        assert_eq!(
-            resource_category("geometry evaluation IterationBudgetExceeded"),
-            MeshingFailureCategory::IterationBudgetExceeded
-        );
-        assert_eq!(
-            resource_category("geometry evaluation AllocationBudgetExceeded"),
-            MeshingFailureCategory::MemoryBudgetExceeded
-        );
-        assert_eq!(
-            resource_category("boundary face inventory exceeds its hard limit"),
-            MeshingFailureCategory::ElementBudgetExceeded
-        );
-        assert_eq!(
-            resource_category("curved-node candidate work exceeds its hard limit"),
-            MeshingFailureCategory::SearchWorkBudgetExceeded
-        );
-    }
-
-    #[test]
-    fn solver_checkpoint_cadence_respects_the_kernel_latency_bound() {
-        let mut request = crate::serial_tests::request();
-        request.cancellation.maximum_work_units_between_checks = u64::MAX;
-        let options = solver_options(&request);
-        assert_eq!(
-            options.cancellation_check_interval,
-            DelaunaySolverTopologyOptions::default().cancellation_check_interval
-        );
-        assert_eq!(
-            options.maximum_curved_optimization_sweeps,
-            DelaunaySolverTopologyOptions::default().maximum_curved_optimization_sweeps
-        );
-    }
-}
+mod tests;

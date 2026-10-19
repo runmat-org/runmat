@@ -20,8 +20,8 @@ use runmat_meshing_core::SolverMeshArtifact;
 mod evidence;
 mod execution;
 pub(crate) mod fixture;
-mod fresh_integration;
 mod forcing;
+mod fresh_integration;
 mod moving_front;
 mod plane_tied;
 

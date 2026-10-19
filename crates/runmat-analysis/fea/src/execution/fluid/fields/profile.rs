@@ -3,14 +3,16 @@
 use super::*;
 use crate::{
     execution::SolverResultIdentity,
-    results::field::{NativeOrientedFace, RecoveredFieldArtifactEntry, RecoveredFieldEntityCounts},
-    topology::AnalysisProjection,
+    results::field::{
+        FiniteVolumeFieldTopology, NativeOrientedFace, RecoveredFieldArtifactEntry,
+        RecoveredFieldEntityCounts,
+    },
 };
 use runmat_canonical_codec::{profile_serialized, SerializedCanonicalProfile};
 use runmat_execution::Digest;
 use runmat_meshing_core::StableDigest;
 use serde::{ser::SerializeSeq, Serialize, Serializer};
-use std::{collections::BTreeSet, mem::size_of};
+use std::mem::size_of;
 
 fn add(a: u64, b: u64) -> AnalysisExecutionResult<u64> {
     a.checked_add(b)
@@ -164,19 +166,13 @@ pub(super) fn requested_bytes(
         required,
         u64::try_from(source.topology.reservation.scratch_bytes).map_err(invalid)?,
     )?;
-    // Use the existing shared typed ordered-index estimator for exactly the
-    // native validator's stable-digest sets, not an unrelated mesh projection.
-    // Include the sequential uniqueness reference-set transient conservatively.
-    for count in [nodes, cells, faces, nodes.max(cells)] {
-        required = add(
-            required,
-            AnalysisProjection::identity_set_resident_bytes_estimate(count).map_err(invalid)?,
-        )?;
-        required = add(
-            required,
-            u64::try_from(size_of::<BTreeSet<StableDigest>>()).map_err(invalid)?,
-        )?;
-    }
+    // The field-layout owner profiles its counted validation and one face identity codec;
+    // no numerical projection or unrelated tree-index estimator is substituted here.
+    required = add(
+        required,
+        FiniteVolumeFieldTopology::validation_workspace_bytes(nodes, cells, faces)
+            .map_err(invalid)?,
+    )?;
     for bytes in [
         vector_bytes::<StableDigest>(nodes)?,
         vector_bytes::<StableDigest>(cells)?,

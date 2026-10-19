@@ -186,6 +186,7 @@ fn authored_response_spectrum_study_publishes_basis_and_terminal_envelope() {
     .unwrap();
     let mut coordinator = StructuralModalResponseSpectrumStudyCoordinator::new(
         StructuralModalResponseSpectrumStudyPreparation {
+            local_execution: runmat_analysis_fea::planning::resource::LocalExecutionPlan::serial(),
             authored_study_digest: digest("authored-response-spectrum-study"),
             frozen_project_digest: None,
             workloads,

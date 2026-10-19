@@ -1,4 +1,4 @@
-use runmat_meshing_core::{SolverMeshNode, SolverNodeExactParameter};
+use runmat_meshing_core::SolverMeshNode;
 
 use super::geometry::SurfaceUse;
 
@@ -13,19 +13,20 @@ const SEARCH_SCALES: [f64; 8] = [
     0.001953125,
 ];
 
-pub(super) fn interior_coordinates(initial: [f64; 3], endpoints: [[f64; 3]; 2]) -> Vec<[f64; 3]> {
+pub(super) fn interior_coordinates(
+    initial: [f64; 3],
+    endpoints: [[f64; 3]; 2],
+) -> impl Iterator<Item = [f64; 3]> + Clone {
     let edge_length = endpoints[0]
         .into_iter()
         .zip(endpoints[1])
         .map(|(left, right)| (right - left) * (right - left))
         .sum::<f64>()
         .sqrt();
-    if !edge_length.is_finite() || edge_length == 0.0 {
-        return Vec::new();
-    }
     SEARCH_SCALES
         .into_iter()
-        .flat_map(|scale| {
+        .filter(move |_| edge_length.is_finite() && edge_length != 0.0)
+        .flat_map(move |scale| {
             (0..3).flat_map(move |axis| {
                 [-1.0, 1.0].map(move |sign| {
                     let mut point = initial;
@@ -34,37 +35,34 @@ pub(super) fn interior_coordinates(initial: [f64; 3], endpoints: [[f64; 3]; 2]) 
                 })
             })
         })
-        .collect()
 }
 
 pub(super) fn surface_parameters(
     initial: &SolverMeshNode,
     endpoints: [&SolverMeshNode; 2],
     surface_use: &SurfaceUse,
-) -> Vec<[f64; 2]> {
-    let parameters = |node: &SolverMeshNode| {
-        node.exact_parameters
-            .iter()
-            .filter_map(|parameter| match parameter {
-                SolverNodeExactParameter::Surface {
-                    source_face_id,
-                    chart_id,
-                    evaluator_uv,
-                } if source_face_id == &surface_use.source_face_id
-                    && chart_id == &surface_use.chart_id =>
-                {
-                    Some(*evaluator_uv)
-                }
-                SolverNodeExactParameter::Curve { .. }
-                | SolverNodeExactParameter::Surface { .. } => None,
+) -> impl Iterator<Item = [f64; 2]> + Clone {
+    surface_basis(initial, endpoints, surface_use)
+        .into_iter()
+        .flat_map(|(initial, perpendicular)| {
+            SEARCH_SCALES.into_iter().flat_map(move |scale| {
+                [-1.0, 1.0].map(move |sign| {
+                    [
+                        initial[0] + sign * scale * perpendicular[0],
+                        initial[1] + sign * scale * perpendicular[1],
+                    ]
+                })
             })
-            .collect::<Vec<_>>()
-    };
-    let left = parameters(endpoints[0]);
-    let right = parameters(endpoints[1]);
-    let Some((left, right)) = left
-        .iter()
-        .flat_map(|left| right.iter().map(move |right| (*left, *right)))
+        })
+}
+fn surface_basis(
+    initial: &SolverMeshNode,
+    endpoints: [&SolverMeshNode; 2],
+    surface_use: &SurfaceUse,
+) -> Option<([f64; 2], [f64; 2])> {
+    use super::geometry::surface_parameters as parameters;
+    let (left, right) = parameters(endpoints[0], surface_use)
+        .flat_map(|left| parameters(endpoints[1], surface_use).map(move |right| (left, right)))
         .min_by(|(left_a, right_a), (left_b, right_b)| {
             squared_distance(*left_a, *right_a)
                 .total_cmp(&squared_distance(*left_b, *right_b))
@@ -72,35 +70,17 @@ pub(super) fn surface_parameters(
                 .then_with(|| left_a[1].total_cmp(&left_b[1]))
                 .then_with(|| right_a[0].total_cmp(&right_b[0]))
                 .then_with(|| right_a[1].total_cmp(&right_b[1]))
-        })
-    else {
-        return Vec::new();
-    };
+        })?;
     let midpoint = [(left[0] + right[0]) * 0.5, (left[1] + right[1]) * 0.5];
-    let Some(initial) = parameters(initial).into_iter().min_by(|left, right| {
+    let initial = parameters(initial, surface_use).min_by(|left, right| {
         squared_distance(*left, midpoint)
             .total_cmp(&squared_distance(*right, midpoint))
             .then_with(|| left[0].total_cmp(&right[0]))
             .then_with(|| left[1].total_cmp(&right[1]))
-    }) else {
-        return Vec::new();
-    };
+    })?;
     let tangent = [right[0] - left[0], right[1] - left[1]];
     let perpendicular = [-tangent[1], tangent[0]];
-    if squared_distance(perpendicular, [0.0; 2]) == 0.0 {
-        return Vec::new();
-    }
-    SEARCH_SCALES
-        .into_iter()
-        .flat_map(|scale| {
-            [-1.0, 1.0].map(move |sign| {
-                [
-                    initial[0] + sign * scale * perpendicular[0],
-                    initial[1] + sign * scale * perpendicular[1],
-                ]
-            })
-        })
-        .collect()
+    (squared_distance(perpendicular, [0.0; 2]) != 0.0).then_some((initial, perpendicular))
 }
 
 fn squared_distance(left: [f64; 2], right: [f64; 2]) -> f64 {
@@ -110,7 +90,7 @@ fn squared_distance(left: [f64; 2], right: [f64; 2]) -> f64 {
 #[cfg(test)]
 mod tests {
     use runmat_geometry_core::{PersistentEntityId, PersistentEntityKind};
-    use runmat_meshing_core::StableDigest;
+    use runmat_meshing_core::{SolverNodeExactParameter, StableDigest};
 
     use super::*;
 
@@ -138,7 +118,8 @@ mod tests {
 
     #[test]
     fn interior_search_spans_three_physical_dimensions() {
-        let points = interior_coordinates([0.5, 0.0, 0.0], [[0.0; 3], [1.0, 0.0, 0.0]]);
+        let points =
+            interior_coordinates([0.5, 0.0, 0.0], [[0.0; 3], [1.0, 0.0, 0.0]]).collect::<Vec<_>>();
         assert!(points.iter().any(|point| point[0] != 0.5));
         assert!(points.iter().any(|point| point[1] != 0.0));
         assert!(points.iter().any(|point| point[2] != 0.0));
@@ -150,10 +131,11 @@ mod tests {
         let right = node(2, [1.0, 0.0, 0.0], [1.0, 0.5]);
         let initial = node(3, [0.5, 0.0, 0.0], [0.5, 0.5]);
         let use_record = SurfaceUse {
-            source_face_id: face(),
+            source_face_id: &face(),
             chart_id: StableDigest::from_bytes([9; 32]),
         };
-        let parameters = surface_parameters(&initial, [&left, &right], &use_record);
+        let parameters =
+            surface_parameters(&initial, [&left, &right], &use_record).collect::<Vec<_>>();
         assert!(parameters.iter().all(|uv| uv[0] == 0.5));
         assert!(parameters.iter().any(|uv| uv[1] < 0.5));
         assert!(parameters.iter().any(|uv| uv[1] > 0.5));

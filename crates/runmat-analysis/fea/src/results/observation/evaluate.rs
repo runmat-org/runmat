@@ -21,7 +21,7 @@ pub fn evaluate_observations(
     projection: &AnalysisProjection,
     fields: &RecoveredFieldCatalog,
 ) -> Result<Vec<ObservationResult>, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection)?;
     evaluate_observations_for_topology(plan, &topology, fields)
 }
 
@@ -100,7 +100,7 @@ pub fn evaluate_observation_sample(
     fields: &RecoveredFieldCatalog,
     sample: RecoveredFieldSample,
 ) -> Result<ObservationResult, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection)?;
     evaluate_observation_sample_for_topology(plan, observation_id, &topology, fields, sample, None)
 }
 
@@ -111,7 +111,7 @@ pub fn evaluate_observation_event_sample(
     fields: &RecoveredFieldCatalog,
     attribution: ObservationEventAttribution,
 ) -> Result<ObservationHistorySample, ObservationError> {
-    let topology = ObservationTopology::from_projection(projection);
+    let topology = ObservationTopology::from_projection(projection)?;
     let sample = attribution.sample();
     let result = evaluate_observation_sample_for_topology(
         plan,

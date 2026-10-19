@@ -2,7 +2,7 @@
 use super::*;
 #[path = "attempt_lifecycle/spawn_failure.rs"]
 mod spawn_failure;
-use runmat_execution_artifact::ProgramExecutionRequest;
+use runmat_execution_artifact::ReservedProgramExecutionRequest;
 use runmat_execution_runner::{AttemptDisposition, AttemptExecutionTermination};
 use runmat_execution_runner_native::WorkerProcessMessage;
 use runmat_process_host::ipc::{read_payload, write_payload, FrameLimits};
@@ -14,8 +14,9 @@ pub(super) async fn fault_child(mode: &str) {
         max_message_bytes: 64 * 1024 * 1024,
     };
     let bytes = read_payload(&mut reader, limits).await.unwrap();
-    let request: ProgramExecutionRequest = serde_json::from_slice(&bytes).unwrap();
-    request.validate().unwrap();
+    let reserved: ReservedProgramExecutionRequest = serde_json::from_slice(&bytes).unwrap();
+    reserved.validate().unwrap();
+    drop(reserved);
     let mut response = ProgramExecutionResponse::Success {
         value: ValuePayload::Inline(Box::new(runmat_execution::value::InlineValue::Null)),
     };

@@ -150,7 +150,7 @@ where
             "3D curve and face-use pcurve parameter domains disagree",
         ));
     }
-    let mut parameters = uniform_parameters(range);
+    let mut parameters = uniform_parameters(range)?;
     parameters.extend(additional_parameters(edge, coedge, range)?);
     parameters.retain(|value| value.is_finite() && *value >= range.start && *value <= range.end);
     parameters.sort_by(f64::total_cmp);
@@ -209,7 +209,7 @@ where
         }
         validate_sample(interval.start_sample, tolerance_m)?;
         validate_sample(interval.end_sample, tolerance_m)?;
-        let midpoint = interval.start + (interval.end - interval.start) * 0.5;
+        let midpoint = interval.start.midpoint(interval.end);
         if midpoint == interval.start || midpoint == interval.end {
             return Err(budget(
                 "geometry consistency exhausted parameter resolution",
@@ -278,12 +278,10 @@ where
     })
 }
 
-fn uniform_parameters(range: ParameterRange) -> Vec<f64> {
-    (0..=INITIAL_INTERVALS)
-        .map(|index| {
-            range.start + (range.end - range.start) * index as f64 / INITIAL_INTERVALS as f64
-        })
-        .collect()
+fn uniform_parameters(range: ParameterRange) -> Result<Vec<f64>, GeometryEvaluationError> {
+    Ok(range
+        .uniform_samples::<{ INITIAL_INTERVALS + 1 }>()?
+        .to_vec())
 }
 
 fn validate_sample(sample: Sample, tolerance_m: f64) -> Result<(), GeometryEvaluationError> {
@@ -358,4 +356,29 @@ fn inconsistent(reason: impl Into<String>) -> GeometryEvaluationError {
 
 fn invalid(reason: impl Into<String>) -> GeometryEvaluationError {
     GeometryEvaluationError::new(GeometryEvaluationErrorKind::InvalidResult, reason)
+}
+
+#[cfg(test)]
+mod sampling_tests {
+    use super::*;
+    #[test]
+    fn sampling_preserves_non_representable_domain_endpoints() {
+        for range in [
+            ParameterRange {
+                start: -3.0,
+                end: 0.1,
+            },
+            ParameterRange {
+                start: -1.0,
+                end: 0.123456789,
+            },
+        ] {
+            let parameters = uniform_parameters(range).unwrap();
+            assert_eq!(parameters[0].to_bits(), range.start.to_bits());
+            assert_eq!(parameters[INITIAL_INTERVALS].to_bits(), range.end.to_bits());
+            assert!(parameters
+                .iter()
+                .all(|value| *value >= range.start && *value <= range.end));
+        }
+    }
 }

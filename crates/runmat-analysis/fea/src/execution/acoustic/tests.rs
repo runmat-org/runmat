@@ -1,4 +1,5 @@
 use super::*;
+mod closure_diagnostics;
 mod periodic;
 mod preconditioning;
 use crate::{

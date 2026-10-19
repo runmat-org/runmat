@@ -7,8 +7,10 @@ mod diagnostics;
 mod settings;
 use diagnostics::SuccessfulDiagnostic;
 pub(crate) use diagnostics::{successful_diagnostic_record_count, successful_diagnostics_profile};
-use settings::iteration_limit;
 pub(crate) use settings::ScopedLinearSolveSettings;
+pub(crate) use settings::{
+    accelerator_iteration_limit, iteration_limit, DEFAULT_RELATIVE_TOLERANCE,
+};
 
 use admission::{incompatible_system_result, invalid_system_result, rejected_system_result};
 
@@ -261,7 +263,7 @@ fn solve_operator_system_with_apply(
     // receive a system that the reference path would reject, and provider fallback must not alter
     // that decision.
     if backend_kind == LinearAlgebraBackendKind::Accelerator {
-        let maximum_iterations = u32::try_from(iteration_limit(operator, 64)).unwrap_or(u32::MAX);
+        let maximum_iterations = accelerator_iteration_limit(operator, 64);
         match prepare_accelerator_linear_system(prepared.clone(), maximum_iterations).and_then(
             |accelerator| {
                 solve_prepared_accelerator_system(&accelerator, prepared.rhs(), initial_guess, tol)

@@ -6,6 +6,7 @@ mod authoring_feature_validation;
 mod authoring_tests;
 mod authoring_value;
 mod canonical;
+pub use canonical::GeometryCanonicalControl;
 mod document;
 mod exact_artifact;
 mod exact_contacts;
@@ -23,12 +24,14 @@ mod geometry;
 mod healing;
 mod material_evidence;
 mod mesh;
+mod occurrence_transforms;
 mod regions;
 mod revision_mapping;
 mod source_geometry;
 mod tessellation_profile;
 mod topology;
 mod units;
+mod validation_storage;
 
 pub use analysis_identity::{
     GeometryContractError, GeometryTolerancePolicy, PersistentEntityId, PersistentEntityKind,
@@ -48,6 +51,7 @@ pub use geometry::{GeometryAsset, GeometrySource};
 pub use healing::*;
 pub use material_evidence::{MaterialEvidence, MaterialEvidenceConfidence};
 pub use mesh::{MeshDescriptor, MeshKind, SurfaceMesh};
+pub use occurrence_transforms::PreparedOccurrenceTransforms;
 pub use regions::{
     CadColorEvidence, CadLabelRef, CadPhysicalMaterialEvidence, CadRegionOwnership,
     CadSemanticKind, EntityIdRange, Region, RegionEntityMapping,

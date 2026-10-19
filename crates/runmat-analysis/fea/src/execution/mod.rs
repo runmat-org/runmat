@@ -3,7 +3,7 @@
 //! This module identifies analysis work and numerical objects. Scheduling, placement, transport,
 //! encryption, and object storage remain owned by RunMat's generic execution crates.
 
-pub use crate::pipeline::thermal::PreparedThermalSolve;
+pub use crate::pipeline::thermal::{PreparedThermalPrimarySolve, PreparedThermalSolve};
 
 mod accuracy;
 mod acoustic;

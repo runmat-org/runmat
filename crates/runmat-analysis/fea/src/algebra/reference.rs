@@ -220,8 +220,19 @@ pub fn spmv(matrix: &RealSparseMatrix, x: &[f64]) -> Result<Vec<f64>, &'static s
         return Err("sparse matrix/vector dimension mismatch");
     }
     let mut result = vec![0.0; matrix.rows()];
-    for (row, result_value) in result.iter_mut().enumerate() {
-        *result_value = spmv_row(matrix, x, row);
+    if matrix.values().len() >= 32_768
+        && matrix.rows() >= 1_024
+        && runmat_cpu_execution::current_threads() > 1
+    {
+        // The installed pool is reservation authority supplied by the native caller.
+        // Row accumulation order and the single output allocation remain unchanged.
+        runmat_cpu_execution::for_each_mut_indexed(&mut result, |row, value| {
+            *value = spmv_row(matrix, x, row)
+        });
+    } else {
+        for (row, value) in result.iter_mut().enumerate() {
+            *value = spmv_row(matrix, x, row);
+        }
     }
     Ok(result)
 }
@@ -503,5 +514,36 @@ mod tests {
                 }
             ))
         ));
+    }
+}
+
+#[cfg(test)]
+mod persistent_pool_tests {
+    use super::*;
+    use crate::algebra::{MatrixProperties, OperatorRole, RealSparseAssembler};
+    #[test]
+    fn installed_pool_csr_rows_preserve_serial_bits_and_output_shape() {
+        let mut assembler =
+            RealSparseAssembler::square(2048, OperatorRole::Stiffness, MatrixProperties::GENERAL);
+        for row in 0..2048 {
+            for offset in 0..32 {
+                assembler.add(
+                    row,
+                    (row + offset) % 2048,
+                    if offset % 2 == 0 { 1e12 } else { -1e12 + 0.25 },
+                );
+            }
+        }
+        let matrix = assembler.finish().unwrap();
+        let x = (0..2048)
+            .map(|index| 1. + index as f64 * 1e-9)
+            .collect::<Vec<_>>();
+        let serial = spmv(&matrix, &x).unwrap();
+        for threads in [2, 4] {
+            let parallel = runmat_cpu_execution::with_cpu_pool(threads, || spmv(&matrix, &x))
+                .unwrap()
+                .unwrap();
+            assert_eq!(parallel, serial);
+        }
     }
 }

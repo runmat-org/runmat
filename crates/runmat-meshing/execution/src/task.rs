@@ -197,7 +197,7 @@ pub(crate) fn validate_input(
     input: &runmat_meshing_core::MeshingInputRef,
     access: &ArtifactAccess,
 ) -> MeshingExecutionResult<()> {
-    ValuePayload::Object(Box::new(root.clone())).validate(ValueLimits::default())?;
+    root.validate(ValueLimits::default())?;
     let expected_shape = match input.kind {
         MeshingInputKind::StageArtifact => {
             root.kind == ValueRefKind::ResultObject

@@ -5051,14 +5051,15 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.81"
+version = "0.10.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77823a27f0babb03091cb9ed9ef80af3b39dbc82f97e8fa530374b7dafd87a45"
+checksum = "08838db121398ad17ab8531ce9de97b244589089e290a384c900cb9ff7434328"
 dependencies = [
  "bitflags 2.13.0",
  "cfg-if",
  "foreign-types 0.3.2",
  "libc",
+ "once_cell",
  "openssl-macros",
  "openssl-sys",
 ]
@@ -6417,6 +6418,7 @@ dependencies = [
  "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-execution",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
@@ -6443,6 +6445,14 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-analysis-qualification"
+version = "0.6.2"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -6491,6 +6501,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-build-identity"
+version = "0.6.2"
+dependencies = [
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "runmat-builtins"
 version = "0.6.2"
 dependencies = [
@@ -6510,6 +6527,7 @@ name = "runmat-canonical-codec"
 version = "0.6.2"
 dependencies = [
  "minicbor",
+ "runmat-build-identity",
  "serde",
  "serde_json",
 ]
@@ -6578,6 +6596,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-cpu-execution"
+version = "0.6.2"
+dependencies = [
+ "rayon",
+ "runmat-build-identity",
+]
+
+[[package]]
 name = "runmat-execution"
 version = "0.6.2"
 dependencies = [
@@ -6632,6 +6658,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "futures",
+ "libc",
  "rand 0.8.6",
  "rcgen",
  "runmat-accelerate-api",
@@ -6642,6 +6669,7 @@ dependencies = [
  "runmat-builtins",
  "runmat-canonical-codec",
  "runmat-core",
+ "runmat-cpu-execution",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
@@ -6651,6 +6679,7 @@ dependencies = [
  "runmat-geometry-fixtures",
  "runmat-geometry-io",
  "runmat-geometry-ops",
+ "runmat-logging",
  "runmat-meshing-core",
  "runmat-meshing-curve",
  "runmat-meshing-execution",
@@ -6664,9 +6693,11 @@ dependencies = [
  "runmat-types",
  "runmat-value",
  "runmat-vm",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sysinfo",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -6783,6 +6814,7 @@ dependencies = [
 name = "runmat-geometry-core"
 version = "0.6.2"
 dependencies = [
+ "runmat-build-identity",
  "runmat-canonical-codec",
  "schemars",
  "serde",
@@ -6807,6 +6839,7 @@ dependencies = [
  "cxx-build",
  "js-sys",
  "occt-sys",
+ "runmat-build-identity",
  "runmat-execution",
  "runmat-geometry-core",
  "runmat-geometry-ops",
@@ -6823,6 +6856,7 @@ name = "runmat-geometry-ops"
 version = "0.6.2"
 dependencies = [
  "delaunator",
+ "runmat-build-identity",
  "runmat-geometry-core",
  "serde",
  "thiserror 1.0.69",
@@ -6956,7 +6990,9 @@ dependencies = [
  "minicbor",
  "num-bigint",
  "robust",
+ "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-size",
@@ -6969,12 +7005,14 @@ dependencies = [
 name = "runmat-meshing-curve"
 version = "0.6.2"
 dependencies = [
+ "runmat-build-identity",
  "runmat-canonical-codec",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
  "runmat-meshing-size",
  "serde",
+ "serde_json",
  "sha2 0.10.9",
 ]
 
@@ -6983,6 +7021,9 @@ name = "runmat-meshing-execution"
 version = "0.6.2"
 dependencies = [
  "futures",
+ "runmat-build-identity",
+ "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
@@ -6993,13 +7034,17 @@ dependencies = [
  "runmat-meshing-surface",
  "runmat-meshing-tetrahedron",
  "serde",
+ "serde_json",
+ "sha2 0.10.9",
  "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
 name = "runmat-meshing-size"
 version = "0.6.2"
 dependencies = [
+ "runmat-build-identity",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "serde",
@@ -7010,7 +7055,10 @@ dependencies = [
 name = "runmat-meshing-surface"
 version = "0.6.2"
 dependencies = [
+ "minicbor",
+ "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-geometry-core",
  "runmat-geometry-fixtures",
  "runmat-meshing-core",
@@ -7018,13 +7066,17 @@ dependencies = [
  "runmat-meshing-size",
  "serde",
  "sha2 0.10.9",
+ "tracing",
 ]
 
 [[package]]
 name = "runmat-meshing-tetrahedron"
 version = "0.6.2"
 dependencies = [
+ "minicbor",
+ "runmat-build-identity",
  "runmat-canonical-codec",
+ "runmat-cpu-execution",
  "runmat-geometry-core",
  "runmat-meshing-core",
  "runmat-meshing-curve",
@@ -7126,6 +7178,7 @@ dependencies = [
  "p256",
  "runmat-config",
  "runmat-filesystem",
+ "runmat-types",
  "semver",
  "serde",
  "serde_json",
@@ -7234,6 +7287,15 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "runmat-public-ids"
+version = "0.6.2"
+dependencies = [
+ "serde",
+ "thiserror 1.0.69",
+ "uuid",
 ]
 
 [[package]]
@@ -7354,6 +7416,7 @@ dependencies = [
  "reqwest 0.12.28",
  "runmat-execution",
  "runmat-package",
+ "runmat-public-ids",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -7541,6 +7604,7 @@ dependencies = [
  "runmat-execution",
  "runmat-execution-artifact",
  "runmat-execution-runner",
+ "runmat-fea-source",
  "runmat-filesystem",
  "runmat-geometry-core",
  "runmat-geometry-io",

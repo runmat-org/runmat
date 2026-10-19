@@ -1,8 +1,10 @@
+mod validated;
 use serde::{Deserialize, Serialize};
+pub use validated::{ValidatedSolverMeshProjection, ValidatedSolverMeshTopology};
 
 use super::{
-    CanonicalMeshingContract, GeometryRevisionRef, MeshingContractError, MeshingRequest,
-    NeverCancelled, SolverMeshArtifact, SolverMeshTopology, StableDigest,
+    CanonicalMeshingContract, GeometryRevisionRef, MeshingCancellationSignal, MeshingContractError,
+    MeshingRequest, NeverCancelled, SolverMeshArtifact, SolverMeshTopology, StableDigest,
     SOLVER_MESH_ARTIFACT_SCHEMA_VERSION,
 };
 
@@ -24,6 +26,13 @@ pub struct SolverMeshProjection {
 
 impl SolverMeshProjection {
     pub fn validate(&self) -> Result<(), MeshingContractError> {
+        self.validate_with_cancellation(&NeverCancelled)
+    }
+
+    pub fn validate_with_cancellation(
+        &self,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<(), MeshingContractError> {
         if self.schema_version != SOLVER_MESH_PROJECTION_SCHEMA_VERSION {
             return Err(MeshingContractError::invalid(
                 "solver mesh projection schema version",
@@ -32,13 +41,20 @@ impl SolverMeshProjection {
         }
         self.geometry.validate()?;
         self.resolved_request.validate()?;
-        self.topology
-            .validate(&self.resolved_request, &NeverCancelled)
+        self.topology.validate(&self.resolved_request, cancellation)
     }
 
     pub fn into_artifact(
         self,
         validation_manifest_digest: StableDigest,
+    ) -> Result<SolverMeshArtifact, MeshingContractError> {
+        self.into_artifact_with_cancellation(validation_manifest_digest, &NeverCancelled)
+    }
+
+    pub fn into_artifact_with_cancellation(
+        self,
+        validation_manifest_digest: StableDigest,
+        cancellation: &dyn MeshingCancellationSignal,
     ) -> Result<SolverMeshArtifact, MeshingContractError> {
         validation_manifest_digest.validate_nonzero("solver mesh validation manifest digest")?;
         let mut artifact = SolverMeshArtifact {
@@ -49,7 +65,7 @@ impl SolverMeshProjection {
             resolved_request: self.resolved_request,
             topology: self.topology,
         };
-        artifact.seal_canonical_digest()?;
+        artifact.seal_canonical_digest_with_cancellation(cancellation)?;
         Ok(artifact)
     }
 }
@@ -72,10 +88,17 @@ impl SolverMeshValidation {
     pub fn from_validated_projection(
         projection: &SolverMeshProjection,
     ) -> Result<Self, MeshingContractError> {
-        projection.validate()?;
+        Self::from_validated_projection_with_cancellation(projection, &NeverCancelled)
+    }
+
+    pub fn from_validated_projection_with_cancellation(
+        projection: &SolverMeshProjection,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<Self, MeshingContractError> {
+        projection.validate_with_cancellation(cancellation)?;
         Ok(Self {
             schema_version: SOLVER_MESH_VALIDATION_SCHEMA_VERSION,
-            projection_digest: projection.canonical_digest()?,
+            projection_digest: projection.canonical_digest_with_cancellation(cancellation)?,
             geometry: projection.geometry.clone(),
             resolved_request_digest: projection.resolved_request.canonical_digest()?,
             node_count: projection.topology.nodes.len() as u64,
@@ -89,8 +112,16 @@ impl SolverMeshValidation {
         &self,
         projection: &SolverMeshProjection,
     ) -> Result<(), MeshingContractError> {
+        self.validate_against_with_cancellation(projection, &NeverCancelled)
+    }
+
+    pub fn validate_against_with_cancellation(
+        &self,
+        projection: &SolverMeshProjection,
+        cancellation: &dyn MeshingCancellationSignal,
+    ) -> Result<(), MeshingContractError> {
         self.validate()?;
-        if *self != Self::from_validated_projection(projection)? {
+        if *self != Self::from_validated_projection_with_cancellation(projection, cancellation)? {
             return Err(MeshingContractError::invalid(
                 "solver mesh validation",
                 "receipt does not match the independently validated projection",

@@ -209,6 +209,7 @@ fn driver_honors_authored_boundaries_and_global_accepted_cap() {
         &options,
         NonlinearExecution {
             backend: ComputeBackend::Cpu,
+            contact: None,
             solver_admission: None,
         },
         0.0,
@@ -228,6 +229,7 @@ fn driver_honors_authored_boundaries_and_global_accepted_cap() {
         &options,
         NonlinearExecution {
             backend: ComputeBackend::Cpu,
+            contact: None,
             solver_admission: None
         },
         0.3,

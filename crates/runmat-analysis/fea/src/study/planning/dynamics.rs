@@ -295,7 +295,8 @@ fn modal_convergence(
             step,
             ErrorContributionKind::Algebraic,
         )?)
-        .with_maximum_subspace_iterations(policy.numerics.maximum_modal_iterations))
+        .with_maximum_subspace_iterations(policy.numerics.maximum_modal_iterations)
+        .with_maximum_subspace_dimension(policy.numerics.maximum_modal_subspace_dimension))
 }
 
 fn transient_schedule(

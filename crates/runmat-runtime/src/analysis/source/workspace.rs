@@ -38,7 +38,7 @@ fn confined(path: &LogicalSourcePath) -> Result<(), FeaWorkspaceError> {
     }
     let normalized = LogicalSourcePath::new(path.as_str())
         .map_err(|_| FeaWorkspaceError::OutOfScope(path.to_string()))?;
-    let root = LogicalSourcePath::new("project").expect("canonical project root");
+    let root = LogicalSourcePath::root();
     if normalized == root || !runmat_analysis_language::logical_path_is_within(&root, &normalized) {
         return Err(FeaWorkspaceError::OutOfScope(path.to_string()));
     }
@@ -231,8 +231,8 @@ mod tests {
     }
     fn capture() -> FeaWorkspaceSnapshot {
         FeaWorkspaceSnapshot { source_root: PathBuf::from("/project"), files: vec![
-        FeaWorkspaceFile { path: path("project/main.fea"), version: "v1".into(), bytes: b"import material steel from \"./materials.fea\"\n".to_vec() },
-        FeaWorkspaceFile { path: path("project/materials.fea"), version: "v2".into(), bytes: b"material steel {\n elastic { youngs_modulus = 200 GPa\n poisson_ratio = 0.3 }\n}\n".to_vec() },
+        FeaWorkspaceFile { path: path("main.fea"), version: "v1".into(), bytes: b"import material steel from \"./materials.fea\"\n".to_vec() },
+        FeaWorkspaceFile { path: path("materials.fea"), version: "v2".into(), bytes: b"material steel {\n elastic { youngs_modulus = 200 GPa\n poisson_ratio = 0.3 }\n}\n".to_vec() },
     ] }
     }
     #[test]
@@ -240,17 +240,14 @@ mod tests {
         let candidate = FeaWorkspaceCandidate::new(
             capture(),
             vec![FeaWorkspaceEdit::Remove {
-                path: path("project/materials.fea"),
+                path: path("materials.fea"),
             }],
         )
         .unwrap();
-        assert!(candidate.read(&path("project/materials.fea")).is_none());
-        assert_eq!(
-            candidate.base_version(&path("project/materials.fea")),
-            Some("v2")
-        );
+        assert!(candidate.read(&path("materials.fea")).is_none());
+        assert_eq!(candidate.base_version(&path("materials.fea")), Some("v2"));
         let checked = candidate
-            .prepare(&path("project/main.fea"))
+            .prepare(&path("main.fea"))
             .unwrap()
             .check(Vec::new(), Vec::new())
             .unwrap();
@@ -265,18 +262,18 @@ mod tests {
             capture(),
             vec![
                 FeaWorkspaceEdit::Rename {
-                    from: path("project/materials.fea"),
-                    to: path("project/shared.fea"),
+                    from: path("materials.fea"),
+                    to: path("shared.fea"),
                 },
                 FeaWorkspaceEdit::Write {
-                    path: path("project/main.fea"),
+                    path: path("main.fea"),
                     bytes: b"import material steel from \"./shared.fea\"\n".to_vec(),
                 },
             ],
         )
         .unwrap();
         let checked = candidate
-            .prepare(&path("project/main.fea"))
+            .prepare(&path("main.fea"))
             .unwrap()
             .check(Vec::new(), Vec::new())
             .unwrap();
@@ -286,7 +283,7 @@ mod tests {
             "{:?}",
             checked.check_result().diagnostics
         );
-        assert!(candidate.read(&path("project/materials.fea")).is_none());
+        assert!(candidate.read(&path("materials.fea")).is_none());
     }
     #[test]
     fn capture_order_is_irrelevant_but_dependency_bytes_are_bound() {
@@ -302,7 +299,7 @@ mod tests {
         let second = FeaWorkspaceCandidate::new(
             capture(),
             vec![FeaWorkspaceEdit::Write {
-                path: path("project/materials.fea"),
+                path: path("materials.fea"),
                 bytes: b"material steel { nonsense }".to_vec(),
             }],
         )
@@ -324,7 +321,7 @@ mod tests {
         let mut excessive = capture();
         excessive.files = (0..=runmat_fea_source::MAX_FEA_WORKSPACE_FILES)
             .map(|i| FeaWorkspaceFile {
-                path: path(&format!("project/{i}.fea")),
+                path: path(&format!("{i}.fea")),
                 version: "v1".into(),
                 bytes: vec![],
             })
@@ -335,7 +332,7 @@ mod tests {
         ));
         let edits = vec![
             FeaWorkspaceEdit::Write {
-                path: path("project/source.m"),
+                path: path("source.m"),
                 bytes: vec![]
             };
             runmat_fea_source::MAX_FEA_WORKSPACE_FILES + 1
@@ -349,10 +346,10 @@ mod tests {
     fn deleted_and_overwritten_base_versions_remain_in_the_attestation_identity() {
         for edit in [
             FeaWorkspaceEdit::Remove {
-                path: path("project/materials.fea"),
+                path: path("materials.fea"),
             },
             FeaWorkspaceEdit::Write {
-                path: path("project/materials.fea"),
+                path: path("materials.fea"),
                 bytes: b"material steel {}".to_vec(),
             },
         ] {

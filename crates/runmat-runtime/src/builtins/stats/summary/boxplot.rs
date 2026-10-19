@@ -947,9 +947,6 @@ fn render_boxplot(boxes: &[BoxStats], options: &BoxplotOptions) -> BuiltinResult
     let handles_out = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let handles_slot = std::rc::Rc::clone(&handles_out);
     let opts = PlotRenderOptions {
-        title: "",
-        x_label: "",
-        y_label: "",
         grid: true,
         axis_equal: false,
     };

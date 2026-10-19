@@ -36,9 +36,6 @@ pub(super) fn execute_structural_modal_extraction(
     let constraints =
         CanonicalStructuralConstraintPlan::from_canonical_bytes(&constraint_input.payload())
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    constraints
-        .validate_against(workload.model(), &mesh)
-        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let resource_plan = FeaResourcePlan::from_canonical_bytes(&resource_input.payload())
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let topology_digest = runmat_execution::Digest::from_bytes(*mesh.canonical_digest.bytes());
@@ -75,6 +72,32 @@ pub(super) fn execute_structural_modal_extraction(
         ));
     }
 
+    let original_inputs = prepared_input_resource_facts(invocation.inputs)?;
+    let compiler_limit =
+        runmat_analysis_fea::planning::resource::constraint_compilation_available_bytes(
+            resource_plan.request.memory_bytes.min(
+                workload
+                    .procedure_step()?
+                    .accuracy
+                    .resources
+                    .maximum_resident_bytes,
+            ),
+            &original_inputs,
+            resource_plan.input.worker.fixed_memory_bytes,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    let compiled = CanonicalStructuralConstraintPlan::compile_for_model_with_workspace_limit(
+        workload.model(),
+        Some(&mesh),
+        compiler_limit,
+    )
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
+    if compiled.plan() != &constraints {
+        return Err(AnalysisBridgeError::Identity(
+            "modal constraint plan differs from original bounded compilation",
+        ));
+    }
+
     let fields = structural_observable_field_definitions()
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let observations =
@@ -87,19 +110,24 @@ pub(super) fn execute_structural_modal_extraction(
             ObservationLimits::default(),
         )
         .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let result_payload_upper_bound =
-        structural_modal_result_payload_bytes_upper_bound(Some(&mesh), &constraints, &workload)
+    let result_output =
+        structural_modal_result_output_resource_facts(Some(&mesh), &constraints, &workload)
             .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
-    let expected_resource_plan = build_structural_modal_resource_plan(
+    let expected_resource_plan = build_structural_modal_resource_plan_from_compilation(
         Some(&mesh),
-        &constraints,
+        &compiled,
         &observations,
         &workload,
         prestress_state.as_ref(),
         &resource_plan.request.accelerators,
         PreparedStructuralModalResourceFacts {
+            local_execution:
+                runmat_analysis_fea::planning::resource::LocalExecutionPlan::from_cpu_millicores(
+                    resource_plan.request.cpu_millicores,
+                )
+                .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?,
             inputs: prepared_input_resource_facts(&inputs_except_resource_plan(&invocation))?,
-            result_output: projected_output_resource_facts(result_payload_upper_bound)?,
+            result_output,
             receipt_output: projected_output_resource_facts(
                 structural_modal_receipt_payload_bytes_upper_bound(),
             )?,
@@ -123,12 +151,26 @@ pub(super) fn execute_structural_modal_extraction(
         ));
     }
 
-    let result = match prestress_state.as_ref() {
-        Some(state) => runmat_analysis_fea::execute_structural_prestressed_modal_workload(
-            &workload, &mesh, state,
-        ),
-        None => runmat_analysis_fea::execute_structural_modal_workload(&workload, &mesh),
-    }
+    drop(compiled);
+    let cpu_threads = usize::from(
+        runmat_analysis_fea::planning::resource::LocalThreadCount::from_cpu_millicores(
+            resource_plan.request.cpu_millicores,
+        )
+        .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
+        .get(),
+    );
+    let progress = runmat_analysis_fea::progress::capture_fea_progress_context();
+    let span = tracing::Span::current();
+    let result = runmat_cpu_execution::with_cpu_pool(cpu_threads, || {
+        let _progress = runmat_analysis_fea::replace_fea_progress_context(progress);
+        span.in_scope(|| match prestress_state.as_ref() {
+            Some(state) => runmat_analysis_fea::execute_structural_prestressed_modal_workload(
+                &workload, &mesh, state,
+            ),
+            None => runmat_analysis_fea::execute_structural_modal_workload(&workload, &mesh),
+        })
+    })
+    .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?
     .map_err(|error| AnalysisBridgeError::Invalid(error.to_string()))?;
     let receipt = StructuralModalNumericalReceipt::new(invocation.host.workload.identity, &result)?;
     let payload = result.canonical_bytes()?;

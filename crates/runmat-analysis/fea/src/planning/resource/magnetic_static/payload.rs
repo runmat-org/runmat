@@ -155,5 +155,5 @@ pub(super) fn profile(
             iterations: 0,
         },
     };
-    profile_serialized(&value, LIMITS).map_err(invalid)
+    runmat_canonical_codec::profile_serialized_shape(&value, LIMITS).map_err(invalid)
 }

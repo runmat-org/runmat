@@ -1,4 +1,7 @@
 //! Pre-execution accuracy sizing reused by task preparation and native admission.
+mod source_admission;
+mod thermal;
+pub use source_admission::validate_admitted_accuracy_source;
 #[cfg(test)]
 mod tests;
 use crate::{
@@ -76,6 +79,19 @@ pub fn build_prepared_accuracy_resource_plan(
         }
         Some(crate::accuracy_source_context::fluid::resource_workspace(
             request, &original, available,
+        )?)
+    } else if matches!(receipt, AccuracySourceReceipt::Thermal(_))
+        && request.source_observations.is_some()
+    {
+        Some(thermal::workspace(
+            request,
+            &evidence,
+            inputs,
+            PreparedPhaseResourceFacts {
+                inputs: prepared_input_resource_facts_without_resource_plan(inputs)?,
+                output: projected_output_resource_facts(profile.output_encoded_bytes_upper_bound)?,
+                output_set: projected_output_set_resource_facts(),
+            },
         )?)
     } else {
         None

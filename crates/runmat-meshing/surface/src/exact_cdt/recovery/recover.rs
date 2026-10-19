@@ -10,7 +10,9 @@ use crate::{
 use super::{
     cavity::recover_segment_cavity, ExactFaceConstrainedDelaunay, ExactFaceRecoveredSegment,
 };
-use crate::exact_cdt::topology::{edge_uses, flip_edge, properly_crosses, sorted_edge};
+use crate::exact_cdt::topology::{
+    edge_uses_with_checkpoint, flip_edge, properly_crosses, sorted_edge,
+};
 
 pub fn recover_exact_face_segments(
     delaunay: &ExactFaceDelaunay,
@@ -20,7 +22,7 @@ pub fn recover_exact_face_segments(
     options: ExactFaceDelaunayOptions,
 ) -> Result<ExactFaceConstrainedDelaunay, ExactFaceDelaunayError> {
     validate_exact_face_delaunay(delaunay, pslg, boundary, cancellation, options)?;
-    recover_validated_face_segments(delaunay, pslg, cancellation, options)
+    recover_validated_face_segments(delaunay, pslg, cancellation, options, None)
 }
 
 pub(crate) fn recover_validated_face_segments(
@@ -28,6 +30,7 @@ pub(crate) fn recover_validated_face_segments(
     pslg: &ExactFacePslg,
     cancellation: &dyn MeshingCancellationSignal,
     options: ExactFaceDelaunayOptions,
+    geometry_control: Option<&dyn runmat_geometry_core::GeometryEvaluationControl>,
 ) -> Result<ExactFaceConstrainedDelaunay, ExactFaceDelaunayError> {
     crate::exact_cdt::validate_face_delaunay_topology(delaunay, pslg, cancellation, options)?;
     let mut control = RecoveryControl::new(pslg, cancellation, options);
@@ -37,11 +40,11 @@ pub(crate) fn recover_validated_face_segments(
     let mut recovery_edge_flip_count = 0u64;
     let mut cavity_retriangulation_count = 0u64;
 
+    let mut edges = edge_uses_with_checkpoint(&triangles, || control.checkpoint())?;
     for (pslg_segment_index, segment) in pslg.segments.iter().enumerate() {
         control.checkpoint()?;
         let target = sorted_edge(segment.vertex_indices);
-        while !edge_uses(&triangles).contains_key(&target) {
-            let edges = edge_uses(&triangles);
+        while !edges.contains_key(&target) {
             let mut flipped = false;
             for (edge, uses) in &edges {
                 control.consume_predicates(4)?;
@@ -79,6 +82,8 @@ pub(crate) fn recover_validated_face_segments(
                     ));
                 }
             }
+            // Both flips and cavity replacement invalidate triangle-index incidence.
+            edges = edge_uses_with_checkpoint(&triangles, || control.checkpoint())?;
         }
         protected.insert(target);
         protected_segments.push(ExactFaceRecoveredSegment {
@@ -88,6 +93,7 @@ pub(crate) fn recover_validated_face_segments(
         });
     }
 
+    drop(edges); // Restoration owns its own index; retain only one complete map.
     let delaunay_restoration_flip_count =
         restore_delaunay(&mut triangles, pslg, &protected, &mut control)?;
     let result = ExactFaceConstrainedDelaunay {
@@ -98,7 +104,13 @@ pub(crate) fn recover_validated_face_segments(
         cavity_retriangulation_count,
         delaunay_restoration_flip_count,
     };
-    super::validate::validate_face_constrained_topology(&result, pslg, cancellation, options)?;
+    super::validate::validate_face_constrained_topology(
+        &result,
+        pslg,
+        cancellation,
+        options,
+        geometry_control,
+    )?;
     Ok(result)
 }
 
@@ -111,9 +123,12 @@ fn restore_delaunay(
     let mut flip_count = 0u64;
     loop {
         control.checkpoint()?;
-        let edges = edge_uses(triangles);
+        let edges = edge_uses_with_checkpoint(triangles, || control.checkpoint())?;
         let mut changed = false;
         for (edge, uses) in &edges {
+            // Robust incircle work can be much more expensive than one cheap
+            // bookkeeping unit. Probe per edge as well as the existing work cap.
+            control.checkpoint()?;
             if protected.contains(edge) || uses.len() != 2 {
                 continue;
             }
@@ -149,6 +164,7 @@ fn restore_delaunay(
             ));
         }
         if !changed {
+            control.checkpoint()?;
             return Ok(flip_count);
         }
     }
@@ -234,6 +250,7 @@ impl<'a> RecoveryControl<'a> {
         }
     }
 
+    #[track_caller]
     pub(super) fn checkpoint(&mut self) -> Result<(), ExactFaceDelaunayError> {
         self.work_since_check = 0;
         if self.cancellation.is_cancelled() {

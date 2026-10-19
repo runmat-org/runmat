@@ -78,14 +78,35 @@ fn publish_spoof(
     })
     .unwrap();
     let sample = ObservationSamplePublication::new(evaluation, &artifact).unwrap();
-    ObservationPublicationCatalog::new(
+    let publication = ObservationPublicationCatalog::new(
         workload.producer_identity().unwrap(),
         plan,
         catalog,
         step,
         vec![ObservationPublicationEntry::Sample(Box::new(sample))],
         ObservationHistorySourceContext::Magnetostatic { workload, mesh },
-    )
+    )?;
+    let bytes = publication.metadata_validation_resident_bytes()?;
+    let (verified, _, peak) =
+        crate::topology::measure_test_allocations(|| publication.validate_metadata_admitted(bytes));
+    verified?;
+    assert!(
+        peak as u64 <= bytes,
+        "catalog metadata {peak} exceeds {bytes}"
+    );
+    let (short, retained, peak) = crate::topology::measure_test_allocations(|| {
+        publication.validate_metadata_admitted(bytes - 1)
+    });
+    assert!(matches!(
+        short,
+        Err(AnalysisExecutionError::Limit(
+            "catalog metadata validation workspace"
+        ))
+    ));
+    assert_eq!(retained, 0);
+    // Profiling custom digest serialization can allocate bounded identifier scratch.
+    assert!((peak as u64) < bytes);
+    Ok(publication)
 }
 
 fn fixture(

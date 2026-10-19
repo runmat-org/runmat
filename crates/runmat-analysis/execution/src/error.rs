@@ -17,6 +17,8 @@ pub struct CoordinatorRetentionLimit {
 
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisBridgeError {
+    #[error("analysis host execution failed: {0}")]
+    HostExecution(String),
     #[error(transparent)]
     RetentionCapacity(#[from] CoordinatorRetentionLimit),
     #[error("invalid analysis execution bridge contract: {0}")]

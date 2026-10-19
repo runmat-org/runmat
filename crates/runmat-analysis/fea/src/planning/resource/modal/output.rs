@@ -1,0 +1,69 @@
+//! Numeric modal basis storage and bounded per-mode descriptive records.
+use super::{checked_add, checked_mul, ResourcePlanningError};
+use crate::planning::resource::{
+    numeric_profile::numeric_inventory_profile,
+    static_profiles::profiled_canonical_output_resource_facts, PreparedOutputResourceFacts,
+};
+
+pub(in crate::planning::resource) fn result_output(
+    values: u64,
+    modes: u64,
+    residual_vectors: u64,
+) -> Result<PreparedOutputResourceFacts, ResourcePlanningError> {
+    let numeric = numeric_inventory_profile(values)?;
+    // Per mode: fixed basis/directional/eigenspace map keys, scalar field
+    // descriptors and enum spellings. Numeric values and array/container nodes
+    // are counted separately. Residual direction metadata has its own allowance.
+    // Fixed provenance, diagnostics and run/basis envelopes retain the existing
+    // 64 KiB overhead. No recovered mesh or repeated geometry IDs live here.
+    let metadata = checked_add(
+        checked_add(
+            64 * 1024,
+            checked_mul(modes, 4096, "modal mode metadata")?,
+            "modal metadata",
+        )?,
+        checked_mul(residual_vectors, 16 * 1024, "modal residual metadata")?,
+        "modal metadata",
+    )?;
+    let metadata_resident =
+        runmat_canonical_codec::projected_canonical_materialization_resident_bytes_estimate(
+            metadata, 1,
+        )
+        .ok_or(ResourcePlanningError::Overflow(
+            "modal metadata materialization",
+        ))?;
+    profiled_canonical_output_resource_facts(runmat_canonical_codec::SerializedCanonicalProfile {
+        encoded_bytes_upper_bound: checked_add(
+            numeric.encoded_bytes_upper_bound,
+            metadata,
+            "modal numeric and metadata wire",
+        )?,
+        materialization_resident_bytes_estimate: checked_add(
+            numeric.materialization_resident_bytes_estimate,
+            metadata_resident,
+            "modal numeric and metadata construction",
+        )?,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn full_search_capacity_does_not_treat_every_numeric_byte_as_a_map_node() {
+        let values = super::super::modal_output_value_count(60_000, 256, 3).unwrap();
+        let facts = result_output(values, 256, 3).unwrap();
+        let generic = crate::planning::resource::projected_canonical_output_resource_facts(
+            facts.encoded_payload_bytes_upper_bound.0,
+        )
+        .unwrap();
+        assert!(generic.construction_resident_bytes_admission_budget.0 > 8 * 1024 * 1024 * 1024);
+        assert!(facts.construction_resident_bytes_admission_budget.0 < 2 * 1024 * 1024 * 1024);
+        assert!(
+            result_output(values, 257, 3)
+                .unwrap()
+                .construction_resident_bytes_admission_budget
+                > facts.construction_resident_bytes_admission_budget
+        );
+    }
+}

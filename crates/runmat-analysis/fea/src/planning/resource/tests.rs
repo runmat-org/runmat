@@ -19,9 +19,11 @@ use crate::{
 
 use super::*;
 
+mod compiler_phase;
 mod curved_connector;
 mod exact_work;
 mod excitation_integration;
+mod general;
 mod prepared_inputs;
 mod thermal_state;
 
@@ -53,6 +55,7 @@ fn input(partitioning: PartitioningPolicy) -> FeaResourcePlanningInput {
         phase: FeaResourcePhase::StructuralLinearPipeline,
         demand: FeaResourceDemand::StructuralLinearPipeline(
             StructuralLinearPipelineResourceDemand {
+                constraint_compilation_peak_bytes: ByteCount(1),
                 inputs: None,
                 state_profiles_output: PreparedOutputResourceFacts {
                     encoded_payload_bytes_upper_bound: ByteCount(1),
@@ -502,6 +505,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
         None,
     )
     .unwrap();
+    compiler_phase::assert_carried_request_identity(&workload, &mesh, &observations, &plan);
     let mut serial_workload = workload.clone();
     serial_workload.observation_execution =
         crate::results::observation::ObservationExecutionPolicy::serial();
@@ -516,6 +520,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     )
     .unwrap();
     let direct_plan = build_static_resource_plan(StaticResourcePreflight {
+        compilation: None,
         prepared_inputs: None,
         model: &serial_workload.model,
         step: serial_workload.procedure_step().unwrap(),
@@ -532,6 +537,7 @@ fn structural_preflight_derives_numerical_facts_before_assembly() {
     assert_eq!(direct_plan, serial_plan);
     let solver_model = serial_workload.solver_model().unwrap();
     let solver_projection_plan = build_static_resource_plan(StaticResourcePreflight {
+        compilation: None,
         prepared_inputs: None,
         model: &solver_model,
         step: &solver_model.sequence.steps[0],
@@ -992,6 +998,8 @@ fn exact_small_estimate_separates_all_resource_classes() {
     assert_eq!(
         plan.request.memory_bytes,
         plan.breakdown.worker_overhead_bytes.0
+            + plan.breakdown.input_transport_closure_bytes.0
+            + plan.breakdown.resource_plan_transport_closure_bytes.0
             + plan.breakdown.input_decoded_resident_bytes.0
             + plan.breakdown.resource_plan_decoded_resident_bytes.0
             + plan.breakdown.topology_bytes.0
@@ -1456,9 +1464,13 @@ fn resource_usage_requires_the_exact_planned_accelerator_reservation() {
         .accelerators
         .push(duplicated.accelerators[0].clone());
     assert!(matches!(
-        record_usage(duplicated),
-        Err(ResourcePlanningError::Invalid(message))
-            if message == "resource usage attempt allocation differs from its plan"
+        runmat_execution::resource::ResourceAccounting::for_reserved_interval(
+            duplicated, 1, 0, 0, 0
+        ),
+        Err(runmat_execution::ContractError::Invalid {
+            field: "accelerators",
+            ..
+        })
     ));
 }
 

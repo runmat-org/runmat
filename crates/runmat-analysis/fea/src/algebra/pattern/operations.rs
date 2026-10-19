@@ -1,5 +1,24 @@
 use super::{SparsePattern, SparsePatternError};
 
+/// Exact canonical support counts; no symmetry or numerical-value claim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SparsePatternStatistics {
+    pub rows: usize,
+    pub columns: usize,
+    pub nonzeros: usize,
+    pub maximum_row_nonzeros: usize,
+}
+impl SparsePatternStatistics {
+    pub fn resident_bytes(self) -> Result<u64, SparsePatternError> {
+        self.rows
+            .checked_add(1)
+            .and_then(|n| n.checked_add(self.nonzeros))
+            .and_then(|n| u64::try_from(n).ok())
+            .and_then(|n| n.checked_mul(8))
+            .ok_or(SparsePatternError::DimensionOverflow)
+    }
+}
+
 impl SparsePattern {
     /// Copies canonical index buffers with fallible allocation and no geometric growth.
     pub fn try_clone(&self) -> Result<Self, SparsePatternError> {
@@ -11,21 +30,46 @@ impl SparsePattern {
             rows: self.rows,
             columns: self.columns,
             index_width: self.index_width,
-            row_offsets,
-            column_indices,
+            row_offsets: std::sync::Arc::new(row_offsets),
+            column_indices: std::sync::Arc::new(column_indices),
         })
+    }
+
+    /// Count the original ordered union without allocating support buffers.
+    pub fn union_statistics(
+        &self,
+        other: &Self,
+    ) -> Result<SparsePatternStatistics, SparsePatternError> {
+        if self.rows != other.rows || self.columns != other.columns {
+            return Err(SparsePatternError::ShapeMismatch);
+        }
+        let mut result = SparsePatternStatistics {
+            rows: self.rows(),
+            columns: self.columns(),
+            nonzeros: 0,
+            maximum_row_nonzeros: 0,
+        };
+        for row in 0..self.rows() {
+            let width = merged_columns(self, other, row).count();
+            result.nonzeros = result
+                .nonzeros
+                .checked_add(width)
+                .ok_or(SparsePatternError::DimensionOverflow)?;
+            result.maximum_row_nonzeros = result.maximum_row_nonzeros.max(width);
+        }
+        Ok(result)
+    }
+    pub(crate) fn union_columns<'a>(
+        &'a self,
+        other: &'a Self,
+        row: usize,
+    ) -> impl Iterator<Item = u64> + 'a {
+        merged_columns(self, other, row)
     }
 
     /// Deterministic row-wise union; reserve the actual union size, not both inputs' sum.
     pub fn union(&self, other: &Self) -> Result<Self, SparsePatternError> {
-        if self.rows != other.rows || self.columns != other.columns {
-            return Err(SparsePatternError::ShapeMismatch);
-        }
-        let count = (0..self.rows()).try_fold(0_usize, |count, row| {
-            count
-                .checked_add(merged_columns(self, other, row).count())
-                .ok_or(SparsePatternError::DimensionOverflow)
-        })?;
+        let count = self.union_statistics(other)?.nonzeros;
         let mut row_offsets = reserve(
             self.rows()
                 .checked_add(1)

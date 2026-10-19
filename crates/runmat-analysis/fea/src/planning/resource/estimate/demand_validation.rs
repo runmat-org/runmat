@@ -49,6 +49,7 @@ pub(super) fn validate_buckling_demand(
     let SolveResourcePolicy::SymmetricSubspaceIteration {
         reduced_dimension,
         requested_mode_count,
+        maximum_subspace_dimension,
         ..
     } = demand.operator.solve
     else {
@@ -56,7 +57,8 @@ pub(super) fn validate_buckling_demand(
             "structural buckling demand requires a symmetric-subspace solve policy".into(),
         ));
     };
-    if demand.requested_mode_count != requested_mode_count
+    if maximum_subspace_dimension != reduced_dimension
+        || demand.requested_mode_count != requested_mode_count
         || demand.requested_mode_count.0 == 0
         || demand.requested_mode_count.0 > reduced_dimension.0
         || demand.phase_value_count_upper_bound.0 < demand.output_value_count_upper_bound.0
@@ -75,6 +77,16 @@ pub(super) fn validate_buckling_demand(
 pub(super) fn validate_modal_demand(
     demand: &super::super::contract::StructuralModalResourceDemand,
 ) -> Result<(), ResourcePlanningError> {
+    let expected_result = super::super::modal::output::result_output(
+        demand.modal_output_value_count_upper_bound.0,
+        demand.retained_mode_count_upper_bound.0,
+        demand.residual_vector_count.0,
+    )?;
+    if demand.result_output != expected_result {
+        return Err(ResourcePlanningError::Invalid(
+            "modal result profile differs from its numeric and metadata inventory".into(),
+        ));
+    }
     let SolveResourcePolicy::SymmetricSubspaceIteration {
         reduced_dimension,
         maximum_subspace_dimension,
@@ -110,7 +122,7 @@ pub(super) fn validate_modal_demand(
         || demand.modal_phase_value_count_upper_bound.0
             < demand.modal_output_value_count_upper_bound.0
         || demand.modal_output_value_count_upper_bound.0 == 0
-        || maximum_subspace_dimension != reduced_dimension
+        || demand.retained_mode_count_upper_bound != maximum_subspace_dimension
         || demand.reduced_tangent_nonzero_count_upper_bound.0 == 0
         || demand.residual_vector_count.0 > 3
         || demand.residual_vector_static_iteration_count_upper_bound.0

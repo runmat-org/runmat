@@ -2,6 +2,8 @@
 //! to a mathematical check, never a certificate or a deserializable proof.
 use super::*;
 
+pub(super) const SOURCE_HEADER_BYTES: u64 = 256;
+
 struct Block {
     node_start: usize,
     value_start: usize,
@@ -22,13 +24,9 @@ impl AnchoredEnergySource {
     pub fn resident_bytes_for_widths(
         mut widths: impl Iterator<Item = usize>,
     ) -> Result<u64, EnergyError> {
-        widths.try_fold(256_u64, |bytes, width| {
-            if !(2..=32).contains(&width) {
-                return Err(EnergyError::InvalidBlock);
-            }
-            let width = width as u64;
+        widths.try_fold(SOURCE_HEADER_BYTES, |bytes, width| {
             bytes
-                .checked_add(32 + width * 8 + width * width * 8)
+                .checked_add(block_storage_bytes(width)?)
                 .ok_or(EnergyError::Arithmetic)
         })
     }
@@ -134,10 +132,21 @@ impl AnchoredEnergySource {
         }
         let envelope = CoercivityWorkEnvelope::derive(matrix.pattern())
             .map_err(|_| EnergyError::Arithmetic)?;
+        let admitted = if matches!(projection, EnergyProjection::Selection(_)) {
+            SourceEnergyDemand::derive(
+                envelope,
+                projection.len(),
+                projection_bytes,
+                self.blocks.iter().map(|block| block.width),
+            )?
+            .admission()
+        } else {
+            envelope.into()
+        };
         let mut check = AnchoredEnergyCheck::new_projected(
             matrix,
             projection,
-            envelope,
+            admitted,
             self.resident_bytes
                 .checked_add(projection_bytes)
                 .ok_or(EnergyError::Arithmetic)?,
@@ -161,3 +170,12 @@ impl AnchoredEnergySource {
 
 #[cfg(test)]
 mod tests;
+
+/// Original capture owner supplies the block/header inventory to preparation and proof planning.
+pub(super) fn block_storage_bytes(width: usize) -> Result<u64, EnergyError> {
+    if !(2..=32).contains(&width) {
+        return Err(EnergyError::InvalidBlock);
+    }
+    let width = width as u64;
+    Ok(32 + width * 8 + width * width * 8)
+}

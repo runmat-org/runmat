@@ -359,9 +359,6 @@ async fn render_polarscatter(parsed: ParsedPolarScatter) -> BuiltinResult<Value>
     let plot_indices_slot = std::rc::Rc::clone(&plot_indices_out);
     let mut plots_opt = Some(plots);
     let opts = PlotRenderOptions {
-        title: "Polar Scatter",
-        x_label: "",
-        y_label: "",
         axis_equal: true,
         grid: true,
     };

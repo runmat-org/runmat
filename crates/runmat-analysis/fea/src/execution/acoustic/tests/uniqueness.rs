@@ -14,7 +14,7 @@ fn required_diagnostic_survives_solve_free_cold_lineage_and_tampering_fails() {
     let receipt_bytes = receipt.canonical_bytes().unwrap();
     let token = crate::progress::FeaCancellationToken::new();
     token.cancel();
-    let _guard =
+    let guard =
         crate::progress::replace_fea_progress_context(crate::progress::FeaProgressContext {
             handler: None,
             cancellation: token,
@@ -24,11 +24,17 @@ fn required_diagnostic_survives_solve_free_cold_lineage_and_tampering_fails() {
     let cold = AcousticHarmonicSolverResult::from_canonical_bytes(&bytes).unwrap();
     let cold_receipt =
         AcousticNumericalReceiptArtifact::from_canonical_bytes(&receipt_bytes).unwrap();
+    assert_eq!(cold, result);
+    // Decoding retained evidence needs neither geometry nor a solve. Mesh-grounded
+    // provenance validation constructs the original projection and must honor cancellation.
+    assert!(cold_receipt
+        .validate_against(&workload, &cold, &mesh)
+        .is_err());
+    assert!(workload.execute(&mesh).is_err());
+    drop(guard);
     cold_receipt
         .validate_against(&workload, &cold, &mesh)
         .unwrap();
-    assert_eq!(cold, result);
-    assert!(workload.execute(&mesh).is_err());
     for mutation in 0..5 {
         let mut bad = serde_json::to_value(&cold).unwrap();
         match mutation {

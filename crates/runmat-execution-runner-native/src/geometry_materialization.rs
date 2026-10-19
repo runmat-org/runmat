@@ -270,8 +270,8 @@ where
             }
             let representation = prepared
                 .geometry_objects()
-                .kernel_representation
-                .as_deref()
+                .kernel_representation()
+                .map_err(|error| error.to_string())?
                 .ok_or_else(|| "derived exact geometry has no kernel representation".to_string())?;
             let mut options = exact_options_for_document(&request.import_options, document);
             options.source_units = runmat_geometry_core::UnitSystem::Meter;

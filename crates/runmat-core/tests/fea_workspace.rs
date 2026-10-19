@@ -9,8 +9,8 @@ fn path(value: &str) -> LogicalSourcePath {
 }
 fn snapshot() -> FeaWorkspaceCapture {
     FeaWorkspaceCapture { files:vec![
-        FeaWorkspaceFile { path:path("project/main.fea"), version:"working:1".into(), bytes:b"import model supports from \"./supports.fea\"\nmodel assembly { include model.supports }\n".to_vec() },
-        FeaWorkspaceFile { path:path("project/supports.fea"), version:"working:2".into(), bytes:b"model supports {}\n".to_vec() },
+        FeaWorkspaceFile { path:path("main.fea"), version:"working:1".into(), bytes:b"import model supports from \"./supports.fea\"\nmodel assembly { include model.supports }\n".to_vec() },
+        FeaWorkspaceFile { path:path("supports.fea"), version:"working:2".into(), bytes:b"model supports {}\n".to_vec() },
     ] }
 }
 
@@ -22,8 +22,8 @@ fn candidate_checks_a_complete_module_move_without_changing_the_real_project() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let result = futures::executor::block_on(session.check_fea_workspace(FeaWorkspaceCheckRequest {
         snapshot:snapshot(), dependencies:vec![], edits:vec![
-            FeaWorkspaceEdit::Rename { from:path("project/supports.fea"), to:path("project/shared.fea") },
-            FeaWorkspaceEdit::Write { path:path("project/main.fea"), bytes:b"import model supports from \"./shared.fea\"\nmodel assembly { include model.supports }\n".to_vec() },
+            FeaWorkspaceEdit::Rename { from:path("supports.fea"), to:path("shared.fea") },
+            FeaWorkspaceEdit::Write { path:path("main.fea"), bytes:b"import model supports from \"./shared.fea\"\nmodel assembly { include model.supports }\n".to_vec() },
         ],
     })).unwrap();
     assert!(result.publication_valid, "{:?}", result.roots);
@@ -49,7 +49,7 @@ fn deleted_dependency_and_invalid_consumers_block_publication() {
             snapshot: snapshot(),
             dependencies: vec![],
             edits: vec![FeaWorkspaceEdit::Remove {
-                path: path("project/supports.fea"),
+                path: path("supports.fea"),
             }],
         }))
         .unwrap();
@@ -62,7 +62,7 @@ fn deleted_dependency_and_invalid_consumers_block_publication() {
 fn unrelated_broken_draft_does_not_block_dependency_changes() {
     let mut capture = snapshot();
     capture.files.push(FeaWorkspaceFile {
-        path: path("project/unrelated.fea"),
+        path: path("unrelated.fea"),
         version: "draft:1".into(),
         bytes: b"this is a broken manual draft".to_vec(),
     });
@@ -72,7 +72,7 @@ fn unrelated_broken_draft_does_not_block_dependency_changes() {
             snapshot: capture,
             dependencies: vec![],
             edits: vec![FeaWorkspaceEdit::Write {
-                path: path("project/supports.fea"),
+                path: path("supports.fea"),
                 bytes: b"model supports {}\n".to_vec(),
             }],
         }))
@@ -82,11 +82,11 @@ fn unrelated_broken_draft_does_not_block_dependency_changes() {
     assert!(result
         .roots
         .iter()
-        .any(|root| root.root_module == path("project/main.fea")));
+        .any(|root| root.root_module == path("main.fea")));
     assert!(result
         .roots
         .iter()
-        .all(|root| root.root_module != path("project/unrelated.fea")));
+        .all(|root| root.root_module != path("unrelated.fea")));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn configuration_is_admitted_separately_from_source_edits() {
             snapshot: snapshot(),
             dependencies: vec![],
             edits: vec![FeaWorkspaceEdit::Write {
-                path: path("project/runmat.toml"),
+                path: path("runmat.toml"),
                 bytes: vec![],
             }],
         }))
@@ -110,13 +110,13 @@ fn function_source_changes_check_all_importing_consumers() {
     let mut capture = snapshot();
     for name in ["first", "second"] {
         capture.files.push(FeaWorkspaceFile {
-            path: path(&format!("project/{name}.fea")),
+            path: path(&format!("{name}.fea")),
             version: format!("base:{name}"),
             bytes: b"import function pulse from \"./signals.m\"\n".to_vec(),
         });
     }
     capture.files.push(FeaWorkspaceFile {
-        path: path("project/signals.m"),
+        path: path("signals.m"),
         version: "base:signals".into(),
         bytes: b"function y = pulse(t)\ny = t;\nend\n".to_vec(),
     });
@@ -126,7 +126,7 @@ fn function_source_changes_check_all_importing_consumers() {
             snapshot: capture,
             dependencies: vec![],
             edits: vec![FeaWorkspaceEdit::Write {
-                path: path("project/signals.m"),
+                path: path("signals.m"),
                 bytes: b"function y = pulse(t)\ny = 2*t;\nend\n".to_vec(),
             }],
         }))
@@ -137,7 +137,7 @@ fn function_source_changes_check_all_importing_consumers() {
             .iter()
             .map(|root| root.root_module.clone())
             .collect::<Vec<_>>(),
-        vec![path("project/first.fea"), path("project/second.fea")]
+        vec![path("first.fea"), path("second.fea")]
     );
     // There is no admitted package/function graph in this session, so checking
     // must report unavailable facts rather than execute or invent the function.
@@ -163,9 +163,9 @@ fn working_check_uses_native_drafts_and_imports_without_writing_the_provider() {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let result = futures::executor::block_on(session.check_fea_working_source(
             runmat_core::FeaWorkingCheckRequest {
-                root: path("project/main.fea"),
+                root: path("main.fea"),
                 overlays: vec![runmat_core::FeaWorkingSource {
-                    path: path("project/main.fea"),
+                    path: path("main.fea"),
                     bytes: snapshot().files[0].bytes.clone(),
                 }],
             },
@@ -177,7 +177,7 @@ fn working_check_uses_native_drafts_and_imports_without_writing_the_provider() {
             "{:?}",
             result.diagnostics
         );
-        assert_eq!(result.root_module, path("project/main.fea"));
+        assert_eq!(result.root_module, path("main.fea"));
     });
     assert_eq!(
         futures::executor::block_on(provider.read(std::path::Path::new("/project/main.fea")))
@@ -187,19 +187,19 @@ fn working_check_uses_native_drafts_and_imports_without_writing_the_provider() {
 }
 
 #[test]
-fn working_check_rejects_duplicate_overlays_and_paths_outside_the_project() {
+fn working_check_rejects_duplicate_overlays_and_root_as_a_source_file() {
     use runmat_filesystem::MemoryFsProvider;
     let _guard = runmat_filesystem::provider_override_lock();
     let provider = std::sync::Arc::new(MemoryFsProvider::with_current_dir("/project"));
     runmat_filesystem::with_provider_override(provider, || {
         let mut session = RunMatSession::with_options(false, false).unwrap();
         let overlay = runmat_core::FeaWorkingSource {
-            path: path("project/main.fea"),
+            path: path("main.fea"),
             bytes: b"model assembly {}\n".to_vec(),
         };
         let error = futures::executor::block_on(session.check_fea_working_source(
             runmat_core::FeaWorkingCheckRequest {
-                root: path("project/main.fea"),
+                root: path("main.fea"),
                 overlays: vec![overlay.clone(), overlay],
             },
         ))
@@ -207,15 +207,15 @@ fn working_check_rejects_duplicate_overlays_and_paths_outside_the_project() {
         assert!(error.contains("duplicate working editor overlay"));
         let error = futures::executor::block_on(session.check_fea_working_source(
             runmat_core::FeaWorkingCheckRequest {
-                root: path("project/main.fea"),
+                root: path("main.fea"),
                 overlays: vec![runmat_core::FeaWorkingSource {
-                    path: path("package/other/main.fea"),
+                    path: LogicalSourcePath::root(),
                     bytes: vec![],
                 }],
             },
         ))
         .unwrap_err();
-        assert!(error.contains("project"), "{error}");
+        assert!(error.contains("must name a file"), "{error}");
     });
 }
 
@@ -233,7 +233,7 @@ fn checked_candidate_retains_exact_source_for_preview_and_never_reads_live_fallb
     let report = result
         .roots
         .iter()
-        .find(|report| report.root_module == path("project/main.fea"))
+        .find(|report| report.root_module == path("main.fea"))
         .unwrap();
     let source = session.checked_fea_source(report.revision).unwrap();
     let captured = source
@@ -259,7 +259,7 @@ fn checked_preview_revision_expires_instead_of_silently_rechecking_current_sourc
     for index in 0..6 {
         let capture = FeaWorkspaceCapture {
             files: vec![FeaWorkspaceFile {
-                path: path("project/main.fea"),
+                path: path("main.fea"),
                 version: format!("draft:{index}"),
                 bytes: format!("model definition_{index} {{}}\n").into_bytes(),
             }],
@@ -289,8 +289,14 @@ fn retained_preview_and_queries_cannot_cross_a_provider_mount_change() {
     let mut session = RunMatSession::with_options(false, false).unwrap();
     let revision = runmat_filesystem::with_provider_override(first.clone(), || {
         futures::executor::block_on(session.check_fea_workspace(FeaWorkspaceCheckRequest {
-            snapshot: snapshot(), dependencies: vec![], edits: vec![],
-        })).unwrap().roots.remove(0).revision
+            snapshot: snapshot(),
+            dependencies: vec![],
+            edits: vec![],
+        }))
+        .unwrap()
+        .roots
+        .remove(0)
+        .revision
     });
     runmat_filesystem::with_provider_override(second, || {
         assert!(session.checked_fea_source(revision).is_err());
@@ -305,19 +311,38 @@ fn working_check_retains_only_the_requested_root_and_ignores_unrelated_broken_st
     use runmat_filesystem::{FsProvider, MemoryFsProvider};
     let _guard = runmat_filesystem::provider_override_lock();
     let provider = std::sync::Arc::new(MemoryFsProvider::with_current_dir("/project"));
-    futures::executor::block_on(provider.write(std::path::Path::new("/project/aaa.fea"), b"model assembly {}\n")).unwrap();
+    futures::executor::block_on(provider.write(
+        std::path::Path::new("/project/aaa.fea"),
+        b"model assembly {}\n",
+    ))
+    .unwrap();
     for index in 0..8 {
-        futures::executor::block_on(provider.write(std::path::Path::new(&format!("/project/other{index}.fea")), b"model other {}\n")).unwrap();
+        futures::executor::block_on(provider.write(
+            std::path::Path::new(&format!("/project/other{index}.fea")),
+            b"model other {}\n",
+        ))
+        .unwrap();
     }
-    futures::executor::block_on(provider.write(std::path::Path::new("/project/unrelated.fea"), b"broken source")).unwrap();
+    futures::executor::block_on(provider.write(
+        std::path::Path::new("/project/unrelated.fea"),
+        b"broken source",
+    ))
+    .unwrap();
     runmat_filesystem::with_provider_override(provider, || {
         let mut session = RunMatSession::with_options(false, false).unwrap();
-        let result = futures::executor::block_on(session.check_fea_working_source(runmat_core::FeaWorkingCheckRequest {
-            root: path("project/aaa.fea"), overlays: vec![],
-        })).unwrap();
+        let result = futures::executor::block_on(session.check_fea_working_source(
+            runmat_core::FeaWorkingCheckRequest {
+                root: path("aaa.fea"),
+                overlays: vec![],
+            },
+        ))
+        .unwrap();
         assert_eq!(result.status, FeaCheckStatus::Valid);
         let source = session.checked_fea_source(result.revision).unwrap();
-        assert_eq!(source.checked().root_module, path("project/aaa.fea"));
-        assert_eq!(source.physical_path(), std::path::Path::new("/project/aaa.fea"));
+        assert_eq!(source.checked().root_module, path("aaa.fea"));
+        assert_eq!(
+            source.physical_path(),
+            std::path::Path::new("/project/aaa.fea")
+        );
     });
 }

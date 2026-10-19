@@ -27,9 +27,9 @@ use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plot::build_line_plot;
 use super::plotting_error;
 use super::state::{
-    current_axes_state, current_hold_enabled, line_color_for_axes_series_index,
-    next_line_color_for_axes, next_line_style_for_axes, render_active_plot,
-    set_line_style_order_for_axes, PlotRenderOptions,
+    continue_line_color_cycle_after, current_axes_state, current_hold_enabled,
+    line_color_for_axes_series_index, next_line_color_for_axes, next_line_style_for_axes,
+    render_active_plot, set_line_style_order_for_axes, PlotRenderOptions,
 };
 use super::style::{
     looks_like_option_name, parse_line_style_args, value_as_string, LineAppearance,
@@ -322,9 +322,6 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
     let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
     let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
-        title: "Polar Plot",
-        x_label: "",
-        y_label: "",
         axis_equal: true,
         grid: true,
     };
@@ -345,6 +342,10 @@ pub async fn polarplot_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         }
         Ok(())
     });
+    if !hold_enabled {
+        // Rendering cleared the axes and reset the color order; resume it after these series.
+        continue_line_color_cycle_after(axes, total);
+    }
     let Some((axes_index, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };

@@ -19,4 +19,4 @@ returns the complete ordinal history; `task_resource_aggregate` rejects active o
 unaccounted attempts instead of reporting only the winning retry. A lost-worker
 closure does not prove process cessation or resource consumption. Schema 1 cannot
 be restored as complete terminal evidence. See the
-[qualification boundary](../../docs/fea/qualification/attempt-history.md).
+[qualification boundary](../../docs/simulation/qualification/attempt-history.md).

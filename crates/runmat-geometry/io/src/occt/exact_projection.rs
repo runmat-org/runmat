@@ -39,7 +39,8 @@ pub(super) fn project_exact_contracts(
     let occurrences = OccurrenceIndex::new(payload, representation_digest)?;
     let names = PersistentNameIndex::new(payload)?;
     let body_partitions = BodyPartitions::new(payload, &occurrences, &names)?;
-    let assembly_projection = occurrences.project_assemblies(&body_partitions)?;
+    let assembly_projection =
+        occurrences.project_assemblies(&body_partitions, meters_per_source_unit)?;
 
     let mut topology = ExactBRepTopology {
         schema_version: EXACT_BREP_TOPOLOGY_SCHEMA_VERSION,

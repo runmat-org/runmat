@@ -1,0 +1,280 @@
+{
+  "schema_version": 1,
+  "examples": [
+    {
+      "id": "cantilever-static",
+      "title": "Bend a steel cantilever",
+      "description": "Import a one-metre steel beam, clamp one end, and apply a downward load to the free end. Explore displacement and stress from the saved solve.",
+      "entry": "cantilever-static.fea",
+      "files": [
+        "cantilever-static.fea",
+        "cantilever-load.svg",
+        "geometry/cantilever.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in metres",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-SOLID-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import the geometry and choose the mesh",
+          "start": "geometry beam {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Choose an elastic material",
+          "start": "material steel {",
+          "end": "\nmodel loaded_beam"
+        },
+        {
+          "title": "Fix one end and apply the load",
+          "start": "model loaded_beam {",
+          "end": "\nstudy cantilever_static"
+        },
+        {
+          "title": "Request the analysis and result fields",
+          "start": "study cantilever_static {",
+          "end": null
+        }
+      ],
+      "model_illustration": {
+        "path": "cantilever-load.svg",
+        "alt": "One-metre cantilever: fixed at x = 0, with 100 kPa downward traction on the x = 1 m end face, giving a total load of 1,000 N.",
+        "caption": "Loading schematic \u00b7 the arrow shows the resultant of the distributed end-face traction.",
+        "width": 760,
+        "height": 220
+      }
+    },
+    {
+      "id": "two-body-static",
+      "title": "Load a two-body assembly",
+      "description": "Import two STEP solids, assign steel to both, fix their support faces and apply traction to one body.",
+      "entry": "structural-static-experimental.fea",
+      "files": [
+        "structural-static-experimental.fea",
+        "geometry/two-box-assembly.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in metres",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-SOLID-001"
+      ],
+      "snapshot": false
+    },
+    {
+      "id": "heatsink-steady",
+      "title": "Cool a finned electronics heat sink",
+      "description": "Apply heater power to an aluminium heat sink and inspect conduction into its air-cooled fins.",
+      "entry": "heatsink-steady.fea",
+      "files": [
+        "heatsink-steady.fea",
+        "heatsink-setup.svg",
+        "geometry/electronics-heatsink.step",
+        "geometry/KICAD-LICENSE.md",
+        "geometry/electronics-heatsink-provenance.md"
+      ],
+      "expected_outputs": [
+        "Node temperature, in kelvin",
+        "Element heat flux, in watts per square metre"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-THERMAL-DOMAIN-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import the heat sink and choose the mesh",
+          "start": "geometry heatsink {",
+          "end": "\nmaterial aluminium"
+        },
+        {
+          "title": "Choose thermal properties",
+          "start": "material aluminium {",
+          "end": "\nmodel cooled_heatsink"
+        },
+        {
+          "title": "Apply heater power and air cooling",
+          "start": "model cooled_heatsink {",
+          "end": "\nstudy heatsink_temperature"
+        },
+        {
+          "title": "Request temperature and heat-flux fields",
+          "start": "study heatsink_temperature {",
+          "end": null
+        }
+      ],
+      "model_illustration": {
+        "path": "heatsink-setup.svg",
+        "alt": "Heat enters the flat mounting face of a finned aluminium heat sink; convection exchanges heat with 25 degree Celsius air on its outer surface.",
+        "caption": "Thermal model \u00b7 distributed heater input at the mounting face and prescribed convection to ambient air.",
+        "width": 760,
+        "height": 260
+      }
+    },
+    {
+      "id": "tuning-fork-modal",
+      "title": "Explore a tuning fork\u2019s natural modes",
+      "description": "Fix the stem of an exact steel tuning fork and compare the recovered free-vibration patterns of its tines.",
+      "entry": "tuning-fork-modal.fea",
+      "files": [
+        "tuning-fork-modal.fea",
+        "tuning-fork-setup.svg",
+        "geometry/tuning-fork.step",
+        "geometry/generate-tuning-fork.cc"
+      ],
+      "expected_outputs": [
+        "Natural frequencies, in hertz",
+        "Original modal displacement vectors"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-DYNAMICS-MODAL-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import the fork and choose quadratic elements",
+          "start": "geometry fork {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Choose stiffness and mass",
+          "start": "material steel {",
+          "end": "\nmodel supported_fork"
+        },
+        {
+          "title": "Fix the stem end",
+          "start": "model supported_fork {",
+          "end": "\nstudy fork_modes"
+        },
+        {
+          "title": "Extract two modes and retain the basis",
+          "start": "study fork_modes {",
+          "end": null
+        }
+      ],
+      "model_illustration": {
+        "path": "tuning-fork-setup.svg",
+        "alt": "A 100 millimetre steel tuning fork has two free tines joined by a bridge and a fixed 8 by 6 millimetre stem end; there is no applied vibration force.",
+        "caption": "Modal model \u00b7 clamp the bottom of the stem; leave the tines free. No forcing or damping is applied.",
+        "width": 760,
+        "height": 280
+      }
+    },
+    {
+      "id": "cantilever-coarse",
+      "title": "Coarse quadratic cantilever",
+      "description": "Compare the same cantilever with a 300 mm requested mesh size.",
+      "entry": "cantilever-coarse.fea",
+      "files": [
+        "cantilever-coarse.fea",
+        "geometry/cantilever.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in metres",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-REFERENCE-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import geometry and choose the mesh",
+          "start": "geometry beam {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Define the material",
+          "start": "material steel {",
+          "end": "\nmodel loaded_beam"
+        },
+        {
+          "title": "Define the physical model",
+          "start": "model loaded_beam {",
+          "end": "\nstudy cantilever_coarse"
+        },
+        {
+          "title": "Request the analysis and fields",
+          "start": "study cantilever_coarse {",
+          "end": null
+        }
+      ]
+    },
+    {
+      "id": "cantilever-medium",
+      "title": "Medium quadratic cantilever",
+      "description": "Compare the same cantilever with a 175 mm requested mesh size.",
+      "entry": "cantilever-medium.fea",
+      "files": [
+        "cantilever-medium.fea",
+        "geometry/cantilever.step"
+      ],
+      "expected_outputs": [
+        "Node displacement, in metres",
+        "Element von Mises stress, in pascals"
+      ],
+      "host_note": "The saved results are ready to explore here. Open the complete project in RunMat Desktop to edit the study and run it again.",
+      "actions": [
+        "open_source",
+        "download"
+      ],
+      "requirements": [
+        "FEA-STRUCTURAL-REFERENCE-001"
+      ],
+      "snapshot": true,
+      "source_sections": [
+        {
+          "title": "Import geometry and choose the mesh",
+          "start": "geometry beam {",
+          "end": "\nmaterial steel"
+        },
+        {
+          "title": "Define the material",
+          "start": "material steel {",
+          "end": "\nmodel loaded_beam"
+        },
+        {
+          "title": "Define the physical model",
+          "start": "model loaded_beam {",
+          "end": "\nstudy cantilever_medium"
+        },
+        {
+          "title": "Request the analysis and fields",
+          "start": "study cantilever_medium {",
+          "end": null
+        }
+      ]
+    }
+  ]
+}

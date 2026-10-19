@@ -2,6 +2,7 @@
 
 mod closure;
 mod codec;
+mod packing;
 
 #[cfg(test)]
 mod tests;
@@ -12,8 +13,11 @@ use sha2::{Digest as _, Sha256};
 use super::{MeshingChunkDescriptor, MeshingChunkMediaType, MeshingContractError, StableDigest};
 
 pub use closure::{
-    build_closed_stage_manifest, decode_stage_manifest_streams,
+    build_closed_stage_manifest, close_stage_payload_with_admission, decode_stage_manifest_streams,
+    decode_stage_manifest_streams_borrowed, decode_stage_manifest_streams_borrowed_with_admission,
     decode_stage_manifest_streams_with_cancellation, verify_stage_manifest_closure,
+    verify_stage_manifest_closure_borrowed, verify_stage_manifest_closure_borrowed_with_admission,
+    ClosedMeshingStage, MeshingManifestMetadata, MeshingStreamStorageProfile,
 };
 
 const MAX_CHUNKS: usize = 65_536;
@@ -61,6 +65,21 @@ pub struct EncodedMeshingChunk {
     pub bytes: Vec<u8>,
 }
 
+/// Borrow encoded bytes during closure validation; ownership stays with storage.
+#[derive(Clone, Copy)]
+pub struct EncodedMeshingChunkRef<'a> {
+    pub descriptor: &'a MeshingChunkDescriptor,
+    pub bytes: &'a [u8],
+}
+impl<'a> From<&'a EncodedMeshingChunk> for EncodedMeshingChunkRef<'a> {
+    fn from(chunk: &'a EncodedMeshingChunk) -> Self {
+        Self {
+            descriptor: &chunk.descriptor,
+            bytes: &chunk.bytes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeshingChunkedPayload {
     pub logical_content_digest: StableDigest,
@@ -69,107 +88,121 @@ pub struct MeshingChunkedPayload {
     pub total_encoded_length: u64,
 }
 
+/// Requested chunk storage derived from the actual packing layout and encoder.
+/// Input record buffers remain caller-owned and must be admitted separately.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MeshingChunkStorageProfile {
+    pub chunk_count: usize,
+    pub total_encoded_length: u64,
+    /// Payload buffers and their typed chunk inventory; excludes allocator overhead.
+    pub requested_storage_bytes: u64,
+}
+
+pub fn profile_chunked_stage_payload(
+    streams: &[MeshingChunkStream],
+    policy: MeshingChunkPolicy,
+    cancellation: &dyn super::MeshingCancellationSignal,
+) -> Result<MeshingChunkStorageProfile, MeshingContractError> {
+    let mut profile = MeshingChunkStorageProfile {
+        chunk_count: 0,
+        total_encoded_length: 0,
+        requested_storage_bytes: 0,
+    };
+    packing::visit(
+        streams,
+        policy,
+        cancellation,
+        |ordinal, first, stream, fragments| {
+            let length = codec::encoded_length(
+                ordinal,
+                first,
+                stream.media_type,
+                stream.schema_version,
+                fragments,
+                cancellation,
+            )? as u64;
+            if length > policy.maximum_chunk_bytes {
+                return Err(MeshingContractError::invalid(
+                    "meshing chunks",
+                    "encoded chunk exceeds the hard chunk byte limit",
+                ));
+            }
+            profile.total_encoded_length = profile
+                .total_encoded_length
+                .checked_add(length)
+                .ok_or_else(|| {
+                    MeshingContractError::invalid("meshing chunks", "byte total overflow")
+                })?;
+            if profile.total_encoded_length > policy.maximum_total_encoded_bytes {
+                return Err(MeshingContractError::invalid(
+                    "meshing chunks",
+                    format!("chunk inventory requires at least {} bytes, exceeding the hard total byte limit {}", profile.total_encoded_length, policy.maximum_total_encoded_bytes),
+                ));
+            }
+            profile.chunk_count += 1;
+            profile.requested_storage_bytes = profile
+                .total_encoded_length
+                .checked_add(
+                    (profile.chunk_count as u64)
+                        .checked_mul(std::mem::size_of::<EncodedMeshingChunk>() as u64)
+                        .ok_or_else(|| {
+                            MeshingContractError::invalid(
+                                "meshing chunks",
+                                "chunk storage overflow",
+                            )
+                        })?,
+                )
+                .ok_or_else(|| {
+                    MeshingContractError::invalid("meshing chunks", "chunk storage overflow")
+                })?;
+            Ok(())
+        },
+    )?;
+    Ok(profile)
+}
+
 pub fn build_chunked_stage_payload(
     streams: &[MeshingChunkStream],
     policy: MeshingChunkPolicy,
 ) -> Result<MeshingChunkedPayload, MeshingContractError> {
-    policy.validate()?;
-    validate_streams(streams)?;
-    let logical_content_digest = logical_content_digest(streams)?;
+    build_chunked_stage_payload_with_cancellation(streams, policy, &super::NeverCancelled)
+}
+
+pub fn build_chunked_stage_payload_with_cancellation(
+    streams: &[MeshingChunkStream],
+    policy: MeshingChunkPolicy,
+    cancellation: &dyn super::MeshingCancellationSignal,
+) -> Result<MeshingChunkedPayload, MeshingContractError> {
+    // Fail the complete hard byte limit before allocating any encoded payload.
+    let profile = profile_chunked_stage_payload(streams, policy, cancellation)?;
+    let logical_content_digest = logical_content_digest_with_cancellation(streams, cancellation)?;
     let logical_entity_count = streams.iter().try_fold(0_u64, |count, stream| {
         count
             .checked_add(stream.records.len() as u64)
             .ok_or_else(|| MeshingContractError::invalid("meshing chunks", "entity count overflow"))
     })?;
-
-    let mut chunks = Vec::new();
-    let mut global_entity_ordinal = 0_u64;
-    let payload_budget = usize::try_from(policy.maximum_chunk_bytes)
-        .unwrap_or(usize::MAX)
-        .saturating_sub(CHUNK_OVERHEAD_RESERVE);
-    for stream in streams {
-        let mut pending = Vec::new();
-        let mut pending_bytes = 0_usize;
-        for record in &stream.records {
-            let complete = codec::MeshingRecordFragment {
-                bytes: record.clone(),
-                completes_record: true,
-            };
-            let cost = encoded_fragment_cost(record.len());
-            if cost > payload_budget {
-                append_chunk(
-                    &mut chunks,
-                    &mut global_entity_ordinal,
-                    stream,
-                    std::mem::take(&mut pending),
-                    policy,
-                )?;
-                pending_bytes = 0;
-                let maximum_fragment_bytes = payload_budget.saturating_sub(16);
-                if maximum_fragment_bytes == 0 {
-                    return Err(MeshingContractError::invalid(
-                        "meshing chunk policy",
-                        "chunk byte limit leaves no room for a record fragment",
-                    ));
-                }
-                let fragment_count = record.len().div_ceil(maximum_fragment_bytes);
-                for (index, bytes) in record.chunks(maximum_fragment_bytes).enumerate() {
-                    append_chunk(
-                        &mut chunks,
-                        &mut global_entity_ordinal,
-                        stream,
-                        vec![codec::MeshingRecordFragment {
-                            bytes: bytes.to_vec(),
-                            completes_record: index + 1 == fragment_count,
-                        }],
-                        policy,
-                    )?;
-                }
-                continue;
-            }
-            if !pending.is_empty()
-                && (pending.len() >= policy.maximum_records_per_chunk as usize
-                    || pending_bytes.saturating_add(cost) > payload_budget)
-            {
-                append_chunk(
-                    &mut chunks,
-                    &mut global_entity_ordinal,
-                    stream,
-                    std::mem::take(&mut pending),
-                    policy,
-                )?;
-                pending_bytes = 0;
-            }
-            pending_bytes = pending_bytes.checked_add(cost).ok_or_else(|| {
-                MeshingContractError::invalid("meshing chunks", "chunk size overflow")
-            })?;
-            pending.push(complete);
-        }
-        append_chunk(
-            &mut chunks,
-            &mut global_entity_ordinal,
-            stream,
-            pending,
-            policy,
-        )?;
-    }
-
-    let total_encoded_length = chunks.iter().try_fold(0_u64, |total, chunk| {
-        total
-            .checked_add(chunk.descriptor.encoded_length)
-            .ok_or_else(|| MeshingContractError::invalid("meshing chunks", "byte total overflow"))
-    })?;
-    if total_encoded_length > policy.maximum_total_encoded_bytes {
-        return Err(MeshingContractError::invalid(
-            "meshing chunks",
-            "chunk inventory exceeds the hard total byte limit",
-        ));
-    }
+    let mut chunks = Vec::with_capacity(profile.chunk_count);
+    packing::visit(
+        streams,
+        policy,
+        cancellation,
+        |ordinal, first, stream, fragments| {
+            chunks.push(codec::encode_chunk(
+                ordinal,
+                first,
+                stream.media_type,
+                stream.schema_version,
+                fragments,
+                cancellation,
+            )?);
+            Ok(())
+        },
+    )?;
     Ok(MeshingChunkedPayload {
         logical_content_digest,
         logical_entity_count,
         chunks,
-        total_encoded_length,
+        total_encoded_length: profile.total_encoded_length,
     })
 }
 
@@ -199,12 +232,6 @@ fn validate_streams(streams: &[MeshingChunkStream]) -> Result<(), MeshingContrac
         }
     }
     Ok(())
-}
-
-fn logical_content_digest(
-    streams: &[MeshingChunkStream],
-) -> Result<StableDigest, MeshingContractError> {
-    logical_content_digest_with_cancellation(streams, &super::NeverCancelled)
 }
 
 fn logical_content_digest_with_cancellation(
@@ -251,44 +278,6 @@ fn cancellation_checkpoint(
             "operation was cancelled",
         ));
     }
-    Ok(())
-}
-
-fn append_chunk(
-    chunks: &mut Vec<EncodedMeshingChunk>,
-    global_entity_ordinal: &mut u64,
-    stream: &MeshingChunkStream,
-    fragments: Vec<codec::MeshingRecordFragment>,
-    policy: MeshingChunkPolicy,
-) -> Result<(), MeshingContractError> {
-    if fragments.is_empty() {
-        return Ok(());
-    }
-    if chunks.len() >= MAX_CHUNKS {
-        return Err(MeshingContractError::invalid(
-            "meshing chunks",
-            "chunk count exceeds the manifest limit",
-        ));
-    }
-    let chunk = codec::encode_chunk(
-        chunks.len() as u32,
-        *global_entity_ordinal,
-        stream.media_type,
-        stream.schema_version,
-        &fragments,
-    )?;
-    if chunk.bytes.len() as u64 > policy.maximum_chunk_bytes {
-        return Err(MeshingContractError::invalid(
-            "meshing chunks",
-            "encoded chunk exceeds the hard chunk byte limit",
-        ));
-    }
-    *global_entity_ordinal = global_entity_ordinal
-        .checked_add(chunk.descriptor.logical_entity_count)
-        .ok_or_else(|| {
-            MeshingContractError::invalid("meshing chunks", "entity ordinal overflow")
-        })?;
-    chunks.push(chunk);
     Ok(())
 }
 

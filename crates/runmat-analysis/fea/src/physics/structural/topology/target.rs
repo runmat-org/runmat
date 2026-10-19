@@ -54,6 +54,7 @@ pub(crate) fn resolve_mixed_structural_target(
     structural: &StructuralModel,
     topology: &CanonicalStructuralNodeSpace,
 ) -> Result<MixedStructuralTargetOwnership, MixedStructuralTargetError> {
+    let _profile = mixed_target_workspace_profile(target, mesh, structural)?;
     let selector = &target.region_id;
     let solid = solid_nodes(mesh, target)?;
     let mut explicit = explicit_target_node_indices(structural, selector)?;
@@ -100,48 +101,7 @@ fn solid_nodes(
             .map(|(i, n)| (n.node_id, i)),
         mesh.topology.nodes.len(),
     )?;
-    let selected_point = if target.resolved_entities().is_empty() {
-        target
-            .region_id
-            .strip_prefix("node:")
-            .and_then(|v| v.parse::<u64>().ok())
-            .and_then(|id| node_by_id.get(&id))
-            .map_or(0, |_| 1)
-    } else {
-        0
-    };
-    let selected_provenance = mesh
-        .topology
-        .nodes
-        .iter()
-        .filter(|n| {
-            n.provenance
-                .iter()
-                .any(|e| target.matches_persistent_entity(e))
-        })
-        .count();
-    let mut count = storage::count_add(selected_point, selected_provenance)?;
-    for face in &mesh.topology.boundary_faces {
-        storage::check_cancelled()?;
-        if face
-            .provenance
-            .iter()
-            .any(|e| target.matches_persistent_entity(e))
-        {
-            count = storage::count_add(count, face.node_ids.len())?;
-        }
-    }
-    for element in &mesh.topology.volume_elements {
-        storage::check_cancelled()?;
-        if target.matches_persistent_entity(&element.region_id)
-            || element
-                .provenance
-                .iter()
-                .any(|e| target.matches_persistent_entity(e))
-        {
-            count = storage::count_add(count, element.node_ids.len())?;
-        }
-    }
+    let count = solid_candidate_count(mesh, target)?;
     storage::slots::<usize>(count)?;
     let mut nodes = storage::reserve(count)?;
     if target.resolved_entities().is_empty() {
@@ -202,4 +162,89 @@ fn solid_nodes(
     nodes.sort_unstable();
     nodes.dedup();
     Ok(nodes)
+}
+
+fn solid_candidate_count(
+    mesh: &SolverMeshArtifact,
+    target: &RegionTarget,
+) -> Result<usize, TopologyStorageError> {
+    storage::check_cancelled()?;
+    let selected_point = if target.resolved_entities().is_empty() {
+        target
+            .region_id
+            .strip_prefix("node:")
+            .and_then(|v| v.parse::<u64>().ok())
+            .map_or(0, |id| {
+                usize::from(mesh.topology.nodes.iter().any(|node| node.node_id == id))
+            })
+    } else {
+        0
+    };
+    let mut selected_provenance = 0;
+    for (ordinal, node) in mesh.topology.nodes.iter().enumerate() {
+        if ordinal % 1024 == 0 {
+            storage::check_cancelled()?;
+        }
+        if node
+            .provenance
+            .iter()
+            .any(|entity| target.matches_persistent_entity(entity))
+        {
+            selected_provenance = storage::count_add(selected_provenance, 1)?;
+        }
+    }
+    let mut count = storage::count_add(selected_point, selected_provenance)?;
+    for face in &mesh.topology.boundary_faces {
+        storage::check_cancelled()?;
+        if face
+            .provenance
+            .iter()
+            .any(|e| target.matches_persistent_entity(e))
+        {
+            count = storage::count_add(count, face.node_ids.len())?;
+        }
+    }
+    for element in &mesh.topology.volume_elements {
+        storage::check_cancelled()?;
+        if target.matches_persistent_entity(&element.region_id)
+            || element
+                .provenance
+                .iter()
+                .any(|e| target.matches_persistent_entity(e))
+        {
+            count = storage::count_add(count, element.node_ids.len())?;
+        }
+    }
+    Ok(count)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MixedTargetWorkspaceProfile {
+    pub solid_candidate_slots: usize,
+    pub explicit_candidate_slots: usize,
+    pub total_requested_bytes: u64,
+}
+
+/// Additional index/selection buffers only; target metadata/identity and canonical
+/// node-space construction remain their owners. No allocator overhead/RSS claim.
+pub(crate) fn mixed_target_workspace_profile(
+    target: &RegionTarget,
+    mesh: &SolverMeshArtifact,
+    structural: &StructuralModel,
+) -> Result<MixedTargetWorkspaceProfile, TopologyStorageError> {
+    let solid_candidate_slots = solid_candidate_count(mesh, target)?;
+    let explicit = super::explicit_target_workspace_profile(structural, &target.region_id)?;
+    let total_requested_bytes = storage::add(
+        explicit.total_requested_bytes,
+        storage::add(
+            storage::slots::<(u64, usize)>(mesh.topology.nodes.len())?,
+            storage::slots::<usize>(solid_candidate_slots)?,
+        )?,
+    )?;
+    usize::try_from(total_requested_bytes).map_err(|_| TopologyStorageError::Capacity)?;
+    Ok(MixedTargetWorkspaceProfile {
+        solid_candidate_slots,
+        explicit_candidate_slots: explicit.candidate_slots,
+        total_requested_bytes,
+    })
 }

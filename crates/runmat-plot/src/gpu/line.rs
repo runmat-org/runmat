@@ -28,6 +28,9 @@ pub struct LineGpuParams {
     pub x_span: f32,
     pub y_min: f32,
     pub y_span: f32,
+    /// When set, the axis maps through log10 and `*_min`/`*_span` are in decades.
+    pub x_log: bool,
+    pub y_log: bool,
     pub line_style: LineStyle,
     pub marker_size: f32,
 }
@@ -46,7 +49,7 @@ struct LineSegmentUniforms {
     x_span: f32,
     y_min: f32,
     y_span: f32,
-    _pad1: [f32; 2],
+    log_flags: [u32; 2],
 }
 
 #[repr(C)]
@@ -170,7 +173,7 @@ pub fn pack_vertices_from_xy(
         x_span: params.x_span.max(1e-12),
         y_min: params.y_min,
         y_span: params.y_span.max(1e-12),
-        _pad1: [0.0; 2],
+        log_flags: [u32::from(params.x_log), u32::from(params.y_log)],
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line-pack-uniforms"),

@@ -1,3 +1,15 @@
+#[path = "analysis_process_conformance/fluid_fourier.rs"]
+mod fluid_fourier;
+#[path = "analysis_process_conformance/fluid_mass_flow.rs"]
+mod fluid_mass_flow;
+#[path = "analysis_process_conformance/fluid_study_fixture.rs"]
+mod fluid_study_fixture;
+#[path = "support/fluid.rs"]
+mod fluid_support;
+#[path = "support/phase_execution.rs"]
+mod phase_execution_support;
+#[path = "analysis_process_conformance/static_recovery.rs"]
+mod static_recovery;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::{
@@ -93,6 +105,8 @@ mod signal;
 mod thermal;
 #[path = "analysis_process_conformance/thermal_prestress.rs"]
 mod thermal_prestress;
+#[path = "analysis_process_conformance/thermal_radiation.rs"]
+mod thermal_radiation;
 #[path = "analysis_process_conformance/transient.rs"]
 mod transient;
 use publication_chain::{success_response, PublicationChainDriver};
@@ -155,6 +169,14 @@ fn main() {
 }
 
 async fn parent() {
+    if std::env::args_os().any(|argument| argument == "--fluid-massflow-only") {
+        fluid_mass_flow::run().await;
+        return;
+    }
+    if std::env::args_os().any(|argument| argument == "--fluid-fourier-only") {
+        fluid_fourier::run().await;
+        return;
+    }
     if std::env::args_os().any(|argument| argument == "--fluid-transient-only") {
         fluid_transient::run().await;
         return;
@@ -165,6 +187,10 @@ async fn parent() {
         #[cfg(not(feature = "occt-native"))]
         panic!("authored J2 conformance requires occt-native");
         #[cfg(feature = "occt-native")]
+        return;
+    }
+    if std::env::args_os().any(|argument| argument == "--static-recovery-only") {
+        static_recovery::run().await;
         return;
     }
     if std::env::args_os().any(|argument| argument == "--nonlinear-only") {
@@ -191,6 +217,14 @@ async fn parent() {
         #[cfg(not(feature = "occt-native"))]
         panic!("Maxwell authored conformance requires occt-native");
         #[cfg(feature = "occt-native")]
+        return;
+    }
+    if std::env::args_os().any(|argument| argument == "--thermal-radiation-fine-only") {
+        thermal_radiation::run_fine().await;
+        return;
+    }
+    if std::env::args_os().any(|argument| argument == "--thermal-radiation-only") {
+        thermal_radiation::run().await;
         return;
     }
     if std::env::args_os().any(|argument| argument == "--electrothermal-only") {

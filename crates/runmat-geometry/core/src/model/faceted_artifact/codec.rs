@@ -30,3 +30,18 @@ pub fn decode_faceted_solid(
     FacetedSolid::validate_against(&solid, model)?;
     Ok(solid)
 }
+
+pub fn decode_faceted_solid_with_control(
+    bytes: &[u8],
+    model: &FacetedSolidModel,
+    control: &dyn crate::GeometryCanonicalControl,
+) -> Result<FacetedSolid, GeometryContractError> {
+    let solid: FacetedSolid = crate::model::canonical::decode_with_control(
+        "analysis.geometry.faceted-solid/v2",
+        bytes,
+        FACETED_SOLID_LIMITS,
+        control,
+    )?;
+    solid.validate_against_with_control(model, control)?;
+    Ok(solid)
+}

@@ -1,8 +1,13 @@
+mod diagnostic;
+mod invariants;
 use super::*;
+use crate::{ExactMeshingEvaluatorProvider, PortableMeshingEvaluatorProvider};
+use std::sync::Arc;
 
 #[test]
 fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     let mut fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
+    let policy = workflow_chunk_policy(&fixture.host.resolved_request);
     let exact_root = root(&fixture.program.arguments[1]);
     let exact = import_exact_geometry_input(
         &fixture.store,
@@ -21,7 +26,7 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
         kernel: &crate::MeshingKernelDispatcher::default(),
         cancellation: &NeverCancelled,
         progress: &mut progress,
-        chunk_policy: chunk_policy(1_000_000),
+        chunk_policy: policy,
         inventory_limits: ObjectInventoryLimits::default(),
     };
     let result = crate::execute_exact_meshing_dag(
@@ -52,8 +57,10 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
     .unwrap();
 
     result.evidence.validate(&result.artifact).unwrap();
-    assert_eq!(result.artifact.topology.nodes.len(), 15);
-    assert_eq!(result.artifact.topology.volume_elements.len(), 4);
+    invariants::assert_unit_tetrahedron(
+        &result.artifact.topology,
+        &result.artifact.resolved_request,
+    );
     assert_eq!(
         result.evidence.stages.last().unwrap().stage,
         MeshingStageKind::Serialization
@@ -68,11 +75,9 @@ fn production_dag_runner_executes_the_complete_serial_exact_pipeline() {
 #[test]
 fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     let fixture = Fixture::with_exact_tetrahedron_curve_partition_order(ElementOrder::Tet10);
+    let policy = workflow_chunk_policy(&fixture.host.resolved_request);
     let (mut fixture, surface_host, exact_root, curve_stage, surface_partition, surface_stage) =
-        super::surface_restart::execute_surface_join_pipeline_from_fixture(
-            &ExactSurfacePartitionKernel::default(),
-            fixture,
-        );
+        super::surface_restart::convergence::execute_from_fixture(fixture);
     let surface_root = root(surface_stage.publication().root_output());
     let planner =
         crate::ExactMeshingDagPlanner::from_exact_host(&surface_host, exact_root.clone()).unwrap();
@@ -96,16 +101,22 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
             )
         }));
     let program = stage_program(&volume_stage, &mut fixture.store);
-    let completed = execute_serial_stage(
+    let diagnostic_store = Arc::new(crate::subtask_cache::tests::Store::default());
+    let kernel =
+        crate::MeshingKernelDispatcher::default().with_subtask_cache(diagnostic_store.clone());
+    let outcome = execute_serial_stage(
         &program,
         &mut fixture.store,
-        &crate::MeshingKernelDispatcher::default(),
+        &kernel,
         &NeverCancelled,
         &mut Progress::default(),
-        chunk_policy(1_000_000),
+        policy,
         ObjectInventoryLimits::default(),
-    )
-    .unwrap();
+    );
+    if outcome.is_err() {
+        diagnostic::retain_failure(&diagnostic_store, &host.resolved_request);
+    }
+    let completed = outcome.unwrap();
 
     let exact = import_exact_geometry_input(
         &fixture.store,
@@ -121,7 +132,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         .decoded_streams()
         .unwrap();
     let surface = runmat_meshing_surface::decode_published_exact_surface_mesh(
-        &surface_streams[1].records[0],
+        &surface_streams[0].records[0],
         &exact.geometry_objects().topology,
         runmat_meshing_surface::ExactSurfaceJoinOptions {
             coordinate_tolerance_m: host.resolved_request.tolerance.absolute_floor_m,
@@ -138,18 +149,99 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         .unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0].media_type, MeshingChunkMediaType::VolumeTopology);
+    let volume_metric = {
+        let mut metric_progress = Progress::default();
+        let stage_control = MeshingStageControl::new(
+            MeshingStageKind::OrderElevation,
+            0,
+            &host.resolved_request,
+            &NeverCancelled,
+            &mut metric_progress,
+        )
+        .unwrap();
+        let control = stage_control.geometry_evaluation_control();
+        let provider = PortableMeshingEvaluatorProvider;
+        let evaluator = provider
+            .evaluator(exact.geometry_objects(), &control)
+            .unwrap();
+        provider
+            .geometry_metric(
+                exact.geometry_objects(),
+                evaluator.as_ref(),
+                &control,
+                &host.resolved_request,
+            )
+            .unwrap()
+    };
     let mesh = runmat_meshing_tetrahedron::cdt::decode_delaunay_volume_mesh(
         &streams[0].records[0],
         &exact.geometry_objects().topology,
         &surface,
-        &host.resolved_request.metric,
+        &volume_metric,
         crate::volume_kernel::volume_options(&host.resolved_request),
         &NeverCancelled,
     )
     .unwrap();
-    assert_eq!(mesh.topology.tetrahedra.len(), 4);
+    assert!(!mesh.topology.tetrahedra.is_empty());
+    assert!(
+        mesh.topology.tetrahedra.len() as u64 <= host.resolved_request.resources.maximum_elements
+    );
     assert_eq!(mesh.topology.incidence.regions.len(), 1);
-    assert_eq!(mesh.provenance.facets.len(), 4);
+    invariants::assert_boundary_conservation(&mesh, &surface);
+
+    // Read through the same bounded opaque persistence port used by the native
+    // adapter. Only its manifest can yield a complete diagnostic; other cache
+    // record kinds must not be mistaken for one.
+    let keys = diagnostic_store
+        .0
+        .lock()
+        .unwrap()
+        .keys()
+        .copied()
+        .collect::<Vec<_>>();
+    let mut diagnostic_progress = Progress::default();
+    let diagnostic_control = MeshingStageControl::new(
+        MeshingStageKind::Tetrahedralization,
+        0,
+        &host.resolved_request,
+        &NeverCancelled,
+        &mut diagnostic_progress,
+    )
+    .unwrap();
+    let control = diagnostic_control.geometry_evaluation_control();
+    let records = keys
+        .into_iter()
+        .filter_map(|key| {
+            crate::read_volume_diagnostic(diagnostic_store.as_ref(), key, &control)
+                .ok()
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        records.len(),
+        1,
+        "production dispatcher did not retain exactly one complete quality input"
+    );
+    let codec = crate::codec_control::CodecControl::new(&control);
+    let replayed = runmat_meshing_tetrahedron::cdt::replay_volume_quality(
+        records[0].bytes(),
+        runmat_meshing_tetrahedron::cdt::VolumeQualityBinding {
+            request: host.resolved_request.canonical_digest().unwrap(),
+            geometry: StableDigest::from_bytes(*exact.geometry_objects().root.digest.bytes()),
+            implementation: crate::MeshingSubtaskCacheStore::volume_implementation_identity(
+                diagnostic_store.as_ref(),
+            )
+            .unwrap(),
+        },
+        crate::volume_kernel::volume_options(&host.resolved_request),
+        runmat_canonical_codec::CanonicalLimits::new(1024 * 1024, 100_000, 1_048_576, 64),
+        &codec,
+        &NeverCancelled,
+    )
+    .unwrap();
+    assert_eq!(replayed.topology, mesh.topology);
+    assert_eq!(replayed.quality, mesh.quality);
+    drop(records);
 
     let volume_root = root(completed.publication().root_output());
     let projection_stage = planner
@@ -166,10 +258,20 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
-        chunk_policy(1_000_000),
+        policy,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
+    assert!(
+        projection
+            .publication()
+            .stage_objects()
+            .manifest
+            .chunks
+            .len()
+            > 1,
+        "the realistic Tet10 fixture must exercise multi-chunk publication"
+    );
     let projection_streams = projection
         .publication()
         .stage_objects()
@@ -185,8 +287,11 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     )
     .unwrap();
     solver_projection.validate().unwrap();
-    assert_eq!(solver_projection.topology.nodes.len(), 15);
-    assert_eq!(solver_projection.topology.volume_elements.len(), 4);
+    invariants::assert_unit_tetrahedron(&solver_projection.topology, &host.resolved_request);
+    assert_eq!(
+        solver_projection.topology.volume_elements.len(),
+        mesh.topology.tetrahedra.len()
+    );
 
     let projection_root = root(projection.publication().root_output());
     let validation_stage = planner.solver_validation(projection_root.clone()).unwrap();
@@ -196,7 +301,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
-        chunk_policy(1_000_000),
+        policy,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
@@ -223,7 +328,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
-        chunk_policy(1_000_000),
+        policy,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
@@ -310,7 +415,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
-        chunk_policy(1_000_000),
+        policy,
         ObjectInventoryLimits::default(),
     )
     .is_err());
@@ -326,6 +431,17 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
     for object in &evidence_input.evidence_objects().objects {
         fixture.store.write_verified(object).unwrap();
     }
+    let evidence_reads = crate::tests::read_buffers::ReadBuffers::new(&fixture.store);
+    let cold_evidence = crate::import_evidence_input(
+        &evidence_reads,
+        evidence_input.root_input(),
+        host.artifact_access.clone(),
+        ObjectInventoryLimits::default(),
+    )
+    .unwrap();
+    evidence_reads.assert_retained(&cold_evidence.evidence_objects().objects);
+    assert_eq!(cold_evidence, evidence_input);
+    drop(evidence_reads);
     let publication_stage = planner
         .solver_publication(serialization_root, evidence_input.root_input().clone())
         .unwrap();
@@ -339,7 +455,7 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
         &crate::MeshingKernelDispatcher::default(),
         &NeverCancelled,
         &mut Progress::default(),
-        chunk_policy(1_000_000),
+        policy,
         ObjectInventoryLimits::default(),
     )
     .unwrap();
@@ -365,4 +481,13 @@ fn serial_dispatcher_publishes_volume_and_canonical_solver_projection() {
             .unwrap();
     final_evidence.validate(&final_artifact).unwrap();
     assert_eq!(final_artifact, artifact);
+}
+
+// Total artifact admission belongs to the original resolved workload. A chunk
+// size is a transport bound; it must not silently become a one-chunk total cap.
+fn workflow_chunk_policy(request: &runmat_meshing_core::MeshingRequest) -> MeshingChunkPolicy {
+    MeshingChunkPolicy {
+        maximum_total_encoded_bytes: request.resources.maximum_artifact_bytes,
+        ..chunk_policy(1_000_000)
+    }
 }

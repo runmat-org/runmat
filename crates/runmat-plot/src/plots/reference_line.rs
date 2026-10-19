@@ -21,6 +21,9 @@ pub struct ReferenceLine {
     pub display_name: Option<String>,
     pub label_orientation: String,
     pub visible: bool,
+    /// No color was given: drawn in the theme's axes color, so it reads on dark and light
+    /// backgrounds alike. `color` holds MATLAB's default for exports without a theme.
+    pub color_auto: bool,
 }
 
 impl ReferenceLine {
@@ -37,6 +40,7 @@ impl ReferenceLine {
             label: None,
             display_name: None,
             label_orientation: "aligned".to_string(),
+            color_auto: false,
             visible: true,
         })
     }
@@ -70,6 +74,7 @@ impl ReferenceLine {
         x_range: (f64, f64),
         y_range: (f64, f64),
         viewport_px: Option<(u32, u32)>,
+        log_axes: (bool, bool),
     ) -> RenderData {
         let (x, y) = match self.orientation {
             ReferenceLineOrientation::Vertical => {
@@ -85,7 +90,12 @@ impl ReferenceLine {
         if let Some(label) = self.label_for_legend() {
             line = line.with_label(label);
         }
-        line.render_data_with_viewport(viewport_px)
+        // Size the stroke against the axes ranges; the line's own bounds are flat on one axis.
+        line.render_data_with_viewport_and_view_bounds(
+            viewport_px,
+            Some((x_range.0, x_range.1, y_range.0, y_range.1)),
+            log_axes,
+        )
     }
 
     pub fn estimated_memory_usage(&self) -> usize {

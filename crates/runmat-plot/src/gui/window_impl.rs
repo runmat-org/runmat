@@ -621,18 +621,15 @@ impl<'window> PlotWindow<'window> {
                 title: self
                     .plot_renderer
                     .overlay_title()
-                    .cloned()
-                    .or(Some("Plot".to_string())),
+                    .cloned(),
                 x_label: self
                     .plot_renderer
                     .overlay_x_label()
-                    .cloned()
-                    .or(Some("X".to_string())),
+                    .cloned(),
                 y_label: self
                     .plot_renderer
                     .overlay_y_label()
-                    .cloned()
-                    .or(Some("Y".to_string())),
+                    .cloned(),
                 ..Default::default()
             };
             let overlay_metrics = OverlayMetrics {

@@ -27,7 +27,7 @@ pub(super) struct BoundaryBalancePlan {
     groups: Vec<(usize, usize)>,
 }
 
-fn authority(boundary: &FaceBoundary) -> Option<&str> {
+fn authority<'a>(boundary: &FaceBoundary<'a>) -> Option<&'a str> {
     match boundary {
         FaceBoundary::Interior => None,
         FaceBoundary::Velocity { authority_id, .. }

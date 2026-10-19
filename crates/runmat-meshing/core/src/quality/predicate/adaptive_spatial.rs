@@ -1,3 +1,7 @@
+mod projection;
+pub use projection::{
+    projected_orient2d_constructed, triangle_projection_axes, triangle_projection_axes_constructed,
+};
 use robust::Coord3D;
 use serde::{Deserialize, Serialize};
 
@@ -134,6 +138,9 @@ pub fn compose_dyadic_point<const N: usize>(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SpatialPredicateError {
+    InvalidProjectionAxes {
+        axes: [usize; 2],
+    },
     NonFiniteCoordinate {
         point_index: usize,
         axis: usize,
@@ -460,7 +467,7 @@ pub(super) fn exact_coordinates(point: SpatialPredicatePoint) -> [ExactDyadic; 3
     }
 }
 
-fn affine_terms(point: SpatialPredicatePoint) -> Option<Vec<([f64; 3], u64, u8)>> {
+pub(super) fn affine_terms(point: SpatialPredicatePoint) -> Option<Vec<([f64; 3], u64, u8)>> {
     Some(match point.construction {
         Point3Construction::Explicit => vec![(point.coordinates, 1, 0)],
         Point3Construction::Segment {
@@ -588,7 +595,7 @@ fn cross_exact(left: [ExactDyadic; 3], right: [ExactDyadic; 3]) -> [ExactDyadic;
     ]
 }
 
-fn determinant3(matrix: [[ExactDyadic; 3]; 3]) -> ExactDyadic {
+pub(super) fn determinant3(matrix: [[ExactDyadic; 3]; 3]) -> ExactDyadic {
     matrix[0][0]
         .clone()
         .multiply_exact(

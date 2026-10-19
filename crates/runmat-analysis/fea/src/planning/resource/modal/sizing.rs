@@ -14,6 +14,7 @@ const MODAL_RECEIPT_PAYLOAD_BYTES_UPPER_BOUND: u64 = 16 * 1024;
 pub(super) fn modal_workspace_bytes(
     full_dimension: u64,
     reduced_dimension: u64,
+    subspace_dimension: u64,
     residual_vector_count: u64,
     reduced_stiffness_nonzeros: u64,
     reduced_mass_nonzeros: u64,
@@ -43,11 +44,11 @@ pub(super) fn modal_workspace_bytes(
         "reduced operators",
     )?;
     let vector_values = checked_add(
-        checked_mul(full_dimension, reduced_dimension, "expanded modal vectors")?,
+        checked_mul(full_dimension, subspace_dimension, "expanded modal vectors")?,
         checked_mul(
             checked_mul(
                 reduced_dimension,
-                reduced_dimension,
+                subspace_dimension,
                 "reduced modal vectors",
             )?,
             3,
@@ -56,7 +57,11 @@ pub(super) fn modal_workspace_bytes(
         "modal vector values",
     )?;
     let dense_values = checked_mul(
-        checked_mul(reduced_dimension, reduced_dimension, "dense modal matrices")?,
+        checked_mul(
+            subspace_dimension,
+            subspace_dimension,
+            "dense modal matrices",
+        )?,
         3,
         "dense modal matrices",
     )?;
@@ -69,6 +74,13 @@ pub(super) fn modal_workspace_bytes(
             "residual-vector workspace",
         )?
     };
+    // The inverse iteration retains one Rayleigh-scaled starting vector while
+    // the shared CG provider owns its solve buffers.
+    let vector_values = checked_add(
+        vector_values,
+        reduced_dimension,
+        "modal inverse starting vector",
+    )?;
     let vector_and_dense = checked_bytes(
         checked_add(
             checked_add(vector_values, dense_values, "modal numerical workspace")?,
@@ -99,7 +111,9 @@ pub(super) fn modal_output_value_count(
     [
         modal_vectors,
         checked_mul(square_metrics, 2, "modal orthogonality metrics")?,
-        checked_mul(retained_modes, 48, "modal scalar metrics")?,
+        // Basis/directional/eigenspace metrics, result-facing scalar fields and
+        // numeric container nodes; map keys remain in the metadata inventory.
+        checked_mul(retained_modes, 64, "modal scalar metrics and containers")?,
         checked_mul(
             checked_add(full_dimension, 16, "residual-vector values")?,
             residual_vector_count,
@@ -151,6 +165,19 @@ pub fn structural_modal_result_payload_bytes_upper_bound(
     constraints: &CanonicalStructuralConstraintPlan,
     workload: &StructuralModalWorkload,
 ) -> Result<u64, ResourcePlanningError> {
+    Ok(
+        structural_modal_result_output_resource_facts(mesh, constraints, workload)?
+            .encoded_payload_bytes_upper_bound
+            .0,
+    )
+}
+
+/// Shared before execution and independently rederived by the native worker.
+pub fn structural_modal_result_output_resource_facts(
+    mesh: Option<&SolverMeshArtifact>,
+    constraints: &CanonicalStructuralConstraintPlan,
+    workload: &StructuralModalWorkload,
+) -> Result<PreparedOutputResourceFacts, ResourcePlanningError> {
     workload
         .validate()
         .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?;
@@ -164,15 +191,26 @@ pub fn structural_modal_result_payload_bytes_upper_bound(
             "modal payload planning requires a nonempty homogeneous reduction".into(),
         ));
     }
+    let retained_modes = count(
+        workload
+            .convergence()
+            .admitted_subspace_dimension(
+                reduction.reduced_dof_count,
+                workload.truncation().requested_mode_count(),
+            )
+            .map_err(|error| ResourcePlanningError::Invalid(error.to_string()))?,
+        "modal retained modes",
+    )?;
+    let residual_vectors = count(
+        workload.residual_vector_directions().len(),
+        "modal residual-vector count",
+    )?;
     let values = modal_output_value_count(
         count(reduction.full_dof_count, "modal full dimension")?,
-        count(reduction.reduced_dof_count, "modal retained modes")?,
-        count(
-            workload.residual_vector_directions().len(),
-            "modal residual-vector count",
-        )?,
+        retained_modes,
+        residual_vectors,
     )?;
-    modal_result_payload_bytes(values, 0)
+    super::output::result_output(values, retained_modes, residual_vectors)
 }
 
 /// Canonical payload ceiling for the compact fixed-shape numerical receipt.
