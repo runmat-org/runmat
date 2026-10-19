@@ -202,6 +202,8 @@ mod assessment_callable_fact_tests {
         let fact = ValueFact::scalar(ValueKindFact::Struct(StructFact {
             fields,
             fields_complete: true,
+            elements: Vec::new(),
+            elements_complete: false,
         }));
         assert_eq!(
             operation_pattern_from_value_fact(&fact),
@@ -229,6 +231,8 @@ mod assessment_callable_fact_tests {
         let fact = ValueFact::scalar(ValueKindFact::Struct(StructFact {
             fields: std::collections::BTreeMap::new(),
             fields_complete: false,
+            elements: Vec::new(),
+            elements_complete: false,
         }));
         assert_eq!(
             operation_pattern_from_value_fact(&fact),
@@ -264,6 +268,10 @@ pub struct GeometryInspection {
     pub topology_digest: SourceDigest,
     pub capabilities: Vec<GeometryInspectionCapability>,
     pub exchange: Option<runmat_geometry_core::Ap242ExchangeInventory>,
+    /// Length unit the geometry was inspected in: the authored `units`, or the
+    /// single length unit the file itself declares when `units` is omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolved_units: Option<runmat_geometry_core::UnitSystem>,
 }
 
 pub trait GeometryInspectionSource {

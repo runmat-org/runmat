@@ -272,6 +272,7 @@ fn parameterized_geometry_inspection() -> GeometryInspection {
             GeometryInspectionCapability::EngineeringProperties,
             GeometryInspectionCapability::MaterialCandidates,
         ],
+        resolved_units: None,
         exchange: Some(Ap242ExchangeInventory {
             schemas: vec!["AP242_MANAGED_MODEL_BASED_3D_ENGINEERING_MIM_LF".to_string()],
             capabilities: vec![

@@ -99,21 +99,14 @@ fn definition(
             );
         }
         let Some(inspection) = inspection else {
-            // Inspection is skipped without units (CAD import needs an explicit
-            // length unit) and reported separately when the host import fails.
+            // The inspection diagnostic (missing file, undeclared length unit,
+            // import failure) states the cause at the same declaration.
             let file_span = imported_file(&declaration.statements)
                 .map_or(declaration.span, |file| file.span);
-            let message = if assignment(&declaration.statements, "units").is_none() {
-                format!(
-                    "imported geometry `{}` needs `units = mm`, `m`, or `in` so its CAD file can be inspected",
-                    declaration.key.name
-                )
-            } else {
-                format!(
-                    "imported geometry `{}` could not be inspected; check `units` (mm, m, or in) and the inspection diagnostic for its file",
-                    declaration.key.name
-                )
-            };
+            let message = format!(
+                "imported geometry `{}` could not be inspected; see the inspection diagnostic for its file",
+                declaration.key.name
+            );
             error(declaration, file_span, message, diagnostics);
             return None;
         };
@@ -176,7 +169,8 @@ fn imported_source(
     inspection: &CheckedGeometryInspection,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> GeometryDefinitionSource {
-    let units = imported_units(declaration, diagnostics).unwrap_or(UnitSystem::Unspecified);
+    let units =
+        imported_units(declaration, inspection, diagnostics).unwrap_or(UnitSystem::Unspecified);
     let format = source_format(inspection.source_path.as_str()).unwrap_or_else(|| {
         error(
             declaration,
@@ -278,13 +272,25 @@ fn derived_source(
 
 fn imported_units(
     declaration: &CheckedFeaDeclaration,
+    inspection: &CheckedGeometryInspection,
     diagnostics: &mut Vec<FeaDiagnostic>,
 ) -> Option<UnitSystem> {
     let Some(value) = assignment(&declaration.statements, "units") else {
+        // Omitted units use the single length unit the file declares.
+        if let Some(units) = inspection
+            .facts
+            .resolved_units
+            .filter(|units| *units != UnitSystem::Unspecified)
+        {
+            return Some(units);
+        }
         error(
             declaration,
-            declaration.span,
-            "imported geometry requires explicit `units`",
+            imported_file(&declaration.statements).map_or(declaration.span, |file| file.span),
+            format!(
+                "imported geometry `{}` needs `units = mm`, `m`, or `in` so its CAD file can be inspected",
+                declaration.key.name
+            ),
             diagnostics,
         );
         return None;

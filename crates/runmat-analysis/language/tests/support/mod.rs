@@ -28,6 +28,7 @@ impl TestHost {
                     GeometryInspectionCapability::PersistentIds,
                 ],
                 exchange: None,
+                resolved_units: None,
             },
         );
         self

@@ -73,6 +73,7 @@ study steady { geometry = geometry.part; mesh = mesh.part; model = model.flow; f
                 GeometryInspectionCapability::PersistentIds,
             ],
             exchange: None,
+            resolved_units: None,
         },
     );
     let program = FeaCompiler::new(&host).check(CheckRequest {

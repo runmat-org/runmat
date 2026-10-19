@@ -119,3 +119,38 @@ geometry bracket {
         "{messages:#?}"
     );
 }
+
+#[test]
+fn imported_geometry_without_units_uses_the_file_declared_unit() {
+    let source = r#"
+geometry bracket {
+    file = "./part.step"
+}
+"#;
+    let inspection = GeometryInspection {
+        content_digest: SourceDigest([3; 32]),
+        topology_digest: SourceDigest([4; 32]),
+        capabilities: vec![
+            GeometryInspectionCapability::Topology,
+            GeometryInspectionCapability::PersistentIds,
+        ],
+        exchange: None,
+        resolved_units: Some(runmat_geometry_core::UnitSystem::Millimeter),
+    };
+    let program = FeaCompiler::new(
+        &TestHost::default().with_geometry_inspection("project/part.step", inspection),
+    )
+    .check(CheckRequest {
+        modules: ModuleGraphRequest {
+            source_root: LogicalSourcePath::new("project").unwrap(),
+            root: source_module("project/main.fea", source, 1),
+        },
+    });
+    assert!(program.is_valid(), "{:#?}", program.diagnostics);
+    let geometry = program.geometries.values().next().unwrap();
+    assert!(matches!(
+        &geometry.source,
+        runmat_geometry_core::GeometryDefinitionSource::Imported(imported)
+            if imported.units == runmat_geometry_core::UnitSystem::Millimeter
+    ));
+}
