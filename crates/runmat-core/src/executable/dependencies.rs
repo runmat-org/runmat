@@ -154,7 +154,8 @@ pub(super) fn owns_callable_parts(
         && bytecode.display_name == metadata.name.0
         && bytecode
             .source_id
-            .is_some_and(|source| source.0 == metadata.source.0 as usize)
+            .and_then(|source| source.program())
+            .is_some_and(|source| source.0 == metadata.source.0)
         && analysis
             .functions
             .iter()

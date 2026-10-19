@@ -30,7 +30,9 @@ pub use owned_prepare::OwnedInlineTransportPlan;
 pub use immutable_class::{
     register_immutable_value_class, ImmutableValueClassSchema, ImmutableValueClassValidator,
 };
-pub use outputs::{decode_inline_outputs, encode_inline_outputs, validate_output_arity};
+pub use outputs::{
+    decode_inline_outputs, encode_inline_outputs, encode_inline_sequence, validate_output_arity,
+};
 
 #[cfg(test)]
 mod tests {

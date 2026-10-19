@@ -62,7 +62,7 @@ async fn invoke(
         .map(runmat_runtime::execution::value_codec::decode_inline_value)
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
-    let value = session
+    let outputs = session
         .invoke_portable_unit(
             &envelope,
             arguments,
@@ -70,8 +70,8 @@ async fn invoke(
             &runmat_core::InvocationControl::default(),
         )
         .await?;
-    runmat_runtime::execution::value_codec::encode_inline_outputs(
-        &value,
+    runmat_runtime::execution::value_codec::encode_inline_sequence(
+        outputs.value(),
         usize::from(request.requested_outputs),
     )
     .map_err(|error| error.to_string())

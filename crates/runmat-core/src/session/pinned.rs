@@ -96,14 +96,17 @@ impl RunMatSession {
         // A pre-existing source catalog was resolved against live content.
         // Discovery for this request must instead read the captured inventory.
         let previous_handoff = self.project_handoff().cloned();
-        self.clear_project_handoff();
+        if let Err(error) = self.clear_project_handoff().await {
+            return input_error(&request, error.to_string());
+        }
         if let Some(handoff) = captured_handoff {
-            if let Err(error) = self.install_project_handoff(handoff) {
-                self.clear_project_handoff();
+            if let Err(error) = self.install_project_handoff(handoff).await {
+                // The install error is reported; a failed rollback is folded in below.
+                let _ = self.clear_project_handoff().await;
                 if let Some(previous) = previous_handoff {
                     // Report restoration failure as well; never execute against
                     // a partially installed dependency graph.
-                    if let Err(restore) = self.install_project_handoff(previous) {
+                    if let Err(restore) = self.install_project_handoff(previous).await {
                         return input_error(
                             &request,
                             format!("{error}; restore failed: {restore}"),
@@ -118,9 +121,18 @@ impl RunMatSession {
         let mut response = self.execute_request(request).await;
         response.dependency_lock = dependency_lock;
         drop(filesystem);
-        self.clear_project_handoff();
+        if let Err(error) = self.clear_project_handoff().await {
+            response.result = Err(crate::RunError::Runtime(
+                runmat_runtime::build_runtime_error(format!(
+                    "Cannot release captured project context: {error}"
+                ))
+                .with_identifier("RunMat:ProjectContextRestore")
+                .build(),
+            ));
+            return response;
+        }
         if let Some(handoff) = previous_handoff {
-            if let Err(error) = self.install_project_handoff(handoff) {
+            if let Err(error) = self.install_project_handoff(handoff).await {
                 response.result = Err(crate::RunError::Runtime(
                     runmat_runtime::build_runtime_error(format!(
                         "Cannot restore project context: {error}"

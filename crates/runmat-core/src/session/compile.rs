@@ -1110,7 +1110,6 @@ impl RunMatSession {
             analysis,
             bytecode,
         )
-        .and_then(|unit| self.program_service.bind_original_dependencies(unit))
         .map_err(|error| {
             RunError::Runtime(
                 build_runtime_error(error)
@@ -1140,7 +1139,16 @@ impl RunMatSession {
                 .map(|id| remap.get(&id).copied().unwrap_or(id))
                 .collect();
         }
-        let unit = draft.seal();
+        let unit = self
+            .program_service
+            .bind_original_dependencies(draft.seal())
+            .map_err(|error| {
+                RunError::Runtime(
+                    build_runtime_error(error)
+                        .with_identifier("RunMat:ExecutableProduct")
+                        .build(),
+                )
+            })?;
         // The prepared product, not parser membership, decides which bodies
         // this immutable program actually owns after unchanged-body reuse.
         let current = unit.compiled_current_body_ids().map_err(|error| {

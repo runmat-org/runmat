@@ -13,9 +13,10 @@ struct SourceMapWire {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SourceEntryWire {
-    source_id: usize,
+    source_id: runmat_types::ProgramSourceId,
     owner_identity: String,
     relative_path: String,
+    content_revision: runmat_execution::Digest,
     display_name: String,
     text: String,
 }
@@ -31,8 +32,8 @@ pub(super) fn decode(
     }
     let primary = bytecode
         .source_id
-        .ok_or("portable bytecode lacks its original primary source ID")?
-        .0;
+        .and_then(|source| source.program())
+        .ok_or("portable bytecode lacks its original primary source ID")?;
     let wire: SourceMapWire = super::decode(envelope, Kind::SourceMap)?;
     let mut ids = BTreeSet::new();
     let mut source = None;
@@ -55,13 +56,16 @@ pub(super) fn decode(
             source_id: entry.source_id,
             owner_identity: entry.owner_identity,
             relative_path: entry.relative_path,
+            content_revision: entry.content_revision,
             display_name: entry.display_name,
             full_path: None,
             text: entry.text,
         });
     }
+    let map = ExecutableSourceMap::new(entries);
+    map.validate_content_revisions()?;
     Ok((
         source.ok_or("portable primary source is absent from its source map")?,
-        ExecutableSourceMap::new(entries),
+        map,
     ))
 }

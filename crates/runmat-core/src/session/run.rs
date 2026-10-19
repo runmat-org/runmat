@@ -306,6 +306,7 @@ impl RunMatSession {
             {
                 Ok(response) => response,
                 Err(error) => crate::abi::ExecutionResponse {
+                    dependency_lock: None,
                     source_context: unresolved_source_context(
                         &request
                             .as_ref()
@@ -411,6 +412,7 @@ impl RunMatSession {
         let source_input = request.source.clone();
         if let Err(error) = self.ensure_user_path_hydrated().await {
             return crate::abi::ExecutionResponse {
+                dependency_lock: None,
                 source_context: unresolved_source_context(&source_input),
                 result: Err(error),
             };
@@ -448,6 +450,7 @@ impl RunMatSession {
                     Ok(source) => source,
                     Err(error) => {
                         return crate::abi::ExecutionResponse {
+                            dependency_lock: None,
                             source_context: crate::abi::ExecutionSourceContext {
                                 name: source_name,
                                 text: Some(source_text),
