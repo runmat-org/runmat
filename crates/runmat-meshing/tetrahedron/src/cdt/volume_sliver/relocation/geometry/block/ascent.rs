@@ -65,26 +65,53 @@ fn proposal(samples: &[Sample], radius: f64) -> Option<Vec<f64>> {
     let mut mean = normalized[first].gradient.clone();
     let mut slack = normalized[first].value;
     let mut best = None;
+    // Each constraint moves at most one cell's free corners. Sparse rows keep
+    // the dominant per-iteration scan proportional to those corners, in index
+    // order; omitted exact-zero products cannot change a derivative value.
+    let values = normalized.iter().map(|s| s.value).collect::<Vec<_>>();
+    let mut row_ends = Vec::with_capacity(normalized.len());
+    let mut entries = Vec::new();
+    for sample in &normalized {
+        entries.extend(
+            sample
+                .gradient
+                .iter()
+                .enumerate()
+                .filter(|(_, value)| **value != 0.)
+                .map(|(index, value)| (index, *value)),
+        );
+        row_ends.push(entries.len());
+    }
+    let mut derivatives = Vec::with_capacity(normalized.len());
     // The ball-constrained linear maximin dual is |sum(lambda*g)| +
     // sum(lambda*slack). Smooth only the zero-norm derivative at roundoff scale;
     // every proposed direction remains inside the original geometric radius.
     for _ in 0..MAXIMUM_CAVITY_SMOOTHING_ITERATIONS {
         let length = dot(&mean, &mean).sqrt().hypot(64. * f64::EPSILON);
         let direction = mean.iter().map(|v| v / length).collect::<Vec<_>>();
-        let predicted = normalized
-            .iter()
-            .map(|s| s.value + dot(&s.gradient, &direction))
-            .fold(f64::INFINITY, f64::min);
+        // One linear-model value per constraint per iteration; the minimum,
+        // entering and away selections below all read this vector.
+        derivatives.clear();
+        let mut row_start = 0;
+        derivatives.extend(row_ends.iter().zip(&values).map(|(&row_end, value)| {
+            let row = &entries[row_start..row_end];
+            row_start = row_end;
+            value
+                + row
+                    .iter()
+                    .map(|(index, gradient)| gradient * direction[*index])
+                    .sum::<f64>()
+        }));
+        let predicted = derivatives.iter().copied().fold(f64::INFINITY, f64::min);
         if predicted > 64. * f64::EPSILON
             && best.as_ref().is_none_or(|(value, _)| predicted > *value)
         {
             best = Some((predicted, direction.clone()));
         }
-        let derivative = |sample: &Sample| dot(&sample.gradient, &direction) + sample.value;
-        let next_index = normalized
+        let next_index = derivatives
             .iter()
             .enumerate()
-            .min_by(|(_, a), (_, b)| derivative(a).total_cmp(&derivative(b)))?
+            .min_by(|(_, a), (_, b)| a.total_cmp(b))?
             .0;
         let next = &normalized[next_index];
         let mut delta = next
@@ -100,11 +127,11 @@ fn proposal(samples: &[Sample], radius: f64) -> Option<Vec<f64>> {
         // Transfer weight away from a stale active constraint when its exact
         // one-dimensional dual decrease exceeds the ordinary convex step.
         // The ordinary step always remains available under the same work cap.
-        let away = normalized
+        let away = derivatives
             .iter()
             .enumerate()
             .filter(|(index, _)| weights[*index] > 0.)
-            .max_by(|(_, a), (_, b)| derivative(a).total_cmp(&derivative(b)))?
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))?
             .0;
         if away != next_index {
             let pair_delta = next

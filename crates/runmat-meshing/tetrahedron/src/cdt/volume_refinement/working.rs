@@ -233,9 +233,14 @@ impl WorkingRefinement {
                 let change = batch.commit_prepared(cancellation)?;
                 state.rebase_committed(change);
                 self.probe_before_repair = true;
+                let (shape_violations, refinement_violations) =
+                    state.quality().violation_counts();
                 tracing::info!(
                     attempts,
                     rejected,
+                    shape_violations,
+                    refinement_violations,
+                    cells = state.quality().cell_count(),
                     candidate_evaluations = work.evaluations(),
                     accepted_count = inserted.len(),
                     "local refinement batch admitted"

@@ -13,6 +13,16 @@ pub(in crate::cdt::volume_sliver::relocation) struct PreparedBlock {
     cells: Vec<Cell>,
     start: Vec<[f64; 3]>,
     scale: f64,
+    /// Cells incident to each free point. A coordinate poll moves one point,
+    /// so only that star is re-evaluated against the cached complement.
+    slot_cells: Vec<Vec<usize>>,
+}
+/// Cell values at the current accepted points. `None` marks a cell whose
+/// orientation is not positive, which scores the whole block as zero.
+struct Accepted {
+    values: Vec<Option<f64>>,
+    /// Per slot: (complement has a non-positive cell, complement minimum).
+    complement: Vec<(bool, f64)>,
 }
 impl PreparedBlock {
     pub(in crate::cdt::volume_sliver::relocation) fn prepare(
@@ -47,38 +57,97 @@ impl PreparedBlock {
                     metric: PreparedJacobian::new(metrics(*index)).expect("admitted metric"),
                 }
             })
-            .collect();
+            .collect::<Vec<Cell>>();
+        let mut slot_cells = vec![Vec::new(); vertices.len()];
+        for (index, cell) in cells.iter().enumerate() {
+            for slot in cell.slots.iter().flatten() {
+                slot_cells[*slot].push(index);
+            }
+        }
         Self {
             cells,
             start,
             scale,
+            slot_cells,
         }
+    }
+    fn cell_value(
+        &self,
+        cell: &Cell,
+        points: &[[f64; 3]],
+    ) -> Result<Option<f64>, DelaunayVolumeSliverError> {
+        let nodes = std::array::from_fn(|slot| {
+            let mut node = cell.nodes[slot];
+            if let Some(index) = cell.slots[slot] {
+                node.coordinates_m = points[index];
+                node.construction = Point3Construction::Explicit;
+            }
+            node
+        });
+        if orient_volume_nodes(nodes).map_err(|failure| {
+            error(
+                DelaunayVolumeSliverErrorKind::InvalidTopology,
+                format!("block proposal orientation failed: {failure:?}"),
+            )
+        })? != PredicateSign::Positive
+        {
+            return Ok(None);
+        }
+        Ok(Some(
+            cell.metric
+                .score(nodes.map(|node| node.coordinates_m))
+                .unwrap_or(0.),
+        ))
+    }
+    fn accept(&self, points: &[[f64; 3]]) -> Result<Accepted, DelaunayVolumeSliverError> {
+        let values = self
+            .cells
+            .iter()
+            .map(|cell| self.cell_value(cell, points))
+            .collect::<Result<Vec<_>, _>>()?;
+        let complement = (0..self.start.len())
+            .map(|slot| {
+                self.cells
+                    .iter()
+                    .zip(&values)
+                    .filter(|(cell, _)| !cell.slots.contains(&Some(slot)))
+                    .fold((false, f64::INFINITY), |(inverted, minimum), (_, value)| {
+                        match value {
+                            Some(value) => (inverted, minimum.min(*value)),
+                            None => (true, minimum),
+                        }
+                    })
+            })
+            .collect();
+        Ok(Accepted { values, complement })
+    }
+    /// Exactly `score(points)` when `points` differs from the accepted points
+    /// only at `slot`; only that point's star is evaluated.
+    fn poll(
+        &self,
+        accepted: &Accepted,
+        slot: usize,
+        points: &[[f64; 3]],
+    ) -> Result<f64, DelaunayVolumeSliverError> {
+        let (inverted, mut minimum) = accepted.complement[slot];
+        if inverted {
+            return Ok(0.);
+        }
+        for index in &self.slot_cells[slot] {
+            match self.cell_value(&self.cells[*index], points)? {
+                Some(value) => minimum = minimum.min(value),
+                None => return Ok(0.),
+            }
+        }
+        Ok(minimum)
     }
     fn score(&self, points: &[[f64; 3]]) -> Result<f64, DelaunayVolumeSliverError> {
         let mut minimum = f64::INFINITY;
         for cell in &self.cells {
-            let nodes = std::array::from_fn(|slot| {
-                let mut node = cell.nodes[slot];
-                if let Some(index) = cell.slots[slot] {
-                    node.coordinates_m = points[index];
-                    node.construction = Point3Construction::Explicit;
-                }
-                node
-            });
-            if orient_volume_nodes(nodes).map_err(|failure| {
-                error(
-                    DelaunayVolumeSliverErrorKind::InvalidTopology,
-                    format!("block proposal orientation failed: {failure:?}"),
-                )
-            })? != PredicateSign::Positive
-            {
-                return Ok(0.);
+            match self.cell_value(cell, points)? {
+                Some(value) => minimum = minimum.min(value),
+                None => return Ok(0.),
             }
-            minimum = minimum.min(
-                cell.metric
-                    .score(nodes.map(|node| node.coordinates_m))
-                    .unwrap_or(0.),
-            );
         }
         Ok(minimum)
     }
@@ -93,16 +162,11 @@ impl PreparedBlock {
         // Coordinate polling is linear in block dimension, unlike a Cartesian
         // stencil whose cost grows exponentially with neighboring point count.
         let directions = (0..dimensions)
-            .flat_map(|axis| {
-                [-1., 1.].map(move |sign| {
-                    let mut direction = vec![0.; dimensions];
-                    direction[axis] = sign;
-                    direction
-                })
-            })
+            .flat_map(|axis| [-1., 1.].map(move |sign| (axis, sign)))
             .collect::<Vec<_>>();
         let mut points = self.start.clone();
-        let initial = self.score(&points)?;
+        let mut accepted_values = self.accept(&points)?;
+        let initial = aggregate(&accepted_values.values);
         let mut score = initial;
         let maximum_radius = self.scale * 0.25;
         let mut radius = maximum_radius;
@@ -127,6 +191,7 @@ impl PreparedBlock {
                 }
                 if let Some((value, trial, accepted_step)) = accepted {
                     score = value;
+                    accepted_values = self.accept(&trial)?;
                     points = trial;
                     // A rejected large-radius model must not be proposed again
                     // after only a tiny fraction passed the nonlinear check.
@@ -136,9 +201,11 @@ impl PreparedBlock {
                 }
             }
             let mut best = None;
-            let results = runmat_cpu_execution::ordered_map(&directions, |direction| {
-                let trial = displaced(&points, direction, radius);
-                self.score(&trial).map(|value| (value, trial))
+            let results = runmat_cpu_execution::ordered_map(&directions, |&(axis, sign)| {
+                let mut trial = points.clone();
+                trial[axis / 3][axis % 3] += radius * sign;
+                self.poll(&accepted_values, axis / 3, &trial)
+                    .map(|value| (value, trial))
             });
             // Preserve canonical first-error and tie behavior across CPU grants.
             for result in results {
@@ -153,6 +220,7 @@ impl PreparedBlock {
             }
             if let Some((value, trial)) = best {
                 score = value;
+                accepted_values = self.accept(&trial)?;
                 points = trial;
             } else {
                 radius *= 0.5;
@@ -170,6 +238,13 @@ impl PreparedBlock {
         );
         Ok((score > initial).then_some(points))
     }
+}
+
+fn aggregate(values: &[Option<f64>]) -> f64 {
+    values
+        .iter()
+        .try_fold(f64::INFINITY, |minimum, value| value.map(|v| minimum.min(v)))
+        .unwrap_or(0.)
 }
 
 fn displaced(points: &[[f64; 3]], direction: &[f64], radius: f64) -> Vec<[f64; 3]> {

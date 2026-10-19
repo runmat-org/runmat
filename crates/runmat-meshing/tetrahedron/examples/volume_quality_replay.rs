@@ -1,5 +1,5 @@
 //! Bounded explicit replay of an unaccepted volume-quality diagnostic.
-//! Usage: volume_quality_replay INPUT.cbor CONTROLS.json SECONDS (1..=300).
+//! Usage: volume_quality_replay INPUT.cbor CONTROLS.json SECONDS (1..=900).
 //! Controls name the retained producer binding and original options; this tool
 //! never creates a complete CAD-admitted solver mesh or qualification receipt.
 use runmat_canonical_codec::{CanonicalCodecControl, CanonicalLimits};
@@ -68,8 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("expected INPUT.cbor CONTROLS.json SECONDS".into());
     }
     let seconds: u64 = arguments[2].to_str().ok_or("invalid seconds")?.parse()?;
-    if !(1..=300).contains(&seconds) {
-        return Err("probe interval must be 1..=300 seconds".into());
+    if !(1..=900).contains(&seconds) {
+        return Err("probe interval must be 1..=900 seconds".into());
     }
     let mut metadata = Vec::new();
     std::fs::File::open(&arguments[1])?
